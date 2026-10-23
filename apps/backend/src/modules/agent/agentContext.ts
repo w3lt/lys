@@ -19,6 +19,7 @@ import type {
   ReplyContextImageSides,
   ReplyContextMessage
 } from "./replyModel"
+import { listUnofferedToolNotes, type UnofferedTools } from "./unofferedTools"
 
 /**
  * Reads the stored bytes of one image attachment of a conversation.
@@ -410,20 +411,17 @@ function listImageAttachments(
 /**
  * Formats the system prompt a context sends.
  * @param systemPrompt - The agent's own instructions.
- * @param switchedOffToolNames - Names of the tools the person switched off,
- * each once; empty when none is.
- * @returns The instructions unchanged when no tool is switched off;
- * otherwise the instructions followed, after a blank line, by a note naming
- * the switched-off tools in request order and telling the model to say a
- * needed one is off instead of guessing what it would return.
+ * @param unofferedTools - What the request names about the tools the turn
+ * does not offer.
+ * @returns The instructions unchanged when there is nothing to say about
+ * those tools; otherwise the instructions followed by each note
+ * {@link listUnofferedToolNotes} lists, each after a blank line.
  */
 export function formatSystemPrompt(
   systemPrompt: string,
-  switchedOffToolNames: readonly string[]
+  unofferedTools: UnofferedTools
 ): string {
-  if (switchedOffToolNames.length === 0) return systemPrompt
-  const toolNames = switchedOffToolNames.join(", ")
-  return `${systemPrompt}\n\nThese tools are turned off in Settings → Tools, so you cannot call them now: ${toolNames}. If a request needs one of them, say that it is turned off and can be turned on in Settings → Tools; do not guess what it would return or claim to have used it.`
+  return [systemPrompt, ...listUnofferedToolNotes(unofferedTools)].join("\n\n")
 }
 
 /**

@@ -33,6 +33,11 @@ import {
   type GetAttachmentImageFileStatus
 } from "../../../../src/modules/agent/agentContext"
 import {
+  NO_UNOFFERED_TOOLS,
+  TOOL_CALLS_OFF,
+  type UnofferedTools
+} from "../../../../src/modules/agent/unofferedTools"
+import {
   ReplyContextOverflowError,
   ReplyModelNotLoadedError
 } from "../../../../src/modules/agent/replyContextFit"
@@ -104,6 +109,13 @@ const INTERRUPTED_EVENT = Object.freeze({ type: "interrupted" })
 const AGENT_PROFILE = Object.freeze({
   code: "lys",
   systemPrompt: "You are Lys."
+})
+
+/** Unoffered tools of a request that switched off both network tools. */
+const SWITCHED_OFF_SEARCH_TOOLS: UnofferedTools = Object.freeze({
+  status: "tool-calls-on",
+  switchedOffToolNames: Object.freeze(["web_search", "read_page"]),
+  unavailableTools: Object.freeze([])
 })
 
 /** Request values every case's turn carries. */
@@ -204,8 +216,11 @@ type AgentReplyScenario = Readonly<{
   clientTools?: readonly ToolDefinition[]
   /** Offered backend tools; none by default. */
   builtInTools?: readonly TurnBuiltInTool[]
-  /** Names of the tools the person switched off; none when omitted. */
-  switchedOffToolNames?: readonly string[]
+  /**
+   * What the request names about the tools the turn does not offer; tool
+   * calls on and no tool named when omitted.
+   */
+  unofferedTools?: UnofferedTools
   /** Client results; any client tool call fails the case by default. */
   sendClientToolCall?: AgentTurn["sendClientToolCall"]
   /**
@@ -632,7 +647,7 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
       sources: getStoredReply(store).sources,
       clientTools: scenario.clientTools ?? [],
       builtInTools: scenario.builtInTools ?? [],
-      switchedOffToolNames: scenario.switchedOffToolNames ?? [],
+      unofferedTools: scenario.unofferedTools ?? NO_UNOFFERED_TOOLS,
       sendClientToolCall:
         scenario.sendClientToolCall ?? handleUnexpectedToolCall,
       createToolCallGate:
@@ -1297,7 +1312,7 @@ describe("Agent", () => {
       sources: [],
       clientTools: [],
       builtInTools: [],
-      switchedOffToolNames: [],
+      unofferedTools: NO_UNOFFERED_TOOLS,
       sendClientToolCall: handleUnexpectedToolCall,
       createToolCallGate: handleUnexpectedToolCall,
       userMessage: createUserMessage(101, userMessageContent),
@@ -1579,7 +1594,7 @@ describe("Agent", () => {
         canSeeImages: false,
         getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
         tools: [READ_TEXT_FILE_TOOL, LOOK_UP_WORD_TOOL],
-        switchedOffToolNames: []
+        unofferedTools: NO_UNOFFERED_TOOLS
       })
 
       expect(measurement).toEqual({
@@ -1623,7 +1638,11 @@ describe("Agent", () => {
         canSeeImages: false,
         getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
         tools: [],
-        switchedOffToolNames: ["web_search"]
+        unofferedTools: {
+          status: "tool-calls-on",
+          switchedOffToolNames: ["web_search"],
+          unavailableTools: []
+        }
       })
 
       expect(measurement).toMatchObject({ systemPromptTokens: 2310 })
@@ -1633,9 +1652,11 @@ describe("Agent", () => {
         messages: [
           {
             role: "system",
-            content: formatSystemPrompt(AGENT_PROFILE.systemPrompt, [
-              "web_search"
-            ])
+            content: formatSystemPrompt(AGENT_PROFILE.systemPrompt, {
+              status: "tool-calls-on",
+              switchedOffToolNames: ["web_search"],
+              unavailableTools: []
+            })
           },
           { role: "user", content: "", images: [] }
         ],
@@ -1687,7 +1708,7 @@ describe("Agent", () => {
         canSeeImages: false,
         getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
         tools: [],
-        switchedOffToolNames: []
+        unofferedTools: NO_UNOFFERED_TOOLS
       })
 
       expect(measurement).toMatchObject({
@@ -1715,7 +1736,7 @@ describe("Agent", () => {
           canSeeImages: false,
           getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
           tools: [],
-          switchedOffToolNames: []
+          unofferedTools: NO_UNOFFERED_TOOLS
         })
       ).resolves.toBeUndefined()
     })
@@ -1760,7 +1781,7 @@ describe("Agent", () => {
           canSeeImages: true,
           getAttachmentImageFileStatus,
           tools: [],
-          switchedOffToolNames: []
+          unofferedTools: NO_UNOFFERED_TOOLS
         })
 
         expect(getAttachmentImageFileStatus.mock.calls).toEqual([
@@ -1794,7 +1815,7 @@ describe("Agent", () => {
           canSeeImages: true,
           getAttachmentImageFileStatus: getPhotoFileStatus,
           tools: [],
-          switchedOffToolNames: []
+          unofferedTools: NO_UNOFFERED_TOOLS
         })
         await getAgentReplyOutcome({
           openReplyStream: createEventStream({
@@ -2051,7 +2072,7 @@ describe("Agent", () => {
       const run = await getAgentReplyOutcome({
         openReplyStream,
         clientTools: [READ_TEXT_FILE_TOOL],
-        switchedOffToolNames: ["web_search", "read_page"],
+        unofferedTools: SWITCHED_OFF_SEARCH_TOOLS,
         sendClientToolCall,
         createToolCallGate
       })
@@ -2076,12 +2097,138 @@ describe("Agent", () => {
       for (const messages of roundMessages) {
         expect(messages[0]).toEqual({
           role: "system",
-          content: formatSystemPrompt(AGENT_PROFILE.systemPrompt, [
-            "web_search",
-            "read_page"
-          ])
+          content: formatSystemPrompt(
+            AGENT_PROFILE.systemPrompt,
+            SWITCHED_OFF_SEARCH_TOOLS
+          )
         })
       }
+    })
+
+    it("answers a call of a switched-on tool that cannot run now with why, without asking or running it, and says why in every round's instructions", async () => {
+      const unofferedTools: UnofferedTools = {
+        status: "tool-calls-on",
+        switchedOffToolNames: [],
+        unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
+      }
+      const openReplyStream = createRoundStreams(
+        [
+          {
+            type: "tool-calls",
+            toolCalls: [{ toolName: "web_search", argumentText: "{}" }]
+          }
+        ],
+        [{ type: "finish", finishReason: "stop" }]
+      )
+      const sendClientToolCall = vi.fn<AgentTurn["sendClientToolCall"]>()
+      const createToolCallGate = vi.fn<AgentTurn["createToolCallGate"]>()
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        unofferedTools,
+        sendClientToolCall,
+        createToolCallGate
+      })
+
+      const unavailableMessage =
+        '"web_search" did not run: it is turned on but cannot run now, because no Tavily API key is saved (one can be added in Settings → Secrets). Say why it cannot run instead of guessing what it would return.'
+      expect(sendClientToolCall).not.toHaveBeenCalled()
+      expect(createToolCallGate).not.toHaveBeenCalled()
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          toolName: "web_search",
+          status: "failed",
+          result: unavailableMessage
+        })
+      ])
+      const roundMessages = openReplyStream.mock.calls.map(
+        ([request]) => request.messages
+      )
+      for (const messages of roundMessages) {
+        expect(messages[0]).toEqual({
+          role: "system",
+          content: formatSystemPrompt(
+            AGENT_PROFILE.systemPrompt,
+            unofferedTools
+          )
+        })
+      }
+    })
+
+    it("answers a call while tool calls are off as off, even with no tool offered, and says tool calls are off in every round's instructions", async () => {
+      const openReplyStream = createRoundStreams(
+        [
+          {
+            type: "tool-calls",
+            toolCalls: [{ toolName: "get_current_time", argumentText: "{}" }]
+          }
+        ],
+        [{ type: "finish", finishReason: "stop" }]
+      )
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        unofferedTools: TOOL_CALLS_OFF
+      })
+
+      expect(run.persistedStates).toEqual([
+        { status: "completed", finishReason: "stop" }
+      ])
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          toolName: "get_current_time",
+          status: "failed",
+          result:
+            '"get_current_time" did not run: tool calls are turned off in Settings → Tools. Say that tool calls are turned off instead of guessing what it would return.'
+        })
+      ])
+      for (const [request] of openReplyStream.mock.calls) {
+        expect(request.messages[0]).toEqual({
+          role: "system",
+          content: formatSystemPrompt(
+            AGENT_PROFILE.systemPrompt,
+            TOOL_CALLS_OFF
+          )
+        })
+      }
+    })
+
+    it("answers a call of a switched-off tool when no tool is offered, and an unknown name as one no tool has", async () => {
+      const openReplyStream = createRoundStreams(
+        [
+          {
+            type: "tool-calls",
+            toolCalls: [
+              { toolName: "web_search", argumentText: "{}" },
+              { toolName: "fetch_url", argumentText: "{}" }
+            ]
+          }
+        ],
+        [{ type: "finish", finishReason: "stop" }]
+      )
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        unofferedTools: SWITCHED_OFF_SEARCH_TOOLS
+      })
+
+      expect(run.persistedStates).toEqual([
+        { status: "completed", finishReason: "stop" }
+      ])
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          toolName: "web_search",
+          status: "failed",
+          result:
+            '"web_search" is turned off in Settings → Tools, so it did not run. Say that it is turned off instead of guessing what it would return.'
+        }),
+        expect.objectContaining({
+          toolName: "fetch_url",
+          status: "failed",
+          result: 'No tool is named "fetch_url", and you can call no tool now.'
+        })
+      ])
     })
 
     it("stores each round's parts under the round's index and gives the model each round's own text with its calls", async () => {

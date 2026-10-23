@@ -8,6 +8,7 @@ import {
   conversationUserMessageSchema,
   hasDistinctAttachmentNames,
   hasDistinctToolNames,
+  hasDistinctValues,
   isEveryToolRunBy,
   MAXIMUM_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
@@ -17,6 +18,10 @@ import {
   toolNameSchema,
   type ToolDefinition
 } from "@lys/share"
+import {
+  unavailableBackendToolSchema,
+  type UnavailableBackendTool
+} from "../tool/backendToolAvailability"
 import { agentNotFoundProblemSchema } from "../../http/errors/agent"
 import {
   chatAttachmentUnsupportedProblemSchema,
@@ -182,16 +187,6 @@ function hasOnlyClientTools(definitions: readonly ToolDefinition[]): boolean {
   return isEveryToolRunBy(definitions, "client")
 }
 
-/**
- * Answers whether no tool name is listed twice.
- *
- * @param toolNames - Tool names in request order.
- * @returns True when every name appears once.
- */
-function hasDistinctNames(toolNames: readonly string[]): boolean {
-  return new Set(toolNames).size === toolNames.length
-}
-
 /** Explanation of a refused offer that names the backend's attachment reader. */
 const RESERVED_TOOL_NAME_MESSAGE = `A request does not offer ${READ_ATTACHMENT_TOOL_NAME}; the backend adds it to a turn itself.`
 
@@ -232,7 +227,7 @@ const chatToolOfferListsSchema = z.strictObject({
    */
   backendToolNames: z
     .array(toolNameSchema)
-    .refine(hasDistinctNames, "A request offers each backend tool name once.")
+    .refine(hasDistinctValues, "A request offers each backend tool name once.")
     .refine(hasNoReservedToolName, RESERVED_TOOL_NAME_MESSAGE)
     .readonly()
     .optional()
@@ -290,73 +285,161 @@ export const chatToolOfferSchema = chatToolOfferListsSchema
 export type ChatToolOffer = z.infer<typeof chatToolOfferSchema>
 
 /**
- * Most tools one request names as switched off.
+ * Most tools one request names in each list of tools it does not offer: the
+ * switched-off tools, and the switched-on tools that cannot run now.
  *
  * @remarks Far more than Lys lists, so it never limits a real request, while
- * bounding the note the backend adds to the turn's instructions to 64 names
- * of at most 64 characters each.
+ * bounding each list in the note the backend adds to the turn's
+ * instructions to 64 names of at most 64 characters each.
  */
-const MAXIMUM_SWITCHED_OFF_TOOL_COUNT = 64
+const MAXIMUM_UNOFFERED_TOOL_COUNT = 64
 
 /**
- * Explanation of a refused switched-off list that names the backend's
- * attachment reader.
+ * Explanation of a refused switched-off or unavailable list that names the
+ * backend's attachment reader.
  */
-const RESERVED_SWITCHED_OFF_TOOL_NAME_MESSAGE = `A request does not switch off ${READ_ATTACHMENT_TOOL_NAME}; it has no switch.`
+const RESERVED_UNOFFERED_TOOL_NAME_MESSAGE = `A request does not name ${READ_ATTACHMENT_TOOL_NAME} as switched off or unable to run; it has no switch and the backend adds it to a turn itself.`
 
 /**
  * Validates the names of the tools the person switched off in the client.
  *
- * @remarks One to {@link MAXIMUM_SWITCHED_OFF_TOOL_COUNT} names, each
- * passing the shared tool-name rule, each once, and none the backend's
- * attachment reader, which has no switch. A name need not be a tool the
- * backend runs, because the client's own tools are named too. The backend
- * tells the model these tools are off and answers a call of one as off;
- * it never runs one.
+ * @remarks One to {@link MAXIMUM_UNOFFERED_TOOL_COUNT} names, each passing
+ * the shared tool-name rule, each once, and none the backend's attachment
+ * reader, which has no switch. A name need not be a tool the backend runs,
+ * because the client's own tools are named too. The backend tells the model
+ * these tools are off and answers a call of one as off; it never runs one.
  */
 export const switchedOffToolNamesSchema = z
   .array(toolNameSchema)
   .min(1)
-  .max(MAXIMUM_SWITCHED_OFF_TOOL_COUNT)
-  .refine(hasDistinctNames, "A request names each switched-off tool once.")
-  .refine(hasNoReservedToolName, RESERVED_SWITCHED_OFF_TOOL_NAME_MESSAGE)
+  .max(MAXIMUM_UNOFFERED_TOOL_COUNT)
+  .refine(hasDistinctValues, "A request names each switched-off tool once.")
+  .refine(hasNoReservedToolName, RESERVED_UNOFFERED_TOOL_NAME_MESSAGE)
   .readonly()
 
-/** Offered and switched-off tools of one request, before their joint check. */
+/**
+ * Answers whether no unavailable tool names the backend's attachment reader.
+ *
+ * @param unavailableTools - Validated unavailable tools of one request.
+ * @returns True when none is `READ_ATTACHMENT_TOOL_NAME`.
+ */
+function hasNoReservedUnavailableTool(
+  unavailableTools: readonly UnavailableBackendTool[]
+): boolean {
+  return hasNoReservedToolName(unavailableTools.map((tool) => tool.name))
+}
+
+/**
+ * Validates the backend tools the person switched on that cannot run now,
+ * each with why, as the client last read them from the backend's tool list.
+ *
+ * @remarks One to {@link MAXIMUM_UNOFFERED_TOOL_COUNT} tools, each name once
+ * and none the backend's attachment reader. The backend rejects a name it
+ * does not run (400) but does not check the reason again, so the note
+ * repeats the client's reading. The backend tells the model these tools
+ * cannot run now, why, and what would fix it, and answers a call of one the
+ * same way; it never runs one.
+ */
+export const unavailableToolsSchema = z
+  .array(unavailableBackendToolSchema)
+  .min(1)
+  .max(MAXIMUM_UNOFFERED_TOOL_COUNT)
+  .refine(
+    (unavailableTools) =>
+      hasDistinctValues(unavailableTools.map((tool) => tool.name)),
+    "A request names each tool that cannot run once."
+  )
+  .refine(hasNoReservedUnavailableTool, RESERVED_UNOFFERED_TOOL_NAME_MESSAGE)
+  .readonly()
+
+/**
+ * Validates that the person switched tool calls off in the client.
+ *
+ * @remarks Only `true` is accepted; absence means tool calls are on, so the
+ * field has one representation for each state. The backend tells the model
+ * tool calls are off and answers a call of a tool it is not offered the same
+ * way.
+ */
+export const areToolCallsSwitchedOffSchema = z.literal(true)
+
+/**
+ * The tool fields of one request, before the checks across them.
+ *
+ * @remarks Every field is absent or undefined when the request leaves it
+ * out.
+ */
 type ToolChoiceCandidate = Readonly<{
-  /** Offered tools; absent or undefined when none are. */
+  /** Offered tools. */
   tools?: ChatToolOffer | undefined
-  /** Switched-off tool names; absent or undefined when none are. */
+  /** Switched-off tool names. */
   switchedOffToolNames?: readonly string[] | undefined
+  /** Switched-on backend tools that cannot run now. */
+  unavailableTools?: readonly UnavailableBackendTool[] | undefined
+  /** `true` when tool calls are switched off. */
+  areToolCallsSwitchedOff?: true | undefined
 }>
 
 /**
- * Answers whether no switched-off tool is also offered.
+ * Answers whether no tool is named in two of a request's tool lists.
  *
- * @param candidate - The request's offer and switched-off names.
- * @returns True when no switched-off name is an offered client or backend
- * tool, also when either part is absent.
+ * @param candidate - The request's offer, switched-off names, and
+ * unavailable tools, each list already free of repeats.
+ * @returns True when no name is offered and switched off, offered and
+ * unavailable, or switched off and unavailable, also when lists are absent.
  */
-export function hasNoOfferedSwitchedOffTool(
+export function hasDistinctToolChoiceNames(
   candidate: ToolChoiceCandidate
 ): boolean {
-  const offeredNames = new Set([
+  const offeredNames = [
     ...(candidate.tools?.definitions ?? []).map((tool) => tool.name),
     ...(candidate.tools?.backendToolNames ?? [])
+  ]
+  const unavailableNames = (candidate.unavailableTools ?? []).map(
+    (tool) => tool.name
+  )
+  return hasDistinctValues([
+    ...offeredNames,
+    ...(candidate.switchedOffToolNames ?? []),
+    ...unavailableNames
   ])
-  return (candidate.switchedOffToolNames ?? []).every(
-    (toolName) => !offeredNames.has(toolName)
+}
+
+/** Explanation of a refused request that names one tool in two tool lists. */
+export const TOOL_NAMED_TWICE_MESSAGE =
+  "A request names each tool once across its offered, switched-off, and unable-to-run tools."
+
+/**
+ * Answers whether a request with tool calls switched off leaves out every
+ * other tool field.
+ *
+ * @param candidate - The request's tool fields.
+ * @returns True when tool calls are on, or when they are off and the request
+ * offers no tool and names none as switched off or unable to run.
+ */
+export function hasNoToolListWhileToolCallsOff(
+  candidate: ToolChoiceCandidate
+): boolean {
+  if (candidate.areToolCallsSwitchedOff === undefined) return true
+  return (
+    candidate.tools === undefined &&
+    candidate.switchedOffToolNames === undefined &&
+    candidate.unavailableTools === undefined
   )
 }
 
-/** Explanation of a refused request that offers a switched-off tool. */
-export const OFFERED_SWITCHED_OFF_TOOL_MESSAGE =
-  "A request does not offer a tool it names as switched off."
+/**
+ * Explanation of a refused request that switches tool calls off and still
+ * offers or names tools.
+ */
+export const TOOL_LIST_WHILE_TOOL_CALLS_OFF_MESSAGE =
+  "A request with tool calls switched off offers no tool and names none as switched off or unable to run."
 
 /**
  * Validates a chat request for a new or an existing conversation.
  *
- * @remarks A tool named as switched off is never also offered.
+ * @remarks A tool is named at most once across the offered, switched-off,
+ * and unavailable tools, and a request with tool calls switched off names
+ * no tool in any of them.
  */
 export const chatApiRequestBodySchema = z
   .strictObject({
@@ -373,17 +456,31 @@ export const chatApiRequestBodySchema = z
      */
     tools: chatToolOfferSchema.optional(),
     /**
-     * Tools the person switched off, by name, none of them offered; absence
-     * means none is. The backend tells the model they are off.
+     * Tools the person switched off, by name; absence means none is. The
+     * backend tells the model they are off.
      */
     switchedOffToolNames: switchedOffToolNamesSchema.optional(),
+    /**
+     * Switched-on backend tools that cannot run now, each with why; absence
+     * means none. The backend tells the model they cannot run and why.
+     */
+    unavailableTools: unavailableToolsSchema.optional(),
+    /**
+     * `true` when the person switched tool calls off; absence means they
+     * are on. The backend tells the model tool calls are off.
+     */
+    areToolCallsSwitchedOff: areToolCallsSwitchedOffSchema.optional(),
     /**
      * Files sent with the message, in the order they were attached; absence
      * means none. Each is stored with the message under its name.
      */
     attachments: chatAttachmentsSchema.optional()
   })
-  .refine(hasNoOfferedSwitchedOffTool, OFFERED_SWITCHED_OFF_TOOL_MESSAGE)
+  .refine(hasDistinctToolChoiceNames, TOOL_NAMED_TWICE_MESSAGE)
+  .refine(
+    hasNoToolListWhileToolCallsOff,
+    TOOL_LIST_WHILE_TOOL_CALLS_OFF_MESSAGE
+  )
 
 /**
  * Validates the discriminated SSE event variants emitted by the chat route.

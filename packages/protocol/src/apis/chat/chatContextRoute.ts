@@ -10,11 +10,15 @@ import {
 } from "../../http/errors/llm"
 import { llmServiceBusyProblemSchema } from "../../http/errors/llmServiceBusy"
 import {
+  areToolCallsSwitchedOffSchema,
   chatConversationTargetSchema,
   chatToolOfferSchema,
-  hasNoOfferedSwitchedOffTool,
-  OFFERED_SWITCHED_OFF_TOOL_MESSAGE,
-  switchedOffToolNamesSchema
+  hasDistinctToolChoiceNames,
+  hasNoToolListWhileToolCallsOff,
+  switchedOffToolNamesSchema,
+  TOOL_LIST_WHILE_TOOL_CALLS_OFF_MESSAGE,
+  TOOL_NAMED_TWICE_MESSAGE,
+  unavailableToolsSchema
 } from "./chatRoute"
 import { apiChatContextRoute } from "./routes"
 
@@ -22,10 +26,11 @@ import { apiChatContextRoute } from "./routes"
  * Validates a request to measure the context a conversation's next message
  * would be sent with.
  *
- * @remarks Names the conversation, model, offered tools, and switched-off
- * tools exactly as the chat request that would send the message names them;
- * the message's text is not part of the measurement. A tool named as
- * switched off is never also offered.
+ * @remarks Names the conversation, model, offered tools, switched-off and
+ * unavailable tools, and whether tool calls are off exactly as the chat
+ * request that would send the message names them; the message's text is not
+ * part of the measurement. The tool fields pass the chat request's checks
+ * across them.
  */
 export const chatContextApiRequestBodySchema = z
   .strictObject({
@@ -39,9 +44,23 @@ export const chatContextApiRequestBodySchema = z
      * Tools the person switched off, by name; absence means none is. The
      * measurement counts the note that tells the model they are off.
      */
-    switchedOffToolNames: switchedOffToolNamesSchema.optional()
+    switchedOffToolNames: switchedOffToolNamesSchema.optional(),
+    /**
+     * Switched-on backend tools that cannot run now, each with why; absence
+     * means none. The measurement counts the note that tells the model so.
+     */
+    unavailableTools: unavailableToolsSchema.optional(),
+    /**
+     * `true` when the person switched tool calls off; absence means they
+     * are on. The measurement counts the note that tells the model so.
+     */
+    areToolCallsSwitchedOff: areToolCallsSwitchedOffSchema.optional()
   })
-  .refine(hasNoOfferedSwitchedOffTool, OFFERED_SWITCHED_OFF_TOOL_MESSAGE)
+  .refine(hasDistinctToolChoiceNames, TOOL_NAMED_TWICE_MESSAGE)
+  .refine(
+    hasNoToolListWhileToolCallsOff,
+    TOOL_LIST_WHILE_TOOL_CALLS_OFF_MESSAGE
+  )
 
 /** Validates a whole number of tokens. */
 const tokenCountSchema = z.int().nonnegative()
@@ -58,8 +77,9 @@ export const chatContextApiResponseSchema = z
     /** Context length the model is loaded with; a positive integer. */
     contextLength: z.int().positive(),
     /**
-     * Tokens of the answering agent's system prompt, with the note naming
-     * the switched-off tools when the request names any.
+     * Tokens of the answering agent's system prompt, with the note about the
+     * tools the request does not offer when it names any or switches tool
+     * calls off.
      */
     systemPromptTokens: tokenCountSchema,
     /** Tokens of the offered tool definitions; 0 when none are offered. */

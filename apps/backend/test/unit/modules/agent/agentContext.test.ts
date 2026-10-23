@@ -12,6 +12,10 @@ import {
 } from "../../../../src/modules/agent/agentContext"
 import type { ReplyContextImage } from "../../../../src/modules/agent/replyModel"
 import {
+  NO_UNOFFERED_TOOLS,
+  TOOL_CALLS_OFF
+} from "../../../../src/modules/agent/unofferedTools"
+import {
   createImageAttachment,
   createTextAttachment
 } from "../../support/attachmentFixtures"
@@ -570,15 +574,46 @@ describe("buildAgentContext", () => {
 })
 
 describe("formatSystemPrompt", () => {
-  it("leaves the agent's instructions unchanged when no tool is switched off", () => {
-    expect(formatSystemPrompt("You are Lys.", [])).toBe("You are Lys.")
+  it("leaves the agent's instructions unchanged when tool calls are on and no tool is named", () => {
+    expect(formatSystemPrompt("You are Lys.", NO_UNOFFERED_TOOLS)).toBe(
+      "You are Lys."
+    )
   })
 
   it("adds a note after the instructions that names each switched-off tool in request order", () => {
     expect(
-      formatSystemPrompt("You are Lys.", ["web_search", "read_text_file"])
+      formatSystemPrompt("You are Lys.", {
+        status: "tool-calls-on",
+        switchedOffToolNames: ["web_search", "read_text_file"],
+        unavailableTools: []
+      })
     ).toBe(
       "You are Lys.\n\nThese tools are turned off in Settings → Tools, so you cannot call them now: web_search, read_text_file. If a request needs one of them, say that it is turned off and can be turned on in Settings → Tools; do not guess what it would return or claim to have used it."
+    )
+  })
+
+  it("adds the switched-off note, then a note naming each switched-on tool that cannot run with why and what fixes it", () => {
+    expect(
+      formatSystemPrompt("You are Lys.", {
+        status: "tool-calls-on",
+        switchedOffToolNames: ["get_location"],
+        unavailableTools: [
+          { name: "web_search", reason: "api-key-missing" },
+          { name: "read_page", reason: "page-reader-not-ready" }
+        ]
+      })
+    ).toBe(
+      [
+        "You are Lys.",
+        "These tools are turned off in Settings → Tools, so you cannot call them now: get_location. If a request needs one of them, say that it is turned off and can be turned on in Settings → Tools; do not guess what it would return or claim to have used it.",
+        "These tools are turned on in Settings → Tools but cannot run now, so you cannot call them: web_search, because no Tavily API key is saved (one can be added in Settings → Secrets); read_page, because vmo, Lys's page reader, is not ready (it can be started in Settings → Runtime). If a request needs one of them, say that it cannot run now, why, and what would fix that; do not guess what it would return or claim to have used it."
+      ].join("\n\n")
+    )
+  })
+
+  it("adds one note saying tool calls are off when they are", () => {
+    expect(formatSystemPrompt("You are Lys.", TOOL_CALLS_OFF)).toBe(
+      "You are Lys.\n\nTool calls are turned off in Settings → Tools. If a request needs a tool you are not offered, say that tool calls are turned off and can be turned on in Settings → Tools; do not guess what a tool would return or claim to have used one."
     )
   })
 })

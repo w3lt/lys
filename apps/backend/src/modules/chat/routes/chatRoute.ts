@@ -15,6 +15,7 @@ import type { BackendConfig } from "../../../config"
 import type Agent from "../../agent/agent"
 import type { AgentTurn } from "../../agent/agent"
 import type { FindAttachmentImage } from "../../agent/agentContext"
+import type { UnofferedTools } from "../../agent/unofferedTools"
 import type AttachmentFileStore from "../../attachment/attachmentFileStore"
 import { buildAttachmentImageReader } from "../../attachment/attachmentImageReader"
 import {
@@ -72,7 +73,7 @@ import {
 import {
   findRequestedAgent,
   findRequestedBuiltInTools,
-  listSwitchedOffToolNames,
+  findUnofferedTools,
   sendUnansweredTurnProblem,
   type TurnAgentLookups,
   type UnansweredTurnOutcome
@@ -160,6 +161,8 @@ type AcceptedTurnRequest = Readonly<{
   attachments: readonly ParsedChatAttachment[]
   /** Backend tools the request offered, found for the turn. */
   builtInTools: readonly TurnBuiltInTool[]
+  /** What the request names about the tools the turn does not offer. */
+  unofferedTools: UnofferedTools
   /**
    * What the model can do with attachments; both false when neither the
    * request nor the conversation holds any.
@@ -223,8 +226,8 @@ type TurnGenerationInput = Readonly<{
    * then the attachment reader when the turn offers it; empty when none.
    */
   builtInTools: readonly TurnBuiltInTool[]
-  /** Tools the request named as switched off; empty when it named none. */
-  switchedOffToolNames: readonly string[]
+  /** What the request names about the tools the turn does not offer. */
+  unofferedTools: UnofferedTools
   /** Whether the model sees images. */
   canSeeImages: boolean
   /** Reads the bytes of one stored image attachment of the conversation. */
@@ -295,7 +298,8 @@ export default function updateFastifyWithChatRoute(
  * @param dependencies - Borrowed persistence, agents, files, and registry.
  * @returns Settlement after the stream ends, or after a problem response.
  * @throws An `UnknownBackendToolError`, before anything is stored, when the
- * request offers a backend tool the backend does not run; the inventory
+ * request offers a backend tool the backend does not run or names one as
+ * unable to run; the inventory
  * read's failure, before anything is stored, when the model's capabilities
  * are needed and cannot be read; and unexpected failures before the stream
  * starts, for the route's error boundary. A request answered with one of
@@ -352,10 +356,12 @@ async function handleChatRequest(
  * for a model that cannot see images, including a model the inventory does
  * not list. Nothing is stored or written either way.
  * @throws An `UnknownBackendToolError` for an offered backend tool the
+ * backend does not run, or for a tool named as unable to run that the
  * backend does not run; the inventory read's failure; and any persistence
  * failure of a lookup.
- * @remarks The attachments are decoded first, then every offered backend
- * tool is looked up, then the conversation is read once and an agent is
+ * @remarks The attachments are decoded first, then the tools named as
+ * unable to run are checked and every offered backend tool is looked up,
+ * then the conversation is read once and an agent is
  * looked up for the request, so a request no agent answers is refused
  * before the inventory is read; the conversation's stored attachments come
  * from that read. The model's capabilities are read from LM Studio only when
@@ -378,6 +384,7 @@ async function parseTurnRequest(
     )
     return undefined
   }
+  const unofferedTools = findUnofferedTools(dependencies.builtInTools, body)
   const builtInTools = await findOfferedBuiltInTools(
     request,
     reply,
@@ -407,7 +414,12 @@ async function parseTurnRequest(
     )
     return undefined
   }
-  return { attachments: attachments.attachments, builtInTools, capabilities }
+  return {
+    attachments: attachments.attachments,
+    builtInTools,
+    unofferedTools,
+    capabilities
+  }
 }
 
 /**
@@ -762,7 +774,7 @@ function buildTurnGenerationInput(
           (location) => attachmentFiles.readAttachment(location)
         )
       : accepted.builtInTools,
-    switchedOffToolNames: listSwitchedOffToolNames(body),
+    unofferedTools: accepted.unofferedTools,
     canSeeImages: accepted.capabilities.vision,
     findAttachmentImage: buildAttachmentImageReader(
       conversationId,
@@ -923,7 +935,7 @@ function buildAgentTurn(
     generationOptions: input.generationOptions,
     clientTools: input.clientTools,
     builtInTools: input.builtInTools,
-    switchedOffToolNames: input.switchedOffToolNames,
+    unofferedTools: input.unofferedTools,
     abortSignal,
     createReplyPart: (draft) =>
       replyParts.createReplyPart(assistantMessageId, draft),

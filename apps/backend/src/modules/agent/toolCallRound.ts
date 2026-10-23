@@ -24,6 +24,11 @@ import type {
   ReplyContextMessage
 } from "./replyModel"
 import type SourceCatalog from "./sourceCatalog"
+import {
+  findUnofferedToolCallMessage,
+  hasUnofferedToolNote,
+  type UnofferedTools
+} from "./unofferedTools"
 
 /** One tool offered for a turn, with the side that runs it. */
 type OfferedTool =
@@ -82,10 +87,11 @@ export type ToolCallRoundContext = Readonly<{
   /** Tools offered for the turn. */
   tools: AgentToolset
   /**
-   * Names of the tools the person switched off, none of them offered; a
-   * call of one is answered as switched off.
+   * What the request names about the tools the turn does not offer; a call
+   * of one is answered as not run, and so is a call of any tool not offered
+   * while tool calls are off.
    */
-  switchedOffToolNames: ReadonlySet<string>
+  unofferedTools: UnofferedTools
   /** Sends one allowed call of a client tool to run. */
   sendClientToolCall: SendClientToolCall
   /**
@@ -106,8 +112,8 @@ export type ToolCallRoundContext = Readonly<{
 type ToolCallHandling = Readonly<{
   /** Tools offered for the turn. */
   tools: AgentToolset
-  /** Names of the tools the person switched off, none of them offered. */
-  switchedOffToolNames: ReadonlySet<string>
+  /** What the request names about the tools the turn does not offer. */
+  unofferedTools: UnofferedTools
   /**
    * Approval gate of the round; undefined when no call of the round passes
    * one, because every call names a tool that runs without approval or no
@@ -307,14 +313,15 @@ export function buildDefinedToolOffer(
  * result message per call in the model's order; or undefined when the reply
  * was stopped while the gate was created, a call waited, or a backend tool
  * ran, or the reply refused to store a call because it ended.
- * @throws If the turn offered no tools: the model called a tool it was not
- * offered, which ends the reply as failed, as before tools existed. Also
- * throws when the gate cannot be created, or a backend tool's run fails for
- * a reason other than Stop.
+ * @throws If the turn offered no tools and tells the model nothing about the
+ * tools it does not offer: the model called a tool it was not offered, which
+ * ends the reply as failed, as before tools existed. Also throws when the
+ * gate cannot be created, or a backend tool's run fails for a reason other
+ * than Stop.
  * @remarks Each call gets a new UUIDv7, which is its part's identity. Calls
- * of switched-off tools, of unknown tools, and calls whose arguments do not
- * match are stored as failed with the message the model reads; nobody is
- * asked about them, and a switched-off tool never runs. A
+ * of tools the turn does not offer, named or not, and calls whose arguments
+ * do not match are stored as failed with the message the model reads;
+ * nobody is asked about them, and none of them runs. A
  * call of a backend tool that runs without approval is stored as running at
  * once. Every other call passes the round's gate, created once for a round
  * that has such a call, so the saved choices are read at most once per
@@ -331,7 +338,7 @@ export async function handleToolCallRound(
   round: ToolCallRound,
   context: ToolCallRoundContext
 ): Promise<readonly ReplyContextMessage[] | undefined> {
-  if (context.tools.size === 0)
+  if (context.tools.size === 0 && !hasUnofferedToolNote(context.unofferedTools))
     throw new Error("The model called a tool although none was offered")
   const toolCalls = Object.freeze(round.toolCalls.map(createContextToolCall))
   const gate = hasGatedToolCall(toolCalls, context.tools)
@@ -340,7 +347,7 @@ export async function handleToolCallRound(
   if (context.abortSignal.aborted) return undefined
   const handling: ToolCallHandling = Object.freeze({
     tools: context.tools,
-    switchedOffToolNames: context.switchedOffToolNames,
+    unofferedTools: context.unofferedTools,
     gate,
     round: round.round,
     sendClientToolCall: context.sendClientToolCall,
@@ -778,18 +785,24 @@ function formatToolCallResult(
  * Formats what the model reads when it called a tool that was not offered.
  *
  * @param toolCall - Call naming a tool that was not offered.
- * @param handling - Tools offered for the turn and the switched-off names.
- * @returns For a switched-off tool, a sentence saying it is turned off and
- * did not run; otherwise a sentence naming the unknown tool and every
- * offered tool.
+ * @param handling - Tools offered for the turn and what the request names
+ * about the others.
+ * @returns The sentence {@link findUnofferedToolCallMessage} finds for a
+ * tool the request names, or for any name while tool calls are off;
+ * otherwise a sentence naming the unknown tool and every offered tool, or
+ * saying no tool can be called when none is offered.
  */
 function formatMissingToolMessage(
   toolCall: ContextToolCall,
-  handling: Pick<ToolCallHandling, "tools" | "switchedOffToolNames">
+  handling: Pick<ToolCallHandling, "tools" | "unofferedTools">
 ): string {
-  if (handling.switchedOffToolNames.has(toolCall.toolName)) {
-    return `"${toolCall.toolName}" is turned off in Settings → Tools, so it did not run. Say that it is turned off instead of guessing what it would return.`
-  }
+  const unofferedMessage = findUnofferedToolCallMessage(
+    handling.unofferedTools,
+    toolCall.toolName
+  )
+  if (unofferedMessage !== undefined) return unofferedMessage
+  if (handling.tools.size === 0)
+    return `No tool is named "${toolCall.toolName}", and you can call no tool now.`
   const offeredNames = [...handling.tools.keys()].join(", ")
   return `No tool is named "${toolCall.toolName}". The tools you can call are: ${offeredNames}.`
 }

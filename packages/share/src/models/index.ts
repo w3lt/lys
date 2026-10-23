@@ -82,6 +82,7 @@ export { tavilyApiKeySchema, type TavilyApiKey } from "./secrets"
 export {
   buildToolFunctionFormat,
   hasDistinctToolNames,
+  hasDistinctValues,
   isEveryToolRunBy,
   toolArgumentDefinitionSchema,
   toolArgumentNameSchema,

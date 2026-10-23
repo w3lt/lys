@@ -305,11 +305,11 @@ describe("tool labels", () => {
 describe("formatToolSettingsSaveStatus", () => {
   it.each([
     ["idle", ""],
-    ["saving", "Saving Just run choices…"],
+    ["saving", "Saving tool choices…"],
     ["saved", ""],
     [
       "failed",
-      "Couldn't save your Just run choices. Tool calls keep following the choices Lys last saved until a save works."
+      "Couldn't save your tool choices. Each switch applies until Lys quits, but Just run keeps following the choices Lys last saved until a save works."
     ]
   ] as const)("announces a %s save as %j", (status, message) => {
     expect(formatToolSettingsSaveStatus({ status })).toBe(message)

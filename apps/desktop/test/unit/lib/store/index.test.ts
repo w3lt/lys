@@ -675,7 +675,10 @@ describe("useLysStore", () => {
 
       useLysStore.getState().setSettings({
         ...DISK_SETTINGS,
-        tools: { justRunToolNames: new Set(["find_files"]) }
+        tools: {
+          justRunToolNames: new Set(["find_files"]),
+          switches: new Map([["web_search", true]])
+        }
       })
       await waitForMicrotasks()
 
@@ -684,7 +687,7 @@ describe("useLysStore", () => {
         args: {
           newSettings: {
             ...DISK_SETTINGS_DOCUMENT,
-            tools: { justRun: ["find_files"] }
+            tools: { justRun: ["find_files"], switches: { web_search: true } }
           }
         }
       })
@@ -831,7 +834,8 @@ describe("useLysStore", () => {
           newSettings: {
             ...DISK_SETTINGS_DOCUMENT,
             tools: {
-              justRun: [...DISK_SETTINGS_DOCUMENT.tools.justRun, "find_files"]
+              justRun: [...DISK_SETTINGS_DOCUMENT.tools.justRun, "find_files"],
+              switches: DISK_SETTINGS_DOCUMENT.tools.switches
             }
           }
         }

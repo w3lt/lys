@@ -151,7 +151,8 @@ describe("createSettingsGroupSaves", () => {
 
     const secretsSave = saves.saveSecretsSettings({ tavilyApiKey: null })
     const toolsSave = saves.saveToolSettings({
-      justRunToolNames: new Set(["find_files"])
+      justRunToolNames: new Set(["find_files"]),
+      switches: new Map([["web_search", true]])
     })
     await waitForMicrotasks()
     const writesDuringFirst = writes.length
@@ -165,7 +166,7 @@ describe("createSettingsGroupSaves", () => {
     expect(readStoredDocument()).toEqual({
       ...STORED_SETTINGS_DOCUMENT,
       secrets: { tavilyApiKey: null },
-      tools: { justRun: ["find_files"] }
+      tools: { justRun: ["find_files"], switches: { web_search: true } }
     })
   })
 
@@ -173,8 +174,10 @@ describe("createSettingsGroupSaves", () => {
     const { writes, readStoredDocument } = startSettingsFileHost()
     const saves = createSettingsGroupSaves()
 
-    const justRunToolNames = new Set(["find_files"])
-    const toolsSave = saves.saveToolSettings({ justRunToolNames })
+    const toolsSave = saves.saveToolSettings({
+      justRunToolNames: new Set(["find_files"]),
+      switches: new Map()
+    })
     const runtimeSave = saves.saveRuntimeAutoStartSettings({
       autoStartBackend: true,
       autoStartVmo: true
@@ -192,7 +195,10 @@ describe("createSettingsGroupSaves", () => {
       autoStartBackend: true,
       autoStartVmo: true
     }
-    const tools: SettingsDocument["tools"] = { justRun: ["find_files"] }
+    const tools: SettingsDocument["tools"] = {
+      justRun: ["find_files"],
+      switches: {}
+    }
     expect(writesDuringFirst).toBe(1)
     expect(readStoredDocument()).toEqual({
       ...STORED_SETTINGS_DOCUMENT,

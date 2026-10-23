@@ -574,7 +574,8 @@ describe("createChatViewStore", () => {
       const { store, providers } = createChatHarness()
       providers.toolOffer = Object.freeze({
         status: "offered",
-        offer: OFFERED_TOOLS
+        offer: OFFERED_TOOLS,
+        switchedOffToolNames: []
       })
 
       const send = store.getState().sendMessage("Read my notes")
@@ -583,7 +584,50 @@ describe("createChatViewStore", () => {
       await send
 
       expect(backend.requests[0]?.body).toHaveProperty("tools", OFFERED_TOOLS)
+      expect(backend.requests[0]?.body).not.toHaveProperty(
+        "switchedOffToolNames"
+      )
     })
+
+    it.each<[string, ChatToolOfferResult, Record<string, unknown>]>([
+      [
+        "beside the offered tools",
+        Object.freeze({
+          status: "offered",
+          offer: OFFERED_TOOLS,
+          switchedOffToolNames: ["read_page"]
+        }),
+        { tools: OFFERED_TOOLS, switchedOffToolNames: ["read_page"] }
+      ],
+      [
+        "without tools when none is offered",
+        Object.freeze({
+          status: "not-offered",
+          switchedOffToolNames: ["read_text_file", "find_files"]
+        }),
+        { switchedOffToolNames: ["read_text_file", "find_files"] }
+      ]
+    ])(
+      "names the switched-off tools %s",
+      async (_case, toolOffer, toolFields) => {
+        const { backend, streams } = startChatBackend()
+        const { store, providers } = createChatHarness()
+        providers.toolOffer = toolOffer
+
+        const send = store.getState().sendMessage("Read my notes")
+        await waitForMicrotasks()
+        streams[0]?.close()
+        await send
+
+        expect(backend.requests[0]?.body).toEqual({
+          conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
+          message: "Read my notes",
+          model: "qwen3-8b",
+          generationOptions: { temperature: 0.4, replyCeiling: 256 },
+          ...toolFields
+        })
+      }
+    )
 
     it("fails the request with the tool list's error, keeps the draft, and sends nothing when the offered tools cannot be read", async () => {
       const { backend } = startChatBackend()
@@ -1874,6 +1918,31 @@ describe("useChatViewStore", () => {
     return { useLysStore, useChatViewStore }
   }
 
+  /**
+   * Replaces the saved tool switches the application store holds, without
+   * writing the settings file.
+   *
+   * @param useLysStore - Application store of the fresh module graph.
+   * @param switches - Switches the person changed, by tool name.
+   */
+  function setToolSwitches(
+    useLysStore: Awaited<
+      ReturnType<typeof loadFreshChatViewStore>
+    >["useLysStore"],
+    switches: Readonly<Record<string, boolean>>
+  ): void {
+    const { settings } = useLysStore.getState()
+    useLysStore.setState({
+      settings: {
+        ...settings,
+        tools: {
+          ...settings.tools,
+          switches: new Map(Object.entries(switches))
+        }
+      }
+    })
+  }
+
   it.each([
     [512, { temperature: 0.3, replyCeiling: 512 }],
     [0, { temperature: 0.3 }]
@@ -1896,7 +1965,7 @@ describe("useChatViewStore", () => {
     }
   )
 
-  it("reads both tool lists and offers the tools that start on to a loaded model trained for tool use", async () => {
+  it("reads both tool lists, offers the tools that start on to a loaded model trained for tool use, and names the one that starts off", async () => {
     startNativeHostFake({ list_tools: () => TOOLS })
     // The backend's tool sends requests off this machine, so it starts off.
     const { backend, streams } = startChatBackend({
@@ -1925,6 +1994,106 @@ describe("useChatViewStore", () => {
       (request) => request.method === "POST"
     )
     expect(chatRequest?.body).toHaveProperty("tools", { definitions: TOOLS })
+    expect(chatRequest?.body).toHaveProperty("switchedOffToolNames", [
+      "read_page"
+    ])
+  })
+
+  it("offers the tools the saved switches turn on and names the ones they turn off", async () => {
+    startNativeHostFake({ list_tools: () => TOOLS })
+    const { backend, streams } = startChatBackend({
+      "GET /api/v1/tools": () =>
+        buildJsonResponse(200, {
+          tools: [buildBackendToolDefinition("read_page")],
+          unavailableTools: []
+        })
+    })
+    const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
+    useLysStore.setState({
+      modelInventory: {
+        status: "ready",
+        models: [
+          buildLlmInfo("resident", { loaded: true, trainedForToolUse: true })
+        ]
+      }
+    })
+    setToolSwitches(useLysStore, { read_page: true, find_files: false })
+
+    const send = useChatViewStore.getState().sendMessage("Read my notes")
+    await waitForMicrotasks()
+    streams[0]?.close()
+    await send
+
+    const chatRequest = backend.requests.find(
+      (request) => request.method === "POST"
+    )
+    expect(chatRequest?.body).toMatchObject({
+      tools: { definitions: [TOOLS[0]], backendToolNames: ["read_page"] },
+      switchedOffToolNames: ["find_files"]
+    })
+  })
+
+  it("reads the tool list while tool calls are off, offers no tools, and names every listed tool as off", async () => {
+    startNativeHostFake({ list_tools: () => TOOLS })
+    const { backend, streams } = startChatBackend({
+      "GET /api/v1/tools": () =>
+        buildJsonResponse(200, {
+          tools: [buildBackendToolDefinition("read_page")],
+          unavailableTools: []
+        })
+    })
+    const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
+    const { useToolStore } = await import("@/lib/store/tools")
+    useLysStore.setState({
+      modelInventory: {
+        status: "ready",
+        models: [
+          buildLlmInfo("resident", { loaded: true, trainedForToolUse: true })
+        ]
+      }
+    })
+    setToolSwitches(useLysStore, { read_page: true })
+    useToolStore.getState().updateToolCallsOn(false)
+
+    const send = useChatViewStore.getState().sendMessage("Read my notes")
+    await waitForMicrotasks()
+    streams[0]?.close()
+    await send
+
+    const chatRequest = backend.requests.find(
+      (request) => request.method === "POST"
+    )
+    expect(chatRequest?.body).not.toHaveProperty("tools")
+    expect(chatRequest?.body).toHaveProperty("switchedOffToolNames", [
+      "read_text_file",
+      "find_files",
+      "read_page"
+    ])
+  })
+
+  it("sends neither tools nor switched-off tools for a model not trained for tool use, without reading the tool list", async () => {
+    const host = startNativeHostFake({ list_tools: () => TOOLS })
+    const { backend, streams } = startChatBackend()
+    const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
+    useLysStore.setState({
+      modelInventory: {
+        status: "ready",
+        models: [
+          buildLlmInfo("resident", { loaded: true, trainedForToolUse: false })
+        ]
+      }
+    })
+    setToolSwitches(useLysStore, { find_files: false })
+
+    const send = useChatViewStore.getState().sendMessage("Hello")
+    await waitForMicrotasks()
+    streams[0]?.close()
+    await send
+
+    expect(backend.requests.map((request) => request.method)).toEqual(["POST"])
+    expect(backend.requests[0]?.body).not.toHaveProperty("tools")
+    expect(backend.requests[0]?.body).not.toHaveProperty("switchedOffToolNames")
+    expect(host.commands).toEqual([])
   })
 
   it("reads the tool list again when the backend refuses an offered tool that can no longer run, and says what to do", async () => {
@@ -1959,7 +2128,7 @@ describe("useChatViewStore", () => {
       buildJsonResponse(200, { tools: [webSearch], unavailableTools: [] })
     )
     await firstRead
-    useToolStore.getState().updateToolOn(webSearch, true)
+    setToolSwitches(useLysStore, { web_search: true })
 
     await useChatViewStore.getState().sendMessage("Find today's news")
     await waitForMicrotasks()

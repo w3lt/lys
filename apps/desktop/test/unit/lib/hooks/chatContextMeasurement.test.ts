@@ -21,12 +21,27 @@ import {
 import { buildLlmInfo } from "../../support/modelFixtures"
 import {
   READY_RUNTIME,
-  updateStoreRuntime
+  updateStoreRuntime,
+  type RuntimeArrangement
 } from "../../support/runtimeFixtures"
 import { buildToolDefinition } from "../../support/toolFixtures"
 
 /** Desktop tool the Tools pane offers once its list is read. */
 const READ_TEXT_FILE = buildToolDefinition("read_text_file")
+
+/** Second desktop tool, which a case can switch off. */
+const FIND_FILES = buildToolDefinition("find_files")
+
+/** The runtime ready with `qwen3-8b` loaded and trained for tool use. */
+const TRAINED_RUNTIME: RuntimeArrangement = {
+  ...READY_RUNTIME,
+  modelInventory: {
+    status: "ready",
+    models: [
+      buildLlmInfo("qwen3-8b", { loaded: true, trainedForToolUse: true })
+    ]
+  }
+}
 
 /**
  * Loads fresh stores with the hook under test, the runtime ready with
@@ -237,31 +252,129 @@ describe("useChatContextMeasurement", () => {
     ])
   })
 
-  it("starts reading a tool list that was never read when the next message would offer tools", async () => {
-    startBackendFake({
+  it("measures the note that names the tools the saved switches turn off", async () => {
+    const backend = startBackendFake({
       [CHAT_CONTEXT_ROUTE]: () =>
         buildJsonResponse(200, FIXTURE_CHAT_CONTEXT_MEASUREMENT)
     })
     const { useLysStore, useToolStore, useChatContextMeasurement } =
       await loadFreshMeasurementHook()
-    updateStoreRuntime(useLysStore, {
-      ...READY_RUNTIME,
-      modelInventory: {
-        status: "ready",
-        models: [
-          buildLlmInfo("qwen3-8b", { loaded: true, trainedForToolUse: true })
-        ]
+    updateStoreRuntime(useLysStore, TRAINED_RUNTIME)
+    useToolStore.setState({
+      list: {
+        status: "loaded",
+        tools: [READ_TEXT_FILE, FIND_FILES],
+        unavailableTools: new Map()
       }
     })
-    const loadTools = vi.fn(async () => undefined)
-    useToolStore.setState({ loadTools })
+    const { settings } = useLysStore.getState()
+    useLysStore.setState({
+      settings: {
+        ...settings,
+        tools: { ...settings.tools, switches: new Map([["find_files", false]]) }
+      }
+    })
 
     const { result } = renderHook(() => useChatContextMeasurement(true))
     await waitFor(() => {
       expect(result.current.isPending).toBe(false)
     })
 
-    expect(loadTools).toHaveBeenCalledOnce()
+    expect(listMeasurementBodies(backend)).toEqual([
+      {
+        conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
+        model: "qwen3-8b",
+        tools: { definitions: [READ_TEXT_FILE] },
+        switchedOffToolNames: ["find_files"]
+      }
+    ])
+  })
+
+  it("measures no tools and names every listed tool as off while tool calls are off", async () => {
+    const backend = startBackendFake({
+      [CHAT_CONTEXT_ROUTE]: () =>
+        buildJsonResponse(200, FIXTURE_CHAT_CONTEXT_MEASUREMENT)
+    })
+    const { useLysStore, useToolStore, useChatContextMeasurement } =
+      await loadFreshMeasurementHook()
+    updateStoreRuntime(useLysStore, TRAINED_RUNTIME)
+    useToolStore.setState({
+      areToolCallsOn: false,
+      list: {
+        status: "loaded",
+        tools: [READ_TEXT_FILE, FIND_FILES],
+        unavailableTools: new Map()
+      }
+    })
+
+    const { result } = renderHook(() => useChatContextMeasurement(true))
+    await waitFor(() => {
+      expect(result.current.isPending).toBe(false)
+    })
+
+    expect(listMeasurementBodies(backend)).toEqual([
+      {
+        conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
+        model: "qwen3-8b",
+        switchedOffToolNames: ["read_text_file", "find_files"]
+      }
+    ])
+  })
+
+  it.each([
+    ["on", true],
+    ["off", false]
+  ])(
+    "starts reading a tool list that was never read for a model trained for tool use while tool calls are %s",
+    async (_label, areToolCallsOn) => {
+      startBackendFake({
+        [CHAT_CONTEXT_ROUTE]: () =>
+          buildJsonResponse(200, FIXTURE_CHAT_CONTEXT_MEASUREMENT)
+      })
+      const { useLysStore, useToolStore, useChatContextMeasurement } =
+        await loadFreshMeasurementHook()
+      updateStoreRuntime(useLysStore, TRAINED_RUNTIME)
+      const loadTools = vi.fn(async () => undefined)
+      useToolStore.setState({ areToolCallsOn, loadTools })
+
+      const { result } = renderHook(() => useChatContextMeasurement(true))
+      await waitFor(() => {
+        expect(result.current.isPending).toBe(false)
+      })
+
+      expect(loadTools).toHaveBeenCalledOnce()
+    }
+  )
+
+  it("measures neither tools nor switched-off tools for a model not trained for tool use, without reading the tool list", async () => {
+    const backend = startBackendFake({
+      [CHAT_CONTEXT_ROUTE]: () =>
+        buildJsonResponse(200, FIXTURE_CHAT_CONTEXT_MEASUREMENT)
+    })
+    const { useLysStore, useToolStore, useChatContextMeasurement } =
+      await loadFreshMeasurementHook()
+    const loadTools = vi.fn(async () => undefined)
+    useToolStore.setState({ loadTools })
+    const { settings } = useLysStore.getState()
+    useLysStore.setState({
+      settings: {
+        ...settings,
+        tools: { ...settings.tools, switches: new Map([["find_files", false]]) }
+      }
+    })
+
+    const { result } = renderHook(() => useChatContextMeasurement(true))
+    await waitFor(() => {
+      expect(result.current.isPending).toBe(false)
+    })
+
+    expect(loadTools).not.toHaveBeenCalled()
+    expect(listMeasurementBodies(backend)).toEqual([
+      {
+        conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
+        model: "qwen3-8b"
+      }
+    ])
   })
 
   it.each([

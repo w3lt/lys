@@ -10,13 +10,9 @@ import { useId, type ReactElement } from "react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import type { ToolSettings } from "@/lib/store/settings"
 import { TOOL_APPROVALS, type ToolApproval } from "@/lib/store/tool-settings"
-import {
-  getToolChoice,
-  isToolOn,
-  type ToolChoice,
-  type ToolChoices
-} from "@/lib/store/tools"
+import { getToolChoice, isToolOn, type ToolChoice } from "@/lib/store/tools"
 
 import {
   calculateToolTokenEstimate,
@@ -523,8 +519,8 @@ function ToolRow({
 export type ToolGroupSectionProps = {
   /** Group and its tools, in list order. */
   readonly listing: ToolGroupListing
-  /** Session switches and saved approvals the rows are drawn with. */
-  readonly toolChoices: ToolChoices
+  /** Saved switches and approvals the rows are drawn with. */
+  readonly toolChoices: ToolSettings
   /** Name of the tool whose details are shown, or null when none is. */
   readonly expandedToolName: string | null
   /** Whether the tool controls are locked. */

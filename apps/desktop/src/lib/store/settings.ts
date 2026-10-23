@@ -111,16 +111,24 @@ export type SecretsSettings = {
  * Tool choices persisted under the `tools` JSON object.
  *
  * @remarks Holds what Rust's `ToolSettings` holds; Rust validates each name
- * against the shared tool name rule and reads a missing group or list as
- * empty. The settings file keeps the names as one array in ascending order,
- * which the Tauri settings adapter converts to and from the set held here.
- * A tool not in the set asks the person before each call. A name Lys does
- * not list is kept and has no effect. The application store saves the group
- * automatically whenever a tool's approval changes.
+ * against the shared tool name rule and reads a missing group, list, or
+ * object as empty. The settings file keeps the Just run names as one array
+ * and the switches as one object keyed by tool name, both in ascending name
+ * order, which the Tauri settings adapter converts to and from the set and
+ * the map held here. A tool not in the set asks the person before each call.
+ * A tool without a switch is on or off as its access makes it by default, so
+ * a tool added later starts at its own default. A name Lys does not list is
+ * kept and has no effect. The application store saves the group
+ * automatically whenever a tool's approval or switch changes.
  */
 export type ToolSettings = {
   /** Names of the tools that run at once, without asking, when called. */
   readonly justRunToolNames: ReadonlySet<string>
+  /**
+   * Whether each tool the person switched is on, keyed by tool name; only
+   * tools the person switched have an entry.
+   */
+  readonly switches: ReadonlyMap<string, boolean>
 }
 
 /**
@@ -130,8 +138,9 @@ export type ToolSettings = {
  * names, so a saved value cannot silently drop a persisted group. The
  * runtime and generation groups match Rust field for field. The load
  * configuration group differs only in its per-model settings, a map here and
- * one object in the document, and the tools group in its names, a set here
- * and one array in the document; the Tauri settings adapter converts between
+ * one object in the document, and the tools group in its Just run names, a
+ * set here and one array in the document, and its switches, a map here and
+ * one object in the document; the Tauri settings adapter converts between
  * the two.
  */
 export type LysSettings = {
@@ -143,7 +152,7 @@ export type LysSettings = {
   loadConfiguration: LoadConfigurationSettings
   /** Keys of the services Lys calls on the person's behalf. */
   secrets: SecretsSettings
-  /** Tools the person set to Just run. */
+  /** Tools the person set to Just run and tools the person switched. */
   tools: ToolSettings
 }
 
@@ -178,10 +187,12 @@ const INITIAL_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
 
 /**
  * Tool choices shown before Tauri initialization completes: no tool on Just
- * run, as in a first-run settings file, so every call asks.
+ * run and no tool switched, as in a first-run settings file, so every call
+ * asks and every tool is on or off by default.
  */
 const INITIAL_TOOL_SETTINGS: ToolSettings = Object.freeze({
-  justRunToolNames: new Set<string>()
+  justRunToolNames: new Set<string>(),
+  switches: new Map<string, boolean>()
 })
 
 /**

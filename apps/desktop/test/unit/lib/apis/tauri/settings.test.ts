@@ -35,8 +35,8 @@ const PROTOTYPE_KEY_LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
 })
 
 /**
- * Settings document in which the one model with settings of its own has the
- * key `__proto__`.
+ * Settings document in which the one model with settings of its own and the
+ * one switched tool both have the key `__proto__`, a valid tool name.
  *
  * @remarks The computed key makes `__proto__` a property of the object's own,
  * as parsing the host's JSON answer does; a literal `__proto__` key would set
@@ -49,6 +49,10 @@ const PROTOTYPE_KEY_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
     models: Object.freeze({
       ["__proto__"]: PROTOTYPE_KEY_LOAD_CONFIGURATION
     })
+  }),
+  tools: Object.freeze({
+    justRun: STORED_SETTINGS_DOCUMENT.tools.justRun,
+    switches: Object.freeze({ ["__proto__"]: false })
   })
 })
 
@@ -58,6 +62,10 @@ const PROTOTYPE_KEY_SETTINGS: LysSettings = Object.freeze({
   loadConfiguration: Object.freeze({
     default: STORED_SETTINGS.loadConfiguration.default,
     models: new Map([["__proto__", PROTOTYPE_KEY_LOAD_CONFIGURATION]])
+  }),
+  tools: Object.freeze({
+    justRunToolNames: STORED_SETTINGS.tools.justRunToolNames,
+    switches: new Map([["__proto__", false]])
   })
 })
 
@@ -88,7 +96,7 @@ describe("loadSettings", () => {
     ])
   })
 
-  it("keeps a model key that names an object-prototype member", async () => {
+  it("keeps a model key and a switched tool's name that name an object-prototype member", async () => {
     startNativeHostFake({
       load_settings: () => PROTOTYPE_KEY_SETTINGS_DOCUMENT
     })
@@ -98,6 +106,7 @@ describe("loadSettings", () => {
     expect(settings.loadConfiguration.models).toEqual(
       new Map([["__proto__", PROTOTYPE_KEY_LOAD_CONFIGURATION]])
     )
+    expect(settings.tools.switches).toEqual(new Map([["__proto__", false]]))
   })
 
   it("reads a settings file without a saved key as no key", async () => {
@@ -136,17 +145,20 @@ describe("loadSettings", () => {
     expect(String(failure)).not.toContain(spacedKey)
   })
 
-  it("reads the tools on Just run as a set, and an empty list as none", async () => {
+  it("reads an empty Just run list and an empty switches object as no tool on Just run and no tool switched", async () => {
     startNativeHostFake({
       load_settings: () => ({
         ...STORED_SETTINGS_DOCUMENT,
-        tools: { justRun: [] }
+        tools: { justRun: [], switches: {} }
       })
     })
 
     const settings = await loadSettings()
 
-    expect(settings.tools.justRunToolNames).toEqual(new Set())
+    expect(settings.tools).toEqual({
+      justRunToolNames: new Set(),
+      switches: new Map()
+    })
   })
 
   it("rejects with the host's rejection", async () => {
@@ -172,7 +184,7 @@ describe("saveSettings", () => {
     ])
   })
 
-  it("sends a model key that names an object-prototype member as a property of its own", async () => {
+  it("sends a model key and a switched tool's name that name an object-prototype member as properties of their own", async () => {
     const host = startNativeHostFake({ save_settings: () => null })
 
     await saveSettings(PROTOTYPE_KEY_SETTINGS)
@@ -384,7 +396,11 @@ describe("saveToolSettings", () => {
     })
 
     await saveToolSettings({
-      justRunToolNames: new Set(["read_text_file", "find_files"])
+      justRunToolNames: new Set(["read_text_file", "find_files"]),
+      switches: new Map([
+        ["web_search", true],
+        ["find_files", false]
+      ])
     })
 
     expect(host.commands).toEqual([
@@ -394,25 +410,31 @@ describe("saveToolSettings", () => {
         args: {
           newSettings: {
             ...STORED_SETTINGS_DOCUMENT,
-            tools: { justRun: ["read_text_file", "find_files"] }
+            tools: {
+              justRun: ["read_text_file", "find_files"],
+              switches: { web_search: true, find_files: false }
+            }
           }
         }
       }
     ])
   })
 
-  it("writes an empty list when no tool is on Just run", async () => {
+  it("writes an empty list and an empty object when no tool is on Just run or switched", async () => {
     const host = startNativeHostFake({
       load_settings: () => STORED_SETTINGS_DOCUMENT,
       save_settings: () => null
     })
 
-    await saveToolSettings({ justRunToolNames: new Set() })
+    await saveToolSettings({ justRunToolNames: new Set(), switches: new Map() })
 
     expect(host.commands[1]).toEqual({
       command: "save_settings",
       args: {
-        newSettings: { ...STORED_SETTINGS_DOCUMENT, tools: { justRun: [] } }
+        newSettings: {
+          ...STORED_SETTINGS_DOCUMENT,
+          tools: { justRun: [], switches: {} }
+        }
       }
     })
   })
@@ -424,7 +446,10 @@ describe("saveToolSettings", () => {
     })
 
     await expect(
-      saveToolSettings({ justRunToolNames: new Set(["find_files"]) })
+      saveToolSettings({
+        justRunToolNames: new Set(["find_files"]),
+        switches: new Map()
+      })
     ).rejects.toBe("Failed to read settings.json")
     expect(host.commands.map((invoked) => invoked.command)).toEqual([
       "load_settings"
@@ -438,7 +463,10 @@ describe("saveToolSettings", () => {
     })
 
     await expect(
-      saveToolSettings({ justRunToolNames: new Set(["find_files"]) })
+      saveToolSettings({
+        justRunToolNames: new Set(["find_files"]),
+        switches: new Map()
+      })
     ).rejects.toBe("Disk full")
   })
 })

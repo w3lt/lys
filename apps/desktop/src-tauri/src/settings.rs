@@ -44,7 +44,7 @@ static TEMPORARY_FILE_COUNT: AtomicU64 = AtomicU64::new(0);
 /// those groups behind the settings module's API boundary. A missing group
 /// takes that group's defaults; the load configuration group's default is
 /// empty, the secrets group's default holds no key, and the tools group's
-/// default puts no tool on Just run. A group the value does not hold, such as
+/// default puts no tool on Just run and saves no tool switch. A group the value does not hold, such as
 /// the `model` group of files written before the local context estimate was
 /// removed, is ignored when loading and left out of the next save.
 pub struct LysSettings {
@@ -56,7 +56,7 @@ pub struct LysSettings {
     load_configuration: LoadConfigurationSettings,
     /// Secrets, such as the Tavily API key, in the `secrets` object.
     secrets: SecretsSettings,
-    /// Tools set to Just run, in the `tools` object.
+    /// Tools set to Just run and saved tool switches, in the `tools` object.
     tools: ToolSettings,
 }
 
@@ -312,7 +312,10 @@ mod tests {
             "models": { "qwen/qwen3-8b": { "contextLength": 16384 } }
         });
         settings["secrets"] = json!({ "tavilyApiKey": "tvly-synthetic-0123456789" });
-        settings["tools"] = json!({ "justRun": ["read_page", "read_text_file"] });
+        settings["tools"] = json!({
+            "justRun": ["read_page", "read_text_file"],
+            "switches": { "read_page": true, "search_files": false }
+        });
 
         settings
     }
@@ -322,9 +325,10 @@ mod tests {
         json!({ "tavilyApiKey": null })
     }
 
-    /// Tools group of a settings file in which every tool asks first.
+    /// Tools group of a settings file in which every tool asks first and no
+    /// tool has a saved switch.
     fn get_empty_tools() -> Value {
-        json!({ "justRun": [] })
+        json!({ "justRun": [], "switches": {} })
     }
 
     /// Reads the settings file at `path` as JSON.
@@ -455,6 +459,8 @@ mod tests {
         null_tools["tools"] = Value::Null;
         let mut invalid_tool_name = get_complete_settings();
         invalid_tool_name["tools"]["justRun"] = json!(["read page"]);
+        let mut invalid_switch = get_complete_settings();
+        invalid_switch["tools"]["switches"] = json!({ "read_page": "on" });
         let unusable_files = [
             invalid_group.to_string(),
             null_group.to_string(),
@@ -463,6 +469,7 @@ mod tests {
             null_secrets.to_string(),
             null_tools.to_string(),
             invalid_tool_name.to_string(),
+            invalid_switch.to_string(),
             String::from("{ not json"),
         ];
 

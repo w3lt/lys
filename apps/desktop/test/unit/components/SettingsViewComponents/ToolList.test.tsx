@@ -8,7 +8,7 @@ import {
   buildToolGroups,
   calculateToolTokenEstimate
 } from "@/components/SettingsViewComponents/tool-presentation"
-import type { ToolChoices } from "@/lib/store/tools"
+import type { ToolSettings } from "@/lib/store/settings"
 import {
   buildBackendToolDefinition,
   buildToolDefinition
@@ -54,7 +54,7 @@ const [SEARCH_GROUP] = buildToolGroups([READ_PAGE, WEB_SEARCH])
 function buildToolChoices(
   switches: Readonly<Record<string, boolean>>,
   justRunToolNames: readonly string[]
-): ToolChoices {
+): ToolSettings {
   return {
     switches: new Map(Object.entries(switches)),
     justRunToolNames: new Set(justRunToolNames)
@@ -181,7 +181,7 @@ describe("ToolGroupSection", () => {
     ).toBeChecked()
   })
 
-  it.each<[string, ToolChoices, string]>([
+  it.each<[string, ToolSettings, string]>([
     [
       "on and asks first",
       buildToolChoices({ read_text_file: true }, []),

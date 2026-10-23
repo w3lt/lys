@@ -31,10 +31,15 @@ export type SettingsDocument = Readonly<
       /** Settings each model has of its own, keyed by model key. */
       models: Readonly<Record<string, ModelLoadConfiguration>>
     }>
-    /** Tool choices, the tools on Just run as an array. */
+    /**
+     * Tool choices, the tools on Just run as an array and the switches as an
+     * object keyed by tool name.
+     */
     tools: Readonly<{
       /** Names of the tools on Just run, as the document lists them. */
       justRun: readonly string[]
+      /** Whether each tool the person switched is on, keyed by tool name. */
+      switches: Readonly<Record<string, boolean>>
     }>
   }
 >
@@ -93,15 +98,19 @@ const STORED_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
   tavilyApiKey: STORED_TAVILY_API_KEY
 })
 
-/** Tools group on disk: `read_page` is on Just run. */
+/**
+ * Tools group on disk: `read_page` is on Just run and `search_files` is
+ * switched off.
+ */
 const STORED_TOOL_SETTINGS: ToolSettings = Object.freeze({
-  justRunToolNames: new Set(["read_page"])
+  justRunToolNames: new Set(["read_page"]),
+  switches: new Map([["search_files", false]])
 })
 
 /**
  * Settings document `load_settings` resolves with: every group is set, one
- * model has load settings of its own, a Tavily API key is saved, and one tool
- * is on Just run.
+ * model has load settings of its own, a Tavily API key is saved, one tool is
+ * on Just run, and one tool is switched off.
  */
 export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   runtime: STORED_RUNTIME_SETTINGS,
@@ -111,15 +120,19 @@ export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
     models: Object.freeze({ "qwen3-8b": STORED_MODEL_LOAD_CONFIGURATION })
   }),
   secrets: STORED_SECRETS_SETTINGS,
-  tools: Object.freeze({ justRun: Object.freeze(["read_page"]) })
+  tools: Object.freeze({
+    justRun: Object.freeze(["read_page"]),
+    switches: Object.freeze({ search_files: false })
+  })
 })
 
 /**
  * The renderer's settings for {@link STORED_SETTINGS_DOCUMENT}: the same
- * groups, with the per-model load settings as a map keyed by model key and
- * the tools on Just run as a set.
+ * groups, with the per-model load settings as a map keyed by model key, the
+ * tools on Just run as a set, and the tool switches as a map keyed by tool
+ * name.
  *
- * @remarks The map and the set are read-only through their types; no
+ * @remarks The maps and the set are read-only through their types; no
  * consumer of the settings mutates them, so the value is safe to share
  * between cases.
  */

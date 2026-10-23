@@ -21,21 +21,22 @@ results go to the backend and on to LM Studio, both on loopback.
 
 ## Current trust boundaries
 
-| Boundary                     | Current state                                                                                                                                                                                                                          |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| React UI -> Tauri host       | Trusted application boundary using Tauri `invoke` commands.                                                                                                                                                                            |
-| React UI -> Fastify backend  | Loopback HTTP and SSE only. No auth layer beyond local binding.                                                                                                                                                                        |
-| Fastify backend -> LM Studio | Loopback connections to local LM Studio HTTP and WebSocket endpoints.                                                                                                                                                                  |
-| Backend -> SQLite file       | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                                                                                                                                                                                  |
-| Backend -> attachment files  | Local filesystem access to `$LYS_HOME/attachments/`: the files of each chat request are written under the conversation's and the message's identifiers and the file's own name, read for the model, and removed with the conversation. |
-| Tauri host -> settings file  | Local filesystem access to `$LYS_HOME/settings.json`; `get_location` reads its `location` group and never creates or writes the file.                                                                                                  |
-| Tauri host -> system clock   | `get_current_time` reads the system clock and the machine's time zone, from `TZ` or else `/etc/localtime`.                                                                                                                             |
-| Tauri host -> user files     | File tools read any path the OS user running Lys can read.                                                                                                                                                                             |
-| Tauri host -> vmo            | The host starts vmo as the OS user running Lys, ad hoc signed with the virtualization entitlement, stops it with `SIGTERM` and, after 60 seconds, `SIGKILL`, and asks its `GET /health` over loopback TCP.                             |
-| Backend -> vmo               | Each tool lookup sends `GET /health` to vmo, and each `read_page` call sends the page's URL, over loopback HTTP on `127.0.0.1:8080`, without authentication.                                                                           |
-| vmo -> micro VM -> web       | vmo reads the page in headless Chromium in a fresh micro VM, which loads the page, its redirects, and what it loads.                                                                                                                   |
-| Backend -> Tavily            | `web_search` sends one query and the saved API key to `api.tavily.com` per allowed call.                                                                                                                                               |
-| Backend -> settings file     | Reads the Tavily API key and the saved Just run choices from `$LYS_HOME/settings.json`; the Tauri host is the only writer.                                                                                                             |
+| Boundary                      | Current state                                                                                                                                                                                                                          |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| React UI -> Tauri host        | Trusted application boundary using Tauri `invoke` commands.                                                                                                                                                                            |
+| React UI -> Fastify backend   | Loopback HTTP and SSE only. No auth layer beyond local binding.                                                                                                                                                                        |
+| Fastify backend -> LM Studio  | Loopback connections to local LM Studio HTTP and WebSocket endpoints.                                                                                                                                                                  |
+| Backend -> SQLite file        | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                                                                                                                                                                                  |
+| Backend -> attachment files   | Local filesystem access to `$LYS_HOME/attachments/`: the files of each chat request are written under the conversation's and the message's identifiers and the file's own name, read for the model, and removed with the conversation. |
+| Tauri host -> settings file   | Local filesystem access to `$LYS_HOME/settings.json`; `get_location` reads its `location` group and never creates or writes the file.                                                                                                  |
+| Tauri host -> system clock    | `get_current_time` reads the system clock and the machine's time zone, from `TZ` or else `/etc/localtime`.                                                                                                                             |
+| Tauri host -> user files      | File tools read any path the OS user running Lys can read.                                                                                                                                                                             |
+| Tauri host -> vmo             | The host starts vmo as the OS user running Lys, ad hoc signed with the virtualization entitlement, stops it with `SIGTERM` and, after 60 seconds, `SIGKILL`, and asks its `GET /health` over loopback TCP.                             |
+| Backend -> vmo                | Each tool lookup sends `GET /health` to vmo, and each `read_page` call sends the page's URL, over loopback HTTP on `127.0.0.1:8080`, without authentication.                                                                           |
+| vmo -> micro VM -> web        | vmo reads the page in headless Chromium in a fresh micro VM, which loads the page, its redirects, and what it loads.                                                                                                                   |
+| Backend -> Tavily             | `web_search` sends one query and the saved API key to `api.tavily.com` per allowed call.                                                                                                                                               |
+| Backend -> loaded models file | Local filesystem access to `$LYS_HOME/loaded_models.json`, which holds only the identifiers of the LM Studio instances Lys loaded; the backend is its only writer and replaces it atomically.                                          |
+| Backend -> settings file      | Reads the Tavily API key and the saved Just run choices from `$LYS_HOME/settings.json`; the Tauri host is the only writer.                                                                                                             |
 
 ## Current controls
 
@@ -74,6 +75,10 @@ results go to the backend and on to LM Studio, both on loopback.
 - The backend reads the Just run choices, like the Tavily API key, from the
   `settings.json` on its own machine. A backend running on another machine
   would need another source for them.
+- Any process running as the person's OS account can edit
+  `loaded_models.json`. An identifier added there makes Lys unload the
+  instance with that identifier, even one another program loaded; one removed
+  there makes Lys leave its own instance loaded.
 - Switching a tool or tool calls off does not stop a reply already running;
   it applies from the next message. Stop ends a running reply at once.
 - There is no auth token or CSRF layer on the loopback backend, and it checks

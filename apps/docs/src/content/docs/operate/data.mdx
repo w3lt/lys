@@ -127,6 +127,26 @@ The backend keeps its log here, one file per UTC day; see
   file for each line, so a file deleted while Lys runs is created again with
   the next line.
 
+## `$LYS_HOME/loaded_models.json`
+
+The backend keeps the record of the LM Studio model instances Lys loaded here,
+so that it unloads only those; see
+[Instances Lys loaded](/architecture/providers/#instances-lys-loaded).
+
+- it holds a format version and the identifiers Lys gave its instances, such
+  as `qwen/qwen3-8b@lys-7f3c9a`, and nothing else:
+  `{ "version": 1, "instanceIdentifiers": [...] }`
+- the backend creates it at its first model load and saves it before each
+  load and after each unload, writing `loaded_models.json.tmp` beside it,
+  flushing it, and renaming it over the file, so a read sees either the old
+  record or the new one. It never creates a missing Lys home
+- the model list reads it and never writes it
+- a file larger than 64 KiB, not UTF-8 text, not JSON, of another version, or
+  not in the version 1 format is never replaced. While it stays that way, Lys
+  loads no model and unloads none; fix or delete the file to recover
+- deleting it while the backend is stopped makes Lys forget its instances:
+  they stay loaded, and only LM Studio or `lms` can unload them
+
 ## vmo's image store
 
 vmo, the page reader `read_page` uses, keeps its images and the files of its
@@ -165,6 +185,7 @@ that space.
 ## Lifecycle notes
 
 - The settings file is created by the Tauri host on first settings load.
+- The loaded models record is created by the backend at its first model load.
 - The SQLite file is opened once by the backend's database owner when the
   backend's services start, before the conversation services and the agent
   service are created.
@@ -172,8 +193,9 @@ that space.
   started with `pnpm backend:dev` uses `~/.lys`, which must already exist; the
   desktop creates the Lys home when initializing a missing settings file. See
   [Running Lys locally](/develop/running/).
-- The settings file, the database, and the attachments directory live in the
-  same Lys home directory, so user data and app settings currently share one
+- The settings file, the database, the loaded models record, and the
+  attachments directory live in the same Lys home directory, so user data and
+  app settings currently share one
   root. Release builds also start their backend and vmo
   from the `runtime/` directory there, and the backend keeps its log in
   `logs/`.

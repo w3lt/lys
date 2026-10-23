@@ -111,9 +111,10 @@ Each tool builds its own definition next to the limits it enforces, so a
 description states the current limits. The tools are named `read_text_file`,
 `search_files`, `get_current_time`, and `get_location`; the search-files tool
 keeps its name although its command is `find_files`, and the last two, in
-the `timeAndPlace` group, take no arguments. Its arguments are the exact keys of the `find_files` filter,
-and `target` is an enum of `name`, `content`, and `nameAndContent`. The command
-reads nothing and never fails.
+the `timeAndPlace` group, take no arguments. The search-files tool's
+arguments are the exact keys of the `find_files` filter, and `target` is an
+enum of `name`, `content`, and `nameAndContent`. The command reads nothing and
+never fails.
 
 ## Lys home
 

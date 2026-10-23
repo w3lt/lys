@@ -11,6 +11,7 @@ import {
   getToolChoice,
   isToolOn,
   NO_CHAT_TOOL_OFFER,
+  TOOL_CALLS_OFF_OFFER,
   type ChatToolFields,
   type ChatToolOfferResult,
   type ToolListState
@@ -187,7 +188,8 @@ describe("buildChatToolOffer", () => {
     ).toEqual({
       status: "offered",
       offer: { definitions: [findFiles, searchFiles] },
-      switchedOffToolNames: ["read_text_file", "read_page"]
+      switchedOffToolNames: ["read_text_file", "read_page"],
+      unavailableTools: []
     })
   })
 
@@ -207,11 +209,12 @@ describe("buildChatToolOffer", () => {
     ).toEqual({
       status: "offered",
       offer: { definitions: [findFiles], backendToolNames: ["read_page"] },
-      switchedOffToolNames: []
+      switchedOffToolNames: [],
+      unavailableTools: []
     })
   })
 
-  it("leaves out a switched-on backend tool that cannot run now, without naming it as off", () => {
+  it("leaves out a switched-on backend tool that cannot run now and names it with the list's reason, not as off", () => {
     expect(
       buildChatToolOffer({
         list: {
@@ -228,22 +231,54 @@ describe("buildChatToolOffer", () => {
     ).toEqual({
       status: "offered",
       offer: { definitions: [], backendToolNames: ["read_page"] },
-      switchedOffToolNames: []
+      switchedOffToolNames: [],
+      unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
     })
   })
 
-  it("offers no tools when the only switched-on tool cannot run now", () => {
+  it("names a switched-off backend tool that cannot run now as off only", () => {
     expect(
       buildChatToolOffer({
         list: {
           status: "loaded",
           tools: [WEB_SEARCH],
-          unavailableTools: new Map([["web_search", "settings-unreadable"]])
+          unavailableTools: new Map([["web_search", "api-key-missing"]])
         },
         areToolCallsOn: true,
-        toolSwitches: new Map([["web_search", true]])
+        toolSwitches: new Map()
       })
-    ).toEqual({ status: "not-offered", switchedOffToolNames: [] })
+    ).toEqual({
+      status: "not-offered",
+      switchedOffToolNames: ["web_search"],
+      unavailableTools: []
+    })
+  })
+
+  it("offers no tools and names each switched-on tool that cannot run now, in list order, when none can run", () => {
+    expect(
+      buildChatToolOffer({
+        list: {
+          status: "loaded",
+          tools: [READ_PAGE, WEB_SEARCH],
+          unavailableTools: new Map<string, BackendToolUnavailableReason>([
+            ["web_search", "settings-unreadable"],
+            ["read_page", "page-reader-not-ready"]
+          ])
+        },
+        areToolCallsOn: true,
+        toolSwitches: new Map([
+          ["read_page", true],
+          ["web_search", true]
+        ])
+      })
+    ).toEqual({
+      status: "not-offered",
+      switchedOffToolNames: [],
+      unavailableTools: [
+        READ_PAGE_NOT_READY,
+        { name: "web_search", reason: "settings-unreadable" }
+      ]
+    })
   })
 
   it.each([
@@ -268,44 +303,36 @@ describe("buildChatToolOffer", () => {
           ["find_files", false]
         ])
       })
-    ).toEqual({ status: "not-offered", switchedOffToolNames })
-  })
-
-  it("offers no tools and names every listed tool as off while tool calls are off, whatever each tool's switch says", () => {
-    const findFiles = buildToolDefinition("find_files")
-
-    expect(
-      buildChatToolOffer({
-        list: {
-          status: "loaded",
-          tools: [findFiles, READ_PAGE, WEB_SEARCH],
-          unavailableTools: new Map([["web_search", "api-key-missing"]])
-        },
-        areToolCallsOn: false,
-        toolSwitches: new Map([
-          ["read_page", true],
-          ["web_search", true]
-        ])
-      })
     ).toEqual({
       status: "not-offered",
-      switchedOffToolNames: ["find_files", "read_page", "web_search"]
+      switchedOffToolNames,
+      unavailableTools: []
     })
   })
 
   it.each([
     ...UNREAD_TOOL_LISTS,
-    Object.freeze({ status: "failed", error: "Lys couldn't read it." })
+    Object.freeze({ status: "failed", error: "Lys couldn't read it." }),
+    Object.freeze({
+      status: "loaded",
+      tools: [buildToolDefinition("find_files"), READ_PAGE, WEB_SEARCH],
+      unavailableTools: new Map<string, BackendToolUnavailableReason>([
+        ["web_search", "api-key-missing"]
+      ])
+    })
   ] satisfies readonly ToolListState[])(
-    "offers and names no tools while tool calls are off and the list is $status",
+    "offers and names no tool but says tool calls are off while they are off and the list is $status, whatever each tool's switch says",
     (list) => {
       expect(
         buildChatToolOffer({
           list,
           areToolCallsOn: false,
-          toolSwitches: new Map()
+          toolSwitches: new Map([
+            ["read_page", true],
+            ["web_search", true]
+          ])
         })
-      ).toBe(NO_CHAT_TOOL_OFFER)
+      ).toBe(TOOL_CALLS_OFF_OFFER)
     }
   )
 
@@ -350,21 +377,53 @@ describe("buildChatToolFields", () => {
 
   it.each<[string, ChatToolOfferResult, ChatToolFields]>([
     [
-      "offered tools and switched-off tools",
-      { status: "offered", offer, switchedOffToolNames: ["read_page"] },
-      { tools: offer, switchedOffToolNames: ["read_page"] }
+      "offered tools, switched-off tools, and tools that cannot run",
+      {
+        status: "offered",
+        offer,
+        switchedOffToolNames: ["read_page"],
+        unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
+      },
+      {
+        tools: offer,
+        switchedOffToolNames: ["read_page"],
+        unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
+      }
     ],
     [
       "offered tools alone",
-      { status: "offered", offer, switchedOffToolNames: [] },
+      {
+        status: "offered",
+        offer,
+        switchedOffToolNames: [],
+        unavailableTools: []
+      },
       { tools: offer }
     ],
     [
       "switched-off tools alone",
-      { status: "not-offered", switchedOffToolNames: ["read_page"] },
+      {
+        status: "not-offered",
+        switchedOffToolNames: ["read_page"],
+        unavailableTools: []
+      },
       { switchedOffToolNames: ["read_page"] }
     ],
-    ["neither", NO_CHAT_TOOL_OFFER, {}],
+    [
+      "tools that cannot run alone",
+      {
+        status: "not-offered",
+        switchedOffToolNames: [],
+        unavailableTools: [READ_PAGE_NOT_READY]
+      },
+      { unavailableTools: [READ_PAGE_NOT_READY] }
+    ],
+    ["no tool field", NO_CHAT_TOOL_OFFER, {}],
+    [
+      "only that tool calls are off",
+      TOOL_CALLS_OFF_OFFER,
+      { areToolCallsSwitchedOff: true }
+    ],
     [
       "nothing for an unavailable list",
       { status: "unavailable", error: "x" },

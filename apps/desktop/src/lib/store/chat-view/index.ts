@@ -38,6 +38,7 @@ import {
   buildChatToolFields,
   buildChatToolOffer,
   NO_CHAT_TOOL_OFFER,
+  TOOL_CALLS_OFF_OFFER,
   useToolStore,
   type ChatToolOfferResult
 } from "@/lib/store/tools"
@@ -548,7 +549,10 @@ type CreateChatRequestPayloadInput = {
   readonly generationOptions: MessageGenerationOptions
 }
 
-/** Tool offer of a request that can be sent, with its switched-off tools. */
+/**
+ * Tool offer of a request that can be sent, with what it names about the
+ * tools it does not offer.
+ */
 type SendableChatToolOffer = Exclude<
   ChatToolOfferResult,
   { status: "unavailable" }
@@ -708,14 +712,15 @@ function createChatRequestResource(token: number): ChatRequestResource {
  *
  * @param input - Model, prompt, staged files, conversation, and generation
  * values sampled for this request.
- * @param toolOffer - Tools the request offers, if any, and the tools it
- * names as switched off.
+ * @param toolOffer - Tools the request offers, if any, and what it names
+ * about the tools it does not offer.
  * @returns The complete payload, which starts a conversation the sampled
  * agent answers or continues one with the agent it was started with, and
  * carries each staged file by name with its base64 content; without staged
- * files it carries no attachment field. Without offered tools it carries no
- * tools field, so the reply answers in one round, and without switched-off
- * tools no switched-off field.
+ * files it carries no attachment field. It carries the tool fields
+ * {@link buildChatToolFields} builds: without offered tools no tools field,
+ * so the reply answers in one round, and a field naming switched-off or
+ * unavailable tools only when there are any.
  */
 function createChatRequestPayload(
   {
@@ -2044,19 +2049,26 @@ function getStoredConversation(
 }
 
 /**
- * Gets the tools the next chat request offers and names as switched off.
+ * Gets the tools the next chat request offers and what it names about the
+ * tools it does not offer.
  *
  * @returns A promise that resolves with {@link NO_CHAT_TOOL_OFFER} when the
- * loaded model is not known to be trained for tool use, and otherwise with
- * the offer built from the tool list, which is read first when it has not
- * been, the tool-calls switch, and the saved switches, each sampled once the
- * list is read. It never rejects.
+ * loaded model is not known to be trained for tool use; with
+ * {@link TOOL_CALLS_OFF_OFFER}, without reading the tool list, when tool
+ * calls are off; and otherwise with the offer built from the tool list,
+ * which is read first when it has not been, the tool-calls switch, and the
+ * saved switches, each sampled once the list is read. It never rejects.
  */
 async function getChatToolOffer(): Promise<ChatToolOfferResult> {
   const { modelRuntime, modelInventory } = useLysStore.getState()
   const support = calculateToolModelSupport(modelRuntime, modelInventory)
   if (support.status !== "trained") return NO_CHAT_TOOL_OFFER
-  const { list, loadTools } = useToolStore.getState()
+  const {
+    list,
+    loadTools,
+    areToolCallsOn: wereToolCallsOn
+  } = useToolStore.getState()
+  if (!wereToolCallsOn) return TOOL_CALLS_OFF_OFFER
   if (list.status !== "loaded") await loadTools()
 
   const { list: currentList, areToolCallsOn } = useToolStore.getState()

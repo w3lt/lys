@@ -72,8 +72,8 @@ type ChatContextRequestInput = {
   /** Loaded model the message would be sent to, or null when none is. */
   readonly model: string | null
   /**
-   * Tools the message would offer and name as switched off; an
-   * `unavailable` offer is measured without tools.
+   * Tools the message would offer and what it would name about the others;
+   * an `unavailable` offer is measured without tools.
    */
   readonly toolOffer: ChatToolOfferResult
 }
@@ -94,8 +94,9 @@ type ChatContextRequestInput = {
  * conversation's stored messages changed since the last one started; the
  * backend counts it with the model's tokenizer. A change abandons the
  * previous measurement, whose result is then never published; unmounting
- * abandons it too. When the model is trained for tool use and the tool list
- * was never read, the hook starts reading it, as sending would. A failed
+ * abandons it too. When the model is trained for tool use, tool calls are on,
+ * and the tool list was never read, the hook starts reading it, as sending
+ * would. A failed
  * measurement is reported as `failed` and is not retried
  * until an input changes.
  */
@@ -166,7 +167,8 @@ function useChatContextRequest(): ChatContextApiRequestBody | undefined {
     selectedAgentCode,
     agentList
   )
-  const isToolListNeeded = isTrainedForToolUse && list.status === "idle"
+  const isToolListNeeded =
+    isTrainedForToolUse && areToolCallsOn && list.status === "idle"
 
   useEffect(() => {
     if (isToolListNeeded) void loadTools()
@@ -198,9 +200,9 @@ function useChatContextRequest(): ChatContextApiRequestBody | undefined {
  * Builds the tool offer the next message would carry.
  *
  * @param input - The Tools pane's choices, the model's training, and the list.
- * @returns The offer sending would build from the same list, with the tools
- * it would name as switched off; {@link NO_CHAT_TOOL_OFFER} when the model is
- * not known to be trained for tool use.
+ * @returns The offer sending would build from the same list, with what it
+ * would name about the tools it does not offer; {@link NO_CHAT_TOOL_OFFER}
+ * when the model is not known to be trained for tool use.
  * @remarks Sending reads an unread list first and then offers what it holds;
  * the hook reads it too, so the measurement follows once the list arrives.
  */
@@ -220,8 +222,8 @@ function buildMeasuredToolOffer(
  *
  * @param input - Conversation, agent, model, and tool offer.
  * @returns The request for the shown conversation, or for a new one its agent
- * would start, with the offered tools and the switched-off ones when there
- * are any; undefined when no model is loaded.
+ * would start, with the tool fields {@link buildChatToolFields} builds;
+ * undefined when no model is loaded.
  */
 function buildChatContextRequest(
   input: ChatContextRequestInput

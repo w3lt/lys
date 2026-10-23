@@ -1,7 +1,8 @@
 import type {
   BackendToolUnavailableReason,
   ChatApiRequestBody,
-  ChatToolOffer
+  ChatToolOffer,
+  UnavailableBackendTool
 } from "@lys/protocol"
 import type { ToolAccess, ToolDefinition } from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
@@ -164,13 +165,14 @@ export function getToolChoice(
 }
 
 /**
- * Whether the next chat request offers tools, which, and which tools it
- * names as switched off.
+ * Whether the next chat request offers tools, which, and what it tells the
+ * backend about the tools it does not offer.
  *
  * @remarks `unavailable` means the request would offer tools but the tool
  * list cannot be read; the request then fails instead of being sent without
- * them. The switched-off names let the backend tell the model a tool it
- * needs is off.
+ * them. The switched-off names, the switched-on tools that cannot run now,
+ * and `tool-calls-off` let the backend tell the model why a tool it needs
+ * cannot be used.
  */
 export type ChatToolOfferResult =
   | {
@@ -179,19 +181,36 @@ export type ChatToolOfferResult =
       /** Switched-on tools the request offers. */
       readonly offer: ChatToolOffer
       /**
-       * Listed tools that are off, in list order; empty when every listed
-       * tool is on.
+       * Listed tools whose switch is off, in list order; empty when every
+       * listed tool is on.
        */
       readonly switchedOffToolNames: readonly string[]
+      /**
+       * Switched-on backend tools that cannot run now, each with why, in
+       * list order; empty when every switched-on tool can run.
+       */
+      readonly unavailableTools: readonly UnavailableBackendTool[]
     }
   | {
       /** The request offers no tools; the reply answers in one round. */
       readonly status: "not-offered"
       /**
-       * Listed tools that are off, in list order; empty when the list was
-       * not read or every listed tool is on.
+       * Listed tools whose switch is off, in list order; empty when the list
+       * was not read or every listed tool is on.
        */
       readonly switchedOffToolNames: readonly string[]
+      /**
+       * Switched-on backend tools that cannot run now, each with why, in
+       * list order; empty when the list was not read or none is.
+       */
+      readonly unavailableTools: readonly UnavailableBackendTool[]
+    }
+  | {
+      /**
+       * Tool calls are off: the request offers no tools and names none, and
+       * tells the backend tool calls are off.
+       */
+      readonly status: "tool-calls-off"
     }
   | {
       /** The request would offer tools, but the list could not be read. */
@@ -206,19 +225,33 @@ export type ChatToolOfferResult =
  */
 export type ChatToolFields = Pick<
   ChatApiRequestBody,
-  "tools" | "switchedOffToolNames"
+  | "tools"
+  | "switchedOffToolNames"
+  | "unavailableTools"
+  | "areToolCallsSwitchedOff"
 >
 
 /** Switched-off names of a request that names no switched-off tool. */
 const NO_SWITCHED_OFF_TOOL_NAMES: readonly string[] = Object.freeze([])
 
+/** Unavailable tools of a request that names none. */
+const NO_UNAVAILABLE_TOOLS: readonly UnavailableBackendTool[] = Object.freeze(
+  []
+)
+
 /**
  * Shared outcome of a request that offers no tools and names none as
- * switched off.
+ * switched off or unable to run.
  */
 export const NO_CHAT_TOOL_OFFER: ChatToolOfferResult = Object.freeze({
   status: "not-offered",
-  switchedOffToolNames: NO_SWITCHED_OFF_TOOL_NAMES
+  switchedOffToolNames: NO_SWITCHED_OFF_TOOL_NAMES,
+  unavailableTools: NO_UNAVAILABLE_TOOLS
+})
+
+/** Shared outcome of a request sent while tool calls are off. */
+export const TOOL_CALLS_OFF_OFFER: ChatToolOfferResult = Object.freeze({
+  status: "tool-calls-off"
 })
 
 /** Tool settings a chat request's offer is built from. */
@@ -237,26 +270,26 @@ const TOOL_LIST_RECOVERY_ACTION =
 
 /**
  * Builds the tool offer of one chat request, and the tools it names as
- * switched off, from the tool list.
+ * switched off or unable to run, from the tool list.
  *
  * @param input - Tool list, the tool-calls switch, and each tool's switch.
  * The caller has already checked that the loaded model was trained for tool
  * use.
- * @returns `offered` with the definitions of the switched-on desktop tools
- * and the names of the switched-on backend tools that can run now, each in
- * list order; `not-offered` when no such tool is on or tool calls are off;
- * or `unavailable` when tool calls are on and the list was not read. With
- * a read list, both name as switched off every listed tool whose switch is
- * off, or every listed tool while tool calls are off. A backend tool that
- * cannot run now is never offered, whatever its switch says, and is named
- * as switched off only when it is.
+ * @returns {@link TOOL_CALLS_OFF_OFFER} when tool calls are off, whatever
+ * the list's state; `unavailable` when they are on and the list was not
+ * read; otherwise `offered` with the definitions of the switched-on desktop
+ * tools and the names of the switched-on backend tools that can run now,
+ * each in list order, or `not-offered` when no such tool is on. Both name
+ * every listed tool whose switch is off, and every switched-on backend tool
+ * that cannot run now with the list's reason, each in list order. Each tool
+ * is sorted once.
  */
 export function buildChatToolOffer(
   input: BuildChatToolOfferInput
 ): ChatToolOfferResult {
+  if (!input.areToolCallsOn) return TOOL_CALLS_OFF_OFFER
   const { list } = input
   if (list.status !== "loaded") {
-    if (!input.areToolCallsOn) return NO_CHAT_TOOL_OFFER
     const reason =
       list.status === "failed" ? list.error : "Lys couldn't read its tool list."
 
@@ -266,56 +299,56 @@ export function buildChatToolOffer(
     })
   }
 
-  const switchedOffToolNames = Object.freeze(
-    list.tools
-      .filter((tool) => !isToolOnForRequest(input, tool))
-      .map((tool) => tool.name)
-  )
-  const onTools = list.tools.filter(
-    (tool) =>
-      isToolOnForRequest(input, tool) && !list.unavailableTools.has(tool.name)
-  )
+  const switchedOffToolNames: string[] = []
+  const unavailableTools: UnavailableBackendTool[] = []
+  const onTools: ToolDefinition[] = []
+  for (const tool of list.tools) {
+    const reason = list.unavailableTools.get(tool.name)
+    if (!isToolOn(input.toolSwitches, tool))
+      switchedOffToolNames.push(tool.name)
+    else if (reason === undefined) onTools.push(tool)
+    else unavailableTools.push(Object.freeze({ name: tool.name, reason }))
+  }
+  const unoffered = {
+    switchedOffToolNames: Object.freeze(switchedOffToolNames),
+    unavailableTools: Object.freeze(unavailableTools)
+  }
   if (onTools.length === 0) {
-    return Object.freeze({ status: "not-offered", switchedOffToolNames })
+    return Object.freeze({ status: "not-offered", ...unoffered })
   }
 
   const offer = buildToolOffer(onTools)
-  return Object.freeze({ status: "offered", offer, switchedOffToolNames })
+  return Object.freeze({ status: "offered", offer, ...unoffered })
 }
 
 /**
  * Builds the tool fields of a request built from one offer.
  *
  * @param toolOffer - Offer of the request.
- * @returns A new object with `tools` only when the offer offers tools and
- * `switchedOffToolNames` only when it names a switched-off tool; empty for
- * an `unavailable` offer.
+ * @returns A new object: `areToolCallsSwitchedOff` alone for a
+ * `tool-calls-off` offer; otherwise `tools` only when the offer offers
+ * tools, `switchedOffToolNames` only when it names a switched-off tool, and
+ * `unavailableTools` only when it names one that cannot run; empty for an
+ * `unavailable` offer.
  */
 export function buildChatToolFields(
   toolOffer: ChatToolOfferResult
 ): ChatToolFields {
-  if (toolOffer.status === "unavailable") return {}
-  const { switchedOffToolNames } = toolOffer
-
-  return {
-    ...(toolOffer.status === "offered" ? { tools: toolOffer.offer } : {}),
-    ...(switchedOffToolNames.length === 0 ? {} : { switchedOffToolNames })
+  switch (toolOffer.status) {
+    case "unavailable":
+      return {}
+    case "tool-calls-off":
+      return { areToolCallsSwitchedOff: true }
+    case "offered":
+    case "not-offered": {
+      const { switchedOffToolNames, unavailableTools } = toolOffer
+      return {
+        ...(toolOffer.status === "offered" ? { tools: toolOffer.offer } : {}),
+        ...(switchedOffToolNames.length === 0 ? {} : { switchedOffToolNames }),
+        ...(unavailableTools.length === 0 ? {} : { unavailableTools })
+      }
+    }
   }
-}
-
-/**
- * Answers whether a request counts one tool as on.
- *
- * @param input - The tool-calls switch and each tool's switch.
- * @param tool - Name and access of the tool.
- * @returns Whether tool calls are on and the tool's own switch is on, whether
- * or not the tool can run now.
- */
-function isToolOnForRequest(
-  input: Pick<BuildChatToolOfferInput, "areToolCallsOn" | "toolSwitches">,
-  tool: Pick<ToolDefinition, "name" | "access">
-): boolean {
-  return input.areToolCallsOn && isToolOn(input.toolSwitches, tool)
 }
 
 /**
@@ -483,8 +516,9 @@ function createToolStore(
  * nothing here is saved. Each tool's switch and approval belong to the
  * application store, which saves them in the settings file, where the
  * backend's tool approval service reads the approvals. The chat view offers
- * the switched-on tools to a model trained for tool use and names the
- * switched-off ones.
+ * the switched-on tools that can run to a model trained for tool use, and
+ * names the switched-off ones and the switched-on ones that cannot run, or
+ * says tool calls are off.
  */
 export const useToolStore: UseBoundStore<StoreApi<ToolStore>> = createToolStore(
   {

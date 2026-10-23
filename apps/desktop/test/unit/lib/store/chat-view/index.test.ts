@@ -13,7 +13,11 @@ import {
 import { getConversation } from "@/lib/apis/http/conversations"
 import type { AttachmentModelSupport } from "@/lib/models/attachment-model-support"
 import { createChatViewStore } from "@/lib/store/chat-view"
-import { NO_CHAT_TOOL_OFFER, type ChatToolOfferResult } from "@/lib/store/tools"
+import {
+  NO_CHAT_TOOL_OFFER,
+  TOOL_CALLS_OFF_OFFER,
+  type ChatToolOfferResult
+} from "@/lib/store/tools"
 import {
   buildPngFile,
   buildTextFile,
@@ -575,7 +579,8 @@ describe("createChatViewStore", () => {
       providers.toolOffer = Object.freeze({
         status: "offered",
         offer: OFFERED_TOOLS,
-        switchedOffToolNames: []
+        switchedOffToolNames: [],
+        unavailableTools: []
       })
 
       const send = store.getState().sendMessage("Read my notes")
@@ -587,47 +592,56 @@ describe("createChatViewStore", () => {
       expect(backend.requests[0]?.body).not.toHaveProperty(
         "switchedOffToolNames"
       )
+      expect(backend.requests[0]?.body).not.toHaveProperty("unavailableTools")
     })
 
     it.each<[string, ChatToolOfferResult, Record<string, unknown>]>([
       [
-        "beside the offered tools",
-        Object.freeze({
+        "the switched-off tools and the ones that cannot run beside the offered tools",
+        {
           status: "offered",
           offer: OFFERED_TOOLS,
-          switchedOffToolNames: ["read_page"]
-        }),
-        { tools: OFFERED_TOOLS, switchedOffToolNames: ["read_page"] }
+          switchedOffToolNames: ["read_page"],
+          unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
+        },
+        {
+          tools: OFFERED_TOOLS,
+          switchedOffToolNames: ["read_page"],
+          unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
+        }
       ],
       [
-        "without tools when none is offered",
+        "the switched-off tools without tools when none is offered",
         Object.freeze({
           status: "not-offered",
-          switchedOffToolNames: ["read_text_file", "find_files"]
+          switchedOffToolNames: ["read_text_file", "find_files"],
+          unavailableTools: []
         }),
         { switchedOffToolNames: ["read_text_file", "find_files"] }
+      ],
+      [
+        "only that tool calls are off while they are",
+        TOOL_CALLS_OFF_OFFER,
+        { areToolCallsSwitchedOff: true }
       ]
-    ])(
-      "names the switched-off tools %s",
-      async (_case, toolOffer, toolFields) => {
-        const { backend, streams } = startChatBackend()
-        const { store, providers } = createChatHarness()
-        providers.toolOffer = toolOffer
+    ])("names %s", async (_case, toolOffer, toolFields) => {
+      const { backend, streams } = startChatBackend()
+      const { store, providers } = createChatHarness()
+      providers.toolOffer = toolOffer
 
-        const send = store.getState().sendMessage("Read my notes")
-        await waitForMicrotasks()
-        streams[0]?.close()
-        await send
+      const send = store.getState().sendMessage("Read my notes")
+      await waitForMicrotasks()
+      streams[0]?.close()
+      await send
 
-        expect(backend.requests[0]?.body).toEqual({
-          conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
-          message: "Read my notes",
-          model: "qwen3-8b",
-          generationOptions: { temperature: 0.4, replyCeiling: 256 },
-          ...toolFields
-        })
-      }
-    )
+      expect(backend.requests[0]?.body).toEqual({
+        conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
+        message: "Read my notes",
+        model: "qwen3-8b",
+        generationOptions: { temperature: 0.4, replyCeiling: 256 },
+        ...toolFields
+      })
+    })
 
     it("fails the request with the tool list's error, keeps the draft, and sends nothing when the offered tools cannot be read", async () => {
       const { backend } = startChatBackend()
@@ -2033,17 +2047,16 @@ describe("useChatViewStore", () => {
     })
   })
 
-  it("reads the tool list while tool calls are off, offers no tools, and names every listed tool as off", async () => {
+  it("names a switched-on backend tool that cannot run now with the list's reason instead of offering it", async () => {
     startNativeHostFake({ list_tools: () => TOOLS })
     const { backend, streams } = startChatBackend({
       "GET /api/v1/tools": () =>
         buildJsonResponse(200, {
-          tools: [buildBackendToolDefinition("read_page")],
-          unavailableTools: []
+          tools: [buildBackendToolDefinition("web_search")],
+          unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
         })
     })
     const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
-    const { useToolStore } = await import("@/lib/store/tools")
     useLysStore.setState({
       modelInventory: {
         status: "ready",
@@ -2052,10 +2065,9 @@ describe("useChatViewStore", () => {
         ]
       }
     })
-    setToolSwitches(useLysStore, { read_page: true })
-    useToolStore.getState().updateToolCallsOn(false)
+    setToolSwitches(useLysStore, { web_search: true })
 
-    const send = useChatViewStore.getState().sendMessage("Read my notes")
+    const send = useChatViewStore.getState().sendMessage("Search the news")
     await waitForMicrotasks()
     streams[0]?.close()
     await send
@@ -2063,13 +2075,58 @@ describe("useChatViewStore", () => {
     const chatRequest = backend.requests.find(
       (request) => request.method === "POST"
     )
-    expect(chatRequest?.body).not.toHaveProperty("tools")
-    expect(chatRequest?.body).toHaveProperty("switchedOffToolNames", [
-      "read_text_file",
-      "find_files",
-      "read_page"
-    ])
+    expect(chatRequest?.body).toMatchObject({
+      tools: { definitions: TOOLS },
+      unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
+    })
+    expect(chatRequest?.body).not.toHaveProperty("switchedOffToolNames")
   })
+
+  it.each([
+    ["was never read", undefined],
+    ["could not be read", "failed"]
+  ] as const)(
+    "sends only that tool calls are off while they are and the tool list %s, without reading it",
+    async (_label, listState) => {
+      const host = startNativeHostFake({ list_tools: () => TOOLS })
+      const { backend, streams } = startChatBackend({
+        "GET /api/v1/tools": () => buildJsonResponse(500, {})
+      })
+      const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
+      const { useToolStore } = await import("@/lib/store/tools")
+      useLysStore.setState({
+        modelInventory: {
+          status: "ready",
+          models: [
+            buildLlmInfo("resident", { loaded: true, trainedForToolUse: true })
+          ]
+        }
+      })
+      if (listState === "failed")
+        useToolStore.setState({
+          list: { status: "failed", error: "Lys couldn't read its tool list." }
+        })
+      setToolSwitches(useLysStore, { read_page: true })
+      useToolStore.getState().updateToolCallsOn(false)
+
+      const send = useChatViewStore.getState().sendMessage("Read my notes")
+      await waitForMicrotasks()
+      streams[0]?.close()
+      await send
+
+      expect(backend.requests.map((request) => request.method)).toEqual([
+        "POST"
+      ])
+      expect(backend.requests[0]?.body).toEqual({
+        conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
+        message: "Read my notes",
+        model: "resident",
+        generationOptions: { temperature: 0.3 },
+        areToolCallsSwitchedOff: true
+      })
+      expect(host.commands).toEqual([])
+    }
+  )
 
   it("sends neither tools nor switched-off tools for a model not trained for tool use, without reading the tool list", async () => {
     const host = startNativeHostFake({ list_tools: () => TOOLS })

@@ -99,7 +99,8 @@ export interface LlmModelLoader {
    * @returns A promise resolving only after the model is loaded and its
    * immutable canonical metadata has been validated.
    * @throws If the provider cannot load or describe the model, the model is
-   * absent from inventory, metadata is invalid, or application cleanup has begun.
+   * absent from inventory, metadata is invalid, the record of the instances
+   * Lys loaded cannot be read or saved, or application cleanup has begun.
    * @throws A service-busy error recognized by
    * [isLlmServiceBusyError](./llmServiceBusyError.ts) if the shared queue is full;
    * the load is not accepted and has no runtime effects.
@@ -110,7 +111,10 @@ export interface LlmModelLoader {
    * @remarks Loading changes provider runtime state. No atomicity or
    * idempotency guarantee is provided: a repeated call may create another
    * loaded instance, and an inventory or validation failure after loading may
-   * leave the model loaded.
+   * leave the model loaded. Each load gives its instance a new identifier and
+   * saves it on the record of the instances Lys loaded before the provider
+   * loads, so an instance Lys loaded is always on the record; nothing is
+   * loaded when the record cannot be read or saved.
    */
   loadLlmModel(
     modelKeyOrAlias: string,

@@ -44,6 +44,7 @@ import {
 } from "../../../support/scriptedBuiltInTool"
 import { ScriptedBuiltInToolProvider } from "../../../support/scriptedBuiltInToolProvider"
 import { READ_TEXT_FILE_TOOL } from "../../../support/toolFixtures"
+import InMemoryLysLlmInstanceStore from "../../../support/inMemoryLysLlmInstanceStore"
 
 /** Built-in agent that answers the cases' conversations. */
 const CALIGINIA: BuiltInAgent = Object.freeze({
@@ -119,7 +120,8 @@ async function createChatContextRouteApp() {
     llmEngineOperationQueue: Object.freeze({
       handleLlmEngineOperationRequest: () =>
         Promise.reject(new Error("Unexpected LLM engine operation"))
-    })
+    }),
+    lysLlmInstanceStore: new InMemoryLysLlmInstanceStore()
   })
   const listDownloadedLlmModels = vi
     .spyOn(llmService, "listDownloadedLlmModels")

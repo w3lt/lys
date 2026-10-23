@@ -23,6 +23,7 @@ import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
 } from "../modules/llm/llmRuntimeService"
 import LlmService from "../modules/llm/llmService"
+import JsonFileLysLlmInstanceStore from "../modules/llm/jsonFileLysLlmInstanceStore"
 import ToolApprovalService from "../modules/toolApproval/toolApprovalService"
 import { readJustRunToolNames } from "../infrastructure/settings/justRunToolsFile"
 import { readTavilyApiKey } from "../infrastructure/settings/tavilyApiKeyFile"
@@ -217,7 +218,10 @@ export async function createSingletonServices(
     )
     serviceLifetime.defer(llmRuntimeServiceAcquisition.closeService)
     const llmService = new LlmService({
-      llmEngineOperationQueue: llmRuntimeServiceAcquisition.service
+      llmEngineOperationQueue: llmRuntimeServiceAcquisition.service,
+      lysLlmInstanceStore: new JsonFileLysLlmInstanceStore(
+        config.loadedModelsFilePath
+      )
     })
     const agentService = createAgentService(
       config,

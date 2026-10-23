@@ -14,6 +14,8 @@ type FakeLmStudioClientOptions = Readonly<{
 
 /** Load options the backend passes to `llm.load`. */
 export type FakeLmStudioLoadOptions = Readonly<{
+  /** Identifier the loaded instance must have; refused when in use. */
+  identifier?: string
   /** Load settings the SDK sends to LM Studio. */
   config?: LLMLoadModelConfig
 }>
@@ -108,8 +110,10 @@ const EMPTY_LM_STUDIO_INVENTORY: FakeLmStudioInventory = Object.freeze({
  * @remarks Replaces the external LM Studio server for unit tests that install
  * `vi.mock("@lmstudio/sdk", () => import("../support/lmStudioSdkFake"))`.
  * Default operations keep the inventory in memory: `load` accepts only an
- * exact downloaded key, ignores its options, and adds a handle whose
- * identifier is the key, suffixed `:<n>` for later instances; `unload` rejects
+ * exact downloaded key, ignores its load config, and adds a handle whose
+ * identifier is the requested one, refused like LM Studio when an instance
+ * already has it, or else the key, suffixed `:<n>` for later instances;
+ * `unload` rejects
  * an unknown identifier; `listLoaded` returns SDK-like handles whose
  * `getContextLength()` and `countTokens()` reach the engine's operations of
  * the same names, which by default report {@link FAKE_LOADED_CONTEXT_LENGTH}
@@ -202,7 +206,8 @@ class FakeLmStudioEngine {
             this.#buildSdkHandle(handle)
           )
         ),
-      load: (modelKey: string) => Promise.resolve(this.#loadModel(modelKey)),
+      load: (modelKey: string, options?: FakeLmStudioLoadOptions) =>
+        Promise.resolve(this.#loadModel(modelKey, options?.identifier)),
       unload: (identifier: string) =>
         new Promise<void>((resolve) => {
           this.#stopLoadedModelInstance(identifier)
@@ -252,13 +257,22 @@ class FakeLmStudioEngine {
    * Adds a loaded instance for one downloaded model key.
    *
    * @param modelKey - Exact downloaded model key.
+   * @param identifier - Identifier the instance must have, or undefined to
+   * let the engine name it.
    * @returns The new instance handle.
-   * @throws If the key is not downloaded.
+   * @throws If the key is not downloaded, or an instance already has the
+   * requested identifier.
    */
-  #loadModel(modelKey: string): FakeLoadedLlmHandle {
+  #loadModel(
+    modelKey: string,
+    identifier: string | undefined
+  ): FakeLoadedLlmHandle {
     const { downloadedModels, loadedModels } = this.#inventory
     if (!downloadedModels.some((model) => model.modelKey === modelKey)) {
       throw new Error(`Model "${modelKey}" is not downloaded.`)
+    }
+    if (loadedModels.some((model) => model.identifier === identifier)) {
+      throw new Error(`Identifier "${identifier}" is already in use.`)
     }
     const instanceCount = loadedModels.filter(
       (model) => model.modelKey === modelKey
@@ -266,7 +280,8 @@ class FakeLmStudioEngine {
     const handle = Object.freeze({
       modelKey,
       identifier:
-        instanceCount === 0 ? modelKey : `${modelKey}:${instanceCount + 1}`
+        identifier ??
+        (instanceCount === 0 ? modelKey : `${modelKey}:${instanceCount + 1}`)
     })
     this.#inventory = Object.freeze({
       downloadedModels,

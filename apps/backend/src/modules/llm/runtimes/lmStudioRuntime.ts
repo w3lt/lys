@@ -206,17 +206,22 @@ export default class LmStudioRuntime implements LlmRuntime {
    * @param modelKeyOrAlias - Interface-defined engine model selection.
    * @param loadConfiguration - Interface-defined load settings, given to the SDK
    * as its load config.
+   * @param instanceIdentifier - Interface-defined instance identifier, given
+   * to the SDK as its `identifier` load option, which LM Studio refuses
+   * when an instance already has it.
    * @returns The interface-defined canonical identity after the SDK load completes.
    * @throws The interface-defined admission, load, or identity failure.
    */
   public async loadLlmModel(
     modelKeyOrAlias: string,
-    loadConfiguration: ModelLoadConfiguration
+    loadConfiguration: ModelLoadConfiguration,
+    instanceIdentifier: string
   ): Promise<LoadedLlmModelInstance> {
     const operation = this.#startRuntimeOperation()
     try {
       const loadedModel = await this.#client.llm
         .load(modelKeyOrAlias, {
+          identifier: instanceIdentifier,
           config: buildLmStudioLoadConfig(loadConfiguration)
         })
         .catch((cause: unknown) => {

@@ -27,6 +27,12 @@ import type {
   LlmContextMeasurement,
   LoadedLlmModelInstance
 } from "./llmRuntimeTypes"
+import {
+  buildLysLlmInstanceIdentifier,
+  createRandomLysInstanceSuffix,
+  findLoadedLysLlmInstanceIdentifiers
+} from "./lysLlmInstanceIdentifiers"
+import type { LysLlmInstanceStore } from "./lysLlmInstanceStore"
 
 /**
  * One model operation performed against the connected engine.
@@ -72,8 +78,18 @@ export interface LlmEngineOperationQueue {
 export type LlmServiceCreationOptions = {
   /** Borrowed queue that serializes every model operation against the connected runtime. */
   readonly llmEngineOperationQueue: LlmEngineOperationQueue
+  /**
+   * Borrowed record of the instances Lys loaded, read and saved only inside
+   * queued model operations.
+   */
+  readonly lysLlmInstanceStore: LysLlmInstanceStore
   /** Monotonic millisecond clock; defaults to the process performance clock. */
   readonly readMonotonicTimeMs?: () => number
+  /**
+   * Generator of the random part of each new instance identifier; defaults
+   * to six lowercase hex digits from three random bytes.
+   */
+  readonly createLysInstanceSuffix?: () => string
 }
 
 /**
@@ -131,20 +147,31 @@ export default class LlmService
   /** Borrowed queue that owns the runtime and every accepted operation. */
   readonly #llmEngineOperationQueue: LlmEngineOperationQueue
 
+  /** Borrowed record of the instances Lys loaded. */
+  readonly #lysLlmInstanceStore: LysLlmInstanceStore
+
   /** Borrowed monotonic clock used only around admitted health queries. */
   readonly #readMonotonicTimeMs: () => number
 
+  /** Generator of the random part of each new instance identifier. */
+  readonly #createLysInstanceSuffix: () => string
+
   /**
-   * Creates a ready service over a borrowed operation queue.
+   * Creates a ready service over a borrowed operation queue and record.
    *
-   * @param options - Borrowed queue and optional monotonic clock.
+   * @param options - Borrowed queue and record, with an optional monotonic
+   * clock and suffix generator.
    */
   public constructor({
     llmEngineOperationQueue,
-    readMonotonicTimeMs = readPerformanceNowMs
+    lysLlmInstanceStore,
+    readMonotonicTimeMs = readPerformanceNowMs,
+    createLysInstanceSuffix = createRandomLysInstanceSuffix
   }: LlmServiceCreationOptions) {
     this.#llmEngineOperationQueue = llmEngineOperationQueue
+    this.#lysLlmInstanceStore = lysLlmInstanceStore
     this.#readMonotonicTimeMs = readMonotonicTimeMs
+    this.#createLysInstanceSuffix = createLysInstanceSuffix
   }
 
   /**
@@ -180,23 +207,46 @@ export default class LlmService
    * connected runtime unchanged.
    * @returns A promise resolving to a validated immutable model snapshot after
    * the runtime loads the model and its canonical key is found in inventory.
-   * @throws If loading or inventory fails, response validation fails, or the
-   * queue rejects the operation.
+   * @throws If listing the loaded instances, reading or saving the record,
+   * loading, or inventory fails, response validation fails, or the queue
+   * rejects the operation.
+   * @throws An `Error` whose message is the record's reason followed by
+   * `No model was loaded, so the record is left as it is.` when the record
+   * cannot be read; nothing is saved or loaded.
    * @throws An `Error` with the message `Loaded model "<canonical model key>"
    * was not found in the downloaded LLM inventory` if the canonical model is
    * absent from inventory after loading.
+   * @remarks The instance's identifier, `<modelKeyOrAlias>@lys-<suffix>`, is
+   * saved before the runtime loads, with the saved identifiers whose
+   * instances are still loaded, so an instance the runtime loads is always
+   * on the record. A failed load leaves its identifier saved until a later
+   * load or unload finds its instance gone.
    */
   public async loadLlmModel(
     modelKeyOrAlias: string,
     loadConfiguration: ModelLoadConfiguration
   ): Promise<LlmLoadModelApiResponse> {
     return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
-      async (llmEngine) =>
-        await loadRuntimeLlmModel(
+      async (llmEngine) => {
+        const instanceIdentifier = buildLysLlmInstanceIdentifier(
+          modelKeyOrAlias,
+          this.#createLysInstanceSuffix()
+        )
+        await addLysLlmInstanceIdentifier(
+          instanceIdentifier,
+          async () => await llmEngine.listLoadedLlmModelInstances(),
+          this.#lysLlmInstanceStore
+        )
+        return await loadRuntimeLlmModel(
           async () =>
-            await llmEngine.loadLlmModel(modelKeyOrAlias, loadConfiguration),
+            await llmEngine.loadLlmModel(
+              modelKeyOrAlias,
+              loadConfiguration,
+              instanceIdentifier
+            ),
           async () => await llmEngine.listDownloadedLlmModels()
         )
+      }
     )
   }
 
@@ -363,6 +413,38 @@ async function listLoadedContextLengths(
       contextLengths.set(modelKey, measurement.contextLength)
   }
   return contextLengths
+}
+
+/**
+ * Saves a new identifier on the record, with the saved identifiers whose
+ * instances are still loaded.
+ *
+ * @param instanceIdentifier - Identifier of the instance about to load.
+ * @param listLoadedLlmModelInstances - Query for the instances loaded now.
+ * @param lysLlmInstanceStore - Record of the instances Lys loaded.
+ * @returns A promise resolving once the record holds the new identifier.
+ * @throws If the query or the save fails; or, when the record cannot be
+ * read, an `Error` with its reason, without saving, since replacing a
+ * record that cannot be read would lose it.
+ */
+async function addLysLlmInstanceIdentifier(
+  instanceIdentifier: string,
+  listLoadedLlmModelInstances: ListLoadedLlmModelInstances,
+  lysLlmInstanceStore: LysLlmInstanceStore
+): Promise<void> {
+  const loadedModelInstances = await listLoadedLlmModelInstances()
+  const savedRecord = await lysLlmInstanceStore.readLysLlmInstanceIdentifiers()
+  if (savedRecord.status === "unreadable") {
+    throw new Error(
+      `${savedRecord.message} No model was loaded, so the record is left as it is.`
+    )
+  }
+  const keptIdentifiers = findLoadedLysLlmInstanceIdentifiers(
+    savedRecord.instanceIdentifiers,
+    loadedModelInstances
+  )
+  keptIdentifiers.add(instanceIdentifier)
+  await lysLlmInstanceStore.saveLysLlmInstanceIdentifiers(keptIdentifiers)
 }
 
 /**

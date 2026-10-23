@@ -9,6 +9,7 @@ import type { LlmEngine } from "../../../../src/modules/llm/llmEngine"
 import type { LoadedLlmModelInstance } from "../../../../src/modules/llm/llmRuntimeTypes"
 import LmStudioRuntime from "../../../../src/modules/llm/runtimes/lmStudioRuntime"
 import { createFakeLlmRuntime } from "../../support/fakeLlmRuntime"
+import InMemoryLysLlmInstanceStore from "../../support/inMemoryLysLlmInstanceStore"
 import {
   createDownloadedLlmModel,
   createLmStudioLlmRecord
@@ -21,11 +22,21 @@ import { waitForMicrotasks } from "../../support/microtasks"
 
 vi.mock("@lmstudio/sdk", () => import("../../support/lmStudioSdkFake"))
 
-/** Service settings a case may vary; the queue is always the case's double. */
+/**
+ * Service settings a case may vary; the queue is always the case's double,
+ * and the record is an in-memory one, empty unless the case gives its own.
+ */
 type LlmServiceTestOptions = Omit<
   LlmServiceCreationOptions,
-  "llmEngineOperationQueue"
->
+  "llmEngineOperationQueue" | "lysLlmInstanceStore"
+> &
+  Readonly<{
+    /** Record the service reads and saves. */
+    lysLlmInstanceStore?: InMemoryLysLlmInstanceStore
+  }>
+
+/** Random part of the identifiers the services of these cases build. */
+const TEST_INSTANCE_SUFFIX = "7f3c9a"
 
 /**
  * Creates one loaded-instance observation.
@@ -68,15 +79,39 @@ function createAdmittingQueue(
 /**
  * Creates a service whose admitting queue runs operations on a runtime double.
  *
- * @param options - Optional clock; every other setting is the default.
- * @returns The service, the runtime double acting as its engine, and the spy
- * recording queue requests.
+ * @param options - Optional clock, record, and suffix generator; the record
+ * is empty and the suffix {@link TEST_INSTANCE_SUFFIX} unless given.
+ * @returns The service, the runtime double acting as its engine, the record,
+ * and the spy recording queue requests.
  */
 function createServiceWithEngine(options: LlmServiceTestOptions = {}) {
   const engine = createFakeLlmRuntime()
   const { queue, requests } = createAdmittingQueue(engine)
-  const service = new LlmService({ ...options, llmEngineOperationQueue: queue })
-  return { service, engine, requests }
+  const lysLlmInstanceStore =
+    options.lysLlmInstanceStore ?? new InMemoryLysLlmInstanceStore()
+  const service = new LlmService({
+    createLysInstanceSuffix: () => TEST_INSTANCE_SUFFIX,
+    ...options,
+    lysLlmInstanceStore,
+    llmEngineOperationQueue: queue
+  })
+  return { service, engine, requests, lysLlmInstanceStore }
+}
+
+/**
+ * Creates a record that already holds identifiers, as one saved before a
+ * restart.
+ *
+ * @param instanceIdentifiers - Saved identifiers.
+ * @returns The record.
+ */
+function createSavedRecord(
+  ...instanceIdentifiers: readonly string[]
+): InMemoryLysLlmInstanceStore {
+  return new InMemoryLysLlmInstanceStore({
+    status: "read",
+    instanceIdentifiers: new Set(instanceIdentifiers)
+  })
 }
 
 /** Public model operations that each enter the borrowed queue. */
@@ -233,7 +268,10 @@ describe("LlmService", () => {
         await runtime[Symbol.asyncDispose]()
       })
       const { queue } = createAdmittingQueue(runtime)
-      const service = new LlmService({ llmEngineOperationQueue: queue })
+      const service = new LlmService({
+        llmEngineOperationQueue: queue,
+        lysLlmInstanceStore: new InMemoryLysLlmInstanceStore()
+      })
 
       const models = await service.listLlmModels()
 
@@ -317,16 +355,17 @@ describe("LlmService", () => {
   })
 
   describe("loadLlmModel", () => {
-    it("loads the selection with the given settings and returns the canonical model's metadata as loaded", async () => {
+    it("loads the selection with the given settings under a new Lys identifier and returns the canonical model's metadata as loaded", async () => {
       const { service, engine } = createServiceWithEngine()
       const loadConfiguration = Object.freeze({
         contextLength: 16_384,
         flashAttention: false
       })
+      engine.listLoadedLlmModelInstances.mockResolvedValue([])
       engine.loadLlmModel.mockResolvedValue(
         Object.freeze({
           modelKey: "qwen/qwen3-8b",
-          modelIdentifier: "qwen/qwen3-8b"
+          modelIdentifier: "qwen3@lys-7f3c9a"
         })
       )
       engine.listDownloadedLlmModels.mockResolvedValue([
@@ -338,7 +377,8 @@ describe("LlmService", () => {
 
       expect(engine.loadLlmModel).toHaveBeenCalledExactlyOnceWith(
         "qwen3",
-        loadConfiguration
+        loadConfiguration,
+        "qwen3@lys-7f3c9a"
       )
       expect(model).toEqual({
         ...createDownloadedLlmModel({ modelKey: "qwen/qwen3-8b" }),
@@ -346,8 +386,154 @@ describe("LlmService", () => {
       })
     })
 
+    it("saves the new identifier before the engine loads", async () => {
+      const { service, engine, lysLlmInstanceStore } = createServiceWithEngine()
+      engine.listLoadedLlmModelInstances.mockResolvedValue([])
+      const recordsDuringLoad: unknown[] = []
+      engine.loadLlmModel.mockImplementation(
+        async (_selection, _configuration, instanceIdentifier) => {
+          recordsDuringLoad.push(
+            await lysLlmInstanceStore.readLysLlmInstanceIdentifiers()
+          )
+          return Object.freeze({
+            modelKey: "a/model",
+            modelIdentifier: instanceIdentifier
+          })
+        }
+      )
+      engine.listDownloadedLlmModels.mockResolvedValue([
+        createDownloadedLlmModel({ modelKey: "a/model" })
+      ])
+
+      await service.loadLlmModel("a/model", {})
+
+      expect(recordsDuringLoad).toEqual([
+        {
+          status: "read",
+          instanceIdentifiers: new Set(["a/model@lys-7f3c9a"])
+        }
+      ])
+    })
+
+    it("keeps the saved identifiers whose instances are still loaded and drops the others", async () => {
+      const lysLlmInstanceStore = createSavedRecord(
+        "a/model@lys-000001",
+        "b/model@lys-000002"
+      )
+      const { service, engine } = createServiceWithEngine({
+        lysLlmInstanceStore
+      })
+      engine.listLoadedLlmModelInstances.mockResolvedValue([
+        Object.freeze({
+          modelKey: "a/model",
+          modelIdentifier: "a/model@lys-000001"
+        }),
+        createLoadedInstance("b/model")
+      ])
+      engine.loadLlmModel.mockResolvedValue(
+        Object.freeze({
+          modelKey: "c/model",
+          modelIdentifier: "c/model@lys-7f3c9a"
+        })
+      )
+      engine.listDownloadedLlmModels.mockResolvedValue([
+        createDownloadedLlmModel({ modelKey: "c/model" })
+      ])
+
+      await service.loadLlmModel("c/model", {})
+
+      expect(lysLlmInstanceStore.listSavedIdentifierSets()).toEqual([
+        new Set(["a/model@lys-000001", "c/model@lys-7f3c9a"])
+      ])
+    })
+
+    it("refuses without saving or loading when the record cannot be read", async () => {
+      const lysLlmInstanceStore = new InMemoryLysLlmInstanceStore({
+        status: "unreadable",
+        message: "The loaded models file is not JSON."
+      })
+      const { service, engine } = createServiceWithEngine({
+        lysLlmInstanceStore
+      })
+      engine.listLoadedLlmModelInstances.mockResolvedValue([])
+
+      await expect(service.loadLlmModel("a/model", {})).rejects.toThrow(
+        "The loaded models file is not JSON. No model was loaded, so the record is left as it is."
+      )
+      expect(engine.loadLlmModel).not.toHaveBeenCalled()
+      expect(lysLlmInstanceStore.listSavedIdentifierSets()).toEqual([])
+    })
+
+    it("refuses without loading when the new identifier cannot be saved", async () => {
+      const { service, engine, lysLlmInstanceStore } = createServiceWithEngine()
+      const saveFailure = new Error("disk full")
+      lysLlmInstanceStore.failSaves(saveFailure)
+      engine.listLoadedLlmModelInstances.mockResolvedValue([])
+
+      await expect(service.loadLlmModel("a/model", {})).rejects.toBe(
+        saveFailure
+      )
+      expect(engine.loadLlmModel).not.toHaveBeenCalled()
+    })
+
+    it("propagates a failed loaded-instance query without saving or loading", async () => {
+      const { service, engine, lysLlmInstanceStore } = createServiceWithEngine()
+      const failure = new Error(
+        "The LLM runtime could not list loaded model instances."
+      )
+      engine.listLoadedLlmModelInstances.mockRejectedValue(failure)
+
+      await expect(service.loadLlmModel("a/model", {})).rejects.toBe(failure)
+      expect(engine.loadLlmModel).not.toHaveBeenCalled()
+      expect(lysLlmInstanceStore.listSavedIdentifierSets()).toEqual([])
+    })
+
+    it("keeps the identifier of a failed load saved until a later load finds its instance gone", async () => {
+      const suffixes = ["000001", "000002"]
+      const { service, engine, lysLlmInstanceStore } = createServiceWithEngine({
+        createLysInstanceSuffix: () => suffixes.shift() ?? "ffffff"
+      })
+      engine.listLoadedLlmModelInstances.mockResolvedValue([])
+      const failure = new Error("The LLM runtime could not load the model.")
+      engine.loadLlmModel.mockRejectedValueOnce(failure).mockResolvedValueOnce(
+        Object.freeze({
+          modelKey: "a/model",
+          modelIdentifier: "a/model@lys-000002"
+        })
+      )
+      engine.listDownloadedLlmModels.mockResolvedValue([
+        createDownloadedLlmModel({ modelKey: "a/model" })
+      ])
+
+      await expect(service.loadLlmModel("a/model", {})).rejects.toBe(failure)
+      await service.loadLlmModel("a/model", {})
+
+      expect(lysLlmInstanceStore.listSavedIdentifierSets()).toEqual([
+        new Set(["a/model@lys-000001"]),
+        new Set(["a/model@lys-000002"])
+      ])
+    })
+
+    it("builds the random part from six lowercase hex digits by default", async () => {
+      const engine = createFakeLlmRuntime()
+      const { queue } = createAdmittingQueue(engine)
+      const service = new LlmService({
+        llmEngineOperationQueue: queue,
+        lysLlmInstanceStore: new InMemoryLysLlmInstanceStore()
+      })
+      engine.listLoadedLlmModelInstances.mockResolvedValue([])
+      engine.loadLlmModel.mockRejectedValue(new Error("stop after the call"))
+
+      await expect(service.loadLlmModel("a/model", {})).rejects.toThrow()
+
+      expect(engine.loadLlmModel.mock.calls[0]?.[2]).toMatch(
+        /^a\/model@lys-[0-9a-f]{6}$/
+      )
+    })
+
     it("rejects when the loaded model is absent from the downloaded inventory", async () => {
       const { service, engine } = createServiceWithEngine()
+      engine.listLoadedLlmModelInstances.mockResolvedValue([])
       engine.loadLlmModel.mockResolvedValue(
         Object.freeze({ modelKey: "qwen/qwen3-8b", modelIdentifier: "id" })
       )
@@ -360,6 +546,7 @@ describe("LlmService", () => {
 
     it("propagates a load failure without querying inventory", async () => {
       const { service, engine } = createServiceWithEngine()
+      engine.listLoadedLlmModelInstances.mockResolvedValue([])
       const failure = new Error("The LLM runtime could not load the model.")
       engine.loadLlmModel.mockRejectedValue(failure)
 
@@ -405,6 +592,7 @@ describe("LlmService", () => {
       let nowMs = 0
       const service = new LlmService({
         llmEngineOperationQueue: queue,
+        lysLlmInstanceStore: new InMemoryLysLlmInstanceStore(),
         readMonotonicTimeMs: () => nowMs
       })
 

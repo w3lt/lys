@@ -278,9 +278,10 @@ turn itself, has neither entry: it never asks and cannot be switched off.
   name in it is invalid, no tool is on Just run, every call asks, and the
   backend logs a warning.
 - The backend never reads `switches`. The desktop applies them when it builds
-  each chat request: it offers only the tools that are on and names the ones
-  that are off, so the backend can tell the model (see the
-  [chat request](/reference/api/#switched-off-tools)).
+  each chat request: it offers only the tools that are on and can run, names
+  the ones that are off and the switched-on ones that cannot run now, or says
+  tool calls are off, so the backend can tell the model (see the
+  [chat request](/reference/api/#tools-the-turn-does-not-offer)).
 - The desktop reads `settings.json` when it starts. A save from the Tools pane
   replaces `justRun` and `switches` with the choices the desktop holds, so a
   hand edit of `justRun` made while Lys runs takes effect at the next round of

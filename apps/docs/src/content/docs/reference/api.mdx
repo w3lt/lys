@@ -212,29 +212,73 @@ only to a model whose `trainedForToolUse` is true; the backend does not check
 this itself ([#135](https://github.com/w3lt/lys/issues/135)). A reply can make any number of tool calls
 ([#136](https://github.com/w3lt/lys/issues/136)).
 
-### Switched-off tools
+### Tools the turn does not offer
 
-A request can name the tools the person switched off, so the model can say
-that a tool it needs is off instead of guessing what the tool would return:
+A request can tell the backend about the tools it does not offer, so the
+model can say why a tool it needs cannot be used instead of guessing what the
+tool would return. With tool calls on, it names the tools the person switched
+off and the switched-on backend tools that cannot run now:
 
 ```json
-{ "switchedOffToolNames": ["web_search", "search_files"] }
+{
+  "switchedOffToolNames": ["get_location", "search_files"],
+  "unavailableTools": [{ "name": "web_search", "reason": "api-key-missing" }]
+}
 ```
 
-`switchedOffToolNames` is optional; when sent, it lists 1 to 64 tool names,
-each once, in the tool name format. A name the backend does not list is
-allowed. It never names `read_attachment`, which has no switch, or a tool the
-request offers in `tools`; a request that breaks these rules returns `400`
-before anything is stored. For a request that names any, every round of the
-turn sends the agent's system prompt followed by a blank line and a note that
-names them in request order, and that asks the model to say a needed tool is
-turned off and can be turned on in Settings → Tools, without guessing what it
-would return or claiming to have used it. When the turn offers any tool, a
-call the model still makes to a named tool is neither asked about nor run: its
-step fails with a result saying the tool is turned off, which the model reads
-in the next round. The desktop names every listed tool whose switch is off,
-or every listed tool while tool calls are off, and sends the field only to a
-model whose `trainedForToolUse` is true.
+With tool calls off, it says only that:
+
+```json
+{ "areToolCallsSwitchedOff": true }
+```
+
+All three fields are optional:
+
+- `switchedOffToolNames` lists 1 to 64 tool names, each once, in the tool
+  name format. A name the backend does not list is allowed.
+- `unavailableTools` lists 1 to 64 backend tools, each once, in the shape
+  [`GET /api/v1/tools`](#tool-list) lists them in its `unavailableTools`: a
+  `name` and a `reason`, one of `api-key-missing`, `api-key-invalid`,
+  `settings-unreadable`, and `page-reader-not-ready`. A name the backend does
+  not run returns `400`. The reason is the client's reading of the tool list;
+  the backend does not check it again.
+- `areToolCallsSwitchedOff` is `true` or absent; absence means tool calls are
+  on. A request that sends it offers no `tools` and names nothing in
+  `switchedOffToolNames` or `unavailableTools`.
+
+A tool appears at most once across `tools`, `switchedOffToolNames`, and
+`unavailableTools`, and neither list names `read_attachment`, which has no
+switch and which the backend adds to a turn itself. A request that breaks
+these rules returns `400` before anything is stored.
+
+Every round of the turn sends the agent's system prompt followed by the notes
+these fields call for, each after a blank line:
+
+- with `areToolCallsSwitchedOff`, one note saying tool calls are turned off in
+  Settings → Tools, and asking the model to say so, and that they can be
+  turned on there, when a request needs a tool it is not offered;
+- otherwise, a note naming the switched-off tools in request order, asking
+  the model to say a needed one is turned off and can be turned on in
+  Settings → Tools, then a note naming each unavailable tool in request order
+  with why it cannot run and what fixes it: a Tavily API key to add in
+  Settings → Secrets, a key to fix or remove as `secrets.tavilyApiKey` in
+  `settings.json`, a `settings.json` to fix by hand, or vmo to start in
+  Settings → Runtime.
+
+Each note asks the model not to guess what a tool would return or claim to
+have used it. A call the model still makes to a named tool, or to any tool it
+is not offered while tool calls are off, is neither asked about nor run, even
+when the turn offers no tool: its step fails with a result saying the tool is
+turned off, that tool calls are off, or that it cannot run now and why, which
+the model reads in the next round. A call of an unknown name in a turn that
+offers no tool and names none still fails the reply.
+
+The desktop sends these fields only to a model whose `trainedForToolUse` is
+true. With tool calls on, it names every listed tool whose switch is off, and
+every switched-on backend tool the list reports as unable to run, with the
+list's reason. With tool calls off, it sends `areToolCallsSwitchedOff` without
+reading the tool list. `read_attachment` is still offered while the
+conversation holds a text file.
 
 ## Chat response shape
 
@@ -281,12 +325,14 @@ meter calls it; nothing is stored and the model generates nothing.
 }
 ```
 
-`conversation`, `model`, `tools`, and `switchedOffToolNames` follow the
+`conversation`, `model`, `tools`, `switchedOffToolNames`, `unavailableTools`,
+and `areToolCallsSwitchedOff` follow the
 [chat request body](#chat-request-body); there is no `message` and no
 `generationOptions`. The backend builds the context a turn's first round would
 send, with an empty new message in place of the text: the answering agent's
-current system prompt, followed by the note naming the
-[switched-off tools](#switched-off-tools) when the request names any, the
+current system prompt, followed by the notes about the
+[tools the turn does not offer](#tools-the-turn-does-not-offer) when the
+request names any or switches tool calls off, the
 stored messages a turn includes, the empty message,
 and the tools a turn would offer, client tools first, then the backend's,
 then `read_attachment` when the conversation holds a text file for a model
@@ -307,7 +353,7 @@ answers `200`:
 | Field                 | Meaning                                                                       |
 | --------------------- | ----------------------------------------------------------------------------- |
 | `contextLength`       | Context length the model is loaded with; the smallest of its loaded instances |
-| `systemPromptTokens`  | Tokens of the agent's system prompt, with the switched-off tools' note        |
+| `systemPromptTokens`  | Tokens of the agent's system prompt, with the notes about unoffered tools     |
 | `toolTokens`          | Tokens of the offered tool definitions; `0` when none are offered             |
 | `historyTokens`       | Tokens of the stored messages the next turn would include                     |
 | `historyMessageCount` | Number of those messages                                                      |

@@ -644,14 +644,15 @@ A chat request offers the switched-on tools when tool calls are on and the
 loaded model's `trainedForToolUse` is true: client tools by their definitions,
 backend tools by name in `backendToolNames`, leaving out every backend tool
 that cannot run now. For such a model it also names, in
-`switchedOffToolNames`, every listed tool whose switch is off, or every listed
-tool while tool calls are off, so the backend can tell the model a tool it
-needs is off instead of letting it guess; a tool that is on but cannot run now
-is not named. The list is read before sending also while tool calls are off.
-If the tool list cannot be read while tool calls are on, the request fails
-with an inline error and nothing is sent; while they are off, the request is
-sent without tools or names. A model that is not trained for tool use gets
-neither field. The composer's context meter measures the same fields. When the backend still refuses an offered
+`switchedOffToolNames`, every listed tool whose switch is off, and, in
+`unavailableTools`, every switched-on backend tool that cannot run now with
+the list's reason, so the backend can tell the model why a tool it needs
+cannot be used instead of letting it guess. While tool calls are off, the
+request names no tool and sends `areToolCallsSwitchedOff` instead, without
+reading the tool list, so the backend tells the model tool calls are off. If
+the tool list cannot be read while tool calls are on, the request fails with
+an inline error and nothing is sent. A model that is not trained for tool use
+gets none of these fields. The composer's context meter measures the same fields. When the backend still refuses an offered
 tool that cannot run (its key was removed since the list was read), the request
 fails with an inline error that says which tool and what to do, and the tool
 list is read again so the next request leaves the tool out.

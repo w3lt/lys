@@ -180,8 +180,11 @@ calls it stored are part of the new turn's context.
 1. The desktop sends `POST /api/v1/chat` with `tools`: the definitions of the
    switched-on client tools and the names of the switched-on backend tools
    that can run now, offered only to a model trained for tool use. It names
-   the tools that are switched off in `switchedOffToolNames`, which the
-   backend notes after the system prompt.
+   the tools that are switched off in `switchedOffToolNames` and the
+   switched-on backend tools that cannot run now, with why, in
+   `unavailableTools`; with tool calls off it sends only
+   `areToolCallsSwitchedOff`. The backend notes these after the system
+   prompt.
 2. Before it stores the turn, the backend looks up every offered backend tool;
    `web_search` reads the Tavily API key from the settings file and keeps it
    for the turn. When an offered tool cannot run, the backend answers `409`
@@ -193,8 +196,9 @@ calls it stored are part of the new turn's context.
    the backend checks each call's arguments against its definition, and a
    backend tool also checks them by its own rules, such as `read_page`'s URL
    rules. A call to an unknown tool, such as one the request names as
-   switched off, or with invalid arguments is answered by the backend itself
-   and stored as a `failed` call. Every other call is
+   switched off or unable to run, or any call while tool calls are off, or
+   with invalid arguments is answered by the backend itself and stored as a
+   `failed` call. Every other call is
    stored as a part too, `running` or `awaiting-approval`, and each later
    change of it is stored and sent as a `reply-part` event.
 4. The backend's tool approval service reads the Just run choices from the

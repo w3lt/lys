@@ -1,5 +1,6 @@
 import { open, rename, type FileHandle } from "node:fs/promises"
 import * as z from "zod"
+import { calculateLysLlmInstanceIdentifierOrder } from "./lysLlmInstanceIdentifiers"
 import type {
   LysLlmInstanceIdentifiersRead,
   LysLlmInstanceStore
@@ -263,7 +264,9 @@ function formatLoadedModelsFileText(
 ): string {
   const document = loadedModelsDocumentSchema.parse({
     version: LOADED_MODELS_FILE_VERSION,
-    instanceIdentifiers: [...instanceIdentifiers].toSorted()
+    instanceIdentifiers: [...instanceIdentifiers].toSorted(
+      calculateLysLlmInstanceIdentifierOrder
+    )
   })
   const text = `${JSON.stringify(document, null, 2)}\n`
   if (Buffer.byteLength(text, "utf8") > MAXIMUM_LOADED_MODELS_FILE_BYTES) {

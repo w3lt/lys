@@ -32,6 +32,24 @@ export function createRandomLysInstanceSuffix(): string {
 }
 
 /**
+ * Calculates the ascending order of two instance identifiers, by UTF-16 code
+ * unit, the same in every locale.
+ *
+ * @param left - First identifier to compare.
+ * @param right - Second identifier to compare.
+ * @returns A negative value when `left` precedes `right`, a positive value
+ * when `right` precedes `left`, and zero when they are equal.
+ */
+export function calculateLysLlmInstanceIdentifierOrder(
+  left: string,
+  right: string
+): number {
+  if (left < right) return -1
+  if (left > right) return 1
+  return 0
+}
+
+/**
  * Finds the saved identifiers whose instances are still loaded.
  *
  * @param savedIdentifiers - Identifiers saved for the instances Lys loaded.

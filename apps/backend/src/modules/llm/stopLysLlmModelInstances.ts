@@ -1,5 +1,8 @@
 import type { LoadedLlmModelInstance } from "./llmRuntimeTypes"
-import { findLoadedLysLlmInstanceIdentifiers } from "./lysLlmInstanceIdentifiers"
+import {
+  calculateLysLlmInstanceIdentifierOrder,
+  findLoadedLysLlmInstanceIdentifiers
+} from "./lysLlmInstanceIdentifiers"
 import type { LysLlmInstanceStore } from "./lysLlmInstanceStore"
 
 /** Queries the latest loaded-instance snapshot from the model runtime. */
@@ -232,7 +235,7 @@ export async function stopLysLlmModelInstances(
   return Object.freeze({
     status: "stop-failed",
     remainingModelIdentifiers: Object.freeze(
-      [...remainingIdentifiers].toSorted()
+      [...remainingIdentifiers].toSorted(calculateLysLlmInstanceIdentifierOrder)
     ),
     diagnostics
   })
@@ -259,7 +262,7 @@ function listLysModelInstanceIdentifiers(
         savedIdentifiers.has(modelInstance.modelIdentifier)
     )
     .map(({ modelIdentifier }) => modelIdentifier)
-    .toSorted()
+    .toSorted(calculateLysLlmInstanceIdentifierOrder)
 }
 
 /**

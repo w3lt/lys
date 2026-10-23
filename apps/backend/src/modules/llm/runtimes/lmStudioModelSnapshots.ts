@@ -1,4 +1,4 @@
-import { llmInfoSchema } from "@lys/protocol"
+import { llmMetadataSchema } from "@lys/protocol"
 import * as z from "zod"
 import type {
   DownloadedLlmModel,
@@ -10,9 +10,8 @@ import type {
  * invariant, without the loaded state and loaded context length that loaded
  * instances supply.
  */
-const downloadedLlmMetadataSchema = llmInfoSchema
+const downloadedLlmMetadataSchema = llmMetadataSchema
   .unwrap()
-  .omit({ loaded: true, loadedContextLength: true })
   .extend({ modelKey: z.string().min(1) })
 
 /** Validates the external LM Studio discriminator and consumed metadata fields. */

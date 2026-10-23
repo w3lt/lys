@@ -1,7 +1,7 @@
 import type { LlmInfo, LlmLoadModelApiResponse } from "@lys/protocol"
 import type { ModelLoadConfiguration } from "@lys/share"
 import type { LlmModelHealthOutcome } from "./getLlmModelHealth"
-import type { StopLlmModelsByKeyOutcome } from "./stopLlmModelsByKey"
+import type { StopLysLlmModelInstancesOutcome } from "./stopLysLlmModelInstances"
 
 /**
  * Observes loaded-state health for the model-health route.
@@ -61,8 +61,9 @@ export interface LlmModelInventory {
    *
    * @returns A promise resolving to immutable snapshots ordered by ascending
    * canonical model key, then by ascending path. A loaded model's snapshots
-   * carry the smallest context length among its loaded instances, unless its
-   * instances were gone by the time they were measured.
+   * say whether Lys loaded one of its instances, and carry the smallest
+   * context length among its loaded instances, unless its instances were
+   * gone by the time they were measured.
    * @throws If the provider cannot query or validate its model inventory, or
    * its application lifetime has begun cleanup.
    * @throws A service-busy error if the shared model-operation queue is full;
@@ -123,7 +124,7 @@ export interface LlmModelLoader {
 }
 
 /**
- * Stops loaded LLM models for the model-unload route.
+ * Stops the loaded LLM model instances Lys loaded, for the model-unload route.
  *
  * @remarks Implementations are ready when injected. The application
  * composition lifetime owns provider resources and cleanup. By product design,
@@ -137,9 +138,10 @@ export interface LlmModelLoader {
  */
 export interface LlmModelStopper {
   /**
-   * Stops every loaded instance observed for one canonical model key.
+   * Stops the loaded instances of one canonical model key that Lys loaded,
+   * leaving every instance another program loaded.
    *
-   * @param modelKey - Canonical model key whose instances should stop.
+   * @param modelKey - Canonical model key whose instances Lys loaded should stop.
    * @returns A promise resolving to an immutable outcome based on the initial
    * or reconciled loaded-instance snapshot.
    * @throws If the application lifetime has begun cleanup; provider operation
@@ -153,11 +155,17 @@ export interface LlmModelStopper {
    * stopped answering; the operation had no further runtime effects.
    * A resolved runtime-unavailable outcome is returned instead when the
    * operation already represented the failure.
-   * @remarks Stopping changes provider runtime state and is not atomic. A
-   * `stopped` outcome means the reconciliation snapshot contains no matching
-   * instances; `stop-failed` or `runtime-unavailable` may follow partial stop
-   * effects. A repeated call after `stopped` returns `not-loaded` unless the
-   * model was loaded again, so repeated calls do not preserve the same status.
+   * @remarks Stopping changes provider runtime state and is not atomic. An
+   * instance is Lys's when its identifier is on the record of the instances
+   * Lys loaded. A `stopped` outcome means the reconciliation snapshot
+   * contains none of the stopped instances; `stop-failed` or
+   * `runtime-unavailable` may follow partial stop effects. `not-loaded`
+   * means no instance of the key Lys loaded was loaded, or the record cannot
+   * be read. A repeated call after `stopped` returns `not-loaded` unless Lys
+   * loaded the model again, so repeated calls do not preserve the same
+   * status.
    */
-  stopLlmModelsByKey(modelKey: string): Promise<StopLlmModelsByKeyOutcome>
+  stopLysLlmModelInstances(
+    modelKey: string
+  ): Promise<StopLysLlmModelInstancesOutcome>
 }

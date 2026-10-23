@@ -178,7 +178,7 @@ export async function loadModel(
 }
 
 /**
- * Stops every loaded instance matching one canonical model key.
+ * Stops the loaded instances of one canonical model key that Lys loaded.
  * @param modelKey - Canonical inventory key to unload.
  * @param connection - Backend origin and local cancellation signal.
  * @returns Resolves only for the protocol's bodyless 204 acknowledgement.

@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import LlmService, {
@@ -7,6 +10,7 @@ import LlmService, {
 } from "../../../../src/modules/llm/llmService"
 import type { LlmEngine } from "../../../../src/modules/llm/llmEngine"
 import type { LoadedLlmModelInstance } from "../../../../src/modules/llm/llmRuntimeTypes"
+import JsonFileLysLlmInstanceStore from "../../../../src/modules/llm/jsonFileLysLlmInstanceStore"
 import LmStudioRuntime from "../../../../src/modules/llm/runtimes/lmStudioRuntime"
 import { createFakeLlmRuntime } from "../../support/fakeLlmRuntime"
 import InMemoryLysLlmInstanceStore from "../../support/inMemoryLysLlmInstanceStore"
@@ -121,7 +125,7 @@ type QueuedLlmServiceOperationName = keyof Pick<
   | "listDownloadedLlmModels"
   | "loadLlmModel"
   | "getLlmModelHealth"
-  | "stopLlmModelsByKey"
+  | "stopLysLlmModelInstances"
   | "findLlmContextMeasurement"
 >
 
@@ -145,8 +149,8 @@ async function sendLlmServiceRequest(
       return await service.loadLlmModel("a/model", {})
     case "getLlmModelHealth":
       return await service.getLlmModelHealth("a/model")
-    case "stopLlmModelsByKey":
-      return await service.stopLlmModelsByKey("a/model")
+    case "stopLysLlmModelInstances":
+      return await service.stopLysLlmModelInstances("a/model")
     case "findLlmContextMeasurement":
       return await service.findLlmContextMeasurement("a/model", ["Hello"])
   }
@@ -182,8 +186,74 @@ describe("LlmService", () => {
       expect(models[2]).toEqual({
         ...createDownloadedLlmModel({ modelKey: "b/model" }),
         loaded: true,
+        loadedByLys: false,
         loadedContextLength: 8192
       })
+    })
+
+    it("says a loaded model is loaded by Lys only when one of its loaded instances is on the record", async () => {
+      const { service, engine, lysLlmInstanceStore } = createServiceWithEngine({
+        lysLlmInstanceStore: createSavedRecord(
+          "a/model@lys-000001",
+          "b/model@lys-000002"
+        )
+      })
+      engine.listDownloadedLlmModels.mockResolvedValue([
+        createDownloadedLlmModel({ modelKey: "a/model" }),
+        createDownloadedLlmModel({ modelKey: "b/model" }),
+        createDownloadedLlmModel({ modelKey: "c/model" })
+      ])
+      engine.listLoadedLlmModelInstances.mockResolvedValue([
+        createLoadedInstance("a/model"),
+        Object.freeze({
+          modelKey: "a/model",
+          modelIdentifier: "a/model@lys-000001"
+        }),
+        createLoadedInstance("b/model")
+      ])
+      engine.findLlmContextMeasurement.mockResolvedValue(undefined)
+
+      const models = await service.listLlmModels()
+
+      expect(
+        models.map((model) => ({
+          modelKey: model.modelKey,
+          loaded: model.loaded,
+          loadedByLys: model.loaded ? model.loadedByLys : undefined
+        }))
+      ).toEqual([
+        { modelKey: "a/model", loaded: true, loadedByLys: true },
+        { modelKey: "b/model", loaded: true, loadedByLys: false },
+        { modelKey: "c/model", loaded: false, loadedByLys: undefined }
+      ])
+      expect(lysLlmInstanceStore.listSavedIdentifierSets()).toEqual([])
+    })
+
+    it("lists no model as loaded by Lys when the record cannot be read", async () => {
+      const { service, engine } = createServiceWithEngine({
+        lysLlmInstanceStore: new InMemoryLysLlmInstanceStore({
+          status: "unreadable",
+          message: "The loaded models file is not JSON."
+        })
+      })
+      engine.listDownloadedLlmModels.mockResolvedValue([
+        createDownloadedLlmModel({ modelKey: "a/model" })
+      ])
+      engine.listLoadedLlmModelInstances.mockResolvedValue([
+        Object.freeze({
+          modelKey: "a/model",
+          modelIdentifier: "a/model@lys-000001"
+        })
+      ])
+      engine.findLlmContextMeasurement.mockResolvedValue(undefined)
+
+      await expect(service.listLlmModels()).resolves.toEqual([
+        {
+          ...createDownloadedLlmModel({ modelKey: "a/model" }),
+          loaded: true,
+          loadedByLys: false
+        }
+      ])
     })
 
     it("gives every entry of a loaded model the context length one measurement of its key reports, without text, and none to a model that is not loaded", async () => {
@@ -205,9 +275,11 @@ describe("LlmService", () => {
       const models = await service.listLlmModels()
 
       expect(
-        models.map(({ modelKey, loadedContextLength }) => ({
-          modelKey,
-          loadedContextLength
+        models.map((model) => ({
+          modelKey: model.modelKey,
+          loadedContextLength: model.loaded
+            ? model.loadedContextLength
+            : undefined
         }))
       ).toEqual([
         { modelKey: "a/model", loadedContextLength: 4096 },
@@ -234,7 +306,11 @@ describe("LlmService", () => {
       const models = await service.listLlmModels()
 
       expect(models).toEqual([
-        { ...createDownloadedLlmModel({ modelKey: "a/model" }), loaded: true }
+        {
+          ...createDownloadedLlmModel({ modelKey: "a/model" }),
+          loaded: true,
+          loadedByLys: false
+        }
       ])
       expect(models[0]).not.toHaveProperty("loadedContextLength")
     })
@@ -276,9 +352,11 @@ describe("LlmService", () => {
       const models = await service.listLlmModels()
 
       expect(
-        models.map(({ modelKey, loadedContextLength }) => ({
-          modelKey,
-          loadedContextLength
+        models.map((model) => ({
+          modelKey: model.modelKey,
+          loadedContextLength: model.loaded
+            ? model.loadedContextLength
+            : undefined
         }))
       ).toEqual([
         { modelKey: "a/model", loadedContextLength: 4096 },
@@ -382,7 +460,8 @@ describe("LlmService", () => {
       )
       expect(model).toEqual({
         ...createDownloadedLlmModel({ modelKey: "qwen/qwen3-8b" }),
-        loaded: true
+        loaded: true,
+        loadedByLys: true
       })
     })
 
@@ -666,21 +745,106 @@ describe("LlmService", () => {
     })
   })
 
-  describe("stopLlmModelsByKey", () => {
-    it("stops the key's instances through the queued engine and reconciles", async () => {
-      const { service, engine, requests } = createServiceWithEngine()
+  describe("stopLysLlmModelInstances", () => {
+    it("stops the key's instance Lys loaded through the queued engine, leaving another program's, and reconciles", async () => {
+      const { service, engine, requests } = createServiceWithEngine({
+        lysLlmInstanceStore: createSavedRecord("qwen/qwen3-8b@lys-000001")
+      })
+      const lysInstance = Object.freeze({
+        modelKey: "qwen/qwen3-8b",
+        modelIdentifier: "qwen/qwen3-8b@lys-000001"
+      })
       engine.listLoadedLlmModelInstances
+        .mockResolvedValueOnce([
+          createLoadedInstance("qwen/qwen3-8b"),
+          lysInstance
+        ])
         .mockResolvedValueOnce([createLoadedInstance("qwen/qwen3-8b")])
-        .mockResolvedValueOnce([])
       engine.stopLoadedLlmModelInstance.mockResolvedValue(undefined)
 
-      const outcome = await service.stopLlmModelsByKey("qwen/qwen3-8b")
+      const outcome = await service.stopLysLlmModelInstances("qwen/qwen3-8b")
 
       expect(outcome).toEqual({ status: "stopped", diagnostics: [] })
-      expect(engine.stopLoadedLlmModelInstance).toHaveBeenCalledWith(
-        "qwen/qwen3-8b"
+      expect(engine.stopLoadedLlmModelInstance).toHaveBeenCalledExactlyOnceWith(
+        "qwen/qwen3-8b@lys-000001"
       )
       expect(requests).toHaveBeenCalledOnce()
+    })
+
+    it("stops an instance a service saved before a restart, read from the same file", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "lys-llm-service-"))
+      onTestFinished(async () => {
+        await rm(directory, { recursive: true, force: true })
+      })
+      const loadedModelsFilePath = join(directory, "loaded_models.json")
+      const engine = createFakeLlmRuntime()
+      const { queue } = createAdmittingQueue(engine)
+      const servicesOverTheFile = [1, 2].map(
+        () =>
+          new LlmService({
+            llmEngineOperationQueue: queue,
+            lysLlmInstanceStore: new JsonFileLysLlmInstanceStore(
+              loadedModelsFilePath
+            ),
+            createLysInstanceSuffix: () => TEST_INSTANCE_SUFFIX
+          })
+      )
+      const lysInstance = Object.freeze({
+        modelKey: "a/model",
+        modelIdentifier: "a/model@lys-7f3c9a"
+      })
+      engine.listLoadedLlmModelInstances
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([lysInstance])
+        .mockResolvedValueOnce([])
+      engine.loadLlmModel.mockResolvedValue(lysInstance)
+      engine.listDownloadedLlmModels.mockResolvedValue([
+        createDownloadedLlmModel({ modelKey: "a/model" })
+      ])
+      engine.stopLoadedLlmModelInstance.mockResolvedValue(undefined)
+      await servicesOverTheFile[0]?.loadLlmModel("a/model", {})
+
+      const outcome =
+        await servicesOverTheFile[1]?.stopLysLlmModelInstances("a/model")
+
+      expect(outcome).toEqual({ status: "stopped", diagnostics: [] })
+      expect(engine.stopLoadedLlmModelInstance).toHaveBeenCalledExactlyOnceWith(
+        "a/model@lys-7f3c9a"
+      )
+    })
+
+    it("stops both instances Lys loaded of one key over a runtime that refuses overlapping operations, leaving another program's", async () => {
+      fakeLmStudio.reset()
+      fakeLmStudio.inventory = {
+        downloadedModels: [createLmStudioLlmRecord({ modelKey: "a/model" })],
+        loadedModels: [{ modelKey: "a/model", identifier: "a/model" }]
+      }
+      const runtime = await LmStudioRuntime.create(
+        "ws://127.0.0.1:1234",
+        DISCARDING_SDK_LOGGER
+      )
+      onTestFinished(async () => {
+        await runtime[Symbol.asyncDispose]()
+      })
+      const { queue } = createAdmittingQueue(runtime)
+      const suffixes = ["000001", "000002"]
+      const service = new LlmService({
+        llmEngineOperationQueue: queue,
+        lysLlmInstanceStore: new InMemoryLysLlmInstanceStore(),
+        createLysInstanceSuffix: () => suffixes.shift() ?? "ffffff"
+      })
+      await service.loadLlmModel("a/model", {})
+      await service.loadLlmModel("a/model", {})
+
+      const outcome = await service.stopLysLlmModelInstances("a/model")
+
+      expect(outcome).toEqual({ status: "stopped", diagnostics: [] })
+      expect(fakeLmStudio.inventory.loadedModels).toEqual([
+        { modelKey: "a/model", identifier: "a/model" }
+      ])
+      await expect(service.listLlmModels()).resolves.toMatchObject([
+        { modelKey: "a/model", loaded: true, loadedByLys: false }
+      ])
     })
   })
 
@@ -722,7 +886,7 @@ describe("LlmService", () => {
       "listDownloadedLlmModels",
       "loadLlmModel",
       "getLlmModelHealth",
-      "stopLlmModelsByKey",
+      "stopLysLlmModelInstances",
       "findLlmContextMeasurement"
     ] as const)(
       "propagates the queue's rejection from %s without engine work",

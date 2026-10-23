@@ -18,7 +18,8 @@ export const apiLlmListModelsRoute = `${API_PREFIX_V1}/llm/list`
 export const apiLlmLoadModelRoute = `${API_PREFIX_V1}/llm/load`
 
 /**
- * Versioned PATCH path for stopping every loaded instance of one model key.
+ * Versioned PATCH path for stopping the loaded instances of one model key
+ * that Lys loaded.
  *
  * @remarks This path is transmitted in HTTP requests and is not persisted. It
  * is release-stable across compatible clients; changing it requires coordinated

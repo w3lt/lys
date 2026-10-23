@@ -13,19 +13,35 @@ import { createLlmRouteTestApp } from "../../../support/llmRouteTestApp"
 /** Published path of the inventory route. */
 const LIST_MODELS_PATH = "/api/v1/llm/list"
 
-/** Valid inventory snapshot of one loaded model with its context length. */
+/** Valid inventory snapshot of a model Lys loaded, with its context length. */
 const LOADED_MODEL = llmInfoSchema.parse({
   ...createDownloadedLlmModel({ modelKey: "qwen/qwen3-8b" }),
   loaded: true,
+  loadedByLys: true,
   loadedContextLength: 8192
 })
 
+/** Valid inventory snapshot of a model only another program loaded. */
+const OUTSIDE_LOADED_MODEL = llmInfoSchema.parse({
+  ...createDownloadedLlmModel({ modelKey: "b/model" }),
+  loaded: true,
+  loadedByLys: false
+})
+
+/** Valid inventory snapshot of a model that is not loaded. */
+const NOT_LOADED_MODEL = llmInfoSchema.parse({
+  ...createDownloadedLlmModel({ modelKey: "c/model" }),
+  loaded: false
+})
+
 describe("updateFastifyWithLlmListModelsRoute", () => {
-  it("responds with the service inventory, with each loaded model's context length", async () => {
+  it("responds with the service inventory: each loaded model with whether Lys loaded it and its context length, and models that are not loaded", async () => {
     const testApp = createLlmRouteTestApp()
     const listLlmModels = vi
       .spyOn(testApp.service, "listLlmModels")
-      .mockResolvedValue(Object.freeze([LOADED_MODEL]))
+      .mockResolvedValue(
+        Object.freeze([LOADED_MODEL, OUTSIDE_LOADED_MODEL, NOT_LOADED_MODEL])
+      )
     await updateFastifyWithLlmListModelsRoute(testApp.app)
 
     const response = await testApp.app.inject({
@@ -34,7 +50,9 @@ describe("updateFastifyWithLlmListModelsRoute", () => {
     })
 
     expect(response.statusCode).toBe(200)
-    expect(response.json()).toEqual({ llms: [LOADED_MODEL] })
+    expect(response.json()).toEqual({
+      llms: [LOADED_MODEL, OUTSIDE_LOADED_MODEL, NOT_LOADED_MODEL]
+    })
     expect(listLlmModels).toHaveBeenCalledOnce()
   })
 

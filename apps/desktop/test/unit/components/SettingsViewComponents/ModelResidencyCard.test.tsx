@@ -80,6 +80,12 @@ const DEFAULT_IN_MEMORY: LlmInfo = buildLlmInfo(DEFAULT_MODEL, {
   loaded: true
 })
 
+/** The default model in memory only through an instance another program loaded. */
+const DEFAULT_LOADED_ELSEWHERE: LlmInfo = buildLlmInfo(DEFAULT_MODEL, {
+  loaded: true,
+  loadedByLys: false
+})
+
 /** Another model, on disk only. */
 const OTHER_ON_DISK: LlmInfo = buildLlmInfo(OTHER_MODEL)
 
@@ -92,6 +98,12 @@ const DEFAULT_LISTED_MODELS: readonly LlmInfo[] = Object.freeze([
 /** Inventory listing the default model in memory. */
 const DEFAULT_RESIDENT_MODELS: readonly LlmInfo[] = Object.freeze([
   DEFAULT_IN_MEMORY,
+  OTHER_ON_DISK
+])
+
+/** Inventory listing the default model in memory, loaded by another program. */
+const DEFAULT_LOADED_ELSEWHERE_MODELS: readonly LlmInfo[] = Object.freeze([
+  DEFAULT_LOADED_ELSEWHERE,
   OTHER_ON_DISK
 ])
 
@@ -110,6 +122,12 @@ const DEFAULT_LISTED: ModelInventoryState = Object.freeze({
 const DEFAULT_LISTED_RESIDENT: ModelInventoryState = Object.freeze({
   status: "ready",
   models: DEFAULT_RESIDENT_MODELS
+})
+
+/** Read inventory with the default model in memory, loaded by another program. */
+const DEFAULT_LISTED_LOADED_ELSEWHERE: ModelInventoryState = Object.freeze({
+  status: "ready",
+  models: DEFAULT_LOADED_ELSEWHERE_MODELS
 })
 
 /** Read inventory without the default model. */
@@ -144,6 +162,12 @@ const READY_TO_UNLOAD: ModelResidencyArrangement = Object.freeze({
   modelInventory: DEFAULT_LISTED_RESIDENT,
   modelRequest: IDLE_REQUEST,
   modelRuntime: DEFAULT_RESIDENT
+})
+
+/** LM Studio connected, the default in memory only as another program loaded it. */
+const LOADED_ELSEWHERE: ModelResidencyArrangement = Object.freeze({
+  ...READY_TO_UNLOAD,
+  modelInventory: DEFAULT_LISTED_LOADED_ELSEWHERE
 })
 
 /** The default in memory while an inventory refresh is in flight. */
@@ -285,6 +309,12 @@ describe("ModelResidencyCard", () => {
       canUnload: true
     },
     {
+      name: "the default is loaded only by another program",
+      arrangement: LOADED_ELSEWHERE,
+      canLoad: false,
+      canUnload: false
+    },
+    {
       name: "a model request is in flight",
       arrangement: LISTING_WHILE_RESIDENT,
       canLoad: false,
@@ -404,7 +434,7 @@ describe("ModelResidencyCard", () => {
     startModelResidencyCard(READY_TO_LOAD)
 
     const note = screen.getByText(
-      "Loading and unloading use LM Studio through the backend. This summary prefers the loaded default; manage every loaded model in Model settings."
+      "Loading and unloading use LM Studio through the backend, and Lys unloads only the models it loaded. This summary prefers the loaded default; manage every loaded model in Model settings."
     )
     const feedback = screen.getByText(REQUEST_FEEDBACK)
     expect(

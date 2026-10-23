@@ -1,4 +1,4 @@
-import type { LlmInfo } from "@lys/protocol"
+import type { LlmInfo, LoadedLlmInfo } from "@lys/protocol"
 
 import type { BackendServerStatus } from "@/lib/store"
 import type { ModelRuntimeAvailability } from "./lm-studio-connection"
@@ -11,6 +11,9 @@ import type { LocalModelDescriptor } from "./inventory"
 
 /** Visual tone the status indicator uses for a residency state. */
 export type ModelResidencyTone = "active" | "pending" | "idle"
+
+/** Residency change Lys can request for a model. */
+export type ModelResidencyAction = "load" | "unload"
 
 /** Supporting line while the loaded weights are not observed. */
 const UNOBSERVED_RESIDENCY_META =
@@ -36,19 +39,36 @@ export function readLoadedModelKey(
  * do.
  * @returns The loaded model's entry in a ready inventory, or undefined while
  * no model is loaded, the inventory cannot be read, or it does not list the
- * loaded model.
+ * loaded model as loaded.
  */
 export function findLoadedModel(
   modelRuntime: ModelRuntimeState,
   modelInventory: ModelInventoryState
-): LlmInfo | undefined {
+): LoadedLlmInfo | undefined {
   if (modelRuntime.status !== "loaded" || modelInventory.status !== "ready") {
     return undefined
   }
 
   return modelInventory.models.find(
-    (model) => model.modelKey === modelRuntime.modelKey
+    (model): model is LoadedLlmInfo =>
+      model.loaded && model.modelKey === modelRuntime.modelKey
   )
+}
+
+/**
+ * Selects the residency change offered for one model.
+ *
+ * @param model - Inventory entry of the model.
+ * @returns `load` for a model that is not loaded, `unload` for a model with an
+ * instance Lys loaded, and null for a model only another program loaded,
+ * because Lys never unloads an instance it did not load and the model is
+ * already loaded.
+ */
+export function readModelResidencyAction(
+  model: LlmInfo
+): ModelResidencyAction | null {
+  if (!model.loaded) return "load"
+  return model.loadedByLys ? "unload" : null
 }
 
 /**

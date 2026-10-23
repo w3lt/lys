@@ -8,6 +8,7 @@ import {
   formatModelResidencyMeta,
   formatModelRowTag,
   readLoadedModelKey,
+  readModelResidencyAction,
   readModelResidencyTone,
   readModelRowTone
 } from "@/lib/models/model-residency"
@@ -80,10 +81,36 @@ describe("findLoadedModel", () => {
       "the inventory does not list the loaded model",
       { status: "loaded", modelKey: "resident" },
       { status: "ready", models: [buildLlmInfo("on-disk")] }
+    ],
+    [
+      "the inventory lists the loaded model as not loaded",
+      { status: "loaded", modelKey: "resident" },
+      { status: "ready", models: [buildLlmInfo("resident")] }
     ]
   ])("finds no entry while %s", (_case, modelRuntime, inventory) => {
     expect(findLoadedModel(modelRuntime, inventory)).toBeUndefined()
   })
+})
+
+describe("readModelResidencyAction", () => {
+  it.each([
+    ["a model that is not loaded", buildLlmInfo("on-disk"), "load"],
+    [
+      "a model Lys loaded",
+      buildLlmInfo("resident", { loaded: true, loadedByLys: true }),
+      "unload"
+    ],
+    [
+      "a model only another program loaded",
+      buildLlmInfo("elsewhere", { loaded: true, loadedByLys: false }),
+      null
+    ]
+  ] as const)(
+    "selects the residency change offered for %s",
+    (_case, model, action) => {
+      expect(readModelResidencyAction(model)).toBe(action)
+    }
+  )
 })
 
 describe("findEligibleChatModel", () => {

@@ -8,7 +8,7 @@ import {
   llmRuntimeUnavailableProblemSchema,
   type LlmRuntimeUnavailableProblem
 } from "../../http/errors/llm"
-import { llmInfoSchema } from "./_share"
+import { llmMetadataSchema } from "./_share"
 import { apiLlmLoadModelRoute } from "./routes"
 
 /**
@@ -40,12 +40,13 @@ export const llmLoadModelApiRequestBodySchema = z
  * @remarks The load does not observe the context length the model was loaded
  * with, so the response has no `loadedContextLength`; the inventory reports it.
  */
-export const llmLoadModelApiResponseBodySchema = llmInfoSchema
+export const llmLoadModelApiResponseBodySchema = llmMetadataSchema
   .unwrap()
-  .omit({ loadedContextLength: true })
-  .safeExtend({
+  .extend({
     /** A successful load response always describes a loaded model. */
-    loaded: z.literal(true)
+    loaded: z.literal(true),
+    /** The instance the load created is one Lys loaded. */
+    loadedByLys: z.literal(true)
   })
   .readonly()
 

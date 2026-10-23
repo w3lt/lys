@@ -55,6 +55,7 @@ describe("listModels", () => {
   it("returns the listed models after a validated response", async () => {
     const models = [
       buildLlmInfo("qwen3-8b", { loaded: true }),
+      buildLlmInfo("mistral-7b", { loaded: true, loadedByLys: false }),
       buildLlmInfo("gemma-3")
     ]
     const backend = startBackendFake({
@@ -85,6 +86,27 @@ describe("listModels", () => {
     startBackendFake({
       "GET /api/v1/llm/list": () =>
         buildJsonResponse(200, { llms: [buildLlmInfo("")] })
+    })
+
+    await expect(listModels(createConnection())).rejects.toThrow(Error)
+  })
+
+  it.each([
+    [
+      "a loaded model that does not say whether Lys loaded it",
+      { ...buildLlmInfo("gemma-3"), loaded: true }
+    ],
+    [
+      "a model that is not loaded but says Lys loaded it",
+      { ...buildLlmInfo("gemma-3"), loadedByLys: true }
+    ],
+    [
+      "a model that is not loaded but carries a loaded context length",
+      { ...buildLlmInfo("gemma-3"), loadedContextLength: 4096 }
+    ]
+  ])("rejects a list containing %s", async (_case, model) => {
+    startBackendFake({
+      "GET /api/v1/llm/list": () => buildJsonResponse(200, { llms: [model] })
     })
 
     await expect(listModels(createConnection())).rejects.toThrow(Error)
@@ -230,6 +252,20 @@ describe("loadModel", () => {
     startBackendFake({
       "POST /api/v1/llm/load": () =>
         buildJsonResponse(200, buildLlmInfo("qwen3-8b", { loaded: false }))
+    })
+
+    await expect(
+      loadModel("qwen3-8b", LOAD_CONFIGURATION, createConnection())
+    ).rejects.toThrow(Error)
+  })
+
+  it("rejects a load response that does not say Lys loaded the model", async () => {
+    startBackendFake({
+      "POST /api/v1/llm/load": () =>
+        buildJsonResponse(
+          200,
+          buildLlmInfo("qwen3-8b", { loaded: true, loadedByLys: false })
+        )
     })
 
     await expect(

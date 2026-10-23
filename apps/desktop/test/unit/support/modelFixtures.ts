@@ -7,6 +7,11 @@ export type LlmInfoVariation = Readonly<{
   /** Whether the model's weights are in memory; defaults to false. */
   loaded?: boolean
   /**
+   * Whether one of the loaded instances is one Lys loaded; set only with
+   * `loaded: true`, where it defaults to true.
+   */
+  loadedByLys?: boolean
+  /**
    * Context length the model is loaded with, as the backend reports it for a
    * loaded model; set only with `loaded: true`. Absent by default.
    */
@@ -45,6 +50,9 @@ export function buildLlmInfo(
       trainedForToolUse: variation.trainedForToolUse ?? false,
       maxContextLength: variation.maxContextLength ?? 8192,
       loaded: variation.loaded ?? false,
+      ...(variation.loaded === true
+        ? { loadedByLys: variation.loadedByLys ?? true }
+        : {}),
       ...(variation.loadedContextLength === undefined
         ? {}
         : { loadedContextLength: variation.loadedContextLength })

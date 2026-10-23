@@ -6,7 +6,7 @@ import {
   createLlmModelHealthDiagnostic,
   type LlmModelHealthDiagnostic
 } from "./llmModelHealthDiagnostic"
-import type { ListLoadedLlmModelInstances } from "./stopLlmModelsByKey"
+import type { ListLoadedLlmModelInstances } from "./stopLysLlmModelInstances"
 import type { LoadedLlmModelInstance } from "./llmRuntimeTypes"
 
 export type { LlmModelHealthDiagnostic } from "./llmModelHealthDiagnostic"

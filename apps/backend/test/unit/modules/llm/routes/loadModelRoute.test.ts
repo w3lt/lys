@@ -16,7 +16,8 @@ const LOAD_MODEL_PATH = "/api/v1/llm/load"
 /** Valid canonical metadata of the model the service reports as loaded. */
 const LOADED_MODEL = llmLoadModelApiResponseBodySchema.parse({
   ...createDownloadedLlmModel({ modelKey: "qwen/qwen3-8b" }),
-  loaded: true
+  loaded: true,
+  loadedByLys: true
 })
 
 describe("updateFastifyWithLlmModelLoadRoute", () => {

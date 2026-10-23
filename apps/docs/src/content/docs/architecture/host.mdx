@@ -70,15 +70,19 @@ through `getCurrentTime` and `getLocation` in
 declared failures with the schemas exported by `@lys/protocol`. Neither
 command reaches the network.
 
-- `get_current_time` reads the system clock and the machine's time zone, from
-  `TZ` or else `/etc/localtime`, through the `jiff` crate. It returns
-  `dateTime` (local time to the second with its offset, such as
-  `2026-10-22T21:30:05+02:00`; fractions of a second are dropped),
-  `weekday` (English name), `utcOffset` (`+HH:MM`, or `+HH:MM:SS` for a
-  historical offset with seconds), and `timeZone`, the IANA name, or `null`
-  for a zone without one, such as one a POSIX `TZ` rule sets. When the time
-  zone cannot be determined it rejects with `{ "code": "timeZoneUnknown" }`
-  rather than assume UTC.
+- `get_current_time` reads the system clock and the machine's time zone at
+  each call, so a change of zone applies to the next call. The zone is the
+  one `TZ` sets when it is set, read through the `jiff` crate, which keeps it
+  for up to 5 minutes; that matters only when `TZ` names a file whose zone
+  changes. Otherwise it is the zone `/etc/localtime` sets, read without a
+  cache: a link into a `zoneinfo` directory names its zone, and any other file
+  is read as TZif data. It returns `dateTime` (local time to the second with
+  its offset, such as `2026-10-22T21:30:05+02:00`; fractions of a second are
+  dropped), `weekday` (English name), `utcOffset` (`+HH:MM`, or `+HH:MM:SS`
+  for a historical offset with seconds), and `timeZone`, the IANA name, or
+  `null` for a zone without one, such as one a POSIX `TZ` rule or a TZif file
+  that is not a `zoneinfo` link sets. When the time zone cannot be determined
+  it rejects with `{ "code": "timeZoneUnknown" }` rather than assume UTC.
 - `get_location` reads the `location` group of the settings file, without
   creating the file when it is missing, so a saved change applies to the next
   call. It returns `city`, `region`, and `country`, each a string or `null`,

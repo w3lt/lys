@@ -1,6 +1,8 @@
 //! The `get_current_time` tool, which reads the local date, time, and time
 //! zone of the machine running the desktop app.
 
+use std::{env, fs, path::Path};
+
 use jiff::{civil::Weekday, tz::TimeZone, Timestamp, Zoned};
 use serde::Serialize;
 
@@ -11,6 +13,15 @@ const SECONDS_PER_HOUR: i32 = 60 * 60;
 
 /// Seconds in one minute, used to split a UTC offset into its minutes.
 const SECONDS_PER_MINUTE: i32 = 60;
+
+/// Path that sets the machine's time zone when `TZ` is not set: on macOS, a
+/// link into the zoneinfo directory that is replaced when the zone changes in
+/// System Settings or through automatic time zone.
+const LOCALTIME_PATH: &str = "/etc/localtime";
+
+/// Part of a zoneinfo path that comes just before the IANA name of the zone,
+/// as in `/var/db/timezone/zoneinfo/Europe/Paris`.
+const ZONEINFO_DIRECTORY: &str = "zoneinfo/";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,7 +40,7 @@ pub struct CurrentTime {
     utc_offset: String,
     /// IANA name of the machine's time zone, such as `Europe/Paris`; `None`,
     /// JSON `null`, when the zone has none, as for a zone a POSIX `TZ` rule
-    /// sets.
+    /// or an `/etc/localtime` that is not a zoneinfo link sets.
     time_zone: Option<String>,
 }
 
@@ -51,18 +62,86 @@ pub enum GetCurrentTimeError {
 /// Reads the local date, time, and time zone of this machine.
 ///
 /// The renderer invokes this command as `get_current_time` with no
-/// arguments. It reads the system clock and the machine's time zone: `TZ`
-/// when it is set, otherwise `/etc/localtime`. It changes nothing and cannot
-/// be cancelled.
+/// arguments. It reads the system clock and the machine's time zone at each
+/// call, as [`get_machine_time_zone`] describes, so a change of zone applies
+/// to the next call. It changes nothing and cannot be cancelled.
 ///
 /// # Errors
 ///
 /// Rejects with [`GetCurrentTimeError::TimeZoneUnknown`] when the machine's
 /// time zone cannot be determined.
 pub fn get_current_time() -> Result<CurrentTime, GetCurrentTimeError> {
-    let time_zone = TimeZone::try_system().map_err(|_| GetCurrentTimeError::TimeZoneUnknown)?;
+    let now = Timestamp::now();
+    let time_zone = get_machine_time_zone(now)?;
 
-    Ok(build_current_time(&Timestamp::now().to_zoned(time_zone)))
+    Ok(build_current_time(&now.to_zoned(time_zone)))
+}
+
+/// Gets the machine's time zone at the instant `now`: the zone `TZ` sets when
+/// it is set, otherwise the zone [`LOCALTIME_PATH`] sets, read afresh.
+///
+/// `TZ` is read through jiff, which keeps the zone it found for up to 5
+/// minutes. Nothing in this process changes `TZ`, so that copy stays current,
+/// unless `TZ` names a file whose zone changes within those 5 minutes.
+///
+/// # Errors
+///
+/// Returns [`GetCurrentTimeError::TimeZoneUnknown`] when `TZ` names no zone
+/// jiff can read or, without `TZ`, as [`read_localtime_zone`] does.
+fn get_machine_time_zone(now: Timestamp) -> Result<TimeZone, GetCurrentTimeError> {
+    if env::var_os("TZ").is_some() {
+        return TimeZone::try_system().map_err(|_| GetCurrentTimeError::TimeZoneUnknown);
+    }
+
+    read_localtime_zone(Path::new(LOCALTIME_PATH), now)
+}
+
+/// Reads the time zone that `localtime`, a path such as `/etc/localtime`,
+/// sets at the instant `now`.
+///
+/// A link whose target holds `zoneinfo/` sets the zone named by the rest of
+/// the target, such as `Europe/Paris`, when jiff's time zone database knows
+/// that name. Any other link or file is read as TZif data, which names no
+/// zone; see [`read_unnamed_zone`]. Nothing is kept between calls.
+///
+/// # Errors
+///
+/// Returns [`GetCurrentTimeError::TimeZoneUnknown`] when `localtime` neither
+/// links to a known zone nor holds TZif data, for example because it is
+/// missing.
+fn read_localtime_zone(localtime: &Path, now: Timestamp) -> Result<TimeZone, GetCurrentTimeError> {
+    let linked_zone = fs::read_link(localtime)
+        .ok()
+        .and_then(|target| find_linked_zone(&target));
+
+    match linked_zone {
+        Some(zone) => Ok(zone),
+        None => read_unnamed_zone(localtime, now).ok_or(GetCurrentTimeError::TimeZoneUnknown),
+    }
+}
+
+/// Finds the zone that a zoneinfo link `target`, such as
+/// `/var/db/timezone/zoneinfo/Europe/Paris`, names; `None` when the target
+/// holds no `zoneinfo/` or names no zone jiff's time zone database knows.
+fn find_linked_zone(target: &Path) -> Option<TimeZone> {
+    let target = target.to_str()?;
+    let name_start = target.rfind(ZONEINFO_DIRECTORY)? + ZONEINFO_DIRECTORY.len();
+
+    TimeZone::get(&target[name_start..]).ok()
+}
+
+/// Reads the TZif data at `path`, which names no IANA zone, as a zone fixed at
+/// the offset that data gives for `now`, so the zone has no name; `None` when
+/// `path` cannot be read or holds no TZif data.
+///
+/// jiff 0.2 builds a zone from TZif data only with a name. The empty name
+/// given here stays with that zone, which serves only to find the offset. The
+/// fixed zone is right for `now`, the one instant the command reports.
+fn read_unnamed_zone(path: &Path, now: Timestamp) -> Option<TimeZone> {
+    let data = fs::read(path).ok()?;
+    let named_zone = TimeZone::tzif("", &data).ok()?;
+
+    Some(TimeZone::fixed(named_zone.to_offset(now)))
 }
 
 /// Builds the local date, time, and time zone of the instant `now`, in the
@@ -134,16 +213,23 @@ pub(super) fn build_get_current_time_definition() -> ToolDefinition {
 
 #[cfg(test)]
 mod tests {
+    use std::{fs, os::unix::fs::symlink, path::Path};
+
     use jiff::{
         tz::{Offset, TimeZone},
         Timestamp,
     };
     use serde_json::json;
 
-    use super::{build_current_time, CurrentTime, GetCurrentTimeError};
+    use super::{build_current_time, read_localtime_zone, CurrentTime, GetCurrentTimeError};
+    use crate::tools::test_directory::TestDirectory;
 
     /// Instant 2026-10-22T19:30:05Z, a Thursday in UTC.
     const THURSDAY_EVENING_UTC_SECONDS: i64 = 1_792_697_405;
+
+    /// Directory of the system time zone database, which jiff reads the named
+    /// zones of these tests from.
+    const SYSTEM_ZONEINFO_DIRECTORY: &str = "/usr/share/zoneinfo";
 
     /// Builds the current time of `seconds` after the Unix epoch, plus
     /// `nanoseconds`, in `time_zone`.
@@ -151,6 +237,23 @@ mod tests {
         let instant = Timestamp::new(seconds, nanoseconds).expect("a valid test instant");
 
         build_current_time(&instant.to_zoned(time_zone))
+    }
+
+    /// Builds the current time at [`THURSDAY_EVENING_UTC_SECONDS`] in the zone
+    /// that `localtime` sets, or the failure of reading that zone.
+    fn build_current_time_from(localtime: &Path) -> Result<CurrentTime, GetCurrentTimeError> {
+        let instant =
+            Timestamp::from_second(THURSDAY_EVENING_UTC_SECONDS).expect("a valid test instant");
+
+        read_localtime_zone(localtime, instant)
+            .map(|zone| build_current_time(&instant.to_zoned(zone)))
+    }
+
+    /// Reads the TZif data of the zone `name` from the system time zone
+    /// database.
+    fn read_system_tzif_data(name: &str) -> Vec<u8> {
+        fs::read(Path::new(SYSTEM_ZONEINFO_DIRECTORY).join(name))
+            .expect("a zone the system time zone database holds")
     }
 
     /// Gets a zone of the system time zone database by its IANA name.
@@ -263,6 +366,87 @@ mod tests {
             build_current_time_at(THURSDAY_EVENING_UTC_SECONDS, 999_999_999, TimeZone::UTC);
 
         assert_eq!(current_time.date_time, "2026-10-22T19:30:05+00:00");
+    }
+
+    #[test]
+    fn reads_the_zone_a_zoneinfo_link_names_again_at_each_call() {
+        let directory = TestDirectory::create("localtime-link");
+        let localtime = directory.path().join("localtime");
+        symlink("/var/db/timezone/zoneinfo/Europe/Paris", &localtime).expect("link to Paris");
+
+        let in_paris = build_current_time_from(&localtime).expect("a zone for Paris");
+        fs::remove_file(&localtime).expect("remove the link to Paris");
+        symlink("/var/db/timezone/zoneinfo/Asia/Tokyo", &localtime).expect("link to Tokyo");
+        let in_tokyo = build_current_time_from(&localtime).expect("a zone for Tokyo");
+
+        assert_eq!(
+            serde_json::to_value(in_paris).expect("serialize"),
+            json!({
+                "dateTime": "2026-10-22T21:30:05+02:00",
+                "weekday": "Thursday",
+                "utcOffset": "+02:00",
+                "timeZone": "Europe/Paris"
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(in_tokyo).expect("serialize"),
+            json!({
+                "dateTime": "2026-10-23T04:30:05+09:00",
+                "weekday": "Friday",
+                "utcOffset": "+09:00",
+                "timeZone": "Asia/Tokyo"
+            })
+        );
+    }
+
+    #[test]
+    fn reads_a_tzif_file_as_a_zone_without_a_name() {
+        let directory = TestDirectory::create("localtime-file");
+        let localtime = directory.create_file("localtime", read_system_tzif_data("Asia/Tokyo"));
+
+        let current_time = build_current_time_from(&localtime).expect("a zone for a TZif file");
+
+        assert_eq!(
+            serde_json::to_value(current_time).expect("serialize"),
+            json!({
+                "dateTime": "2026-10-23T04:30:05+09:00",
+                "weekday": "Friday",
+                "utcOffset": "+09:00",
+                "timeZone": null
+            })
+        );
+    }
+
+    #[test]
+    fn reads_the_target_of_a_link_that_names_no_known_zone_as_a_zone_without_a_name() {
+        let directory = TestDirectory::create("localtime-unknown-name");
+        let target =
+            directory.create_file("zoneinfo/Lys/Nowhere", read_system_tzif_data("Asia/Tokyo"));
+        let localtime = directory.path().join("localtime");
+        symlink(&target, &localtime).expect("link to a zone with an unknown name");
+
+        let current_time = build_current_time_from(&localtime).expect("a zone for the target");
+
+        assert_eq!(current_time.utc_offset, "+09:00");
+        assert_eq!(current_time.time_zone, None);
+    }
+
+    #[test]
+    fn fails_when_localtime_neither_links_to_a_known_zone_nor_holds_tzif_data() {
+        let directory = TestDirectory::create("localtime-unknown");
+        let missing = directory.path().join("missing");
+        let not_tzif = directory.create_file("not-tzif", "Europe/Paris\n");
+        let dangling = directory.path().join("dangling");
+        symlink("/nowhere/zoneinfo/Lys/Nowhere", &dangling).expect("link to nothing");
+
+        for localtime in [missing, not_tzif, dangling] {
+            assert_eq!(
+                build_current_time_from(&localtime),
+                Err(GetCurrentTimeError::TimeZoneUnknown),
+                "{}",
+                localtime.display()
+            );
+        }
     }
 
     #[test]

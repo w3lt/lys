@@ -33,5 +33,5 @@
     "@astrojs/check": "^0.9.10",
     "typescript": "^6.0.3"
   },
-  "version": "0.3.0"
+  "version": "0.4.0"
 }

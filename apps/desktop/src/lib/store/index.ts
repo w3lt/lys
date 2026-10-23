@@ -18,6 +18,10 @@ import {
   type RuntimeAutoStartSettingsSlice
 } from "./runtime-autostart-settings"
 import {
+  createLocationSettingsSlice,
+  type LocationSettingsSlice
+} from "./location-settings"
+import {
   createSecretsSettingsSlice,
   type SecretsSettingsSlice
 } from "./secrets-settings"
@@ -152,6 +156,7 @@ type LysStore = LysState &
   GenerationSettingsSlice &
   LoadConfigurationSettingsSlice &
   SecretsSettingsSlice &
+  LocationSettingsSlice &
   ToolSettingsSlice &
   RuntimeAutoStartSettingsSlice &
   VmoRuntimeSlice &
@@ -313,6 +318,9 @@ export const useLysStore = create<LysStore>()((set, get) => {
       saveSecretsSettings: settingsGroupSaves.saveSecretsSettings,
       sendWebSearchKeyCheck: () =>
         sendWebSearchKeyCheck({ backendUrl: get().backendUrl })
+    }),
+    ...createLocationSettingsSlice(set, get, {
+      saveLocationSettings: settingsGroupSaves.saveLocationSettings
     }),
     ...createModelSlice(set, get, {
       getConnection: () => ({

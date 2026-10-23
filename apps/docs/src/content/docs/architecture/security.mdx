@@ -15,7 +15,9 @@ browser inside a micro VM, which also loads what the page needs, and the
 `web_search` tool sends a query and the person's Tavily
 API key to Tavily's search service. Each runs after the person allows the call, or
 at once when the person set that tool to Just run, a choice Lys saves. The
-backend decides which calls ask; the desktop shows the prompts.
+backend decides which calls ask; the desktop shows the prompts. The clock and
+location tools, `get_current_time` and `get_location`, reach no network: their
+results go to the backend and on to LM Studio, both on loopback.
 
 ## Current trust boundaries
 
@@ -26,7 +28,8 @@ backend decides which calls ask; the desktop shows the prompts.
 | Fastify backend -> LM Studio | Loopback connections to local LM Studio HTTP and WebSocket endpoints.                                                                                                                                                                  |
 | Backend -> SQLite file       | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                                                                                                                                                                                  |
 | Backend -> attachment files  | Local filesystem access to `$LYS_HOME/attachments/`: the files of each chat request are written under the conversation's and the message's identifiers and the file's own name, read for the model, and removed with the conversation. |
-| Tauri host -> settings file  | Local filesystem access to `$LYS_HOME/settings.json`.                                                                                                                                                                                  |
+| Tauri host -> settings file  | Local filesystem access to `$LYS_HOME/settings.json`; `get_location` reads its `location` group and never creates or writes the file.                                                                                                  |
+| Tauri host -> system clock   | `get_current_time` reads the system clock and the machine's time zone, from `TZ` or else `/etc/localtime`.                                                                                                                             |
 | Tauri host -> user files     | File tools read any path the OS user running Lys can read.                                                                                                                                                                             |
 | Tauri host -> vmo            | The host starts vmo as the OS user running Lys, ad hoc signed with the virtualization entitlement, stops it with `SIGTERM` and, after 60 seconds, `SIGKILL`, and asks its `GET /health` over loopback TCP.                             |
 | Backend -> vmo               | Each tool lookup sends `GET /health` to vmo, and each `read_page` call sends the page's URL, over loopback HTTP on `127.0.0.1:8080`, without authentication.                                                                           |
@@ -54,15 +57,16 @@ backend decides which calls ask; the desktop shows the prompts.
 | Approval of searches        | `web_search` runs only once the person allows the call on the card (full query and "Sends the query to Tavily (api.tavily.com)"), or at once on Just run. It starts off.                                                                                                                                                                                                                                                     |
 | Fixed search destination    | Every search goes to `https://api.tavily.com` with certificate verification forced on, TLS 1.2 or later, no redirects, and the address rule on every resolved address and the connected socket.                                                                                                                                                                                                                              |
 | Search key handling         | The key goes only into the `authorization` header sent to Tavily; it never appears in results, the model's context, events, API answers, logs, or errors.                                                                                                                                                                                                                                                                    |
+| Typed location only         | `get_location` returns only the city, region, and country the person saved in Settings → Tools, and fails with `locationNotSet` when none is saved. Lys never asks Location Services, an IP lookup, or the time zone where the person is. Like every client tool, a call asks first unless the tool is on Just run.                                                                                                          |
 | Owner-only settings file    | `settings.json` is replaced atomically and is readable only by its owner on Unix.                                                                                                                                                                                                                                                                                                                                            |
 | Owner-only backend log      | Each of the backend's log files in `logs/` is created readable and writable only by its owner.                                                                                                                                                                                                                                                                                                                               |
 | Untrusted result framing    | Result titles, URLs, and snippets reach the model between delimiters it cannot forge, with a notice never to obey them.                                                                                                                                                                                                                                                                                                      |
 
 ## Candid limits
 
-- There is no keychain integration. The Tavily API key is stored as plain
-  text in `settings.json`, readable by the person's OS account and by any
-  process running as it.
+- There is no keychain integration. The Tavily API key and the saved
+  location are stored as plain text in `settings.json`, readable by the
+  person's OS account and by any process running as it.
 - There is no scoped credential-handle layer.
 - The saved Just run choices live in `settings.json`, so any process running
   as the person's OS account can edit the file to put a tool on Just run. The
@@ -79,18 +83,25 @@ backend decides which calls ask; the desktop shows the prompts.
 - Nothing ties an answer to an approval prompt to the person. Any caller that
   reaches the backend, a local process or a page that uses DNS rebinding, can
   read a waiting prompt from the reply's events and answer it with `allowed`.
-  For `read_text_file` and `search_files`, the desktop then runs the call with
+  For the client tools, such as `read_text_file`, `search_files`, and
+  `get_location`, the desktop then runs the call with
   the person's account on a reply it follows, including one it starts
   following when the person opens the conversation, and even while the call's
   card still waits for the person. The model reads what the call returns.
   This stays open until callers are authenticated
   ([#171](https://github.com/w3lt/lys/issues/171)).
 - Every tool call's full result is stored with its reply: the text of a file
-  `read_text_file` read, the matches of `search_files`, and the evidence of
-  `web_search` and `read_page`. Any caller that reaches the backend can read
+  `read_text_file` read, the matches of `search_files`, the time
+  `get_current_time` read, the location `get_location` returned, and the
+  evidence of `web_search` and `read_page`. Any caller that reaches the backend can read
   it through the conversation and reply-event routes until the conversation is
   deleted, so a call answered as above exposes the file's text to that caller
   ([#171](https://github.com/w3lt/lys/issues/171)).
+- A saved location reaches a model whenever a call of `get_location` runs:
+  on Ask me once the person allows it, and on Just run without the person
+  seeing the call. The location is then part of that reply's stored result
+  until the conversation is deleted, also after the person changes or removes
+  it in Settings.
 - Attachment files are stored as sent, unencrypted, under
   `$LYS_HOME/attachments`, readable by the person's OS account and any process
   running as it. The folders and files are created with the process's default

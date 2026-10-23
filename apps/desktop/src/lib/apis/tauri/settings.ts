@@ -1,8 +1,13 @@
-import { tavilyApiKeySchema, type ModelLoadConfiguration } from "@lys/share"
+import {
+  locationSettingsSchema,
+  tavilyApiKeySchema,
+  type ModelLoadConfiguration
+} from "@lys/share"
 
 import type {
   GenerationSettings,
   LoadConfigurationSettings,
+  LocationSettings,
   LysSettings,
   RuntimeAutoStartSettings,
   RuntimeSettings,
@@ -54,6 +59,21 @@ type SettingsDocumentTools = {
 }
 
 /**
+ * The `location` group as the settings document holds it.
+ *
+ * @remarks Matches Rust's `LocationSettings`; the names are plain text here
+ * and branded only after {@link buildLocationSettings} parses them.
+ */
+type SettingsDocumentLocation = {
+  /** Saved city, or null. */
+  readonly city: string | null
+  /** Saved region, or null. */
+  readonly region: string | null
+  /** Saved country, or null. */
+  readonly country: string | null
+}
+
+/**
  * Complete settings document as the Tauri settings commands exchange it.
  *
  * @remarks Matches Rust's `LysSettings` field for field: `load_settings`
@@ -71,6 +91,8 @@ type SettingsDocument = {
   readonly secrets: SettingsDocumentSecrets
   /** Tool choices, with the names on Just run as one array. */
   readonly tools: SettingsDocumentTools
+  /** Saved location, with the names as plain text. */
+  readonly location: SettingsDocumentLocation
 }
 
 /**
@@ -90,6 +112,24 @@ function buildSecretsSettings(
     throw new Error("The settings file holds an invalid Tavily API key.")
   }
   return { tavilyApiKey: parsed.data }
+}
+
+/**
+ * Builds the renderer's location from the document group.
+ *
+ * @param location - Group Rust validated.
+ * @returns The location with its names branded.
+ * @throws If the group fails the shared location schema, which Rust's
+ * validation rules out; the error never contains the location.
+ */
+function buildLocationSettings(
+  location: SettingsDocumentLocation
+): LocationSettings {
+  const parsed = locationSettingsSchema.safeParse(location)
+  if (!parsed.success) {
+    throw new Error("The settings file holds an invalid location.")
+  }
+  return parsed.data
 }
 
 /**
@@ -148,7 +188,8 @@ function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
     generation: settingsDocument.generation,
     loadConfiguration,
     secrets: buildSecretsSettings(settingsDocument.secrets),
-    tools: buildToolSettings(settingsDocument.tools)
+    tools: buildToolSettings(settingsDocument.tools),
+    location: buildLocationSettings(settingsDocument.location)
   }
 }
 
@@ -173,7 +214,8 @@ function buildSettingsDocument(settings: LysSettings): SettingsDocument {
     generation: settings.generation,
     loadConfiguration,
     secrets: { tavilyApiKey: settings.secrets.tavilyApiKey },
-    tools: buildSettingsDocumentTools(settings.tools)
+    tools: buildSettingsDocumentTools(settings.tools),
+    location: settings.location
   }
 }
 
@@ -284,6 +326,25 @@ export async function saveSecretsSettings(
 export async function saveToolSettings(tools: ToolSettings): Promise<void> {
   const persistedSettings = await loadSettings()
   await saveSettings({ ...persistedSettings, tools })
+}
+
+/**
+ * Persists the location while preserving everything else already on disk.
+ * @param location - Location to save; null parts are written as null, and a
+ * location whose parts are all null removes the saved one.
+ * @returns Resolves after the merged settings document is written by Tauri,
+ * which replaces the file atomically and owner-only.
+ * @throws The native load or save rejection; no replacement is written if
+ * loading fails.
+ * @remarks The application store serializes this read-modify-write operation
+ * with the other settings-group saves, so that overlapping saves cannot write
+ * back each other's stale group.
+ */
+export async function saveLocationSettings(
+  location: LocationSettings
+): Promise<void> {
+  const persistedSettings = await loadSettings()
+  await saveSettings({ ...persistedSettings, location })
 }
 
 /**

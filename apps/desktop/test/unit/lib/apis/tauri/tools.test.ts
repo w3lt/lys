@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { findFiles, listTools, readTextFile } from "@/lib/apis/tauri/tools"
+import {
+  findFiles,
+  getCurrentTime,
+  getLocation,
+  listTools,
+  readTextFile
+} from "@/lib/apis/tauri/tools"
 import { startNativeHostFake } from "../../../support/nativeHostFake"
 import {
   buildBackendToolDefinition,
@@ -140,6 +146,118 @@ describe("findFiles", () => {
       findFiles({ ...SEARCH_FILTER, maxResults: -1 })
     ).rejects.toMatchObject({ name: "ZodError" })
     expect(host.commands).toEqual([])
+  })
+})
+
+/** Time the desktop reports in the get-current-time cases. */
+const CURRENT_TIME = Object.freeze({
+  dateTime: "2026-10-22T21:30:05+02:00",
+  weekday: "Thursday",
+  utcOffset: "+02:00",
+  timeZone: "Europe/Paris"
+})
+
+describe("getCurrentTime", () => {
+  it("sends no arguments and returns the machine's time", async () => {
+    const host = startNativeHostFake({ get_current_time: () => CURRENT_TIME })
+
+    await expect(getCurrentTime()).resolves.toEqual({
+      status: "succeeded",
+      currentTime: CURRENT_TIME
+    })
+    expect(host.commands).toEqual([{ command: "get_current_time", args: {} }])
+  })
+
+  it("returns a time zone without an IANA name as null", async () => {
+    const currentTime = { ...CURRENT_TIME, timeZone: null }
+    startNativeHostFake({ get_current_time: () => currentTime })
+
+    await expect(getCurrentTime()).resolves.toEqual({
+      status: "succeeded",
+      currentTime
+    })
+  })
+
+  it("returns the declared timeZoneUnknown failure", async () => {
+    startNativeHostFake({
+      get_current_time: () => Promise.reject({ code: "timeZoneUnknown" })
+    })
+
+    await expect(getCurrentTime()).resolves.toEqual({
+      status: "failed",
+      error: { code: "timeZoneUnknown" }
+    })
+  })
+
+  it("rejects an undeclared rejection and keeps it as the cause", async () => {
+    const rejection = "command get_current_time not found"
+    startNativeHostFake({ get_current_time: () => Promise.reject(rejection) })
+
+    await expect(getCurrentTime()).rejects.toMatchObject({
+      message:
+        "The get_current_time command failed without a declared tool failure.",
+      cause: rejection
+    })
+  })
+
+  it.each([
+    ["a date without its offset", { dateTime: "2026-10-22T21:30:05" }],
+    ["an unknown weekday", { weekday: "Thor's day" }],
+    ["an extra field", { latitude: 45.76 }]
+  ])("rejects a time with %s", async (_label, change) => {
+    startNativeHostFake({
+      get_current_time: () => ({ ...CURRENT_TIME, ...change })
+    })
+
+    await expect(getCurrentTime()).rejects.toMatchObject({ name: "ZodError" })
+  })
+})
+
+describe("getLocation", () => {
+  it("sends no arguments and returns the saved location", async () => {
+    const location = { city: "Lyon", region: null, country: "France" }
+    const host = startNativeHostFake({ get_location: () => location })
+
+    await expect(getLocation()).resolves.toEqual({
+      status: "succeeded",
+      location
+    })
+    expect(host.commands).toEqual([{ command: "get_location", args: {} }])
+  })
+
+  it.each([{ code: "locationNotSet" }, { code: "settingsUnreadable" }])(
+    "returns the declared $code failure",
+    async (error) => {
+      startNativeHostFake({ get_location: () => Promise.reject(error) })
+
+      await expect(getLocation()).resolves.toEqual({ status: "failed", error })
+    }
+  )
+
+  it("rejects an undeclared rejection and keeps it as the cause", async () => {
+    const rejection = { code: "settingsUnreadable", path: "/Users/fixture" }
+    startNativeHostFake({ get_location: () => Promise.reject(rejection) })
+
+    await expect(getLocation()).rejects.toMatchObject({
+      message:
+        "The get_location command failed without a declared tool failure.",
+      cause: rejection
+    })
+  })
+
+  it.each([
+    ["no saved part", { city: null, region: null, country: null }],
+    ["a padded name", { city: " Lyon", region: null, country: null }],
+    [
+      "a name ending in a no-break space",
+      { city: null, region: null, country: "France\u00a0" }
+    ],
+    ["a tab in a name", { city: "Lyon\tCentre", region: null, country: null }],
+    ["coordinates", { city: "Lyon", region: null, country: null, latitude: 1 }]
+  ])("rejects a location with %s", async (_label, location) => {
+    startNativeHostFake({ get_location: () => location })
+
+    await expect(getLocation()).rejects.toMatchObject({ name: "ZodError" })
   })
 })
 

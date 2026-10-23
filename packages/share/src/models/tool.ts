@@ -118,11 +118,12 @@ export type ToolArgumentDefinition = z.infer<
  * when a client tool uses it; consumers that branch on the group
  * exhaustively must handle it.
  */
-const toolGroupSchema = z.enum(["files", "network"])
+const toolGroupSchema = z.enum(["files", "network", "timeAndPlace"])
 
 /**
- * Group a tool is listed under in Settings: `files` holds the file tools and
- * `network` the tools that reach past this machine.
+ * Group a tool is listed under in Settings: `files` holds the file tools,
+ * `network` the tools that reach past this machine, and `timeAndPlace` the
+ * tools that tell when and where the person is.
  */
 export type ToolGroup = z.infer<typeof toolGroupSchema>
 

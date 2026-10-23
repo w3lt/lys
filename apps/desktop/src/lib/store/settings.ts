@@ -1,4 +1,8 @@
-import type { ModelLoadConfiguration, TavilyApiKey } from "@lys/share"
+import type {
+  ModelLoadConfiguration,
+  PlaceName,
+  TavilyApiKey
+} from "@lys/share"
 
 /**
  * Runtime process settings persisted under the `runtime` JSON object.
@@ -132,9 +136,30 @@ export type ToolSettings = {
 }
 
 /**
+ * Location persisted under the `location` JSON object: the place the person
+ * typed, never one Lys detected.
+ *
+ * @remarks Mirrors Rust's `LocationSettings`. Rust validates each name on
+ * load, and the Tauri settings adapter parses the group again with the
+ * shared location schema, which brands the names. A group whose parts are
+ * all null saves no location. The group is saved only by an explicit Save in
+ * the Tools pane; the `get_location` tool reads it from the settings file
+ * when a model calls it. The location is personal data: the renderer never
+ * logs it or sends it anywhere but to the Tauri settings commands.
+ */
+export type LocationSettings = {
+  /** City, town, or other locality, or null when not saved. */
+  readonly city: PlaceName | null
+  /** State, province, or other region, or null when not saved. */
+  readonly region: PlaceName | null
+  /** Country, or null when not saved. */
+  readonly country: PlaceName | null
+}
+
+/**
  * Renderer projection of the complete Tauri-persisted settings document.
  *
- * @remarks Holds the five groups of Rust's `LysSettings` under the same
+ * @remarks Holds the six groups of Rust's `LysSettings` under the same
  * names, so a saved value cannot silently drop a persisted group. The
  * runtime and generation groups match Rust field for field. The load
  * configuration group differs only in its per-model settings, a map here and
@@ -154,6 +179,8 @@ export type LysSettings = {
   secrets: SecretsSettings
   /** Tools the person set to Just run and tools the person switched. */
   tools: ToolSettings
+  /** Location the person saved for the `get_location` tool. */
+  location: LocationSettings
 }
 
 /**
@@ -196,6 +223,16 @@ const INITIAL_TOOL_SETTINGS: ToolSettings = Object.freeze({
 })
 
 /**
+ * Location shown before Tauri initialization completes: none saved, as in a
+ * first-run settings file.
+ */
+const INITIAL_LOCATION_SETTINGS: LocationSettings = Object.freeze({
+  city: null,
+  region: null,
+  country: null
+})
+
+/**
  * Renderer-side fallback settings used before Tauri initialization completes.
  *
  * @remarks Values match the Rust `Default` implementations so the pre-load
@@ -214,5 +251,6 @@ export const initialSettingsState: LysSettings = {
   },
   loadConfiguration: INITIAL_LOAD_CONFIGURATION_SETTINGS,
   secrets: INITIAL_SECRETS_SETTINGS,
-  tools: INITIAL_TOOL_SETTINGS
+  tools: INITIAL_TOOL_SETTINGS,
+  location: INITIAL_LOCATION_SETTINGS
 }

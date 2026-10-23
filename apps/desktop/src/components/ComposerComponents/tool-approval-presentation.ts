@@ -22,7 +22,8 @@ export const DRAFT_APPROVAL_HINT = "↵ sends your message as her answer"
  * @param input - Validated input of the call.
  * @returns The action and its target, then its effect: a tool that reads
  * this machine changes nothing, a page read names the full URL of the page,
- * and a web search names where its full query goes.
+ * and a web search names where its full query goes. A location read names
+ * where the location comes from, because the person typed it.
  */
 export function formatToolCallSummary(input: ToolCallInput): string {
   switch (input.toolName) {
@@ -30,6 +31,10 @@ export function formatToolCallSummary(input: ToolCallInput): string {
       return `Read ${input.input.path}. Nothing is changed.`
     case "search_files":
       return `Search ${SEARCH_TARGET_PHRASES[input.filter.target]} under ${input.filter.root} for “${input.filter.query}”. Nothing is changed.`
+    case "get_current_time":
+      return "Read the date, time, and time zone of this machine. Nothing is changed."
+    case "get_location":
+      return "Read the location you saved in Settings → Tools. Nothing is changed."
     case "read_page":
       return `Read ${input.url}.`
     case "web_search":

@@ -17,6 +17,9 @@ use serde::Serialize;
 pub enum ToolGroup {
     /// Tools that work with files on this machine.
     Files,
+    /// Tools that tell when and where the person is: the machine's clock and
+    /// the location the person saved.
+    TimeAndPlace,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

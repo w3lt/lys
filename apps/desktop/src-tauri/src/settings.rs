@@ -8,12 +8,14 @@
 pub mod commands;
 pub mod generation;
 pub mod load_configuration;
+pub mod location;
 pub mod runtime;
 pub mod secrets;
 pub mod tools;
 
 use generation::GenerationSettings;
 use load_configuration::LoadConfigurationSettings;
+use location::LocationSettings;
 use runtime::RunTimeSettings;
 use secrets::SecretsSettings;
 use tools::ToolSettings;
@@ -40,11 +42,13 @@ static TEMPORARY_FILE_COUNT: AtomicU64 = AtomicU64::new(0);
 /// Complete persisted Lys settings value.
 ///
 /// The private fields group runtime, generation, load configuration, secrets,
-/// and tools settings in the serialized JSON representation while keeping
-/// those groups behind the settings module's API boundary. A missing group
-/// takes that group's defaults; the load configuration group's default is
-/// empty, the secrets group's default holds no key, and the tools group's
-/// default puts no tool on Just run and saves no tool switch. A group the value does not hold, such as
+/// tools, and location settings in the serialized JSON representation while
+/// keeping those groups behind the settings module's API boundary. A missing
+/// group takes that group's defaults; the load configuration group's default
+/// is empty, the secrets group's default holds no key, the tools group's
+/// default puts no tool on Just run and saves no tool switch, and the
+/// location group's default saves no location. A group the value does not
+/// hold, such as
 /// the `model` group of files written before the local context estimate was
 /// removed, is ignored when loading and left out of the next save.
 pub struct LysSettings {
@@ -58,6 +62,8 @@ pub struct LysSettings {
     secrets: SecretsSettings,
     /// Tools set to Just run and saved tool switches, in the `tools` object.
     tools: ToolSettings,
+    /// Location the person saved, in the `location` object.
+    location: LocationSettings,
 }
 
 impl LysSettings {
@@ -77,6 +83,11 @@ impl LysSettings {
     /// written. A file that cannot be read or parsed is left as it is.
     pub fn load_settings(lys_home: &LysHome) -> Result<Self, String> {
         load_settings_file(&lys_home.settings_path())
+    }
+
+    /// Returns the location the person saved, which may hold no part.
+    pub fn location(&self) -> &LocationSettings {
+        &self.location
     }
 
     /// Serializes settings as pretty-printed JSON and replaces the settings file
@@ -101,11 +112,27 @@ impl LysSettings {
 /// Returns an error when the file cannot be read or parsed, or when creating
 /// it fails. Nothing is written when reading or parsing fails.
 fn load_settings_file(path: &Path) -> Result<LysSettings, String> {
+    match find_settings_file(path)? {
+        Some(settings) => Ok(settings),
+        None => create_settings_file(path),
+    }
+}
+
+/// Reads the settings stored at `path`, such as the settings file of the Lys
+/// home, without creating it, or `None` when there is no file. An existing
+/// file is read as [`LysSettings::load_settings`] reads it.
+///
+/// # Errors
+///
+/// Returns an error naming `path` when the file cannot be read or JSON cannot
+/// be parsed. Nothing is written.
+pub fn find_settings_file(path: &Path) -> Result<Option<LysSettings>, String> {
     match fs::read_to_string(path) {
         Ok(contents) => serde_json::from_str(&contents)
+            .map(Some)
             .map_err(|err| format!("Failed to parse {}: {err}", path.display())),
 
-        Err(err) if err.kind() == ErrorKind::NotFound => create_settings_file(path),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
 
         Err(err) => Err(format!("Failed to read {}: {err}", path.display())),
     }
@@ -279,8 +306,8 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{
-        build_temporary_path, create_owner_only_file, load_settings_file, save_settings_file,
-        LysSettings,
+        build_temporary_path, create_owner_only_file, find_settings_file, load_settings_file,
+        save_settings_file, LysSettings,
     };
     use crate::tools::test_directory::TestDirectory;
 
@@ -304,7 +331,7 @@ mod tests {
     }
 
     /// Stored settings whose load configuration has a hand-written default
-    /// and one model's settings, with a saved Tavily API key.
+    /// and one model's settings, with a saved Tavily API key and location.
     fn get_complete_settings() -> Value {
         let mut settings = get_settings_without_load_configuration();
         settings["loadConfiguration"] = json!({
@@ -316,6 +343,7 @@ mod tests {
             "justRun": ["read_page", "read_text_file"],
             "switches": { "read_page": true, "search_files": false }
         });
+        settings["location"] = json!({ "city": "Lyon", "region": null, "country": "France" });
 
         settings
     }
@@ -329,6 +357,11 @@ mod tests {
     /// tool has a saved switch.
     fn get_empty_tools() -> Value {
         json!({ "justRun": [], "switches": {} })
+    }
+
+    /// Location group of a settings file without a saved location.
+    fn get_empty_location() -> Value {
+        json!({ "city": null, "region": null, "country": null })
     }
 
     /// Reads the settings file at `path` as JSON.
@@ -365,6 +398,7 @@ mod tests {
         assert_eq!(stored["loadConfiguration"], get_empty_load_configuration());
         assert_eq!(stored["secrets"], get_empty_secrets());
         assert_eq!(stored["tools"], get_empty_tools());
+        assert_eq!(stored["location"], get_empty_location());
     }
 
     #[test]
@@ -389,6 +423,7 @@ mod tests {
         expected["loadConfiguration"] = get_empty_load_configuration();
         expected["secrets"] = get_empty_secrets();
         expected["tools"] = get_empty_tools();
+        expected["location"] = get_empty_location();
         assert_eq!(get_settings_json(&settings), expected);
         assert_eq!(
             fs::read_to_string(&path).expect("read the settings file"),
@@ -461,6 +496,10 @@ mod tests {
         invalid_tool_name["tools"]["justRun"] = json!(["read page"]);
         let mut invalid_switch = get_complete_settings();
         invalid_switch["tools"]["switches"] = json!({ "read_page": "on" });
+        let mut null_location = get_settings_without_load_configuration();
+        null_location["location"] = Value::Null;
+        let mut padded_place_name = get_complete_settings();
+        padded_place_name["location"]["city"] = json!("Lyon ");
         let unusable_files = [
             invalid_group.to_string(),
             null_group.to_string(),
@@ -470,6 +509,8 @@ mod tests {
             null_tools.to_string(),
             invalid_tool_name.to_string(),
             invalid_switch.to_string(),
+            null_location.to_string(),
+            padded_place_name.to_string(),
             String::from("{ not json"),
         ];
 
@@ -495,6 +536,54 @@ mod tests {
         let failure = load_settings_file(&path).expect_err("a directory at the settings path");
 
         assert!(failure.starts_with("Failed to read "), "{failure}");
+    }
+
+    #[test]
+    fn finds_no_settings_for_a_missing_file_and_creates_nothing() {
+        let directory = TestDirectory::create("settings-find-missing");
+        let path = directory.path().join("lys-home").join("settings.json");
+
+        let settings = find_settings_file(&path).expect("no failure for a missing file");
+
+        assert!(settings.is_none());
+        assert!(!directory.path().join("lys-home").exists());
+    }
+
+    #[test]
+    fn finds_the_saved_location_of_an_existing_file_without_rewriting_it() {
+        let directory = TestDirectory::create("settings-find-existing");
+        let stored_text = get_complete_settings().to_string();
+        let path = directory.create_file("settings.json", &stored_text);
+
+        let settings = find_settings_file(&path)
+            .expect("a readable file")
+            .expect("settings for an existing file");
+
+        assert!(settings.location().is_saved());
+        assert_eq!(get_settings_json(&settings), get_complete_settings());
+        assert_eq!(
+            fs::read_to_string(&path).expect("read the settings file"),
+            stored_text
+        );
+    }
+
+    #[test]
+    fn finding_fails_on_an_unreadable_or_unusable_file() {
+        let directory = TestDirectory::create("settings-find-failure");
+        let unreadable_path = directory.create_subdirectory("settings.json");
+        let unusable_path = directory.create_file("unusable.json", "{ not json");
+
+        let read_failure = find_settings_file(&unreadable_path).expect_err("a directory");
+        let parse_failure = find_settings_file(&unusable_path).expect_err("invalid JSON");
+
+        assert!(
+            read_failure.starts_with("Failed to read "),
+            "{read_failure}"
+        );
+        assert!(
+            parse_failure.starts_with("Failed to parse "),
+            "{parse_failure}"
+        );
     }
 
     #[test]

@@ -1,20 +1,6 @@
-import { locationSettingsSchema, type LocationSettings } from "@lys/share"
+import { hasSavedLocationPart, locationSettingsSchema } from "@lys/share"
 import * as z from "zod"
 import { buildCodeOnlyFailureSchema } from "./_share"
-
-/**
- * Answers whether a location has at least one saved part.
- *
- * @param location - Location to inspect.
- * @returns True when the city, the region, or the country is not `null`.
- */
-function hasSavedPart(location: LocationSettings): boolean {
-  return (
-    location.city !== null ||
-    location.region !== null ||
-    location.country !== null
-  )
-}
 
 /**
  * Validates the argument object of a `get_location` call: the tool takes no
@@ -34,7 +20,7 @@ export const getLocationInputSchema = z.strictObject({}).readonly()
  * `locationNotSet` instead. The location is personal data.
  */
 export const savedLocationSchema = locationSettingsSchema.refine(
-  hasSavedPart,
+  hasSavedLocationPart,
   "A saved location has a city, a region, or a country."
 )
 

@@ -79,3 +79,17 @@ export const locationSettingsSchema = z
 
 /** Location the person saved, as the `location` settings group holds it. */
 export type LocationSettings = z.infer<typeof locationSettingsSchema>
+
+/**
+ * Answers whether a location has at least one saved part.
+ *
+ * @param location - Location to inspect.
+ * @returns True when the city, the region, or the country is not `null`.
+ */
+export function hasSavedLocationPart(location: LocationSettings): boolean {
+  return (
+    location.city !== null ||
+    location.region !== null ||
+    location.country !== null
+  )
+}

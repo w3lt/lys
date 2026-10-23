@@ -1,10 +1,9 @@
-import { locationSettingsSchema } from "@lys/share"
+import { hasSavedLocationPart, locationSettingsSchema } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   buildLocationDraft,
   formatLocationMessage,
   formatPlaceNameProblem,
-  hasSavedLocationPart,
   parseLocationDraft
 } from "@/components/SettingsViewComponents/location-presentation"
 

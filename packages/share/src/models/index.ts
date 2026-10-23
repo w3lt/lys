@@ -71,6 +71,7 @@ export {
   type ModelLoadConfiguration
 } from "./modelLoadConfiguration"
 export {
+  hasSavedLocationPart,
   locationSettingsSchema,
   MAXIMUM_PLACE_NAME_LENGTH,
   placeNameSchema,

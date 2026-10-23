@@ -1,4 +1,8 @@
-import { MAXIMUM_PLACE_NAME_LENGTH, placeNameSchema } from "@lys/share"
+import {
+  hasSavedLocationPart,
+  MAXIMUM_PLACE_NAME_LENGTH,
+  placeNameSchema
+} from "@lys/share"
 
 import type { LocationSaveState } from "@/lib/store/location-settings"
 import type { LocationSettings } from "@/lib/store/settings"
@@ -112,16 +116,6 @@ export function buildLocationDraft(location: LocationSettings): LocationDraft {
     region: location.region ?? "",
     country: location.country ?? ""
   }
-}
-
-/**
- * Answers whether a location has at least one saved part.
- *
- * @param location - Location to inspect.
- * @returns True when the city, the region, or the country is not null.
- */
-export function hasSavedLocationPart(location: LocationSettings): boolean {
-  return LOCATION_PARTS.some((part) => location[part] !== null)
 }
 
 /**

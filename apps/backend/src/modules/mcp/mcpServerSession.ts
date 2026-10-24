@@ -151,19 +151,7 @@ export default class McpServerSession {
    * @returns A frozen state.
    */
   public get reportedState(): McpServerState {
-    switch (this.#state.status) {
-      case "connecting":
-        return Object.freeze({ status: "connecting" })
-      case "connected":
-        return Object.freeze({
-          status: "connected",
-          toolCount: this.#state.catalog.definitions.length,
-          skippedTools: this.#state.catalog.skippedTools,
-          isToolListCut: this.#state.catalog.isToolListCut
-        })
-      case "failed":
-        return Object.freeze({ status: "failed", reason: this.#state.reason })
-    }
+    return buildReportedState(this.#state)
   }
 
   /**
@@ -399,6 +387,28 @@ function buildCallSubject(definition: McpToolDefinition): McpToolCallSubject {
     serverName: definition.server,
     toolName: definition.name
   })
+}
+
+/**
+ * Builds the state the server list reports for a session state.
+ *
+ * @param state - Current state of a session.
+ * @returns A frozen state without the connection or the tools.
+ */
+function buildReportedState(state: SessionState): McpServerState {
+  switch (state.status) {
+    case "connecting":
+      return Object.freeze({ status: "connecting" })
+    case "connected":
+      return Object.freeze({
+        status: "connected",
+        toolCount: state.catalog.definitions.length,
+        skippedTools: state.catalog.skippedTools,
+        isToolListCut: state.catalog.isToolListCut
+      })
+    case "failed":
+      return Object.freeze({ status: "failed", reason: state.reason })
+  }
 }
 
 /**

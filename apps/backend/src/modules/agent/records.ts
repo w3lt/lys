@@ -57,6 +57,36 @@ export type StoredAgentRecord = Readonly<{
   deletedAt: string | null
 }>
 
+/** Search text and the number of matches to read. */
+export type SearchAgentsInput = Readonly<{
+  /** Text found literally, ignoring case, in a code, name, or bio. */
+  query: string
+  /** Inclusive maximum number of matches to read, at least one. */
+  limit: number
+}>
+
+/** One stored agent that matches a search. */
+export type StoredAgentMatch = Readonly<{
+  /** The agent, without its system prompt. */
+  agent: AgentSummary
+  /** Time the agent was deleted; null while it is not deleted. */
+  deletedAt: string | null
+  /** Whether the agent's code or name equals the query, ignoring case. */
+  isExactMatch: boolean
+}>
+
+/** The first matches of one search and how many agents match in all. */
+export type StoredAgentSearchPage = Readonly<{
+  /**
+   * Agents whose code or name equals the query first, then the others; each
+   * group in ascending creation-time and then code order; at most the
+   * requested limit.
+   */
+  matches: readonly StoredAgentMatch[]
+  /** Number of stored agents that match, deleted ones included. */
+  matchCount: number
+}>
+
 /**
  * Keeps stored agent definitions for the agent service: paged listing, and
  * lookup, creation, change, and deletion by code.
@@ -74,9 +104,9 @@ export type StoredAgentRecord = Readonly<{
  * nested: a call made while another operation on the store runs fails with
  * `Database transactions cannot be nested` and leaves that operation
  * untouched. Deletion only marks an agent deleted: its row stays, so its
- * code is never free again, a lookup still finds it, and listings, counts,
- * and changes skip it. Concurrency model: single-owner, synchronous on the
- * backend's event loop.
+ * code is never free again, a lookup or an {@link AgentRecordSearcher}
+ * search still finds it, and listings, counts, and changes skip it.
+ * Concurrency model: single-owner, synchronous on the backend's event loop.
  */
 export interface AgentRecordStore {
   /**
@@ -133,4 +163,32 @@ export interface AgentRecordStore {
    * @throws If the store is closed or the write fails.
    */
   deleteAgent(code: string, deletedAt: string): boolean
+}
+
+/**
+ * Searches the stored agent definitions for the agent service, deleted ones
+ * included.
+ *
+ * @remarks A search reads one consistent snapshot and changes nothing; it
+ * fails when the store cannot begin or release that snapshot. Returned
+ * matches are frozen independent values, validated against the agent
+ * schema. Borrowed from the store's owner without the authority to close
+ * it; every search fails with `Database is closed` after the owner closes
+ * the store. A search made while another operation on the store runs fails
+ * with `Database transactions cannot be nested`. Concurrency model:
+ * single-owner, synchronous on the backend's event loop.
+ */
+export interface AgentRecordSearcher {
+  /**
+   * Finds the stored agents whose code, name, or bio contains a text.
+   *
+   * @param input - Text found literally, under Unicode simple case folding,
+   * and the number of matches to read.
+   * @returns The first matches, frozen and without system prompts, deleted
+   * agents included with their deletion times, and the number of all
+   * matches; both read from one snapshot.
+   * @throws If the store is closed, the snapshot cannot begin or be released,
+   * or a matched row violates the agent schema; the records stay usable.
+   */
+  searchAgents(input: SearchAgentsInput): StoredAgentSearchPage
 }

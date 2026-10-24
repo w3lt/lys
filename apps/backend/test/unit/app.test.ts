@@ -9,6 +9,7 @@ import {
   createBackendLogger,
   registerOutputFailureListeners
 } from "../../src/log"
+import AgentRuntimeService from "../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../src/modules/agent/agentService"
 import AttachmentFileStore from "../../src/modules/attachment/attachmentFileStore"
 import StoredConversationHistoryEditor from "../../src/modules/conversation/historyEditor"
@@ -139,6 +140,7 @@ describe("buildApp", () => {
       StoredConversationHistoryEditor
     )
     expect(app.agentService).toBeInstanceOf(AgentService)
+    expect(app.agentRuntimeService).toBeInstanceOf(AgentRuntimeService)
     expect(app.attachmentFileStore).toBeInstanceOf(AttachmentFileStore)
     expect(response.statusCode).toBe(200)
     expect(response.json()).toMatchObject({ storedCount: 0 })

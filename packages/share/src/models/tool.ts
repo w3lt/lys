@@ -1,4 +1,10 @@
 import * as z from "zod"
+import {
+  FIND_AGENTS_TOOL_NAME,
+  READ_AGENT_STATE_TOOL_NAME,
+  READ_MY_STATE_TOOL_NAME
+} from "./agent"
+import { READ_ATTACHMENT_TOOL_NAME } from "./attachment"
 
 /**
  * Function names the OpenAI function-tool format accepts: 1 to 64 ASCII
@@ -118,12 +124,14 @@ export type ToolArgumentDefinition = z.infer<
  * when a client tool uses it; consumers that branch on the group
  * exhaustively must handle it.
  */
-const toolGroupSchema = z.enum(["files", "network", "timeAndPlace"])
+const toolGroupSchema = z.enum(["files", "network", "timeAndPlace", "agents"])
 
 /**
  * Group a tool is listed under in Settings: `files` holds the file tools,
- * `network` the tools that reach past this machine, and `timeAndPlace` the
- * tools that tell when and where the person is.
+ * `network` the tools that reach past this machine, `timeAndPlace` the
+ * tools that tell when and where the person is, and `agents` the tools that
+ * tell agents about themselves and each other, which the backend adds to a
+ * turn itself and Settings does not list.
  */
 export type ToolGroup = z.infer<typeof toolGroupSchema>
 
@@ -367,3 +375,18 @@ export function buildToolFunctionFormat(
     function: toolFunction
   } satisfies OpenAIFunctionTool)
 }
+
+/**
+ * Names of the tools the backend adds to a turn itself: the attachment reader
+ * and the agent tools.
+ *
+ * @remarks They have no switch, so a chat request may not offer them or name
+ * them as switched off or unable to run; the request contract refuses each
+ * one before the backend stores anything.
+ */
+export const BACKEND_INTERNAL_TOOL_NAMES: readonly string[] = Object.freeze([
+  READ_ATTACHMENT_TOOL_NAME,
+  READ_MY_STATE_TOOL_NAME,
+  FIND_AGENTS_TOOL_NAME,
+  READ_AGENT_STATE_TOOL_NAME
+])

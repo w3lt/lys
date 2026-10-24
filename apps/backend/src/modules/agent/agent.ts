@@ -15,6 +15,10 @@ import type {
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
 import { waitForSettlementOrAbort } from "../../utils/abort"
 import { ChatCompletionCancelledError } from "../../utils/errors"
+import AgentActivity, {
+  type AgentRequestStart,
+  type AgentRequestState
+} from "./agentActivity"
 import {
   buildAgentContext,
   calculateAgentContextHistoryMessageCount,
@@ -27,6 +31,12 @@ import {
   type FindAttachmentImage,
   type GetAttachmentImageFileStatus
 } from "./agentContext"
+import type { AgentIdentity, AgentRole } from "./agentRoles"
+import {
+  buildAgentStateDefinitions,
+  buildAgentStateTools,
+  type AgentStateReader
+} from "./agentStateTools"
 import {
   findReplyRoundFitFailure,
   ReplyContextOverflowError,
@@ -44,6 +54,7 @@ import type {
 } from "./replyModel"
 import ReplyPartSequence, {
   type ReplyPartDraft,
+  type ReplyPartSequenceDependencies,
   type ReplyToolCallChange
 } from "./replyPartSequence"
 import SourceCatalog from "./sourceCatalog"
@@ -66,8 +77,23 @@ export type AgentProfile = Readonly<{
    * compared exactly when a turn looks its agent up.
    */
   code: string
-  /** Non-empty instructions sent first in every context the agent builds. */
+  /** Role that decides which agents' state the agent may read. */
+  role: AgentRole
+  /**
+   * Non-empty instructions sent first in every context the agent builds,
+   * until {@link Agent.updateSystemPrompt} replaces them.
+   */
   systemPrompt: string
+}>
+
+/** What an agent borrows for its lifetime. */
+export type AgentDependencies = Readonly<{
+  /** Model access that writes every reply. */
+  replyModel: ReplyModel
+  /** Context meter of the same model, which measures every context. */
+  replyContextMeter: ReplyContextMeter
+  /** Reads agents and their state for the agent's state tools. */
+  stateReader: AgentStateReader
 }>
 
 /** Valid terminal assistant state; only completed replies carry a finish reason. */
@@ -88,6 +114,13 @@ export type AssistantMessageCompletion =
  * and report the reply.
  */
 export type AgentTurn = Readonly<{
+  /** UUIDv7 of the conversation the turn belongs to. */
+  conversationId: string
+  /**
+   * UUIDv7 of the stored reply the turn writes, which identifies the request
+   * in the agent's activity.
+   */
+  requestId: string
   /** Stored transcript before this turn, in conversation order. */
   history: readonly ConversationMessage[]
   /**
@@ -111,6 +144,11 @@ export type AgentTurn = Readonly<{
   findAttachmentImage: FindAttachmentImage
   /** Model selected by the request. */
   model: string
+  /**
+   * Whether the model is trained for tool use: true offers the agent's state
+   * tools after the turn's backend tools, also while tool calls are off.
+   */
+  trainedForToolUse: boolean
   /** Caller-provided sampling and reply length controls. */
   generationOptions: MessageGenerationOptions
   /** Client tools offered for the turn, each name once; empty when none are. */
@@ -246,6 +284,12 @@ export type AgentContextInput = Readonly<{
    */
   tools: readonly ToolDefinition[]
   /**
+   * Whether that model is trained for tool use, as
+   * {@link AgentTurn.trainedForToolUse}: true counts the agent's state tool
+   * definitions after `tools`.
+   */
+  trainedForToolUse: boolean
+  /**
    * What the request names about the tools the message would not offer, as
    * {@link AgentTurn.unofferedTools}.
    */
@@ -302,46 +346,52 @@ type ReplyRoundState = Readonly<{
 }>
 
 /**
- * Retains one agent's profile and borrowed model access to answer
- * conversation turns as that agent.
+ * One live agent: its profile, borrowed model access, and the requests it is
+ * working on, answering conversation turns as that agent.
  *
- * @remarks Every context the agent builds starts with its own system prompt,
- * never one stored with the conversation, followed by the notes about the
- * tools the turn does not offer when there are any. It keeps no state between turns; a
- * turn's rounds and context live only in that turn's `createReply` call, so
- * one instance answers overlapping turns, each through its own
+ * @remarks Long-lived: its owner keeps one instance per agent and answers
+ * every turn of that agent with it. Every context a turn builds starts with
+ * the system prompt the agent held when the turn started, never one stored
+ * with the conversation, followed by the notes about the tools the turn does
+ * not offer when there are any. Between turns it keeps only that prompt and
+ * its activity: each request is listed from the start of its `createReply`
+ * call until the call settles, at the step its stored parts show. A turn's
+ * rounds and context live only in that turn's `createReply` call, so one
+ * instance answers overlapping turns, each through its own
  * {@link AgentTurn}, as long as the model access permits overlapping streams.
  * Every round's context is measured against the model's window before it is
  * sent, and a round that does not fit, or whose model is not loaded, is never
  * sent. Owns no resource: the model's owner releases it. Concurrency model:
- * reentrant.
+ * reentrant; the prompt and the activity change synchronously on the
+ * backend's event loop.
  */
 export default class Agent {
-  /** Code stored on the conversations this agent answers. */
-  readonly #code: string
-  /** Instructions sent first in every context. */
-  readonly #systemPrompt: string
+  /** Code and role of this agent. */
+  readonly #identity: AgentIdentity
+  /** Instructions sent first in every context a new turn builds. */
+  #systemPrompt: string
   /** Borrowed model access that writes every reply. */
   readonly #replyModel: ReplyModel
   /** Borrowed meter that measures every context before it is sent. */
   readonly #replyContextMeter: ReplyContextMeter
+  /** Borrowed reader of agents and their state, for the state tools. */
+  readonly #stateReader: AgentStateReader
+  /** Requests this agent is working on and the step each is at. */
+  readonly #activity = new AgentActivity()
 
   /**
-   * Creates a ready agent without contacting its model.
-   * @param profile - Trusted code and system prompt of the agent.
-   * @param replyModel - Model access lent for the agent's lifetime.
-   * @param replyContextMeter - Context meter of the same model, lent for the
-   * agent's lifetime.
+   * Creates a ready agent, working on no request, without contacting its
+   * model.
+   * @param profile - Trusted code, role, and system prompt of the agent.
+   * @param dependencies - Model access, its context meter, and the state
+   * reader, lent for the agent's lifetime.
    */
-  public constructor(
-    profile: AgentProfile,
-    replyModel: ReplyModel,
-    replyContextMeter: ReplyContextMeter
-  ) {
-    this.#code = profile.code
+  public constructor(profile: AgentProfile, dependencies: AgentDependencies) {
+    this.#identity = Object.freeze({ code: profile.code, role: profile.role })
     this.#systemPrompt = profile.systemPrompt
-    this.#replyModel = replyModel
-    this.#replyContextMeter = replyContextMeter
+    this.#replyModel = dependencies.replyModel
+    this.#replyContextMeter = dependencies.replyContextMeter
+    this.#stateReader = dependencies.stateReader
   }
 
   /**
@@ -349,7 +399,27 @@ export default class Agent {
    * @returns The valid agent code given at creation; it never changes.
    */
   public get code(): string {
-    return this.#code
+    return this.#identity.code
+  }
+
+  /**
+   * Replaces the instructions the agent sends first.
+   * @param systemPrompt - Non-empty instructions of the agent as stored now.
+   * @remarks A turn already answering keeps the instructions it started
+   * with; a turn or a measurement that starts after the call sends the new
+   * ones.
+   */
+  public updateSystemPrompt(systemPrompt: string): void {
+    this.#systemPrompt = systemPrompt
+  }
+
+  /**
+   * Lists the requests the agent is working on.
+   * @returns A frozen list in start order, each request with its step; later
+   * changes leave it as it was.
+   */
+  public listRequests(): readonly AgentRequestState[] {
+    return this.#activity.listRequests()
   }
 
   /**
@@ -357,12 +427,13 @@ export default class Agent {
    * its next message.
    *
    * @param input - Stored transcript, model, whether it sees images, the
-   * image file lookup, offered tool definitions, and what the request names
-   * about the tools it would not offer, borrowed until the returned promise
-   * settles.
+   * image file lookup, offered tool definitions, whether the model is trained
+   * for tool use, and what the request names about the tools it would not
+   * offer, borrowed until the returned promise settles.
    * @returns A promise resolving to the window and the tokens of this agent's
    * system prompt with the notes about the tools the message would not
-   * offer, of the tools, of the stored messages a turn would include,
+   * offer, of the tools with the agent's state tools after them when the
+   * model is trained for tool use, of the stored messages a turn would include,
    * and of the new message's markup, measured exactly as a turn's first round
    * sends them with an empty new message without files; or to undefined when
    * the model is not loaded. When the model sees images, the history's image
@@ -376,6 +447,7 @@ export default class Agent {
   public async findContextMeasurement(
     input: AgentContextInput
   ): Promise<AgentContextMeasurement | undefined> {
+    const systemPrompt = this.#systemPrompt
     const images: AgentContextImages<ReplyContextImageSides> =
       input.canSeeImages
         ? await getAgentContextImageSides(
@@ -386,15 +458,19 @@ export default class Agent {
     const measurement =
       await this.#replyContextMeter.findReplyContextMeasurement({
         messages: buildAgentContext({
-          systemPrompt: formatSystemPrompt(
-            this.#systemPrompt,
-            input.unofferedTools
-          ),
+          systemPrompt: formatSystemPrompt(systemPrompt, input.unofferedTools),
           history: input.history,
           userMessage: EMPTY_USER_MESSAGE,
           images
         }),
-        tools: buildDefinedToolOffer(input.tools),
+        tools: buildDefinedToolOffer(
+          input.trainedForToolUse
+            ? [
+                ...input.tools,
+                ...buildAgentStateDefinitions(this.#identity.role)
+              ]
+            : input.tools
+        ),
         model: input.model
       })
     return measurement === undefined
@@ -444,11 +520,21 @@ export default class Agent {
    * first round, and sent with their messages in every round. A round whose
    * context, tools, and reply ceiling exceed the model's context length, or
    * whose model is not loaded, is not sent: the reply fails, keeping the
-   * parts earlier rounds stored, and its `error` event says why.
+   * parts earlier rounds stored, and its `error` event says why. The turn uses
+   * the system prompt the agent holds when the call starts. When the model is
+   * trained for tool use, the agent's state tools are offered after the
+   * turn's backend tools, also while tool calls are off, and their calls run
+   * at once. The request is listed in the agent's activity from the call's
+   * start, preparing round 0, until the returned promise settles, whatever
+   * the outcome: each round's start shows it preparing that round, and each
+   * part or tool call change the reply stores shows the step it puts the
+   * request at.
    */
   public async createReply(turn: AgentTurn): Promise<void> {
+    const systemPrompt = this.#systemPrompt
+    this.#activity.addRequest(buildRequestStart(turn, new Date()))
     try {
-      const finishReason = await this.#createReplyText(turn)
+      const finishReason = await this.#createReplyText(turn, systemPrompt)
       if (finishReason === undefined) {
         turn.updateAssistantMessageState({ status: "interrupted" })
         turn.sendEvent({ type: "interrupted" })
@@ -465,6 +551,8 @@ export default class Agent {
       )
     } catch (error) {
       handleReplyFailure(turn, error)
+    } finally {
+      this.#activity.removeRequest(turn.requestId)
     }
   }
 
@@ -473,6 +561,7 @@ export default class Agent {
    * part before sending it.
    *
    * @param turn - Turn context, tools, reply storage, and cancellation.
+   * @param systemPrompt - Instructions the turn sends first.
    * @returns The supported finish reason, or undefined after cancellation,
    * supersession, or deletion.
    * @throws If an image attachment cannot be read although its file is not
@@ -487,20 +576,28 @@ export default class Agent {
    * round.
    */
   async #createReplyText(
-    turn: AgentTurn
+    turn: AgentTurn,
+    systemPrompt: string
   ): Promise<ConversationAssistantMessageFinishReason | undefined> {
-    const tools = buildAgentToolset(turn.clientTools, turn.builtInTools)
+    const builtInTools = turn.trainedForToolUse
+      ? [
+          ...turn.builtInTools,
+          ...buildAgentStateTools({
+            self: this.#identity,
+            requestId: turn.requestId,
+            reader: this.#stateReader
+          })
+        ]
+      : turn.builtInTools
+    const tools = buildAgentToolset(turn.clientTools, builtInTools)
     const state: ReplyRoundState = Object.freeze({
       turn,
       tools,
       unofferedTools: turn.unofferedTools,
       offeredTools: buildOfferedTools(tools),
-      replyParts: new ReplyPartSequence({
-        createReplyPart: turn.createReplyPart,
-        updateReplyPartContent: turn.updateReplyPartContent,
-        updateReplyToolCall: turn.updateReplyToolCall,
-        sendEvent: turn.sendEvent
-      }),
+      replyParts: new ReplyPartSequence(
+        buildActivityReplyStorage(turn, this.#activity)
+      ),
       sourceCatalog: new SourceCatalog(turn.sources)
     })
     const images = await readContextImages(
@@ -509,7 +606,7 @@ export default class Agent {
       turn.findAttachmentImage
     )
     const messages = buildAgentContext({
-      systemPrompt: formatSystemPrompt(this.#systemPrompt, turn.unofferedTools),
+      systemPrompt: formatSystemPrompt(systemPrompt, turn.unofferedTools),
       history: turn.history,
       userMessage: turn.userMessage,
       images
@@ -580,6 +677,7 @@ export default class Agent {
   ): Promise<ReplyRound> {
     const { turn, replyParts } = state
     if (turn.abortSignal.aborted) return ENDED_REPLY_ROUND
+    this.#activity.updateRequestRound(turn.requestId, input.round)
     const stream = await this.#openReplyRoundStream(state, input)
     let roundText = ""
     for await (const event of stream) {
@@ -640,6 +738,71 @@ export default class Agent {
       abortSignal: turn.abortSignal
     })
   }
+}
+
+/**
+ * Builds what the agent's activity follows of a request when it starts.
+ *
+ * @param turn - The turn the request answers.
+ * @param now - Time the request started.
+ * @returns The request's reply, conversation, model, start time, and the
+ * names of the client tools the turn offers.
+ */
+function buildRequestStart(turn: AgentTurn, now: Date): AgentRequestStart {
+  return Object.freeze({
+    requestId: turn.requestId,
+    conversationId: turn.conversationId,
+    model: turn.model,
+    startedAt: now.toISOString(),
+    clientToolNames: new Set(turn.clientTools.map((tool) => tool.name))
+  })
+}
+
+/**
+ * Shows a part or a tool call change the reply stored in the agent's
+ * activity.
+ *
+ * @param activity - The agent's activity.
+ * @param requestId - Reply id of the request.
+ * @param part - What the reply's storage returned: the stored part, or
+ * undefined when the reply refused the write.
+ * @returns The same value, after the activity shows the step a stored part
+ * puts the request at; a refused write changes nothing.
+ */
+function updateActivityStep<Part extends ReplyPart>(
+  activity: AgentActivity,
+  requestId: string,
+  part: Part | undefined
+): Part | undefined {
+  if (part !== undefined) activity.updateRequestStep(requestId, part)
+  return part
+}
+
+/**
+ * Builds the reply storage of one turn's part sequence, which shows each
+ * stored part and tool call change in the agent's activity.
+ *
+ * @param turn - The turn's reply storage and event sender.
+ * @param activity - The agent's activity.
+ * @returns The turn's writers and sender; part and tool call writes return
+ * what the turn's own writers return.
+ */
+function buildActivityReplyStorage(
+  turn: AgentTurn,
+  activity: AgentActivity
+): ReplyPartSequenceDependencies {
+  return Object.freeze({
+    createReplyPart: (draft: ReplyPartDraft) =>
+      updateActivityStep(activity, turn.requestId, turn.createReplyPart(draft)),
+    updateReplyPartContent: turn.updateReplyPartContent,
+    updateReplyToolCall: (toolCallId: string, change: ReplyToolCallChange) =>
+      updateActivityStep(
+        activity,
+        turn.requestId,
+        turn.updateReplyToolCall(toolCallId, change)
+      ),
+    sendEvent: turn.sendEvent
+  })
 }
 
 /**

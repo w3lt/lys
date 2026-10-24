@@ -5,7 +5,10 @@ import type {
   DatabaseWriter
 } from "../../../../../src/infrastructure/database/databaseTransactions"
 import { openSqliteAgentRecordStore } from "../../../support/agentDatabase"
-import { registerAgentRecordStoreContractSuite } from "../../../support/agentRecordStoreContract"
+import {
+  registerAgentRecordSearcherContractSuite,
+  registerAgentRecordStoreContractSuite
+} from "../../../support/agentRecordStoreContract"
 
 /** Column values of one stored agent row, unchecked by the agent schemas. */
 type AgentRow = Readonly<{
@@ -72,6 +75,7 @@ function saveAgentRow(database: DatabaseWriter, row: AgentRow): void {
 
 describe("SqliteAgentRecordStore", () => {
   registerAgentRecordStoreContractSuite(() => openSqliteAgentRecordStore())
+  registerAgentRecordSearcherContractSuite(() => openSqliteAgentRecordStore())
 
   it("rejects a stored row that violates the agent contract and stays usable", () => {
     const records = openSqliteAgentRecordStore()

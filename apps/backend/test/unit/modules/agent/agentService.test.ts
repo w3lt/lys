@@ -10,21 +10,16 @@ import type {
   DatabaseReader,
   DatabaseWriter
 } from "../../../../src/infrastructure/database/databaseTransactions"
-import type Agent from "../../../../src/modules/agent/agent"
 import AgentService from "../../../../src/modules/agent/agentService"
 import { buildBuiltInAgents } from "../../../../src/modules/agent/builtInAgents"
 import type { AgentRecordStore } from "../../../../src/modules/agent/records"
-import type {
-  ReplyModel,
-  ReplyStreamEvent
-} from "../../../../src/modules/agent/replyModel"
-import { NO_UNOFFERED_TOOLS } from "../../../../src/modules/agent/unofferedTools"
 import SqliteAgentRecordStore from "../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
 import {
   registerAgentDeleterContractSuite,
   registerAgentEditorContractSuite,
   registerAgentListerContractSuite,
   registerAgentReaderContractSuite,
+  registerAgentSearcherContractSuite,
   type AgentCapabilitiesHarness
 } from "../../support/agentCapabilitiesContract"
 import { openSqliteAgentRecordStore } from "../../support/agentDatabase"
@@ -33,8 +28,6 @@ import {
   type AgentCreatorHarness
 } from "../../support/agentCreatorContract"
 import { openTestDatabase } from "../../support/conversationDatabase"
-import { createRoomyReplyContextMeter } from "../../support/replyContextMeterFakes"
-import { createUserMessage } from "../../support/conversationFixtures"
 
 /** Time the clock reads when a case starts. */
 const NOW = "2026-05-06T07:08:09.123Z"
@@ -57,83 +50,15 @@ const RESEARCHER_DEFINITION = {
 }
 
 /**
- * Creates model access whose every reply ends at once.
- *
- * @returns The model, whose stream opener records each call.
- */
-function createFinishingReplyModel() {
-  return {
-    openReplyStream: vi.fn<ReplyModel["openReplyStream"]>(async () =>
-      (async function* (): AsyncGenerator<ReplyStreamEvent> {
-        yield { type: "finish", finishReason: "stop" }
-      })()
-    )
-  } satisfies ReplyModel
-}
-
-/**
  * Creates the agent service over Sqlite records on an in-memory database
  * owned by the current test.
  *
- * @param replyModel - Model access every agent borrows; by default one that
- * ends every reply at once.
  * @returns The ready service.
  */
-function createAgentService(
-  replyModel: ReplyModel = createFinishingReplyModel()
-): AgentService {
+function createAgentService(): AgentService {
   return new AgentService({
-    recordStore: new SqliteAgentRecordStore(openTestDatabase()),
-    builtInAgents: BUILT_IN_AGENTS,
-    replyModel,
-    replyContextMeter: createRoomyReplyContextMeter()
-  })
-}
-
-/**
- * Has an agent answer one turn that says `Hello`, without history or tools.
- *
- * @param agent - Agent that answers.
- * @returns Settlement after the reply is final.
- */
-async function createHelloReply(agent: Agent): Promise<void> {
-  await agent.createReply({
-    history: [],
-    sources: [],
-    userMessage: createUserMessage(1, "Hello"),
-    canSeeImages: false,
-    findAttachmentImage: vi.fn(),
-    model: "qwen/qwen3-8b",
-    generationOptions: { temperature: 0.4 },
-    clientTools: [],
-    builtInTools: [],
-    unofferedTools: NO_UNOFFERED_TOOLS,
-    abortSignal: new AbortController().signal,
-    updateAssistantMessageState: () => true,
-    createReplyPart: vi.fn(),
-    updateReplyPartContent: vi.fn(),
-    updateReplyToolCall: vi.fn(),
-    sendEvent: vi.fn(),
-    sendClientToolCall: vi.fn(),
-    createToolCallGate: vi.fn(),
-    reportReplyCancellation: vi.fn(),
-    reportReplyRefusal: vi.fn(),
-    reportReplyFailure: vi.fn()
-  })
-}
-
-/**
- * Builds the context a model receives for {@link createHelloReply}.
- *
- * @param systemPrompt - System prompt the answering agent sends first.
- * @returns The expected stream request, matching any other request field.
- */
-function buildHelloReplyRequest(systemPrompt: string): unknown {
-  return expect.objectContaining({
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: "Hello", images: [] }
-    ]
+    recordStore: SqliteAgentRecordStore.create(openTestDatabase()),
+    builtInAgents: BUILT_IN_AGENTS
   })
 }
 
@@ -239,14 +164,13 @@ function createAgentServiceHarness(): AgentServiceHarness {
   const { database, recordStore, closeRecords } = openSqliteAgentRecordStore()
   const agentService = new AgentService({
     recordStore,
-    builtInAgents: BUILT_IN_AGENTS,
-    replyModel: createFinishingReplyModel(),
-    replyContextMeter: createRoomyReplyContextMeter()
+    builtInAgents: BUILT_IN_AGENTS
   })
   return {
     agentCreator: agentService,
     agentLister: agentService,
     agentReader: agentService,
+    agentSearcher: agentService,
     agentEditor: agentService,
     agentDeleter: agentService,
     builtInAgents: BUILT_IN_AGENTS,
@@ -262,6 +186,7 @@ describe("AgentService", () => {
   registerAgentCreatorContractSuite(createAgentServiceHarness)
   registerAgentListerContractSuite(createAgentServiceHarness)
   registerAgentReaderContractSuite(createAgentServiceHarness)
+  registerAgentSearcherContractSuite(createAgentServiceHarness)
   registerAgentEditorContractSuite(createAgentServiceHarness)
   registerAgentDeleterContractSuite(createAgentServiceHarness)
 
@@ -442,7 +367,7 @@ describe("AgentService", () => {
     })
 
     it.each([CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE])(
-      "leaves the built-in agent %s answering chats after refusing to delete it",
+      "leaves the built-in agent %s as it was after refusing to delete it",
       (code) => {
         const agents = createAgentService()
 
@@ -452,71 +377,7 @@ describe("AgentService", () => {
           agent: { kind: "built-in" },
           deletedAt: null
         })
-        expect(agents.findChatAgent(code)?.code).toBe(code)
       }
     )
-  })
-
-  describe("findChatAgent", () => {
-    it.each([
-      [CALIGINIA_AGENT_CODE, "You are Caliginia."],
-      [LYSIPTERA_AGENT_CODE, "You are Lysiptera."]
-    ])(
-      "finds the built-in agent %s, answering with its shipped prompt",
-      async (code, systemPrompt) => {
-        const replyModel = createFinishingReplyModel()
-        const agent = createAgentService(replyModel).findChatAgent(code)
-
-        if (agent !== undefined) await createHelloReply(agent)
-
-        expect(agent?.code).toBe(code)
-        expect(replyModel.openReplyStream).toHaveBeenCalledWith(
-          buildHelloReplyRequest(systemPrompt)
-        )
-      }
-    )
-
-    it("finds a stored agent, answering with its stored prompt", async () => {
-      const replyModel = createFinishingReplyModel()
-      const agents = createAgentService(replyModel)
-      agents.createAgent(RESEARCHER_DEFINITION)
-
-      const agent = agents.findChatAgent("researcher")
-      if (agent !== undefined) await createHelloReply(agent)
-
-      expect(agent?.code).toBe("researcher")
-      expect(replyModel.openReplyStream).toHaveBeenCalledWith(
-        buildHelloReplyRequest("You research the web.")
-      )
-    })
-
-    it("answers with a stored agent's changed prompt once it is looked up again", async () => {
-      const replyModel = createFinishingReplyModel()
-      const agents = createAgentService(replyModel)
-      agents.createAgent(RESEARCHER_DEFINITION)
-      agents.updateAgent("researcher", { systemPrompt: "You cite sources." })
-
-      const agent = agents.findChatAgent("researcher")
-      if (agent !== undefined) await createHelloReply(agent)
-
-      expect(replyModel.openReplyStream).toHaveBeenCalledWith(
-        buildHelloReplyRequest("You cite sources.")
-      )
-    })
-
-    it.each(["web-researcher", "CALIGINIA", "caliginia-2", "lys", ""])(
-      "finds no agent for the code %j",
-      (code) => {
-        expect(createAgentService().findChatAgent(code)).toBeUndefined()
-      }
-    )
-
-    it("finds no agent for a deleted agent's code", () => {
-      const agents = createAgentService()
-      agents.createAgent(RESEARCHER_DEFINITION)
-      agents.deleteAgent("researcher")
-
-      expect(agents.findChatAgent("researcher")).toBeUndefined()
-    })
   })
 })

@@ -14,9 +14,10 @@ const deleteAgentApiResponseSchemas = Object.freeze({
 })
 
 /**
- * Describes the DELETE endpoint that permanently removes one stored agent.
+ * Describes the DELETE endpoint that marks one stored agent deleted.
  *
- * @remarks Success is a bodyless 204 sent after the agent has been removed.
+ * @remarks Success is a bodyless 204 sent after the agent has been marked
+ * deleted.
  * Deletion cannot be undone. A missing agent, or one already deleted,
  * returns the agent-not-found problem with HTTP 404; clients may treat that
  * problem as confirmation that the agent no longer exists. A built-in agent

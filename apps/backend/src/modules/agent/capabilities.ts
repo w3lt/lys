@@ -127,3 +127,50 @@ export interface AgentDeleter {
    */
   deleteAgent(code: string): AgentDeletionOutcome
 }
+
+/** Largest number of matches one agent search returns. */
+export const MAXIMUM_AGENT_SEARCH_MATCHES = 20
+
+/** One built-in or stored agent that matches a search. */
+export type AgentSearchMatch = Readonly<{
+  /** Whether the agent ships with the backend or was stored. */
+  kind: "built-in" | "custom"
+  /** Code of the agent. */
+  code: string
+  /** Display name of the agent. */
+  name: string
+  /** Short description of what the agent does. */
+  bio: string
+  /**
+   * Time a stored agent was deleted; null while it is not deleted, and
+   * always null for a built-in agent.
+   */
+  deletedAt: string | null
+}>
+
+/** The first matches of one agent search and how many agents match in all. */
+export type AgentSearchResult = Readonly<{
+  /**
+   * At most {@link MAXIMUM_AGENT_SEARCH_MATCHES} matches: agents whose code
+   * or name equals the query first, built-in before stored; then the other
+   * built-in agents in shipped order; then the other stored agents by
+   * creation time and code.
+   */
+  matches: readonly AgentSearchMatch[]
+  /** Number of built-in and stored agents that match, deleted ones included. */
+  matchCount: number
+}>
+
+/** Synchronous search of every agent, borrowed for one backend lifetime. */
+export interface AgentSearcher {
+  /**
+   * Finds the built-in and stored agents, deleted ones included, whose code,
+   * name, or bio contains a text.
+   * @param query - Text found literally, under Unicode simple case folding;
+   * the caller bounds and trims it.
+   * @returns The frozen first matches and the number of all matches.
+   * @throws With `Database is closed` once the store's owner has closed it,
+   * or if the store holds an invalid agent.
+   */
+  searchAgents(query: string): AgentSearchResult
+}

@@ -3,12 +3,18 @@ import { agentSummarySchema } from "@lys/protocol"
 import { agentSchema, type Agent } from "@lys/share"
 import type {
   AgentPage,
+  AgentRecordSearcher,
   AgentRecordStore,
   ListAgentsInput,
+  SearchAgentsInput,
+  StoredAgentMatch,
   StoredAgentRecord,
+  StoredAgentSearchPage,
   UpdateAgentInput
 } from "../../../modules/agent/records"
+import { calculateConversationSearchMatch } from "../conversations/conversationSearch"
 import type {
+  DatabaseFunctionRegistry,
   DatabaseReader,
   DatabaseStatementCompiler,
   DatabaseWriter
@@ -34,6 +40,89 @@ const storedAgentRecordSchema = z
     deletedAt: z.iso.datetime({ precision: 3 }).nullable()
   })
   .readonly()
+
+/** Validates the number of stored agents that match a search. */
+const agentMatchCountSchema = z.strictObject({
+  matchCount: z.int().nonnegative()
+})
+
+/** Validates one matched row: the agent summary and two search columns. */
+const agentMatchRowSchema = z.strictObject({
+  ...agentSummarySchema.unwrap().shape,
+  /** Deletion time in the stored format; null while not deleted. */
+  deletedAt: z.iso.datetime({ precision: 3 }).nullable(),
+  /** SQLite truth value of whether the code or name equals the query. */
+  isExactMatch: z.literal([0, 1])
+})
+
+/**
+ * Condition under which an agent matches the bound `$query`; requires the
+ * `contains_search` function on the connection.
+ */
+const AGENT_MATCH_SQL = `contains_search(code, $query)
+  OR contains_search(name, $query) OR contains_search(bio, $query)`
+
+/**
+ * Value of whether an agent's code or name equals the bound `$query`,
+ * ignoring case: the same number of characters and a case-insensitive
+ * match mean the whole text matches.
+ */
+const AGENT_EXACT_MATCH_SQL = `(length(code) = length($query)
+  AND contains_search(code, $query))
+  OR (length(name) = length($query) AND contains_search(name, $query))`
+
+/**
+ * Builds the frozen match of one validated row.
+ * @param row - Matched row read by {@link searchAgents}.
+ * @returns The match, its agent summary frozen.
+ */
+function buildAgentMatch(
+  row: z.infer<typeof agentMatchRowSchema>
+): StoredAgentMatch {
+  const { deletedAt, isExactMatch, ...agent } = row
+  return Object.freeze({
+    agent: agentSummarySchema.parse(agent),
+    deletedAt,
+    isExactMatch: isExactMatch === 1
+  })
+}
+
+/**
+ * Reads the match count and the first matches of one search inside the
+ * caller's read transaction.
+ * @param statements - Statement compilation lent to the caller's transaction.
+ * @param input - Search text and the number of matches to read.
+ * @returns The frozen page: matches whose code or name equals the query
+ * first, then the others, each group by creation time and code.
+ * @throws If SQLite fails or a matched row violates the agent schema.
+ * @remarks Requires the `contains_search` function on the connection.
+ */
+function searchAgents(
+  statements: DatabaseStatementCompiler,
+  input: SearchAgentsInput
+): StoredAgentSearchPage {
+  const { matchCount } = agentMatchCountSchema.parse(
+    statements
+      .getStatement(
+        `SELECT count(*) AS matchCount FROM agents WHERE ${AGENT_MATCH_SQL}`
+      )
+      .get({ query: input.query })
+  )
+  const rows = statements
+    .getStatement(
+      `SELECT code, name, bio, created_at AS createdAt, updated_at AS updatedAt,
+      deleted_at AS deletedAt, ${AGENT_EXACT_MATCH_SQL} AS isExactMatch
+      FROM agents WHERE ${AGENT_MATCH_SQL}
+      ORDER BY isExactMatch DESC, created_at, code LIMIT $limit`
+    )
+    .all({ query: input.query, limit: input.limit })
+  return Object.freeze({
+    matches: Object.freeze(
+      rows.map((row) => buildAgentMatch(agentMatchRowSchema.parse(row)))
+    ),
+    matchCount
+  })
+}
 
 /**
  * Reads the agent count and one page of summaries inside the caller's read
@@ -168,13 +257,17 @@ function updateAgent(
  * Borrows the shared database's read snapshots and write transactions to keep
  * stored agent definitions.
  *
- * @remarks Owns no resource: the database's owner closes the connection, after
- * which every operation fails with `Database is closed`. Each listing or
- * lookup is one read snapshot and each change one write transaction that commits before it
- * returns. Concurrency model: single-owner, synchronous on the backend's event
- * loop. Implements {@link AgentRecordStore}.
+ * @remarks Invariant: once created, `contains_search` is registered on the
+ * shared connection for its search queries. Owns no resource: the database's
+ * owner closes the connection, after which every operation fails with
+ * `Database is closed`. Each listing, search, or lookup is one read snapshot
+ * and each change one write transaction that commits before it returns.
+ * Concurrency model: single-owner, synchronous on the backend's event loop.
+ * Implements {@link AgentRecordStore} and {@link AgentRecordSearcher}.
  */
-export default class SqliteAgentRecordStore implements AgentRecordStore {
+export default class SqliteAgentRecordStore
+  implements AgentRecordStore, AgentRecordSearcher
+{
   /** Borrowed read snapshots for agent listings and lookups. */
   readonly #databaseReader: DatabaseReader
 
@@ -182,13 +275,36 @@ export default class SqliteAgentRecordStore implements AgentRecordStore {
   readonly #databaseWriter: DatabaseWriter
 
   /**
-   * Retains borrowed database access without performing database work.
+   * Retains borrowed database access prepared by
+   * {@link SqliteAgentRecordStore.create}.
    * @param database - Read snapshots and write transactions lent by the
    * database owner.
    */
-  public constructor(database: DatabaseReader & DatabaseWriter) {
+  private constructor(database: DatabaseReader & DatabaseWriter) {
     this.#databaseReader = database
     this.#databaseWriter = database
+  }
+
+  /**
+   * Registers agent search on the shared connection and publishes the agent
+   * records.
+   * @param database - Read snapshots, write transactions, and function
+   * registration lent by the database owner; the records retain only the
+   * snapshots and transactions.
+   * @returns The ready records; they own nothing to release.
+   * @throws If the database is closed or SQLite rejects the registration.
+   * @remarks Registers `contains_search`, the case-insensitive match the
+   * conversation records register too, replacing a function already
+   * registered under that name.
+   */
+  public static create(
+    database: DatabaseReader & DatabaseWriter & DatabaseFunctionRegistry
+  ): SqliteAgentRecordStore {
+    database.registerDatabaseFunction(
+      "contains_search",
+      calculateConversationSearchMatch
+    )
+    return new SqliteAgentRecordStore(database)
   }
 
   /**
@@ -259,6 +375,19 @@ export default class SqliteAgentRecordStore implements AgentRecordStore {
             "UPDATE agents SET deleted_at = ? WHERE code = ? AND deleted_at IS NULL"
           )
           .run(deletedAt, code).changes === 1
+    )
+  }
+
+  /**
+   * Implements {@link AgentRecordSearcher.searchAgents} in one read snapshot, so
+   * the count and the matches agree.
+   * @param input - Interface-defined search text and number of matches.
+   * @returns The interface-defined page.
+   * @throws The interface-defined closed and validation failures.
+   */
+  public searchAgents(input: SearchAgentsInput): StoredAgentSearchPage {
+    return this.#databaseReader.handleDatabaseReadRequest((statements) =>
+      searchAgents(statements, input)
     )
   }
 }

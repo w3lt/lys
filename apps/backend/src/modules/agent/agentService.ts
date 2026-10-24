@@ -9,39 +9,41 @@ import {
   type AgentDefinitionCandidate,
   type BuiltInAgent
 } from "@lys/share"
-import Agent from "./agent"
+import { isExactSearchMatch, hasSearchText } from "../../utils/search"
 import { calculateAgentCode } from "./agentCode"
-import type {
-  AgentCreator,
-  AgentDeleter,
-  AgentDeletionOutcome,
-  AgentEditor,
-  AgentLister,
-  AgentReader,
-  AgentUpdateOutcome,
-  FoundAgent
+import {
+  MAXIMUM_AGENT_SEARCH_MATCHES,
+  type AgentCreator,
+  type AgentDeleter,
+  type AgentDeletionOutcome,
+  type AgentEditor,
+  type AgentLister,
+  type AgentReader,
+  type AgentSearcher,
+  type AgentSearchMatch,
+  type AgentSearchResult,
+  type AgentUpdateOutcome,
+  type FoundAgent
 } from "./capabilities"
 import { createAgentListCursor, type AgentListOptions } from "./listOptions"
-import type { AgentRecordStore } from "./records"
-import type { ReplyContextMeter } from "./replyContextMeter"
-import type { ReplyModel } from "./replyModel"
+import type {
+  AgentRecordSearcher,
+  AgentRecordStore,
+  StoredAgentMatch
+} from "./records"
 
-/** Records, built-in agents, and model access the agent service is built from. */
+/** Records and built-in agents the agent service is built from. */
 export type AgentServiceOptions = Readonly<{
-  /** Agent records lent by the composition root, which closes their store. */
-  recordStore: AgentRecordStore
+  /**
+   * Agent records and their search, lent by the composition root, which
+   * closes their store.
+   */
+  recordStore: AgentRecordStore & AgentRecordSearcher
   /**
    * Agents the backend ships with, each code once, in the order they are
    * listed; built once at startup.
    */
   builtInAgents: readonly BuiltInAgent[]
-  /** Model access lent to every agent for the service's lifetime. */
-  replyModel: ReplyModel
-  /**
-   * Context meter of the same model, lent to every agent for the service's
-   * lifetime.
-   */
-  replyContextMeter: ReplyContextMeter
 }>
 
 /** Shared outcome of a change no agent could take. */
@@ -61,6 +63,63 @@ const BUILT_IN_AGENT_UPDATE_OUTCOME = Object.freeze({
  */
 function buildBuiltInAgentSummary(agent: BuiltInAgent): BuiltInAgentSummary {
   return Object.freeze({ code: agent.code, name: agent.name, bio: agent.bio })
+}
+
+/**
+ * Tells whether a built-in agent's code, name, or bio contains a search text.
+ * @param agent - Listed built-in agent.
+ * @param query - Search text, taken literally, ignoring case.
+ * @returns True when the agent matches, as a stored agent would.
+ */
+function hasAgentSearchMatch(
+  agent: BuiltInAgentSummary,
+  query: string
+): boolean {
+  return (
+    hasSearchText(agent.code, query) ||
+    hasSearchText(agent.name, query) ||
+    hasSearchText(agent.bio, query)
+  )
+}
+
+/**
+ * Tells whether a built-in agent's code or name equals a search text.
+ * @param agent - Listed built-in agent.
+ * @param query - Search text, taken literally, ignoring case.
+ * @returns True for an exact match, as the records tell for a stored agent.
+ */
+function isExactAgentSearchMatch(
+  agent: BuiltInAgentSummary,
+  query: string
+): boolean {
+  return (
+    isExactSearchMatch(agent.code, query) ||
+    isExactSearchMatch(agent.name, query)
+  )
+}
+
+/**
+ * Builds the search match of a built-in agent.
+ * @param agent - Listed built-in agent.
+ * @returns The frozen match; a built-in agent is never deleted.
+ */
+function buildBuiltInAgentMatch(agent: BuiltInAgentSummary): AgentSearchMatch {
+  return Object.freeze({ kind: "built-in", ...agent, deletedAt: null })
+}
+
+/**
+ * Builds the search match of a stored agent.
+ * @param match - Match read from the records.
+ * @returns The frozen match with the agent's deletion time.
+ */
+function buildStoredAgentMatch(match: StoredAgentMatch): AgentSearchMatch {
+  return Object.freeze({
+    kind: "custom",
+    code: match.agent.code,
+    name: match.agent.name,
+    bio: match.agent.bio,
+    deletedAt: match.deletedAt
+  })
 }
 
 /**
@@ -94,22 +153,31 @@ function buildStoredAgent(
  *
  * @remarks A built-in agent ships with the backend: it is never stored,
  * changed, or deleted, and no stored agent can take its code. Every built-in
- * or stored agent answers chats under its code; the agent that answers a turn
- * is built from the current record when it is looked up, so a stored agent's
- * latest system prompt is the one sent. Each create or update reads the
- * current time once and passes it to everything it stores; nothing it calls
- * reads the clock. Each update or delete is one write transaction that
- * commits before it returns; a create is one write transaction per code it
- * tries. Owns no resource: the records' owner closes their store, after which
- * every records operation fails with `Database is closed`, and the model's
- * owner releases it and its context meter. Concurrency model: single-owner,
- * synchronous on the backend's event loop.
+ * or stored agent answers chats under its code through the agent runtime
+ * service, which reads it here each time a turn looks it up, so a stored
+ * agent's latest system prompt is the one sent. Each create, update, or
+ * delete reads the current time once and passes it to everything it stores;
+ * nothing it calls reads the clock. Each update or delete is one write
+ * transaction that commits before it returns; a create is one write
+ * transaction per code it tries. Owns no resource: the records' owner closes
+ * their store, after which every records operation fails with `Database is
+ * closed`. Concurrency model: single-owner, synchronous on the backend's
+ * event loop.
  */
 export default class AgentService
-  implements AgentLister, AgentReader, AgentCreator, AgentEditor, AgentDeleter
+  implements
+    AgentLister,
+    AgentReader,
+    AgentSearcher,
+    AgentCreator,
+    AgentEditor,
+    AgentDeleter
 {
-  /** Borrowed records for every stored-agent listing, lookup, and change. */
-  readonly #recordStore: AgentRecordStore
+  /**
+   * Borrowed records for every stored-agent listing, search, lookup, and
+   * change.
+   */
+  readonly #recordStore: AgentRecordStore & AgentRecordSearcher
 
   /** Built-in agents by code, in the order they are listed. */
   readonly #builtInAgents: ReadonlyMap<string, BuiltInAgent>
@@ -117,17 +185,10 @@ export default class AgentService
   /** Listed form of every built-in agent, in listing order. */
   readonly #builtInAgentSummaries: readonly BuiltInAgentSummary[]
 
-  /** Borrowed model access that writes every agent's replies. */
-  readonly #replyModel: ReplyModel
-
-  /** Borrowed meter that measures every agent's contexts. */
-  readonly #replyContextMeter: ReplyContextMeter
-
   /**
-   * Retains the borrowed records, the built-in agents, the model access, and
-   * the context meter without reading the records or contacting the model.
-   * @param options - Agent records, the built-in agents, and the model access
-   * and context meter every agent borrows.
+   * Retains the borrowed records and the built-in agents without reading the
+   * records.
+   * @param options - Agent records and the built-in agents.
    */
   public constructor(options: AgentServiceOptions) {
     this.#recordStore = options.recordStore
@@ -137,8 +198,6 @@ export default class AgentService
     this.#builtInAgentSummaries = Object.freeze(
       options.builtInAgents.map(buildBuiltInAgentSummary)
     )
-    this.#replyModel = options.replyModel
-    this.#replyContextMeter = options.replyContextMeter
   }
 
   /**
@@ -166,6 +225,44 @@ export default class AgentService
           ? createAgentListCursor(lastAgent)
           : null
     }
+  }
+
+  /**
+   * Finds the built-in and stored agents, deleted ones included, whose code,
+   * name, or bio contains a text.
+   * @param query - Text found literally, under Unicode simple case folding.
+   * @returns At most {@link MAXIMUM_AGENT_SEARCH_MATCHES} frozen matches,
+   * read from one store snapshot: exact built-in matches, exact stored ones,
+   * the other built-in agents in shipped order, then the other stored agents
+   * by creation time and code; and the number of all matches.
+   * @throws If the store is closed or a matched agent is invalid.
+   */
+  public searchAgents(query: string): AgentSearchResult {
+    const builtInAgents = this.#builtInAgentSummaries.filter((agent) =>
+      hasAgentSearchMatch(agent, query)
+    )
+    const page = this.#recordStore.searchAgents({
+      query,
+      limit: MAXIMUM_AGENT_SEARCH_MATCHES
+    })
+    const matches = [
+      ...builtInAgents
+        .filter((agent) => isExactAgentSearchMatch(agent, query))
+        .map(buildBuiltInAgentMatch),
+      ...page.matches
+        .filter((match) => match.isExactMatch)
+        .map(buildStoredAgentMatch),
+      ...builtInAgents
+        .filter((agent) => !isExactAgentSearchMatch(agent, query))
+        .map(buildBuiltInAgentMatch),
+      ...page.matches
+        .filter((match) => !match.isExactMatch)
+        .map(buildStoredAgentMatch)
+    ]
+    return Object.freeze({
+      matches: Object.freeze(matches.slice(0, MAXIMUM_AGENT_SEARCH_MATCHES)),
+      matchCount: builtInAgents.length + page.matchCount
+    })
   }
 
   /**
@@ -288,33 +385,12 @@ export default class AgentService
    * @throws If the store is closed or the write fails.
    * @remarks The agent stays stored with the time of its deletion, so its
    * code is never free again: a conversation it answered keeps the code and
-   * {@link AgentService.findChatAgent} finds no agent for it for good.
+   * finds no agent to answer it for good.
    */
   public deleteAgent(code: string): AgentDeletionOutcome {
     if (this.#builtInAgents.has(code)) return "built-in"
     return this.#recordStore.deleteAgent(code, new Date().toISOString())
       ? "deleted"
       : "missing"
-  }
-
-  /**
-   * Finds the agent that answers chats under a code.
-   * @param code - Agent code as given, compared exactly.
-   * @returns A new agent that answers with the system prompt the built-in or
-   * stored agent has now; undefined when no agent has the code or its agent
-   * is deleted.
-   * @throws If the store is closed or the stored agent is invalid.
-   */
-  public findChatAgent(code: string): Agent | undefined {
-    const found = this.findAgent(code)
-    const profile =
-      found === undefined || found.deletedAt !== null ? undefined : found.agent
-    return profile === undefined
-      ? undefined
-      : new Agent(
-          { code: profile.code, systemPrompt: profile.systemPrompt },
-          this.#replyModel,
-          this.#replyContextMeter
-        )
   }
 }

@@ -1,4 +1,6 @@
 import { toolDefinitionSchema, type ToolDefinition } from "@lys/share"
+import { buildAgentStateDefinitions } from "../../../src/modules/agent/agentStateTools"
+import AgentTool from "../../../src/modules/tool/tool"
 
 /**
  * Validated definition of the desktop's read-text-file tool: one required
@@ -31,3 +33,20 @@ export const READ_TEXT_FILE_FORMAT = Object.freeze({
     }
   }
 })
+
+/**
+ * Names of the state tools a built-in agent, a leader, offers a model trained
+ * for tool use, after every other tool of the turn.
+ */
+export const LEADER_STATE_TOOL_NAMES: readonly string[] = Object.freeze([
+  "read_my_state",
+  "find_agents",
+  "read_agent_state"
+])
+
+/** Function tools a leader's state tools are offered as, in offer order. */
+export const LEADER_STATE_TOOL_FORMATS = Object.freeze(
+  buildAgentStateDefinitions("leader").map((definition) =>
+    new AgentTool(definition).buildAgentFormat()
+  )
+)

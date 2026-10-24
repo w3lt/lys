@@ -62,7 +62,7 @@ export async function updateFastifyWithHttpTransport(
     `${address.backendHost}:${address.backendPort}`,
     `localhost:${address.backendPort}`
   ])
-  app.addHook("onRequest", async (request, reply) =>
+  app.addHook("onRequest", (request, reply) =>
     handleIncomingRequest(request, reply, backendHosts)
   )
   await app.register(cors, {
@@ -78,17 +78,18 @@ export async function updateFastifyWithHttpTransport(
  * @param request - Request whose headers are checked; its body is not read.
  * @param reply - Response owner, used only to send a refusal.
  * @param backendHosts - Lowercased `Host` values that name the backend.
- * @returns The sent reply when the request is refused, which ends it;
- * `undefined` when the request may go on.
+ * @returns Settlement at once when the request may go on, or once its
+ * refusal has been sent, which ends the request: Fastify runs no later hook
+ * or handler for a sent reply.
  */
-function handleIncomingRequest(
+async function handleIncomingRequest(
   request: FastifyRequest,
   reply: FastifyReply,
   backendHosts: readonly string[]
-): FastifyReply | undefined {
+): Promise<void> {
   const detail = findRequestSourceRefusalDetail(request, backendHosts)
-  if (detail === undefined) return undefined
-  return reply
+  if (detail === undefined) return
+  await reply
     .code(403)
     .type("application/problem+json")
     .send(createRequestSourceRefusedProblem(detail))

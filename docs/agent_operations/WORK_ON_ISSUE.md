@@ -297,7 +297,7 @@ The agent MUST stop, without opening a pull request, when:
 - the issue is a bug the agent cannot reproduce and cannot find in the code;
 - the issue is assigned to an account that is neither `@me` nor the maintainer;
 - an open pull request by another account already covers the issue;
-- the issue has the `Patch Fix` label and the day's patch branch does not exist on `origin`, because only the maintainer creates it.
+- the issue has the `Patch Fix` label and the day's patch branch does not exist on `origin`, for example after the 20:00 UTC run of the Patch branch workflow deleted it for holding no fix. The agent never creates that branch.
 
 A follow-up issue is not a duplicate of the issue it was filed for, because only the follow-up issue tracks its part.
 

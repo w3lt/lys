@@ -165,9 +165,9 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     value: "mcp",
     label: "MCP",
     ordinal: "06",
-    note: "Servers that give the agents more tools. Each runs as you, so add only servers you trust.",
+    note: "Programs and services that give the agents more tools. Local ones Lys starts on this machine; remote ones it reaches by URL. Each runs as you, so add only servers you trust.",
     footNote:
-      "Saved in settings.json in Lys's home folder, environment values and headers in plain text, readable only by your user account. A command runs as you in your home folder, with a short PATH: use its full path, such as /opt/homebrew/bin/npx.",
+      "Saved in settings.json in Lys's home folder, environment values, tokens, and headers in plain text, readable only by your user account. A command runs as you in your home folder, with a short PATH: use its full path, such as /opt/homebrew/bin/npx.",
     contentComponent: McpPane
   },
   {

@@ -381,8 +381,8 @@ describe("registerMcpRoutes", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual(FILES_CONNECTING)
       expect(mcpServerListSchema.safeParse(response.json()).success).toBe(true)
-      expect(openServer).toHaveBeenCalledTimes(2)
       await waitForServerList(registry, FILES_CONNECTED)
+      expect(openServer).toHaveBeenCalledTimes(2)
     })
 
     it("answers the server-not-found problem for a name no applied server has", async () => {

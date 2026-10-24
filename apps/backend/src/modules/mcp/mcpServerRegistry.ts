@@ -87,7 +87,9 @@ const UNKNOWN_TOOL: McpTurnToolLookup = Object.freeze({ status: "unknown" })
  * session, with its connection or failure, and a removed one's session is
  * stopped. Opening runs in the background; the list reports each server as
  * connecting until its opening ends. Nothing reconnects by itself:
- * {@link reconnect} or a changed setting starts a new session. Settings that
+ * {@link reconnect} or a changed setting starts a new session, which opens
+ * only once the session it replaces released the server, so a command
+ * server's old process has ended before its new one starts. Settings that
  * fail their rules or cannot be read keep the servers applied before.
  * Resource ownership: owns every session it started until it stops it; a
  * stopped session closes its connection, now or when its opening ends.
@@ -147,15 +149,15 @@ export default class McpServerRegistry {
    * one.
    *
    * @param serverName - Name of the server, compared exactly.
-   * @returns `reconnecting` once the new opening started, or `not-found`
+   * @returns `reconnecting` once the new session was started, or `not-found`
    * when no applied server has the name, which is always the case after
    * {@link close}.
+   * @remarks The new session opens once the old one released the server.
    */
   public reconnect(serverName: string): McpServerReconnection {
     const entry = this.#entries.get(serverName)
     if (entry === undefined) return "not-found"
-    entry.session.stop()
-    this.#startSession(entry.settings)
+    this.#startSession(entry.settings, entry.session.stop())
     return "reconnecting"
   }
 
@@ -232,7 +234,7 @@ export default class McpServerRegistry {
    */
   public async close(): Promise<void> {
     this.#isClosed = true
-    for (const entry of this.#entries.values()) entry.session.stop()
+    for (const entry of this.#entries.values()) void entry.session.stop()
     this.#entries = new Map()
     await this.#settingsReads
     await this.#settleTasks()
@@ -291,7 +293,7 @@ export default class McpServerRegistry {
     const previousEntries = this.#entries
     const appliedNames = new Set(servers.map((settings) => settings.name))
     for (const [serverName, entry] of previousEntries)
-      if (!appliedNames.has(serverName)) entry.session.stop()
+      if (!appliedNames.has(serverName)) void entry.session.stop()
     this.#entries = new Map()
     for (const settings of servers) {
       const entry = previousEntries.get(settings.name)
@@ -299,8 +301,7 @@ export default class McpServerRegistry {
         this.#entries.set(settings.name, entry)
         continue
       }
-      entry?.session.stop()
-      this.#startSession(settings)
+      this.#startSession(settings, entry?.session.stop())
     }
   }
 
@@ -308,8 +309,13 @@ export default class McpServerRegistry {
    * Starts a session that opens one server, and records it as the server's.
    *
    * @param settings - Validated settings of the server.
+   * @param previousRelease - Release of the session it replaces, which the
+   * opening waits for; undefined when it replaces none.
    */
-  #startSession(settings: McpServerSettings): void {
+  #startSession(
+    settings: McpServerSettings,
+    previousRelease: Promise<void> | undefined
+  ): void {
     const session = new McpServerSession(settings, {
       openServer: this.#dependencies.openServer,
       workingDirectory: this.#dependencies.workingDirectory,
@@ -317,7 +323,7 @@ export default class McpServerRegistry {
       trackTask: (task) => this.#trackTask(task)
     })
     this.#entries.set(settings.name, Object.freeze({ settings, session }))
-    this.#trackTask(session.open())
+    this.#trackTask(session.open(previousRelease))
   }
 
   /**

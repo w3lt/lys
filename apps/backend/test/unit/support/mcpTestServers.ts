@@ -26,6 +26,14 @@ export type FakeStdioServerOptions = Readonly<{
   reportEnvironment?: readonly string[]
   /** Write the process identifier to standard error as `pid <id>`. */
   reportProcessId?: boolean
+  /**
+   * Hold this file while running, as a server that runs one copy at a time:
+   * create it on start, or exit with code 3 when it exists, and remove it on
+   * exit.
+   */
+  lockFile?: string
+  /** Wait this long after standard input closes before exiting. */
+  shutdownDelayMilliseconds?: number
 }>
 
 /** One request the fake HTTP server received. */

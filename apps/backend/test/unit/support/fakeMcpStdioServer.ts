@@ -1,6 +1,7 @@
 // A minimal MCP server over stdio for tests, run directly by Node, which
 // strips its types: `node fakeMcpStdioServer.ts '<options JSON>'`. It speaks
 // newline-delimited JSON-RPC and imports only Node's own modules.
+import { rmSync, writeFileSync } from "node:fs"
 import { createInterface } from "node:readline"
 
 /** What the server does, from its first argument. */
@@ -15,6 +16,14 @@ type FakeServerOptions = {
   reportEnvironment?: string[]
   /** Write the process identifier to standard error as `pid <id>`. */
   reportProcessId?: boolean
+  /**
+   * Hold this file while running, as a server that runs one copy at a time:
+   * create it on start, or exit with code 3 when it exists, and remove it on
+   * exit.
+   */
+  lockFile?: string
+  /** Wait this long after standard input closes before exiting. */
+  shutdownDelayMilliseconds?: number
 }
 
 /** One JSON-RPC message the server received. */
@@ -138,6 +147,22 @@ function callTool(id: RequestId, params: Record<string, unknown>): void {
 }
 
 /**
+ * Holds the lock file for the life of the process.
+ *
+ * @param path - Lock file to create; another copy holding it ends this one
+ * with code 3, after `locked by another copy` on standard error.
+ */
+function holdLock(path: string): void {
+  try {
+    writeFileSync(path, String(process.pid), { flag: "wx" })
+  } catch {
+    process.stderr.write("locked by another copy\n")
+    process.exit(3)
+  }
+  process.on("exit", () => rmSync(path, { force: true }))
+}
+
+/**
  * Handles one message the client sent.
  *
  * @param message - Parsed message.
@@ -191,6 +216,12 @@ if (options.reportEnvironment !== undefined) {
     process.stderr.write(`env ${name}=${process.env[name] ?? "<unset>"}\n`)
 }
 if (options.exitOnStart !== undefined) process.exit(options.exitOnStart)
-createInterface({ input: process.stdin }).on("line", (line) => {
+if (options.lockFile !== undefined) holdLock(options.lockFile)
+const input = createInterface({ input: process.stdin })
+input.on("line", (line) => {
   handleMessage(JSON.parse(line) as ReceivedMessage)
 })
+if (options.shutdownDelayMilliseconds !== undefined) {
+  const delay = options.shutdownDelayMilliseconds
+  input.on("close", () => setTimeout(() => process.exit(0), delay))
+}

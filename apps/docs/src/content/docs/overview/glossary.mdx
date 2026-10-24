@@ -42,6 +42,16 @@ Terms that mean something specific inside Lys.
   agent is selected.
 - **Stored agent**: an agent the user created, kept in the backend database.
   It answers chats with the system prompt it has when each turn starts.
+  Deleting it only marks it deleted, so its code is never free again.
+- **Leader** and **member**: the role of an agent, fixed by its kind. The
+  built-in agents are leaders, which can find every agent and read any
+  agent's state; stored agents are members, which can read only their own.
+- **Live agent**: the one instance of an agent that answers all of its
+  turns while the backend runs and knows the requests it is working on.
+- **Agent state tools**: `read_my_state`, `find_agents`, and
+  `read_agent_state`, which the backend adds to a turn of a model trained
+  for tool use so an agent can tell what it and the other agents are
+  doing.
 - **User message**: a persisted message with role `user`, non-empty content,
   and the attachments sent with it.
 - **Attachment**: a file sent with a user message and stored with the

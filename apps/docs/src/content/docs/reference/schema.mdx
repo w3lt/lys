@@ -88,6 +88,7 @@ The file itself is at
 | `system_prompt` | `TEXT NOT NULL` | Non-empty system instruction                                                   |
 | `created_at`    | `TEXT NOT NULL` | ISO timestamp, set when the agent is stored                                    |
 | `updated_at`    | `TEXT NOT NULL` | ISO timestamp of the latest change; equals `created_at` until the first update |
+| `deleted_at`    | `TEXT`          | ISO timestamp of the agent's deletion; `NULL` while it is not deleted          |
 
 ## Important constraints
 
@@ -124,9 +125,10 @@ The file itself is at
   every row the backend writes and reads. A row added without the column gets
   `lys`, the default version 7 declared; the backend always writes the code,
   so that default is never used.
-- Agent rows must have every column, and a non-empty `code`, `name`, `bio`,
-  and `system_prompt`. SQLite checks only that, comparing each of the four with
-  `''`, so text that starts with a NUL character still counts as non-empty;
+- Agent rows must have every column but `deleted_at`, and a non-empty `code`,
+  `name`, `bio`, and `system_prompt`. SQLite checks only that, comparing each
+  of the four with `''`, so text that starts with a NUL character still
+  counts as non-empty, and that `deleted_at` is `NULL` or not `''`;
   `created_at` and `updated_at` have no check. The backend's agent schemas
   enforce the rest on every row it writes and reads: a code of at most 64
   lowercase letters, digits, and single inner hyphens; a name of at most 64
@@ -196,6 +198,10 @@ round 0 with the reply's times; a reply without text gets no part. Version 9
 cannot be undone, and builds that support only version 8 refuse a version-9
 database. Version 10 adds `conversation_attachments` and changes no existing
 row; builds that support only version 9 refuse a version-10 database.
+Version 11 adds `agents.deleted_at`, `NULL` for every stored agent, because
+deleting an agent now only marks it: the row stays, so its code is never
+free again. Agents deleted before version 11 are gone, and their codes stay
+free. Builds that support only version 10 refuse a version-11 database.
 Versions 1–3 are unchanged. Missing migrations
 and the version marker commit together. At startup, streaming replies
 become interrupted with a refreshed `updated_at`; their waiting and running

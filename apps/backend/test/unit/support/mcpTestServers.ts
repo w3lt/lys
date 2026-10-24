@@ -27,9 +27,10 @@ export type FakeStdioServerOptions = Readonly<{
   /** Write the process identifier to standard error as `pid <id>`. */
   reportProcessId?: boolean
   /**
-   * Hold this file while running, as a server that runs one copy at a time:
-   * create it on start, or exit with code 3 when it exists, and remove it on
-   * exit.
+   * Hold this file, inside the folder the server runs in, while running, as a
+   * server that runs one copy at a time: create it on start, or exit with
+   * code 3 when it exists, and remove it on exit. A path outside that folder
+   * exits with code 2.
    */
   lockFile?: string
   /** Wait this long after standard input closes before exiting. */

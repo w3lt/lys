@@ -438,6 +438,26 @@ async function waitForServerList(
 }
 
 /**
+ * Creates a registry harness whose only server, `alpha`, runs one copy at a
+ * time, and waits until it is connected.
+ *
+ * @param lockFile - Lock file the server's copies share.
+ * @returns The harness, with `alpha` connected.
+ */
+async function createConnectedOneCopyHarness(
+  lockFile: string
+): Promise<RegistryHarness> {
+  const harness = createRegistryHarness()
+  harness.setServers([buildOneCopyServerSettings("alpha", lockFile, [])])
+  await harness.registry.applySettings()
+  await waitForServerList(
+    harness.registry,
+    buildList([buildStdioStatus("alpha", buildConnectedState(1))])
+  )
+  return harness
+}
+
+/**
  * Finds a tool the case expects to be found.
  *
  * @param registry - Registry under test.
@@ -689,14 +709,8 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     })
 
     it("opens a changed command server only once its previous process ended, so a server that runs one copy at a time connects", async () => {
-      const harness = createRegistryHarness()
       const lockFile = createLockFilePath()
-      harness.setServers([buildOneCopyServerSettings("alpha", lockFile, [])])
-      await harness.registry.applySettings()
-      await waitForServerList(
-        harness.registry,
-        buildList([buildStdioStatus("alpha", buildConnectedState(1))])
-      )
+      const harness = await createConnectedOneCopyHarness(lockFile)
       const changedSettings = buildOneCopyServerSettings("alpha", lockFile, [
         { name: "LYS_TEST_MODE", value: "changed" }
       ])
@@ -1044,15 +1058,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     })
 
     it("opens a command server again only once its previous process ended, so a server that runs one copy at a time connects", async () => {
-      const harness = createRegistryHarness()
-      harness.setServers([
-        buildOneCopyServerSettings("alpha", createLockFilePath(), [])
-      ])
-      await harness.registry.applySettings()
-      await waitForServerList(
-        harness.registry,
-        buildList([buildStdioStatus("alpha", buildConnectedState(1))])
-      )
+      const harness = await createConnectedOneCopyHarness(createLockFilePath())
 
       expect(harness.registry.reconnect("alpha")).toBe("reconnecting")
       await waitForMicrotasks()
@@ -1070,15 +1076,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     })
 
     it("opens a server reconnected twice while its previous process ends only once", async () => {
-      const harness = createRegistryHarness()
-      harness.setServers([
-        buildOneCopyServerSettings("alpha", createLockFilePath(), [])
-      ])
-      await harness.registry.applySettings()
-      await waitForServerList(
-        harness.registry,
-        buildList([buildStdioStatus("alpha", buildConnectedState(1))])
-      )
+      const harness = await createConnectedOneCopyHarness(createLockFilePath())
 
       expect(harness.registry.reconnect("alpha")).toBe("reconnecting")
       expect(harness.registry.reconnect("alpha")).toBe("reconnecting")
@@ -1092,15 +1090,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     })
 
     it("opens nothing for a server removed while its previous process ends", async () => {
-      const harness = createRegistryHarness()
-      harness.setServers([
-        buildOneCopyServerSettings("alpha", createLockFilePath(), [])
-      ])
-      await harness.registry.applySettings()
-      await waitForServerList(
-        harness.registry,
-        buildList([buildStdioStatus("alpha", buildConnectedState(1))])
-      )
+      const harness = await createConnectedOneCopyHarness(createLockFilePath())
       expect(harness.registry.reconnect("alpha")).toBe("reconnecting")
       harness.setServers([])
 
@@ -1112,14 +1102,8 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     })
 
     it("opens nothing when the registry closes while a reconnected server's previous process ends, and waits for that process", async () => {
-      const harness = createRegistryHarness()
       const lockFile = createLockFilePath()
-      harness.setServers([buildOneCopyServerSettings("alpha", lockFile, [])])
-      await harness.registry.applySettings()
-      await waitForServerList(
-        harness.registry,
-        buildList([buildStdioStatus("alpha", buildConnectedState(1))])
-      )
+      const harness = await createConnectedOneCopyHarness(lockFile)
       expect(harness.registry.reconnect("alpha")).toBe("reconnecting")
 
       await harness.registry.close()

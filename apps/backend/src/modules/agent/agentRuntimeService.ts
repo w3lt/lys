@@ -147,7 +147,7 @@ export default class AgentRuntimeService implements AgentStateReader {
    */
   public loadChatAgent(code: string): Agent | undefined {
     const found = this.#agents.findAgent(code)
-    if (found === undefined || found.deletedAt !== null) return undefined
+    if (found?.deletedAt !== null) return undefined
     const liveAgent = this.#liveAgents.get(code)
     if (liveAgent !== undefined) {
       liveAgent.updateSystemPrompt(found.agent.systemPrompt)

@@ -161,7 +161,7 @@ function handleGetAgent(
   agents: AgentReader
 ): void {
   const found = agents.findAgent(request.params.agentCode)
-  if (found === undefined || found.deletedAt !== null) {
+  if (found?.deletedAt !== null) {
     reply
       .type("application/problem+json")
       .code(404)

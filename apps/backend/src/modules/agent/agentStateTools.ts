@@ -264,10 +264,11 @@ function buildParsedCall(
 ): ParsedBuiltInToolCall {
   return Object.freeze({
     status: "parsed",
-    runToolCall: async ({ abortSignal }) => {
-      abortSignal.throwIfAborted()
-      return runAt(new Date())
-    }
+    runToolCall: ({ abortSignal }) =>
+      new Promise<BuiltInToolResult>((resolve) => {
+        abortSignal.throwIfAborted()
+        resolve(runAt(new Date()))
+      })
   })
 }
 

@@ -140,7 +140,7 @@ An exception requires explicit reviewer approval. Time pressure, existing noncom
 
 A pull request targets `main`, unless its primary issue has the `Patch Fix` label. An issue gets that label when its fix must reach `stable` in a patch release. A `Patch Fix` pull request starts from the day's patch branch and targets it, never `stable` directly.
 
-The day's patch branch is named after the next patch version: the version in `stable`'s `VERSION` file with its patch number raised by one, such as `patch/v0.4.1` when `stable` is at `0.4.0`. The maintainer creates it from `stable` on a day that has a `Patch Fix`, so a day without one has no patch branch and no patch release. At the end of that day, the maintainer merges the patch branch into `stable`, then merges `stable` into `main` so that `main` keeps every fix. [Packaging and releases](https://lys.negentropy.studio/operate/releases/#patch-releases) lists the release steps.
+The day's patch branch is named after the next patch version: the version in `stable`'s `VERSION` file with its patch number raised by one, such as `patch/v0.4.1` when `stable` is at `0.4.0`. The [Patch branch workflow](./.github/workflows/patch-branch.yml) creates it from `stable` every day at 00:00 UTC. At 20:00 UTC, the workflow deletes the branch when it holds no fix, so that day has no patch release; otherwise it opens a pull request from the branch into `stable`. The maintainer completes and merges that pull request, then merges `stable` into `main` so that `main` keeps every fix. [Packaging and releases](https://lys.negentropy.studio/operate/releases/#patch-releases) lists the release steps.
 
 ## Opening a pull request
 

@@ -150,6 +150,40 @@ describe("updateFastifyWithHttpTransport", () => {
     }
   )
 
+  it("refuses a rebound request for a path no route serves instead of answering 404", async () => {
+    const app = await createTransportApp()
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/missing",
+      headers: { host: "rebound.attacker.example:12345" }
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(response.json()).toEqual(HOST_REFUSAL)
+  })
+
+  it("refuses a rebound request before its body is parsed", async () => {
+    const app = await createTransportApp()
+    const handler = vi.fn(async () => ({ ok: true }))
+    app.post("/resource", handler)
+
+    // Malformed JSON, which the body parser would answer with 400.
+    const response = await app.inject({
+      method: "POST",
+      url: "/resource",
+      headers: {
+        host: "rebound.attacker.example:12345",
+        "content-type": "application/json"
+      },
+      payload: "{"
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(response.json()).toEqual(HOST_REFUSAL)
+    expect(handler).not.toHaveBeenCalled()
+  })
+
   it("refuses a request that names no Host before the route runs", async () => {
     const app = await createTransportApp()
     const handler = vi.fn(async () => ({ ok: true }))

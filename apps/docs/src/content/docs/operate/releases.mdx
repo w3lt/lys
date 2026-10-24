@@ -124,8 +124,10 @@ no patch release. For a patch from `0.4.0` to `0.4.1`:
    [Recording a release](/changelog/#recording-a-release) describes.
 5. The maintainer merges the pull request into `stable` and tags the result
    `v0.4.1`.
-6. The maintainer then merges `stable` into `main`, so that `main` keeps every
-   fix.
+6. At the next 00:00 UTC, the
+   [stable into main workflow](#stable-into-main-workflow) opens a pull request
+   from `stable` into `main`. The maintainer squashes it, so that `main` keeps
+   every fix.
 
 ### Patch branch workflow
 
@@ -150,6 +152,26 @@ can also be run by hand with the task `open` or `close`.
   read-only access to contents. Without it, `close` fails and opens no pull
   request.
 - Merged patch branches are not deleted.
+
+### Stable into main workflow
+
+`.github/workflows/stable-into-main.yml` runs at 00:00 UTC from `main`, and can
+also be run by hand.
+
+- It reads `VERSION` on `stable` and on `main`, and fails, naming the branch,
+  when either does not hold a `major.minor.patch` version.
+- It compares the two as numbers, major first, then minor, then patch. When
+  `stable`'s version is newer and no pull request from `stable` into `main` is
+  open, it opens one. Otherwise it does nothing, and it never merges.
+- It opens the pull request with the same `PATCH_PR_TOKEN` secret as the patch
+  branch workflow, and fails without it.
+- The maintainer squashes that pull request, because `main` requires a linear
+  history. The squash brings `stable`'s `VERSION` to `main`, so the versions
+  match and the workflow stays quiet until the next patch release.
+- It relies on `main`'s `VERSION` staying at the released version until the
+  next release is prepared. If `main` is raised to the next version earlier,
+  `stable`'s patch versions are older than `main`'s, and no pull request
+  opens.
 
 <RelatedDocuments
   documents={[

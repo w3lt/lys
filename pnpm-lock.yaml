@@ -254,7 +254,7 @@ importers:
         version: 11.3.1
       "@fastify/sse":
         specifier: ^0.6.1
-        version: 0.6.1(fastify@5.12.5)
+        version: 0.6.1(fastify@5.12.7)
       "@lmstudio/sdk":
         specifier: ^2.1.0
         version: 2.1.0
@@ -268,14 +268,14 @@ importers:
         specifier: ^0.6.0
         version: 0.6.0
       fastify:
-        specifier: 5.12.5
-        version: 5.12.5
+        specifier: ^5.12.7
+        version: 5.12.7
       fastify-plugin:
         specifier: ^6.0.1
         version: 6.0.1
       fastify-type-provider-zod:
         specifier: ^7.0.0
-        version: 7.0.0(@fastify/swagger@9.9.2(supports-color@7.2.0))(fastify@5.12.5)(openapi-types@12.1.3)(zod@4.6.7)
+        version: 7.0.0(@fastify/swagger@9.9.2(supports-color@7.2.0))(fastify@5.12.7)(openapi-types@12.1.3)(zod@4.6.7)
       linkedom:
         specifier: ^0.18.14
         version: 0.18.14
@@ -4183,10 +4183,10 @@ packages:
       openapi-types: ^12.1.3
       zod: ">=4.1.5"
 
-  fastify@5.12.5:
+  fastify@5.12.7:
     resolution:
       {
-        integrity: sha512-OB2k1dlxs5/NAABqeKV2FUHkSD2BbENsCak8yULVcymn3fHIPDVa9TI3SDnJSWYSllZmSYuZXy2gTnsT+Sut1A==
+        integrity: sha512-v4pEPsTRPuqlDIYiQFB+BHjVN4SdHX9u0ABk0ZDUKbbdY1vsNryUd1j4Z+jQEZajvYIVk047Kimva9/AJ79GYw==
       }
 
   fastq@1.20.3:
@@ -7958,10 +7958,10 @@ snapshots:
       "@fastify/forwarded": 3.1.1
       ipaddr.js: 2.5.0
 
-  "@fastify/sse@0.6.1(fastify@5.12.5)":
+  "@fastify/sse@0.6.1(fastify@5.12.7)":
     dependencies:
       "@fastify/error": 4.2.1
-      fastify: 5.12.5
+      fastify: 5.12.7
       fastify-plugin: 6.0.1
 
   "@fastify/swagger@9.9.2(supports-color@7.2.0)":
@@ -9452,15 +9452,15 @@ snapshots:
 
   fastify-plugin@6.0.1: {}
 
-  fastify-type-provider-zod@7.0.0(@fastify/swagger@9.9.2(supports-color@7.2.0))(fastify@5.12.5)(openapi-types@12.1.3)(zod@4.6.7):
+  fastify-type-provider-zod@7.0.0(@fastify/swagger@9.9.2(supports-color@7.2.0))(fastify@5.12.7)(openapi-types@12.1.3)(zod@4.6.7):
     dependencies:
       "@fastify/error": 4.2.1
       "@fastify/swagger": 9.9.2(supports-color@7.2.0)
-      fastify: 5.12.5
+      fastify: 5.12.7
       openapi-types: 12.1.3
       zod: 4.6.7
 
-  fastify@5.12.5:
+  fastify@5.12.7:
     dependencies:
       "@fastify/ajv-compiler": 4.0.7
       "@fastify/error": 4.2.1

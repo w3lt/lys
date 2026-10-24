@@ -1,6 +1,6 @@
 ---
 title: Packaging and releases
-description: Current checked-in docs deployment and desktop packaging signals.
+description: Current checked-in docs deployment and desktop packaging signals, versioning, and patch releases.
 sidebar:
   order: 3
 ---
@@ -8,7 +8,8 @@ sidebar:
 import DocumentMeta from "@/components/handbook/DocumentMeta.astro"
 import RelatedDocuments from "@/components/handbook/RelatedDocuments.astro"
 
-Current build and publication paths that are evidenced in this repository.
+Current build and publication paths that are evidenced in this repository, and
+how a patch release reaches `stable`.
 
 <DocumentMeta
   label="Page metadata"
@@ -35,8 +36,9 @@ notarization. Desktop builds are made locally with `build.sh`.
 
 On macOS, `build.sh` at the repository root builds the desktop app from a
 source checkout and installs it on the same machine. On any other operating
-system it prints a message and exits without building. Run it from the
-repository root:
+system it prints a message and exits without building. A checkout of `stable`
+builds the latest release; a checkout of `main` builds the development version.
+Run it from the repository root:
 
 ```sh
 ./build.sh
@@ -85,7 +87,7 @@ from Finder or the Dock looks for the runtime under `~/.lys`.
 
 ## Versioning
 
-The root `VERSION` file holds the release version, currently `0.3.0`. The
+The root `VERSION` file holds the release version, currently `0.4.0`. The
 `@lys/scripts` package writes it into the manifests or checks them:
 
 ```sh
@@ -94,12 +96,38 @@ pnpm --filter @lys/scripts run version:check
 ```
 
 All checked-in workspace manifests, `apps/desktop/src-tauri/Cargo.toml`, and
-`apps/desktop/src-tauri/tauri.conf.json` are currently versioned `0.3.0`.
+`apps/desktop/src-tauri/tauri.conf.json` are currently versioned `0.4.0`.
 `version:sync` does not rewrite `apps/desktop/src-tauri/Cargo.lock`; update its
 `lys-desktop` entry in the same change. Each release is tagged `v<version>` in
 Git, and the changelog's compare links rely on those tags. See the
 [package reference](/reference/packages/#lysscripts) for what the scripts
 rewrite, and the [changelog](/changelog/) for the recorded releases.
+
+## Patch releases
+
+`stable` holds the latest release and `main` holds development toward the next
+one; the
+[Branches section of `CONTRIBUTING.md`](https://github.com/w3lt/lys/blob/main/CONTRIBUTING.md#branches)
+says which branch a pull request targets. A patch release ships one day's fixes
+for issues with the `Patch Fix` label to `stable`. A day without such a fix has
+no patch release. For a patch from `0.4.0` to `0.4.1`:
+
+1. When the day's first fix is needed, the maintainer creates the patch branch
+   from `stable`:
+
+   ```sh
+   git fetch origin
+   git push origin origin/stable:refs/heads/patch/v0.4.1
+   ```
+
+2. Each fix reaches the patch branch through its own pull request.
+3. Before the end-of-day merge, one commit on the patch branch sets the version
+   to `0.4.1` as [Versioning](#versioning) describes, and records the release
+   as [Recording a release](/changelog/#recording-a-release) describes.
+4. At the end of the day, the maintainer merges the patch branch into `stable`
+   and tags the result `v0.4.1`.
+5. The maintainer then merges `stable` into `main`, so that `main` keeps every
+   fix.
 
 <RelatedDocuments
   documents={[

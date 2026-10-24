@@ -9,6 +9,7 @@ pub mod commands;
 pub mod generation;
 pub mod load_configuration;
 pub mod location;
+pub mod mcp;
 pub mod runtime;
 pub mod secrets;
 pub mod tools;
@@ -16,6 +17,7 @@ pub mod tools;
 use generation::GenerationSettings;
 use load_configuration::LoadConfigurationSettings;
 use location::LocationSettings;
+use mcp::McpSettings;
 use runtime::RunTimeSettings;
 use secrets::SecretsSettings;
 use tools::ToolSettings;
@@ -42,13 +44,13 @@ static TEMPORARY_FILE_COUNT: AtomicU64 = AtomicU64::new(0);
 /// Complete persisted Lys settings value.
 ///
 /// The private fields group runtime, generation, load configuration, secrets,
-/// tools, and location settings in the serialized JSON representation while
-/// keeping those groups behind the settings module's API boundary. A missing
-/// group takes that group's defaults; the load configuration group's default
-/// is empty, the secrets group's default holds no key, the tools group's
-/// default puts no tool on Just run and saves no tool switch, and the
-/// location group's default saves no location. A group the value does not
-/// hold, such as
+/// tools, location, and MCP server settings in the serialized JSON
+/// representation while keeping those groups behind the settings module's API
+/// boundary. A missing group takes that group's defaults; the load
+/// configuration group's default is empty, the secrets group's default holds
+/// no key, the tools group's default puts no tool on Just run and saves no
+/// tool switch, the location group's default saves no location, and the MCP
+/// group's default lists no server. A group the value does not hold, such as
 /// the `model` group of files written before the local context estimate was
 /// removed, is ignored when loading and left out of the next save.
 pub struct LysSettings {
@@ -64,6 +66,8 @@ pub struct LysSettings {
     tools: ToolSettings,
     /// Location the person saved, in the `location` object.
     location: LocationSettings,
+    /// MCP servers Lys connects to, in the `mcp` object.
+    mcp: McpSettings,
 }
 
 impl LysSettings {
@@ -331,7 +335,8 @@ mod tests {
     }
 
     /// Stored settings whose load configuration has a hand-written default
-    /// and one model's settings, with a saved Tavily API key and location.
+    /// and one model's settings, with a saved Tavily API key, location, and
+    /// two MCP servers.
     fn get_complete_settings() -> Value {
         let mut settings = get_settings_without_load_configuration();
         settings["loadConfiguration"] = json!({
@@ -344,6 +349,21 @@ mod tests {
             "switches": { "read_page": true, "search_files": false }
         });
         settings["location"] = json!({ "city": "Lyon", "region": null, "country": "France" });
+        settings["mcp"] = json!({ "servers": [
+            {
+                "name": "files",
+                "transport": "stdio",
+                "command": "/opt/homebrew/bin/npx",
+                "arguments": ["-y", "@modelcontextprotocol/server-filesystem"],
+                "environment": [{ "name": "LOG_LEVEL", "value": "env-synthetic-value" }]
+            },
+            {
+                "name": "docs",
+                "transport": "http",
+                "url": "https://mcp.example.com/mcp",
+                "headers": [{ "name": "Authorization", "value": "Bearer header-synthetic-value" }]
+            }
+        ] });
 
         settings
     }
@@ -362,6 +382,11 @@ mod tests {
     /// Location group of a settings file without a saved location.
     fn get_empty_location() -> Value {
         json!({ "city": null, "region": null, "country": null })
+    }
+
+    /// MCP group of a settings file that lists no server.
+    fn get_empty_mcp() -> Value {
+        json!({ "servers": [] })
     }
 
     /// Reads the settings file at `path` as JSON.
@@ -399,6 +424,7 @@ mod tests {
         assert_eq!(stored["secrets"], get_empty_secrets());
         assert_eq!(stored["tools"], get_empty_tools());
         assert_eq!(stored["location"], get_empty_location());
+        assert_eq!(stored["mcp"], get_empty_mcp());
     }
 
     #[test]
@@ -424,6 +450,7 @@ mod tests {
         expected["secrets"] = get_empty_secrets();
         expected["tools"] = get_empty_tools();
         expected["location"] = get_empty_location();
+        expected["mcp"] = get_empty_mcp();
         assert_eq!(get_settings_json(&settings), expected);
         assert_eq!(
             fs::read_to_string(&path).expect("read the settings file"),
@@ -500,6 +527,12 @@ mod tests {
         null_location["location"] = Value::Null;
         let mut padded_place_name = get_complete_settings();
         padded_place_name["location"]["city"] = json!("Lyon ");
+        let mut null_mcp = get_settings_without_load_configuration();
+        null_mcp["mcp"] = Value::Null;
+        let mut invalid_server_name = get_complete_settings();
+        invalid_server_name["mcp"]["servers"][0]["name"] = json!("My Files");
+        let mut plain_http_url = get_complete_settings();
+        plain_http_url["mcp"]["servers"][1]["url"] = json!("http://mcp.example.com/mcp");
         let unusable_files = [
             invalid_group.to_string(),
             null_group.to_string(),
@@ -511,6 +544,9 @@ mod tests {
             invalid_switch.to_string(),
             null_location.to_string(),
             padded_place_name.to_string(),
+            null_mcp.to_string(),
+            invalid_server_name.to_string(),
+            plain_http_url.to_string(),
             String::from("{ not json"),
         ];
 
@@ -611,6 +647,28 @@ mod tests {
             json!("tvly-synthetic-0123456789")
         );
         assert!(!format!("{settings:?}").contains("tvly-synthetic"));
+    }
+
+    #[test]
+    fn reads_saved_mcp_servers_and_hides_their_secret_values_from_debug_output() {
+        let directory = TestDirectory::create("settings-mcp");
+        let path = directory.create_file("settings.json", get_complete_settings().to_string());
+
+        let settings = load_settings_file(&path).expect("settings with MCP servers");
+
+        assert_eq!(
+            get_settings_json(&settings)["mcp"],
+            get_complete_settings()["mcp"]
+        );
+        let debug_output = format!("{settings:?}");
+        assert!(
+            !debug_output.contains("env-synthetic-value"),
+            "{debug_output}"
+        );
+        assert!(
+            !debug_output.contains("header-synthetic-value"),
+            "{debug_output}"
+        );
     }
 
     #[test]

@@ -46,6 +46,17 @@ The review standards are explicit that reviewers:
 - may run validation commands
 - must not weaken an active standard to make a change acceptable
 
+## AI agent operations
+
+An AI agent asked to review a pull request follows
+[Review a Pull Request](https://github.com/w3lt/lys/blob/main/docs/agent_operations/REVIEW_PULL_REQUEST.md):
+it applies the merge request review standard in its own worktree and posts the
+report as one pull request comment. The agent that authored the pull request
+answers with
+[Check the Reviews of a Pull Request](https://github.com/w3lt/lys/blob/main/docs/agent_operations/CHECK_REVIEWS.md):
+it verifies each finding against the code, pushes the fixes, and posts one reply
+that names what the maintainer must decide.
+
 ## Coming soon
 
 This repository does not currently expose a handbook page or code-owner file

@@ -226,6 +226,8 @@ A re-review MUST classify every finding from the previous report as one of:
 
 The reviewer MUST then review the fix diff itself as a new change through Steps 2 to 4, because corrections introduce defects. The reviewer MUST NOT approve based on the author's fix report alone.
 
+The re-review report uses the [report format](#report-format) with one more section, `## Previous findings`, placed after Review scope. It lists every finding of the previous report with its identifier and its class, and for a finding fixed differently, the alternative that was verified.
+
 ## Reviewer checklist
 
 - [ ] The purpose, need, and scope of the change were established from the merge request, not reconstructed from the implementation.

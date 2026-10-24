@@ -12,6 +12,8 @@ Agents MUST follow:
 4. [JSDoc Standard](docs/JSDOC.md) for repository-owned JavaScript and TypeScript in its scope.
 5. [Merge Request Review](docs/code_reviews/MR_REVIEW.md) or [Full Code Review](docs/code_reviews/FULL_CODE_REVIEW.md) when reviewing code rather than authoring it.
 6. [Work on an Issue](docs/agent_operations/WORK_ON_ISSUE.md) when asked to work on an issue.
+7. [Review a Pull Request](docs/agent_operations/REVIEW_PULL_REQUEST.md) when asked to review a pull request.
+8. [Check the Reviews of a Pull Request](docs/agent_operations/CHECK_REVIEWS.md) when asked, as the author of a pull request, to check its reviews and fix.
 
 This file MUST NOT be used to redefine or weaken a canonical construction rule. Rule ownership stays with the documents under `docs/`.
 
@@ -67,7 +69,7 @@ An agent MUST:
 5. Identify applicable rule IDs and relevant validation commands.
 6. Ask for direction only when unresolved ambiguity would materially change behavior, architecture, data, security, compatibility, or external state.
 
-During a [Work on an Issue](docs/agent_operations/WORK_ON_ISSUE.md) operation, an agent MUST NOT stop to ask. It decides, records, and reports every decision as that manual defines. For that operation only, this replaces item 6 above and the request in `CONTRIBUTING.md` to ask for a decision.
+During a [Work on an Issue](docs/agent_operations/WORK_ON_ISSUE.md) or [Check the Reviews of a Pull Request](docs/agent_operations/CHECK_REVIEWS.md) operation, an agent MUST NOT stop to ask. It decides, records, and reports every decision as those manuals define. For those operations only, this replaces item 6 above and the request in `CONTRIBUTING.md` to ask for a decision.
 
 ### During implementation
 
@@ -106,7 +108,7 @@ An agent MUST NOT claim completion without fresh validation evidence when valida
 
 Reviews SHOULD cite stable rule IDs rather than paraphrasing requirements.
 
-An agent reviewing a proposed change MUST follow [Merge Request Review](docs/code_reviews/MR_REVIEW.md). An agent reviewing an existing area of the codebase MUST follow [Full Code Review](docs/code_reviews/FULL_CODE_REVIEW.md). A reviewing agent reports findings and MUST NOT apply corrections.
+An agent reviewing a proposed change MUST follow [Merge Request Review](docs/code_reviews/MR_REVIEW.md). An agent reviewing an existing area of the codebase MUST follow [Full Code Review](docs/code_reviews/FULL_CODE_REVIEW.md). A reviewing agent reports findings and MUST NOT apply corrections. An agent asked to review a pull request follows [Review a Pull Request](docs/agent_operations/REVIEW_PULL_REQUEST.md), which applies that standard in a worktree and posts the report on the pull request.
 
 Passing compilation or tests does not override a violated construction rule.
 
@@ -118,7 +120,7 @@ Agents MUST preserve unrelated work already present in the working tree.
 
 Agents MUST NOT create commits, branches, tags, pull requests, or staged changes unless explicitly requested.
 
-A request to work on an issue is an explicit request for exactly the actions that [Work on an Issue](docs/agent_operations/WORK_ON_ISSUE.md) authorizes. It never authorizes merging or approving a pull request, tagging, releasing, force-pushing, or committing a dependency file or a generated file, such as a lockfile.
+A request to work on an issue, to review a pull request, or to check the reviews of a pull request is an explicit request for exactly the actions that [Work on an Issue](docs/agent_operations/WORK_ON_ISSUE.md), [Review a Pull Request](docs/agent_operations/REVIEW_PULL_REQUEST.md), or [Check the Reviews of a Pull Request](docs/agent_operations/CHECK_REVIEWS.md) authorizes. None of them ever authorizes merging or approving a pull request, tagging, releasing, force-pushing, or committing a dependency file or a generated file, such as a lockfile.
 
 Agents MUST NOT perform destructive operations without explicit authorization and verified targets.
 
@@ -135,4 +137,4 @@ The final report MUST state:
 
 If no risk or follow-up remains, say so explicitly.
 
-For a Work on an Issue operation, the report that manual defines, together with the pull request description, satisfies this section.
+For a Work on an Issue or a Check the Reviews of a Pull Request operation, the report or reply that manual defines, together with the pull request description, satisfies this section. For a Review a Pull Request operation, the posted review report satisfies it.

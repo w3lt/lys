@@ -75,8 +75,9 @@ seconds. Quitting Lys stops vmo and the backend together.
    that cannot be read, keeps the servers applied before.
 2. Each new or changed server gets a new session, which is `connecting`; an
    unchanged server keeps its connection or its failure, and a removed one is
-   closed. The sync answers with the list right away, without waiting for a
-   server.
+   closed. A changed server's new session goes on to step 3 only once its old
+   connection closed, so a command server's old process has ended first. The
+   sync answers with the list right away, without waiting for a server.
 3. In the background, the session starts a stdio server's command in the
    person's home folder, or sends a remote server its first request with the
    configured headers, then finishes the MCP handshake and reads the tool
@@ -88,7 +89,8 @@ seconds. Quitting Lys stops vmo and the backend together.
    becomes `failed` with `closed` and its tools are no longer listed.
    Nothing reconnects by itself:
    `POST /api/v1/mcp/servers/:serverName/reconnect` closes the server's
-   connection, or cancels its opening, and opens it again from step 3.
+   connection, or cancels its opening, and opens it again from step 3 once
+   that close or cancellation ended.
 
 ## Reconnect to LM Studio
 

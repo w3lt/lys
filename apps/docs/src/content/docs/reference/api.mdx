@@ -579,7 +579,8 @@ in the configuration reference. It opens each server in the background: it
 starts a stdio server's command, or sends the first request to a remote one,
 then reads its tools. A server's tools are listed and can be offered only
 while it is connected. Nothing reconnects by itself: Reconnect, or a changed
-setting, opens a server again.
+setting, opens a server again, once its old connection closed, so a command
+server's old process has ended before its new one starts.
 
 `GET /api/v1/mcp/servers` lists the applied servers, in the group's order,
 with each one's state. It reads nothing and contacts no server.
@@ -646,15 +647,17 @@ cut to 128 characters.
 `POST /api/v1/mcp/servers/sync` reads the `mcp` group again and applies it,
 then answers `200` with the list as it is right after applying. A server
 whose settings did not change keeps its connection, or its failure; a changed
-one is closed and opened again; a removed one is closed; a new one is opened.
+one is closed and opened again once that close ended; a removed one is closed;
+a new one is opened.
 The servers it opens are `connecting` in the answer, which does not wait for
 them. Syncs run one at a time in the order they arrive.
 
 `POST /api/v1/mcp/servers/:serverName/reconnect` closes one applied server's
 connection, or cancels its opening, and opens it again with the settings the
-backend applied; it does not read the file. It answers `200` with the list,
-the server `connecting`. A name no applied server has answers `404` with
-`urn:lys:problem:mcp:server-not-found` and changes nothing:
+backend applied once that ended; it does not read the file. It answers `200`
+with the list, the server `connecting`, without waiting. A name no applied
+server has answers `404` with `urn:lys:problem:mcp:server-not-found` and
+changes nothing:
 
 ```json
 {

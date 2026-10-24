@@ -664,7 +664,8 @@ dropped unread. `POST /api/v1/mcp/servers/sync` applies the group again;
 nothing else reads it after startup.
 
 `reconnect(name)` stops the server's session and starts a new one with the
-settings applied before, without reading the file. Nothing reconnects by
+settings applied before, without reading the file; the new session opens once
+the old one released the server. Nothing reconnects by
 itself: a server whose connection ended stays failed until Reconnect or a
 changed setting. The registry also lists the servers and their states, lists
 the tools of every connected server, and finds one tool by its model-facing
@@ -681,8 +682,14 @@ call with HTTP 404 because it no longer knows the session, fails the session
 as `closed`.
 Stopping a session cancels its opening or closes its connection, and a
 connection an opening returns after the stop is closed at once. Closes run in
-the background, and the registry keeps each until it settles. Every state
-change happens in one synchronous step, so a lookup sees one consistent
+the background, and the registry keeps each until it settles. Stopping also
+returns the session's release, which settles once its opening ended and every
+connection it led to closed, a command server's process included; for a
+process that does not exit when its input closes, that takes up to about four
+seconds. A session that replaces another, after Reconnect or a changed
+setting, opens only once that release settled, so two copies of a command
+server never run at once, and one stopped while it waits opens nothing. Every
+state change happens in one synchronous step, so a lookup sees one consistent
 state.
 
 ### Opening a server

@@ -152,6 +152,12 @@ opens it again with the settings the backend applied, and restarting the
 backend opens every server again. The backend reads a server's tools once,
 when it connects.
 
+Reconnect, and saving a changed server, start a command server's new process
+only after its old one ended, so a server that runs one copy at a time, such
+as one that holds a lock file or a port, connects again. A server that does
+not exit when Lys closes its input is ended within about four seconds, and the
+row shows `Connecting…` until then.
+
 Each MCP tool appears in Settings → Tools under `MCP · <server>` and starts
 switched on, but asks before each call until you choose Just run for it.
 Every tool that is on is described to the model with each request, so switch

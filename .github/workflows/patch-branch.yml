@@ -138,7 +138,7 @@ jobs:
             echo "- [ ] Set the version to \`$NEXT\` as [Versioning](https://lys.negentropy.studio/operate/releases/#versioning) describes."
             echo "- [ ] Record the release as [Recording a release](https://lys.negentropy.studio/changelog/#recording-a-release) describes."
             echo
-            echo "After merging, tag \`v$NEXT\` on \`stable\`, then merge \`stable\` into \`main\`, as [Patch releases](https://lys.negentropy.studio/operate/releases/#patch-releases) describes."
+            echo "After merging, tag \`v$NEXT\` on \`stable\`. At 00:00 UTC, the Stable into main workflow then opens the pull request that brings it into \`main\`; squash it. See [Patch releases](https://lys.negentropy.studio/operate/releases/#patch-releases)."
             echo
             echo "Opened by the [Patch branch workflow]($RUN_URL)."
           } > "$RUNNER_TEMP/pull-request.md"

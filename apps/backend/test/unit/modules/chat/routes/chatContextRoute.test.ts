@@ -34,7 +34,10 @@ import {
   createFixtureUuidV7,
   createTextPart
 } from "../../../support/conversationFixtures"
-import { createTestFastify } from "../../../support/fastifyTestApp"
+import {
+  createTestFastify,
+  INJECTED_REQUEST_ADDRESS
+} from "../../../support/fastifyTestApp"
 import { createDownloadedLlmModel } from "../../../support/llmFixtures"
 import { createRoomyReplyContextMeter } from "../../../support/replyContextMeterFakes"
 import {
@@ -126,7 +129,7 @@ async function createChatContextRouteApp() {
     .mockRejectedValue(
       new Error("Unexpected context route call: listDownloadedLlmModels")
     )
-  await updateFastifyWithHttpTransport(app)
+  await updateFastifyWithHttpTransport(app, INJECTED_REQUEST_ADDRESS)
   app.decorate("llmService", llmService)
   app.decorate("attachmentFileStore", attachmentFileStore)
   app.decorate(

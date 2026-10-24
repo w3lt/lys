@@ -56,6 +56,33 @@ attachments. A larger body is refused with
 changed. The response is Fastify's JSON error body, with
 `code` `FST_ERR_CTP_BODY_TOO_LARGE`, not Problem Details.
 
+## Request source
+
+Every request is checked before its body is read, before CORS answers, and
+before any route runs, the answer for an unknown path included. It is
+refused with `403` and `Content-Type: application/problem+json` when:
+
+- its `Host` header, compared without case, is not the backend's own address
+  with its port, `127.0.0.1:12345` or `localhost:12345`; this includes a
+  missing `Host`, another port, `[::1]`, and the name a page that uses DNS
+  rebinding sends; or
+- it carries an `Origin` header other than `http://localhost:1420`,
+  `http://127.0.0.1:1420`, or `tauri://localhost`, `null` included.
+
+```json
+{
+  "type": "urn:lys:problem:http:request-source-refused",
+  "title": "Request source refused",
+  "status": 403,
+  "detail": "The backend answers only requests addressed to 127.0.0.1:12345 or localhost:12345."
+}
+```
+
+For a refused `Origin`, `detail` is "The backend answers only pages of the
+Lys desktop app." A request without `Origin`, such as one from `curl` or a
+local script, is served: the check stops web pages, not other local
+processes.
+
 ## Chat request body
 
 ```json

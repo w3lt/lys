@@ -1,7 +1,22 @@
 import Fastify, { type FastifyInstance } from "fastify"
 import { onTestFinished } from "vitest"
 import * as z from "zod"
+import type { BackendListenAddress } from "../../../src/http"
 import { createBackendLogger } from "../../../src/log"
+
+/**
+ * Backend address under which the HTTP transport serves injected requests
+ * that name no `Host`.
+ *
+ * @remarks light-my-request sends `Host: localhost:80` when a case names none,
+ * and the transport serves `localhost` with the backend's port, so a route
+ * test that installs the transport with this address needs no `Host` of its
+ * own. Cases about the `Host` rule use the backend's real address instead.
+ */
+export const INJECTED_REQUEST_ADDRESS: BackendListenAddress = Object.freeze({
+  backendHost: "127.0.0.1",
+  backendPort: 80
+})
 
 /** Pino fields read by backend log assertions; other fields are retained. */
 const capturedLogRecordSchema = z.looseObject({

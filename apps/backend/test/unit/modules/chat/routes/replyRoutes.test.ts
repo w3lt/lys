@@ -33,7 +33,10 @@ import {
   FIXTURE_TIMESTAMP
 } from "../../../support/conversationFixtures"
 import { openConversationTestServices } from "../../../support/conversationDatabase"
-import { createTestFastify } from "../../../support/fastifyTestApp"
+import {
+  createTestFastify,
+  INJECTED_REQUEST_ADDRESS
+} from "../../../support/fastifyTestApp"
 import { waitForMicrotasks } from "../../../support/microtasks"
 
 /** Conversation the stubbed history answers for. */
@@ -131,7 +134,10 @@ async function createReplyRouteApp() {
   const getConversation = vi
     .spyOn(history, "getConversation")
     .mockImplementation(() => handleUnexpectedHistoryCall("getConversation"))
-  await updateFastifyWithHttpTransport(testFastify.app)
+  await updateFastifyWithHttpTransport(
+    testFastify.app,
+    INJECTED_REQUEST_ADDRESS
+  )
   testFastify.app.decorate("conversationHistoryReader", history)
   await updateFastifyWithChatReplyRoutes(testFastify.app, generations)
   return { ...testFastify, generations, getConversation }

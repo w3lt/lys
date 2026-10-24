@@ -48,6 +48,9 @@ function createOwnedBackendConfig(): BackendConfig {
   }
 }
 
+/** `Host` the desktop sends, naming the configured backend address. */
+const BACKEND_HOST_HEADER = `${TEST_BACKEND_CONFIG.backendHost}:${TEST_BACKEND_CONFIG.backendPort}`
+
 /** Fastify's default request body limit, in bytes, stated in the API reference. */
 const REQUEST_BODY_LIMIT = 1_048_576
 
@@ -124,11 +127,13 @@ describe("buildApp", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: "/api/v1/conversations"
+      url: "/api/v1/conversations",
+      headers: { host: BACKEND_HOST_HEADER }
     })
     const agentsResponse = await app.inject({
       method: "GET",
-      url: "/api/v1/agents"
+      url: "/api/v1/agents",
+      headers: { host: BACKEND_HOST_HEADER }
     })
 
     expect(app.conversationTurns).toBeInstanceOf(StoredConversationTurns)
@@ -191,7 +196,8 @@ describe("buildApp", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: "/api/v1/conversations?query=trip%20to%20Hanoi&limit=20"
+      url: "/api/v1/conversations?query=trip%20to%20Hanoi&limit=20",
+      headers: { host: BACKEND_HOST_HEADER }
     })
 
     expect(response.statusCode).toBe(200)
@@ -201,7 +207,7 @@ describe("buildApp", () => {
         req: {
           method: "GET",
           url: "/api/v1/conversations?query=trip%20to%20Hanoi&limit=20",
-          host: "localhost:80",
+          host: "127.0.0.1:12345",
           remoteAddress: "127.0.0.1"
         }
       })
@@ -220,7 +226,8 @@ describe("buildApp", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: "/api/v1/missing?query=trip%20to%20Hanoi"
+      url: "/api/v1/missing?query=trip%20to%20Hanoi",
+      headers: { host: BACKEND_HOST_HEADER }
     })
 
     expect(response.statusCode).toBe(404)
@@ -294,8 +301,16 @@ describe("buildApp", () => {
     onTestFinished(async () => await app.close())
     await app.ready()
 
-    const first = await app.inject({ method: "GET", url: "/api/v1/heath" })
-    const second = await app.inject({ method: "GET", url: "/api/v1/heath" })
+    const first = await app.inject({
+      method: "GET",
+      url: "/api/v1/heath",
+      headers: { host: BACKEND_HOST_HEADER }
+    })
+    const second = await app.inject({
+      method: "GET",
+      url: "/api/v1/heath",
+      headers: { host: BACKEND_HOST_HEADER }
+    })
 
     expect(first.statusCode).toBe(200)
     expect(second.statusCode).toBe(200)
@@ -323,13 +338,19 @@ describe("buildApp", () => {
     const atLimit = await app.inject({
       method: "POST",
       url: "/api/v1/agents",
-      headers: { "content-type": "application/json" },
+      headers: {
+        host: BACKEND_HOST_HEADER,
+        "content-type": "application/json"
+      },
       payload: createAgentBodyOfSize("at-limit", REQUEST_BODY_LIMIT)
     })
     const overLimit = await app.inject({
       method: "POST",
       url: "/api/v1/agents",
-      headers: { "content-type": "application/json" },
+      headers: {
+        host: BACKEND_HOST_HEADER,
+        "content-type": "application/json"
+      },
       payload: createAgentBodyOfSize("over-limit", REQUEST_BODY_LIMIT + 1)
     })
 
@@ -340,4 +361,52 @@ describe("buildApp", () => {
     })
     expect(app.agentService.findAgent("over-limit")).toBeUndefined()
   })
+
+  it.each([
+    ["a name rebound to loopback", { host: "rebound.attacker.example:12345" }],
+    [
+      "another site's page",
+      { host: BACKEND_HOST_HEADER, origin: "https://attacker.example" }
+    ]
+  ])(
+    "refuses a request from %s before any route runs and logs its refusal",
+    async (_case, sourceHeaders) => {
+      const log = new CapturedLogDestination()
+      const app = await buildApp({
+        config: createOwnedBackendConfig(),
+        logger: createBackendLogger(log)
+      })
+      onTestFinished(async () => await app.close())
+      await app.ready()
+      const logCountBeforeRequest = log.records.length
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        headers: { ...sourceHeaders, "content-type": "application/json" },
+        payload: {
+          code: "intruder",
+          name: "Intruder",
+          bio: "Bio",
+          systemPrompt: ""
+        }
+      })
+
+      expect(response.statusCode).toBe(403)
+      expect(response.json()).toMatchObject({
+        type: "urn:lys:problem:http:request-source-refused"
+      })
+      expect(app.agentService.findAgent("intruder")).toBeUndefined()
+      expect(log.records.slice(logCountBeforeRequest)).toEqual([
+        expect.objectContaining({
+          msg: "incoming request",
+          req: expect.objectContaining({ host: sourceHeaders.host })
+        }),
+        expect.objectContaining({
+          msg: "request completed",
+          res: { statusCode: 403 }
+        })
+      ])
+    }
+  )
 })

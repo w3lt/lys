@@ -15,7 +15,10 @@ import updateFastifyWithAgentRoutes from "../../../../../src/modules/agent/route
 import { createConversationListCursor } from "../../../../../src/modules/conversation/listOptions"
 import { openTestDatabase } from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
-import { createTestFastify } from "../../../support/fastifyTestApp"
+import {
+  createTestFastify,
+  INJECTED_REQUEST_ADDRESS
+} from "../../../support/fastifyTestApp"
 
 /** Time the clock reads when a case starts. */
 const NOW = "2026-05-06T07:08:09.123Z"
@@ -115,7 +118,7 @@ async function createAgentRouteApp(
     replyModel: UNUSED_REPLY_MODEL,
     replyContextMeter: UNUSED_REPLY_CONTEXT_METER
   })
-  await updateFastifyWithHttpTransport(app)
+  await updateFastifyWithHttpTransport(app, INJECTED_REQUEST_ADDRESS)
   app.decorate("agentService", agents)
   await updateFastifyWithAgentRoutes(app)
   return { app, agents }

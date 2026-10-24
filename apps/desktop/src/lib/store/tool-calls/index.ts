@@ -733,8 +733,8 @@ function createToolCallStore(
      * request listed again by a snapshot runs once. A call held in its
      * approval step moves to its run step in place, also while it still
      * waits for the person: the store does not check who allowed the call,
-     * and the backend takes an approval answer from any local caller until
-     * its callers are authenticated (#171). Running and sending never reject.
+     * and the backend takes an approval answer from any local process until
+     * its callers are authenticated (#211). Running and sending never reject.
      */
     function startToolRun(
       target: ChatReplyPathParams,

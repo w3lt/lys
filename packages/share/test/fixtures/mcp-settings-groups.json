@@ -1,0 +1,4125 @@
+[
+  {
+    "case": "a group without a servers list holds no server",
+    "group": {},
+    "accepted": true,
+    "written": {
+      "servers": []
+    }
+  },
+  {
+    "case": "an empty servers list",
+    "group": {
+      "servers": []
+    },
+    "accepted": true,
+    "written": {
+      "servers": []
+    }
+  },
+  {
+    "case": "a null group",
+    "group": null,
+    "accepted": false
+  },
+  {
+    "case": "a null servers list",
+    "group": {
+      "servers": null
+    },
+    "accepted": false
+  },
+  {
+    "case": "a group with an unknown field",
+    "group": {
+      "servers": [],
+      "extra": true
+    },
+    "accepted": false
+  },
+  {
+    "case": "a group that is an array",
+    "group": [],
+    "accepted": false
+  },
+  {
+    "case": "a group that is text",
+    "group": "servers",
+    "accepted": false
+  },
+  {
+    "case": "a servers list that is text",
+    "group": {
+      "servers": "files"
+    },
+    "accepted": false
+  },
+  {
+    "case": "a servers list that is an object",
+    "group": {
+      "servers": {}
+    },
+    "accepted": false
+  },
+  {
+    "case": "16 servers",
+    "group": {
+      "servers": [
+        {
+          "name": "s1",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s2",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s3",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s4",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s5",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s6",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s7",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s8",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s9",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s10",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s11",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s12",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s13",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s14",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s15",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s16",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s1",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s2",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s3",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s4",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s5",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s6",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s7",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s8",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s9",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s10",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s11",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s12",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s13",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s14",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s15",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "s16",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    }
+  },
+  {
+    "case": "17 servers",
+    "group": {
+      "servers": [
+        {
+          "name": "s1",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s2",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s3",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s4",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s5",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s6",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s7",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s8",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s9",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s10",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s11",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s12",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s13",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s14",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s15",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s16",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "s17",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "two servers with one name",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "name": "files",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "one server of each transport with every field",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "arguments": ["-y", "files-server"],
+          "environment": [
+            {
+              "name": "LOG_LEVEL",
+              "value": "warn"
+            }
+          ]
+        },
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer synthetic-token"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": ["-y", "files-server"],
+          "environment": [
+            {
+              "name": "LOG_LEVEL",
+              "value": "warn"
+            }
+          ],
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx"
+        },
+        {
+          "headers": [
+            {
+              "name": "Authorization",
+              "value": "Bearer synthetic-token"
+            }
+          ],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a server that is an array",
+    "group": {
+      "servers": [["stdio", "files", "npx"]]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server that is text",
+    "group": {
+      "servers": ["files"]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a null server",
+    "group": {
+      "servers": [null]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server name of 20 characters",
+    "group": {
+      "servers": [
+        {
+          "name": "aaaaaaaaaaaaaaaaaaaa",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "aaaaaaaaaaaaaaaaaaaa",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a server name of 21 characters",
+    "group": {
+      "servers": [
+        {
+          "name": "aaaaaaaaaaaaaaaaaaaaa",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server name of digits only",
+    "group": {
+      "servers": [
+        {
+          "name": "123",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "123",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a server name of hyphen-joined runs",
+    "group": {
+      "servers": [
+        {
+          "name": "a-1-b2",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "a-1-b2",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an empty server name",
+    "group": {
+      "servers": [
+        {
+          "name": "",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server name with an uppercase letter",
+    "group": {
+      "servers": [
+        {
+          "name": "Files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server name with a space",
+    "group": {
+      "servers": [
+        {
+          "name": "my files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server name with a leading hyphen",
+    "group": {
+      "servers": [
+        {
+          "name": "-files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server name with a trailing hyphen",
+    "group": {
+      "servers": [
+        {
+          "name": "files-",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server name with a double hyphen",
+    "group": {
+      "servers": [
+        {
+          "name": "my--files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server name with an underscore",
+    "group": {
+      "servers": [
+        {
+          "name": "my_files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server name with a non-ASCII letter",
+    "group": {
+      "servers": [
+        {
+          "name": "café",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server name that is a number",
+    "group": {
+      "servers": [
+        {
+          "name": 1,
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server without a name",
+    "group": {
+      "servers": [
+        {
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an unknown transport",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "sse",
+          "url": "https://mcp.example.com/sse"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a transport in uppercase",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "STDIO",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server without a transport",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a stdio server with a url",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "url": "https://mcp.example.com/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a stdio server with headers",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "headers": []
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an http server with a command",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an http server with an environment",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "environment": []
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server with an unknown field",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "enabled": true
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a stdio server without a command",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an http server without a url",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a command of 1 character",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "x"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "files",
+          "transport": "stdio",
+          "command": "x"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a command of 1024 characters",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "files",
+          "transport": "stdio",
+          "command": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a command of 1025 characters",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a command of 1024 characters ending in an astral one",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "files",
+          "transport": "stdio",
+          "command": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a command of 1025 characters ending in an astral one",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an empty command",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": ""
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a command with inner spaces",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "/Applications/My App/bin/server"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "files",
+          "transport": "stdio",
+          "command": "/Applications/My App/bin/server"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a command with an inner no-break space",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "my server"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "files",
+          "transport": "stdio",
+          "command": "my server"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a command with an inner line separator",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "my server"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [],
+          "name": "files",
+          "transport": "stdio",
+          "command": "my server"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a command with a leading space",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": " npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a command with a trailing space",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx "
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a command with a leading no-break space",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": " npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a command with a trailing line separator",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx "
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a command with a trailing ideographic space",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx　"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a command with an inner tab",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "n\tpx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a command with a line break",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx\nrm"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a command with a bell character",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx\u0007"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a command with a delete character",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a command with a C1 control character",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npxx"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a command that is a number",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": 1
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "64 arguments",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "arguments": [
+            "a0",
+            "a1",
+            "a2",
+            "a3",
+            "a4",
+            "a5",
+            "a6",
+            "a7",
+            "a8",
+            "a9",
+            "a10",
+            "a11",
+            "a12",
+            "a13",
+            "a14",
+            "a15",
+            "a16",
+            "a17",
+            "a18",
+            "a19",
+            "a20",
+            "a21",
+            "a22",
+            "a23",
+            "a24",
+            "a25",
+            "a26",
+            "a27",
+            "a28",
+            "a29",
+            "a30",
+            "a31",
+            "a32",
+            "a33",
+            "a34",
+            "a35",
+            "a36",
+            "a37",
+            "a38",
+            "a39",
+            "a40",
+            "a41",
+            "a42",
+            "a43",
+            "a44",
+            "a45",
+            "a46",
+            "a47",
+            "a48",
+            "a49",
+            "a50",
+            "a51",
+            "a52",
+            "a53",
+            "a54",
+            "a55",
+            "a56",
+            "a57",
+            "a58",
+            "a59",
+            "a60",
+            "a61",
+            "a62",
+            "a63"
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [
+            "a0",
+            "a1",
+            "a2",
+            "a3",
+            "a4",
+            "a5",
+            "a6",
+            "a7",
+            "a8",
+            "a9",
+            "a10",
+            "a11",
+            "a12",
+            "a13",
+            "a14",
+            "a15",
+            "a16",
+            "a17",
+            "a18",
+            "a19",
+            "a20",
+            "a21",
+            "a22",
+            "a23",
+            "a24",
+            "a25",
+            "a26",
+            "a27",
+            "a28",
+            "a29",
+            "a30",
+            "a31",
+            "a32",
+            "a33",
+            "a34",
+            "a35",
+            "a36",
+            "a37",
+            "a38",
+            "a39",
+            "a40",
+            "a41",
+            "a42",
+            "a43",
+            "a44",
+            "a45",
+            "a46",
+            "a47",
+            "a48",
+            "a49",
+            "a50",
+            "a51",
+            "a52",
+            "a53",
+            "a54",
+            "a55",
+            "a56",
+            "a57",
+            "a58",
+            "a59",
+            "a60",
+            "a61",
+            "a62",
+            "a63"
+          ],
+          "environment": [],
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    }
+  },
+  {
+    "case": "65 arguments",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "arguments": [
+            "a0",
+            "a1",
+            "a2",
+            "a3",
+            "a4",
+            "a5",
+            "a6",
+            "a7",
+            "a8",
+            "a9",
+            "a10",
+            "a11",
+            "a12",
+            "a13",
+            "a14",
+            "a15",
+            "a16",
+            "a17",
+            "a18",
+            "a19",
+            "a20",
+            "a21",
+            "a22",
+            "a23",
+            "a24",
+            "a25",
+            "a26",
+            "a27",
+            "a28",
+            "a29",
+            "a30",
+            "a31",
+            "a32",
+            "a33",
+            "a34",
+            "a35",
+            "a36",
+            "a37",
+            "a38",
+            "a39",
+            "a40",
+            "a41",
+            "a42",
+            "a43",
+            "a44",
+            "a45",
+            "a46",
+            "a47",
+            "a48",
+            "a49",
+            "a50",
+            "a51",
+            "a52",
+            "a53",
+            "a54",
+            "a55",
+            "a56",
+            "a57",
+            "a58",
+            "a59",
+            "a60",
+            "a61",
+            "a62",
+            "a63",
+            "a64"
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an argument of 1024 characters ending in an astral one",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "arguments": [
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb😀"
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb😀"
+          ],
+          "environment": [],
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an argument of 1025 characters ending in an astral one",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "arguments": [
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb😀"
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an empty argument",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "arguments": [""]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an argument of one tab",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "arguments": ["\t"]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": ["\t"],
+          "environment": [],
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    }
+  },
+  {
+    "case": "arguments with tabs and spaces at either end",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "arguments": ["a\tb", " padded "]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": ["a\tb", " padded "],
+          "environment": [],
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an argument with a line break",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "arguments": ["a\nb"]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an argument with a carriage return",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "arguments": ["a\rb"]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an argument with a null character",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "arguments": ["a\u0000b"]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a null arguments list",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "arguments": null
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an argument that is a number",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "arguments": [1]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "32 variables",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "V0",
+              "value": "v"
+            },
+            {
+              "name": "V1",
+              "value": "v"
+            },
+            {
+              "name": "V2",
+              "value": "v"
+            },
+            {
+              "name": "V3",
+              "value": "v"
+            },
+            {
+              "name": "V4",
+              "value": "v"
+            },
+            {
+              "name": "V5",
+              "value": "v"
+            },
+            {
+              "name": "V6",
+              "value": "v"
+            },
+            {
+              "name": "V7",
+              "value": "v"
+            },
+            {
+              "name": "V8",
+              "value": "v"
+            },
+            {
+              "name": "V9",
+              "value": "v"
+            },
+            {
+              "name": "V10",
+              "value": "v"
+            },
+            {
+              "name": "V11",
+              "value": "v"
+            },
+            {
+              "name": "V12",
+              "value": "v"
+            },
+            {
+              "name": "V13",
+              "value": "v"
+            },
+            {
+              "name": "V14",
+              "value": "v"
+            },
+            {
+              "name": "V15",
+              "value": "v"
+            },
+            {
+              "name": "V16",
+              "value": "v"
+            },
+            {
+              "name": "V17",
+              "value": "v"
+            },
+            {
+              "name": "V18",
+              "value": "v"
+            },
+            {
+              "name": "V19",
+              "value": "v"
+            },
+            {
+              "name": "V20",
+              "value": "v"
+            },
+            {
+              "name": "V21",
+              "value": "v"
+            },
+            {
+              "name": "V22",
+              "value": "v"
+            },
+            {
+              "name": "V23",
+              "value": "v"
+            },
+            {
+              "name": "V24",
+              "value": "v"
+            },
+            {
+              "name": "V25",
+              "value": "v"
+            },
+            {
+              "name": "V26",
+              "value": "v"
+            },
+            {
+              "name": "V27",
+              "value": "v"
+            },
+            {
+              "name": "V28",
+              "value": "v"
+            },
+            {
+              "name": "V29",
+              "value": "v"
+            },
+            {
+              "name": "V30",
+              "value": "v"
+            },
+            {
+              "name": "V31",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [
+            {
+              "name": "V0",
+              "value": "v"
+            },
+            {
+              "name": "V1",
+              "value": "v"
+            },
+            {
+              "name": "V2",
+              "value": "v"
+            },
+            {
+              "name": "V3",
+              "value": "v"
+            },
+            {
+              "name": "V4",
+              "value": "v"
+            },
+            {
+              "name": "V5",
+              "value": "v"
+            },
+            {
+              "name": "V6",
+              "value": "v"
+            },
+            {
+              "name": "V7",
+              "value": "v"
+            },
+            {
+              "name": "V8",
+              "value": "v"
+            },
+            {
+              "name": "V9",
+              "value": "v"
+            },
+            {
+              "name": "V10",
+              "value": "v"
+            },
+            {
+              "name": "V11",
+              "value": "v"
+            },
+            {
+              "name": "V12",
+              "value": "v"
+            },
+            {
+              "name": "V13",
+              "value": "v"
+            },
+            {
+              "name": "V14",
+              "value": "v"
+            },
+            {
+              "name": "V15",
+              "value": "v"
+            },
+            {
+              "name": "V16",
+              "value": "v"
+            },
+            {
+              "name": "V17",
+              "value": "v"
+            },
+            {
+              "name": "V18",
+              "value": "v"
+            },
+            {
+              "name": "V19",
+              "value": "v"
+            },
+            {
+              "name": "V20",
+              "value": "v"
+            },
+            {
+              "name": "V21",
+              "value": "v"
+            },
+            {
+              "name": "V22",
+              "value": "v"
+            },
+            {
+              "name": "V23",
+              "value": "v"
+            },
+            {
+              "name": "V24",
+              "value": "v"
+            },
+            {
+              "name": "V25",
+              "value": "v"
+            },
+            {
+              "name": "V26",
+              "value": "v"
+            },
+            {
+              "name": "V27",
+              "value": "v"
+            },
+            {
+              "name": "V28",
+              "value": "v"
+            },
+            {
+              "name": "V29",
+              "value": "v"
+            },
+            {
+              "name": "V30",
+              "value": "v"
+            },
+            {
+              "name": "V31",
+              "value": "v"
+            }
+          ],
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    }
+  },
+  {
+    "case": "33 variables",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "V0",
+              "value": "v"
+            },
+            {
+              "name": "V1",
+              "value": "v"
+            },
+            {
+              "name": "V2",
+              "value": "v"
+            },
+            {
+              "name": "V3",
+              "value": "v"
+            },
+            {
+              "name": "V4",
+              "value": "v"
+            },
+            {
+              "name": "V5",
+              "value": "v"
+            },
+            {
+              "name": "V6",
+              "value": "v"
+            },
+            {
+              "name": "V7",
+              "value": "v"
+            },
+            {
+              "name": "V8",
+              "value": "v"
+            },
+            {
+              "name": "V9",
+              "value": "v"
+            },
+            {
+              "name": "V10",
+              "value": "v"
+            },
+            {
+              "name": "V11",
+              "value": "v"
+            },
+            {
+              "name": "V12",
+              "value": "v"
+            },
+            {
+              "name": "V13",
+              "value": "v"
+            },
+            {
+              "name": "V14",
+              "value": "v"
+            },
+            {
+              "name": "V15",
+              "value": "v"
+            },
+            {
+              "name": "V16",
+              "value": "v"
+            },
+            {
+              "name": "V17",
+              "value": "v"
+            },
+            {
+              "name": "V18",
+              "value": "v"
+            },
+            {
+              "name": "V19",
+              "value": "v"
+            },
+            {
+              "name": "V20",
+              "value": "v"
+            },
+            {
+              "name": "V21",
+              "value": "v"
+            },
+            {
+              "name": "V22",
+              "value": "v"
+            },
+            {
+              "name": "V23",
+              "value": "v"
+            },
+            {
+              "name": "V24",
+              "value": "v"
+            },
+            {
+              "name": "V25",
+              "value": "v"
+            },
+            {
+              "name": "V26",
+              "value": "v"
+            },
+            {
+              "name": "V27",
+              "value": "v"
+            },
+            {
+              "name": "V28",
+              "value": "v"
+            },
+            {
+              "name": "V29",
+              "value": "v"
+            },
+            {
+              "name": "V30",
+              "value": "v"
+            },
+            {
+              "name": "V31",
+              "value": "v"
+            },
+            {
+              "name": "V32",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a variable name of 128 characters",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "VAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [
+            {
+              "name": "VAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "value": "v"
+            }
+          ],
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a variable name of 129 characters",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "VAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "variable names starting with an underscore or a letter",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "_PRIVATE",
+              "value": "v"
+            },
+            {
+              "name": "a1_B2",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [
+            {
+              "name": "_PRIVATE",
+              "value": "v"
+            },
+            {
+              "name": "a1_B2",
+              "value": "v"
+            }
+          ],
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an empty variable name",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a variable name starting with a digit",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "1TOKEN",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a variable name with a hyphen",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "MY-TOKEN",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a variable name with an equals sign",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "A=B",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a variable name with a non-ASCII letter",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "ÉTÉ",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "two variables with one name",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "TOKEN",
+              "value": "v"
+            },
+            {
+              "name": "TOKEN",
+              "value": "w"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "two variable names that differ only in case",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "token",
+              "value": "v"
+            },
+            {
+              "name": "TOKEN",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [
+            {
+              "name": "token",
+              "value": "v"
+            },
+            {
+              "name": "TOKEN",
+              "value": "v"
+            }
+          ],
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a variable value of 4096 characters ending in an astral one",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "V",
+              "value": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc😀"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [
+            {
+              "name": "V",
+              "value": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc😀"
+            }
+          ],
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a variable value of 4097 characters ending in an astral one",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "V",
+              "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc😀"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an empty variable value",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "V",
+              "value": ""
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [
+            {
+              "name": "V",
+              "value": ""
+            }
+          ],
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a variable value with tabs and spaces at either end",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "V",
+              "value": " a\tb "
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "arguments": [],
+          "environment": [
+            {
+              "name": "V",
+              "value": " a\tb "
+            }
+          ],
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a variable value with a line break",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "V",
+              "value": "a\nb"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a variable value with a carriage return",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "V",
+              "value": "a\rb"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a variable without a value",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "V"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a variable with an unknown field",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [
+            {
+              "name": "V",
+              "value": "v",
+              "secret": true
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a variable that is an array",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": [["V", "v"]]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a null environment list",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "environment": null
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL with a port, path, and query",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com:8443/mcp?team=lys"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com:8443/mcp?team=lys"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an http URL to localhost",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "http://localhost:3000/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "http://localhost:3000/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an http URL to 127.0.0.1",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "http://127.0.0.1:8080/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "http://127.0.0.1:8080/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an http URL to [::1]",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "http://[::1]:8080/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "http://[::1]:8080/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an http URL to localhost in uppercase",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "HTTP://LOCALHOST/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "HTTP://LOCALHOST/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an http URL to the short form 127.1",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "http://127.1/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "http://127.1/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an http URL to the hexadecimal form 0x7f000001",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "http://0x7f000001/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "http://0x7f000001/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an http URL to 127.0.0.1 with a trailing dot",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "http://127.0.0.1./mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "http://127.0.0.1./mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an http URL to a percent-encoded localhost",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "http://%6c%6fcalhost/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "http://%6c%6fcalhost/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an http URL to localhost written with backslashes",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "http:\\\\localhost\\mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "http:\\\\localhost\\mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an http URL to localhost with a trailing dot",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "http://localhost./mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an http URL to an IPv4-mapped IPv6 loopback",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "http://[::ffff:127.0.0.1]/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an http URL to another loopback address",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "http://127.0.0.2/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an http URL to another host",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "http://mcp.example.com/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an http URL to a host under localhost",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "http://localhost.example.com/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL with a user name",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://user@mcp.example.com/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL with a user name and an empty password",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://user:@mcp.example.com/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL with a password",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://:secret@mcp.example.com/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL with empty user info",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://@mcp.example.com/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://@mcp.example.com/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL with a fragment",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp#tools"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL with an empty fragment",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp#"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a URL of 2048 characters ending in an astral one",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp😀"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp😀"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a URL of 2049 characters ending in an astral one",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp😀"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a URL with a space",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/my mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a URL with a no-break space",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/my mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a URL with a line break",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/\nmcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a URL with a leading space",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": " https://mcp.example.com/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an ftp URL",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "ftp://localhost/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a ws URL",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "ws://localhost/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a file URL",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "file:///tmp/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a relative URL",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a URL without a scheme",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "mcp.example.com/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL with a third slash, which the URL parser skips before the host",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https:///mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https:///mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL without a host",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an http URL with a port but no host",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "http://:8080/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an empty URL",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": ""
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "32 headers",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-H0",
+              "value": "v"
+            },
+            {
+              "name": "X-H1",
+              "value": "v"
+            },
+            {
+              "name": "X-H2",
+              "value": "v"
+            },
+            {
+              "name": "X-H3",
+              "value": "v"
+            },
+            {
+              "name": "X-H4",
+              "value": "v"
+            },
+            {
+              "name": "X-H5",
+              "value": "v"
+            },
+            {
+              "name": "X-H6",
+              "value": "v"
+            },
+            {
+              "name": "X-H7",
+              "value": "v"
+            },
+            {
+              "name": "X-H8",
+              "value": "v"
+            },
+            {
+              "name": "X-H9",
+              "value": "v"
+            },
+            {
+              "name": "X-H10",
+              "value": "v"
+            },
+            {
+              "name": "X-H11",
+              "value": "v"
+            },
+            {
+              "name": "X-H12",
+              "value": "v"
+            },
+            {
+              "name": "X-H13",
+              "value": "v"
+            },
+            {
+              "name": "X-H14",
+              "value": "v"
+            },
+            {
+              "name": "X-H15",
+              "value": "v"
+            },
+            {
+              "name": "X-H16",
+              "value": "v"
+            },
+            {
+              "name": "X-H17",
+              "value": "v"
+            },
+            {
+              "name": "X-H18",
+              "value": "v"
+            },
+            {
+              "name": "X-H19",
+              "value": "v"
+            },
+            {
+              "name": "X-H20",
+              "value": "v"
+            },
+            {
+              "name": "X-H21",
+              "value": "v"
+            },
+            {
+              "name": "X-H22",
+              "value": "v"
+            },
+            {
+              "name": "X-H23",
+              "value": "v"
+            },
+            {
+              "name": "X-H24",
+              "value": "v"
+            },
+            {
+              "name": "X-H25",
+              "value": "v"
+            },
+            {
+              "name": "X-H26",
+              "value": "v"
+            },
+            {
+              "name": "X-H27",
+              "value": "v"
+            },
+            {
+              "name": "X-H28",
+              "value": "v"
+            },
+            {
+              "name": "X-H29",
+              "value": "v"
+            },
+            {
+              "name": "X-H30",
+              "value": "v"
+            },
+            {
+              "name": "X-H31",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [
+            {
+              "name": "X-H0",
+              "value": "v"
+            },
+            {
+              "name": "X-H1",
+              "value": "v"
+            },
+            {
+              "name": "X-H2",
+              "value": "v"
+            },
+            {
+              "name": "X-H3",
+              "value": "v"
+            },
+            {
+              "name": "X-H4",
+              "value": "v"
+            },
+            {
+              "name": "X-H5",
+              "value": "v"
+            },
+            {
+              "name": "X-H6",
+              "value": "v"
+            },
+            {
+              "name": "X-H7",
+              "value": "v"
+            },
+            {
+              "name": "X-H8",
+              "value": "v"
+            },
+            {
+              "name": "X-H9",
+              "value": "v"
+            },
+            {
+              "name": "X-H10",
+              "value": "v"
+            },
+            {
+              "name": "X-H11",
+              "value": "v"
+            },
+            {
+              "name": "X-H12",
+              "value": "v"
+            },
+            {
+              "name": "X-H13",
+              "value": "v"
+            },
+            {
+              "name": "X-H14",
+              "value": "v"
+            },
+            {
+              "name": "X-H15",
+              "value": "v"
+            },
+            {
+              "name": "X-H16",
+              "value": "v"
+            },
+            {
+              "name": "X-H17",
+              "value": "v"
+            },
+            {
+              "name": "X-H18",
+              "value": "v"
+            },
+            {
+              "name": "X-H19",
+              "value": "v"
+            },
+            {
+              "name": "X-H20",
+              "value": "v"
+            },
+            {
+              "name": "X-H21",
+              "value": "v"
+            },
+            {
+              "name": "X-H22",
+              "value": "v"
+            },
+            {
+              "name": "X-H23",
+              "value": "v"
+            },
+            {
+              "name": "X-H24",
+              "value": "v"
+            },
+            {
+              "name": "X-H25",
+              "value": "v"
+            },
+            {
+              "name": "X-H26",
+              "value": "v"
+            },
+            {
+              "name": "X-H27",
+              "value": "v"
+            },
+            {
+              "name": "X-H28",
+              "value": "v"
+            },
+            {
+              "name": "X-H29",
+              "value": "v"
+            },
+            {
+              "name": "X-H30",
+              "value": "v"
+            },
+            {
+              "name": "X-H31",
+              "value": "v"
+            }
+          ],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "33 headers",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-H0",
+              "value": "v"
+            },
+            {
+              "name": "X-H1",
+              "value": "v"
+            },
+            {
+              "name": "X-H2",
+              "value": "v"
+            },
+            {
+              "name": "X-H3",
+              "value": "v"
+            },
+            {
+              "name": "X-H4",
+              "value": "v"
+            },
+            {
+              "name": "X-H5",
+              "value": "v"
+            },
+            {
+              "name": "X-H6",
+              "value": "v"
+            },
+            {
+              "name": "X-H7",
+              "value": "v"
+            },
+            {
+              "name": "X-H8",
+              "value": "v"
+            },
+            {
+              "name": "X-H9",
+              "value": "v"
+            },
+            {
+              "name": "X-H10",
+              "value": "v"
+            },
+            {
+              "name": "X-H11",
+              "value": "v"
+            },
+            {
+              "name": "X-H12",
+              "value": "v"
+            },
+            {
+              "name": "X-H13",
+              "value": "v"
+            },
+            {
+              "name": "X-H14",
+              "value": "v"
+            },
+            {
+              "name": "X-H15",
+              "value": "v"
+            },
+            {
+              "name": "X-H16",
+              "value": "v"
+            },
+            {
+              "name": "X-H17",
+              "value": "v"
+            },
+            {
+              "name": "X-H18",
+              "value": "v"
+            },
+            {
+              "name": "X-H19",
+              "value": "v"
+            },
+            {
+              "name": "X-H20",
+              "value": "v"
+            },
+            {
+              "name": "X-H21",
+              "value": "v"
+            },
+            {
+              "name": "X-H22",
+              "value": "v"
+            },
+            {
+              "name": "X-H23",
+              "value": "v"
+            },
+            {
+              "name": "X-H24",
+              "value": "v"
+            },
+            {
+              "name": "X-H25",
+              "value": "v"
+            },
+            {
+              "name": "X-H26",
+              "value": "v"
+            },
+            {
+              "name": "X-H27",
+              "value": "v"
+            },
+            {
+              "name": "X-H28",
+              "value": "v"
+            },
+            {
+              "name": "X-H29",
+              "value": "v"
+            },
+            {
+              "name": "X-H30",
+              "value": "v"
+            },
+            {
+              "name": "X-H31",
+              "value": "v"
+            },
+            {
+              "name": "X-H32",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header name of 128 characters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [
+            {
+              "name": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh",
+              "value": "v"
+            }
+          ],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a header name of 129 characters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header name of every token symbol",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "!#$%&'*+.^_`|~-",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [
+            {
+              "name": "!#$%&'*+.^_`|~-",
+              "value": "v"
+            }
+          ],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an empty header name",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header name with a colon",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Key:",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header name with a space",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X Key",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header name with a non-ASCII letter",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Clé",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "the header Accept, which the transport sets",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "Accept",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "the header content-length, which the transport sets",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "content-length",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "the header Content-Type, which the transport sets",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "the header HOST, which the transport sets",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "HOST",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "the header Last-Event-ID, which the transport sets",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "Last-Event-ID",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "the header MCP-Protocol-Version, which the transport sets",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "MCP-Protocol-Version",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "the header mcp-session-id, which the transport sets",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "mcp-session-id",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "two headers whose names differ only in case",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": "v"
+            },
+            {
+              "name": "x-key",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header value of 8192 characters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            }
+          ],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a header value of 8193 characters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an empty header value",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": ""
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": ""
+            }
+          ],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a header value with inner spaces and tabs",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": "a b\tc"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": "a b\tc"
+            }
+          ],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "a header value with a leading space",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": " a"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header value with a trailing space",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": "a "
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header value with a leading tab",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": "\ta"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header value with a trailing tab",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": "a\t"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header value of one space",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": " "
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header value with a non-ASCII character",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": "café"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header value with a line break",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": "a\nb"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header value with a delete character",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Key",
+              "value": "ab"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header without a value",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "X-Key"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header that is an array",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [["X-Key", "v"]]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a null headers list",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": null
+        }
+      ]
+    },
+    "accepted": false
+  }
+]

@@ -12,6 +12,7 @@ import type {
   ToolCallReplyPart,
   ToolDefinition
 } from "@lys/share"
+import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
 import { waitForSettlementOrAbort } from "../../utils/abort"
 import { ChatCompletionCancelledError } from "../../utils/errors"
@@ -120,6 +121,12 @@ export type AgentTurn = Readonly<{
    * client tool; empty when none are offered.
    */
   builtInTools: readonly TurnBuiltInTool[]
+  /**
+   * MCP tools found for the turn, each name once and none named like
+   * another offered tool; empty when none are offered. Each call asks the
+   * person first, unless they saved the tool as Just run.
+   */
+  mcpTools: readonly TurnMcpTool[]
   /**
    * What the request names about the tools the turn does not offer: that
    * tool calls are off, or the switched-off tools and the switched-on
@@ -242,7 +249,7 @@ export type AgentContextInput = Readonly<{
   getAttachmentImageFileStatus: GetAttachmentImageFileStatus
   /**
    * Definitions of the offered tools, each name once: client tools first,
-   * then backend tools; empty when none would be offered.
+   * then built-in tools, then MCP tools; empty when none would be offered.
    */
   tools: readonly ToolDefinition[]
   /**
@@ -489,7 +496,11 @@ export default class Agent {
   async #createReplyText(
     turn: AgentTurn
   ): Promise<ConversationAssistantMessageFinishReason | undefined> {
-    const tools = buildAgentToolset(turn.clientTools, turn.builtInTools)
+    const tools = buildAgentToolset(
+      turn.clientTools,
+      turn.builtInTools,
+      turn.mcpTools
+    )
     const state: ReplyRoundState = Object.freeze({
       turn,
       tools,

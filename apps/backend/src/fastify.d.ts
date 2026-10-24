@@ -9,6 +9,7 @@ import type StoredReplyParts from "./modules/conversation/replyParts"
 import type StoredConversationTurns from "./modules/conversation/turns"
 import type LlmRuntimeService from "./modules/llm/llmRuntimeService"
 import type LlmService from "./modules/llm/llmService"
+import type McpServerRegistry from "./modules/mcp/mcpServerRegistry"
 import type { BuiltInToolEntry } from "./modules/tool/builtIn/builtInTool"
 import type WebSearchToolProvider from "./modules/tool/builtIn/web/webSearchToolProvider"
 import type ToolApprovalService from "./modules/toolApproval/toolApprovalService"
@@ -44,6 +45,11 @@ declare module "fastify" {
      * run choices, which tool calls ask the person first.
      */
     toolApprovalService: ToolApprovalService
+    /**
+     * Application-scoped connections to the MCP servers the settings file
+     * names, and their tools.
+     */
+    mcpServerRegistry: McpServerRegistry
     /**
      * Application-scoped attachment files of every conversation, under the
      * attachments directory.

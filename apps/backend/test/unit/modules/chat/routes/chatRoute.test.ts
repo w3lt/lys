@@ -6,11 +6,13 @@ import {
   chatApiStreamEventSchema,
   chatImageNeedsVisionProblemSchema,
   conversationAgentMissingProblemSchema,
-  conversationNotFoundProblemSchema
+  conversationNotFoundProblemSchema,
+  MAXIMUM_OFFERED_BACKEND_TOOL_COUNT
 } from "@lys/protocol"
 import {
   MAXIMUM_ATTACHMENT_BYTES,
-  MAXIMUM_MESSAGE_ATTACHMENT_BYTES
+  MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
+  type McpServerSettings
 } from "@lys/share"
 import type { LightMyRequestResponse } from "fastify"
 import { readdirSync, readFileSync, statSync } from "node:fs"
@@ -37,6 +39,7 @@ import {
 import { parseSseEvents } from "../../../support/chatSseRoute"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
 import { createDownloadedLlmModel } from "../../../support/llmFixtures"
+import { buildFakeStdioServerSettings } from "../../../support/mcpTestServers"
 import { createChatCompletionChunk } from "../../../support/openAiEndpointFake"
 import { LOOK_UP_WORD_FORMAT } from "../../../support/scriptedBuiltInTool"
 import {
@@ -662,6 +665,29 @@ describe("updateFastifyWithChatRoute", () => {
     expect(testApp.completeChatStream).not.toHaveBeenCalled()
   })
 
+  it("rejects more backend tool names than one request offers before looking any up", async () => {
+    const testApp = await createChatRouteTestApp()
+    updateFastifyWithChatRoute(testApp.app, {
+      ...CHAT_ROUTE_OPTIONS,
+      generations: testApp.generations
+    })
+    const backendToolNames = Array.from(
+      { length: MAXIMUM_OFFERED_BACKEND_TOOL_COUNT + 1 },
+      (_, index) => `tool_${index}`
+    )
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      tools: { definitions: [], backendToolNames }
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toMatchObject({
+      message: expect.stringContaining("backendToolNames")
+    })
+    expect(testApp.createConversationTurn).not.toHaveBeenCalled()
+  })
+
   it("refuses a backend tool that cannot run now before storing a turn, naming it and why", async () => {
     const testApp = await createChatRouteTestApp()
     updateFastifyWithChatRoute(testApp.app, {
@@ -864,6 +890,15 @@ describe("updateFastifyWithChatRoute", () => {
         unavailableTools: [{ name: "fetch_url", reason: "api-key-missing" }]
       },
       "The request names backend tools the backend does not run: fetch_url"
+    ],
+    [
+      "a tool that cannot run for a reason the tool list never gives",
+      {
+        unavailableTools: [
+          { name: "check_spelling", reason: "mcp-server-not-connected" }
+        ]
+      },
+      "body/unavailableTools/0/reason"
     ]
   ])(
     "rejects a request with %s before storing a turn",
@@ -1146,6 +1181,288 @@ describe("updateFastifyWithChatRoute", () => {
           msg: expect.stringContaining("Just run")
         })
       )
+    })
+  })
+
+  describe("MCP tools", () => {
+    /** Name the model calls the fake `files` server's echo tool by. */
+    const ECHO_TOOL_NAME = "mcp__files__echo"
+
+    /** Request whose turn offers the echo tool of the `files` server. */
+    const ECHO_REQUEST = Object.freeze({
+      ...NEW_CONVERSATION_REQUEST,
+      tools: { definitions: [], backendToolNames: [ECHO_TOOL_NAME] }
+    })
+
+    /**
+     * Applies one MCP server to the test application's registry and waits
+     * until its opening ended.
+     *
+     * @param testApp - Test application without the chat route.
+     * @param settings - Settings of the only applied server.
+     * @param status - State the opening is expected to end in.
+     */
+    async function applyMcpServer(
+      testApp: ChatRouteTestApp,
+      settings: McpServerSettings,
+      status: "connected" | "failed"
+    ): Promise<void> {
+      testApp.readMcpSettings.mockResolvedValue({
+        status: "read",
+        settings: { servers: [settings] }
+      })
+      await testApp.app.mcpServerRegistry.applySettings()
+      await vi.waitFor(
+        () => {
+          expect(
+            testApp.app.mcpServerRegistry.listServers().servers[0]?.state.status
+          ).toBe(status)
+        },
+        { timeout: 10_000 }
+      )
+    }
+
+    /**
+     * Registers the chat route on a test application whose connected `files`
+     * server lists the echo tool, and whose model calls it with `moth` in its
+     * first round and answers `Done` in its second.
+     *
+     * @returns The application and the generation the route starts, once
+     * started.
+     */
+    async function createEchoApp() {
+      const testApp = await createChatRouteTestApp()
+      await applyMcpServer(
+        testApp,
+        buildFakeStdioServerSettings("files"),
+        "connected"
+      )
+      testApp.createConversationTurn.mockRestore()
+      testApp.completeChatStream
+        .mockImplementationOnce(async () =>
+          createChunkStream(
+            createChatCompletionChunk({
+              toolCalls: [
+                {
+                  index: 0,
+                  id: "call_0",
+                  type: "function",
+                  function: {
+                    name: ECHO_TOOL_NAME,
+                    arguments: '{"text":"moth"}'
+                  }
+                }
+              ]
+            }),
+            createChatCompletionChunk({ finishReason: "tool_calls" })
+          )
+        )
+        .mockImplementationOnce(async () =>
+          createChunkStream(
+            createChatCompletionChunk({ content: "Done", finishReason: "stop" })
+          )
+        )
+      testApp.generateTitle.mockResolvedValue("Trip plan")
+      const startReplyGeneration = vi.spyOn(
+        testApp.generations,
+        "startReplyGeneration"
+      )
+      updateFastifyWithChatRoute(testApp.app, {
+        ...CHAT_ROUTE_OPTIONS,
+        generations: testApp.generations
+      })
+
+      /**
+       * Gets the generation the route started.
+       *
+       * @returns The generation.
+       * @throws If the route has not started one.
+       */
+      function getGeneration(): ReplyGeneration {
+        const result = startReplyGeneration.mock.results[0]
+        if (result?.type !== "return") throw new Error("No generation started.")
+        return result.value
+      }
+
+      return { testApp, getGeneration }
+    }
+
+    it("refuses an MCP tool whose server is not connected before storing a turn, naming it and why", async () => {
+      const testApp = await createChatRouteTestApp()
+      await applyMcpServer(
+        testApp,
+        buildFakeStdioServerSettings("files", { exitOnStart: 1 }),
+        "failed"
+      )
+      updateFastifyWithChatRoute(testApp.app, {
+        ...CHAT_ROUTE_OPTIONS,
+        generations: testApp.generations
+      })
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: {
+          definitions: [],
+          backendToolNames: ["look_up_word", ECHO_TOOL_NAME]
+        }
+      })
+
+      expect(response.statusCode).toBe(409)
+      expect(response.json()).toEqual({
+        type: "urn:lys:problem:chat:backend-tool-unavailable",
+        title: "Backend tool unavailable",
+        status: 409,
+        detail:
+          "mcp__files__echo is unavailable: its MCP server is not connected.",
+        instance: "/api/v1/chat",
+        toolName: ECHO_TOOL_NAME,
+        reason: "mcp-server-not-connected"
+      })
+      expect(
+        chatBackendToolUnavailableProblemSchema.safeParse(response.json())
+          .success
+      ).toBe(true)
+      expect(testApp.createConversationTurn).not.toHaveBeenCalled()
+      expect(testApp.completeChatStream).not.toHaveBeenCalled()
+    })
+
+    it("rejects an MCP tool no applied server lists before storing a turn, naming each", async () => {
+      const testApp = await createChatRouteTestApp()
+      await applyMcpServer(
+        testApp,
+        buildFakeStdioServerSettings("files"),
+        "connected"
+      )
+      updateFastifyWithChatRoute(testApp.app, {
+        ...CHAT_ROUTE_OPTIONS,
+        generations: testApp.generations
+      })
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: {
+          definitions: [],
+          backendToolNames: [
+            ECHO_TOOL_NAME,
+            "mcp__files__delete",
+            "mcp__notes__echo"
+          ]
+        }
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json()).toMatchObject({
+        message:
+          "The request names backend tools the backend does not run: mcp__files__delete, mcp__notes__echo"
+      })
+      expect(testApp.createConversationTurn).not.toHaveBeenCalled()
+      expect(testApp.completeChatStream).not.toHaveBeenCalled()
+    })
+
+    it("offers a connected server's tool after the built-in tools", async () => {
+      const { testApp } = await createEchoApp()
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set([ECHO_TOOL_NAME])
+      })
+
+      await sendChatRequest(testApp.app, {
+        ...ECHO_REQUEST,
+        tools: {
+          definitions: [],
+          backendToolNames: [ECHO_TOOL_NAME, "look_up_word"]
+        }
+      })
+
+      expect(
+        (testApp.completeChatStream.mock.calls[0]?.[0].tools ?? []).map(
+          (tool) => tool.function.name
+        )
+      ).toEqual(["look_up_word", ECHO_TOOL_NAME])
+    })
+
+    it("asks the person before an MCP tool's call runs, runs it on its server once allowed, and sends the framed result to the model", async () => {
+      const { testApp, getGeneration } = await createEchoApp()
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set()
+      })
+
+      const responsePromise = sendChatRequest(testApp.app, ECHO_REQUEST)
+      await vi.waitFor(() => {
+        expect(getGeneration().pendingToolCalls.toolApprovals).toHaveLength(1)
+      })
+      const [prompt] = getGeneration().pendingToolCalls.toolApprovals
+      if (prompt === undefined) throw new Error("No prompt was sent.")
+      expect(prompt).toMatchObject({
+        toolName: ECHO_TOOL_NAME,
+        arguments: { text: "moth" }
+      })
+      expect(testApp.completeChatStream).toHaveBeenCalledOnce()
+      getGeneration().resolveToolCall(prompt.id, { status: "allowed" })
+      const response = await responsePromise
+
+      expect(
+        testApp.completeChatStream.mock.calls[1]?.[0].messages.at(-1)
+      ).toEqual({
+        role: "tool",
+        tool_call_id: expect.any(String),
+        content: expect.stringContaining(
+          '<<<mcp result>>>\necho: {"text":"moth"}\n<<<end of mcp result>>>'
+        )
+      })
+      expect(parseSseEvents(response.body).at(-1)?.event).toBe("done")
+    })
+
+    it("runs an MCP tool's call saved as Just run without asking the person", async () => {
+      const { testApp } = await createEchoApp()
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set([ECHO_TOOL_NAME])
+      })
+
+      const response = await sendChatRequest(testApp.app, ECHO_REQUEST)
+
+      const eventTypes = parseSseEvents(response.body).map(
+        (event) => event.event
+      )
+      expect(eventTypes).not.toContain("tool-approval")
+      expect(eventTypes.at(-1)).toBe("done")
+      expect(
+        testApp.completeChatStream.mock.calls[1]?.[0].messages.at(-1)
+      ).toMatchObject({
+        role: "tool",
+        content: expect.stringContaining('echo: {"text":"moth"}')
+      })
+    })
+
+    it("sends the person's rejection to the model instead of running a rejected MCP tool's call", async () => {
+      const { testApp, getGeneration } = await createEchoApp()
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set()
+      })
+
+      const responsePromise = sendChatRequest(testApp.app, ECHO_REQUEST)
+      await vi.waitFor(() => {
+        expect(getGeneration().pendingToolCalls.toolApprovals).toHaveLength(1)
+      })
+      const [prompt] = getGeneration().pendingToolCalls.toolApprovals
+      if (prompt === undefined) throw new Error("No prompt was sent.")
+      getGeneration().resolveToolCall(prompt.id, {
+        status: "rejected",
+        reason: "declined",
+        content: "The person declined this call."
+      })
+      await responsePromise
+
+      expect(
+        testApp.completeChatStream.mock.calls[1]?.[0].messages.at(-1)
+      ).toEqual({
+        role: "tool",
+        tool_call_id: expect.any(String),
+        content: "The person declined this call."
+      })
     })
   })
 

@@ -5,6 +5,7 @@ import type {
   ConversationAgentMissingProblem,
   ConversationNotFoundProblem
 } from "@lys/protocol"
+import { MCP_TOOL_NAME_PREFIX } from "@lys/share"
 import type { FastifyReply } from "fastify"
 import type Agent from "../../agent/agent"
 import {
@@ -17,6 +18,10 @@ import {
   type UnofferedTools
 } from "../../agent/unofferedTools"
 import { createConversationNotFoundProblem } from "../../conversation/routes/notFound"
+import type {
+  McpTurnToolLookup,
+  TurnMcpTool
+} from "../../mcp/mcpServerRegistry"
 import type { BuiltInToolEntry } from "../../tool/builtIn/builtInTool"
 import { findBuiltInTools } from "../../tool/builtIn/builtInTools"
 
@@ -98,40 +103,78 @@ export type UnansweredTurnOutcome = Exclude<
   Readonly<{ status: "found" }>
 >
 
+/** The backend tools a request offers, by kind, in offer order. */
+export type RequestedBackendTools = Readonly<{
+  /** Offered built-in tools; empty when none. */
+  builtInTools: readonly BuiltInToolEntry[]
+  /** Offered MCP tools whose server is connected; empty when none. */
+  mcpTools: readonly TurnMcpTool[]
+  /**
+   * Name of the first offered MCP tool whose server is applied but not
+   * connected now; undefined when there is none.
+   */
+  notConnectedMcpToolName: string | undefined
+}>
+
 /**
- * Finds the backend tools a request offers.
+ * Finds the backend tools a request offers: the built-in tools, and the
+ * tools of the MCP servers, whose names start with `mcp__`.
  *
- * @param builtInTools - Every tool the backend runs.
+ * @param builtInTools - Every built-in tool.
+ * @param findMcpTool - Looks up one MCP tool in the servers as they are
+ * now.
  * @param tools - Validated tool offer of the request; absence offers none.
- * @returns The offered backend tools in offer order; empty when the request
- * offers none.
- * @throws An {@link UnknownBackendToolError} naming every offered name that
- * belongs to no backend tool.
+ * @returns The offered tools by kind, each list in offer order, and the
+ * first offered MCP tool whose server is not connected.
+ * @throws An {@link UnknownBackendToolError} naming every offered name, in
+ * offer order, that belongs to no built-in tool and to no applied server's
+ * listed tool.
  */
-export function findRequestedBuiltInTools(
+export function findRequestedBackendTools(
   builtInTools: readonly BuiltInToolEntry[],
+  findMcpTool: (toolName: string) => McpTurnToolLookup,
   tools: ChatToolOffer | undefined
-): readonly BuiltInToolEntry[] {
-  const selection = findBuiltInTools(builtInTools, tools?.backendToolNames)
-  switch (selection.status) {
-    case "found":
-      return selection.entries
-    case "unknown":
-      throw new UnknownBackendToolError(selection.toolNames)
+): RequestedBackendTools {
+  const builtInByName = new Map(
+    builtInTools.map((entry) => [entry.definition.name, entry])
+  )
+  const offeredBuiltInTools: BuiltInToolEntry[] = []
+  const mcpTools: TurnMcpTool[] = []
+  const unknownNames: string[] = []
+  let notConnectedMcpToolName: string | undefined
+  for (const name of tools?.backendToolNames ?? []) {
+    const builtInTool = builtInByName.get(name)
+    if (builtInTool !== undefined) {
+      offeredBuiltInTools.push(builtInTool)
+      continue
+    }
+    const lookup: McpTurnToolLookup = name.startsWith(MCP_TOOL_NAME_PREFIX)
+      ? findMcpTool(name)
+      : { status: "unknown" }
+    if (lookup.status === "found") mcpTools.push(lookup.tool)
+    else if (lookup.status === "not-connected") notConnectedMcpToolName ??= name
+    else unknownNames.push(name)
   }
+  if (unknownNames.length > 0) throw new UnknownBackendToolError(unknownNames)
+  return Object.freeze({
+    builtInTools: Object.freeze(offeredBuiltInTools),
+    mcpTools: Object.freeze(mcpTools),
+    notConnectedMcpToolName
+  })
 }
 
 /**
  * Finds what a chat or chat-context request names about the tools its turn
  * does not offer.
  *
- * @param builtInTools - Every tool the backend runs.
+ * @param builtInTools - Every built-in tool.
  * @param body - Validated request body.
  * @returns `TOOL_CALLS_OFF` when the request switches tool calls off;
  * otherwise the switched-off names and the unavailable tools in request
  * order, none of them offered, each list empty when the request names none.
  * @throws An {@link UnknownBackendToolError} naming every tool named as
- * unable to run that belongs to no backend tool.
+ * unable to run that belongs to no built-in tool; MCP tools are never named
+ * as unable to run.
  * @remarks The reason given for an unavailable tool is the client's reading
  * of the tool list and is not checked again.
  */

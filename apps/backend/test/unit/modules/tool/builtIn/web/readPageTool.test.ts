@@ -157,7 +157,9 @@ describe("buildReadPageDefinition", () => {
   })
 
   it("states the URL limit to the model, as typed and once percent-encoded", () => {
-    const [urlArgument] = buildReadPageDefinition().arguments
+    const definition = buildReadPageDefinition()
+    if (definition.runner === "mcp") throw new Error("Expected a Lys tool")
+    const [urlArgument] = definition.arguments
 
     expect(urlArgument?.description).toBe(
       "Absolute http or https URL of the page, at most 2048 characters, as typed and once percent-encoded."

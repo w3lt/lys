@@ -13,11 +13,13 @@ import {
   MAXIMUM_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_COUNT,
+  MAXIMUM_MCP_SERVER_COUNT,
   READ_ATTACHMENT_TOOL_NAME,
   toolDefinitionSchema,
   toolNameSchema,
   type ToolDefinition
 } from "@lys/share"
+import { MAXIMUM_MCP_SERVER_TOOL_COUNT } from "../mcp/_share"
 import {
   unavailableBackendToolSchema,
   type UnavailableBackendTool
@@ -202,6 +204,17 @@ function hasNoReservedToolName(toolNames: readonly string[]): boolean {
 }
 
 /**
+ * Most backend tool names one request offers: every tool of the most MCP
+ * servers the settings hold, each with the most tools the backend reads,
+ * plus 64 for the backend's own tools, far more than it has.
+ *
+ * @remarks Bounds the list before the backend looks up any name. Raising it
+ * requires a coordinated backend and desktop release.
+ */
+export const MAXIMUM_OFFERED_BACKEND_TOOL_COUNT =
+  MAXIMUM_MCP_SERVER_COUNT * MAXIMUM_MCP_SERVER_TOOL_COUNT + 64
+
+/**
  * Validates each list of a chat tool offer on its own, before the checks
  * across both lists.
  */
@@ -221,12 +234,15 @@ const chatToolOfferListsSchema = z.strictObject({
     )
     .readonly(),
   /**
-   * Names of the switched-on backend tools, each name once and none the
-   * backend's attachment reader. Absence means the request offers no
-   * backend tool.
+   * Names of the switched-on tools from the backend's tool list, each name
+   * once and none the backend's attachment reader: the backend's own tools
+   * and the tools of its MCP servers; at most
+   * {@link MAXIMUM_OFFERED_BACKEND_TOOL_COUNT}. Absence means the request
+   * offers no backend tool.
    */
   backendToolNames: z
     .array(toolNameSchema)
+    .max(MAXIMUM_OFFERED_BACKEND_TOOL_COUNT)
     .refine(hasDistinctValues, "A request offers each backend tool name once.")
     .refine(hasNoReservedToolName, RESERVED_TOOL_NAME_MESSAGE)
     .readonly()
@@ -272,7 +288,8 @@ function hasDistinctOfferedToolNames(offer: ChatToolOfferCandidate): boolean {
  * (`READ_ATTACHMENT_TOOL_NAME`), which the backend adds to a turn itself
  * when the conversation holds a text attachment. The backend rejects a
  * backend tool name it does not run (400) and an offered backend tool that
- * cannot run now (409). Offered only to a model trained for tool use.
+ * cannot run now (409), such as an MCP tool whose server is configured but
+ * not connected. Offered only to a model trained for tool use.
  */
 export const chatToolOfferSchema = chatToolOfferListsSchema
   .refine(hasOfferedTool, "A tool offer names at least one tool.")
@@ -288,9 +305,10 @@ export type ChatToolOffer = z.infer<typeof chatToolOfferSchema>
  * Most tools one request names in each list of tools it does not offer: the
  * switched-off tools, and the switched-on tools that cannot run now.
  *
- * @remarks Far more than Lys lists, so it never limits a real request, while
- * bounding each list in the note the backend adds to the turn's
- * instructions to 64 names of at most 64 characters each.
+ * @remarks Far more than Lys's own tools, so it never limits a real
+ * request, while bounding each list in the note the backend adds to the
+ * turn's instructions to 64 names of at most 64 characters each. MCP tools
+ * are never named in these lists, because one server alone may list more.
  */
 const MAXIMUM_UNOFFERED_TOOL_COUNT = 64
 

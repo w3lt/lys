@@ -1,10 +1,15 @@
 import fastifyPlugin from "fastify-plugin"
-import { type FastifyPluginAsync } from "fastify"
+import { type FastifyInstance, type FastifyPluginAsync } from "fastify"
 import type { BackendConfig } from "../config"
 import type { LlmRuntimeFailureReporters } from "../modules/llm/llmRuntimeService"
 import PinoLmStudioSdkLogger from "../modules/llm/runtimes/pinoLmStudioSdkLogger"
+import { logMcpServerEvent } from "../modules/mcp/mcpServerEventLog"
 import type { PageRenderingFailureReporters } from "../modules/tool/builtIn/web/pageRendering"
-import { closeSingletonServices, createSingletonServices } from "./singleton"
+import {
+  closeSingletonServices,
+  createSingletonServices,
+  type SingletonServices
+} from "./singleton"
 
 /** Options used to install application-scoped singleton services. */
 type SingletonServicePluginOptions = {
@@ -23,9 +28,13 @@ type SingletonServicePluginOptions = {
  * Fastify closes. After the HTTP listener opens, an `onListen` hook performs
  * the first LLM runtime connection attempt. Fastify resolves `listen()` before
  * running the hook and logs a hook rejection, so LM Studio never delays or
- * prevents listening. `inject()` and `ready()` do not run the hook. The
- * services' failures that no caller observes, and the messages of the LM
- * Studio SDK, are logged through the application's logger.
+ * prevents listening. `inject()` and `ready()` do not run the hook. An
+ * `onReady` hook applies the MCP settings before the backend listens, so the
+ * first request already sees every configured server, connecting; the
+ * servers connect in the background and never delay listening. The
+ * services' failures that no caller observes, the messages of the LM
+ * Studio SDK, and the MCP servers' events are logged through the
+ * application's logger.
  */
 const singletonPlugin: FastifyPluginAsync<
   SingletonServicePluginOptions
@@ -52,7 +61,10 @@ const singletonPlugin: FastifyPluginAsync<
   const singletonServices = await createSingletonServices(config, {
     llmRuntime,
     pageRendering,
-    lmStudioSdk: new PinoLmStudioSdkLogger(app.log)
+    lmStudioSdk: new PinoLmStudioSdkLogger(app.log),
+    reportMcpServerEvent: (event) => {
+      logMcpServerEvent(app.log, event)
+    }
   })
 
   app.addHook("onClose", async () => {
@@ -61,7 +73,25 @@ const singletonPlugin: FastifyPluginAsync<
   app.addHook("onListen", async () => {
     await singletonServices.llmRuntimeService.connectLlmRuntime()
   })
+  app.addHook("onReady", async () => {
+    await singletonServices.mcpServerRegistry.applySettings()
+  })
 
+  decorateSingletonServices(app, singletonServices)
+}
+
+/**
+ * Adds every singleton service to the application, so routes reach them as
+ * `app.<service>`.
+ *
+ * @param app - Application the plugin runs in.
+ * @param singletonServices - Services the plugin created; the application
+ * borrows them until it closes.
+ */
+function decorateSingletonServices(
+  app: FastifyInstance,
+  singletonServices: SingletonServices
+): void {
   app.decorate("chatService", singletonServices.chatService)
   app.decorate("llmService", singletonServices.llmService)
   app.decorate("llmRuntimeService", singletonServices.llmRuntimeService)
@@ -79,6 +109,7 @@ const singletonPlugin: FastifyPluginAsync<
   app.decorate("builtInTools", singletonServices.builtInTools)
   app.decorate("webSearchToolProvider", singletonServices.webSearchToolProvider)
   app.decorate("toolApprovalService", singletonServices.toolApprovalService)
+  app.decorate("mcpServerRegistry", singletonServices.mcpServerRegistry)
   app.decorate("attachmentFileStore", singletonServices.attachmentFileStore)
 }
 

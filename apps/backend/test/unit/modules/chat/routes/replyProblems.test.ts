@@ -42,6 +42,11 @@ const UNAVAILABLE_TOOL_CASES: readonly UnavailableToolCase[] = [
     toolName: "read_page",
     reason: "page-reader-not-ready",
     clause: "vmo, Lys's page reader, is not ready."
+  },
+  {
+    toolName: "mcp__files__read",
+    reason: "mcp-server-not-connected",
+    clause: "its MCP server is not connected."
   }
 ]
 

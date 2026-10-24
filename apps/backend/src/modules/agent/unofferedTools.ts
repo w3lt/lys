@@ -1,5 +1,5 @@
 import type {
-  BackendToolUnavailableReason,
+  ListedBackendToolUnavailableReason,
   UnavailableBackendTool
 } from "@lys/protocol"
 
@@ -65,7 +65,7 @@ const UNAVAILABLE_TOOL_CLAUSES = Object.freeze({
     "Lys cannot read its settings file, settings.json (it can be fixed by hand)",
   "page-reader-not-ready":
     "vmo, Lys's page reader, is not ready (it can be started in Settings → Runtime)"
-} satisfies Readonly<Record<BackendToolUnavailableReason, string>>)
+} satisfies Readonly<Record<ListedBackendToolUnavailableReason, string>>)
 
 /** Note a turn sends while tool calls are off. */
 const TOOL_CALLS_OFF_NOTE =

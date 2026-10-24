@@ -21,18 +21,21 @@ import {
   type ReadableAttachment
 } from "../../attachment/readAttachmentTool"
 import handleLlmServiceRequestFailure from "../../llm/routes/handleLlmServiceRequestFailure"
+import type { McpTurnToolLookup } from "../../mcp/mcpServerRegistry"
 import type { BuiltInToolEntry } from "../../tool/builtIn/builtInTool"
 import {
   createModelCapabilitiesLookup,
   findListedModelCapabilities,
   NO_MODEL_CAPABILITIES,
-  type FindModelCapabilities
+  type FindModelCapabilities,
+  type ModelCapabilities
 } from "./modelCapabilities"
 import {
   findRequestedAgent,
-  findRequestedBuiltInTools,
+  findRequestedBackendTools,
   findUnofferedTools,
   sendUnansweredTurnProblem,
+  type RequestedBackendTools,
   type TurnAgentLookups
 } from "./turnRequest"
 
@@ -44,8 +47,13 @@ type ChatContextRouteDependencies = Pick<TurnAgentLookups, "findChatAgent"> &
      * means it is not stored.
      */
     findConversation: (conversationId: string) => Conversation | undefined
-    /** Every tool the backend runs, which a request may offer by name. */
+    /** Every built-in tool, which a request may offer by name. */
     builtInTools: readonly BuiltInToolEntry[]
+    /**
+     * Looks up one MCP tool a request offers by name, in the servers as they
+     * are now.
+     */
+    findMcpTool: (toolName: string) => McpTurnToolLookup
     /**
      * Capabilities of the model a request names, read from LM Studio's
      * inventory.
@@ -98,7 +106,8 @@ const MODEL_NOT_LOADED_DETAIL =
  *
  * @param app - Backend with validation, the Zod response serializer, the
  * agent service, the conversation reader, the LLM service behind the agents,
- * the backend tools, and the attachment file store installed.
+ * the built-in tools, the MCP server registry, and the attachment file store
+ * installed.
  * @throws If route registration fails.
  * @remarks Every response prevents caching, because a measurement observes
  * the loaded model at the moment it ran. A full model-operation queue and a
@@ -110,6 +119,8 @@ export default function registerChatContextRoute(app: FastifyInstance): void {
     findConversation: (conversationId: string) =>
       app.conversationHistoryReader.getConversation(conversationId),
     builtInTools: app.builtInTools,
+    findMcpTool: (toolName: string) =>
+      app.mcpServerRegistry.findTurnTool(toolName),
     findModelCapabilities: createModelCapabilitiesLookup(() =>
       app.llmService.listDownloadedLlmModels()
     ),
@@ -139,9 +150,10 @@ export default function registerChatContextRoute(app: FastifyInstance): void {
  * lookups, and the attachment files.
  * @returns Settlement after the measurement or a problem is sent.
  * @throws An `UnknownBackendToolError` for an offered backend tool the
- * backend does not run, or for a tool named as unable to run that the
- * backend does not run; the inventory read's failure; and the agent's
- * measurement failure, for the route's error handler.
+ * backend does not run, such as a tool no applied MCP server lists, or for
+ * a tool named as unable to run that the backend does not run; the
+ * inventory read's failure; and the agent's measurement failure, for the
+ * route's error handler.
  * @remarks A continued conversation is read once, and its agent and stored
  * messages both come from that read, before the measurement waits for the
  * model's runtime. Whether the model sees images and is trained for tool
@@ -149,7 +161,9 @@ export default function registerChatContextRoute(app: FastifyInstance): void {
  * attachment, so the history's images and the attachment reader are
  * measured as a turn would send and offer them; a model the inventory does
  * not list sees no image and is offered no reader. Image files are looked
- * up, never read: an image counts from its stored sides.
+ * up, never read: an image counts from its stored sides. An offered MCP tool
+ * whose server is not connected is left out, because its definition is
+ * known only while the server is connected.
  */
 async function handleChatContextRequest(
   request: FastifyRequest<ChatContextApiRoute>,
@@ -157,8 +171,9 @@ async function handleChatContextRequest(
   dependencies: ChatContextRouteDependencies
 ): Promise<void> {
   const { body } = request
-  const builtInTools = findRequestedBuiltInTools(
+  const requestedTools = findRequestedBackendTools(
     dependencies.builtInTools,
+    dependencies.findMcpTool,
     body.tools
   )
   const unofferedTools = findUnofferedTools(dependencies.builtInTools, body)
@@ -178,13 +193,11 @@ async function handleChatContextRequest(
     storedConversation,
     dependencies.attachmentFiles
   )
-  const capabilities =
-    measured.attachments.length > 0
-      ? await findListedModelCapabilities(
-          body.model,
-          dependencies.findModelCapabilities
-        )
-      : NO_MODEL_CAPABILITIES
+  const capabilities = await findAttachmentCapabilities(
+    body.model,
+    measured.attachments,
+    dependencies.findModelCapabilities
+  )
   const measurement = await requestedAgent.agent.findContextMeasurement({
     history: measured.history,
     model: body.model,
@@ -192,22 +205,55 @@ async function handleChatContextRequest(
     getAttachmentImageFileStatus: measured.getAttachmentImageFileStatus,
     tools: buildOfferedDefinitions(
       body,
-      builtInTools,
+      requestedTools,
       capabilities.trainedForToolUse &&
         hasReadableTextAttachment(measured.attachments)
     ),
     unofferedTools
   })
   if (measurement === undefined) {
-    const problem = createLlmHealthProblem({
-      reason: "model-not-loaded",
-      detail: MODEL_NOT_LOADED_DETAIL,
-      instance: request.url
-    })
-    reply.type("application/problem+json").code(problem.status).send(problem)
+    sendModelNotLoadedProblem(reply, request.url)
     return
   }
   reply.code(200).send(measurement)
+}
+
+/**
+ * Finds what a model can do with a measured history's attachments.
+ *
+ * @param model - Model the request names.
+ * @param attachments - Every attachment of the stored messages.
+ * @param findModelCapabilities - Capability lookup over LM Studio's
+ * inventory; borrowed for the call.
+ * @returns The model's listed capabilities when the history holds an
+ * attachment, read from the inventory; otherwise none, without reading it.
+ * @throws The inventory read's failure.
+ */
+async function findAttachmentCapabilities(
+  model: string,
+  attachments: readonly ReadableAttachment[],
+  findModelCapabilities: FindModelCapabilities
+): Promise<ModelCapabilities> {
+  if (attachments.length === 0) return NO_MODEL_CAPABILITIES
+  return await findListedModelCapabilities(model, findModelCapabilities)
+}
+
+/**
+ * Sends the problem for a request whose model is not loaded.
+ *
+ * @param reply - HTTP response owner.
+ * @param instance - Path of the request, for the problem's `instance`.
+ */
+function sendModelNotLoadedProblem(
+  reply: FastifyReply<ChatContextApiRoute>,
+  instance: string
+): void {
+  const problem = createLlmHealthProblem({
+    reason: "model-not-loaded",
+    detail: MODEL_NOT_LOADED_DETAIL,
+    instance
+  })
+  reply.type("application/problem+json").code(problem.status).send(problem)
 }
 
 /**
@@ -243,21 +289,22 @@ function buildMeasuredHistory(
  * Builds the definitions of the tools a turn would offer, as it orders them.
  *
  * @param body - Validated chat-context input.
- * @param builtInTools - The offered backend tools, in offer order.
+ * @param requestedTools - The offered backend tools, in offer order.
  * @param offersReader - Whether the turn would offer the attachment reader:
  * the conversation holds a text attachment and the model is trained for
  * tool use.
- * @returns The client definitions first, then the backend tools', then the
- * reader's when the turn offers it.
+ * @returns The client definitions first, then the built-in tools', then the
+ * reader's when the turn offers it, then the connected MCP tools'.
  */
 function buildOfferedDefinitions(
   body: ChatContextApiRequestBody,
-  builtInTools: readonly BuiltInToolEntry[],
+  requestedTools: RequestedBackendTools,
   offersReader: boolean
 ): readonly ToolDefinition[] {
   return [
     ...(body.tools?.definitions ?? []),
-    ...builtInTools.map((entry) => entry.definition),
-    ...(offersReader ? [buildReadAttachmentDefinition()] : [])
+    ...requestedTools.builtInTools.map((entry) => entry.definition),
+    ...(offersReader ? [buildReadAttachmentDefinition()] : []),
+    ...requestedTools.mcpTools.map((tool) => tool.definition)
   ]
 }

@@ -59,7 +59,8 @@ function createLogReporters() {
   return {
     llmRuntime,
     pageRendering,
-    lmStudioSdk
+    lmStudioSdk,
+    reportMcpServerEvent: vi.fn()
   } satisfies SingletonLogReporters
 }
 
@@ -104,6 +105,7 @@ function buildHelloAgentTurn(): AgentTurn {
     generationOptions: { temperature: 0.4 },
     clientTools: [],
     builtInTools: [],
+    mcpTools: [],
     unofferedTools: NO_UNOFFERED_TOOLS,
     abortSignal: new AbortController().signal,
     updateAssistantMessageState: () => true,

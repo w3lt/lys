@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import type { McpServerSettings } from "@lys/share"
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
@@ -21,6 +22,7 @@ import {
   createTurnUserMessage
 } from "./support/conversationFixtures"
 import { CapturedLogDestination } from "./support/fastifyTestApp"
+import { buildFakeStdioServerSettings } from "./support/mcpTestServers"
 import {
   fakeLmStudio,
   type FakeLmStudioOperations
@@ -47,6 +49,62 @@ function createOwnedBackendConfig(): BackendConfig {
     databaseFilePath: join(directory, "lys_db.sqlite")
   }
 }
+
+/**
+ * Creates an owned configuration whose settings file names these MCP
+ * servers.
+ *
+ * @param servers - Servers of the `mcp` group, in order.
+ * @returns The configuration; its settings file sits beside the database
+ * and is removed with it.
+ */
+function createConfigWithMcpServers(
+  servers: readonly McpServerSettings[]
+): BackendConfig {
+  const config = createOwnedBackendConfig()
+  const settingsFilePath = join(
+    dirname(config.databaseFilePath),
+    "settings.json"
+  )
+  writeFileSync(settingsFilePath, JSON.stringify({ mcp: { servers } }))
+  return { ...config, settingsFilePath }
+}
+
+/**
+ * Tells whether a process is running.
+ *
+ * @param processId - Identifier of the process.
+ * @returns Whether a signal could reach it.
+ * @throws What `process.kill` throws other than for a missing process.
+ */
+function isProcessRunning(processId: number): boolean {
+  try {
+    process.kill(processId, 0)
+    return true
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH")
+      return false
+    throw error
+  }
+}
+
+/**
+ * Reads the process identifier a fake MCP server logged as `pid <id>`.
+ *
+ * @param log - Log the server's lines reach.
+ * @returns The identifier, once the line was logged.
+ * @throws While no such line was logged.
+ */
+function readLoggedProcessId(log: CapturedLogDestination): number {
+  const line = log.records
+    .map((record) => record["line"])
+    .find((value) => typeof value === "string" && value.startsWith("pid "))
+  if (typeof line !== "string") throw new Error("No process identifier yet")
+  return Number(line.slice("pid ".length))
+}
+
+/** Longest a case waits for a fake MCP server to start and connect. */
+const MCP_SERVER_WAIT_MILLISECONDS = 10_000
 
 /** Fastify's default request body limit, in bytes, stated in the API reference. */
 const REQUEST_BODY_LIMIT = 1_048_576
@@ -311,6 +369,70 @@ describe("buildApp", () => {
       )
     ])
   })
+
+  it("applies the mcp settings group once ready and serves the MCP servers' states", async () => {
+    const app = await buildApp({
+      config: createConfigWithMcpServers([
+        buildFakeStdioServerSettings("files")
+      ]),
+      logger: createBackendLogger(new CapturedLogDestination())
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/mcp/servers"
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      settings: "applied",
+      servers: [
+        {
+          name: "files",
+          transport: "stdio",
+          state: expect.objectContaining({ status: expect.any(String) })
+        }
+      ]
+    })
+  })
+
+  it(
+    "logs what an MCP server does and ends its process when it closes",
+    async () => {
+      const log = new CapturedLogDestination()
+      const app = await buildApp({
+        config: createConfigWithMcpServers([
+          buildFakeStdioServerSettings("files", { reportProcessId: true })
+        ]),
+        logger: createBackendLogger(log)
+      })
+      onTestFinished(async () => await app.close())
+      await app.ready()
+
+      const processId = await vi.waitFor(
+        () => {
+          expect(log.records).toContainEqual(
+            expect.objectContaining({
+              level: "info",
+              mcpServer: "files",
+              msg: "MCP server connected"
+            })
+          )
+          return readLoggedProcessId(log)
+        },
+        { timeout: MCP_SERVER_WAIT_MILLISECONDS }
+      )
+      onTestFinished(() => {
+        if (isProcessRunning(processId)) process.kill(processId)
+      })
+      await app.close()
+
+      expect(isProcessRunning(processId)).toBe(false)
+    },
+    2 * MCP_SERVER_WAIT_MILLISECONDS
+  )
 
   it("accepts a request body at the limit and refuses a larger one before the route runs", async () => {
     const app = await buildApp({

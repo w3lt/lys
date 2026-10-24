@@ -31,6 +31,10 @@ import ReadAttachmentTool, {
 } from "../../attachment/readAttachmentTool"
 import handleLlmServiceRequestFailure from "../../llm/routes/handleLlmServiceRequestFailure"
 import type {
+  McpTurnToolLookup,
+  TurnMcpTool
+} from "../../mcp/mcpServerRegistry"
+import type {
   BuiltInToolEntry,
   TurnBuiltInTool
 } from "../../tool/builtIn/builtInTool"
@@ -72,7 +76,7 @@ import {
 } from "./share"
 import {
   findRequestedAgent,
-  findRequestedBuiltInTools,
+  findRequestedBackendTools,
   findUnofferedTools,
   sendUnansweredTurnProblem,
   type TurnAgentLookups,
@@ -137,8 +141,13 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "findChatAgent"> &
     titleGenerationMaxAttempts: number
     /** Registry that owns every generation this route starts. */
     generations: ReplyGenerationRegistry
-    /** Every tool the backend runs, which a request may offer by name. */
+    /** Every built-in tool, which a request may offer by name. */
     builtInTools: readonly BuiltInToolEntry[]
+    /**
+     * Looks up one MCP tool a request offers by name, in the servers as they
+     * are now.
+     */
+    findMcpTool: (toolName: string) => McpTurnToolLookup
     /**
      * Approval gateway every tool call passes, except a call of a backend
      * tool that runs without approval.
@@ -159,8 +168,10 @@ type AcceptedTurnRequest = Readonly<{
    * empty when it carries none.
    */
   attachments: readonly ParsedChatAttachment[]
-  /** Backend tools the request offered, found for the turn. */
+  /** Built-in tools the request offered, found for the turn. */
   builtInTools: readonly TurnBuiltInTool[]
+  /** MCP tools the request offered, each of a connected server. */
+  mcpTools: readonly TurnMcpTool[]
   /** What the request names about the tools the turn does not offer. */
   unofferedTools: UnofferedTools
   /**
@@ -168,6 +179,14 @@ type AcceptedTurnRequest = Readonly<{
    * request nor the conversation holds any.
    */
   capabilities: ModelCapabilities
+}>
+
+/** The backend tools a request offers, found for its turn. */
+type OfferedBackendTools = Readonly<{
+  /** Offered built-in tools, each ready to run, in offer order. */
+  builtInTools: readonly TurnBuiltInTool[]
+  /** Offered MCP tools, each of a connected server, in offer order. */
+  mcpTools: readonly TurnMcpTool[]
 }>
 
 /**
@@ -226,6 +245,11 @@ type TurnGenerationInput = Readonly<{
    * then the attachment reader when the turn offers it; empty when none.
    */
   builtInTools: readonly TurnBuiltInTool[]
+  /**
+   * MCP tools the request offered, each name once; each call runs on its
+   * server as connected when the call runs. Empty when none.
+   */
+  mcpTools: readonly TurnMcpTool[]
   /** What the request names about the tools the turn does not offer. */
   unofferedTools: UnofferedTools
   /** Whether the model sees images. */
@@ -275,6 +299,8 @@ export default function updateFastifyWithChatRoute(
     titleGenerationMaxAttempts,
     generations,
     builtInTools: app.builtInTools,
+    findMcpTool: (toolName: string) =>
+      app.mcpServerRegistry.findTurnTool(toolName),
     toolApprovals: app.toolApprovalService
   }
   app.route<ChatApiRoute>({
@@ -298,8 +324,8 @@ export default function updateFastifyWithChatRoute(
  * @param dependencies - Borrowed persistence, agents, files, and registry.
  * @returns Settlement after the stream ends, or after a problem response.
  * @throws An `UnknownBackendToolError`, before anything is stored, when the
- * request offers a backend tool the backend does not run or names one as
- * unable to run; the inventory
+ * request offers a backend tool the backend does not run, such as a tool no
+ * applied MCP server lists, or names one as unable to run; the inventory
  * read's failure, before anything is stored, when the model's capabilities
  * are needed and cannot be read; and unexpected failures before the stream
  * starts, for the route's error boundary. A request answered with one of
@@ -315,7 +341,10 @@ export default function updateFastifyWithChatRoute(
  * are created right after, and the follower receives the start event before
  * any generation event. The agent answers with the system prompt it has when
  * the turn is stored. The turn keeps the backend tools found for it, so a
- * key saved or removed while it runs applies from the next request.
+ * key saved or removed while it runs applies from the next request. An MCP
+ * tool's call runs on its server as connected when the call runs, and fails
+ * for the model when the server is no longer connected or no longer lists
+ * the tool.
  */
 async function handleChatRequest(
   request: ChatRouteRequest,
@@ -351,7 +380,8 @@ async function handleChatRequest(
  * @returns The accepted request, or undefined once a problem was sent: the
  * attachment-unsupported problem for an attachment whose content is neither
  * text nor an image Lys sends, the backend-tool-unavailable problem for an
- * offered backend tool that cannot run now, the problem that says why no
+ * offered built-in tool that cannot run now or an offered MCP tool whose
+ * server is not connected, the problem that says why no
  * agent answers, or the image-needs-vision problem for an image attached
  * for a model that cannot see images, including a model the inventory does
  * not list. Nothing is stored or written either way.
@@ -360,7 +390,8 @@ async function handleChatRequest(
  * backend does not run; the inventory read's failure; and any persistence
  * failure of a lookup.
  * @remarks The attachments are decoded first, then the tools named as
- * unable to run are checked and every offered backend tool is looked up,
+ * unable to run are checked and every offered backend tool is looked up:
+ * the built-in tools' availability first, then the MCP tools' servers;
  * then the conversation is read once and an agent is
  * looked up for the request, so a request no agent answers is refused
  * before the inventory is read; the conversation's stored attachments come
@@ -385,12 +416,12 @@ async function parseTurnRequest(
     return undefined
   }
   const unofferedTools = findUnofferedTools(dependencies.builtInTools, body)
-  const builtInTools = await findOfferedBuiltInTools(
+  const backendTools = await findOfferedBackendTools(
     request,
     reply,
-    dependencies.builtInTools
+    dependencies
   )
-  if (builtInTools === undefined) return undefined
+  if (backendTools === undefined) return undefined
   const checked = findTurnConversation(request, reply, dependencies)
   if (checked === undefined) return undefined
   const capabilities = hasTurnAttachments(
@@ -416,7 +447,8 @@ async function parseTurnRequest(
   }
   return {
     attachments: attachments.attachments,
-    builtInTools,
+    builtInTools: backendTools.builtInTools,
+    mcpTools: backendTools.mcpTools,
     unofferedTools,
     capabilities
   }
@@ -468,21 +500,25 @@ function findTurnConversation(
  *
  * @param request - Validated chat input.
  * @param reply - Response owner; the response has not started.
- * @param builtInTools - Every tool the backend runs.
- * @returns The offered tools found for the turn, in offer order; or
- * undefined once the backend-tool-unavailable problem was sent for an
- * offered tool that cannot run now.
+ * @param dependencies - Every built-in tool and the MCP tool lookup.
+ * @returns The offered built-in and MCP tools found for the turn, each in
+ * offer order; or undefined once the backend-tool-unavailable problem was
+ * sent for an offered built-in tool that cannot run now or, after those, an
+ * offered MCP tool whose server is not connected.
  * @throws An `UnknownBackendToolError` for an offered backend tool the
  * backend does not run.
  */
-async function findOfferedBuiltInTools(
+async function findOfferedBackendTools(
   request: ChatRouteRequest,
   reply: ChatRouteReply,
-  builtInTools: readonly BuiltInToolEntry[]
-): Promise<readonly TurnBuiltInTool[] | undefined> {
-  const found = await findTurnBuiltInTools(
-    findRequestedBuiltInTools(builtInTools, request.body.tools)
+  dependencies: Pick<ChatRouteDependencies, "builtInTools" | "findMcpTool">
+): Promise<OfferedBackendTools | undefined> {
+  const requested = findRequestedBackendTools(
+    dependencies.builtInTools,
+    dependencies.findMcpTool,
+    request.body.tools
   )
+  const found = await findTurnBuiltInTools(requested.builtInTools)
   if (found.status === "unavailable") {
     sendProblem(
       reply,
@@ -494,7 +530,18 @@ async function findOfferedBuiltInTools(
     )
     return undefined
   }
-  return found.tools
+  if (requested.notConnectedMcpToolName !== undefined) {
+    sendProblem(
+      reply,
+      createChatBackendToolUnavailableProblem(
+        requested.notConnectedMcpToolName,
+        "mcp-server-not-connected",
+        request.url
+      )
+    )
+    return undefined
+  }
+  return { builtInTools: found.tools, mcpTools: requested.mcpTools }
 }
 
 /**
@@ -774,6 +821,7 @@ function buildTurnGenerationInput(
           (location) => attachmentFiles.readAttachment(location)
         )
       : accepted.builtInTools,
+    mcpTools: accepted.mcpTools,
     unofferedTools: accepted.unofferedTools,
     canSeeImages: accepted.capabilities.vision,
     findAttachmentImage: buildAttachmentImageReader(
@@ -935,6 +983,7 @@ function buildAgentTurn(
     generationOptions: input.generationOptions,
     clientTools: input.clientTools,
     builtInTools: input.builtInTools,
+    mcpTools: input.mcpTools,
     unofferedTools: input.unofferedTools,
     abortSignal,
     createReplyPart: (draft) =>
@@ -957,17 +1006,32 @@ function buildAgentTurn(
           input.logger.warn(UNREADABLE_JUST_RUN_CHOICES_MESSAGE)
         }
       ),
+    ...buildReplyFailureReporters(input.logger)
+  }
+}
+
+/**
+ * Builds the reporters that log how a reply ended without finishing.
+ *
+ * @param logger - Request logger, borrowed for the reply.
+ * @returns Reporters that log a cancellation and a refused round as debug
+ * entries and a failed stream as an error.
+ */
+function buildReplyFailureReporters(
+  logger: FastifyBaseLogger
+): Pick<
+  AgentTurn,
+  "reportReplyCancellation" | "reportReplyRefusal" | "reportReplyFailure"
+> {
+  return {
     reportReplyCancellation: (failure) => {
-      input.logger.debug({ err: failure }, "Chat completion was cancelled")
+      logger.debug({ err: failure }, "Chat completion was cancelled")
     },
     reportReplyRefusal: (failure) => {
-      input.logger.debug(
-        { err: failure },
-        "Chat round was not sent to the model"
-      )
+      logger.debug({ err: failure }, "Chat round was not sent to the model")
     },
     reportReplyFailure: (failure) => {
-      input.logger.error({ err: failure }, "Chat completion stream failed")
+      logger.error({ err: failure }, "Chat completion stream failed")
     }
   }
 }

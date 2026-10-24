@@ -1,7 +1,9 @@
 export {
   backendToolUnavailableReasonSchema,
+  listedBackendToolUnavailableReasonSchema,
   unavailableBackendToolSchema,
   type BackendToolUnavailableReason,
+  type ListedBackendToolUnavailableReason,
   type UnavailableBackendTool,
   type WebSearchKeyUnavailableReason
 } from "./backendToolAvailability"

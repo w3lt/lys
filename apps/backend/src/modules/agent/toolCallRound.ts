@@ -9,6 +9,7 @@ import type {
   ToolDefinition
 } from "@lys/share"
 import { v7 as uuidv7 } from "uuid"
+import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
 import type {
   BuiltInTool,
   BuiltInToolCallRun,
@@ -48,9 +49,20 @@ type OfferedTool =
       /** Whether each call runs at once, without the person being asked. */
       runsWithoutApproval: boolean
     }>
+  | Readonly<{
+      /** The backend runs each allowed call on the tool's MCP server. */
+      runner: "mcp"
+      /** Checks the shape of each call's arguments. */
+      agentTool: AgentTool
+      /** Runs each allowed call on its server. */
+      mcpTool: TurnMcpTool
+    }>
 
 /** One backend tool offered for a turn. */
 type OfferedBuiltInTool = Extract<OfferedTool, { runner: "backend" }>
+
+/** One MCP tool offered for a turn. */
+type OfferedMcpTool = Extract<OfferedTool, { runner: "mcp" }>
 
 /** Tools offered for one turn, by the name the model calls them by, in offer order. */
 export type AgentToolset = ReadonlyMap<string, OfferedTool>
@@ -100,7 +112,7 @@ export type ToolCallRoundContext = Readonly<{
    * round that has a call to gate, and not at all otherwise.
    */
   createToolCallGate: CreateToolCallGate
-  /** Stops the reply; an allowed backend tool runs under it. */
+  /** Stops the reply; an allowed backend or MCP tool runs under it. */
   abortSignal: AbortSignal
   /** Stores and sends each call and its changes as parts of the reply. */
   replyParts: ReplyPartSequence
@@ -148,6 +160,10 @@ type ClientToolCallHandling = ToolCallStartHandling &
 /** What handling a checked call of a backend tool needs. */
 type BuiltInToolCallHandling = ToolCallStartHandling &
   Pick<ToolCallHandling, "abortSignal" | "sourceCatalog">
+
+/** What handling a checked call of an MCP tool needs. */
+type McpToolCallHandling = ToolCallStartHandling &
+  Pick<ToolCallHandling, "abortSignal">
 
 /** What running an allowed backend call needs: cancellation and numbering. */
 type BuiltInToolRunHandling = Pick<
@@ -242,30 +258,52 @@ const ALLOWED_TOOL_CALL_APPROVAL: ToolCallApproval = Object.freeze({
  * @param clientTools - Validated definitions of the client tools, each name
  * once.
  * @param builtInTools - Backend tools found for the turn, each name once.
+ * @param mcpTools - MCP tools found for the turn, each name once.
  * @returns The tools by name: client tools in offer order, then backend
- * tools in offer order.
- * @throws If a backend tool has the name of a client tool; the chat request
- * contract prevents that.
+ * tools, then MCP tools, each in offer order.
+ * @throws If two tools share a name; the chat request contract and the
+ * `mcp__` names of MCP tools prevent that.
  */
 export function buildAgentToolset(
   clientTools: readonly ToolDefinition[],
-  builtInTools: readonly TurnBuiltInTool[]
+  builtInTools: readonly TurnBuiltInTool[],
+  mcpTools: readonly TurnMcpTool[]
 ): AgentToolset {
   const tools = new Map<string, OfferedTool>(
     clientTools.map(buildClientToolEntry)
   )
-  for (const entry of builtInTools) {
-    const agentTool = new AgentTool(entry.definition)
-    if (tools.has(agentTool.name))
-      throw new Error(`Tool ${agentTool.name} is offered twice`)
-    tools.set(agentTool.name, {
+  for (const entry of builtInTools)
+    addOfferedTool(tools, new AgentTool(entry.definition), (agentTool) => ({
       runner: "backend",
       agentTool,
       builtInTool: entry.tool,
       runsWithoutApproval: entry.runsWithoutApproval
-    })
-  }
+    }))
+  for (const mcpTool of mcpTools)
+    addOfferedTool(tools, new AgentTool(mcpTool.definition), (agentTool) => ({
+      runner: "mcp",
+      agentTool,
+      mcpTool
+    }))
   return tools
+}
+
+/**
+ * Adds one tool to a turn's toolset under its name.
+ *
+ * @param tools - Toolset being built.
+ * @param agentTool - Checker of the tool's calls.
+ * @param buildTool - Builds the offered tool around the checker.
+ * @throws If the toolset already has a tool of that name.
+ */
+function addOfferedTool(
+  tools: Map<string, OfferedTool>,
+  agentTool: AgentTool,
+  buildTool: (agentTool: AgentTool) => OfferedTool
+): void {
+  if (tools.has(agentTool.name))
+    throw new Error(`Tool ${agentTool.name} is offered twice`)
+  tools.set(agentTool.name, Object.freeze(buildTool(agentTool)))
 }
 
 /**
@@ -331,8 +369,9 @@ export function buildDefinedToolOffer(
  * once are sent before the first wait, in the model's order, because each
  * call's handling runs synchronously up to its first send. Nothing runs
  * before its call is allowed. Every result the model reads is stored with
- * its call first; a network tool's result is cleaned of invisible characters
- * before that, whichever side answered and however the call ended.
+ * its call first; the result of a tool that does more than read this
+ * machine, a network or MCP tool, is cleaned of invisible characters before
+ * that, whichever side answered and however the call ended.
  */
 export async function handleToolCallRound(
   round: ToolCallRound,
@@ -428,7 +467,8 @@ function createContextToolCall(toolCall: ModelToolCall): ContextToolCall {
  * @returns The message carrying the text the model reads as the result, or
  * undefined when the reply was stopped while the call waited or ran, or
  * refused to store the call.
- * @throws When a backend tool's run fails for a reason other than Stop.
+ * @throws When a backend tool's run fails for a reason other than Stop, or
+ * an MCP tool's call rejects although the reply was not stopped.
  */
 async function handleToolCall(
   toolCall: ContextToolCall,
@@ -462,6 +502,8 @@ async function handleToolCall(
       return handleClientToolCall(checkedToolCall, handling)
     case "backend":
       return handleBuiltInToolCall(checkedToolCall, tool, handling)
+    case "mcp":
+      return handleMcpToolCall(checkedToolCall, tool, handling)
   }
 }
 
@@ -529,6 +571,48 @@ async function handleBuiltInToolCall(
   if (approval.status === "rejected") return approval.message
   const outcome = await runBuiltInToolCall(parsedCall.runToolCall, handling)
   if (outcome === undefined) return undefined
+  return updateFinishedToolCall(toolCall, outcome, handling.replyParts)
+}
+
+/**
+ * Has one checked call of an MCP tool allowed, then runs it on its server.
+ *
+ * @param toolCall - Checked call.
+ * @param tool - MCP tool the call names.
+ * @param handling - The round's gate and index, the reply's cancellation,
+ * and its part sequence.
+ * @returns The message carrying the server's result or why the call failed,
+ * or the person's rejection; or undefined when the reply was stopped while
+ * the call waited or ran, or refused to store the call.
+ * @throws When the call rejects although the reply was not stopped.
+ * @remarks Every call passes the gate, which asks the person unless they
+ * saved the tool as Just run. The server checks the arguments against its
+ * own schema.
+ */
+async function handleMcpToolCall(
+  toolCall: CheckedToolCall,
+  tool: OfferedMcpTool,
+  handling: McpToolCallHandling
+): Promise<ToolResultMessage | undefined> {
+  const startedCall = startToolCall(toolCall, handling)
+  const approval =
+    startedCall.status === "waiting" ? await startedCall.approval : startedCall
+  if (approval.status === "ended") return undefined
+  if (approval.status === "rejected") return approval.message
+  let outcome: ToolCallRunOutcome
+  try {
+    const result = await tool.mcpTool.callTool(
+      toolCall.checkedCall.arguments,
+      handling.abortSignal
+    )
+    outcome =
+      result.status === "succeeded"
+        ? { status: "succeeded", content: result.content, sources: NO_SOURCES }
+        : { status: "failed", content: result.content }
+  } catch (error) {
+    if (handling.abortSignal.aborted) return undefined
+    throw error
+  }
   return updateFinishedToolCall(toolCall, outcome, handling.replyParts)
 }
 
@@ -693,7 +777,7 @@ function updateAllowedToolCall(
  * @param content - Rejection the model reads, as the client sent it.
  * @param replyParts - The reply's part sequence.
  * @returns `rejected` with the message once stored; `ended` when the reply
- * refused it. A network tool's rejection is cleaned first.
+ * refused it. A network or MCP tool's rejection is cleaned first.
  */
 function updateRejectedToolCall(
   toolCall: CheckedToolCall,
@@ -719,8 +803,8 @@ function updateRejectedToolCall(
  * @param outcome - How the run ended.
  * @param replyParts - The reply's part sequence.
  * @returns The message carrying the text the model reads, once stored; or
- * undefined when the reply refused it. A network tool's result is cleaned
- * first.
+ * undefined when the reply refused it. A network or MCP tool's result is
+ * cleaned first.
  */
 function updateFinishedToolCall(
   toolCall: CheckedToolCall,
@@ -744,7 +828,8 @@ function updateFinishedToolCall(
  * @param message - Why the call cannot run.
  * @param handling - The round's index and the reply's part sequence.
  * @returns The message carrying the explanation, once stored; or undefined
- * when the reply refused it. A network tool's explanation is cleaned first.
+ * when the reply refused it. A network or MCP tool's explanation is cleaned
+ * first.
  */
 function createFailedToolCall(
   toolCall: HandledToolCall,
@@ -769,14 +854,15 @@ function createFailedToolCall(
  *
  * @param tool - Offered tool the call names, or undefined.
  * @param content - Text the tool, the client, or Lys gave.
- * @returns The text cleaned of invisible characters when the tool reaches
- * the network; otherwise the text unchanged.
+ * @returns The text cleaned of invisible characters when the tool does more
+ * than read this machine: it reaches the network, or it is an MCP tool,
+ * whose server decides what it reaches. Otherwise the text unchanged.
  */
 function formatToolCallResult(
   tool: OfferedTool | undefined,
   content: string
 ): string {
-  return tool?.agentTool.access === "network"
+  return tool !== undefined && tool.agentTool.access !== "reads"
     ? formatNetworkToolResult(content)
     : content
 }

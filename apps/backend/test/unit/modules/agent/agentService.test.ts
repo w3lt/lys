@@ -107,6 +107,7 @@ async function createHelloReply(agent: Agent): Promise<void> {
     generationOptions: { temperature: 0.4 },
     clientTools: [],
     builtInTools: [],
+    mcpTools: [],
     unofferedTools: NO_UNOFFERED_TOOLS,
     abortSignal: new AbortController().signal,
     updateAssistantMessageState: () => true,

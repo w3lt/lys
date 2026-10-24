@@ -3,6 +3,7 @@ import updateFastifyWithAgentRoutes from "./modules/agent/routes"
 import updateFastifyWithConversationRoutes from "./modules/conversation/routes"
 import registerHealthRoutes from "./modules/health/routes"
 import updateFastifyWithLlmRoutes from "./modules/llm/routes"
+import registerMcpRoutes from "./modules/mcp/routes"
 import registerChatRoutes from "./modules/chat/routes"
 import registerToolRoutes from "./modules/tool/routes"
 import { backendConfigSchema, type BackendConfig } from "./config"
@@ -63,6 +64,7 @@ export async function buildApp(
   await app.register(updateFastifyWithConversationRoutes)
   await app.register(updateFastifyWithAgentRoutes)
   await app.register(registerToolRoutes)
+  await app.register(registerMcpRoutes)
   // =============== REGISTER THE ROUTES =============== //
 
   return app

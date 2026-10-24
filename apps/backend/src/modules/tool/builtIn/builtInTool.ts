@@ -1,4 +1,7 @@
-import type { BackendToolUnavailableReason, ChatToolCall } from "@lys/protocol"
+import type {
+  ListedBackendToolUnavailableReason,
+  ChatToolCall
+} from "@lys/protocol"
 import type { ConversationSource, ToolDefinition } from "@lys/share"
 
 /** Argument values of one call, by argument name, after the type check. */
@@ -124,7 +127,7 @@ export type TurnToolLookup =
       /** The tool cannot run now. */
       status: "unavailable"
       /** Why. */
-      reason: BackendToolUnavailableReason
+      reason: ListedBackendToolUnavailableReason
     }>
 
 /**

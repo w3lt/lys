@@ -1,6 +1,6 @@
 import {
   TAVILY_API_HOST,
-  type BackendToolUnavailableReason
+  type ListedBackendToolUnavailableReason
 } from "@lys/protocol"
 import type {
   BuiltInToolEntry,
@@ -56,7 +56,7 @@ export type TurnToolSetLookup =
       /** Name of the first offered tool that cannot run, in offer order. */
       toolName: string
       /** Why it cannot run. */
-      reason: BackendToolUnavailableReason
+      reason: ListedBackendToolUnavailableReason
     }>
 
 /**

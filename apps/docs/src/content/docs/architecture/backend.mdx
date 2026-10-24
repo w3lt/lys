@@ -446,9 +446,10 @@ machine:
 1. it looks up the URL's host name through the operating system and refuses
    the read, without asking vmo, when the name has no address or any of its
    addresses is blocked by the rule in `webAddresses.ts`. A host that is an IP
-   address is not looked up: the URL rules already checked it. The check
-   covers only the URL given: the page's redirects, what the page loads, and a
-   name that resolves differently inside vmo's micro VM are not checked;
+   address is not looked up: the URL rules already checked it. The ranges
+   come from `web/blocked_address_ranges.json`, which the backend bundle
+   embeds and the `lys-readpage` image copies, so the reader applies the same
+   rule;
 2. it sends `GET /web/read-page` to vmo at `127.0.0.1:8080`, with the URL
    form-encoded as the `url` query parameter, on a connection of its own. vmo
    checks that the URL is absolute `http` or `https` with a host, and passes
@@ -458,6 +459,13 @@ machine:
    fetches at each start. The reader loads the page in headless Chromium,
    with the page's scripts running and its redirects followed, for up to 10
    seconds of virtual time, in which the page's timers run without waiting.
+   Every connection Chromium makes goes through the reader's own proxy in the
+   VM, which looks each host name up again, refuses any target with a blocked
+   address, connects only to an address it checked, and ends the read's
+   connections past 256 connections or 64 MiB received. When the page, or a
+   page it redirected or moved to, is at a blocked address, the reader exits
+   with the `blockedAddress` code of `web/page_reader_exit_codes.json`; a
+   refused resource is left out of the page.
    It dismisses each dialog the page opens, as Cancel would, so an
    `alert()`, `confirm()`, or `prompt()` does not hold the read up. It
    writes the HTML of the DOM it ended on as the page renders it, built by a
@@ -477,13 +485,16 @@ machine:
    such as share bars and comment threads
    ([#208](https://github.com/w3lt/lys/issues/208)). vmo deletes the VM
    before it answers and gives the read 30 seconds;
-3. it reads vmo's answer. Only a `200` body is read: JSON
-   `{ html, isTruncated }` of at most 16 MiB, whose HTML is cut to 4 Mi UTF-16
-   code units without splitting a character. A `400` or `431`, for a URL vmo
-   refuses, a `502`, for a page the reader could not load or that was empty,
-   and a `504`, for a read past vmo's 30 seconds, fail the read with that
-   reason. Any other status, or an answer that is not that JSON, fails it as
-   a failure of the page reader. A plain-text page arrives as the HTML
+3. it reads vmo's answer. A `200` body is JSON `{ html, isTruncated }` of at
+   most 16 MiB, whose HTML is cut to 4 Mi UTF-16 code units without splitting
+   a character. A `502` body, which vmo sends when the reader exits with an
+   error, is JSON `{ exitCode, error }` of at most 16 MiB: the
+   `blockedAddress` exit code fails the read as a blocked address, and any
+   other code, or a body over 16 MiB, as a page the reader could not load or
+   that was empty. A `400` or `431`, for a URL vmo refuses, and a `504`, for a
+   read past vmo's 30 seconds, fail the read with that reason. Any other
+   status, or a `200` or `502` answer that is not its JSON, fails it as a
+   failure of the page reader. A plain-text page arrives as the HTML
    Chromium shows it in, its text inside a `<pre>`, and is read as one block
    that keeps its line breaks;
 4. it extracts the main text with Mozilla Readability over a linkedom

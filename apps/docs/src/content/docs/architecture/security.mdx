@@ -33,7 +33,7 @@ results go to the backend and on to LM Studio, both on loopback.
 | Tauri host -> user files     | File tools read any path the OS user running Lys can read.                                                                                                                                                                             |
 | Tauri host -> vmo            | The host starts vmo as the OS user running Lys, ad hoc signed with the virtualization entitlement, stops it with `SIGTERM` and, after 60 seconds, `SIGKILL`, and asks its `GET /health` over loopback TCP.                             |
 | Backend -> vmo               | Each tool lookup sends `GET /health` to vmo, and each `read_page` call sends the page's URL, over loopback HTTP on `127.0.0.1:8080`, without authentication.                                                                           |
-| vmo -> micro VM -> web       | vmo reads the page in headless Chromium in a fresh micro VM, which loads the page, its redirects, and what it loads.                                                                                                                   |
+| vmo -> micro VM -> web       | vmo reads the page in headless Chromium in a fresh micro VM, which loads the page, its redirects, and what it loads, each connection through the reader's own proxy in the VM.                                                         |
 | Backend -> Tavily            | `web_search` sends one query and the saved API key to `api.tavily.com` per allowed call.                                                                                                                                               |
 | Backend -> settings file     | Reads the Tavily API key and the saved Just run choices from `$LYS_HOME/settings.json`; the Tauri host is the only writer.                                                                                                             |
 
@@ -50,8 +50,9 @@ results go to the backend and on to LM Studio, both on loopback.
 | Route-local abort handling  | Closing the SSE connection aborts the backend chat task.                                                                                                                                                                                                                                                                                                                                                                     |
 | Approval gateway            | The backend's tool approval service decides every tool call, client and backend tools alike, except `read_attachment`, which runs without approval because it reads only what the person attached: a tool asks first unless it is saved as Just run in `settings.json`, and every call asks when that file cannot be read. The desktop shows the prompts and runs only the client tools' calls the backend sends.            |
 | Approval of web reads       | `read_page` runs only once the person allows the call on the card (full URL), or at once on Just run. Allowing a read lets the page load what it needs from public hosts. It starts off.                                                                                                                                                                                                                                     |
-| Address rule                | A read whose URL names, or whose host name resolves to, a loopback, private, link-local, shared, documentation, benchmarking, multicast, or reserved address is refused before vmo is asked. Only that URL is checked; see [Web reads](#web-reads).                                                                                                                                                                          |
+| Address rule                | A read whose URL names, or whose host name resolves to, a loopback, private, link-local, shared, documentation, benchmarking, multicast, or reserved address is refused before vmo is asked. In the micro VM, the reader's proxy applies the same rule, from the same `blocked_address_ranges.json`, to every connection Chromium makes: the page, each redirect, and what the page loads. See [Web reads](#web-reads).      |
 | VM isolation                | Each read runs in a fresh micro VM that vmo deletes before it answers; nothing is kept between reads.                                                                                                                                                                                                                                                                                                                        |
+| Read bounds                 | The reader's proxy lets one read open at most 256 connections and receive at most 64 MiB from the web; past either, it ends every connection of the read.                                                                                                                                                                                                                                                                    |
 | Invisible character removal | Every network tool's result loses Unicode format and control characters, such as zero-width, direction, and tag characters, and every variation selector but one emoji- or text-style selector after a visible character, and says how many it lost.                                                                                                                                                                         |
 | Untrusted page framing      | Page text and the page's title, site, and date reach the model between delimiters it cannot forge, with a notice never to obey them.                                                                                                                                                                                                                                                                                         |
 | Approval of searches        | `web_search` runs only once the person allows the call on the card (full query and "Sends the query to Tavily (api.tavily.com)"), or at once on Just run. It starts off.                                                                                                                                                                                                                                                     |
@@ -115,14 +116,22 @@ results go to the backend and on to LM Studio, both on loopback.
   them. The browser is the Alpine `chromium-headless-shell` package of the
   `lys-readpage` image, whose `latest` tag vmo fetches at each start. It gets
   security fixes only when the image is rebuilt on `main`, by a change under
-  `sandboxes/readpage` or a manual run of its workflow, and vmo uses the new
+  `sandboxes/readpage`, a change to the backend's address ranges or reader
+  exit codes that the image copies, or a manual run of its workflow, and vmo
+  uses the new
   build from its next start. Whoever can publish that tag decides which reader
   the next vmo start runs.
-- The address rule covers only the URL Lys is asked to read. vmo applies no
-  rule of its own, so a redirect, a request the page's scripts make, or a
-  name that resolves differently inside the VM can reach any address the
-  VM's network reaches, a private network the machine is on included, and
-  the HTML of what it reached then goes to the model.
+- The address rule for a read's connections runs in the micro VM, next to the
+  page's scripts, and only Chromium's switches send its connections through
+  the reader's proxy. Chromium's own sandbox is off, so a page that exploits
+  Chromium controls the VM and can connect past the proxy to any address the
+  VM's network reaches, a private network the machine is on included, and the
+  HTML of what it reached then goes to the model
+  ([#265](https://github.com/w3lt/lys/issues/265)).
+- The rule blocks address ranges, not the addresses of the Mac itself: a
+  public IPv4 or global IPv6 address of the Mac is allowed, so a page can
+  reach a service the Mac offers on all of its addresses
+  ([#266](https://github.com/w3lt/lys/issues/266)).
 - vmo does not authenticate its callers: any process on the machine can ask
   it to read a page. Stop and the backend's time limit do not stop the VM of
   a read, which runs until vmo's own 30 seconds end it, and nothing limits
@@ -176,14 +185,23 @@ what reaches the model:
   normalized URL to the reader unchanged.
 - **Connections.** Before it asks vmo, the backend looks up the URL's host
   name through the operating system and refuses the read when any address is
-  blocked; IPv4-mapped IPv6 addresses are matched against the IPv4 rules.
-  Nothing else a read connects to is checked: vmo applies no address rule, so
-  a redirect, a request the page's scripts make, or a name that resolves
-  differently inside the VM can reach any address the VM's network reaches.
-- **Redirects.** HTTP, `<meta>` refresh, and script redirects are followed
-  to any host, unchecked. vmo does not say where they led, so the result
-  cites the URL Lys was asked to read, and the page there is read whatever
-  its HTTP status or media type.
+  blocked; IPv4-mapped IPv6 addresses are matched against the IPv4 rules. In
+  the micro VM, Chromium sends every connection, the page's included, to the
+  reader's proxy on the VM's loopback address: plain HTTP requests, which it
+  forwards one per connection, and `CONNECT` tunnels for HTTPS and
+  WebSockets. For each one, the proxy looks the host name up again through
+  the VM's resolver, refuses the target when any address is blocked, by the
+  same rule and the same `blocked_address_ranges.json`, and connects only to
+  an address it checked, so a name that resolves differently in the VM, or
+  later, cannot lead past the rule. Chromium bypasses the proxy for no host,
+  not even loopback, and has QUIC and WebRTC's UDP off, which an HTTP proxy
+  cannot carry. A refused connection is closed without an answer.
+- **Redirects.** HTTP, `<meta>` refresh, and script redirects are followed,
+  each through the proxy. A read whose page, or a page it redirected or
+  moved to, is at a blocked address fails as `blocked-address`, and a
+  refused resource of the page is left out. vmo does not say where redirects
+  led, so the result cites the URL Lys was asked to read, and the page there
+  is read whatever its HTTP status or media type.
 - **Isolation.** Each read runs in a fresh micro VM that vmo creates from the
   `lys-readpage` image it fetched at its start and deletes before it answers,
   so cookies or storage a page sets last for that read only. Chromium runs as
@@ -195,9 +213,11 @@ what reaches the model:
   reads at most 16 MiB of vmo's answer and cuts the page's HTML at 4 Mi
   UTF-16 code units; markup with more than 40,000 start tags, or a parsed
   page with more than 40,000 elements or a nesting depth sum above 400,000,
-  is refused before Readability runs. Nothing limits the connections a page
-  makes, the bytes it receives, or the memory its scripts hold beyond what
-  the VM has.
+  is refused before Readability runs. The reader's proxy lets one read open
+  at most 256 connections and receive at most 64 MiB from the web, headers
+  and TLS records included; the connection or the bytes past either bound end
+  every connection of the read, and the page is read as it is then. Nothing
+  limits the memory the page's scripts hold beyond what the VM has.
 - **Hidden and invisible text.** Lys reads hidden text like any other text:
   the reader in the VM drops styles, `<link>` elements, and `style`
   attributes, so no stylesheet applies, and the backend drops the `hidden` and

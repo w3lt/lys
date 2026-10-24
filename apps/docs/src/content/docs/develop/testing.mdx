@@ -86,6 +86,14 @@ contracts, schemas, or behavior that crosses package boundaries.
   the lifecycle contract's cases that need no VM, under an
   [approved exception](/reference/standard-application/#reader-vm-lifecycle-contract-exception).
   No workflow runs it.
+- `sandboxes/readpage/tests` contains a `unittest` suite for the page
+  reader's proxy and address rule, in Python 3.12 or later. Run it with
+  `python3 -m unittest discover -s sandboxes/readpage/tests -t sandboxes/readpage`.
+  It needs no VM: the proxy cases use loopback servers and a host lookup of
+  their own, and the reader cases run `dump_dom.py` in a copy of the image's
+  layout against local pages, with `chromium-headless-shell` on `PATH`; they
+  are skipped without it. No workflow runs it; automated tests of the rest of
+  the reader are tracked in [#228](https://github.com/w3lt/lys/issues/228).
 - The `Desktop unit tests` workflow runs that typecheck and the desktop suite on
   every pull request and on every push to `main`.
 - The `Backend unit tests` workflow runs

@@ -97,10 +97,14 @@ approve its public surface or establish an exception.
 
 ## Page reader owners
 
-| Declaration            | Source                                                                                                 | Recorded classification            |
-| ---------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------- |
-| `ChromiumDevToolsPipe` | [sandboxes/readpage/dump_dom.py](https://github.com/w3lt/lys/blob/main/sandboxes/readpage/dump_dom.py) | resource owner or boundary adapter |
-| `PageReadError`        | [sandboxes/readpage/dump_dom.py](https://github.com/w3lt/lys/blob/main/sandboxes/readpage/dump_dom.py) | framework adapter                  |
+| Declaration            | Source                                                                                                               | Recorded classification            |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `BlockedAddressError`  | [sandboxes/readpage/dump_dom.py](https://github.com/w3lt/lys/blob/main/sandboxes/readpage/dump_dom.py)               | framework adapter                  |
+| `ChromiumDevToolsPipe` | [sandboxes/readpage/dump_dom.py](https://github.com/w3lt/lys/blob/main/sandboxes/readpage/dump_dom.py)               | resource owner or boundary adapter |
+| `ConnectionGate`       | [sandboxes/readpage/connection_gate.py](https://github.com/w3lt/lys/blob/main/sandboxes/readpage/connection_gate.py) | resource owner or boundary adapter |
+| `PageProxy`            | [sandboxes/readpage/page_proxy.py](https://github.com/w3lt/lys/blob/main/sandboxes/readpage/page_proxy.py)           | resource owner or boundary adapter |
+| `PageReadError`        | [sandboxes/readpage/dump_dom.py](https://github.com/w3lt/lys/blob/main/sandboxes/readpage/dump_dom.py)               | framework adapter                  |
+| `StopSignal`           | [sandboxes/readpage/connection_gate.py](https://github.com/w3lt/lys/blob/main/sandboxes/readpage/connection_gate.py) | resource owner or boundary adapter |
 
 ## Desktop views and feature declarations
 

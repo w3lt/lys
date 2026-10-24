@@ -208,7 +208,10 @@ following finding I-9 of its
 [second review](https://github.com/w3lt/lys/pull/203#issuecomment-6267044781):
 `read_page` reads through vmo, which starts one micro VM per read with no
 limit on that VM's connections or on what it receives, until
-[#196](https://github.com/w3lt/lys/issues/196).
+[#196](https://github.com/w3lt/lys/issues/196). Since
+[#194](https://github.com/w3lt/lys/issues/194) the reader in each VM bounds
+its read to 256 connections and 64 MiB received, so what remains until #196
+is that nothing limits how many reads run at once.
 
 - **Scope:** the tool loop of `Agent.createReply`, including the backend tool
   runs of one round, and the `tools` offer of `POST /api/v1/chat`. Every
@@ -237,11 +240,12 @@ limit on that VM's connections or on what it receives, until
   context to LM Studio again; the backend measures each round first and ends the
   reply when the round would not fit the loaded model's context length. On Just
   run, a round of N `read_page` calls asks vmo for N reads at once, and vmo
-  starts N micro VMs at once, with no limit on their connections or on what
-  they receive ([#196](https://github.com/w3lt/lys/issues/196)). Each read
-  ends within 60 seconds in the backend, which reads at most 16 MiB of each
-  answer. vmo deletes each VM after at most 30 seconds, or, when creating and
-  booting it alone take longer, as soon as they end. Their extractions run one
+  starts N micro VMs at once, with no limit on how many
+  ([#196](https://github.com/w3lt/lys/issues/196)). Each read opens at most
+  256 connections and receives at most 64 MiB from the web, and ends within
+  60 seconds in the backend, which reads at most 16 MiB of each answer. vmo
+  deletes each VM after at most 30 seconds, or, when creating and booting it
+  alone take longer, as soon as they end. Their extractions run one
   after another on the backend's thread, about a second each at most. A round
   of N `web_search` calls sends N queries to Tavily
   at once, each costing one Tavily credit, each ending within 15 seconds and

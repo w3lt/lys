@@ -618,13 +618,14 @@ describe("Composer", () => {
       ).toBeNull()
     })
 
-    // Known defect (#168): the field answers Enter while an input method is
-    // still composing text, so the Enter that confirms a composition sends
-    // the unfinished draft. The other key handlers of the renderer leave such
-    // keys to the input method.
-    it.fails(
-      "leaves an Enter that belongs to text composition to the input method",
-      async () => {
+    // The Enter that confirms a composition is marked as composing, or, when
+    // WebKit delivers it after `compositionend`, carries key code 229.
+    it.each([
+      ["marked as composing", { isComposing: true }],
+      ["with the input method's key code", { keyCode: 229 }]
+    ])(
+      "leaves an Enter %s to the input method and sends nothing",
+      async (_form, composition) => {
         const { backend, streams } = startChatBackend()
         const { useChatViewStore, Composer } = await loadFreshComposer()
         useChatViewStore.setState({ inputDraft: "Konnichi" })
@@ -635,14 +636,12 @@ describe("Composer", () => {
           />
         )
 
-        fireEvent.keyDown(getMessageField(), {
-          key: "Enter",
-          isComposing: true
-        })
+        fireEvent.keyDown(getMessageField(), { key: "Enter", ...composition })
         await waitForRenderedWork()
         streams[0]?.close()
 
         expect(listChatBodies(backend)).toEqual([])
+        expect(getMessageField()).toHaveValue("Konnichi")
       }
     )
 
@@ -1254,13 +1253,16 @@ describe("Composer", () => {
       ).toBeInTheDocument()
     })
 
-    // Known defect (#168), the same as for sending: a key pressed while an
-    // input method composes text answers the waiting call. Escape, which
-    // cancels a composition, rejects the call, and Enter, which confirms one,
-    // rejects it with the unfinished draft or allows it.
-    it.fails.each(["Escape", "Enter"])(
-      "leaves an %s that belongs to text composition to the input method while a call waits",
-      async (key) => {
+    // Escape cancels a composition and Enter confirms one; neither may answer
+    // the waiting call, in either form the key that ends a composition takes.
+    it.each([
+      ["Escape", "marked as composing", { isComposing: true }],
+      ["Escape", "with the input method's key code", { keyCode: 229 }],
+      ["Enter", "marked as composing", { isComposing: true }],
+      ["Enter", "with the input method's key code", { keyCode: 229 }]
+    ])(
+      "leaves an %s %s to the input method while a call waits",
+      async (key, _form, composition) => {
         startNativeHostFake({})
         const backend = startBackendFake({
           ...MEASURING_BACKEND_ROUTES,
@@ -1276,12 +1278,18 @@ describe("Composer", () => {
           />
         )
 
-        fireEvent.keyDown(getMessageField(), { key, isComposing: true })
+        fireEvent.keyDown(getMessageField(), { key, ...composition })
         await waitForRenderedWork()
 
         expect(
           listRequestsBesideMeasurements(backend).map((request) => request.body)
         ).toEqual([])
+        expect(getMessageField()).toHaveValue("Konnichi")
+        expect(
+          screen.getByRole("group", {
+            name: "Tool call waiting for your answer"
+          })
+        ).toBeInTheDocument()
       }
     )
 

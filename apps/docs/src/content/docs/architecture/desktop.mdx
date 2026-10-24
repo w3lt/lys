@@ -697,6 +697,9 @@ Allow once answers `allowed`, after which the backend runs its tool or sends a
 client tool's call back to run; Allow anyway does the same while keeping the
 text. In the field, Escape rejects,
 Enter with an empty draft allows, and Enter with text rejects with that text.
+A key that belongs to an input method's composition, such as the Enter that
+confirms Japanese text, is left to the input method: it answers no call and
+sends nothing.
 Several calls wait in the model's order, one card at a time.
 
 A read sends the file's text, a search sends its report as JSON, and a

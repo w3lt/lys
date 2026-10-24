@@ -72,7 +72,9 @@ export type ComposerProps = {
  * state: whether a drag is over the field and whether the field has focus.
  * The parent owns the
  * message-field ref. Enter without Shift submits once and suppresses the
- * newline; Shift+Enter keeps it. Sending requires a non-empty draft, and is
+ * newline; Shift+Enter keeps it. A key that belongs to an input method's
+ * composition is left to the input method: it sends nothing and answers no
+ * tool call. Sending requires a non-empty draft, and is
  * refused while a reply is awaited or streams, while a past conversation is
  * opening, while generation is unavailable, or while the current measurement
  * with the draft's estimate exceeds the loaded model's window. A request the
@@ -269,9 +271,22 @@ export function Composer({
    * Answers a waiting tool call from the keyboard, or otherwise sends the
    * current draft when Enter is pressed without a Shift modifier.
    *
+   * @remarks A key that belongs to an input method's composition, such as the
+   * Enter that confirms it or the Escape that cancels it, is left to the input
+   * method: it sends nothing and answers no tool call.
    * @param event - Keyboard event emitted by the composer textarea.
    */
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    // WebKit, which runs the macOS window, can deliver the key that ends a
+    // composition after `compositionend`, no longer marked as composing; it
+    // still carries the key code browsers give keys the input method handles.
+    const inputMethodKeyCode = 229
+    if (
+      event.nativeEvent.isComposing ||
+      event.nativeEvent.keyCode === inputMethodKeyCode
+    ) {
+      return
+    }
     if (handleToolCallKeyDown(event)) return
     if (event.key !== "Enter" || event.shiftKey) return
 

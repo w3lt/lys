@@ -39,6 +39,16 @@ Keep the scope focused:
 Run the smallest relevant checks first and record the actual results. If you
 cannot run a relevant check, say exactly why.
 
+## Branches
+
+`stable` holds the latest release, and `main` holds development toward the
+next one. Pull requests target `main`, except fixes for issues with the
+`Patch Fix` label: those target the day's `patch/v<version>` branch, which the
+maintainer merges into `stable` at the end of the day. The canonical rule is the
+[Branches section of `CONTRIBUTING.md`](https://github.com/w3lt/lys/blob/main/CONTRIBUTING.md#branches),
+and [Packaging and releases](/operate/releases/#patch-releases) lists the
+release steps.
+
 ## Pull request preparation
 
 This repository keeps specialized pull request templates under
@@ -64,8 +74,9 @@ The final checklist in `CONTRIBUTING.md` requires you to confirm:
 
 ## Coming soon
 
-The repository workflow documents do not currently define a branch naming
-policy or commit-message convention for human contributors beyond the general
+The repository workflow documents do not currently define a naming policy for
+contributors' own branches or a commit-message convention for human
+contributors beyond the general
 requirement that a change have one clear purpose. Keep your change easy to
 review and avoid inventing stronger policy in docs until the repo adopts it
 explicitly. AI agents that work on an issue follow the branch and commit

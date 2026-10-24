@@ -62,7 +62,7 @@ body:
     attributes:
       label: Version or revision
       description: Identify the release, branch, or commit where the bug occurs.
-      placeholder: For example, v0.1.0, main, or commit 1a2b3c4
+      placeholder: For example, v0.4.0, stable, main, or commit 1a2b3c4
     validations:
       required: true
 

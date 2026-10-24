@@ -130,9 +130,21 @@ Every exception must document:
 
 An exception requires explicit reviewer approval. Time pressure, existing noncompliant code, generated code, or a passing happy-path test is not sufficient justification.
 
+## Branches
+
+| Branch             | Holds                                                  |
+| ------------------ | ------------------------------------------------------ |
+| `stable`           | The latest release of Lys.                             |
+| `main`             | Development toward the next release.                   |
+| `patch/v<version>` | One day's fixes for `stable`, released as `<version>`. |
+
+A pull request targets `main`, unless its primary issue has the `Patch Fix` label. An issue gets that label when its fix must reach `stable` in a patch release. A `Patch Fix` pull request starts from the day's patch branch and targets it, never `stable` directly.
+
+The day's patch branch is named after the next patch version: the version in `stable`'s `VERSION` file with its patch number raised by one, such as `patch/v0.4.1` when `stable` is at `0.4.0`. The maintainer creates it from `stable` on a day that has a `Patch Fix`, so a day without one has no patch branch and no patch release. At the end of that day, the maintainer merges the patch branch into `stable`, then merges `stable` into `main` so that `main` keeps every fix. [Packaging and releases](https://lys.negentropy.studio/operate/releases/#patch-releases) lists the release steps.
+
 ## Opening a pull request
 
-Open one pull request for one primary issue and one clear purpose. Select the specialized template that matches the primary issue type, not every kind of file touched by the change.
+Open one pull request for one primary issue and one clear purpose. Target the branch that [Branches](#branches) names for the primary issue. Select the specialized template that matches the primary issue type, not every kind of file touched by the change.
 
 GitHub selects a file from `.github/PULL_REQUEST_TEMPLATE` through the compare URL's `template` query parameter. For a compare URL without a query string, append `?quick_pull=1&template=bug.md`. If the URL already has query parameters, append `&template=bug.md` instead.
 
@@ -152,6 +164,8 @@ In the **Primary issue** section:
 - Use `Closes #123` only when the pull request fully completes the issue.
 - Use `Relates to #123` when the pull request contributes to the issue without completing it.
 - List secondary related issues without closing keywords.
+
+GitHub acts on a closing keyword only in a pull request that targets `main`, the default branch, so merging a `Patch Fix` pull request into its patch branch does not close the issue.
 
 ## Before requesting review
 

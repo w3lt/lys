@@ -2,6 +2,7 @@ import type { IncomingMessage } from "node:http"
 import { isIP } from "node:net"
 import * as z from "zod"
 import { waitForSettlementOrAbort } from "../../../../utils/abort"
+import committedPageReaderExitCodesFile from "./page_reader_exit_codes.json" with { type: "json" }
 import type { PageUrl } from "./pageUrl"
 import { formatCutText } from "./untrustedText"
 import { openVmoResponse } from "./vmoRequest"
@@ -82,7 +83,9 @@ export type PageRenderingFailure =
   | Readonly<{
       /**
        * The page's host is a name that resolves to this machine or a private
-       * network, so vmo was not asked.
+       * network, so vmo was not asked; or the reader in vmo's micro VM did
+       * not connect to the page, or to a page it redirected or moved to,
+       * because the address the name has there is blocked.
        */
       kind: "blocked-address"
     }>
@@ -159,6 +162,61 @@ const vmoReadPageAnswerSchema = z
 /** vmo's answer to a page it read. */
 type VmoReadPageAnswer = z.infer<typeof vmoReadPageAnswerSchema>
 
+/**
+ * Validates vmo's `502 Bad Gateway` answer to a page read, which it gives
+ * when the page's reader exits with an error, before Lys trusts it.
+ */
+const vmoReaderFailureSchema = z
+  .strictObject({
+    /** The reader's exit code, which is not 0. */
+    exitCode: z.int(),
+    /** What the reader wrote to standard error; Lys does not read it. */
+    error: z.string()
+  })
+  .readonly()
+
+/** Validates the committed `page_reader_exit_codes.json`. */
+const pageReaderExitCodesSchema = z
+  .strictObject({
+    /**
+     * Exit code of a reader that did not connect to the page, or to a page
+     * it led to, because its address is blocked; an exit status from 1 to
+     * 255.
+     */
+    blockedAddress: z.int().min(1).max(255)
+  })
+  .readonly()
+
+/**
+ * Exit codes of the page reader in vmo's micro VM that Lys tells apart.
+ *
+ * @remarks Read from the committed `page_reader_exit_codes.json`, which the
+ * backend bundle embeds when it is built. The `lys-readpage` image copies the
+ * same file, and its reader exits with these codes. Evaluating this module
+ * validates the file, so an invalid code stops the backend at startup.
+ */
+const PAGE_READER_EXIT_CODES: z.infer<typeof pageReaderExitCodesSchema> =
+  pageReaderExitCodesSchema.parse(committedPageReaderExitCodesFile)
+
+/** Outcome of reading one JSON answer of vmo into its validated shape. */
+type VmoJsonAnswer<TAnswer> =
+  | Readonly<{
+      /** The answer is the JSON vmo promises for its status. */
+      status: "read"
+      /** The validated answer. */
+      answer: TAnswer
+    }>
+  | Readonly<{
+      /** The body is longer than {@link MAXIMUM_VMO_RESPONSE_BYTES}. */
+      status: "too-large"
+    }>
+  | Readonly<{
+      /** The answer is not that JSON, which breaks vmo's contract. */
+      status: "unexpected"
+      /** What was wrong with the answer, without any of its body. */
+      cause: Error
+    }>
+
 /** Path of vmo's read-page route. */
 const VMO_READ_PAGE_PATH = "/web/read-page"
 
@@ -177,6 +235,11 @@ const TIMED_OUT: PageRenderingFailure = Object.freeze({ kind: "timed-out" })
 
 /** Failure of a page the browser could not load. */
 const NOT_LOADED: PageRenderingFailure = Object.freeze({ kind: "not-loaded" })
+
+/** Failure of a page the reader in the micro VM did not connect to. */
+const BLOCKED_ADDRESS: PageRenderingFailure = Object.freeze({
+  kind: "blocked-address"
+})
 
 /** Failure of an answer over the size limit. */
 const TOO_LARGE: PageRenderingFailure = Object.freeze({ kind: "too-large" })
@@ -247,14 +310,12 @@ function buildVmoReadPageUrl(url: PageUrl, vmoOrigin: string): URL {
 }
 
 /**
- * Finds the read failure a status of vmo stands for.
+ * Finds the read failure a status of vmo without a JSON body stands for.
  *
- * @param status - HTTP status of vmo's answer, other than 200.
+ * @param status - HTTP status of vmo's answer, other than 200 and 502.
  * @returns `url-refused` for 400, which vmo gives a URL it does not parse,
- * and 431, which it gives a request too long to read; `not-loaded` for 502,
- * which it gives when the page's reader exits with an error; `timed-out` for
- * 504, which it gives when its time limit passes; undefined for any other
- * status.
+ * and 431, which it gives a request too long to read; `timed-out` for 504,
+ * which it gives when its time limit passes; undefined for any other status.
  */
 function findVmoStatusFailure(
   status: number
@@ -263,8 +324,6 @@ function findVmoStatusFailure(
     case 400:
     case 431:
       return URL_REFUSED
-    case 502:
-      return NOT_LOADED
     case 504:
       return TIMED_OUT
     default:
@@ -310,6 +369,42 @@ function buildRenderedResult(
 }
 
 /**
+ * Reads one JSON answer of vmo into the shape its status promises.
+ *
+ * @param response - Response whose status has a JSON body: 200 or 502.
+ * @param answerSchema - Schema of the body vmo sends with that status.
+ * @returns The validated answer; `too-large` for a body over
+ * {@link MAXIMUM_VMO_RESPONSE_BYTES}; `unexpected` for a body that is not
+ * UTF-8 JSON or does not match the schema.
+ * @throws A body read failure.
+ */
+async function readVmoJsonAnswer<TAnswer>(
+  response: IncomingMessage,
+  answerSchema: z.ZodType<TAnswer>
+): Promise<VmoJsonAnswer<TAnswer>> {
+  const status = response.statusCode ?? 0
+  if (!isJsonResponse(response)) {
+    const cause = new Error(
+      `vmo answered a page read with a ${status} body that is not JSON`
+    )
+    return Object.freeze({ status: "unexpected", cause })
+  }
+  const body = await readBoundedBody(response, MAXIMUM_VMO_RESPONSE_BYTES)
+  if (body.status === "too-large") return Object.freeze({ status: "too-large" })
+  const json = parseJsonBody(body.bytes)
+  const answer =
+    json.status === "parsed" ? answerSchema.safeParse(json.value) : undefined
+  if (answer?.success !== true) {
+    const cause = new Error(
+      `vmo's ${status} answer to a page read is not the JSON it promises`,
+      { cause: answer?.error }
+    )
+    return Object.freeze({ status: "unexpected", cause })
+  }
+  return Object.freeze({ status: "read", answer: answer.data })
+}
+
+/**
  * Reads vmo's `200 OK` answer into the page.
  *
  * @param response - Response whose status is 200.
@@ -325,28 +420,48 @@ async function readVmoPage(
   url: PageUrl,
   dependencies: PageRenderingDependencies
 ): Promise<PageRenderingResult> {
-  if (!isJsonResponse(response)) {
-    return handleUnexpectedVmoAnswer(
-      new Error("vmo answered a page read with a body that is not JSON"),
-      dependencies
-    )
+  const page = await readVmoJsonAnswer(response, vmoReadPageAnswerSchema)
+  switch (page.status) {
+    case "read":
+      return buildRenderedResult(url, page.answer)
+    case "too-large":
+      return buildFailedRendering(TOO_LARGE)
+    case "unexpected":
+      return handleUnexpectedVmoAnswer(page.cause, dependencies)
   }
-  const body = await readBoundedBody(response, MAXIMUM_VMO_RESPONSE_BYTES)
-  if (body.status === "too-large") return buildFailedRendering(TOO_LARGE)
-  const json = parseJsonBody(body.bytes)
-  const answer =
-    json.status === "parsed"
-      ? vmoReadPageAnswerSchema.safeParse(json.value)
-      : undefined
-  if (answer?.success !== true) {
-    return handleUnexpectedVmoAnswer(
-      new Error("vmo's answer to a page read is not the JSON it promises", {
-        cause: answer?.error
-      }),
-      dependencies
-    )
+}
+
+/**
+ * Reads vmo's `502 Bad Gateway` answer, which it gives when the page's
+ * reader exits with an error, into why the page could not be read.
+ *
+ * @param response - Response whose status is 502.
+ * @param dependencies - Failure reporter.
+ * @returns `blocked-address` when the reader exited with
+ * {@link PAGE_READER_EXIT_CODES}' `blockedAddress`, because it did not
+ * connect to the page, or to a page it led to; `not-loaded` for any other
+ * exit code, and for a body over {@link MAXIMUM_VMO_RESPONSE_BYTES}, whose
+ * exit code Lys does not read; `reader-failed`, reported, for a body that is
+ * not UTF-8 JSON or does not match vmo's failure.
+ * @throws A body read failure.
+ */
+async function readVmoReaderFailure(
+  response: IncomingMessage,
+  dependencies: PageRenderingDependencies
+): Promise<FailedRendering> {
+  const failure = await readVmoJsonAnswer(response, vmoReaderFailureSchema)
+  switch (failure.status) {
+    case "read":
+      return buildFailedRendering(
+        failure.answer.exitCode === PAGE_READER_EXIT_CODES.blockedAddress
+          ? BLOCKED_ADDRESS
+          : NOT_LOADED
+      )
+    case "too-large":
+      return buildFailedRendering(NOT_LOADED)
+    case "unexpected":
+      return handleUnexpectedVmoAnswer(failure.cause, dependencies)
   }
-  return buildRenderedResult(url, answer.data)
 }
 
 /**
@@ -356,8 +471,9 @@ async function readVmoPage(
  * this settles.
  * @param url - Page Lys asked vmo to read.
  * @param dependencies - Failure reporter.
- * @returns The page for 200; the failure a status of vmo stands for; or
- * `reader-failed`, reported, for any other status. Only a 200 body is read.
+ * @returns The page for 200; the failure the reader's exit code stands for,
+ * for 502; the failure another status of vmo stands for; or `reader-failed`,
+ * reported, for any other status. Only a 200 or 502 body is read.
  * @throws A body read failure.
  */
 async function readVmoResponse(
@@ -368,6 +484,8 @@ async function readVmoResponse(
   try {
     const status = response.statusCode ?? 0
     if (status === 200) return await readVmoPage(response, url, dependencies)
+    if (status === 502)
+      return await readVmoReaderFailure(response, dependencies)
     const failure = findVmoStatusFailure(status)
     if (failure !== undefined) return buildFailedRendering(failure)
     return handleUnexpectedVmoAnswer(
@@ -439,13 +557,16 @@ function handleFailedReadStep(
  * it already has. Any failure Lys does not recognize, which is a defect, such
  * as a `vmoOrigin` that is not an `http` URL.
  * @remarks First looks up the page's host name and refuses it when any of its
- * addresses is blocked. That check covers only the URL given: the page's
- * redirects, the resources it loads, and a name that resolves differently
- * inside the micro VM are not checked. Then sends `GET /web/read-page` to
- * vmo, which loads the page in headless Chromium in a micro VM of its own,
- * with the page's scripts running and its redirects followed, for at most
- * vmo's own time limit, and deletes the VM before it answers. The time limit
- * covers the lookup and vmo's whole answer, whose body is bounded by
+ * addresses is blocked. Then sends `GET /web/read-page` to vmo, which loads
+ * the page in headless Chromium in a micro VM of its own, with the page's
+ * scripts running and its redirects followed, for at most vmo's own time
+ * limit, and deletes the VM before it answers. Inside the VM, every
+ * connection the browser makes, to the page, its redirects, and what it
+ * loads, goes through the reader's proxy, which looks each name up again
+ * and applies the same address rule, from `blocked_address_ranges.json`,
+ * and the read's bounds of 256 connections and 64 MiB received. A refused
+ * page fails as `blocked-address`; a refused resource is left out. The time
+ * limit covers the lookup and vmo's whole answer, whose body is bounded by
  * {@link MAXIMUM_VMO_RESPONSE_BYTES}. Stop or the time limit only ends Lys's
  * request: vmo does not notice, and its VM runs until vmo's own time limit
  * ends it.

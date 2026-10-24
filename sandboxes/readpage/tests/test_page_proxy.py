@@ -194,7 +194,7 @@ class PageProxyTestCase(unittest.TestCase):
 
     def connect_to_proxy(self) -> socket.socket:
         """Opens a client connection to the proxy that the case's cleanup closes."""
-        port = int(self.proxy.url.rsplit(":", 1)[1])
+        port = int(self.proxy.address.rsplit(":", 1)[1])
         client = socket.create_connection(
             ("127.0.0.1", port), timeout=TEST_SOCKET_TIMEOUT_SECONDS
         )

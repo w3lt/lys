@@ -1,8 +1,8 @@
 """The proxy every connection of the reader's Chromium goes through.
 
-Chromium starts with ``--proxy-server`` set to the proxy's URL and no bypass,
-loopback included, so the page, every redirect, and everything the page loads
-reach the web only through it. Each connection Chromium opens to the proxy
+Chromium starts with ``--proxy-server`` set to the proxy's address and no
+bypass, loopback included, so the page, every redirect, and everything the
+page loads reach the web only through it. Each connection Chromium opens to the proxy
 carries one request: a ``CONNECT`` tunnel or one forwarded plain-HTTP
 request. A ConnectionGate decides whether the target may be connected to and
 bounds the read. A refusal closes Chromium's connection without an answer, so
@@ -85,7 +85,7 @@ class PageProxy:
     the gate. From then on it is closed for good; has_refused still answers
     from what it recorded.
 
-    Concurrency: the reader's thread owns it and calls open, url,
+    Concurrency: the reader's thread owns it and calls open, address,
     has_refused, and close; its own threads use only its gate, which is
     thread-safe.
     """
@@ -165,13 +165,14 @@ class PageProxy:
         return proxy
 
     @property
-    def url(self) -> str:
-        """The URL Chromium's ``--proxy-server`` takes.
+    def address(self) -> str:
+        """The address Chromium's ``--proxy-server`` takes.
 
         Returns:
-            ``http://127.0.0.1:<port>``.
+            ``127.0.0.1:<port>``. Without a scheme, Chromium uses it as an
+            HTTP proxy, which tunnels HTTPS with ``CONNECT``.
         """
-        return f"http://{LISTEN_HOST}:{self._listen_port}"
+        return f"{LISTEN_HOST}:{self._listen_port}"
 
     def __enter__(self) -> "PageProxy":
         """Begins a with block that closes this proxy at its end.

@@ -518,7 +518,7 @@ def close_descriptors(*descriptors: int) -> None:
         close_descriptors(*other_descriptors)
 
 
-def start_chromium(proxy_url: str) -> ChromiumDevToolsPipe:
+def start_chromium(proxy_address: str) -> ChromiumDevToolsPipe:
     """Starts headless Chromium with a DevTools pipe and no tab.
 
     Chromium runs through ``sh``, so a Chromium that cannot start, for example
@@ -526,8 +526,8 @@ def start_chromium(proxy_url: str) -> ChromiumDevToolsPipe:
     command raises PageReadError.
 
     Args:
-        proxy_url: URL of the proxy every connection of Chromium goes through,
-            as PageProxy.url gives it.
+        proxy_address: Host and port of the proxy every connection of
+            Chromium goes through, as PageProxy.address gives them.
 
     Returns:
         The pipe, which owns Chromium from then on.
@@ -545,7 +545,7 @@ def start_chromium(proxy_url: str) -> ChromiumDevToolsPipe:
         raise
     try:
         process = subprocess.Popen(
-            (*CHROMIUM_COMMAND, f"--proxy-server={proxy_url}"),
+            (*CHROMIUM_COMMAND, f"--proxy-server={proxy_address}"),
             stdin=command_read_fd,
             stdout=message_write_fd,
             stderr=subprocess.DEVNULL,
@@ -790,7 +790,7 @@ def get_page_html(url: str) -> str:
     """
     page_script = PAGE_SCRIPT_PATH.read_text(encoding="utf-8")
     ranges = load_blocked_address_ranges(BLOCKED_ADDRESS_RANGES_PATH)
-    with PageProxy.open(ranges) as proxy, start_chromium(proxy.url) as browser:
+    with PageProxy.open(ranges) as proxy, start_chromium(proxy.address) as browser:
         session_id = open_page_session(browser)
         frame_id = load_page(browser, session_id, url, proxy=proxy)
         return get_page_script_result(

@@ -282,7 +282,7 @@ describe("getRenderedPage", () => {
 
   it.each([
     ["exit code 2, of a URL the reader refuses", 2],
-    ["exit code 124, of timeout", 124],
+    ["exit code 124", 124],
     ["exit code 0", 0]
   ])(
     "fails a 502 answer with %s as not-loaded, unreported",

@@ -55,7 +55,7 @@ const PLAIN_ARGUMENT_PATTERN = /^[^\s"'\\]+$/u
  */
 function formatMcpCommandArgument(argument: string): string {
   if (PLAIN_ARGUMENT_PATTERN.test(argument)) return argument
-  return `"${argument.replaceAll(/["\\]/gu, "\\$&")}"`
+  return `"${argument.replaceAll(/["\\]/gu, String.raw`\$&`)}"`
 }
 
 /**

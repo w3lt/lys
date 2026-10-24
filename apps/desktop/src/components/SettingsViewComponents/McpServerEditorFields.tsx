@@ -951,7 +951,13 @@ export type McpServerDraftFieldsProps = {
 }
 
 /** Properties accepted by {@link McpCommandFields}. */
-type McpCommandFieldsProps = McpServerDraftFieldsProps
+type McpCommandFieldsProps = Omit<McpServerDraftFieldsProps, "fieldRefs"> & {
+  /** Hosts of the command, arguments, and environment fields. */
+  readonly fieldRefs: Pick<
+    McpFieldRefs,
+    "command" | "arguments" | "environment"
+  >
+}
 
 /**
  * Edits a local program's command, arguments, and environment.
@@ -1013,7 +1019,10 @@ function McpCommandFields({
 }
 
 /** Properties accepted by {@link McpUrlFields}. */
-type McpUrlFieldsProps = McpServerDraftFieldsProps
+type McpUrlFieldsProps = Omit<McpServerDraftFieldsProps, "fieldRefs"> & {
+  /** Hosts of the URL, token, and header fields. */
+  readonly fieldRefs: Pick<McpFieldRefs, "url" | "token" | "headers">
+}
 
 /**
  * Edits a remote server's URL, sign-in, and headers.

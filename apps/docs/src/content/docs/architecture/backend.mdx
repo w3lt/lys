@@ -715,9 +715,12 @@ declares no client capabilities.
   request to the configured URL with the configured headers, and
   `redirect: "manual"`, so a redirect is an HTTP error and is never
   followed. `fetchMcpResponse` (`mcpResponseLimit.ts`) reads at most 16 MiB of
-  each answer's body, an event stream included, and fails the body past that.
-  A call answered with HTTP 404 ends the connection, because the server no
-  longer knows the session. Closing the connection aborts its open requests;
+  each answer's body, an event stream included. An answer past that ends the
+  connection, as a long stdio message line does: `McpServerConnection` closes
+  the client at once, so every request in flight fails as too large. The SDK
+  alone would leave a request whose event stream breaks waiting for its time
+  limit. A call answered with HTTP 404 ends the connection, because the server
+  no longer knows the session. Closing the connection aborts its open requests;
   Lys does not ask the server to end its session.
 
 The tool list is read past the SDK's response cache, so the SDK holds no

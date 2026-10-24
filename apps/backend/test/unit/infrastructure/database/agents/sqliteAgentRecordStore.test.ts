@@ -82,7 +82,9 @@ describe("SqliteAgentRecordStore", () => {
       z.ZodError
     )
 
-    expect(records.recordStore.findAgent("lys")).toMatchObject({ name: "Lys" })
+    expect(records.recordStore.findAgent("lys")).toMatchObject({
+      agent: { name: "Lys" }
+    })
   })
 
   it.each([
@@ -109,6 +111,21 @@ describe("SqliteAgentRecordStore", () => {
     expect(() => records.recordStore.findAgent("lys")).toThrow(z.ZodError)
   })
 
+  it.each([
+    ["without milliseconds", "2026-01-02T03:04:05Z"],
+    ["in another format", "2026-01-02 03:04:05.678"]
+  ])("rejects a stored deletion time %s", (_label, deletedAt) => {
+    const records = openSqliteAgentRecordStore()
+    saveAgentRow(records.database, VALID_AGENT_ROW)
+    records.database.handleDatabaseWriteRequest((statements) => {
+      statements
+        .getStatement("UPDATE agents SET deleted_at = ? WHERE code = 'lys'")
+        .run(deletedAt)
+    })
+
+    expect(() => records.recordStore.findAgent("lys")).toThrow(z.ZodError)
+  })
+
   it("rejects a listed row that violates the agent contract and stays usable", () => {
     const records = openSqliteAgentRecordStore()
     saveAgentRow(records.database, { ...VALID_AGENT_ROW, name: " Lys " })
@@ -117,7 +134,9 @@ describe("SqliteAgentRecordStore", () => {
       records.recordStore.listAgents({ after: undefined, limit: 1 })
     ).toThrow(z.ZodError)
 
-    expect(records.recordStore.deleteAgent("lys")).toBe(true)
+    expect(
+      records.recordStore.deleteAgent("lys", "2026-02-03T04:05:06.789Z")
+    ).toBe(true)
     expect(
       records.recordStore.listAgents({ after: undefined, limit: 1 })
     ).toEqual({ agents: [], storedCount: 0, hasMore: false })
@@ -149,9 +168,9 @@ describe("SqliteAgentRecordStore", () => {
           updatedAt: "2026-02-03T04:05:06.789Z"
         })
       ).toThrow("Database transactions cannot be nested")
-      expect(() => recordStore.deleteAgent("lys")).toThrow(
-        "Database transactions cannot be nested"
-      )
+      expect(() =>
+        recordStore.deleteAgent("lys", "2026-02-03T04:05:06.789Z")
+      ).toThrow("Database transactions cannot be nested")
     })
 
     expect(recordStore.listAgents({ after: undefined, limit: 2 })).toEqual({

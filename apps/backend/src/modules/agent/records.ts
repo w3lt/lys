@@ -49,6 +49,14 @@ export type UpdateAgentInput = Readonly<{
   updatedAt: string
 }>
 
+/** One stored agent with the time it was deleted, if it was. */
+export type StoredAgentRecord = Readonly<{
+  /** The agent as stored, deleted or not. */
+  agent: Agent
+  /** Time the agent was deleted; null while it is not deleted. */
+  deletedAt: string | null
+}>
+
 /**
  * Keeps stored agent definitions for the agent service: paged listing, and
  * lookup, creation, change, and deletion by code.
@@ -65,34 +73,39 @@ export type UpdateAgentInput = Readonly<{
  * `Database is closed` after the owner closes the store. Calls cannot be
  * nested: a call made while another operation on the store runs fails with
  * `Database transactions cannot be nested` and leaves that operation
- * untouched. Concurrency model: single-owner, synchronous on the backend's
- * event loop.
+ * untouched. Deletion only marks an agent deleted: its row stays, so its
+ * code is never free again, a lookup still finds it, and listings, counts,
+ * and changes skip it. Concurrency model: single-owner, synchronous on the
+ * backend's event loop.
  */
 export interface AgentRecordStore {
   /**
-   * Reads the number of stored agents and one page of their summaries.
+   * Reads the number of stored agents that are not deleted and one page of
+   * their summaries.
    *
    * @param input - Boundary after which the page starts and its size.
-   * @returns The page, its summaries frozen and without system prompts.
+   * @returns The page, its summaries frozen and without system prompts;
+   * deleted agents are neither listed nor counted.
    * @throws If the store is closed, the snapshot cannot begin or be released,
    * or a listed row violates the agent schema; the records stay usable.
    */
   listAgents(input: ListAgentsInput): AgentPage
   /**
-   * Reads one stored agent.
+   * Reads one stored agent, deleted or not.
    *
    * @param code - Code to look up, compared exactly.
-   * @returns The stored agent, or undefined when no agent has this code.
+   * @returns The frozen record of the stored agent with its deletion time,
+   * or undefined when no agent was ever stored under this code.
    * @throws If the store is closed, the snapshot cannot begin or be released,
    * or the stored row violates the agent schema; the records stay usable.
    */
-  findAgent(code: string): Agent | undefined
+  findAgent(code: string): StoredAgentRecord | undefined
   /**
    * Stores a new agent exactly as given.
    *
    * @param agent - Validated agent whose times the caller chose.
    * @returns True when stored; false when an agent with the same code is
-   * already stored, which changes nothing.
+   * already stored, deleted or not, which changes nothing.
    * @throws If the store is closed or the write fails.
    */
   createAgent(agent: Agent): boolean
@@ -102,18 +115,22 @@ export interface AgentRecordStore {
    *
    * @param input - Code of the agent, the fields to replace, and the time of
    * the change.
-   * @returns The changed agent, or undefined when no agent has the code, which
-   * changes nothing.
+   * @returns The changed agent, or undefined when no agent that is not
+   * deleted has the code, which changes nothing.
    * @throws If the store is closed, the write fails, or the changed row
    * violates the agent schema; the agent is then unchanged.
    */
   updateAgent(input: UpdateAgentInput): Agent | undefined
   /**
-   * Permanently deletes one stored agent.
+   * Marks one stored agent deleted, keeping its row and its other fields,
+   * its last-change time included.
    *
    * @param code - Code of the agent to delete, compared exactly.
-   * @returns True when it was stored; false when it was already absent.
-   * @throws If the store is closed or the deletion fails.
+   * @param deletedAt - Time stored as the moment of the deletion.
+   * @returns True when an agent that was not deleted was marked; false when
+   * no agent has the code or it is already deleted, which keeps its first
+   * deletion time.
+   * @throws If the store is closed or the write fails.
    */
-  deleteAgent(code: string): boolean
+  deleteAgent(code: string, deletedAt: string): boolean
 }

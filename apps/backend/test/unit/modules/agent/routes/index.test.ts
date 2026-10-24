@@ -425,7 +425,7 @@ describe("updateFastifyWithAgentRoutes", () => {
       })
 
       expect(response.statusCode).toBe(201)
-      expect(agents.findAgent("researcher")).toMatchObject({
+      expect(agents.findAgent("researcher")?.agent).toMatchObject({
         name: "\u0000Researcher"
       })
     })
@@ -448,9 +448,31 @@ describe("updateFastifyWithAgentRoutes", () => {
       expect(agentCodeTakenProblemSchema.parse(response.json())).toMatchObject({
         instance: "/api/v1/agents"
       })
-      expect(agents.findAgent("researcher")).toEqual({
+      expect(agents.findAgent("researcher")?.agent).toEqual({
         kind: "custom",
         ...STORED_RESEARCHER
+      })
+    })
+
+    it("responds with the code-taken problem for a deleted agent's code and keeps the deleted agent", async () => {
+      const { app, agents } = await createAgentRouteApp()
+      agents.createAgent(RESEARCHER_DEFINITION)
+      agents.deleteAgent("researcher")
+      vi.setSystemTime(new Date(LATER))
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/agents",
+        payload: { ...RESEARCHER_DEFINITION, name: "Successor" }
+      })
+
+      expect(response.statusCode).toBe(409)
+      expect(agentCodeTakenProblemSchema.parse(response.json())).toMatchObject({
+        instance: "/api/v1/agents"
+      })
+      expect(agents.findAgent("researcher")).toEqual({
+        agent: { kind: "custom", ...STORED_RESEARCHER },
+        deletedAt: NOW
       })
     })
 
@@ -472,7 +494,9 @@ describe("updateFastifyWithAgentRoutes", () => {
         expect(
           agentCodeTakenProblemSchema.parse(response.json())
         ).toMatchObject({ instance: "/api/v1/agents" })
-        expect(agents.findAgent(code)).toMatchObject({ kind: "built-in" })
+        expect(agents.findAgent(code)?.agent).toMatchObject({
+          kind: "built-in"
+        })
         expect(
           agents.listAgents({ cursor: undefined, limit: 30 }).storedCount
         ).toBe(0)
@@ -580,6 +604,23 @@ describe("updateFastifyWithAgentRoutes", () => {
       })
     })
 
+    it("responds with the missing-agent problem for a deleted agent", async () => {
+      const { app, agents } = await createAgentRouteApp()
+      agents.createAgent(RESEARCHER_DEFINITION)
+      agents.deleteAgent("researcher")
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/agents/researcher"
+      })
+
+      expect(response.statusCode).toBe(404)
+      expect(agentNotFoundProblemSchema.parse(response.json())).toMatchObject({
+        detail: "Agent researcher was not found.",
+        instance: "/api/v1/agents/researcher"
+      })
+    })
+
     it("rejects a code that is not a slug without looking it up", async () => {
       const { app, agents } = await createAgentRouteApp()
       const findAgent = vi.spyOn(agents, "findAgent")
@@ -627,7 +668,7 @@ describe("updateFastifyWithAgentRoutes", () => {
 
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual(expected)
-      expect(agents.findAgent("researcher")).toEqual({
+      expect(agents.findAgent("researcher")?.agent).toEqual({
         kind: "custom",
         ...expected
       })
@@ -647,7 +688,7 @@ describe("updateFastifyWithAgentRoutes", () => {
 
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual(expected)
-      expect(agents.findAgent("researcher")).toEqual({
+      expect(agents.findAgent("researcher")?.agent).toEqual({
         kind: "custom",
         ...expected
       })
@@ -664,7 +705,9 @@ describe("updateFastifyWithAgentRoutes", () => {
       })
 
       expect(response.statusCode).toBe(200)
-      expect(agents.findAgent("researcher")).toMatchObject({ bio: "\u0000Bio" })
+      expect(agents.findAgent("researcher")?.agent).toMatchObject({
+        bio: "\u0000Bio"
+      })
     })
 
     it("rejects a code that is not a slug without changing anything", async () => {
@@ -696,6 +739,27 @@ describe("updateFastifyWithAgentRoutes", () => {
       )
       expect(agentNotFoundProblemSchema.parse(response.json())).toMatchObject({
         instance: "/api/v1/agents/researcher"
+      })
+    })
+
+    it("responds with the missing-agent problem for a deleted agent and changes nothing", async () => {
+      const { app, agents } = await createAgentRouteApp()
+      agents.createAgent(RESEARCHER_DEFINITION)
+      agents.deleteAgent("researcher")
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/agents/researcher",
+        payload: { name: "Renamed" }
+      })
+
+      expect(response.statusCode).toBe(404)
+      expect(agentNotFoundProblemSchema.parse(response.json())).toMatchObject({
+        instance: "/api/v1/agents/researcher"
+      })
+      expect(agents.findAgent("researcher")).toEqual({
+        agent: { kind: "custom", ...STORED_RESEARCHER },
+        deletedAt: NOW
       })
     })
 
@@ -743,7 +807,7 @@ describe("updateFastifyWithAgentRoutes", () => {
 
         expect(response.statusCode).toBe(400)
         expect(updateAgent).not.toHaveBeenCalled()
-        expect(agents.findAgent("researcher")).toEqual({
+        expect(agents.findAgent("researcher")?.agent).toEqual({
           kind: "custom",
           ...STORED_RESEARCHER
         })
@@ -778,7 +842,25 @@ describe("updateFastifyWithAgentRoutes", () => {
 
       expect(response.statusCode).toBe(204)
       expect(response.body).toBe("")
-      expect(agents.findAgent("researcher")).toBeUndefined()
+      expect(agents.findAgent("researcher")?.deletedAt).toBe(NOW)
+    })
+
+    it("responds with the missing-agent problem for a deleted agent and keeps its deletion time", async () => {
+      const { app, agents } = await createAgentRouteApp()
+      agents.createAgent(RESEARCHER_DEFINITION)
+      agents.deleteAgent("researcher")
+      vi.setSystemTime(new Date(LATER))
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: "/api/v1/agents/researcher"
+      })
+
+      expect(response.statusCode).toBe(404)
+      expect(agentNotFoundProblemSchema.parse(response.json())).toMatchObject({
+        instance: "/api/v1/agents/researcher"
+      })
+      expect(agents.findAgent("researcher")?.deletedAt).toBe(NOW)
     })
 
     it("responds with the missing-agent problem", async () => {
@@ -813,7 +895,9 @@ describe("updateFastifyWithAgentRoutes", () => {
       expect(agentBuiltInProblemSchema.parse(response.json())).toMatchObject({
         instance: "/api/v1/agents/lysiptera"
       })
-      expect(agents.findAgent("lysiptera")).toMatchObject({ kind: "built-in" })
+      expect(agents.findAgent("lysiptera")?.agent).toMatchObject({
+        kind: "built-in"
+      })
     })
 
     it("rejects a code that is not a slug without deleting anything", async () => {

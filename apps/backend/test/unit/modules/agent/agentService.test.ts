@@ -292,9 +292,40 @@ describe("AgentService", () => {
       expect(created).toEqual(expected)
       expect(Object.isFrozen(created)).toBe(true)
       expect(agents.findAgent("researcher")).toEqual({
-        kind: "custom",
-        ...expected
+        agent: { kind: "custom", ...expected },
+        deletedAt: null
       })
+    })
+
+    it("refuses a deleted agent's code and keeps the deleted agent", () => {
+      const agents = createAgentService()
+      agents.createAgent(RESEARCHER_DEFINITION)
+      agents.deleteAgent("researcher")
+      vi.setSystemTime(new Date(LATER))
+
+      expect(
+        agents.createAgent({ ...RESEARCHER_DEFINITION, name: "Successor" })
+      ).toBeUndefined()
+
+      expect(agents.findAgent("researcher")).toEqual({
+        agent: {
+          kind: "custom",
+          ...RESEARCHER_DEFINITION,
+          createdAt: NOW,
+          updatedAt: NOW
+        },
+        deletedAt: NOW
+      })
+    })
+
+    it("skips a deleted agent's code when the name gives it", () => {
+      const agents = createAgentService()
+      agents.createAgent(RESEARCHER_DEFINITION)
+      agents.deleteAgent("researcher")
+
+      expect(
+        agents.createAgent({ ...RESEARCHER_DEFINITION, code: undefined })
+      ).toMatchObject({ code: "researcher-2" })
     })
 
     it("finds a free code when the first try equals the second", () => {
@@ -339,13 +370,17 @@ describe("AgentService", () => {
 
   describe("findAgent", () => {
     it.each([CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE])(
-      "returns the built-in agent %s frozen and without times",
+      "returns the built-in agent %s frozen, not deleted, and without times",
       (code) => {
         const found = createAgentService().findAgent(code)
 
-        expect(found).toMatchObject({ kind: "built-in", code })
-        expect(found).not.toHaveProperty("createdAt")
+        expect(found).toMatchObject({
+          agent: { kind: "built-in", code },
+          deletedAt: null
+        })
+        expect(found?.agent).not.toHaveProperty("createdAt")
         expect(Object.isFrozen(found)).toBe(true)
+        expect(Object.isFrozen(found?.agent)).toBe(true)
       }
     )
 
@@ -355,8 +390,12 @@ describe("AgentService", () => {
 
       const found = agents.findAgent("researcher")
 
-      expect(found).toMatchObject({ kind: "custom", code: "researcher" })
+      expect(found).toMatchObject({
+        agent: { kind: "custom", code: "researcher" },
+        deletedAt: null
+      })
       expect(Object.isFrozen(found)).toBe(true)
+      expect(Object.isFrozen(found?.agent)).toBe(true)
     })
   })
 
@@ -377,13 +416,31 @@ describe("AgentService", () => {
       )
 
       expect(agents.findAgent("researcher")).toEqual({
-        kind: "custom",
-        ...expected
+        agent: { kind: "custom", ...expected },
+        deletedAt: null
       })
     })
   })
 
   describe("deleteAgent", () => {
+    it("marks the agent deleted at the current time and keeps its last change time", () => {
+      const agents = createAgentService()
+      agents.createAgent(RESEARCHER_DEFINITION)
+      vi.setSystemTime(new Date(LATER))
+
+      expect(agents.deleteAgent("researcher")).toBe("deleted")
+
+      expect(agents.findAgent("researcher")).toEqual({
+        agent: {
+          kind: "custom",
+          ...RESEARCHER_DEFINITION,
+          createdAt: NOW,
+          updatedAt: NOW
+        },
+        deletedAt: LATER
+      })
+    })
+
     it.each([CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE])(
       "leaves the built-in agent %s answering chats after refusing to delete it",
       (code) => {
@@ -391,7 +448,10 @@ describe("AgentService", () => {
 
         agents.deleteAgent(code)
 
-        expect(agents.findAgent(code)).toMatchObject({ kind: "built-in" })
+        expect(agents.findAgent(code)).toMatchObject({
+          agent: { kind: "built-in" },
+          deletedAt: null
+        })
         expect(agents.findChatAgent(code)?.code).toBe(code)
       }
     )

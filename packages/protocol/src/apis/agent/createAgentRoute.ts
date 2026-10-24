@@ -18,11 +18,11 @@ const createAgentApiResponseSchemas = Object.freeze({
  * are trimmed. A given `code` is stored exactly; when it is omitted, the
  * backend derives the code from the name. Success is a 201 sent after the
  * agent is stored, carrying the stored agent and a `Location` header with its
- * path. A given code that another agent already has, a built-in agent's
- * included, returns the agent-code-taken problem with HTTP 409 and stores
- * nothing. A derived code is never a built-in agent's. The operation is
- * not idempotent: repeating a request without a code stores another agent
- * under the next free derived code. A lost response leaves the creation
+ * path. A given code that another agent already has, a built-in or a
+ * deleted agent's included, returns the agent-code-taken problem with HTTP
+ * 409 and stores nothing. A derived code is never a built-in or a deleted
+ * agent's. The operation is not idempotent: repeating a request without a
+ * code stores another agent under the next free derived code. A lost response leaves the creation
  * uncertain; the agent list shows whether it happened. Changing the method,
  * path, or schemas requires coordinated consumers.
  */

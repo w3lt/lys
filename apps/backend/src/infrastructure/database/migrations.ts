@@ -515,6 +515,14 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
       PRIMARY KEY (message_id, name),
       UNIQUE (conversation_id, number)
     ) STRICT
+  `,
+  // Deleting a custom agent only marks it deleted, at the time stored here;
+  // NULL means it is not deleted. The row stays, so its code is never free
+  // again and the leaders can still find it; listings and changes skip it.
+  // Agents deleted before this version are gone.
+  `
+    ALTER TABLE agents ADD COLUMN deleted_at TEXT
+      CHECK (deleted_at IS NULL OR deleted_at <> '')
   `
 ]
 

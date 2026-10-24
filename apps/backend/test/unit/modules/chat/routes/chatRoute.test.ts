@@ -612,15 +612,16 @@ describe("updateFastifyWithChatRoute", () => {
     expect(testApp.generateTitle).not.toHaveBeenCalled()
   })
 
-  it("answers a conversation again once an agent is stored under its deleted agent's code", async () => {
+  it("keeps a deleted agent's conversation refused, because no new agent can take its code", async () => {
     const testApp = await createChatRouteTestApp()
     registerStoringChatRoute(testApp)
     const conversationId = await startWebResearcherConversation(testApp)
     testApp.app.agentService.deleteAgent("web-researcher")
-    testApp.app.agentService.createAgent({
+    const successor = testApp.app.agentService.createAgent({
       ...WEB_RESEARCHER_DEFINITION,
       systemPrompt: "You are the second researcher."
     })
+    testApp.completeChatStream.mockClear()
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
@@ -628,14 +629,14 @@ describe("updateFastifyWithChatRoute", () => {
       message: "And the budget?"
     })
 
-    expect(response.statusCode).toBe(200)
-    expect(testApp.completeChatStream).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        messages: expect.arrayContaining([
-          { role: "system", content: "You are the second researcher." }
-        ])
-      })
-    )
+    expect(successor).toBeUndefined()
+    expect(response.statusCode).toBe(409)
+    expect(
+      conversationAgentMissingProblemSchema.parse(response.json())
+    ).toMatchObject({
+      instance: chatApi.path
+    })
+    expect(testApp.completeChatStream).not.toHaveBeenCalled()
   })
 
   it("rejects a backend tool the backend does not run before storing a turn, naming it", async () => {

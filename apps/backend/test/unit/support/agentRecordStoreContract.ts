@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 import type { Agent } from "@lys/share"
-import type { AgentRecordStore } from "../../../src/modules/agent/records"
+import type {
+  AgentRecordStore,
+  StoredAgentRecord
+} from "../../../src/modules/agent/records"
 
 /** Agent records over one empty store, with the controls a case needs. */
 export type AgentRecordStoreHarness = Readonly<{
@@ -47,6 +50,19 @@ const RESEARCHER: Agent = Object.freeze({
   createdAt: CREATED_AT,
   updatedAt: RESEARCHER_CHANGED_AT
 })
+
+/** Time a case passes as the moment an agent is deleted. */
+const DELETED_AT = "2026-03-04T05:06:07.890Z"
+
+/**
+ * Builds the record of a stored agent that is not deleted.
+ *
+ * @param agent - Stored agent.
+ * @returns The record the store reads for it.
+ */
+function buildKeptRecord(agent: Agent): StoredAgentRecord {
+  return { agent, deletedAt: null }
+}
 
 /** Earlier creation time shared by two listed agents. */
 const FIRST_CREATED_AT = "2026-01-01T00:00:00.000Z"
@@ -186,8 +202,20 @@ export function registerAgentRecordStoreContractSuite(
 
         const found = recordStore.findAgent("web-researcher")
 
-        expect(found).toEqual(RESEARCHER)
+        expect(found).toEqual(buildKeptRecord(RESEARCHER))
         expect(Object.isFrozen(found)).toBe(true)
+        expect(Object.isFrozen(found?.agent)).toBe(true)
+      })
+
+      it("returns a deleted agent with the time it was deleted", () => {
+        const { recordStore } = createHarness()
+        recordStore.createAgent(RESEARCHER)
+        recordStore.deleteAgent("web-researcher", DELETED_AT)
+
+        expect(recordStore.findAgent("web-researcher")).toEqual({
+          agent: RESEARCHER,
+          deletedAt: DELETED_AT
+        })
       })
     })
 
@@ -198,7 +226,9 @@ export function registerAgentRecordStoreContractSuite(
         expect(recordStore.createAgent(LYS)).toBe(true)
         expect(recordStore.createAgent(RESEARCHER)).toBe(true)
 
-        expect(recordStore.findAgent("web-researcher")).toEqual(RESEARCHER)
+        expect(recordStore.findAgent("web-researcher")).toEqual(
+          buildKeptRecord(RESEARCHER)
+        )
       })
 
       it("keeps the stored agent and reports false when the code is taken", () => {
@@ -214,7 +244,27 @@ export function registerAgentRecordStoreContractSuite(
           })
         ).toBe(false)
 
-        expect(recordStore.findAgent("lys")).toEqual(LYS)
+        expect(recordStore.findAgent("lys")).toEqual(buildKeptRecord(LYS))
+      })
+
+      it("reports false and keeps the deleted agent when the code is a deleted agent's", () => {
+        const { recordStore } = createHarness()
+        recordStore.createAgent(LYS)
+        recordStore.deleteAgent("lys", DELETED_AT)
+
+        expect(
+          recordStore.createAgent({
+            ...RESEARCHER,
+            code: "lys",
+            createdAt: CHANGED_AT,
+            updatedAt: CHANGED_AT
+          })
+        ).toBe(false)
+
+        expect(recordStore.findAgent("lys")).toEqual({
+          agent: LYS,
+          deletedAt: DELETED_AT
+        })
       })
     })
 
@@ -232,7 +282,7 @@ export function registerAgentRecordStoreContractSuite(
 
         expect(updated).toEqual(expected)
         expect(Object.isFrozen(updated)).toBe(true)
-        expect(recordStore.findAgent("lys")).toEqual(expected)
+        expect(recordStore.findAgent("lys")).toEqual(buildKeptRecord(expected))
       })
 
       it("replaces every field given together", () => {
@@ -272,7 +322,7 @@ export function registerAgentRecordStoreContractSuite(
           })
         ).toEqual(expected)
 
-        expect(recordStore.findAgent("lys")).toEqual(expected)
+        expect(recordStore.findAgent("lys")).toEqual(buildKeptRecord(expected))
       })
 
       it("returns undefined and stores nothing for a code that is not stored", () => {
@@ -300,28 +350,74 @@ export function registerAgentRecordStoreContractSuite(
           updatedAt: CHANGED_AT
         })
 
-        expect(recordStore.findAgent("web-researcher")).toEqual(RESEARCHER)
+        expect(recordStore.findAgent("web-researcher")).toEqual(
+          buildKeptRecord(RESEARCHER)
+        )
+      })
+
+      it("returns undefined and changes nothing for a deleted agent", () => {
+        const { recordStore } = createHarness()
+        recordStore.createAgent(LYS)
+        recordStore.deleteAgent("lys", DELETED_AT)
+
+        expect(
+          recordStore.updateAgent({
+            code: "lys",
+            changes: { name: "Lysiptera" },
+            updatedAt: CHANGED_AT
+          })
+        ).toBeUndefined()
+
+        expect(recordStore.findAgent("lys")).toEqual({
+          agent: LYS,
+          deletedAt: DELETED_AT
+        })
       })
     })
 
     describe("deleteAgent", () => {
-      it("deletes a stored agent and reports true, keeping other agents", () => {
+      it("marks a stored agent deleted at the given time and reports true, keeping its fields and other agents", () => {
         const { recordStore } = createHarness()
         recordStore.createAgent(LYS)
         recordStore.createAgent(RESEARCHER)
 
-        expect(recordStore.deleteAgent("lys")).toBe(true)
+        expect(recordStore.deleteAgent("lys", DELETED_AT)).toBe(true)
 
-        expect(recordStore.findAgent("lys")).toBeUndefined()
-        expect(recordStore.findAgent("web-researcher")).toEqual(RESEARCHER)
+        expect(recordStore.findAgent("lys")).toEqual({
+          agent: LYS,
+          deletedAt: DELETED_AT
+        })
+        expect(recordStore.findAgent("web-researcher")).toEqual(
+          buildKeptRecord(RESEARCHER)
+        )
+      })
+
+      it("reports false and keeps the first deletion time for a deleted agent", () => {
+        const { recordStore } = createHarness()
+        recordStore.createAgent(LYS)
+        recordStore.deleteAgent("lys", DELETED_AT)
+
+        expect(recordStore.deleteAgent("lys", CHANGED_AT)).toBe(false)
+
+        expect(recordStore.findAgent("lys")?.deletedAt).toBe(DELETED_AT)
       })
 
       it("reports false for a code that is not stored", () => {
         const { recordStore } = createHarness()
-        recordStore.createAgent(LYS)
-        recordStore.deleteAgent("lys")
 
-        expect(recordStore.deleteAgent("lys")).toBe(false)
+        expect(recordStore.deleteAgent("lys", DELETED_AT)).toBe(false)
+      })
+
+      it("leaves a deleted agent out of every list page and the stored count", () => {
+        const { recordStore } = createHarness()
+        saveListedAgents(recordStore)
+        recordStore.deleteAgent("c", DELETED_AT)
+
+        const page = recordStore.listAgents({ after: undefined, limit: 3 })
+
+        expect(page.agents.map((agent) => agent.code)).toEqual(["b", "a"])
+        expect(page.storedCount).toBe(2)
+        expect(page.hasMore).toBe(false)
       })
     })
 
@@ -344,7 +440,9 @@ export function registerAgentRecordStoreContractSuite(
       expect(() =>
         recordStore.listAgents({ after: undefined, limit: 1 })
       ).toThrow("Database is closed")
-      expect(() => recordStore.deleteAgent("lys")).toThrow("Database is closed")
+      expect(() => recordStore.deleteAgent("lys", DELETED_AT)).toThrow(
+        "Database is closed"
+      )
     })
   })
 }

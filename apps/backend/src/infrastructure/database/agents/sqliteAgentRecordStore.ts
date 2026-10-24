@@ -5,6 +5,7 @@ import type {
   AgentPage,
   AgentRecordStore,
   ListAgentsInput,
+  StoredAgentRecord,
   UpdateAgentInput
 } from "../../../modules/agent/records"
 import type {
@@ -22,6 +23,19 @@ const agentCountSchema = z.strictObject({
 const agentSummaryRowsSchema = z.array(agentSummarySchema).readonly()
 
 /**
+ * Validates one stored agent row with its deletion time, freezing the
+ * record.
+ */
+const storedAgentRecordSchema = z
+  .strictObject({
+    /** The agent's own columns, as the agent schema stores them. */
+    agent: agentSchema,
+    /** Deletion time in the stored format; null while not deleted. */
+    deletedAt: z.iso.datetime({ precision: 3 }).nullable()
+  })
+  .readonly()
+
+/**
  * Reads the agent count and one page of summaries inside the caller's read
  * transaction.
  * @param statements - Statement compilation lent to the caller's transaction.
@@ -34,14 +48,19 @@ function listAgents(
   input: ListAgentsInput
 ): AgentPage {
   const { storedCount } = agentCountSchema.parse(
-    statements.getStatement("SELECT count(*) AS storedCount FROM agents").get()
+    statements
+      .getStatement(
+        "SELECT count(*) AS storedCount FROM agents WHERE deleted_at IS NULL"
+      )
+      .get()
   )
   const rows = statements
     .getStatement(
       `SELECT code, name, bio, created_at AS createdAt, updated_at AS updatedAt
       FROM agents
-      WHERE $createdAt IS NULL OR created_at > $createdAt
-        OR (created_at = $createdAt AND code > $code)
+      WHERE deleted_at IS NULL AND ($createdAt IS NULL
+        OR created_at > $createdAt
+        OR (created_at = $createdAt AND code > $code))
       ORDER BY created_at, code LIMIT $limit`
     )
     .all({
@@ -57,23 +76,28 @@ function listAgents(
 }
 
 /**
- * Reads one agent inside the caller's transaction.
+ * Reads one agent, deleted or not, inside the caller's transaction.
  * @param statements - Statement compilation lent to the caller's transaction.
  * @param code - Code to look up, compared exactly.
- * @returns The validated agent, or undefined when no agent has the code.
- * @throws If SQLite fails or the row violates the agent schema.
+ * @returns The validated, frozen record with the agent's deletion time, or
+ * undefined when no agent has the code.
+ * @throws If SQLite fails, the row violates the agent schema, or its
+ * deletion time is not in the stored format.
  */
 function findAgent(
   statements: DatabaseStatementCompiler,
   code: string
-): Agent | undefined {
+): StoredAgentRecord | undefined {
   const row = statements
     .getStatement(
       `SELECT code, name, bio, system_prompt AS systemPrompt,
-      created_at AS createdAt, updated_at AS updatedAt FROM agents WHERE code = ?`
+      created_at AS createdAt, updated_at AS updatedAt, deleted_at AS deletedAt
+      FROM agents WHERE code = ?`
     )
     .get(code)
-  return row === undefined ? undefined : agentSchema.parse(row)
+  if (row === undefined) return undefined
+  const { deletedAt, ...agent } = row
+  return storedAgentRecordSchema.parse({ agent, deletedAt })
 }
 
 /**
@@ -82,7 +106,8 @@ function findAgent(
  * @param statements - Statement compilation lent to the caller's write
  * transaction.
  * @param agent - Validated agent, stored exactly as given.
- * @returns True when the agent was inserted; false when its code is taken.
+ * @returns True when the agent was inserted; false when its code is taken,
+ * by a deleted agent too.
  * @throws If SQLite fails.
  */
 function insertAgent(
@@ -111,7 +136,8 @@ function insertAgent(
  * transaction.
  * @param input - Code, the fields to replace (an omitted field keeps its
  * stored value), and the time stored as the agent's last change.
- * @returns The changed agent, or undefined when no agent has the code.
+ * @returns The changed agent, or undefined when no agent that is not deleted
+ * has the code.
  * @throws If SQLite fails or the changed row violates the agent schema; the
  * row is validated before the caller's transaction commits, so either failure
  * rolls the change back.
@@ -124,7 +150,7 @@ function updateAgent(
     .getStatement(
       `UPDATE agents SET name = coalesce(?, name), bio = coalesce(?, bio),
       system_prompt = coalesce(?, system_prompt), updated_at = ?
-      WHERE code = ?
+      WHERE code = ? AND deleted_at IS NULL
       RETURNING code, name, bio, system_prompt AS systemPrompt,
       created_at AS createdAt, updated_at AS updatedAt`
     )
@@ -181,10 +207,10 @@ export default class SqliteAgentRecordStore implements AgentRecordStore {
   /**
    * Implements {@link AgentRecordStore.findAgent} in one read snapshot.
    * @param code - Interface-defined code.
-   * @returns The interface-defined agent or absence.
+   * @returns The interface-defined record or absence.
    * @throws The interface-defined closed and validation failures.
    */
-  public findAgent(code: string): Agent | undefined {
+  public findAgent(code: string): StoredAgentRecord | undefined {
     return this.#databaseReader.handleDatabaseReadRequest((statements) =>
       findAgent(statements, code)
     )
@@ -218,16 +244,21 @@ export default class SqliteAgentRecordStore implements AgentRecordStore {
   }
 
   /**
-   * Implements {@link AgentRecordStore.deleteAgent}.
+   * Implements {@link AgentRecordStore.deleteAgent} with one `UPDATE` that
+   * marks only an agent that is not deleted yet.
    * @param code - Interface-defined code.
+   * @param deletedAt - Interface-defined deletion time.
    * @returns The interface-defined deletion outcome.
    * @throws The interface-defined failures.
    */
-  public deleteAgent(code: string): boolean {
+  public deleteAgent(code: string, deletedAt: string): boolean {
     return this.#databaseWriter.handleDatabaseWriteRequest(
       (statements) =>
-        statements.getStatement("DELETE FROM agents WHERE code = ?").run(code)
-          .changes === 1
+        statements
+          .getStatement(
+            "UPDATE agents SET deleted_at = ? WHERE code = ? AND deleted_at IS NULL"
+          )
+          .run(deletedAt, code).changes === 1
     )
   }
 }

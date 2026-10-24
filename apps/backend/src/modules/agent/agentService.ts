@@ -1,8 +1,4 @@
-import type {
-  BuiltInAgentSummary,
-  GetAgentApiResponse,
-  ListAgentsApiResponse
-} from "@lys/protocol"
+import type { BuiltInAgentSummary, ListAgentsApiResponse } from "@lys/protocol"
 import {
   agentChangesSchema,
   agentDefinitionSchema,
@@ -22,7 +18,8 @@ import type {
   AgentEditor,
   AgentLister,
   AgentReader,
-  AgentUpdateOutcome
+  AgentUpdateOutcome,
+  FoundAgent
 } from "./capabilities"
 import { createAgentListCursor, type AgentListOptions } from "./listOptions"
 import type { AgentRecordStore } from "./records"
@@ -231,20 +228,27 @@ export default class AgentService
   }
 
   /**
-   * Reads one built-in or stored agent.
+   * Reads one built-in or stored agent, deleted or not.
    * @param code - Code to look up as given, compared exactly.
-   * @returns The frozen built-in agent with that code, else the frozen stored
-   * one, tagged with its kind; undefined when no agent has the code.
+   * @returns The frozen built-in agent with that code, never deleted, else
+   * the frozen stored one with its deletion time, each tagged with its kind;
+   * undefined when no agent has the code.
    * @throws If the store is closed or the stored agent is invalid.
    */
-  public findAgent(code: string): GetAgentApiResponse | undefined {
+  public findAgent(code: string): FoundAgent | undefined {
     const builtInAgent = this.#builtInAgents.get(code)
     if (builtInAgent !== undefined)
-      return Object.freeze({ kind: "built-in", ...builtInAgent })
-    const storedAgent = this.#recordStore.findAgent(code)
-    return storedAgent === undefined
+      return Object.freeze({
+        agent: Object.freeze({ kind: "built-in", ...builtInAgent }),
+        deletedAt: null
+      })
+    const record = this.#recordStore.findAgent(code)
+    return record === undefined
       ? undefined
-      : Object.freeze({ kind: "custom", ...storedAgent })
+      : Object.freeze({
+          agent: Object.freeze({ kind: "custom", ...record.agent }),
+          deletedAt: record.deletedAt
+        })
   }
 
   /**
@@ -276,30 +280,35 @@ export default class AgentService
   }
 
   /**
-   * Permanently deletes one stored agent.
+   * Marks one stored agent deleted now, in one write transaction.
    * @param code - Code of the agent to delete, as given.
-   * @returns `deleted` when it was stored, `missing` when no agent has the
-   * code, and `built-in` when a built-in agent has it, which deletes nothing.
-   * @throws If the store is closed or the deletion fails.
-   * @remarks A conversation the deleted agent answered keeps its code, so
-   * {@link AgentService.findChatAgent} finds no agent for it until an agent
-   * is stored under that code again.
+   * @returns `deleted` when it was stored and not deleted, `missing` when no
+   * such agent has the code, and `built-in` when a built-in agent has it,
+   * which deletes nothing.
+   * @throws If the store is closed or the write fails.
+   * @remarks The agent stays stored with the time of its deletion, so its
+   * code is never free again: a conversation it answered keeps the code and
+   * {@link AgentService.findChatAgent} finds no agent for it for good.
    */
   public deleteAgent(code: string): AgentDeletionOutcome {
     if (this.#builtInAgents.has(code)) return "built-in"
-    return this.#recordStore.deleteAgent(code) ? "deleted" : "missing"
+    return this.#recordStore.deleteAgent(code, new Date().toISOString())
+      ? "deleted"
+      : "missing"
   }
 
   /**
    * Finds the agent that answers chats under a code.
    * @param code - Agent code as given, compared exactly.
    * @returns A new agent that answers with the system prompt the built-in or
-   * stored agent has now; undefined when no agent has the code.
+   * stored agent has now; undefined when no agent has the code or its agent
+   * is deleted.
    * @throws If the store is closed or the stored agent is invalid.
    */
   public findChatAgent(code: string): Agent | undefined {
+    const found = this.findAgent(code)
     const profile =
-      this.#builtInAgents.get(code) ?? this.#recordStore.findAgent(code)
+      found === undefined || found.deletedAt !== null ? undefined : found.agent
     return profile === undefined
       ? undefined
       : new Agent(

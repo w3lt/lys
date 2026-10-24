@@ -303,7 +303,7 @@ describe("LmStudioRuntime", () => {
   })
 
   describe("loadLlmModel", () => {
-    it("loads the selection and returns the loaded instance identity", async () => {
+    it("loads the selection under the given identifier and returns the loaded instance identity", async () => {
       fakeLmStudio.inventory = {
         downloadedModels: [
           createLmStudioLlmRecord({ modelKey: "qwen/qwen3-8b" })
@@ -312,13 +312,37 @@ describe("LmStudioRuntime", () => {
       }
       const runtime = await createOwnedRuntime()
 
-      await expect(runtime.loadLlmModel("qwen/qwen3-8b", {})).resolves.toEqual({
+      await expect(
+        runtime.loadLlmModel("qwen/qwen3-8b", {}, "qwen/qwen3-8b@lys-7f3c9a")
+      ).resolves.toEqual({
         modelKey: "qwen/qwen3-8b",
-        modelIdentifier: "qwen/qwen3-8b"
+        modelIdentifier: "qwen/qwen3-8b@lys-7f3c9a"
       })
       expect(fakeLmStudio.inventory.loadedModels).toEqual([
-        { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b" }
+        { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b@lys-7f3c9a" }
       ])
+    })
+
+    it("translates the refusal of an identifier already in use", async () => {
+      fakeLmStudio.inventory = {
+        downloadedModels: [
+          createLmStudioLlmRecord({ modelKey: "qwen/qwen3-8b" })
+        ],
+        loadedModels: [
+          { modelKey: "qwen/qwen3-8b", identifier: "qwen/qwen3-8b@lys-7f3c9a" }
+        ]
+      }
+      const runtime = await createOwnedRuntime()
+
+      await expect(
+        runtime.loadLlmModel("qwen/qwen3-8b", {}, "qwen/qwen3-8b@lys-7f3c9a")
+      ).rejects.toMatchObject({
+        message: "The LLM runtime could not load the model.",
+        cause: expect.objectContaining({
+          message: 'Identifier "qwen/qwen3-8b@lys-7f3c9a" is already in use.'
+        })
+      })
+      expect(fakeLmStudio.inventory.loadedModels).toHaveLength(1)
     })
 
     it("sends every set load setting to the SDK as its load config", async () => {
@@ -327,15 +351,20 @@ describe("LmStudioRuntime", () => {
       load.mockResolvedValue({ modelKey: "qwen", identifier: "qwen" })
       fakeLmStudio.operations = { ...fakeLmStudio.operations, load }
 
-      await runtime.loadLlmModel("qwen", {
-        contextLength: 16_384,
-        evalBatchSize: 1024,
-        flashAttention: false,
-        offloadKVCacheToGpu: true,
-        numExperts: 4
-      })
+      await runtime.loadLlmModel(
+        "qwen",
+        {
+          contextLength: 16_384,
+          evalBatchSize: 1024,
+          flashAttention: false,
+          offloadKVCacheToGpu: true,
+          numExperts: 4
+        },
+        "qwen@lys-000001"
+      )
 
       expect(load).toHaveBeenCalledExactlyOnceWith("qwen", {
+        identifier: "qwen@lys-000001",
         config: {
           contextLength: 16_384,
           evalBatchSize: 1024,
@@ -352,9 +381,12 @@ describe("LmStudioRuntime", () => {
       load.mockResolvedValue({ modelKey: "qwen", identifier: "qwen" })
       fakeLmStudio.operations = { ...fakeLmStudio.operations, load }
 
-      await runtime.loadLlmModel("qwen", {})
+      await runtime.loadLlmModel("qwen", {}, "qwen@lys-000001")
 
-      expect(load).toHaveBeenCalledExactlyOnceWith("qwen", { config: {} })
+      expect(load).toHaveBeenCalledExactlyOnceWith("qwen", {
+        identifier: "qwen@lys-000001",
+        config: {}
+      })
     })
 
     it("leaves a setting that is not set out of the load config", async () => {
@@ -363,7 +395,11 @@ describe("LmStudioRuntime", () => {
       load.mockResolvedValue({ modelKey: "qwen", identifier: "qwen" })
       fakeLmStudio.operations = { ...fakeLmStudio.operations, load }
 
-      await runtime.loadLlmModel("qwen", { contextLength: 8192 })
+      await runtime.loadLlmModel(
+        "qwen",
+        { contextLength: 8192 },
+        "qwen@lys-000001"
+      )
 
       const [, options] = load.mock.calls[0] ?? []
       expect(Object.keys(options?.config ?? {})).toEqual(["contextLength"])
@@ -423,7 +459,7 @@ describe("LmStudioRuntime", () => {
         load.mockResolvedValue({ modelKey: "qwen", identifier: "qwen" })
         fakeLmStudio.operations = { ...fakeLmStudio.operations, load }
 
-        await runtime.loadLlmModel("qwen", loadConfiguration)
+        await runtime.loadLlmModel("qwen", loadConfiguration, "qwen@lys-000001")
 
         const [, options] = load.mock.calls[0] ?? []
         expect(options?.config).toEqual(loadConfiguration)
@@ -435,7 +471,7 @@ describe("LmStudioRuntime", () => {
       const runtime = await createOwnedRuntime()
 
       await expect(
-        runtime.loadLlmModel("missing/model", {})
+        runtime.loadLlmModel("missing/model", {}, "missing/model@lys-000001")
       ).rejects.toMatchObject({
         message: "The LLM runtime could not load the model.",
         cause: expect.objectContaining({
@@ -452,9 +488,9 @@ describe("LmStudioRuntime", () => {
         load: async () => ({ modelKey: "qwen" })
       }
 
-      await expect(runtime.loadLlmModel("qwen", {})).rejects.toThrow(
-        "The LLM runtime returned an invalid model instance."
-      )
+      await expect(
+        runtime.loadLlmModel("qwen", {}, "qwen@lys-000001")
+      ).rejects.toThrow("The LLM runtime returned an invalid model instance.")
     })
   })
 
@@ -702,9 +738,9 @@ describe("LmStudioRuntime", () => {
       }
       const active = runtime.listLoadedLlmModelInstances()
 
-      await expect(runtime.loadLlmModel("qwen", {})).rejects.toThrow(
-        "The LLM runtime already has an active operation."
-      )
+      await expect(
+        runtime.loadLlmModel("qwen", {}, "qwen@lys-000001")
+      ).rejects.toThrow("The LLM runtime already has an active operation.")
       await expect(runtime.getRuntimeAvailability()).rejects.toThrow(
         "The LLM runtime already has an active operation."
       )

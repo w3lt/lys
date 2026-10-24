@@ -14,6 +14,11 @@ const RESIDENT = buildModelDescriptor(
 /** Model on disk only. */
 const ON_DISK = buildModelDescriptor(buildLlmInfo("gemma-3"))
 
+/** Model resident in LM Studio only through an instance another program loaded. */
+const LOADED_ELSEWHERE = buildModelDescriptor(
+  buildLlmInfo("mistral-7b", { loaded: true, loadedByLys: false })
+)
+
 /**
  * Renders one row in a list with spies for every action.
  *
@@ -78,6 +83,20 @@ describe("ModelRow", () => {
     const resident = startModelRow({ model: RESIDENT })
     await user.click(screen.getByRole("button", { name: "Unload qwen3-8b" }))
     expect(resident.onUnload).toHaveBeenCalledExactlyOnceWith("qwen3-8b")
+  })
+
+  it("offers neither Load nor Unload, but still Test, for a model only another program loaded", () => {
+    startModelRow({ model: LOADED_ELSEWHERE })
+
+    expect(
+      screen.queryByRole("button", { name: "Load mistral-7b" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Unload mistral-7b" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Test mistral-7b" })
+    ).toBeEnabled()
   })
 
   it("tests whether the model is loaded", async () => {

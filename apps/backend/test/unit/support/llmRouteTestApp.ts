@@ -4,6 +4,7 @@ import LlmService, {
   type LlmEngineOperationQueue
 } from "../../../src/modules/llm/llmService"
 import { createTestFastify, type TestFastify } from "./fastifyTestApp"
+import InMemoryLysLlmInstanceStore from "./inMemoryLysLlmInstanceStore"
 
 /** Test application exposing the LLM services the LLM routes read. */
 export type LlmRouteTestApp = TestFastify &
@@ -39,7 +40,10 @@ export function createLlmRouteTestApp(): LlmRouteTestApp {
     handleLlmEngineOperationRequest: () =>
       Promise.reject(new Error("Unexpected LLM engine operation"))
   })
-  const service = new LlmService({ llmEngineOperationQueue })
+  const service = new LlmService({
+    llmEngineOperationQueue,
+    lysLlmInstanceStore: new InMemoryLysLlmInstanceStore()
+  })
   const runtimeService = new LlmRuntimeService({
     acquireLlmRuntime: () =>
       Promise.reject(new Error("Unexpected LLM runtime acquisition")),

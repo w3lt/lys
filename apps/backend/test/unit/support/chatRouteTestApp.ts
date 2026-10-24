@@ -28,6 +28,7 @@ import {
 } from "./scriptedBuiltInTool"
 import { ROOMY_CONTEXT_LENGTH } from "./replyContextMeterFakes"
 import { ScriptedBuiltInToolProvider } from "./scriptedBuiltInToolProvider"
+import InMemoryLysLlmInstanceStore from "./inMemoryLysLlmInstanceStore"
 
 /** Published path of the chat route. */
 const CHAT_PATH = "/api/v1/chat"
@@ -151,7 +152,8 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     llmEngineOperationQueue: Object.freeze({
       handleLlmEngineOperationRequest: () =>
         Promise.reject(createUnexpectedCallError("LLM engine operation"))
-    })
+    }),
+    lysLlmInstanceStore: new InMemoryLysLlmInstanceStore()
   })
   const findLlmContextMeasurement = vi
     .spyOn(llmService, "findLlmContextMeasurement")

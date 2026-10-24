@@ -41,6 +41,7 @@ Tauri host -> backend and vmo processes; HTTP GET /health -> vmo
 | State                                        | Owner                   | Notes                                                                                                        |
 | -------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Conversation, message, and agent rows        | Backend                 | Stored in `$LYS_HOME/lys_db.sqlite`.                                                                         |
+| Model instances Lys loaded                   | Backend                 | Their LM Studio identifiers are stored in `$LYS_HOME/loaded_models.json`, so an unload stops only those.     |
 | Attachment files                             | Backend                 | Stored under `$LYS_HOME/attachments/<conversation id>/<message id>/<name>`; deleted with their conversation. |
 | Chat request lifecycle in the current window | Desktop UI              | Held in the chat Zustand store while one request is active.                                                  |
 | Past-conversations dialog                    | Desktop UI              | Held in the history Zustand store; listed conversations are read from the backend.                           |

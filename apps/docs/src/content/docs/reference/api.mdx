@@ -806,15 +806,27 @@ it then shows the sentence and keeps the files staged.
 - `trainedForToolUse`
 - `maxContextLength`
 - `loaded`
-- optional `loadedContextLength`
+- on a loaded model only, `loadedByLys` and optional `loadedContextLength`
 
 `GET /api/v1/llm/list` returns `llms` ordered by `modelKey`, then by `path`.
+An entry is one of two shapes, told apart by `loaded`; an entry with
+`loaded: false` carries neither of the two loaded fields, and a client
+refuses one that does.
+
+On a loaded model, `loadedByLys` is `true` when at least one of its loaded
+instances is one Lys loaded, and `false` when another program, such as LM
+Studio's own window or `lms`, loaded them all. Lys unloads only the instances
+it loaded; see [Instances Lys loaded](/architecture/providers/#instances-lys-loaded).
+It is `false` on every model while the backend cannot read
+`$LYS_HOME/loaded_models.json`.
+
 On a loaded model, `loadedContextLength` is the context length it is loaded
 with, in tokens: the smallest among its loaded instances, the window a chat
-request to it is measured against. It is absent on a model that is not loaded,
-and on a loaded one whose instances were gone by the time the list measured
-them. The [load response](#model-load-request) never carries it, since the
-load does not observe it; the next list read does.
+request to it is measured against. It is absent on a loaded model whose
+instances were gone by the time the list measured them. The
+[load response](#model-load-request) never carries it, since the load does
+not observe it; the next list read does. The load response always carries
+`loaded: true` and `loadedByLys: true`.
 
 ## Model load request
 
@@ -861,7 +873,10 @@ LM Studio loads it with:
 - The settings apply to this load only. The backend does not store them.
 
 The backend passes the settings to the LM Studio SDK's load call, which sends
-each of them to LM Studio.
+each of them to LM Studio, together with an identifier of the instance's own,
+such as `google/gemma-4-12b-qat@lys-7f3c9a`. It saves that identifier in
+`$LYS_HOME/loaded_models.json` before the load starts. When that file cannot
+be read, or the save fails, no load starts and the request fails with `500`.
 
 ## Model operation admission
 
@@ -953,21 +968,24 @@ The request body must contain only `modelId`, and its value must be a non-empty
 canonical model key. Invalid bodies are rejected with `400 Bad Request` before
 the backend accesses the LLM runtime.
 
-`PATCH /api/v1/llm/unload` attempts every loaded runtime instance currently
-observed with that model key. It returns `204 No Content` when a fresh
-reconciliation snapshot contains no matching instance. This is an observation
-of that snapshot, not a guarantee that another runtime client will not load a
-new matching instance afterward. Expected failures use
+`PATCH /api/v1/llm/unload` stops, one after another, the loaded instances of
+that model key that Lys loaded: those whose identifiers are in
+`$LYS_HOME/loaded_models.json`. It never stops an instance another program
+loaded. It returns `204 No Content` when a fresh reconciliation snapshot
+contains none of the stopped instances, and saves the file without them; when
+that save fails, it still returns `204` and logs a warning. This is an
+observation of that snapshot, not a guarantee that another runtime client will
+not load a new instance of the model afterward. Expected failures use
 `application/problem+json` with stable `type`, `title`, and `status` fields.
 Operation failures include an occurrence-specific `detail`; admission refusal
 uses the fixed four-field service-busy body shown above:
 
-| Status | Problem type                              | Meaning                                                      |
-| ------ | ----------------------------------------- | ------------------------------------------------------------ |
-| `404`  | `urn:lys:problem:llm:model-not-found`     | No matching instance was initially loaded.                   |
-| `503`  | `urn:lys:problem:llm:runtime-unavailable` | No LLM runtime is connected, or the backend cannot query it. |
-| `503`  | `urn:lys:problem:llm:unload-failed`       | Reconciliation still found matching instances.               |
-| `503`  | `urn:lys:problem:llm:service-busy`        | The shared queue is full; no unload was accepted.            |
+| Status | Problem type                              | Meaning                                                                                                                                                                        |
+| ------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `404`  | `urn:lys:problem:llm:model-not-found`     | No instance of the key that Lys loaded was initially loaded, including while `loaded_models.json` cannot be read; `detail` is `Model "<key>" has no instance that Lys loaded.` |
+| `503`  | `urn:lys:problem:llm:runtime-unavailable` | No LLM runtime is connected, or the backend cannot query it.                                                                                                                   |
+| `503`  | `urn:lys:problem:llm:unload-failed`       | Reconciliation still found an instance it tried to stop.                                                                                                                       |
+| `503`  | `urn:lys:problem:llm:service-busy`        | The shared queue is full; no unload was accepted.                                                                                                                              |
 
 Operation-failure bodies may also include an `instance` identifier for one
 occurrence. The service-busy body has fixed `type`, `title`, `status`, and `detail`

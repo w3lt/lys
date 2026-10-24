@@ -11,10 +11,10 @@ import {
   type LlmModelHealthOutcome
 } from "./getLlmModelHealth"
 import {
-  stopLlmModelsByKey,
+  stopLysLlmModelInstances,
   type ListLoadedLlmModelInstances,
-  type StopLlmModelsByKeyOutcome
-} from "./stopLlmModelsByKey"
+  type StopLysLlmModelInstancesOutcome
+} from "./stopLysLlmModelInstances"
 import type {
   LlmModelHealthReader,
   LlmModelInventory,
@@ -27,6 +27,12 @@ import type {
   LlmContextMeasurement,
   LoadedLlmModelInstance
 } from "./llmRuntimeTypes"
+import {
+  buildLysLlmInstanceIdentifier,
+  createRandomLysInstanceSuffix,
+  findLoadedLysLlmInstanceIdentifiers
+} from "./lysLlmInstanceIdentifiers"
+import type { LysLlmInstanceStore } from "./lysLlmInstanceStore"
 
 /**
  * One model operation performed against the connected engine.
@@ -72,13 +78,23 @@ export interface LlmEngineOperationQueue {
 export type LlmServiceCreationOptions = {
   /** Borrowed queue that serializes every model operation against the connected runtime. */
   readonly llmEngineOperationQueue: LlmEngineOperationQueue
+  /**
+   * Borrowed record of the instances Lys loaded, read and saved only inside
+   * queued model operations.
+   */
+  readonly lysLlmInstanceStore: LysLlmInstanceStore
   /** Monotonic millisecond clock; defaults to the process performance clock. */
   readonly readMonotonicTimeMs?: () => number
+  /**
+   * Generator of the random part of each new instance identifier; defaults
+   * to six lowercase hex digits from three random bytes.
+   */
+  readonly createLysInstanceSuffix?: () => string
 }
 
 /**
  * Loaded state the service adds to a downloaded model's metadata; only a
- * loaded model can carry a context length.
+ * loaded model says whether Lys loaded it and can carry a context length.
  */
 type LlmLoadedState =
   | Readonly<{
@@ -88,6 +104,8 @@ type LlmLoadedState =
   | Readonly<{
       /** At least one loaded instance belongs to the model. */
       loaded: true
+      /** Whether one of those instances is on the record of Lys's instances. */
+      loadedByLys: boolean
       /**
        * Smallest context length among its loaded instances, in tokens;
        * absent when it was not observed.
@@ -97,14 +115,6 @@ type LlmLoadedState =
 
 /** State of a model no loaded instance belongs to. */
 const NOT_LOADED: LlmLoadedState = Object.freeze({ loaded: false })
-
-/**
- * State of a loaded model whose context length was not observed: after a
- * load, or when its instances were gone by the time they were measured.
- */
-const LOADED_WITHOUT_CONTEXT_LENGTH: LlmLoadedState = Object.freeze({
-  loaded: true
-})
 
 /**
  * Applies model policy to operations serialized by the LLM runtime queue.
@@ -131,20 +141,31 @@ export default class LlmService
   /** Borrowed queue that owns the runtime and every accepted operation. */
   readonly #llmEngineOperationQueue: LlmEngineOperationQueue
 
+  /** Borrowed record of the instances Lys loaded. */
+  readonly #lysLlmInstanceStore: LysLlmInstanceStore
+
   /** Borrowed monotonic clock used only around admitted health queries. */
   readonly #readMonotonicTimeMs: () => number
 
+  /** Generator of the random part of each new instance identifier. */
+  readonly #createLysInstanceSuffix: () => string
+
   /**
-   * Creates a ready service over a borrowed operation queue.
+   * Creates a ready service over a borrowed operation queue and record.
    *
-   * @param options - Borrowed queue and optional monotonic clock.
+   * @param options - Borrowed queue and record, with an optional monotonic
+   * clock and suffix generator.
    */
   public constructor({
     llmEngineOperationQueue,
-    readMonotonicTimeMs = readPerformanceNowMs
+    lysLlmInstanceStore,
+    readMonotonicTimeMs = readPerformanceNowMs,
+    createLysInstanceSuffix = createRandomLysInstanceSuffix
   }: LlmServiceCreationOptions) {
     this.#llmEngineOperationQueue = llmEngineOperationQueue
+    this.#lysLlmInstanceStore = lysLlmInstanceStore
     this.#readMonotonicTimeMs = readMonotonicTimeMs
+    this.#createLysInstanceSuffix = createLysInstanceSuffix
   }
 
   /**
@@ -180,23 +201,46 @@ export default class LlmService
    * connected runtime unchanged.
    * @returns A promise resolving to a validated immutable model snapshot after
    * the runtime loads the model and its canonical key is found in inventory.
-   * @throws If loading or inventory fails, response validation fails, or the
-   * queue rejects the operation.
+   * @throws If listing the loaded instances, reading or saving the record,
+   * loading, or inventory fails, response validation fails, or the queue
+   * rejects the operation.
+   * @throws An `Error` whose message is the record's reason followed by
+   * `No model was loaded, so the record is left as it is.` when the record
+   * cannot be read; nothing is saved or loaded.
    * @throws An `Error` with the message `Loaded model "<canonical model key>"
    * was not found in the downloaded LLM inventory` if the canonical model is
    * absent from inventory after loading.
+   * @remarks The instance's identifier, `<modelKeyOrAlias>@lys-<suffix>`, is
+   * saved before the runtime loads, with the saved identifiers whose
+   * instances are still loaded, so an instance the runtime loads is always
+   * on the record. A failed load leaves its identifier saved until a later
+   * load or unload finds its instance gone.
    */
   public async loadLlmModel(
     modelKeyOrAlias: string,
     loadConfiguration: ModelLoadConfiguration
   ): Promise<LlmLoadModelApiResponse> {
     return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
-      async (llmEngine) =>
-        await loadRuntimeLlmModel(
+      async (llmEngine) => {
+        const instanceIdentifier = buildLysLlmInstanceIdentifier(
+          modelKeyOrAlias,
+          this.#createLysInstanceSuffix()
+        )
+        await addLysLlmInstanceIdentifier(
+          instanceIdentifier,
+          async () => await llmEngine.listLoadedLlmModelInstances(),
+          this.#lysLlmInstanceStore
+        )
+        return await loadRuntimeLlmModel(
           async () =>
-            await llmEngine.loadLlmModel(modelKeyOrAlias, loadConfiguration),
+            await llmEngine.loadLlmModel(
+              modelKeyOrAlias,
+              loadConfiguration,
+              instanceIdentifier
+            ),
           async () => await llmEngine.listDownloadedLlmModels()
         )
+      }
     )
   }
 
@@ -204,21 +248,20 @@ export default class LlmService
    * Implements {@link LlmModelInventory.listLlmModels} through the queue.
    *
    * @returns A promise resolving to snapshots in the order defined by
-   * {@link LlmModelInventory.listLlmModels}, each loaded model with the
-   * context length its instances are loaded with.
+   * {@link LlmModelInventory.listLlmModels}, each loaded model saying
+   * whether Lys loaded one of its instances, with the context length its
+   * instances are loaded with.
    * @throws If an inventory query fails or the queue rejects the operation.
-   * @remarks The downloaded models, the loaded instances, and each loaded
-   * model's context length are observed in one queued operation.
+   * @remarks The downloaded models, the loaded instances, the record of
+   * Lys's instances, and each loaded model's context length are observed in
+   * one queued operation. The record is only read; a record that cannot be
+   * read counts as holding no instance, so no model is listed as loaded by
+   * Lys.
    */
   public async listLlmModels(): Promise<readonly LlmInfo[]> {
     return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
       async (llmEngine) =>
-        await listLlmModels(
-          async () => await llmEngine.listDownloadedLlmModels(),
-          async () => await llmEngine.listLoadedLlmModelInstances(),
-          async (model, texts) =>
-            await llmEngine.findLlmContextMeasurement(model, texts)
-        )
+        await listLlmModels(llmEngine, this.#lysLlmInstanceStore)
     )
   }
 
@@ -245,23 +288,22 @@ export default class LlmService
   }
 
   /**
-   * Implements {@link LlmModelStopper.stopLlmModelsByKey} through the queue.
+   * Implements {@link LlmModelStopper.stopLysLlmModelInstances} through the queue.
    *
-   * @param modelKey - Canonical model key shared by the instances to stop.
+   * @param modelKey - Canonical model key of the instances Lys loaded to stop.
    * @returns A promise resolving to the immutable outcome from a fresh reconciliation snapshot.
-   * @throws If the queue rejects the operation; runtime-operation failures are
-   * represented in the returned outcome.
+   * @throws If the queue rejects the operation; runtime-operation and record
+   * failures are represented in the returned outcome.
    */
-  public async stopLlmModelsByKey(
+  public async stopLysLlmModelInstances(
     modelKey: string
-  ): Promise<StopLlmModelsByKeyOutcome> {
+  ): Promise<StopLysLlmModelInstancesOutcome> {
     return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
       async (llmEngine) =>
-        await stopLlmModelsByKey(
+        await stopLysLlmModelInstances(
           modelKey,
-          async () => await llmEngine.listLoadedLlmModelInstances(),
-          async (identifier) =>
-            await llmEngine.stopLoadedLlmModelInstance(identifier)
+          llmEngine,
+          this.#lysLlmInstanceStore
         )
     )
   }
@@ -293,28 +335,31 @@ export default class LlmService
 }
 
 /**
- * Lists downloaded LLMs annotated from the current loaded-instance snapshot.
+ * Lists downloaded LLMs annotated from the current loaded-instance snapshot
+ * and the record of Lys's instances.
  *
- * @param listDownloadedLlmModels - Query for normalized immutable runtime metadata.
- * @param listLoadedLlmModelInstances - Query for immutable loaded-instance records.
- * @param findLlmContextMeasurement - Query for the context length a loaded
- * model is loaded with.
+ * @param llmEngine - Engine whose inventory and measurement queries run.
+ * @param lysLlmInstanceStore - Record of the instances Lys loaded; only read.
  * @returns A promise resolving to a transitively immutable, newly owned model
- * inventory in which each loaded model carries the context length that
+ * inventory in which each loaded model says whether one of its instances is
+ * on the record and carries the context length that
  * {@link LlmEngine.findLlmContextMeasurement} reports for its key, the window a
  * chat request to it is measured against; a model whose instances were gone
  * by the time they were measured carries none.
  * @throws If an inventory query or a context length query fails.
  */
 async function listLlmModels(
-  listDownloadedLlmModels: LlmEngine["listDownloadedLlmModels"],
-  listLoadedLlmModelInstances: ListLoadedLlmModelInstances,
-  findLlmContextMeasurement: LlmEngine["findLlmContextMeasurement"]
+  llmEngine: LlmEngine,
+  lysLlmInstanceStore: LysLlmInstanceStore
 ): Promise<readonly LlmInfo[]> {
-  const downloadedLlmModels = await listDownloadedLlmModels()
-  const loadedLlmModelInstances = await listLoadedLlmModelInstances()
+  const downloadedLlmModels = await llmEngine.listDownloadedLlmModels()
+  const loadedLlmModelInstances = await llmEngine.listLoadedLlmModelInstances()
   const loadedModelKeys = new Set(
     loadedLlmModelInstances.map(({ modelKey }) => modelKey)
+  )
+  const lysModelKeys = await listLysLoadedModelKeys(
+    loadedLlmModelInstances,
+    lysLlmInstanceStore
   )
   const loadedContextLengths = await listLoadedContextLengths(
     new Set(
@@ -322,7 +367,8 @@ async function listLlmModels(
         .map(({ modelKey }) => modelKey)
         .filter((modelKey) => loadedModelKeys.has(modelKey))
     ),
-    findLlmContextMeasurement
+    async (model, texts) =>
+      await llmEngine.findLlmContextMeasurement(model, texts)
   )
   const llmModels = downloadedLlmModels
     .map((downloadedLlmModel) =>
@@ -330,6 +376,7 @@ async function listLlmModels(
         downloadedLlmModel,
         buildLlmLoadedState(
           loadedModelKeys.has(downloadedLlmModel.modelKey),
+          lysModelKeys.has(downloadedLlmModel.modelKey),
           loadedContextLengths.get(downloadedLlmModel.modelKey)
         )
       )
@@ -337,6 +384,30 @@ async function listLlmModels(
     .toSorted(calculateLlmInfoOrder)
 
   return Object.freeze(llmModels)
+}
+
+/**
+ * Lists the keys of the models with a loaded instance on the record of
+ * Lys's instances.
+ *
+ * @param loadedLlmModelInstances - Snapshot of the loaded instances.
+ * @param lysLlmInstanceStore - Record of the instances Lys loaded; only read.
+ * @returns A promise resolving to the keys; none when the record cannot be
+ * read, the documented case in which Lys forgets its instances.
+ */
+async function listLysLoadedModelKeys(
+  loadedLlmModelInstances: readonly LoadedLlmModelInstance[],
+  lysLlmInstanceStore: LysLlmInstanceStore
+): Promise<ReadonlySet<string>> {
+  const savedRecord = await lysLlmInstanceStore.readLysLlmInstanceIdentifiers()
+  if (savedRecord.status === "unreadable") return new Set()
+  return new Set(
+    loadedLlmModelInstances
+      .filter(({ modelIdentifier }) =>
+        savedRecord.instanceIdentifiers.has(modelIdentifier)
+      )
+      .map(({ modelKey }) => modelKey)
+  )
 }
 
 /**
@@ -366,6 +437,38 @@ async function listLoadedContextLengths(
 }
 
 /**
+ * Saves a new identifier on the record, with the saved identifiers whose
+ * instances are still loaded.
+ *
+ * @param instanceIdentifier - Identifier of the instance about to load.
+ * @param listLoadedLlmModelInstances - Query for the instances loaded now.
+ * @param lysLlmInstanceStore - Record of the instances Lys loaded.
+ * @returns A promise resolving once the record holds the new identifier.
+ * @throws If the query or the save fails; or, when the record cannot be
+ * read, an `Error` with its reason, without saving, since replacing a
+ * record that cannot be read would lose it.
+ */
+async function addLysLlmInstanceIdentifier(
+  instanceIdentifier: string,
+  listLoadedLlmModelInstances: ListLoadedLlmModelInstances,
+  lysLlmInstanceStore: LysLlmInstanceStore
+): Promise<void> {
+  const loadedModelInstances = await listLoadedLlmModelInstances()
+  const savedRecord = await lysLlmInstanceStore.readLysLlmInstanceIdentifiers()
+  if (savedRecord.status === "unreadable") {
+    throw new Error(
+      `${savedRecord.message} No model was loaded, so the record is left as it is.`
+    )
+  }
+  const keptIdentifiers = findLoadedLysLlmInstanceIdentifiers(
+    savedRecord.instanceIdentifiers,
+    loadedModelInstances
+  )
+  keptIdentifiers.add(instanceIdentifier)
+  await lysLlmInstanceStore.saveLysLlmInstanceIdentifiers(keptIdentifiers)
+}
+
+/**
  * Loads a model and resolves its canonical downloaded-model metadata.
  *
  * @param loadSelectedLlmModel - Command that loads the requested selection with
@@ -391,28 +494,37 @@ async function loadRuntimeLlmModel(
     )
   }
 
-  return llmLoadModelApiResponseBodySchema.parse(
-    createLlmInfoSnapshot(downloadedLlmModel, LOADED_WITHOUT_CONTEXT_LENGTH)
-  )
+  return llmLoadModelApiResponseBodySchema.parse({
+    ...downloadedLlmModel,
+    loaded: true,
+    loadedByLys: true
+  })
 }
 
 /**
  * Builds the loaded state of one downloaded model.
  *
  * @param isLoaded - Whether a loaded-instance snapshot contains its key.
+ * @param isLoadedByLys - Whether one of those instances is on the record of
+ * Lys's instances.
  * @param loadedContextLength - Context length its instances are loaded with,
  * or undefined when it was not measured.
- * @returns Not loaded; or loaded, with the context length when one was
- * measured.
+ * @returns Not loaded; or loaded, saying whether Lys loaded it, with the
+ * context length when one was measured.
  */
 function buildLlmLoadedState(
   isLoaded: boolean,
+  isLoadedByLys: boolean,
   loadedContextLength: number | undefined
 ): LlmLoadedState {
   if (!isLoaded) return NOT_LOADED
   return loadedContextLength === undefined
-    ? LOADED_WITHOUT_CONTEXT_LENGTH
-    : Object.freeze({ loaded: true, loadedContextLength })
+    ? Object.freeze({ loaded: true, loadedByLys: isLoadedByLys })
+    : Object.freeze({
+        loaded: true,
+        loadedByLys: isLoadedByLys,
+        loadedContextLength
+      })
 }
 
 /**

@@ -347,6 +347,12 @@ pane explains how to recover. A manual Refresh action picks up changes made in
 LM Studio. Inventory metadata and each model's `loaded` flag drive the model
 rows and composer menu; several models may be loaded at once.
 
+Lys unloads only the instances it loaded, so a loaded model's `loadedByLys`
+flag decides what a row offers. A model row offers Load for a model that is
+not loaded and Unload for one Lys loaded. For a model only another program
+loaded, the row offers neither, and still offers Test; the Runtime pane's
+Unload is disabled while its summary names that model.
+
 Load sends `{ modelId, configuration }` to `POST /api/v1/llm/load`. Unload sends
 `{ modelId }` to `PATCH /api/v1/llm/unload` and accepts its bodyless `204`
 response. Both operations reconcile the inventory afterward, including when the
@@ -381,13 +387,14 @@ it saves it.
 
 The backend does not report the settings a loaded model runs with
 ([#145](https://github.com/w3lt/lys/issues/145)), so the store keeps its own
-record for each model it observes as loaded:
+record for each model it observes as loaded by Lys. A model only another
+program loaded has no record, so no reload is offered for it:
 
 - For a model Lys loaded in this session, the record is the configuration that
   load sent. When the stored settings differ from it, each changed row shows
   the loaded value, and a line under the rows lists what a reload would apply.
-- For a model found already loaded, the record is the configuration stored
-  when it was first observed. It only shows whether the settings changed since.
+- For a model found already loaded by Lys, as after the app restarts, the
+  record is the configuration stored when it was first observed. It only shows whether the settings changed since.
   The pane then says that changes apply on the next load.
 
 "Reload now" unloads the model and loads it again with its stored configuration,

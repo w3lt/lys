@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button"
 import type { LocalModelDescriptor } from "@/lib/models/inventory"
 import {
   formatModelRowTag,
-  readModelRowTone
+  readModelResidencyAction,
+  readModelRowTone,
+  type ModelResidencyAction
 } from "@/lib/models/model-residency"
 import type { ModelRuntimeState } from "@/lib/store/model-runtime"
 
@@ -62,6 +64,10 @@ function ModelChoice({
   )
 }
 
+/** Label of the button that requests each residency change. */
+const RESIDENCY_ACTION_LABELS: Readonly<Record<ModelResidencyAction, string>> =
+  Object.freeze({ load: "Load", unload: "Unload" })
+
 /** Backend actions for one model, with application-owned completion. */
 type ModelRowActionsProps = {
   /** Canonical model metadata including observed residency. */
@@ -79,7 +85,9 @@ type ModelRowActionsProps = {
 /**
  * Presents model operations supported by the backend.
  * @param props - Model, availability, and store-owned asynchronous callbacks.
- * @returns Named native controls for health and residency.
+ * @returns Named native controls: Test, then Load for a model that is not
+ * loaded or Unload for a model Lys loaded. A model only another program
+ * loaded has no residency control, since Lys does not unload it.
  * @remarks The store observes all failures;
  * this row does not cancel application work on unmount. Health path eligibility
  * comes from the shared parameter validator rather than a copied length limit.
@@ -94,6 +102,7 @@ function ModelRowActions({
   const canTest = llmTestModelApi.params.safeParse({
     modelId: model.modelKey
   }).success
+  const residencyAction = readModelResidencyAction(model)
   return (
     <div className="settings-view__model-actions">
       <Button
@@ -111,21 +120,23 @@ function ModelRowActions({
       >
         Test
       </Button>
-      <Button
-        aria-label={`${model.loaded ? "Unload" : "Load"} ${model.modelKey}`}
-        className="settings-view__model-act"
-        disabled={disabled}
-        onClick={() =>
-          void (model.loaded
-            ? onUnload(model.modelKey)
-            : onLoad(model.modelKey))
-        }
-        size="sm"
-        type="button"
-        variant={model.loaded ? "outline" : "default"}
-      >
-        {model.loaded ? "Unload" : "Load"}
-      </Button>
+      {residencyAction === null ? null : (
+        <Button
+          aria-label={`${RESIDENCY_ACTION_LABELS[residencyAction]} ${model.modelKey}`}
+          className="settings-view__model-act"
+          disabled={disabled}
+          onClick={() =>
+            void (residencyAction === "unload"
+              ? onUnload(model.modelKey)
+              : onLoad(model.modelKey))
+          }
+          size="sm"
+          type="button"
+          variant={residencyAction === "unload" ? "outline" : "default"}
+        >
+          {RESIDENCY_ACTION_LABELS[residencyAction]}
+        </Button>
+      )}
     </div>
   )
 }

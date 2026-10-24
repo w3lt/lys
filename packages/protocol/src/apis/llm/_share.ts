@@ -34,8 +34,11 @@ export const quantizationSchema = z
 /** Quantization metadata accepted by the model inventory contract. */
 export type Quantization = z.infer<typeof quantizationSchema>
 
-/** Validates model inventory metadata shared by list and load endpoints. */
-export const llmInfoSchema = z
+/**
+ * Validates the metadata of a downloaded model, shared by every model entry
+ * of the list and load endpoints.
+ */
+export const llmMetadataSchema = z
   .strictObject({
     /**
      * The key of the model. Use to load the model.
@@ -80,20 +83,48 @@ export const llmInfoSchema = z
     /**
      * Maximum context length of the model.
      */
-    maxContextLength: z.number(),
-    /**
-     * Whether the model is loaded or not (into lmstudio)
-     */
-    loaded: z.boolean(),
-    /**
-     * Context length the model is loaded with, in tokens: the smallest among
-     * its loaded instances, the window a chat request to the model is measured
-     * against. Present only on a loaded model whose instances were observed
-     * when the inventory was read.
-     */
-    loadedContextLength: z.int().positive().optional()
+    maxContextLength: z.number()
   })
   .readonly()
 
-/** Model inventory metadata inferred from the authoritative runtime schema. */
+/** Metadata of a downloaded model, inferred from {@link llmMetadataSchema}. */
+export type LlmMetadata = z.infer<typeof llmMetadataSchema>
+
+/** Validates the entry of a model with no instance loaded in LM Studio. */
+const notLoadedLlmInfoSchema = llmMetadataSchema.unwrap().extend({
+  /** No instance of the model is loaded. */
+  loaded: z.literal(false)
+})
+
+/** Validates the entry of a model with at least one instance loaded. */
+const loadedLlmInfoSchema = llmMetadataSchema.unwrap().extend({
+  /** At least one instance of the model is loaded in LM Studio. */
+  loaded: z.literal(true),
+  /**
+   * Whether at least one of the loaded instances is one Lys loaded, the only
+   * kind Lys unloads; false when another program loaded them all.
+   */
+  loadedByLys: z.boolean(),
+  /**
+   * Context length the model is loaded with, in tokens: the smallest among
+   * its loaded instances, the window a chat request to the model is measured
+   * against. Absent when its instances were gone by the time the inventory
+   * measured them.
+   */
+  loadedContextLength: z.int().positive().optional()
+})
+
+/**
+ * Validates one model entry of the list and load endpoints: a model with no
+ * loaded instance, or a loaded one, which says whether Lys loaded one of its
+ * instances and the context length it is loaded with.
+ */
+export const llmInfoSchema = z
+  .discriminatedUnion("loaded", [notLoadedLlmInfoSchema, loadedLlmInfoSchema])
+  .readonly()
+
+/** One model entry, inferred from {@link llmInfoSchema}. */
 export type LlmInfo = z.infer<typeof llmInfoSchema>
+
+/** Entry of a model with at least one loaded instance. */
+export type LoadedLlmInfo = Extract<LlmInfo, { readonly loaded: true }>

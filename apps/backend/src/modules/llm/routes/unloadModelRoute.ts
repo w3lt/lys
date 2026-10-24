@@ -65,7 +65,8 @@ function registerLlmModelUnloadRoute(app: FastifyInstance): void {
 }
 
 /**
- * Handles one request to stop every loaded instance of a canonical model key.
+ * Handles one request to stop the loaded instances of a canonical model key
+ * that Lys loaded.
  *
  * @param request - Validated request containing the canonical model key.
  * @param reply - Fastify reply used for status-specific responses.
@@ -75,11 +76,11 @@ function registerLlmModelUnloadRoute(app: FastifyInstance): void {
  * application cleanup has begun. The route boundary translates only the
  * recognized service-busy and runtime-unavailable failures.
  * @remarks Runtime diagnostics and reconciled failures are written to the
- * request logger before their HTTP outcome is sent: a stopped outcome with
- * diagnostics is logged at warn level, and runtime-unavailable and stop-failed
- * outcomes at error level. Each record carries the canonical model key as
- * `modelKey` and the outcome's `diagnostics`; a stop-failed record also
- * carries `remainingModelIdentifiers`.
+ * request logger before their HTTP outcome is sent: a stopped or not-loaded
+ * outcome with diagnostics is logged at warn level, and runtime-unavailable
+ * and stop-failed outcomes at error level. Each record carries the canonical
+ * model key as `modelKey` and the outcome's `diagnostics`; a stop-failed
+ * record also carries `remainingModelIdentifiers`.
  */
 async function handleLlmModelUnloadRequest(
   request: FastifyRequest<LlmUnloadModelApiRoute>,
@@ -87,7 +88,7 @@ async function handleLlmModelUnloadRequest(
   llmModelStopper: LlmModelStopper
 ): Promise<void> {
   const { modelId: modelKey } = request.body
-  const stopOutcome = await llmModelStopper.stopLlmModelsByKey(modelKey)
+  const stopOutcome = await llmModelStopper.stopLysLlmModelInstances(modelKey)
 
   switch (stopOutcome.status) {
     case "stopped": {
@@ -102,9 +103,16 @@ async function handleLlmModelUnloadRequest(
       return
     }
     case "not-loaded": {
+      if (stopOutcome.diagnostics.length > 0) {
+        request.log.warn(
+          { diagnostics: stopOutcome.diagnostics, modelKey },
+          "LLM model stop could not read the record of the instances Lys loaded"
+        )
+      }
+
       const problem = createLlmUnloadProblem({
         reason: "model-not-found",
-        detail: `Model "${modelKey}" is not loaded.`
+        detail: `Model "${modelKey}" has no instance that Lys loaded.`
       })
 
       reply.type("application/problem+json").code(404).send(problem)

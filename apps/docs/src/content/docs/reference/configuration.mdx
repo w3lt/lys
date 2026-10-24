@@ -47,15 +47,16 @@ A rejected value stops the desktop app before any window opens and prints
 `Lys cannot start: …` to standard error. The host does not create the directory
 at startup; loading settings creates it when `settings.json` is missing.
 
-| Path under `$LYS_HOME`        | Used by        | Contents                                                                                                                                                         |
-| ----------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `settings.json`               | Tauri host     | [Persisted settings JSON](#persisted-settings-json)                                                                                                              |
-| `lys_db.sqlite`               | Backend        | Conversation database                                                                                                                                            |
-| `attachments/`                | Backend        | One folder per conversation and one per message under it, holding the files sent with that message under their own names; created on the first attachment stored |
-| `runtime/node/bin/node`       | Release builds | Node.js executable that runs the backend                                                                                                                         |
-| `runtime/backend/backend.mjs` | Release builds | Backend bundle that the release Node.js executable runs                                                                                                          |
-| `runtime/vmo/vmo`             | Release builds | vmo, the page reader the desktop starts, signed with the virtualization entitlement                                                                              |
-| `logs/backend-YYYY-MM-DD.log` | Backend        | The backend's log lines of one UTC day, appended by every run that day and never deleted; see [the backend log files](/operate/logging/#the-backend-log-files)   |
+| Path under `$LYS_HOME`        | Used by        | Contents                                                                                                                                                           |
+| ----------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `settings.json`               | Tauri host     | [Persisted settings JSON](#persisted-settings-json)                                                                                                                |
+| `lys_db.sqlite`               | Backend        | Conversation database                                                                                                                                              |
+| `loaded_models.json`          | Backend        | Identifiers of the LM Studio model instances Lys loaded; created at the first model load; see [the loaded models record](/operate/data/#lys_homeloaded_modelsjson) |
+| `attachments/`                | Backend        | One folder per conversation and one per message under it, holding the files sent with that message under their own names; created on the first attachment stored   |
+| `runtime/node/bin/node`       | Release builds | Node.js executable that runs the backend                                                                                                                           |
+| `runtime/backend/backend.mjs` | Release builds | Backend bundle that the release Node.js executable runs                                                                                                            |
+| `runtime/vmo/vmo`             | Release builds | vmo, the page reader the desktop starts, signed with the virtualization entitlement                                                                                |
+| `logs/backend-YYYY-MM-DD.log` | Backend        | The backend's log lines of one UTC day, appended by every run that day and never deleted; see [the backend log files](/operate/logging/#the-backend-log-files)     |
 
 On macOS, `build.sh` installs the three `runtime/` entries under
 `${LYS_HOME:-$HOME/.lys}`. It treats an empty value as unset but does not reject
@@ -86,6 +87,7 @@ not find a runtime that `build.sh` installed under another directory.
 | SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)                                                                                                                                          |
 | Settings file path             | `$LYS_HOME/settings.json`, as `settingsFilePath`; read for the Tavily API key                                                                                                                                     |
 | Attachments directory          | `$LYS_HOME/attachments`, as `attachmentsDirectoryPath`; created with its folders on the first attachment stored                                                                                                   |
+| Loaded models file path        | `$LYS_HOME/loaded_models.json`, as `loadedModelsFilePath`; the record of the model instances Lys loaded                                                                                                           |
 | vmo endpoint                   | `127.0.0.1:8080`, as `vmoHost` and `vmoPort`, from `VMO_HOST` and `VMO_PORT` in `@lys/protocol`; where vmo listens. It reads every `read_page` page, and its `GET /health` decides whether `read_page` is offered |
 | Caliginia system prompt        | `src/utils/prompts/caliginia.txt`, as `caliginiaSystemPrompt`                                                                                                                                                     |
 | Lysiptera system prompt        | `src/utils/prompts/lysiptera.txt`, as `lysipteraSystemPrompt`                                                                                                                                                     |
@@ -106,15 +108,15 @@ The backend validates the complete configuration with `backendConfigSchema` in
 application or any service. Every key is required, unknown keys are rejected,
 and no defaults are applied.
 
-| Key                                                                       | Accepted values                                                                               |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `backendHost`                                                             | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers |
-| `backendPort`, `lmstudioPort`, `vmoPort`                                  | An integer from 1 to 65535                                                                    |
-| `lmstudioHost`                                                            | A host name or IPv4 address, used unbracketed in the `http://` and `ws://` URLs               |
-| `vmoHost`                                                                 | An IPv4 loopback address (`127.x.x.x`); vmo does not authenticate its callers                 |
-| `databaseFilePath`, `settingsFilePath`, `attachmentsDirectoryPath`        | An absolute path                                                                              |
-| `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `titleGenerationPrompt` | Non-empty text without leading or trailing whitespace                                         |
-| `titleGenerationMaxAttempts`, `generatedTitleMaxLength`                   | A positive integer                                                                            |
+| Key                                                                                        | Accepted values                                                                               |
+| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `backendHost`                                                                              | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers |
+| `backendPort`, `lmstudioPort`, `vmoPort`                                                   | An integer from 1 to 65535                                                                    |
+| `lmstudioHost`                                                                             | A host name or IPv4 address, used unbracketed in the `http://` and `ws://` URLs               |
+| `vmoHost`                                                                                  | An IPv4 loopback address (`127.x.x.x`); vmo does not authenticate its callers                 |
+| `databaseFilePath`, `settingsFilePath`, `attachmentsDirectoryPath`, `loadedModelsFilePath` | An absolute path                                                                              |
+| `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `titleGenerationPrompt`                  | Non-empty text without leading or trailing whitespace                                         |
+| `titleGenerationMaxAttempts`, `generatedTitleMaxLength`                                    | A positive integer                                                                            |
 
 A value outside these rules stops the backend at startup with a `ZodError`
 whose issues name each failing key. The shared constants, the `LYS_HOME`

@@ -125,7 +125,7 @@ type ModelOperationStep =
       readonly configuration: CompleteModelLoadConfiguration
     }
   | {
-      /** Unloads every instance of one model, or reads its health. */
+      /** Unloads the instances Lys loaded of one model, or reads its health. */
       readonly kind: "unload" | "health-read"
       /** Key of the model the step addresses. */
       readonly modelKey: string

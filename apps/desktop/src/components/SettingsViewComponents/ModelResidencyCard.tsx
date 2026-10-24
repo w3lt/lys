@@ -2,9 +2,10 @@ import type { ReactElement } from "react"
 import { Button } from "@/components/ui/button"
 import type { ModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
 import {
+  findLoadedModel,
   formatModelResidencyHeading,
   formatModelResidencyMeta,
-  readLoadedModelKey,
+  readModelResidencyAction,
   readModelResidencyTone
 } from "@/lib/models/model-residency"
 import {
@@ -60,6 +61,27 @@ function findLoadableDefaultModelKey(
 }
 
 /**
+ * Finds the loaded model when Lys can unload it.
+ *
+ * @param modelRuntime - Which weights are resident in LM Studio or in
+ * transition.
+ * @param modelInventory - The models the backend listed.
+ * @returns The key of the model the summary names as loaded while the
+ * inventory lists an instance of it that Lys loaded, or null: no model
+ * loaded, or one only another program loaded.
+ */
+function findUnloadableModelKey(
+  modelRuntime: ModelRuntimeState,
+  modelInventory: ModelInventoryState
+): string | null {
+  const loadedModel = findLoadedModel(modelRuntime, modelInventory)
+  if (loadedModel === undefined) return null
+  return readModelResidencyAction(loadedModel) === "unload"
+    ? loadedModel.modelKey
+    : null
+}
+
+/**
  * Builds the click handler of one model command.
  *
  * @param modelKey - Model the command applies to, or null when the command
@@ -111,9 +133,10 @@ type ModelResidencyRowProps = {
  * @remarks Owns no state or effects. A command can be sent only while LM
  * Studio is connected and no model request is in flight. Load is offered
  * then only while the inventory lists the default model and it is not
- * loaded, and requests the default; Unload only while a model is loaded, and
- * requests that model. The dot is hidden from assistive technology; the
- * heading carries the state.
+ * loaded, and requests the default; Unload only while a model is loaded and
+ * the inventory lists an instance of it that Lys loaded, and requests that
+ * model. The dot is hidden from assistive technology; the heading carries the
+ * state.
  * @param props - Parent-owned model state and requests.
  * @returns The card's first row.
  */
@@ -130,7 +153,9 @@ function ModelResidencyRow({
   const loadModelKey = canSend
     ? findLoadableDefaultModelKey(modelInventory, defaultModel)
     : null
-  const unloadModelKey = canSend ? readLoadedModelKey(modelRuntime) : null
+  const unloadModelKey = canSend
+    ? findUnloadableModelKey(modelRuntime, modelInventory)
+    : null
 
   return (
     <div className="settings-view__card-row">
@@ -203,7 +228,7 @@ type ModelResidencyCardProps = {
 
 /**
  * Presents which model weights are resident in LM Studio, with Load for the
- * default model and Unload for the loaded one.
+ * default model and Unload for the loaded one when Lys loaded it.
  *
  * @remarks The parent owns every input and the requests; the card owns no
  * state, effect, or store access. Its first row shows the residency and the
@@ -212,7 +237,8 @@ type ModelResidencyCardProps = {
  * in flight the card is marked busy and shows an indeterminate progress bar
  * named after the heading: the backend reports completion without progress,
  * so no value is claimed. A note says that the commands go to LM Studio
- * through the backend and where every loaded model is managed.
+ * through the backend, that Lys unloads only the models it loaded, and where
+ * every loaded model is managed.
  * @param props - Parent-owned model state, requests, and request feedback.
  * @returns The model card.
  */
@@ -262,8 +288,9 @@ export default function ModelResidencyCard({
       <div className="settings-view__card-divider" />
 
       <p className="settings-view__card-note">
-        Loading and unloading use LM Studio through the backend. This summary
-        prefers the loaded default; manage every loaded model in Model settings.
+        Loading and unloading use LM Studio through the backend, and Lys unloads
+        only the models it loaded. This summary prefers the loaded default;
+        manage every loaded model in Model settings.
       </p>
       {children}
     </section>

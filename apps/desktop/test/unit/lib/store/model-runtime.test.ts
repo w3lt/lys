@@ -164,7 +164,7 @@ describe("removeLoadedModelConfiguration", () => {
 })
 
 describe("buildLoadedModelConfigurations", () => {
-  it("holds a record for exactly the loaded models: a known one is kept, a newly seen one is assumed", () => {
+  it("holds a record for exactly the models Lys loaded: a known one is kept, a newly seen one is assumed", () => {
     const known: LoadedModelConfigurations = new Map([
       ["first", SENT_RECORD],
       ["on-disk", SENT_RECORD]
@@ -181,6 +181,27 @@ describe("buildLoadedModelConfigurations", () => {
       second: ASSUMED_RECORD
     })
     expect(known.has("on-disk")).toBe(true)
+  })
+
+  it("holds no record for a model only another program loaded, dropping a known one, so no reload is offered for it", () => {
+    const known: LoadedModelConfigurations = new Map([
+      ["elsewhere", SENT_RECORD]
+    ])
+    const inventory: ModelInventoryState = {
+      status: "ready",
+      models: [
+        buildLlmInfo("elsewhere", { loaded: true, loadedByLys: false }),
+        buildLlmInfo("unseen", { loaded: true, loadedByLys: false })
+      ]
+    }
+
+    const records = buildLoadedModelConfigurations(
+      known,
+      inventory,
+      NO_STORED_LOAD_SETTINGS
+    )
+
+    expect(records.size).toBe(0)
   })
 
   it("assumes a newly seen model runs with what is stored for it now, within its own maximum", () => {

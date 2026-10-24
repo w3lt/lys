@@ -1,4 +1,4 @@
-import type { LlmInfo } from "@lys/protocol"
+import type { LlmMetadata } from "@lys/protocol"
 
 /** Result of one admitted provider readiness query. */
 export type LlmRuntimeAvailability = "available" | "unavailable"
@@ -12,9 +12,7 @@ export type LlmRuntimeAvailability = "available" | "unavailable"
  * loaded state and the loaded context length belong to the loaded instances,
  * not to the download.
  */
-export type DownloadedLlmModel = Readonly<
-  Omit<LlmInfo, "loaded" | "loadedContextLength">
->
+export type DownloadedLlmModel = LlmMetadata
 
 /** Immutable observation of one loaded instance in the attached runtime. */
 export type LoadedLlmModelInstance = Readonly<{

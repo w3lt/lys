@@ -683,12 +683,12 @@ inserts and `content` updates.
 
 Chat generation and model management use separate integration boundaries:
 
-| Service             | Backend dependency        | Current use                                                                                                      |
-| ------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `ChatService`       | `openai` SDK              | Streams chat completions and generates titles through LM Studio's OpenAI-compatible HTTP interface.              |
-| `LlmService`        | `LlmEngineOperationQueue` | Runs inventory, health, load, stop-by-key, and context measurement through the serialized queue.                 |
-| `LlmRuntimeService` | `LlmRuntime`              | Owns the LM Studio runtime, its connection status, and the serialized model-operation queue; connects on demand. |
-| `LmStudioRuntime`   | `@lmstudio/sdk`           | Verifies engine availability, implements model operations and lifecycle inspection, and owns SDK client cleanup. |
+| Service             | Backend dependency                               | Current use                                                                                                                                                                                                                                            |
+| ------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ChatService`       | `openai` SDK                                     | Streams chat completions and generates titles through LM Studio's OpenAI-compatible HTTP interface.                                                                                                                                                    |
+| `LlmService`        | `LlmEngineOperationQueue`, `LysLlmInstanceStore` | Runs inventory, health, load, the stop of the instances Lys loaded, and context measurement through the serialized queue, and keeps the identifiers of the instances it loads in `$LYS_HOME/loaded_models.json` through `JsonFileLysLlmInstanceStore`. |
+| `LlmRuntimeService` | `LlmRuntime`                                     | Owns the LM Studio runtime, its connection status, and the serialized model-operation queue; connects on demand.                                                                                                                                       |
+| `LmStudioRuntime`   | `@lmstudio/sdk`                                  | Verifies engine availability, implements model operations and lifecycle inspection, and owns SDK client cleanup.                                                                                                                                       |
 
 Fastify exposes the application-scoped `llmService` and `llmRuntimeService`.
 Model routes use provider-neutral capabilities of `LlmService`; the runtime

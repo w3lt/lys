@@ -10,14 +10,14 @@ Lys currently integrates with one local model runtime: LM Studio.
 
 ## Current stack
 
-| Concern          | Current implementation                                                                                                                                   |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Model inventory  | `LlmService.listLlmModels()` lists downloaded models, annotates which model keys have loaded instances, and the context length each is loaded with.      |
-| Model health     | `LlmService.getLlmModelHealth()` checks one fresh loaded-inventory snapshot for the requested key without generating text.                               |
-| Model loading    | `POST /api/v1/llm/load` uses the application service to load one model with the request's load settings and return its metadata.                         |
-| Model unloading  | `PATCH /api/v1/llm/unload` stops every observed loaded instance matching one key, then reconciles the loaded-instance inventory.                         |
-| Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against LM Studio's OpenAI-compatible `/v1` HTTP endpoint.                                      |
-| Title generation | `ChatService.generateTitle()` calls the same endpoint with a separate prompt and a length-limited JSON-schema response format, then validates the reply. |
+| Concern          | Current implementation                                                                                                                                                              |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model inventory  | `LlmService.listLlmModels()` lists downloaded models, annotates which model keys have loaded instances, whether Lys loaded one of them, and the context length each is loaded with. |
+| Model health     | `LlmService.getLlmModelHealth()` checks one fresh loaded-inventory snapshot for the requested key without generating text.                                                          |
+| Model loading    | `POST /api/v1/llm/load` uses the application service to load one model, under an identifier of its own, with the request's load settings and return its metadata.                   |
+| Model unloading  | `PATCH /api/v1/llm/unload` stops the loaded instances of one key that Lys loaded, leaving those another program loaded, then reconciles the loaded-instance inventory.              |
+| Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against LM Studio's OpenAI-compatible `/v1` HTTP endpoint.                                                                 |
+| Title generation | `ChatService.generateTitle()` calls the same endpoint with a separate prompt and a length-limited JSON-schema response format, then validates the reply.                            |
 
 A load request may carry a `configuration`: context length, eval batch size,
 flash attention, KV cache placement, and active experts. The service hands it to
@@ -29,6 +29,42 @@ not choose the context length and the model placement automatically for that
 load. This has not been checked against a running LM Studio. The backend keeps
 no load settings; the desktop stores them and sends them with each load. See the [load request](/reference/api/#model-load-request)
 for the fields.
+
+## Instances Lys loaded
+
+LM Studio can hold several instances of one model, and another program, such
+as LM Studio's own window or `lms`, can load one too. Lys unloads only the
+instances it loaded itself:
+
+1. Each load gives LM Studio an identifier of its own through the SDK's
+   `identifier` option: the requested model, `@lys-`, and six random hex
+   digits, such as `qwen/qwen3-8b@lys-7f3c9a`.
+2. Before the load starts, the backend saves that identifier in
+   `$LYS_HOME/loaded_models.json`, the [loaded models record](/operate/data/#lys_homeloaded_modelsjson),
+   together with the saved identifiers that are still loaded. Saving first
+   means a crash during the load cannot lose the identifier; a load that
+   fails leaves an identifier no instance has, which the next load, or the
+   next unload that stops an instance, drops.
+3. An unload stops, one after another, the loaded instances of the key whose
+   identifiers are on the record, then saves the record without the
+   identifiers that are no longer loaded. An instance with any other
+   identifier is never stopped. When no instance of the key is on the record,
+   the unload answers `404`.
+4. The model list marks a loaded model with `loadedByLys` when one of its
+   loaded instances is on the record. The list only reads the record.
+
+The record survives a backend restart, so an unload after a restart still
+stops the instances Lys loaded before it. When the record cannot be read, the
+backend never replaces it: the list marks no model as loaded by Lys, an
+unload answers `404` and logs a warning, and a load is refused before it
+starts. If saving the record fails after an unload stopped its instances, the
+unload still succeeds and logs a warning.
+
+A chat request names a model key, and LM Studio answers it with any loaded
+instance of that model, including one another program loaded. LM Studio may
+also load a model on its own when a chat request names one that is not
+loaded; Lys did not load that instance and does not unload it. None of this
+has been checked against a running LM Studio.
 
 Before each round of a reply, and for the composer's context meter, the
 backend measures a context against the loaded model with
@@ -72,7 +108,8 @@ probe, and disposal. Concrete runtime selection belongs in composition.
 
 `LmStudioRuntime` owns SDK calls, vendor-data validation, immutable runtime
 snapshots, and client cleanup. `LlmService` owns canonical metadata lookup after
-loading, loaded-state annotation and sorting, loaded-model health, and stop-by-key reconciliation.
+loading, loaded-state annotation and sorting, loaded-model health, the record of
+the instances Lys loaded, and the reconciled stop of those instances.
 Runtime snapshots contain no SDK handles or application `loaded` flag.
 
 The runtime allows one active call and rejects overlapping operational calls

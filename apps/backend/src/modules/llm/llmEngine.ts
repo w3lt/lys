@@ -40,7 +40,8 @@ export interface LlmEngine {
   listLoadedLlmModelInstances(): Promise<readonly LoadedLlmModelInstance[]>
 
   /**
-   * Loads the selected model to completion and observes its canonical identity.
+   * Loads the selected model to completion under a given instance
+   * identifier and observes its canonical identity.
    *
    * @param modelKeyOrAlias - Model selection interpreted within the attached engine.
    * Unknown or rejected selections fail; repeated loads may create additional instances.
@@ -48,16 +49,20 @@ export interface LlmEngine {
    * The engine decides each setting that is absent. How the engine treats a
    * value the selected model cannot use, such as a context length above the
    * model's maximum, is engine-defined.
+   * @param instanceIdentifier - Non-empty identifier the new instance gets;
+   * the load fails when an instance already has it.
    * @returns A frozen identity after the engine has completed loading and its
    * non-empty canonical key and instance identifier have been validated.
    * @throws The shared closed/busy failures, or
-   * `The LLM runtime could not load the model.` for load failure, or
+   * `The LLM runtime could not load the model.` for load failure, including
+   * an identifier in use, or
    * `The LLM runtime returned an invalid model instance.` for malformed identity.
    * @remarks Non-idempotent and completion-only. Failure can leave a model loaded.
    */
   loadLlmModel(
     modelKeyOrAlias: string,
-    loadConfiguration: ModelLoadConfiguration
+    loadConfiguration: ModelLoadConfiguration,
+    instanceIdentifier: string
   ): Promise<LoadedLlmModelInstance>
 
   /**

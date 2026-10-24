@@ -7,10 +7,10 @@ import {
 import { llmServiceBusyProblemSchema } from "../../http/errors/llmServiceBusy"
 import { apiLlmUnloadModelRoute } from "./routes"
 
-/** Validates a non-empty model key whose loaded instances should be stopped. */
+/** Validates a non-empty model key whose instances Lys loaded should be stopped. */
 export const llmUnloadModelApiRequestBodySchema = z
   .strictObject({
-    /** Canonical model key shared by every loaded instance to stop. */
+    /** Canonical model key of the instances Lys loaded to stop. */
     modelId: z.string().min(1)
   })
   .readonly()
@@ -29,15 +29,18 @@ export const llmUnloadModelApiResponseSchemas = Object.freeze({
 })
 
 /**
- * Describes the PATCH endpoint that stops every loaded instance matching one model key.
+ * Describes the PATCH endpoint that stops the loaded instances of one model
+ * key that Lys loaded, leaving those another program loaded.
  *
  * @remarks This shared descriptor is imported by the backend route consumer;
  * changing its method, path, body, or response schemas changes the transmitted
  * compatibility contract and requires coordinated consumers. Success means a
- * reconciliation snapshot found no matching instance; another runtime client
- * may load a new matching instance afterward. Service-busy responses mean the
- * unload was refused before queue acceptance. Accepted unloads continue under
- * the service owner even if the requesting client disconnects.
+ * reconciliation snapshot found none of the stopped instances still loaded;
+ * another runtime client may load a new instance of the model afterward. The
+ * 404 response means no instance of the key that Lys loaded was loaded.
+ * Service-busy responses mean the unload was refused before queue
+ * acceptance. Accepted unloads continue under the service owner even if the
+ * requesting client disconnects.
  */
 export const llmUnloadModelApi = Object.freeze({
   method: "PATCH",

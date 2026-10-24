@@ -41,17 +41,18 @@ export type ModelRuntimeState =
     }
 
 /**
- * What Lys knows about the load configuration a loaded model runs with.
+ * What Lys knows about the load configuration a model Lys loaded runs with.
  *
  * @remarks The runtime does not report the configuration of a loaded model,
- * so this is Lys's own record, kept while the model stays observed as loaded.
+ * so this is Lys's own record, kept while the model stays observed as loaded
+ * by Lys.
  */
 export type LoadedModelConfiguration = {
   /**
    * `sent` when Lys loaded the model with this configuration in this session.
-   * `assumed` when the model was found already loaded: the configuration is
-   * then the one stored when it was first observed, and it only shows whether
-   * the stored settings changed since.
+   * `assumed` when the model was found already loaded by Lys, as after the
+   * app restarts: the configuration is then the one stored when it was first
+   * observed, and it only shows whether the stored settings changed since.
    */
   readonly origin: "sent" | "assumed"
   /** Configuration sent with the load, or stored at the first observation. */
@@ -59,10 +60,12 @@ export type LoadedModelConfiguration = {
 }
 
 /**
- * Known load configurations of the loaded models, keyed by model key.
+ * Known load configurations of the models Lys loaded, keyed by model key.
  *
  * @remarks Session state that is never serialized. A model that is not
- * observed as loaded has no entry, so a read by its key gives undefined.
+ * observed as loaded by Lys has no entry, so a read by its key gives
+ * undefined, and no reload is offered for it: a reload unloads first, and
+ * Lys never unloads an instance another program loaded.
  */
 export type LoadedModelConfigurations = ReadonlyMap<
   string,
@@ -85,8 +88,8 @@ export type ModelState = {
   /** Latest health observation, cleared by the next operation. */
   readonly modelHealth: LlmTestModelApiResponse | null
   /**
-   * Load configuration known for each model observed as loaded; a model that
-   * is not loaded has no entry.
+   * Load configuration known for each model observed as loaded by Lys; any
+   * other model has no entry.
    */
   readonly loadedModelConfigurations: LoadedModelConfigurations
 }
@@ -181,16 +184,16 @@ export function removeLoadedModelConfiguration(
 }
 
 /**
- * Builds the known configurations of the loaded models after an inventory
- * observation.
+ * Builds the known configurations of the models Lys loaded after an
+ * inventory observation.
  *
  * @param known - Records held before the observation; not modified.
  * @param inventory - Inventory observation being published.
  * @param settings - Load settings stored at the time of the observation.
- * @returns Records for exactly the models the inventory lists as loaded. A
- * model that already has a record keeps it; a model without one is assumed to
- * run with the configuration stored now. An inventory that is not ready
- * establishes nothing, so the earlier records are returned unchanged.
+ * @returns Records for exactly the models the inventory lists as loaded by
+ * Lys. A model that already has a record keeps it; a model without one is
+ * assumed to run with the configuration stored now. An inventory that is not
+ * ready establishes nothing, so the earlier records are returned unchanged.
  */
 export function buildLoadedModelConfigurations(
   known: LoadedModelConfigurations,
@@ -200,7 +203,7 @@ export function buildLoadedModelConfigurations(
   if (inventory.status !== "ready") return known
   return new Map(
     inventory.models
-      .filter((model) => model.loaded)
+      .filter((model) => model.loaded && model.loadedByLys)
       .map((model) => [
         model.modelKey,
         known.get(model.modelKey) ?? {

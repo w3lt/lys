@@ -2,7 +2,7 @@
 // strips its types: `node fakeMcpStdioServer.ts '<options JSON>'`. It speaks
 // newline-delimited JSON-RPC and imports only Node's own modules.
 import { rmSync, writeFileSync } from "node:fs"
-import { resolve, sep } from "node:path"
+import { join } from "node:path"
 import { createInterface } from "node:readline"
 
 /** What the server does, from its first argument. */
@@ -18,12 +18,11 @@ type FakeServerOptions = {
   /** Write the process identifier to standard error as `pid <id>`. */
   reportProcessId?: boolean
   /**
-   * Hold this file, inside the folder the server runs in, while running, as a
+   * Hold `server.lock` in the folder the server runs in while running, as a
    * server that runs one copy at a time: create it on start, or exit with
-   * code 3 when it exists, and remove it on exit. A path outside that folder
-   * exits with code 2.
+   * code 3 when it exists, and remove it on exit.
    */
-  lockFile?: string
+  holdLock?: boolean
   /** Wait this long after standard input closes before exiting. */
   shutdownDelayMilliseconds?: number
 }
@@ -149,20 +148,12 @@ function callTool(id: RequestId, params: Record<string, unknown>): void {
 }
 
 /**
- * Holds the lock file for the life of the process.
- *
- * @param lockFile - Lock file to create, inside the folder the server runs
- * in; another copy holding it ends this one with code 3, after `locked by
- * another copy` on standard error, and a path outside that folder with
- * code 2.
+ * Holds `server.lock` in the folder the server runs in for the life of the
+ * process; another copy holding it ends this one with code 3, after `locked
+ * by another copy` on standard error.
  */
-function holdLock(lockFile: string): void {
-  const folder = `${process.cwd()}${sep}`
-  const path = resolve(folder, lockFile)
-  if (!path.startsWith(folder)) {
-    process.stderr.write("lock file outside the working folder\n")
-    process.exit(2)
-  }
+function holdLock(): void {
+  const path = join(process.cwd(), "server.lock")
   try {
     writeFileSync(path, String(process.pid), { flag: "wx" })
   } catch {
@@ -226,7 +217,7 @@ if (options.reportEnvironment !== undefined) {
     process.stderr.write(`env ${name}=${process.env[name] ?? "<unset>"}\n`)
 }
 if (options.exitOnStart !== undefined) process.exit(options.exitOnStart)
-if (options.lockFile !== undefined) holdLock(options.lockFile)
+if (options.holdLock === true) holdLock()
 const input = createInterface({ input: process.stdin })
 input.on("line", (line) => {
   handleMessage(JSON.parse(line) as ReceivedMessage)

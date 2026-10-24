@@ -10,7 +10,7 @@ import {
   type McpEnvironmentVariable,
   type McpServerSettings
 } from "@lys/share"
-import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
+import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -103,35 +103,36 @@ const CONNECTING: McpServerState = Object.freeze({ status: "connecting" })
 const ONE_COPY_SHUTDOWN_MILLISECONDS = 1000
 
 /**
- * Creates the path of a lock file in a new folder that is removed after the
- * case.
+ * Creates an empty folder for the stdio servers of one case, removed after
+ * the case.
  *
- * @returns Path of a lock file that does not exist yet.
+ * @returns Absolute path of the folder.
  */
-function createLockFilePath(): string {
-  const folder = mkdtempSync(join(WORKING_DIRECTORY, "lys-mcp-lock-"))
+function createServerFolder(): string {
+  const folder = mkdtempSync(join(WORKING_DIRECTORY, "lys-mcp-servers-"))
   onTestFinished(() => rmSync(folder, { recursive: true, force: true }))
-  return join(folder, "server.lock")
+  return folder
 }
 
 /**
  * Builds a command server that runs one copy at a time, like a server that
- * holds a lock or a port, and exits only
- * {@link ONE_COPY_SHUTDOWN_MILLISECONDS} after its input closes.
+ * holds a lock or a port: it holds a lock file in the folder it runs in, and
+ * exits only {@link ONE_COPY_SHUTDOWN_MILLISECONDS} after its input closes.
  *
  * @param name - Server name.
- * @param lockFile - Lock file its copies share.
  * @param environment - Its variables.
  * @returns Validated settings of the server.
  */
 function buildOneCopyServerSettings(
   name: string,
-  lockFile: string,
   environment: readonly McpEnvironmentVariable[]
 ): McpServerSettings {
   return buildFakeStdioServerSettings(
     name,
-    { lockFile, shutdownDelayMilliseconds: ONE_COPY_SHUTDOWN_MILLISECONDS },
+    {
+      holdLock: true,
+      shutdownDelayMilliseconds: ONE_COPY_SHUTDOWN_MILLISECONDS
+    },
     environment
   )
 }
@@ -185,6 +186,8 @@ type RegistryHarnessOptions = Readonly<{
    * @param testEnded - Settles once the case ended.
    */
   readSettings?: (testEnded: Promise<void>) => Promise<McpSettingsRead>
+  /** Folder the stdio servers start in; {@link WORKING_DIRECTORY} when omitted. */
+  workingDirectory?: string
 }>
 
 /** A registry under test, what it was given, and what it reported. */
@@ -323,7 +326,7 @@ function createRegistryHarness(
   const registry = new McpServerRegistry({
     readSettings,
     openServer,
-    workingDirectory: WORKING_DIRECTORY,
+    workingDirectory: options.workingDirectory ?? WORKING_DIRECTORY,
     reportEvent: (event) => events.push(event)
   })
   onTestFinished(async () => {
@@ -441,14 +444,14 @@ async function waitForServerList(
  * Creates a registry harness whose only server, `alpha`, runs one copy at a
  * time, and waits until it is connected.
  *
- * @param lockFile - Lock file the server's copies share.
+ * @param serverFolder - Folder the server starts in, which holds its lock.
  * @returns The harness, with `alpha` connected.
  */
 async function createConnectedOneCopyHarness(
-  lockFile: string
+  serverFolder: string
 ): Promise<RegistryHarness> {
-  const harness = createRegistryHarness()
-  harness.setServers([buildOneCopyServerSettings("alpha", lockFile, [])])
+  const harness = createRegistryHarness({ workingDirectory: serverFolder })
+  harness.setServers([buildOneCopyServerSettings("alpha", [])])
   await harness.registry.applySettings()
   await waitForServerList(
     harness.registry,
@@ -709,9 +712,8 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     })
 
     it("opens a changed command server only once its previous process ended, so a server that runs one copy at a time connects", async () => {
-      const lockFile = createLockFilePath()
-      const harness = await createConnectedOneCopyHarness(lockFile)
-      const changedSettings = buildOneCopyServerSettings("alpha", lockFile, [
+      const harness = await createConnectedOneCopyHarness(createServerFolder())
+      const changedSettings = buildOneCopyServerSettings("alpha", [
         { name: "LYS_TEST_MODE", value: "changed" }
       ])
       harness.setServers([changedSettings])
@@ -1058,7 +1060,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     })
 
     it("opens a command server again only once its previous process ended, so a server that runs one copy at a time connects", async () => {
-      const harness = await createConnectedOneCopyHarness(createLockFilePath())
+      const harness = await createConnectedOneCopyHarness(createServerFolder())
 
       expect(harness.registry.reconnect("alpha")).toBe("reconnecting")
       await waitForMicrotasks()
@@ -1076,7 +1078,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     })
 
     it("opens a server reconnected twice while its previous process ends only once", async () => {
-      const harness = await createConnectedOneCopyHarness(createLockFilePath())
+      const harness = await createConnectedOneCopyHarness(createServerFolder())
 
       expect(harness.registry.reconnect("alpha")).toBe("reconnecting")
       expect(harness.registry.reconnect("alpha")).toBe("reconnecting")
@@ -1090,7 +1092,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     })
 
     it("opens nothing for a server removed while its previous process ends", async () => {
-      const harness = await createConnectedOneCopyHarness(createLockFilePath())
+      const harness = await createConnectedOneCopyHarness(createServerFolder())
       expect(harness.registry.reconnect("alpha")).toBe("reconnecting")
       harness.setServers([])
 
@@ -1102,8 +1104,8 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     })
 
     it("opens nothing when the registry closes while a reconnected server's previous process ends, and waits for that process", async () => {
-      const lockFile = createLockFilePath()
-      const harness = await createConnectedOneCopyHarness(lockFile)
+      const serverFolder = createServerFolder()
+      const harness = await createConnectedOneCopyHarness(serverFolder)
       expect(harness.registry.reconnect("alpha")).toBe("reconnecting")
 
       await harness.registry.close()
@@ -1112,7 +1114,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       expect(
         findOpenedConnection(harness.openedConnections, "alpha").close
       ).toHaveBeenCalledOnce()
-      expect(existsSync(lockFile)).toBe(false)
+      expect(readdirSync(serverFolder)).toEqual([])
     })
 
     it("opens a failed server again, which connects once the server answers", async () => {

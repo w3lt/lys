@@ -6,7 +6,7 @@ This document defines the procedure an AI agent follows when it is asked to work
 
 The manual changes one part of the shared workflow. Where [Contributing to Lys](../../CONTRIBUTING.md) and the [Repository Instructions for AI Agents](../../AGENTS.md) ask for a decision, an agent running this operation decides, records, and reports instead. Every recorded decision reaches the maintainer before the change merges, so the maintainer's authority is unchanged; only its timing moves.
 
-To review a proposed change, follow [Merge Request Review](../code_reviews/MR_REVIEW.md).
+To review a pull request, follow [Review a Pull Request](./REVIEW_PULL_REQUEST.md). To answer the reviews of the pull request this operation opens, follow [Check the Reviews of a Pull Request](./CHECK_REVIEWS.md).
 
 ## Purpose and scope
 
@@ -282,7 +282,7 @@ When the base moves:
 
 1. Take the pull request out of draft: `gh pr ready <pr>`.
 2. Write the report in `.agent-work/report.md` in the [report format](#report-format), post it with `gh pr comment <pr> --body-file .agent-work/report.md`, and print the same report in the chat with the pull request link.
-3. Keep the worktree, because the follow-up operation works in it.
+3. Keep the worktree, because [Check the Reviews of a Pull Request](./CHECK_REVIEWS.md) works in it.
 
 **Exit condition:** the report is posted.
 

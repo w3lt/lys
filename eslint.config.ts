@@ -23,7 +23,7 @@ export default defineConfig([
   // root, so a built application or generated type directory inside `apps/*`
   // is excluded as well. `.astro` holds the types Astro generates for
   // `apps/docs`. `worktree/` matches only at the root, where AI agents create
-  // git worktrees (docs/agent_operations/WORK_ON_ISSUE.md): each one is another
+  // git worktrees (the manuals in docs/agent_operations/): each one is another
   // checkout of this repository, which ESLint would otherwise lint again under
   // that checkout's own configuration. `apps/vmo/.build/` matches only
   // SwiftPM's build directory for `apps/vmo`: its dependency checkouts contain

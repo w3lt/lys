@@ -120,7 +120,16 @@ The nine steps run in order. A later step MUST NOT begin before its predecessor'
 
 3. Determine the issue type.
 4. Check the [stop cases](#stop-cases) first; when one applies, stop and report as that section defines. Otherwise check [Resuming](#resuming), and continue as it defines when it applies.
-5. Choose the base. The base is the latest `origin/main`, unless the issue depends on work that exists only on a branch not yet merged into `main`, named in the issue or found in a pull request it links. Then the base is the latest version of that branch, and the pull request targets it. The choice is recorded like any other decision.
+5. Choose the base, and record the choice like any other decision:
+   - When the issue has the `Patch Fix` label, the base is the day's patch branch that [Contributing to Lys](../../CONTRIBUTING.md#branches) names, and the pull request targets it. These commands print the branch name and show whether it exists on `origin`; when it does not, stop as [Stop cases](#stop-cases) defines:
+
+     ```sh
+     git fetch origin stable
+     git show origin/stable:VERSION | awk -F. '{ printf "patch/v%d.%d.%d\n", $1, $2, $3 + 1 }'
+     git ls-remote --heads origin "<patch branch>"
+     ```
+
+   - Otherwise, the base is the latest `origin/main`, unless the issue depends on work that exists only on a branch not yet merged into `main`, named in the issue or found in a pull request it links. Then the base is the latest version of that branch, and the pull request targets it.
 
 **Exit condition:** the type and the base are known, and no stop case applies.
 
@@ -241,7 +250,7 @@ When the base moves:
 ### Step 7 — Open the pull request
 
 1. Push: `git push -u origin "<branch>"`.
-2. Write the title in the Conventional Commits style, because it becomes the squash commit on `main`.
+2. Write the title in the Conventional Commits style, because it becomes the squash commit on the base.
 3. Write the body in `.agent-work/pr-body.md` from the template for the issue type, as [Contributing to Lys](../../CONTRIBUTING.md#opening-a-pull-request) selects it, with every section filled:
    - The design, which is the spec or the short approach, goes under "Implementation approach", or "Fix approach" for a bug. A documentation pull request uses "Documentation changes".
    - The issue link follows [Contributing to Lys](../../CONTRIBUTING.md#opening-a-pull-request). When any part of the issue is put off, the link is "Relates to".
@@ -287,7 +296,8 @@ The agent MUST stop, without opening a pull request, when:
 - the issue is closed, a duplicate, or already fixed or delivered on the base;
 - the issue is a bug the agent cannot reproduce and cannot find in the code;
 - the issue is assigned to an account that is neither `@me` nor the maintainer;
-- an open pull request by another account already covers the issue.
+- an open pull request by another account already covers the issue;
+- the issue has the `Patch Fix` label and the day's patch branch does not exist on `origin`, because only the maintainer creates it.
 
 A follow-up issue is not a duplicate of the issue it was filed for, because only the follow-up issue tracks its part.
 

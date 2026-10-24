@@ -6,11 +6,15 @@ on:
       - main
     paths:
       - "sandboxes/readpage/**"
+      - "apps/backend/src/modules/tool/builtIn/web/blocked_address_ranges.json"
+      - "apps/backend/src/modules/tool/builtIn/web/page_reader_exit_codes.json"
       - ".dockerignore"
       - ".github/workflows/build-lys-readpage-image.yml"
   pull_request:
     paths:
       - "sandboxes/readpage/**"
+      - "apps/backend/src/modules/tool/builtIn/web/blocked_address_ranges.json"
+      - "apps/backend/src/modules/tool/builtIn/web/page_reader_exit_codes.json"
       - ".dockerignore"
       - ".github/workflows/build-lys-readpage-image.yml"
   workflow_dispatch:

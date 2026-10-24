@@ -31,6 +31,9 @@ dist-ssr
 .agent-work/
 /worktree/
 
+# Python bytecode, written when the page reader's tests run: sandboxes/readpage
+__pycache__/
+
 # Swift package: apps/vmo
 /apps/vmo/.build
 /apps/vmo/Packages

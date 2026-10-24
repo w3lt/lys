@@ -1,10 +1,12 @@
-import type { BackendToolUnavailableReason } from "@lys/protocol"
+import type { ListedBackendToolUnavailableReason } from "@lys/protocol"
 import {
   buildToolFunctionFormat,
+  type JsonValue,
+  type LysToolDefinition,
+  type McpToolDefinition,
   type ToolAccess,
   type ToolArgumentDefinition,
   type ToolDefinition,
-  type ToolGroup,
   type ToolRunner
 } from "@lys/share"
 
@@ -35,12 +37,34 @@ export type ToolCallsSummary = {
   readonly offeredTokenCount: number
 }
 
-/** Tools listed under one group heading, in list order. */
+/**
+ * Tools listed under one group heading, in list order: one of Lys's groups,
+ * or the tools of one MCP server.
+ */
 export type ToolGroupListing = {
-  /** Group the tools belong to. */
-  readonly group: ToolGroup
+  /**
+   * Identity of the listing among the others: the group of Lys's tools, or
+   * `mcp:` followed by the server's name.
+   */
+  readonly key: string
+  /** Heading text: the group's lowercase label, or `MCP · <server>`. */
+  readonly heading: string
   /** Tools of the group, at least one, in list order. */
   readonly tools: readonly ToolDefinition[]
+}
+
+/** One argument of a tool, as Settings lists it. */
+export type ToolArgumentListing = {
+  /** Name the model sends the argument by. */
+  readonly name: string
+  /** Type shown beside the name, such as `string`, `enum · 3`, or `JSON`. */
+  readonly type: string
+  /** Whether a model must send the argument. */
+  readonly isRequired: boolean
+  /** What the argument means, or undefined when the tool does not say. */
+  readonly description: string | undefined
+  /** Values an enum accepts, in offered order, or undefined for other types. */
+  readonly values: readonly string[] | undefined
 }
 
 /** Tools switched on and what they add to each request. */
@@ -72,20 +96,27 @@ const TOOL_UNAVAILABLE_NOTES = Object.freeze({
     "Lys couldn't read settings.json. Fix that file by hand.",
   "page-reader-not-ready":
     "vmo, Lys's page reader, isn't ready. See Settings → Runtime."
-} satisfies Readonly<Record<BackendToolUnavailableReason, string>>)
+} satisfies Readonly<Record<ListedBackendToolUnavailableReason, string>>)
 
-/** Lowercase heading text of every tool group; a new group must add one. */
+/**
+ * Lowercase heading text of every group of Lys's own tools; a new group must
+ * add one. MCP tools are listed per server instead.
+ */
 const TOOL_GROUP_LABELS = Object.freeze({
   files: "files",
   network: "web",
   timeAndPlace: "time & place"
-} satisfies Readonly<Record<ToolGroup, string>>)
+} satisfies Readonly<Record<LysToolDefinition["group"], string>>)
 
 /** Lowercase badge text of every access level; a new level must add one. */
 const TOOL_ACCESS_LABELS = Object.freeze({
   reads: "reads",
-  network: "network"
+  network: "network",
+  unknown: "depends on server"
 } satisfies Readonly<Record<ToolAccess, string>>)
+
+/** Type shown for an MCP argument whose schema names no single type. */
+const MCP_ARGUMENT_JSON_TYPE = "JSON"
 
 /**
  * What Just run does, by what the tool does with the machine; a new access
@@ -94,7 +125,9 @@ const TOOL_ACCESS_LABELS = Object.freeze({
 const JUST_RUN_NOTES = Object.freeze({
   reads: "Runs the moment the model asks, without showing you the call.",
   network:
-    "Sends its request off this machine the moment the model asks, without showing you what it sends."
+    "Sends its request off this machine the moment the model asks, without showing you what it sends.",
+  unknown:
+    "Runs on its MCP server the moment the model asks, without showing you what it sends. What it does depends on the MCP server."
 } satisfies Readonly<Record<ToolAccess, string>>)
 
 /** Presentation of every runner; a new runner must add one. */
@@ -110,6 +143,12 @@ const TOOL_RUNNER_PRESENTATIONS = Object.freeze({
     title: "Runs in Lys’s backend",
     heading: "Runs in Lys’s backend",
     note: "Handled by Lys’s backend, which sends the request from wherever it runs. Works while the backend runs."
+  }),
+  mcp: Object.freeze({
+    label: "on MCP server",
+    title: "Runs on an MCP server",
+    heading: "Runs on an MCP server",
+    note: "Lys’s backend sends each call to the tool’s MCP server, which does the work. Works while the backend runs and the server is connected."
   })
 } satisfies Readonly<Record<ToolRunner, ToolRunnerPresentation>>)
 
@@ -139,7 +178,7 @@ export function calculateToolTokenEstimate(tool: ToolDefinition): number {
 export function calculateOfferedToolTotals(
   tools: readonly ToolDefinition[],
   toolSwitches: ReadonlyMap<string, boolean>,
-  unavailableTools: ReadonlyMap<string, BackendToolUnavailableReason>
+  unavailableTools: ReadonlyMap<string, ListedBackendToolUnavailableReason>
 ): OfferedToolTotals {
   const offeredTools = tools.filter(
     (tool) => isToolOn(toolSwitches, tool) && !unavailableTools.has(tool.name)
@@ -206,38 +245,51 @@ export function calculateToolCallsTone(
   return support.status === "untrained" ? "warning" : "active"
 }
 
+/** Heading of one group listing, by the key that identifies it. */
+type ToolGroupIdentity = Pick<ToolGroupListing, "key" | "heading">
+
+/**
+ * Identifies the group listing a tool belongs to.
+ *
+ * @param tool - Listed tool.
+ * @returns For one of Lys's tools, its group and the group's lowercase
+ * label; for an MCP tool, `mcp:<server>` and `MCP · <server>`.
+ */
+function identifyToolGroup(tool: ToolDefinition): ToolGroupIdentity {
+  if (tool.runner === "mcp") {
+    return { key: `mcp:${tool.server}`, heading: `MCP · ${tool.server}` }
+  }
+  return { key: tool.group, heading: TOOL_GROUP_LABELS[tool.group] }
+}
+
 /**
  * Builds the group listings of the tools, keeping list order.
  *
  * @param tools - Every listed tool, in list order.
- * @returns One frozen listing per group, in the order each group first
- * appears, with its tools in list order.
+ * @returns One frozen listing per group of Lys's tools and per MCP server,
+ * in the order each first appears, with its tools in list order. MCP tools
+ * follow Lys's own in the list, so their servers' listings come last.
  */
 export function buildToolGroups(
   tools: readonly ToolDefinition[]
 ): readonly ToolGroupListing[] {
-  const toolsByGroup = new Map<ToolGroup, ToolDefinition[]>()
+  const listings = new Map<
+    string,
+    ToolGroupIdentity & { tools: ToolDefinition[] }
+  >()
   for (const tool of tools) {
-    const groupTools = toolsByGroup.get(tool.group)
-    if (groupTools === undefined) toolsByGroup.set(tool.group, [tool])
-    else groupTools.push(tool)
+    const identity = identifyToolGroup(tool)
+    const listing = listings.get(identity.key)
+    if (listing === undefined)
+      listings.set(identity.key, { ...identity, tools: [tool] })
+    else listing.tools.push(tool)
   }
 
   return Object.freeze(
-    [...toolsByGroup].map(([group, groupTools]) =>
-      Object.freeze({ group, tools: Object.freeze(groupTools) })
+    [...listings.values()].map((listing) =>
+      Object.freeze({ ...listing, tools: Object.freeze(listing.tools) })
     )
   )
-}
-
-/**
- * Formats the heading of a tool group.
- *
- * @param group - Group of the listed tools.
- * @returns The group's lowercase heading text.
- */
-export function formatToolGroupLabel(group: ToolGroup): string {
-  return TOOL_GROUP_LABELS[group]
 }
 
 /**
@@ -277,14 +329,12 @@ export function getToolRunnerPresentation(
 }
 
 /**
- * Formats the type of one argument.
+ * Formats the type of one argument of one of Lys's tools.
  *
  * @param argument - Argument definition.
  * @returns The JSON type, or `enum · N` for an enum with N values.
  */
-export function formatToolArgumentType(
-  argument: ToolArgumentDefinition
-): string {
+function formatToolArgumentType(argument: ToolArgumentDefinition): string {
   switch (argument.type) {
     case "enum":
       return `enum · ${argument.values.length}`
@@ -307,19 +357,138 @@ export function formatToolArgumentRequirement(isRequired: boolean): string {
 }
 
 /**
+ * Lists the arguments of one of Lys's tools.
+ *
+ * @param tool - Lys tool definition.
+ * @returns One listing per declared argument, in declaration order.
+ */
+function listLysToolArguments(
+  tool: LysToolDefinition
+): readonly ToolArgumentListing[] {
+  return tool.arguments.map((argument) => buildLysArgumentListing(argument))
+}
+
+/**
+ * Builds the listing of one argument of one of Lys's tools.
+ *
+ * @param argument - Declared argument.
+ * @returns A frozen listing with its type, requirement, description, and an
+ * enum's values.
+ */
+function buildLysArgumentListing(
+  argument: ToolArgumentDefinition
+): ToolArgumentListing {
+  return Object.freeze({
+    name: argument.name,
+    type: formatToolArgumentType(argument),
+    isRequired: argument.required,
+    description: argument.description,
+    values: argument.type === "enum" ? argument.values : undefined
+  })
+}
+
+/** A JSON object, read-only. */
+type JsonObject = Readonly<{ [key: string]: JsonValue }>
+
+/**
+ * Answers whether a JSON value is an object.
+ *
+ * @param value - JSON value.
+ * @returns True for an object that is not an array.
+ */
+function isJsonObject(value: JsonValue): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Reads one text keyword of an MCP argument's schema.
+ *
+ * @param schema - Schema of the argument, any JSON value.
+ * @param keyword - Keyword to read, such as `type`.
+ * @returns The keyword's value when the schema is an object holding text
+ * under it as its own key, otherwise undefined.
+ */
+function readSchemaText(
+  schema: JsonValue,
+  keyword: string
+): string | undefined {
+  if (!isJsonObject(schema) || !Object.hasOwn(schema, keyword)) return undefined
+  const value = schema[keyword]
+  return typeof value === "string" ? value : undefined
+}
+
+/**
+ * Lists the arguments of an MCP tool from its input schema.
+ *
+ * @param tool - MCP tool definition.
+ * @returns One listing per property of the input schema, in the schema's
+ * order: its type when the property names one type as text, otherwise
+ * `JSON`; required when the schema's `required` names it; its description
+ * when it has one as text. An enum's values are not listed.
+ */
+function listMcpToolArguments(
+  tool: McpToolDefinition
+): readonly ToolArgumentListing[] {
+  const { properties = {}, required = [] } = tool.inputSchema
+  return Object.entries(properties).map(([name, schema]) =>
+    buildMcpArgumentListing(name, schema, required.includes(name))
+  )
+}
+
+/**
+ * Builds the listing of one argument of an MCP tool.
+ *
+ * @param name - Argument name.
+ * @param schema - The argument's schema, any JSON value.
+ * @param isRequired - Whether the input schema's `required` names it.
+ * @returns A frozen listing: its type when the schema names one type as
+ * text, otherwise `JSON`, and its description when it has one as text.
+ */
+function buildMcpArgumentListing(
+  name: string,
+  schema: JsonValue,
+  isRequired: boolean
+): ToolArgumentListing {
+  return Object.freeze({
+    name,
+    type: readSchemaText(schema, "type") ?? MCP_ARGUMENT_JSON_TYPE,
+    isRequired,
+    description: readSchemaText(schema, "description"),
+    values: undefined
+  })
+}
+
+/**
+ * Lists the arguments of a tool as Settings shows them.
+ *
+ * @param tool - Tool definition.
+ * @returns A frozen list: the declared arguments of one of Lys's tools, or
+ * the properties of an MCP tool's input schema, in order.
+ */
+export function listToolArguments(
+  tool: ToolDefinition
+): readonly ToolArgumentListing[] {
+  return Object.freeze(
+    tool.runner === "mcp"
+      ? listMcpToolArguments(tool)
+      : listLysToolArguments(tool)
+  )
+}
+
+/**
  * Formats how many of a tool's arguments are required and optional.
  *
- * @param toolArguments - Arguments of one tool.
+ * @param toolArguments - Arguments of one tool, as Settings lists them.
  * @returns `none` without arguments, otherwise the non-zero counts such as
  * `3 required · 2 optional`.
  */
 export function formatToolArgumentCounts(
-  toolArguments: readonly ToolArgumentDefinition[]
+  toolArguments: readonly ToolArgumentListing[]
 ): string {
   if (toolArguments.length === 0) return "none"
 
   const requiredCount = toolArguments.filter(
-    (argument) => argument.required
+    (argument) => argument.isRequired
   ).length
   const optionalCount = toolArguments.length - requiredCount
   const counts: string[] = []
@@ -408,7 +577,7 @@ export function findToolApproval(
  * @returns One sentence with what to do.
  */
 export function formatToolUnavailableNote(
-  reason: BackendToolUnavailableReason
+  reason: ListedBackendToolUnavailableReason
 ): string {
   return TOOL_UNAVAILABLE_NOTES[reason]
 }
@@ -424,7 +593,7 @@ export function formatToolUnavailableNote(
  * the Runtime pane.
  */
 export function isFixedInSecretsPane(
-  reason: BackendToolUnavailableReason
+  reason: ListedBackendToolUnavailableReason
 ): boolean {
   return reason === "api-key-missing"
 }

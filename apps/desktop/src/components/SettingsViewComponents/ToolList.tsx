@@ -1,9 +1,5 @@
-import type { BackendToolUnavailableReason } from "@lys/protocol"
-import type {
-  ToolAccess,
-  ToolArgumentDefinition,
-  ToolDefinition
-} from "@lys/share"
+import type { ListedBackendToolUnavailableReason } from "@lys/protocol"
+import type { ToolAccess, ToolDefinition } from "@lys/share"
 import { ChevronRight, Lock } from "lucide-react"
 import { useId, type ReactElement } from "react"
 
@@ -22,25 +18,25 @@ import {
   formatToolApprovalNote,
   formatToolArgumentCounts,
   formatToolArgumentRequirement,
-  formatToolArgumentType,
   formatToolGroupCount,
-  formatToolGroupLabel,
   formatToolTokenEstimate,
   formatToolUnavailableNote,
   getToolRunnerPresentation,
   isFixedInSecretsPane,
+  listToolArguments,
+  type ToolArgumentListing,
   type ToolGroupListing
 } from "./tool-presentation"
 
 /** Properties accepted by {@link ToolArgumentItem}. */
 type ToolArgumentItemProps = {
   /** Argument shown by the item. */
-  readonly argument: ToolArgumentDefinition
+  readonly argument: ToolArgumentListing
 }
 
 /**
- * Presents one argument of a tool: its name, type, requirement, meaning, and,
- * for an enum, every value it accepts.
+ * Presents one argument of a tool: its name, type, requirement, meaning when
+ * the tool gives one, and, for an enum, every value it accepts.
  *
  * @remarks The list owner supplies the key; the item owns no state or
  * effects. An enum's values form a list named Accepted values, in the order
@@ -56,15 +52,17 @@ function ToolArgumentItem({ argument }: ToolArgumentItemProps): ReactElement {
           {argument.name}
         </span>
         <span className="settings-view__tool-argument-meta">
-          <span>{formatToolArgumentType(argument)}</span>
-          <span data-required={argument.required ? "" : undefined}>
-            {formatToolArgumentRequirement(argument.required)}
+          <span>{argument.type}</span>
+          <span data-required={argument.isRequired ? "" : undefined}>
+            {formatToolArgumentRequirement(argument.isRequired)}
           </span>
         </span>
       </div>
       <div className="settings-view__tool-argument-body">
-        <p>{argument.description}</p>
-        {argument.type === "enum" ? (
+        {argument.description === undefined ? null : (
+          <p>{argument.description}</p>
+        )}
+        {argument.values === undefined ? null : (
           <ul
             aria-label="Accepted values"
             className="settings-view__tool-values"
@@ -73,7 +71,7 @@ function ToolArgumentItem({ argument }: ToolArgumentItemProps): ReactElement {
               <li key={value}>{value}</li>
             ))}
           </ul>
-        ) : null}
+        )}
       </div>
     </li>
   )
@@ -170,7 +168,9 @@ type ToolDetailsProps = {
  * and whether Lys asks before it runs.
  *
  * @remarks The row owns whether the details are shown and the approval; the
- * details own no state or effects. A tool without arguments says so.
+ * details own no state or effects. The arguments are those a Lys tool
+ * declares or the properties of an MCP tool's input schema. A tool without
+ * arguments says so.
  * @param props - Tool, choice, lock, identifier, and the approval proposal.
  * @returns The tool's details.
  */
@@ -183,6 +183,7 @@ function ToolDetails({
 }: ToolDetailsProps): ReactElement {
   const argumentsHeadingId = useId()
   const runner = getToolRunnerPresentation(tool.runner)
+  const toolArguments = listToolArguments(tool)
 
   return (
     <div className="settings-view__tool-details" id={detailsId}>
@@ -192,13 +193,13 @@ function ToolDetails({
       >
         <div className="settings-view__tool-subheading">
           <h3 id={argumentsHeadingId}>arguments</h3>
-          <span>{formatToolArgumentCounts(tool.arguments)}</span>
+          <span>{formatToolArgumentCounts(toolArguments)}</span>
         </div>
-        {tool.arguments.length === 0 ? (
+        {toolArguments.length === 0 ? (
           <p className="settings-view__tool-empty">Takes no arguments.</p>
         ) : (
           <ul className="settings-view__tool-argument-list">
-            {tool.arguments.map((argument) => (
+            {toolArguments.map((argument) => (
               <ToolArgumentItem argument={argument} key={argument.name} />
             ))}
           </ul>
@@ -388,7 +389,7 @@ type ToolRowProps = {
   /** Proposes another approval for the tool. */
   readonly onApprovalChange: (approval: ToolApproval) => void
   /** Why the tool cannot run now, or undefined when it can. */
-  readonly unavailableReason: BackendToolUnavailableReason | undefined
+  readonly unavailableReason: ListedBackendToolUnavailableReason | undefined
   /** Requests that the parent open the Secrets pane. */
   readonly onOpenSecrets: () => void
 }
@@ -398,7 +399,7 @@ type ToolUnavailableNoteProps = {
   /** Identifier the row's switch points at through `aria-describedby`. */
   readonly noteId: string
   /** Why the tool cannot run now. */
-  readonly reason: BackendToolUnavailableReason
+  readonly reason: ListedBackendToolUnavailableReason
   /** Requests that the parent open the Secrets pane. */
   readonly onOpenSecrets: () => void
 }
@@ -537,7 +538,10 @@ export type ToolGroupSectionProps = {
     approval: ToolApproval
   ) => void
   /** Why each tool that cannot run now cannot, keyed by tool name. */
-  readonly unavailableTools: ReadonlyMap<string, BackendToolUnavailableReason>
+  readonly unavailableTools: ReadonlyMap<
+    string,
+    ListedBackendToolUnavailableReason
+  >
   /** Requests that the parent open the Secrets pane. */
   readonly onOpenSecrets: () => void
 }
@@ -605,7 +609,7 @@ export function ToolGroupSection({
       data-dimmed={isDimmed ? "" : undefined}
     >
       <div className="settings-view__section-heading">
-        <h2 id={headingId}>{formatToolGroupLabel(listing.group)}</h2>
+        <h2 id={headingId}>{listing.heading}</h2>
         <span>{formatToolGroupCount(onToolCount, listing.tools.length)}</span>
       </div>
       <ul className="settings-view__tool-list">

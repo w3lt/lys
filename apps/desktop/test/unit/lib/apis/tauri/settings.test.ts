@@ -5,6 +5,7 @@ import {
   saveGenerationSettings,
   saveLoadConfigurationSettings,
   saveLocationSettings,
+  saveMcpSettings,
   saveRuntimeAutoStartSettings,
   saveSecretsSettings,
   saveSettings,
@@ -24,6 +25,7 @@ import {
   waitForMicrotasks
 } from "../../../support/settlement"
 import {
+  STORED_MCP_SETTINGS,
   STORED_SETTINGS,
   STORED_SETTINGS_DOCUMENT,
   STORED_TAVILY_API_KEY,
@@ -197,6 +199,74 @@ describe("loadSettings", () => {
       justRunToolNames: new Set(),
       switches: new Map()
     })
+  })
+
+  it("reads a server's omitted lists as empty and freezes the servers", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        mcp: {
+          servers: [
+            { name: "files", transport: "stdio", command: "/usr/bin/files" },
+            { name: "notes", transport: "http", url: "http://127.0.0.1:9000" }
+          ]
+        }
+      })
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.mcp).toEqual({
+      servers: [
+        {
+          name: "files",
+          transport: "stdio",
+          command: "/usr/bin/files",
+          arguments: [],
+          environment: []
+        },
+        {
+          name: "notes",
+          transport: "http",
+          url: "http://127.0.0.1:9000",
+          headers: []
+        }
+      ]
+    })
+    expect(Object.isFrozen(settings.mcp.servers)).toBe(true)
+    expect(Object.isFrozen(settings.mcp.servers[0])).toBe(true)
+  })
+
+  it("rejects MCP servers that fail the shared rules without naming a header value", async () => {
+    const headerValue = "Bearer leaked token "
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        mcp: {
+          servers: [
+            {
+              name: "notes",
+              transport: "http",
+              url: "https://mcp.example.test/notes",
+              headers: [{ name: "Authorization", value: headerValue }]
+            }
+          ]
+        }
+      })
+    })
+
+    const failure = await loadSettings().then(
+      () => {
+        throw new Error("The settings loaded")
+      },
+      (rejection: unknown) => rejection
+    )
+
+    expect(failure).toBeInstanceOf(Error)
+    expect(failure).toMatchObject({
+      message: "The settings file holds invalid MCP server settings."
+    })
+    expect(String(failure)).not.toContain("leaked")
   })
 
   it("rejects with the host's rejection", async () => {
@@ -470,6 +540,67 @@ describe("saveLocationSettings", () => {
     await expect(saveLocationSettings(STORED_SETTINGS.location)).rejects.toBe(
       "Disk full"
     )
+  })
+})
+
+describe("saveMcpSettings", () => {
+  it("replaces only the mcp group of the document on disk", async () => {
+    const onlyNotes = { servers: [STORED_MCP_SETTINGS.servers[1]] }
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveMcpSettings(onlyNotes)
+
+    expect(host.commands).toEqual([
+      { command: "load_settings", args: {} },
+      {
+        command: "save_settings",
+        args: {
+          newSettings: { ...STORED_SETTINGS_DOCUMENT, mcp: onlyNotes }
+        }
+      }
+    ])
+  })
+
+  it("writes an empty server list when every server was removed", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveMcpSettings({ servers: [] })
+
+    expect(host.commands.at(-1)).toEqual({
+      command: "save_settings",
+      args: {
+        newSettings: { ...STORED_SETTINGS_DOCUMENT, mcp: { servers: [] } }
+      }
+    })
+  })
+
+  it("writes nothing when the document cannot be loaded", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => Promise.reject("Failed to read settings.json"),
+      save_settings: () => null
+    })
+
+    await expect(saveMcpSettings(STORED_MCP_SETTINGS)).rejects.toBe(
+      "Failed to read settings.json"
+    )
+    expect(host.commands.map((invoked) => invoked.command)).toEqual([
+      "load_settings"
+    ])
+  })
+
+  it("rejects when the merged document cannot be written", async () => {
+    startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => Promise.reject("Disk full")
+    })
+
+    await expect(saveMcpSettings(STORED_MCP_SETTINGS)).rejects.toBe("Disk full")
   })
 })
 

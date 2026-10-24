@@ -23,9 +23,15 @@ export const DRAFT_APPROVAL_HINT = "↵ sends your message as her answer"
  * @returns The action and its target, then its effect: a tool that reads
  * this machine changes nothing, a page read names the full URL of the page,
  * and a web search names where its full query goes. A location read names
- * where the location comes from, because the person typed it.
+ * where the location comes from, because the person typed it. An MCP call
+ * asks whether to run the tool, by the name its server calls it, on that
+ * server: what it does depends on the server, and the card shows its
+ * arguments.
  */
 export function formatToolCallSummary(input: ToolCallInput): string {
+  if (input.runner === "mcp") {
+    return `Run ${input.serverToolName} on the MCP server ${input.server}?`
+  }
   switch (input.toolName) {
     case "read_text_file":
       return `Read ${input.input.path}. Nothing is changed.`

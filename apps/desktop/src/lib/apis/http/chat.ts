@@ -40,7 +40,9 @@ const BACKEND_TOOL_UNAVAILABLE_ADVICE = Object.freeze({
   "settings-unreadable":
     "Lys couldn't read settings.json. Fix that file by hand",
   "page-reader-not-ready":
-    "vmo, Lys's page reader, isn't ready. See Settings → Runtime"
+    "vmo, Lys's page reader, isn't ready. See Settings → Runtime",
+  "mcp-server-not-connected":
+    "its MCP server isn't connected. See Settings → MCP"
 } satisfies Readonly<Record<BackendToolUnavailableReason, string>>)
 
 /**

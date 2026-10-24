@@ -21,6 +21,7 @@ import {
   createLocationSettingsSlice,
   type LocationSettingsSlice
 } from "./location-settings"
+import { createMcpSettingsSlice, type McpSettingsSlice } from "./mcp-settings"
 import {
   createSecretsSettingsSlice,
   type SecretsSettingsSlice
@@ -157,6 +158,7 @@ type LysStore = LysState &
   LoadConfigurationSettingsSlice &
   SecretsSettingsSlice &
   LocationSettingsSlice &
+  McpSettingsSlice &
   ToolSettingsSlice &
   RuntimeAutoStartSettingsSlice &
   VmoRuntimeSlice &
@@ -183,7 +185,9 @@ const initialState: LysState = {
  * @remarks Initialization and process actions are application-owned
  * asynchronous transitions. Tauri errors propagate from the returned promises;
  * settings are edited in memory by setSettings, and tool approvals by
- * updateToolApproval. The generation, load configuration, tool-settings, and
+ * updateToolApproval. The secrets, location, and MCP server slices save
+ * their group only on an explicit request and change the store's copy once
+ * the file holds it. The generation, load configuration, tool-settings, and
  * runtime-autostart slices own automatic saves and retain their completion or
  * failure state across pane changes; the store runs every group's writes one at a time, so
  * one group's save never writes back another group's older value.
@@ -321,6 +325,9 @@ export const useLysStore = create<LysStore>()((set, get) => {
     }),
     ...createLocationSettingsSlice(set, get, {
       saveLocationSettings: settingsGroupSaves.saveLocationSettings
+    }),
+    ...createMcpSettingsSlice(set, get, {
+      saveMcpSettings: settingsGroupSaves.saveMcpSettings
     }),
     ...createModelSlice(set, get, {
       getConnection: () => ({

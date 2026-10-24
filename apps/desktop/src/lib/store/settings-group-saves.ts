@@ -1,7 +1,10 @@
+import type { McpSettings } from "@lys/share"
+
 import {
   saveGenerationSettings,
   saveLoadConfigurationSettings,
   saveLocationSettings,
+  saveMcpSettings,
   saveRuntimeAutoStartSettings,
   saveSecretsSettings,
   saveToolSettings
@@ -67,6 +70,14 @@ export type SettingsGroupSaves = {
    * the native load or save rejection.
    */
   readonly saveLocationSettings: (location: LocationSettings) => Promise<void>
+  /**
+   * Saves the MCP group after every save sent earlier has settled.
+   *
+   * @param mcp - MCP servers to persist.
+   * @returns Resolves after the settings file is written, and rejects with
+   * the native load or save rejection.
+   */
+  readonly saveMcpSettings: (mcp: McpSettings) => Promise<void>
   /**
    * Saves the two startup switches of the runtime group after every save
    * sent earlier has settled.
@@ -139,6 +150,8 @@ export function createSettingsGroupSaves(): SettingsGroupSaves {
       saveSettingsGroupInOrder(() => saveToolSettings(tools)),
     saveLocationSettings: (location) =>
       saveSettingsGroupInOrder(() => saveLocationSettings(location)),
+    saveMcpSettings: (mcp) =>
+      saveSettingsGroupInOrder(() => saveMcpSettings(mcp)),
     saveRuntimeAutoStartSettings: (autoStart) =>
       saveSettingsGroupInOrder(() => saveRuntimeAutoStartSettings(autoStart))
   }

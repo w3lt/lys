@@ -1285,6 +1285,369 @@
   color: var(--app-text-link);
 }
 
+/* MCP */
+
+/* Holds the pane's status line, empty while nothing needs saying, above the servers. */
+.settings-view__mcp-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.settings-view__mcp-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.settings-view__mcp-tools {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.settings-view__mcp-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.settings-view__mcp-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 10px;
+  border-bottom: 1px solid var(--app-border-subtle);
+}
+
+.settings-view__mcp-row-main {
+  display: grid;
+  align-items: center;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+/* An empty state line takes no space but stays in place as the row's status. */
+.settings-view__mcp-lines {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.settings-view__mcp-lines > * + *:not(:empty) {
+  margin-top: 5px;
+}
+
+.settings-view__mcp-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.settings-view__mcp-name {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--app-text-strong);
+}
+
+.settings-view__mcp-kind {
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid var(--app-border-strong);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+/* The command or URL is what the server runs or reaches, so it reads as text to check. */
+.settings-view__mcp-target {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mcp-state {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  letter-spacing: 0.04em;
+  color: var(--app-text-faint);
+}
+
+.settings-view__mcp-state[data-tone="pending"] {
+  color: var(--app-status-pending);
+}
+
+.settings-view__mcp-state[data-tone="success"] {
+  color: var(--app-status-success);
+}
+
+.settings-view__mcp-state[data-tone="danger"] {
+  color: var(--app-text-danger);
+}
+
+.settings-view__mcp-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-view__mcp-confirm {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--app-text-danger-muted);
+}
+
+.settings-view__mcp-skipped {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.settings-view__mcp-skipped-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+  cursor: pointer;
+}
+
+.settings-view__mcp-skipped-toggle svg {
+  width: 12px;
+  height: 12px;
+  transition: transform var(--duration-standard) var(--ease-standard);
+}
+
+.settings-view__mcp-skipped-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.settings-view__mcp-skipped-toggle:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 2px;
+}
+
+.settings-view__mcp-skipped-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mcp-skipped-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.settings-view__mcp-skipped-name {
+  font-family: var(--font-mono);
+  color: var(--app-text-strong);
+}
+
+.settings-view__mcp-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-view__mcp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+/* Label and hint on one line: the format is read before typing. */
+.settings-view__mcp-field-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--app-text-faint);
+}
+
+.settings-view__mcp-field-top label {
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mcp-field-label {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* A rejected save with several problems lists each field to fix, in field order. */
+.settings-view__mcp-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-left: 2px solid var(--app-text-danger);
+}
+
+.settings-view__mcp-summary:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 2px;
+}
+
+.settings-view__mcp-summary h3 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-danger);
+}
+
+.settings-view__mcp-summary ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.settings-view__mcp-summary-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  color: var(--app-text-link);
+  cursor: pointer;
+}
+
+.settings-view__mcp-summary-link:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 2px;
+}
+
+.settings-view__mcp-field [data-slot="input"] {
+  height: 38px;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+/* Commands, URLs, and lines of values are typed exactly, so they are mono. */
+.settings-view__mcp-mono {
+  font-family: var(--font-mono);
+}
+
+.settings-view__mcp-mono[data-slot="textarea"] {
+  min-height: 96px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.settings-view__mcp-transport {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  font-size: 13px;
+}
+
+.settings-view__mcp-transport legend {
+  float: left;
+  margin-right: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mcp-transport label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
+.settings-view__mcp-problem {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  letter-spacing: 0.04em;
+  color: var(--app-text-danger);
+}
+
+.settings-view__mcp-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+.settings-view__mcp-footer .settings-view__mcp-actions {
+  margin-left: auto;
+}
+
+.settings-view__mcp-feedback {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-view__mcp-feedback .settings-view__note {
+  padding-top: 0;
+}
+
 /* Load configuration */
 
 /* The edited model's key is an identifier, so it keeps its own case. */

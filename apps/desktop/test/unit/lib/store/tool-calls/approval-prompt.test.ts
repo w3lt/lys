@@ -8,6 +8,7 @@ import {
 import type { ToolListState } from "@/lib/store/tools"
 import {
   buildBackendToolDefinition,
+  buildMcpToolDefinition,
   buildToolCall,
   buildToolDefinition
 } from "../../../support/toolFixtures"
@@ -86,6 +87,30 @@ describe("calculateToolApprovalPrompt", () => {
       )
     }
   )
+
+  it("asks the person about an MCP tool's call, with its server and the name the server calls it by, whatever its arguments", () => {
+    const notesSearch = buildMcpToolDefinition("notes", "search")
+    const list: ToolListState = Object.freeze({
+      status: "loaded",
+      tools: [READ_TEXT_FILE, notesSearch],
+      unavailableTools: new Map()
+    })
+    const call = buildToolCall(3, notesSearch.name, {
+      query: { nested: [1, true, null] },
+      extra: "not in the schema"
+    })
+
+    expect(calculateToolApprovalPrompt(call, list)).toEqual({
+      status: "ask",
+      definition: notesSearch,
+      input: {
+        runner: "mcp",
+        toolName: notesSearch.name,
+        server: "notes",
+        serverToolName: "search"
+      }
+    })
+  })
 
   it("rejects a call of a tool the list does not have", () => {
     expect(

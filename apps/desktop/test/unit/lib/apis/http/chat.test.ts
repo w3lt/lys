@@ -326,6 +326,11 @@ describe("readChatEvents", () => {
       "read_page",
       "page-reader-not-ready",
       "read_page is unavailable: vmo, Lys's page reader, isn't ready. See Settings → Runtime, or switch read_page off."
+    ],
+    [
+      "mcp__notes__search",
+      "mcp-server-not-connected",
+      "mcp__notes__search is unavailable: its MCP server isn't connected. See Settings → MCP, or switch mcp__notes__search off."
     ]
   ] as const)(
     "reports %s that cannot run because of %s, with what to do",

@@ -1,5 +1,5 @@
 import type {
-  BackendToolUnavailableReason,
+  ListedBackendToolUnavailableReason,
   ChatApiRequestBody,
   ChatToolOffer,
   UnavailableBackendTool
@@ -27,11 +27,14 @@ export type ToolChoice = {
  * with the machine.
  *
  * @remarks A tool that only reads data on this machine starts on; a tool
- * that sends requests off the machine starts off.
+ * that sends requests off the machine starts off. An MCP tool, whose access
+ * depends on its server, starts on: the person added the server for its
+ * tools, and every call asks first unless they choose Just run.
  */
 const IS_TOOL_ON_BY_DEFAULT = Object.freeze({
   reads: true,
-  network: false
+  network: false,
+  unknown: true
 } satisfies Readonly<Record<ToolAccess, boolean>>)
 
 /** Lifecycle of the list of every tool: the desktop's and the backend's. */
@@ -58,7 +61,7 @@ export type ToolListState =
        */
       readonly unavailableTools: ReadonlyMap<
         string,
-        BackendToolUnavailableReason
+        ListedBackendToolUnavailableReason
       >
     }
   | {
@@ -181,7 +184,7 @@ export type ChatToolOfferResult =
       /** Switched-on tools the request offers. */
       readonly offer: ChatToolOffer
       /**
-       * Listed tools whose switch is off, in list order; empty when every
+       * Listed Lys tools whose switch is off, in list order; empty when every
        * listed tool is on.
        */
       readonly switchedOffToolNames: readonly string[]
@@ -195,8 +198,8 @@ export type ChatToolOfferResult =
       /** The request offers no tools; the reply answers in one round. */
       readonly status: "not-offered"
       /**
-       * Listed tools whose switch is off, in list order; empty when the list
-       * was not read or every listed tool is on.
+       * Listed Lys tools whose switch is off, in list order; empty when the
+       * list was not read or every listed tool is on.
        */
       readonly switchedOffToolNames: readonly string[]
       /**
@@ -278,11 +281,13 @@ const TOOL_LIST_RECOVERY_ACTION =
  * @returns {@link TOOL_CALLS_OFF_OFFER} when tool calls are off, whatever
  * the list's state; `unavailable` when they are on and the list was not
  * read; otherwise `offered` with the definitions of the switched-on desktop
- * tools and the names of the switched-on backend tools that can run now,
- * each in list order, or `not-offered` when no such tool is on. Both name
- * every listed tool whose switch is off, and every switched-on backend tool
- * that cannot run now with the list's reason, each in list order. Each tool
- * is sorted once.
+ * tools and the names of the switched-on backend and MCP tools that can run
+ * now, each in list order, or `not-offered` when no such tool is on. Both
+ * name every listed Lys tool whose switch is off, and every switched-on
+ * backend tool that cannot run now with the list's reason, each in list
+ * order. MCP tools are never named in either list: one server may list more
+ * tools than a request may name, and the list never says one cannot run.
+ * Each tool is sorted once.
  */
 export function buildChatToolOffer(
   input: BuildChatToolOfferInput
@@ -299,26 +304,51 @@ export function buildChatToolOffer(
     })
   }
 
-  const switchedOffToolNames: string[] = []
-  const unavailableTools: UnavailableBackendTool[] = []
-  const onTools: ToolDefinition[] = []
-  for (const tool of list.tools) {
-    const reason = list.unavailableTools.get(tool.name)
-    if (!isToolOn(input.toolSwitches, tool))
-      switchedOffToolNames.push(tool.name)
-    else if (reason === undefined) onTools.push(tool)
-    else unavailableTools.push(Object.freeze({ name: tool.name, reason }))
-  }
-  const unoffered = {
-    switchedOffToolNames: Object.freeze(switchedOffToolNames),
-    unavailableTools: Object.freeze(unavailableTools)
-  }
+  const { onTools, ...unoffered } = sortListedTools(list, input.toolSwitches)
   if (onTools.length === 0) {
     return Object.freeze({ status: "not-offered", ...unoffered })
   }
 
   const offer = buildToolOffer(onTools)
   return Object.freeze({ status: "offered", offer, ...unoffered })
+}
+
+/**
+ * Sorts each listed tool by whether a request offers it or names it as
+ * unoffered.
+ *
+ * @param list - The loaded tool list.
+ * @param toolSwitches - Saved switch choices, keyed by tool name.
+ * @returns The switched-on tools that can run now; the names of the Lys
+ * tools whose switch is off; and the switched-on backend tools that cannot
+ * run now, with the list's reason. Each is in list order, and the two named
+ * lists are frozen. An MCP tool is never named in either.
+ */
+function sortListedTools(
+  list: Extract<ToolListState, { status: "loaded" }>,
+  toolSwitches: ReadonlyMap<string, boolean>
+): Readonly<{
+  onTools: readonly ToolDefinition[]
+  switchedOffToolNames: readonly string[]
+  unavailableTools: readonly UnavailableBackendTool[]
+}> {
+  const switchedOffToolNames: string[] = []
+  const unavailableTools: UnavailableBackendTool[] = []
+  const onTools: ToolDefinition[] = []
+  for (const tool of list.tools) {
+    const reason = list.unavailableTools.get(tool.name)
+    const isNamedUnoffered = tool.runner !== "mcp"
+    if (!isToolOn(toolSwitches, tool)) {
+      if (isNamedUnoffered) switchedOffToolNames.push(tool.name)
+    } else if (reason === undefined) onTools.push(tool)
+    else if (isNamedUnoffered)
+      unavailableTools.push(Object.freeze({ name: tool.name, reason }))
+  }
+  return {
+    onTools,
+    switchedOffToolNames: Object.freeze(switchedOffToolNames),
+    unavailableTools: Object.freeze(unavailableTools)
+  }
 }
 
 /**
@@ -356,15 +386,16 @@ export function buildChatToolFields(
  *
  * @param onTools - Switched-on tools that can run now, at least one, in
  * list order.
- * @returns A frozen offer: the desktop tools' definitions, and the backend
- * tools' names when there is any, each in list order.
+ * @returns A frozen offer: the desktop tools' definitions, and the names of
+ * the tools from the backend's list, its own and its MCP servers', when
+ * there is any, each in list order.
  */
 function buildToolOffer(onTools: readonly ToolDefinition[]): ChatToolOffer {
   const definitions = Object.freeze(
     onTools.filter((tool) => tool.runner === "client")
   )
   const backendToolNames = onTools
-    .filter((tool) => tool.runner === "backend")
+    .filter((tool) => tool.runner !== "client")
     .map((tool) => tool.name)
 
   return Object.freeze(
@@ -378,7 +409,8 @@ function buildToolOffer(onTools: readonly ToolDefinition[]): ChatToolOffer {
  * Builds the list of every tool from the desktop's and the backend's lists.
  *
  * @param clientTools - The desktop's tools, each name once.
- * @param backendTools - The backend's tools, each name once.
+ * @param backendTools - The backend's tools, its own and then its MCP
+ * servers', each name once.
  * @returns A frozen list: the desktop's tools, then the backend's.
  * @throws If a desktop tool and a backend tool share a name, because a chat
  * request could not offer both.

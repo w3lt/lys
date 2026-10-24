@@ -25,6 +25,7 @@ const SETTINGS_PANE_BODY_IMPORTS = Object.freeze({
     import("@/components/SettingsViewComponents/GenerationPaneContent"),
   agents: () => import("@/components/SettingsViewComponents/AgentPaneContent"),
   tools: () => import("@/components/SettingsViewComponents/ToolPaneContent"),
+  mcp: () => import("@/components/SettingsViewComponents/McpPaneContent"),
   secrets: () =>
     import("@/components/SettingsViewComponents/SecretsPaneContent")
 } satisfies Readonly<Record<SettingsPane, () => Promise<unknown>>>)

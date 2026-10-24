@@ -10,6 +10,7 @@ import {
 } from "../../support/conversationFixtures"
 import {
   buildBackendToolDefinition,
+  buildMcpToolDefinition,
   buildToolCall,
   buildToolDefinition
 } from "../../support/toolFixtures"
@@ -96,6 +97,33 @@ const WAITING_WEB_SEARCH: ShownToolCall = Object.freeze({
       toolName: "web_search",
       query: "moths at night",
       host: "api.tavily.com"
+    }
+  }
+} satisfies ShownToolCall)
+
+/** Tool of an MCP server whose call waits for the person. */
+const NOTES_SEARCH = buildMcpToolDefinition("notes", "search")
+
+/** Call of {@link NOTES_SEARCH}, with an object and an array among its values. */
+const MCP_CALL = buildToolCall(13, NOTES_SEARCH.name, {
+  query: "moths",
+  filter: { tags: ["night", "wings"] },
+  limit: 5
+})
+
+/** MCP call that waits for the person. */
+const WAITING_MCP_CALL: ShownToolCall = Object.freeze({
+  target: buildCallTarget(MCP_CALL.id),
+  call: MCP_CALL,
+  step: "approval",
+  answer: {
+    status: "awaiting-person",
+    definition: NOTES_SEARCH,
+    input: {
+      runner: "mcp",
+      toolName: NOTES_SEARCH.name,
+      server: "notes",
+      serverToolName: "search"
     }
   }
 } satisfies ShownToolCall)
@@ -214,6 +242,35 @@ describe("ComposerToolApproval", () => {
       expect(toggle.getAttribute("aria-controls")).toBe(
         screen.getAllByRole("term")[0]?.closest("dl")?.id
       )
+    })
+
+    it("asks whether to run an MCP tool on its server, with its arguments shown at once, objects as JSON", () => {
+      startToolApproval({ toolCall: WAITING_MCP_CALL, hasDraft: false })
+
+      const card = screen.getByRole("group", {
+        name: "Tool call waiting for your answer"
+      })
+      expect(within(card).getByText(NOTES_SEARCH.name)).toBeInTheDocument()
+      expect(within(card).getByText("depends on server")).toBeInTheDocument()
+      expect(within(card).getByText("on MCP server")).toHaveAttribute(
+        "title",
+        "Runs on an MCP server"
+      )
+      expect(
+        within(card).getByText("Run search on the MCP server notes?")
+      ).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Arguments" })).toHaveAttribute(
+        "aria-expanded",
+        "true"
+      )
+      expect(
+        screen.getAllByRole("term").map((term) => term.textContent)
+      ).toEqual(["query", "filter", "limit"])
+      expect(
+        screen
+          .getAllByRole("definition")
+          .map((definition) => definition.textContent)
+      ).toEqual(["moths", '{"tags":["night","wings"]}', "5"])
     })
 
     it("hides the arguments again on a second press", async () => {

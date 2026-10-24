@@ -21,6 +21,7 @@ const SettingsView = lazy(() => import("@/views/SettingsView/SettingsView"))
 
 import "./App.scss"
 import { useLysStore } from "./lib/store"
+import { registerMcpServerRefresh } from "./lib/store/mcp-servers"
 import { registerToolListRefresh } from "./lib/store/tools"
 
 /**
@@ -31,9 +32,11 @@ import { registerToolListRefresh } from "./lib/store/tools"
  * component renders intentionally blank while initialization is pending, then
  * renders the title bar and one lazily loaded child view. While mounted, it
  * keeps the tool list in step with the backend and vmo through
- * {@link registerToolListRefresh}, unsubscribing on unmount. The initialization
- * promise is detached from the effect, so a rejected initialization is
- * unhandled by this component. Only a failed settings load leaves the store in
+ * {@link registerToolListRefresh}, and the MCP server list and the tools its
+ * servers add in step with the backend through
+ * {@link registerMcpServerRefresh}, unsubscribing both on unmount. The
+ * initialization promise is detached from the effect, so a rejected
+ * initialization is unhandled by this component. Only a failed settings load leaves the store in
  * its blank initializing state; a rejected backend start or status check
  * happens after the shell is shown. The lazy children have no local `Suspense`
  * loading fallback or import failure boundary here.
@@ -46,6 +49,7 @@ export default function App() {
     void initialize()
   }, [initialize])
   useEffect(() => registerToolListRefresh(), [])
+  useEffect(() => registerMcpServerRefresh(), [])
 
   const { activeView, setActiveView } = useLysStore((state) => state)
 

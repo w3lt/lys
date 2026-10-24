@@ -14,9 +14,17 @@ import {
   type ClientToolInput,
   type ClientToolInputResult
 } from "./client-tools"
+import {
+  parseMcpToolInput,
+  type McpToolInput,
+  type McpToolInputResult
+} from "./mcp-tools"
 
-/** Validated input of one call, to a desktop tool or to a backend tool. */
-export type ToolCallInput = ClientToolInput | BackendToolInput
+/**
+ * Validated input of one call: to a desktop tool, to a backend tool, or to a
+ * tool of an MCP server.
+ */
+export type ToolCallInput = ClientToolInput | BackendToolInput | McpToolInput
 
 /** How the desktop handles one approval prompt the backend sent. */
 export type ToolApprovalPrompt =
@@ -120,17 +128,19 @@ function findListedToolDefinition(
  * @param call - Call the backend sent.
  * @param definition - Listed definition of the called tool.
  * @returns `parsed` with the validated input, or `rejected` with the
- * explanation the model reads.
+ * explanation the model reads; an MCP call is always parsed.
  */
 function parseToolCallInput(
   call: ChatToolCall,
   definition: ToolDefinition
-): ClientToolInputResult | BackendToolInputResult {
+): ClientToolInputResult | BackendToolInputResult | McpToolInputResult {
   switch (definition.runner) {
     case "client":
       return parseClientToolInput(call)
     case "backend":
       return parseBackendToolInput(call)
+    case "mcp":
+      return parseMcpToolInput(definition)
   }
 }
 

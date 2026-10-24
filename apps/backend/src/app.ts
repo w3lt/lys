@@ -36,7 +36,10 @@ export type BuildAppOptions = {
  * The application logs to {@link BuildAppOptions.logger}.
  *
  * @param options - Runtime dependencies and configuration for the application.
- * @returns A promise that resolves to the Fastify application after SSE support, singleton services, and all backend routes are registered.
+ * @returns A promise that resolves to the Fastify application after the HTTP
+ * transport, singleton services, and all backend routes are registered. The
+ * transport refuses, before any route runs, a request whose `Host` does not
+ * name the configured backend address or whose `Origin` is not the desktop's.
  * @throws {z.ZodError} If the configuration does not satisfy
  * {@link backendConfigSchema}; each issue names the failing key, and no
  * application or service has been created, so nothing is logged.
@@ -49,7 +52,7 @@ export async function buildApp(
   const config = backendConfigSchema.parse(options.config)
   const app = Fastify({ loggerInstance: options.logger })
 
-  await updateFastifyWithHttpTransport(app)
+  await updateFastifyWithHttpTransport(app, config)
   await app.register(singletonServicesPlugin, {
     config
   })

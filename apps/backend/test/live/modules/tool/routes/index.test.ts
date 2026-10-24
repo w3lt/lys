@@ -8,7 +8,10 @@ import WebSearchToolProvider from "../../../../../src/modules/tool/builtIn/web/w
 import registerToolRoutes from "../../../../../src/modules/tool/routes"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import { TEST_BACKEND_CONFIG } from "../../../../unit/support/backendConfig"
-import { createTestFastify } from "../../../../unit/support/fastifyTestApp"
+import {
+  createTestFastify,
+  INJECTED_REQUEST_ADDRESS
+} from "../../../../unit/support/fastifyTestApp"
 import { getLiveTavilyApiKey } from "../../../support/liveTavily"
 
 describe("registerToolRoutes against the Tavily API", () => {
@@ -20,7 +23,7 @@ describe("registerToolRoutes against the Tavily API", () => {
         buildTavilyRequestDependencies()
       )
       const { app } = createTestFastify()
-      await updateFastifyWithHttpTransport(app)
+      await updateFastifyWithHttpTransport(app, INJECTED_REQUEST_ADDRESS)
       app.decorate("webSearchToolProvider", webSearchToolProvider)
       app.decorate(
         "builtInTools",

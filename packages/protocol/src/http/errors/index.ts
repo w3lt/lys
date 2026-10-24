@@ -32,3 +32,7 @@ export {
   type AgentCodeTakenProblem,
   type AgentNotFoundProblem
 } from "./agent"
+export {
+  requestSourceRefusedProblemSchema,
+  type RequestSourceRefusedProblem
+} from "./requestSource"

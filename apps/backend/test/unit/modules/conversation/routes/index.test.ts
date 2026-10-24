@@ -21,7 +21,10 @@ import {
   FIXTURE_TIMESTAMP
 } from "../../../support/conversationFixtures"
 import { openConversationTestServices } from "../../../support/conversationDatabase"
-import { createTestFastify } from "../../../support/fastifyTestApp"
+import {
+  createTestFastify,
+  INJECTED_REQUEST_ADDRESS
+} from "../../../support/fastifyTestApp"
 
 /** Identity of the conversation the stubbed history answers for. */
 const CONVERSATION_ID = createFixtureUuidV7(1)
@@ -135,7 +138,10 @@ async function createConversationRouteApp() {
         handleUnexpectedHistoryCall("deleteConversation")
       )
   }
-  await updateFastifyWithHttpTransport(testFastify.app)
+  await updateFastifyWithHttpTransport(
+    testFastify.app,
+    INJECTED_REQUEST_ADDRESS
+  )
   testFastify.app.decorate("conversationHistoryReader", historyReader)
   testFastify.app.decorate("conversationHistoryEditor", historyEditor)
   testFastify.app.decorate("attachmentFileStore", attachmentFileStore)

@@ -10,7 +10,10 @@ import { buildWebSearchDefinition } from "../../../../../src/modules/tool/builtI
 import registerToolRoutes from "../../../../../src/modules/tool/routes"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import type { TavilyApiKeyRead } from "../../../../../src/infrastructure/settings/tavilyApiKeyFile"
-import { createTestFastify } from "../../../support/fastifyTestApp"
+import {
+  createTestFastify,
+  INJECTED_REQUEST_ADDRESS
+} from "../../../support/fastifyTestApp"
 import {
   LOOK_UP_WORD_TOOL,
   ScriptedBuiltInTool
@@ -65,7 +68,7 @@ async function createToolRouteApp(
     server.dependencies
   )
   const { app } = createTestFastify()
-  await updateFastifyWithHttpTransport(app)
+  await updateFastifyWithHttpTransport(app, INJECTED_REQUEST_ADDRESS)
   app.decorate("webSearchToolProvider", webSearchToolProvider)
   app.decorate("builtInTools", [
     ...createBuiltInTools(
@@ -187,8 +190,9 @@ describe("registerToolRoutes", () => {
       ])
     })
 
-    // Each is a request a web page can send to another origin without a
-    // CORS preflight, so none may reach Tavily with the key.
+    // Each is a request a web page could send to another origin without a
+    // CORS preflight. The transport refuses pages, and the route refuses
+    // each of these from any caller, so none reaches Tavily with the key.
     it.each([
       ["a GET", { method: "GET", headers: {} }, 404],
       ["a POST without a body", { method: "POST", headers: {} }, 400],
@@ -220,8 +224,7 @@ describe("registerToolRoutes", () => {
 
         const response = await app.inject({
           ...request,
-          url: KEY_CHECK_URL,
-          headers: { ...request.headers, origin: WEB_PAGE_ORIGIN }
+          url: KEY_CHECK_URL
         })
 
         expect(response.statusCode).toBe(statusCode)
@@ -242,6 +245,23 @@ describe("registerToolRoutes", () => {
       })
 
       expect(response.statusCode).toBe(400)
+      expect(server.receivedRequests).toHaveLength(0)
+    })
+
+    it("refuses a web page's key check before the route reads the key", async () => {
+      const { app, server } = await createToolRouteApp({
+        status: "configured",
+        apiKey: TEST_TAVILY_API_KEY
+      })
+
+      const response = await app.inject({
+        method: "POST",
+        url: KEY_CHECK_URL,
+        headers: { origin: WEB_PAGE_ORIGIN },
+        payload: {}
+      })
+
+      expect(response.statusCode).toBe(403)
       expect(server.receivedRequests).toHaveLength(0)
     })
 

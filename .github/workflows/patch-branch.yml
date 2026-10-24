@@ -1,0 +1,170 @@
+name: Patch branch
+
+# Opens the day's patch branch from stable at 00:00 UTC. At 20:00 UTC it
+# deletes that branch when it holds no fix, or opens its pull request into
+# stable. The maintainer adds the version bump and changelog to that pull
+# request, merges it, and tags the release; this workflow never merges.
+on:
+  schedule:
+    - cron: "0 0 * * *"
+    - cron: "0 20 * * *"
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "open: create the day's patch branch. close: delete it when it holds no fix, or open its pull request into stable."
+        type: choice
+        options:
+          - open
+          - close
+
+permissions:
+  contents: read
+
+concurrency:
+  group: patch-branch
+  cancel-in-progress: false
+
+jobs:
+  patch-branch:
+    name: Open or close the day's patch branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: read
+    env:
+      GH_REPO: ${{ github.repository }}
+      TASK: ${{ github.event_name == 'workflow_dispatch' && inputs.task || (github.event.schedule == '0 0 * * *' && 'open' || 'close') }}
+
+    steps:
+      # The branch is named after stable's VERSION with its patch number
+      # raised by one, so a pull request not yet merged keeps the same branch.
+      - name: Name the day's patch branch
+        id: name
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          stable_sha="$(gh api "repos/$GH_REPO/git/ref/heads/stable" --jq .object.sha)"
+          version="$(gh api \
+            -H "Accept: application/vnd.github.raw+json" \
+            "repos/$GH_REPO/contents/VERSION?ref=$stable_sha")"
+
+          pattern='^[[:space:]]*(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)[[:space:]]*$'
+          if [[ ! "$version" =~ $pattern ]]; then
+            echo "::error::VERSION on stable must use major.minor.patch, such as 1.2.3."
+            exit 1
+          fi
+          next="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+
+          {
+            echo "stable-sha=$stable_sha"
+            echo "next=$next"
+            echo "branch=patch/v$next"
+          } >> "$GITHUB_OUTPUT"
+          echo "Task $TASK for patch/v$next, stable at $stable_sha."
+
+      - name: Open the patch branch
+        if: env.TASK == 'open'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.name.outputs.branch }}
+          STABLE_SHA: ${{ steps.name.outputs.stable-sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          existing="$(gh api "repos/$GH_REPO/git/matching-refs/heads/$BRANCH" \
+            --jq "map(select(.ref == \"refs/heads/$BRANCH\")) | length")"
+          if [ "$existing" != "0" ]; then
+            echo "$BRANCH already exists, so its fixes carry over."
+            exit 0
+          fi
+
+          gh api "repos/$GH_REPO/git/refs" \
+            -f ref="refs/heads/$BRANCH" \
+            -f sha="$STABLE_SHA" \
+            --silent
+          echo "Created $BRANCH from stable at $STABLE_SHA."
+
+      - name: Close the patch branch
+        id: close
+        if: env.TASK == 'close'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.name.outputs.branch }}
+          NEXT: ${{ steps.name.outputs.next }}
+          OWNER: ${{ github.repository_owner }}
+          STABLE_SHA: ${{ steps.name.outputs.stable-sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          existing="$(gh api "repos/$GH_REPO/git/matching-refs/heads/$BRANCH" \
+            --jq "map(select(.ref == \"refs/heads/$BRANCH\")) | length")"
+          if [ "$existing" = "0" ]; then
+            echo "$BRANCH does not exist, so there is nothing to close."
+            echo "open-pull-request=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          compare="$RUNNER_TEMP/compare.json"
+          gh api "repos/$GH_REPO/compare/$STABLE_SHA...$BRANCH" > "$compare"
+
+          if [ "$(jq .ahead_by "$compare")" = "0" ]; then
+            gh api -X DELETE "repos/$GH_REPO/git/refs/heads/$BRANCH" --silent
+            echo "$BRANCH holds no fix, so it was deleted."
+            echo "open-pull-request=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          open="$(gh api "repos/$GH_REPO/pulls?state=open&base=stable&head=$OWNER:$BRANCH" --jq length)"
+          if [ "$open" != "0" ]; then
+            echo "A pull request from $BRANCH into stable is already open."
+            echo "open-pull-request=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "Fixes on \`$BRANCH\` that \`stable\` does not have yet:"
+            echo
+            jq -r '.commits[] | "- \(.commit.message | split("\n")[0]) (\(.sha[0:7]))"' "$compare"
+            echo
+            echo "Before merging:"
+            echo
+            echo "- [ ] Set the version to \`$NEXT\` as [Versioning](https://lys.negentropy.studio/operate/releases/#versioning) describes."
+            echo "- [ ] Record the release as [Recording a release](https://lys.negentropy.studio/changelog/#recording-a-release) describes."
+            echo
+            echo "After merging, tag \`v$NEXT\` on \`stable\`, then merge \`stable\` into \`main\`, as [Patch releases](https://lys.negentropy.studio/operate/releases/#patch-releases) describes."
+            echo
+            echo "Opened by the [Patch branch workflow]($RUN_URL)."
+          } > "$RUNNER_TEMP/pull-request.md"
+          echo "open-pull-request=true" >> "$GITHUB_OUTPUT"
+
+      # A pull request opened with the workflow's own token starts no other
+      # workflow, so the CI checks would never run on it.
+      - name: Open the pull request into stable
+        if: steps.close.outputs.open-pull-request == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PATCH_PR_TOKEN }}
+          BRANCH: ${{ steps.name.outputs.branch }}
+          NEXT: ${{ steps.name.outputs.next }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::The PATCH_PR_TOKEN secret is not set, so no pull request was opened. Add it as the Patch branch workflow section of the release docs describes, then run this workflow with the close task."
+            exit 1
+          fi
+
+          url="$(gh api "repos/$GH_REPO/pulls" \
+            -f title="chore: release patch v$NEXT" \
+            -f head="$BRANCH" \
+            -f base=stable \
+            -F body=@"$RUNNER_TEMP/pull-request.md" \
+            --jq .html_url)"
+          echo "Opened $url."

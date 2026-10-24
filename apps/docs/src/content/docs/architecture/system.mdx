@@ -1,32 +1,36 @@
 ---
 title: System overview
-description: The React desktop UI, the Tauri host, the Fastify backend, vmo, and the shared contracts between them.
+description: The React desktop UI, the Tauri host, the Fastify backend, vmo, the MCP servers the person adds, and the shared contracts between them.
 docType: architecture
 sidebar:
   order: 1
 ---
 
 Lys currently has four cooperating application components, one required
-external model runtime, and two shared TypeScript contract packages.
+external model runtime, the MCP servers the person adds, and two shared
+TypeScript contract packages.
 
 ## Runtime parts
 
-| Part                      | Implementation                        | Responsibility                                                                                                                                         |
-| ------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Desktop UI                | React in `apps/desktop/src`           | Renders chat, conversation history, and settings views, opens backend HTTP streams, and applies typed chat events to local UI state.                   |
-| Host                      | Tauri in `apps/desktop/src-tauri/src` | Starts and stops the backend and vmo processes, checks vmo's health, exposes native commands to the UI, and reads or writes `$LYS_HOME/settings.json`. |
-| Backend                   | Fastify in `apps/backend/src`         | Serves HTTP and SSE endpoints, persists conversations in SQLite, and talks to LM Studio for model inventory and generation.                            |
-| Page reader               | vmo, Swift in `apps/vmo`              | Listens on `127.0.0.1:8080` and reads each page `read_page` asks for in headless Chromium inside a micro VM, which it deletes.                         |
-| Model runtime             | LM Studio on `127.0.0.1:1234`         | Supplies downloaded-model inventory, model loading, chat completions, and title generation.                                                            |
-| Shared API contract       | `@lys/protocol`                       | Defines route paths, request and response schemas, chat SSE event variants, and file tool command schemas with Zod.                                    |
-| Shared domain model types | `@lys/share`                          | Defines the conversation, message, metadata, and agent shapes shared between backend and desktop.                                                      |
+| Part                      | Implementation                         | Responsibility                                                                                                                                           |
+| ------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop UI                | React in `apps/desktop/src`            | Renders chat, conversation history, and settings views, opens backend HTTP streams, and applies typed chat events to local UI state.                     |
+| Host                      | Tauri in `apps/desktop/src-tauri/src`  | Starts and stops the backend and vmo processes, checks vmo's health, exposes native commands to the UI, and reads or writes `$LYS_HOME/settings.json`.   |
+| Backend                   | Fastify in `apps/backend/src`          | Serves HTTP and SSE endpoints, persists conversations in SQLite, talks to LM Studio for model inventory and generation, and connects to the MCP servers. |
+| Page reader               | vmo, Swift in `apps/vmo`               | Listens on `127.0.0.1:8080` and reads each page `read_page` asks for in headless Chromium inside a micro VM, which it deletes.                           |
+| Model runtime             | LM Studio on `127.0.0.1:1234`          | Supplies downloaded-model inventory, model loading, chat completions, and title generation.                                                              |
+| MCP servers               | The person's, named in `settings.json` | Commands the backend starts (stdio) or URLs it reaches (Streamable HTTP); each serves tools the backend lists and runs the allowed calls of them.        |
+| Shared API contract       | `@lys/protocol`                        | Defines route paths, request and response schemas, chat SSE event variants, and file tool command schemas with Zod.                                      |
+| Shared domain model types | `@lys/share`                           | Defines the conversation, message, metadata, agent, tool definition, and MCP server settings shapes shared between backend and desktop.                  |
 
 ## Process boundary
 
 The desktop UI does not call LM Studio or vmo directly. It talks to the
 backend over loopback HTTP and consumes one SSE stream per chat request. The
 host starts and stops the backend and vmo as child processes, and the backend
-asks vmo over loopback HTTP for each page `read_page` reads.
+asks vmo over loopback HTTP for each page `read_page` reads. The backend
+starts each stdio MCP server as its own child process and reaches each remote
+one over HTTP; the desktop never talks to an MCP server.
 
 ```text
 React UI -> Tauri commands (process and settings lifecycle, file tools)
@@ -34,6 +38,7 @@ React UI -> HTTP/SSE -> Fastify backend -> LM Studio
 Fastify backend -> SQLite
 Fastify backend -> HTTP -> vmo -> micro VM (headless Chromium)
 Tauri host -> backend and vmo processes; HTTP GET /health -> vmo
+Fastify backend -> stdio MCP server processes, or Streamable HTTP -> remote MCP servers
 ```
 
 ## State ownership
@@ -49,6 +54,7 @@ Tauri host -> backend and vmo processes; HTTP GET /health -> vmo
 | Backend process status                       | Desktop UI + Tauri host | The host owns the process; the UI queries status during initialization and lifecycle actions.                |
 | vmo process status                           | Desktop UI + Tauri host | The host owns the process; the UI queries status and health during startup and lifecycle actions.            |
 | Runtime settings JSON                        | Tauri host              | Stored in `$LYS_HOME/settings.json`.                                                                         |
+| MCP server connections and their tools       | Backend                 | Held in memory by the MCP server registry, from the `mcp` settings group read at startup and on each sync.   |
 | Theme preference                             | Desktop UI              | Stored as `lys.theme` in WebView `localStorage`.                                                             |
 | Route and event schemas                      | `@lys/protocol`         | Used by both backend and desktop.                                                                            |
 

@@ -31,6 +31,9 @@ route definitions.
 | `DELETE` | `/api/v1/agents/:agentCode`                                                       | none                                                                                                 | Bodyless `204`, or `409` for a built-in agent                          |
 | `GET`    | `/api/v1/tools`                                                                   | none                                                                                                 | `{ tools: ToolDefinition[], unavailableTools }`                        |
 | `POST`   | `/api/v1/tools/web_search/key-check`                                              | `{}`                                                                                                 | `{ status: "accepted" \| "rejected" \| "unavailable" \| "failed", … }` |
+| `GET`    | `/api/v1/mcp/servers`                                                             | none                                                                                                 | `{ settings, servers: McpServerStatus[] }`                             |
+| `POST`   | `/api/v1/mcp/servers/sync`                                                        | `{}`                                                                                                 | The server list right after applying the `mcp` settings group          |
+| `POST`   | `/api/v1/mcp/servers/:serverName/reconnect`                                       | `{}`                                                                                                 | The server list, or `404` Problem Details                              |
 | `POST`   | `/api/v1/chat`                                                                    | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` and `attachments` | `text/event-stream`                                                    |
 | `POST`   | `/api/v1/chat/context`                                                            | `conversation`, `model`, optional `tools`                                                            | `ChatContextMeasurement`, or typed Problem Details                     |
 | `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`                 | none                                                                                                 | `text/event-stream` (reply snapshot, then live events)                 |
@@ -197,16 +200,24 @@ this turn:
 shape `toolDefinitionSchema` from `@lys/share` validates, each with `runner`
 `client`; it may be empty. `backendToolNames` names switched-on tools the
 backend runs, each once, as [`GET /api/v1/tools`](#tool-list) lists them; it is
-optional. Together they offer at least one tool, and no name appears in both.
+optional and holds at most 2,112 names (16 MCP servers of 128 tools each, plus
+64 for the backend's own tools). These include the tools of connected [MCP servers](#mcp-servers),
+named `mcp__<server>__<tool>`. Together they offer at least one tool, and no name appears in both.
 A request that breaks these rules, names a backend tool the backend does not
 run, or offers `read_attachment` as a client or backend tool, returns `400`
 before anything is stored; the backend adds the reader to a turn itself. A
 request that offers a
 backend tool that cannot run now, such as `web_search` without a usable
-Tavily API key or `read_page` while vmo is not ready, returns `409` with
+Tavily API key, `read_page` while vmo is not ready, or an MCP tool whose
+server is applied but not connected, returns `409` with
 `urn:lys:problem:chat:backend-tool-unavailable` before anything is stored; see
-[an offered tool that cannot run](#an-offered-tool-that-cannot-run). The model is offered client
-tools first, then backend tools, each in request order. Without `tools`, the
+[an offered tool that cannot run](#an-offered-tool-that-cannot-run). An MCP
+tool name that no applied server lists, such as one of a removed server or a
+tool its server no longer lists, returns `400`. The model is offered client
+tools first, then Lys's own backend tools, then MCP tools, each in request
+order. A turn keeps the MCP tools it was offered; each call runs on the
+tool's server as it is connected when the call runs, and fails for the model
+when the server is no longer connected or no longer lists the tool. Without `tools`, the
 turn is one round with no tools. The desktop sends `tools`
 only to a model whose `trainedForToolUse` is true; the backend does not check
 this itself ([#135](https://github.com/w3lt/lys/issues/135)). A reply can make any number of tool calls
@@ -240,7 +251,8 @@ All three fields are optional:
   [`GET /api/v1/tools`](#tool-list) lists them in its `unavailableTools`: a
   `name` and a `reason`, one of `api-key-missing`, `api-key-invalid`,
   `settings-unreadable`, and `page-reader-not-ready`. A name the backend does
-  not run returns `400`. The reason is the client's reading of the tool list;
+  not run returns `400`, and so does an MCP tool, which is never named here:
+  the tool list leaves out the tools of a server that is not connected. The reason is the client's reading of the tool list;
   the backend does not check it again.
 - `areToolCallsSwitchedOff` is `true` or absent; absence means tool calls are
   on. A request that sends it offers no `tools` and names nothing in
@@ -274,9 +286,10 @@ the model reads in the next round. A call of an unknown name in a turn that
 offers no tool and names none still fails the reply.
 
 The desktop sends these fields only to a model whose `trainedForToolUse` is
-true. With tool calls on, it names every listed tool whose switch is off, and
-every switched-on backend tool the list reports as unable to run, with the
-list's reason. With tool calls off, it sends `areToolCallsSwitchedOff` without
+true. With tool calls on, it names every listed tool of Lys's own whose switch
+is off, and every switched-on backend tool the list reports as unable to run,
+with the list's reason. It does not name switched-off MCP tools, because one
+server can list up to 128 tools, more than `switchedOffToolNames` holds. With tool calls off, it sends `areToolCallsSwitchedOff` without
 reading the tool list. `read_attachment` is still offered while the
 conversation holds a text file.
 
@@ -334,9 +347,9 @@ current system prompt, followed by the notes about the
 [tools the turn does not offer](#tools-the-turn-does-not-offer) when the
 request names any or switches tool calls off, the
 stored messages a turn includes, the empty message,
-and the tools a turn would offer, client tools first, then the backend's,
-then `read_attachment` when the conversation holds a text file for a model
-trained for tool use. It counts them with the loaded model's tokenizer and
+and the tools a turn would offer, client tools first, then Lys's own backend
+tools, then `read_attachment` when the conversation holds a text file for a
+model trained for tool use, then the MCP tools of connected servers. It counts them with the loaded model's tokenizer and
 answers `200`:
 
 ```json
@@ -375,8 +388,11 @@ answers `200`:
   sees images and is trained for tool use is read from the inventory only
   when a stored message has an attachment. A client adds the same estimate
   for each image it would send.
-- An offered backend tool is measured whether or not it can run now; the chat
-  request refuses one that cannot.
+- An offered backend tool of Lys's own is measured whether or not it can run
+  now; the chat request refuses one that cannot. An offered MCP tool is
+  measured only while its server is connected, because its definition is
+  known only then; the chat request refuses one whose server is not
+  connected.
 - The model is matched like a chat request names it: by its model key, as LM
   Studio lists it. A model that is not loaded is never
   loaded; the route answers `503` with `urn:lys:problem:llm:model-not-loaded`.
@@ -387,7 +403,8 @@ answers `200`:
 - A new conversation naming an unknown agent, a conversation that is not
   stored, and a conversation whose agent was deleted get the same `404` and
   `409` problems as the chat request. A backend tool name the backend does not
-  run is refused with `400`.
+  run, including an MCP tool name no applied server lists, is refused with
+  `400`.
 - Every response carries `Cache-Control: no-store`.
 
 The chat request makes the same measurement before every round of a reply; see
@@ -405,10 +422,13 @@ order Settings shows them, and the listed tools that cannot run now:
 }
 ```
 
-(Definitions shortened.) Every definition has `runner` `backend`. The
-definitions are fixed for one backend build: `read_page`, which reads one
+(Definitions shortened.) Lys's own tools come first, each with `runner`
+`backend`. Their definitions are fixed for one backend build: `read_page`, which reads one
 public web page through vmo, and `web_search`, which searches the web through Tavily
-(both group and access `network`). Availability is read again on every
+(both group and access `network`). The tools of the connected
+[MCP servers](#mcp-servers) follow, server by server in the settings group's
+order, each server's tools in its own order. A server that is connecting or
+failed adds none. Availability is read again on every
 request. For `web_search`, `reason` is `api-key-missing` (no Tavily API key is
 saved), `api-key-invalid` (the saved key fails the key format), or
 `settings-unreadable` (the settings file cannot be read as a settings
@@ -419,6 +439,36 @@ and asks vmo's health route, contacts nothing else, and never contains the
 key. `read_attachment`, the attachment reader, is not listed and cannot be
 offered by name: the chat route adds it to a turn by itself; see
 [attachments](#attachments).
+
+An MCP tool's definition has `runner` and `group` `mcp`, and `access`
+`unknown`, because Lys cannot tell what a server's tool reaches:
+
+```json
+{
+  "name": "mcp__files__read_file",
+  "description": "Read a file in the shared folder.",
+  "group": "mcp",
+  "access": "unknown",
+  "runner": "mcp",
+  "server": "files",
+  "serverToolName": "read_file",
+  "inputSchema": {
+    "type": "object",
+    "properties": { "path": { "type": "string" } },
+    "required": ["path"]
+  }
+}
+```
+
+`name` is `mcp__`, the server's name, `__`, and the server's name for the tool
+with every character outside the tool name rule replaced by `_`; it is at
+most 64 characters. `description` is the server's, without invisible
+characters, cut to 4,096 characters; a tool without one gets a sentence naming
+it and its server. `inputSchema` is the server's input schema as it sent it,
+at most 64 KiB as JSON. The model is offered `name`, `description`, and
+`inputSchema` as the function's parameters. An MCP tool is never named in
+`unavailableTools`. Listing the tools never contacts a server; the list holds
+what each server listed when it connected.
 
 ### Key check
 
@@ -447,7 +497,7 @@ fraction Tavily reports is rounded up. The answer never contains the key.
 ## Tool approvals
 
 The backend decides which tool calls need the person: every call of a tool
-that is not saved as Just run, client and backend tools alike, except
+that is not saved as Just run, client, backend, and MCP tools alike, except
 `read_attachment`, which runs without approval. It shows such a
 call with a `tool-approval` event, and the client answers it with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`,
@@ -466,11 +516,12 @@ where `callId` is the `id` of the event's call or of its entry in
 }
 ```
 
-After `allowed`, the backend runs a backend tool itself, stores its result
-with the call, and gives it to the model; the client sees that result in the
+After `allowed`, the backend runs a backend tool itself, or calls an MCP
+tool on its server, stores its result with the call, and gives it to the
+model; the client sees that result in the
 call's `reply-part` event. For a client tool, it sends the call to run with a
-`tool-call` event under the same `id`. After `rejected`, nothing runs and the model reads
-`content`. `reason` is not shown to the model: `declined` when the person
+`tool-call` event under the same `id`. After `rejected`, nothing runs, no
+request reaches an MCP server, and the model reads `content`. `reason` is not shown to the model: `declined` when the person
 rejected the call, and `showFailed` when the client could not show it, such as
 a tool it does not list or arguments it cannot describe.
 
@@ -489,7 +540,7 @@ without asking again and answers with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`,
 where `callId` is the `id` of the call's `tool-call` event or of its entry in
 `reply-snapshot.pendingToolCalls`. One request answers one call. Calls of
-backend tools never come here; the backend runs them itself.
+backend and MCP tools never come here; the backend runs them itself.
 
 ```json
 { "status": "succeeded", "content": "The file's text" }
@@ -519,6 +570,135 @@ on a pending call.
 It waits until the call is answered, the reply is stopped, or the backend
 shuts down. A newer turn in the conversation or deleting the conversation does
 not end the wait yet ([#137](https://github.com/w3lt/lys/issues/137)).
+
+## MCP servers
+
+The backend connects to the MCP servers that the `mcp` group of
+`settings.json` lists; see [MCP servers](/reference/configuration/#mcp-servers)
+in the configuration reference. It opens each server in the background: it
+starts a stdio server's command, or sends the first request to a remote one,
+then reads its tools. A server's tools are listed and can be offered only
+while it is connected. Nothing reconnects by itself: Reconnect, or a changed
+setting, opens a server again.
+
+`GET /api/v1/mcp/servers` lists the applied servers, in the group's order,
+with each one's state. It reads nothing and contacts no server.
+
+```json
+{
+  "settings": "applied",
+  "servers": [
+    {
+      "name": "files",
+      "transport": "stdio",
+      "state": {
+        "status": "connected",
+        "toolCount": 11,
+        "skippedTools": [{ "name": "move file", "reason": "duplicate-name" }],
+        "isToolListCut": false
+      }
+    },
+    {
+      "name": "docs",
+      "transport": "http",
+      "state": { "status": "failed", "reason": "unauthorized" }
+    }
+  ]
+}
+```
+
+`settings` is the outcome of the backend's last read of the group:
+`applied`, also when there is no file or no group; `invalid` when the group
+breaks its rules; or `unreadable` when the file cannot be read as a JSON
+object. After `invalid` or `unreadable`, the backend keeps the servers it
+applied before, and `servers` lists them. The list never carries a command,
+an argument, an environment variable, a URL, or a header.
+
+| `state.status` | Other fields                                 | Meaning                                                                             |
+| -------------- | -------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `connecting`   | none                                         | The backend is starting or reaching the server and reading its tools                |
+| `connected`    | `toolCount`, `skippedTools`, `isToolListCut` | Its tools are listed; `isToolListCut` says it has more than the 128 tools Lys reads |
+| `failed`       | `reason`                                     | It is not connected; Reconnect or a changed setting tries again                     |
+
+| `reason`         | Meaning                                                                                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start-failed`   | The command could not be started, such as a command not found on `PATH`                                                                                   |
+| `closed`         | The process exited, or the connection ended, while connecting or later, such as a URL server that answered a call with HTTP `404`, which ends its session |
+| `timed-out`      | Connecting and reading the tools took longer than two minutes                                                                                             |
+| `unauthorized`   | The server answered HTTP `401` or `403`; Lys does not sign in with OAuth ([#253](https://github.com/w3lt/lys/issues/253))                                 |
+| `unreachable`    | No connection could be made, such as a refused connection or an unknown host                                                                              |
+| `http-error`     | The server answered another HTTP error, or a redirect, which Lys does not follow                                                                          |
+| `protocol-error` | The server's answers are not valid MCP or larger than 16 MiB, or it answered the connection or the tool list with an error                                |
+
+A connected server's tools are read once, when it connects. Lys reads the
+first 128 and lists each one it can offer; `skippedTools` names the others it
+read, each with why: `unsupported-name` (its name is empty or longer than
+128 characters, or its `mcp__<server>__<tool>` name would pass 64
+characters), `duplicate-name` (a tool listed before it gets the same name
+once every character other than an ASCII letter, a digit, `_`, or `-` is
+replaced by `_`),
+`unsupported-input-schema` (its input schema is not an object schema, names
+an argument outside the argument name rule, nests deeper than 32 levels, or
+holds a `__proto__` key), or `input-schema-too-large` (its schema is larger
+than 64 KiB as JSON). A skipped name is cleaned of invisible characters and
+cut to 128 characters.
+
+`POST /api/v1/mcp/servers/sync` reads the `mcp` group again and applies it,
+then answers `200` with the list as it is right after applying. A server
+whose settings did not change keeps its connection, or its failure; a changed
+one is closed and opened again; a removed one is closed; a new one is opened.
+The servers it opens are `connecting` in the answer, which does not wait for
+them. Syncs run one at a time in the order they arrive.
+
+`POST /api/v1/mcp/servers/:serverName/reconnect` closes one applied server's
+connection, or cancels its opening, and opens it again with the settings the
+backend applied; it does not read the file. It answers `200` with the list,
+the server `connecting`. A name no applied server has answers `404` with
+`urn:lys:problem:mcp:server-not-found` and changes nothing:
+
+```json
+{
+  "type": "urn:lys:problem:mcp:server-not-found",
+  "title": "MCP server not found",
+  "status": 404,
+  "detail": "No MCP server named docs is applied.",
+  "instance": "/api/v1/mcp/servers/docs/reconnect"
+}
+```
+
+A malformed name, one that breaks the server name rule, answers `400`
+before any lookup. Both POST routes start or reach servers, so each takes the
+empty JSON object `{}` as its body, sent as `application/json`, like the
+[key check](#key-check): a page on another site cannot send that without a
+CORS preflight, which the backend refuses for every origin but the desktop's.
+Another body answers `400`, or `415` for a media type the backend cannot
+parse, before anything starts.
+
+A call of an MCP tool runs on its server as it is connected when the call
+runs, with a five-minute limit, and the server is told when the reply is
+stopped. The model reads one of:
+
+- the server's result, after a sentence that names the server and the tool,
+  by the `mcp__<server>__<tool>` name the model called, and says the output
+  is untrusted, between the lines `<<<mcp result>>>` and
+  `<<<end of mcp result>>>`. Text blocks and embedded text resources are kept;
+  an image, audio, or a binary resource is named but not passed on
+  ([#257](https://github.com/w3lt/lys/issues/257)); a resource link shows its
+  name and address. A result without content shows its structured content as
+  JSON, which is not checked against the tool's output schema. The output
+  holds neither frame line, loses its invisible characters,
+  and is cut at 20,000 characters with a note. A result the server marks as
+  an error is stored as a failed call.
+- a sentence saying why the call failed: the server is not connected now, no
+  longer lists the tool, did not answer within five minutes, ended the
+  connection, answered with an HTTP status, could not be reached, refused the
+  call (with its message, marked as untrusted), sent an answer that is not
+  valid MCP, or sent an answer larger than 16 MiB, which Lys does not read.
+
+The backend checks only the shape of a call's arguments before it asks the
+person: a JSON object of at most 256 KiB, nesting at most 32 levels, whose
+keys follow the argument name rule and include every name the schema
+requires. The server checks the values.
 
 ## Conversation history
 
@@ -742,7 +922,10 @@ such tool in offer order. `toolName` and `reason` are extension members.
 ```
 
 For `page-reader-not-ready`, `detail` is "read_page is unavailable: vmo,
-Lys's page reader, is not ready."
+Lys's page reader, is not ready." For `mcp-server-not-connected`, an offered
+MCP tool whose server is applied but connecting or failed, it is
+"mcp\_\_files\_\_read_file is unavailable: its MCP server is not connected." A
+built-in tool that cannot run is reported before an MCP tool.
 
 The desktop shows the error and reads the tool list again, so its next
 request leaves the tool out.

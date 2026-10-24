@@ -153,6 +153,9 @@ defaults:
     "city": null,
     "region": null,
     "country": null
+  },
+  "mcp": {
+    "servers": []
   }
 }
 ```
@@ -172,11 +175,12 @@ defaults:
 | `location.city`            | `string \| null`        | City the person saved for `get_location`; see [Location](#location)                                                  |
 | `location.region`          | `string \| null`        | State, province, or other region the person saved; see [Location](#location)                                         |
 | `location.country`         | `string \| null`        | Country the person saved; see [Location](#location)                                                                  |
+| `mcp.servers`              | array of server objects | MCP servers Lys connects to, in the order Settings → MCP lists them; see [MCP servers](#mcp-servers)                 |
 
 A missing group, or a missing field in one of them, uses the host defaults;
 for `loadConfiguration` that default is empty, for `secrets` it holds no
-key, for `tools` it puts no tool on Just run and switches no tool, and for
-`location` it saves no location. A `model` group, which
+key, for `tools` it puts no tool on Just run and switches no tool, for
+`location` it saves no location, and for `mcp` it lists no server. A `model` group, which
 older files hold for a context-size estimate Lys no longer has, is ignored,
 and the next save leaves it out. Loading never rewrites an
 existing file. Invalid JSON or invalid field values, including a temperature
@@ -187,7 +191,7 @@ Every save writes a temporary file beside `settings.json`, readable and
 writable only by its owner on Unix, flushes it to disk, and renames it over the
 file, so a reader sees the previous document or the whole new one, never part
 of a write. The Tauri host is the file's only writer; the backend reads it for
-the Tavily API key.
+the Tavily API key, the Just run choices, and the MCP servers.
 
 The file carries no version marker. The maintainer accepted that for
 [PR #143](https://github.com/w3lt/lys/pull/143); see the
@@ -316,10 +320,85 @@ An older Lys build does not know the group. It ignores it and removes it the
 next time it saves settings, so the location must be saved again after going
 back to an older build.
 
+### MCP servers
+
+The `mcp` group lists the [MCP](/overview/glossary/#mcp-terms) servers whose tools
+Lys offers the model. Each server is a command Lys starts and talks to over
+its standard input and output (`stdio`), or a URL Lys sends requests to over
+Streamable HTTP (`http`):
+
+```json
+{
+  "mcp": {
+    "servers": [
+      {
+        "name": "files",
+        "transport": "stdio",
+        "command": "/opt/homebrew/bin/npx",
+        "arguments": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/Users/me/Shared"
+        ],
+        "environment": [{ "name": "LOG_LEVEL", "value": "info" }]
+      },
+      {
+        "name": "docs",
+        "transport": "http",
+        "url": "https://mcp.example.com/mcp",
+        "headers": [{ "name": "Authorization", "value": "Bearer <token>" }]
+      }
+    ]
+  }
+}
+```
+
+| Field         | Server  | Rule                                                                                                                                                                                                                                                    |
+| ------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`        | both    | 1 to 20 lowercase ASCII letters and digits, in runs joined by single hyphens; each name once in the group. The server's tools are named `mcp__<name>__<tool>`                                                                                           |
+| `transport`   | both    | `stdio` or `http`                                                                                                                                                                                                                                       |
+| `command`     | `stdio` | 1 to 1,024 characters, no control character or tab, no white space at either end. A bare name such as `npx` is found through the backend's `PATH`; see [Configuration](/operate/configuration/#mcp-servers)                                             |
+| `arguments`   | `stdio` | Up to 64 arguments in order, each 1 to 1,024 characters without a line break or another control character but a tab; omitted means none. Passed as they are, without a shell                                                                            |
+| `environment` | `stdio` | Up to 32 `{ name, value }` variables, each name once: a name is an ASCII letter or underscore, then up to 127 letters, digits, or underscores; a value is up to 4,096 characters without a control character but a tab, and may be empty                |
+| `url`         | `http`  | Up to 2,048 characters without spaces: `https://`, or `http://` only for `localhost`, `127.0.0.1`, or `[::1]`; no user name, password, or `#`                                                                                                           |
+| `headers`     | `http`  | Up to 32 `{ name, value }` headers, each name once ignoring case: a name is an HTTP token of up to 128 characters, and not one Lys sets itself; a value is up to 8,192 visible ASCII characters, spaces, and tabs, without a space or tab at either end |
+
+- The group holds at most 16 servers. Characters are counted as Unicode code
+  points. A server object with an unknown field, a field of the other
+  transport, a broken rule, or `null` for the group makes loading the settings
+  fail; an error about a server names the broken rule and never quotes a
+  value. An error about the group itself, such as a `servers` value that is
+  not a list, can quote that value.
+- Lys sets these headers itself and refuses them in `headers`: `Accept`,
+  `Content-Length`, `Content-Type`, `Host`, `Last-Event-ID`,
+  `MCP-Protocol-Version`, and `Mcp-Session-Id`.
+- A stdio server starts in the person's home folder, with `HOME`, `LOGNAME`,
+  `PATH`, `SHELL`, `TERM`, and `USER` from the backend's environment, then the
+  configured variables, which win over those. No other variable of the
+  backend's environment reaches it.
+- Environment values, header values, URLs, and arguments can hold secrets,
+  such as an API key or a bearer token. They are stored as plain text,
+  protected by the file's owner-only permissions, like the Tavily API key.
+  The backend never sends them back: the server list carries only each
+  server's name, transport, and state. No log line holds a setting, but a
+  stdio server's standard error lines and a remote server's error answers
+  are logged as the server wrote them, so a server that prints a secret puts
+  it in the [backend log](/operate/logging/).
+- The backend reads the group when it starts and whenever the desktop asks it
+  to sync, which the MCP pane does after each save. It takes only `mcp`,
+  ignoring every other group, and never writes the file. When the file
+  cannot be read, or the group fails its rules, the backend keeps the servers
+  it applied before and reports why; see
+  [MCP servers](/reference/api/#mcp-servers).
+
+An older Lys build does not know the group. It ignores it and removes it the
+next time it saves settings, so the servers must be added again after going
+back to an older build.
+
 ## Settings updates
 
-The settings view provides Runtime, Model, Generation, Agents, Tools, and
-Secrets panes. Model
+The settings view provides Runtime, Model, Generation, Agents, Tools, MCP,
+and Secrets panes. Model
 inventory, load, unload, and loaded-state health controls call the backend
 through the application store. The user's agents are stored by the backend,
 not in `settings.json`, and the built-in agents ship with the backend and are
@@ -366,6 +445,12 @@ the next time Lys opens, or the window reloads, because both read them from
 the file. After a failed save, that next launch follows the switches last
 saved, the pane says so, and changing a switch tries the save again. A file
 saved before `autoStartVmo` existed loads with it on.
+
+The MCP pane saves the servers only when the person saves a server in its
+editor or confirms removing one, replacing only the `mcp` group in the same
+serialized way, and then asks the running backend to apply them. After a
+failed save, the pane says the save failed, an open editor keeps the server
+as typed, and the backend keeps the servers it applied before.
 
 The other runtime edits, such as default-model selection, remain in memory for
 the current session. A save of another group does not persist those unsaved

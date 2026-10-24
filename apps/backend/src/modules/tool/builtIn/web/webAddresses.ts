@@ -1,68 +1,73 @@
 import { BlockList, isIP } from "node:net"
-
-/** One address range written as its first address and prefix length. */
-type AddressRange = readonly [address: string, prefixLength: number]
+import * as z from "zod"
+import committedBlockedAddressRangesFile from "./blocked_address_ranges.json" with { type: "json" }
 
 /**
- * IPv4 ranges Lys never connects to: this host, private and shared networks,
+ * Validates the committed `blocked_address_ranges.json`: the IPv4 and IPv6
+ * ranges Lys never connects to, each written in CIDR notation.
+ */
+const blockedAddressRangesSchema = z
+  .strictObject({
+    /** IPv4 ranges, such as `10.0.0.0/8`. */
+    ipv4: z.array(z.cidrv4()).readonly(),
+    /** IPv6 ranges, such as `fc00::/7`. */
+    ipv6: z.array(z.cidrv6()).readonly()
+  })
+  .readonly()
+
+/** Every range Lys never connects to, in CIDR notation, by address family. */
+type BlockedAddressRanges = z.infer<typeof blockedAddressRangesSchema>
+
+/**
+ * Ranges Lys never connects to. IPv4: this host, private and shared networks,
  * link-local addresses, ranges reserved for protocols, documentation, and
  * benchmarking, multicast, and the reserved block that holds the broadcast
- * address.
+ * address. IPv6: the unspecified and loopback addresses with the deprecated
+ * IPv4-compatible block that holds them, NAT64 and 6to4 prefixes, whose
+ * embedded IPv4 address could be private, the discard and
+ * protocol-assignment blocks, documentation, unique-local, link-local,
+ * site-local, and multicast addresses.
+ *
+ * @remarks Read from the committed `blocked_address_ranges.json`, which the
+ * backend bundle embeds when it is built. The `lys-readpage` image copies the
+ * same file, so the proxy in each read's micro VM applies these ranges too.
+ * Evaluating this module validates the file, so an invalid range stops the
+ * backend at startup instead of letting a connection through.
  */
-const BLOCKED_IPV4_RANGES: readonly AddressRange[] = Object.freeze([
-  ["0.0.0.0", 8],
-  ["10.0.0.0", 8],
-  ["100.64.0.0", 10],
-  ["127.0.0.0", 8],
-  ["169.254.0.0", 16],
-  ["172.16.0.0", 12],
-  ["192.0.0.0", 24],
-  ["192.0.2.0", 24],
-  ["192.88.99.0", 24],
-  ["192.168.0.0", 16],
-  ["198.18.0.0", 15],
-  ["198.51.100.0", 24],
-  ["203.0.113.0", 24],
-  ["224.0.0.0", 4],
-  ["240.0.0.0", 4]
-])
+const BLOCKED_ADDRESS_RANGES: BlockedAddressRanges =
+  blockedAddressRangesSchema.parse(committedBlockedAddressRangesFile)
 
 /**
- * IPv6 ranges Lys never connects to: the unspecified and loopback addresses
- * with the deprecated IPv4-compatible block that holds them, NAT64 and 6to4
- * prefixes, whose embedded IPv4 address could be private, the discard and
- * protocol-assignment blocks, documentation, unique-local, link-local,
- * site-local, and multicast addresses. An IPv4-mapped address is checked
- * against the IPv4 ranges by the block list itself.
+ * Adds ranges of one address family to a block list.
+ *
+ * @param blockedAddresses - List being built, which this changes.
+ * @param ranges - Ranges in CIDR notation, validated by
+ * {@link blockedAddressRangesSchema}.
+ * @param family - Address family of every range.
  */
-const BLOCKED_IPV6_RANGES: readonly AddressRange[] = Object.freeze([
-  ["::", 96],
-  ["64:ff9b::", 96],
-  ["64:ff9b:1::", 48],
-  ["100::", 64],
-  ["2001::", 23],
-  ["2001:db8::", 32],
-  ["2002::", 16],
-  ["fc00::", 7],
-  ["fe80::", 10],
-  ["fec0::", 10],
-  ["ff00::", 8]
-])
+function addBlockedSubnets(
+  blockedAddresses: BlockList,
+  ranges: readonly string[],
+  family: "ipv4" | "ipv6"
+): void {
+  for (const range of ranges) {
+    const slashIndex = range.indexOf("/")
+    const address = range.slice(0, slashIndex)
+    const prefixLength = Number(range.slice(slashIndex + 1))
+    blockedAddresses.addSubnet(address, prefixLength, family)
+  }
+}
 
 /**
  * Builds the list of every blocked range.
  *
- * @returns A new list holding {@link BLOCKED_IPV4_RANGES} and
- * {@link BLOCKED_IPV6_RANGES}.
+ * @returns A new list holding {@link BLOCKED_ADDRESS_RANGES}. An IPv4-mapped
+ * IPv6 address is checked against its IPv4 ranges by the list itself.
  */
 function buildBlockedAddressList(): BlockList {
   const blockedAddresses = new BlockList()
-  for (const [address, prefixLength] of BLOCKED_IPV4_RANGES) {
-    blockedAddresses.addSubnet(address, prefixLength, "ipv4")
-  }
-  for (const [address, prefixLength] of BLOCKED_IPV6_RANGES) {
-    blockedAddresses.addSubnet(address, prefixLength, "ipv6")
-  }
+  addBlockedSubnets(blockedAddresses, BLOCKED_ADDRESS_RANGES.ipv4, "ipv4")
+  addBlockedSubnets(blockedAddresses, BLOCKED_ADDRESS_RANGES.ipv6, "ipv6")
   return blockedAddresses
 }
 

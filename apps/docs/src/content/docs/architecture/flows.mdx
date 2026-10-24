@@ -227,7 +227,9 @@ calls it stored are part of the new turn's context.
    conversation's earlier sources, keeping a URL's number; the sources are
    stored and sent as a `sources` event before the call's `reply-part`. An allowed
    `read_page` call asks vmo to read the page in headless Chromium in a fresh
-   micro VM, which follows its redirects. An allowed `web_search` call sends one query to
+   micro VM, which follows its redirects, each connection through the
+   reader's own proxy and its address rule. An allowed `web_search` call
+   sends one query to
    `https://api.tavily.com` and gives the model the results framed as
    untrusted text; the model may then call `read_page` for a result's URL,
    which is shown again on Ask me. A rejected call runs nothing; the model

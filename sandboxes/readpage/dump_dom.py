@@ -11,14 +11,23 @@ HTML in a script world of the reader's own, with the page's open shadow roots
 flattened, where ``--dump-dom`` would write ``document.documentElement``'s
 ``outerHTML``.
 
+Every connection Chromium makes goes through a PageProxy of the reader's
+own, which applies the backend's address rule and the read's bounds to it,
+so a redirect or a request of the page to a blocked address is never
+connected to.
+
 It exits with 0 after writing the HTML and a newline as UTF-8. It exits with
-1 and ``Error: <reason>`` on standard error, having written nothing, when
-Chromium cannot load the page, the URL starts a download, Chromium refuses a
-DevTools command, sends a message that is not a JSON object or lacks a field
-the reader reads, the page's renderer crashes, Chromium closes its DevTools
-pipe, as it does when it cannot start, or the page script fails. Chromium's
-own messages are discarded. Any other failure, such as flatten_dom.js being
-missing, ends it with a Python traceback and exit code 1.
+the ``blockedAddress`` code of page_reader_exit_codes.json and
+``Error: <reason>`` on standard error, having written nothing, when the page
+or a page it redirected to is at an address the rule blocks. It exits with 1
+and ``Error: <reason>`` on standard error, having written nothing, when
+Chromium cannot load the page for any other reason, the URL starts a
+download, Chromium refuses a DevTools command, sends a message that is not a
+JSON object or lacks a field the reader reads, the page's renderer crashes,
+Chromium closes its DevTools pipe, as it does when it cannot start, or the
+page script fails. Chromium's own messages are discarded. Any other failure,
+such as flatten_dom.js being missing, ends it with a Python traceback and
+exit code 1.
 """
 
 import json
@@ -28,11 +37,17 @@ import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from page_proxy import PageProxy
+from web_addresses import BLOCKED_ADDRESS_RANGES_PATH, load_blocked_address_ranges
+
 # The shell moves the DevTools pipe to the descriptors Chromium's
 # --remote-debugging-pipe reads and writes, 3 and 4, and puts Chromium's
 # standard input and output on /dev/null. --disable-lazy-loading is the
 # switch headless Chromium adds for --dump-dom, so images and frames below
-# the viewport load too.
+# the viewport load too. start_chromium adds --proxy-server. The other
+# switches keep every connection on that proxy: <-loopback> removes the
+# implicit bypass of loopback addresses, and WebRTC's UDP and QUIC, which an
+# HTTP proxy cannot carry, are off, so neither leaves beside the proxy.
 CHROMIUM_COMMAND = (
     "sh",
     "-c",
@@ -43,6 +58,9 @@ CHROMIUM_COMMAND = (
     "--disable-dev-shm-usage",
     "--disable-lazy-loading",
     "--remote-debugging-pipe",
+    "--proxy-bypass-list=<-loopback>",
+    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+    "--disable-quic",
 )
 
 # Virtual time policy set once the main frame has fired load, as
@@ -70,6 +88,10 @@ PAGE_SCRIPT_WORLD_NAME = "lys-read-page"
 # The page script, which the image copies next to this file.
 PAGE_SCRIPT_PATH = Path(__file__).with_name("flatten_dom.js")
 
+# The backend's exit codes of the reader, which the image copies next to this
+# file from apps/backend/src/modules/tool/builtIn/web.
+EXIT_CODES_PATH = Path(__file__).with_name("page_reader_exit_codes.json")
+
 # Event Chromium sends when the renderer of a tab crashes. It answers no
 # command to that tab afterwards, so the read cannot go on.
 RENDERER_CRASH_EVENT = "Inspector.targetCrashed"
@@ -92,7 +114,8 @@ class PageReadError(Exception):
     DevTools command Chromium refuses, including a dialog dismissal, a message
     from Chromium that is not a JSON object or lacks a field the reader reads, a
     renderer crash, a DevTools pipe Chromium closes, as it does when it cannot
-    start, and a page script that fails or returns no text. The entrypoint
+    start, and a page script that fails or returns no text; its subclass
+    BlockedAddressError stands for a page at a blocked address. The entrypoint
     writes its message as ``Error: <message>``. An OSError, such as a pipe that
     cannot be created or a page script file that cannot be read, and a
     programming error, such as using a closed ChromiumDevToolsPipe, are never
@@ -100,6 +123,27 @@ class PageReadError(Exception):
     its ``__cause__``. It owns no state beyond its message and cause, so any
     thread may raise or read an occurrence.
     """
+
+
+class BlockedAddressError(PageReadError):
+    """The page, or a page it redirected to, is at an address the rule blocks.
+
+    The page's main frame ended on Chromium's error page for a URL whose host
+    and port the reader's proxy refused. The entrypoint exits with the
+    ``blockedAddress`` code of page_reader_exit_codes.json, which the backend
+    reports as ``blocked-address``. Like PageReadError, it owns no state beyond
+    its message.
+    """
+
+    def __init__(self, refused_url: str) -> None:
+        """Creates the error for one URL the main frame could not load.
+
+        Args:
+            refused_url: The URL, whose host and port the proxy refused.
+        """
+        super().__init__(
+            f"Chromium did not connect to {refused_url}: its address is blocked"
+        )
 
 
 class ChromiumDevToolsPipe:
@@ -474,12 +518,16 @@ def close_descriptors(*descriptors: int) -> None:
         close_descriptors(*other_descriptors)
 
 
-def start_chromium() -> ChromiumDevToolsPipe:
+def start_chromium(proxy_address: str) -> ChromiumDevToolsPipe:
     """Starts headless Chromium with a DevTools pipe and no tab.
 
     Chromium runs through ``sh``, so a Chromium that cannot start, for example
     one missing from PATH, is not found here: its pipe closes, and the first
     command raises PageReadError.
+
+    Args:
+        proxy_address: Host and port of the proxy every connection of
+            Chromium goes through, as PageProxy.address gives them.
 
     Returns:
         The pipe, which owns Chromium from then on.
@@ -497,7 +545,7 @@ def start_chromium() -> ChromiumDevToolsPipe:
         raise
     try:
         process = subprocess.Popen(
-            CHROMIUM_COMMAND,
+            (*CHROMIUM_COMMAND, f"--proxy-server={proxy_address}"),
             stdin=command_read_fd,
             stdout=message_write_fd,
             stderr=subprocess.DEVNULL,
@@ -548,22 +596,29 @@ def open_page_session(browser: ChromiumDevToolsPipe) -> str:
     return session_id
 
 
-def load_page(browser: ChromiumDevToolsPipe, session_id: str, url: str) -> str:
+def load_page(
+    browser: ChromiumDevToolsPipe, session_id: str, url: str, *, proxy: PageProxy
+) -> str:
     """Loads a page in a tab, then runs its timers for the virtual time budget.
 
     Args:
         browser: Chromium.
         session_id: Session of the tab, from open_page_session.
         url: The page's URL.
+        proxy: The proxy Chromium connects through, which knows what it
+            refused.
 
     Returns:
         The id of the page's main frame.
 
     Raises:
-        PageReadError: Chromium could not load the page, the URL starts a
-            download, Chromium refused a command or answered one without a
-            field the reader reads, the page's renderer crashed, or the pipe
-            failed.
+        BlockedAddressError: The page, a page it redirected to, or a page its
+            ``<meta>`` refresh or scripts moved the main frame to, is at an
+            address the rule blocks.
+        PageReadError: Chromium could not load the page for another reason,
+            the URL starts a download, Chromium refused a command or answered
+            one without a field the reader reads, the page's renderer
+            crashed, or the pipe failed.
     """
     navigation = browser.send_command(
         "Page.navigate", {"url": url}, session_id=session_id
@@ -571,6 +626,10 @@ def load_page(browser: ChromiumDevToolsPipe, session_id: str, url: str) -> str:
     context = "answer to Page.navigate"
     error_text = find_devtools_field(navigation, "errorText", str, context=context)
     is_download = find_devtools_field(navigation, "isDownload", bool, context=context)
+    if error_text:
+        refused_url = find_refused_main_frame_url(browser, session_id, proxy)
+        if refused_url is not None:
+            raise BlockedAddressError(refused_url)
     if error_text or is_download:
         reason = error_text or "net::ERR_ABORTED (download)"
         raise PageReadError(f"Chromium could not load the page: {reason}")
@@ -586,7 +645,45 @@ def load_page(browser: ChromiumDevToolsPipe, session_id: str, url: str) -> str:
         "Emulation.setVirtualTimePolicy", VIRTUAL_TIME_POLICY, session_id=session_id
     )
     browser.wait_for_event("Emulation.virtualTimeBudgetExpired", session_id)
+    refused_url = find_refused_main_frame_url(browser, session_id, proxy)
+    if refused_url is not None:
+        raise BlockedAddressError(refused_url)
     return frame_id
+
+
+def find_refused_main_frame_url(
+    browser: ChromiumDevToolsPipe, session_id: str, proxy: PageProxy
+) -> str | None:
+    """Finds the URL the main frame could not load because the proxy refused it.
+
+    A navigation the proxy refused ends on Chromium's error page, whose frame
+    keeps the URL it could not load as ``unreachableUrl``: the last redirect's
+    target for an HTTP redirect, and the new URL for a ``<meta>`` refresh or
+    a script's navigation.
+
+    Args:
+        browser: Chromium.
+        session_id: Session of the tab, from open_page_session.
+        proxy: The proxy Chromium connects through.
+
+    Returns:
+        The main frame's ``unreachableUrl`` when the proxy refused its host
+        and port by the address rule; None when the frame shows a page, or
+        could not load a URL for another reason.
+
+    Raises:
+        PageReadError: Chromium refused Page.getFrameTree or answered it
+            without a field the reader reads, the page's renderer crashed, or
+            the pipe failed.
+    """
+    tree = browser.send_command("Page.getFrameTree", session_id=session_id)
+    context = "answer to Page.getFrameTree"
+    frame_tree = get_devtools_field(tree, "frameTree", dict, context=context)
+    frame = get_devtools_field(frame_tree, "frame", dict, context=context)
+    unreachable_url = find_devtools_field(frame, "unreachableUrl", str, context=context)
+    if unreachable_url is None or not proxy.has_refused(unreachable_url):
+        return None
+    return unreachable_url
 
 
 def get_page_script_result(
@@ -681,26 +778,60 @@ def get_page_html(url: str) -> str:
         The page's HTML, as flatten_dom.js builds it.
 
     Raises:
-        PageReadError: The page could not be read, including when Chromium
-            could not start.
-        OSError: flatten_dom.js could not be read, a pipe could not be created
-            or closed, or ``sh`` could not start.
+        BlockedAddressError: The page, or a page it led to, is at a blocked
+            address.
+        PageReadError: The page could not be read for another reason,
+            including when Chromium could not start.
+        OSError: flatten_dom.js or the ranges file could not be read, the
+            proxy could not listen, a pipe could not be created or closed, or
+            ``sh`` could not start.
+        ValueError: The ranges file does not hold valid ranges.
+        RuntimeError: The proxy's thread could not start.
     """
     page_script = PAGE_SCRIPT_PATH.read_text(encoding="utf-8")
-    with start_chromium() as browser:
+    ranges = load_blocked_address_ranges(BLOCKED_ADDRESS_RANGES_PATH)
+    with PageProxy.open(ranges) as proxy, start_chromium(proxy.address) as browser:
         session_id = open_page_session(browser)
-        frame_id = load_page(browser, session_id, url)
+        frame_id = load_page(browser, session_id, url, proxy=proxy)
         return get_page_script_result(
             browser, page_script, session_id=session_id, frame_id=frame_id
         )
+
+
+def load_blocked_address_exit_code(path: Path) -> int:
+    """Reads the exit code the backend reports as ``blocked-address``.
+
+    Args:
+        path: The backend's page_reader_exit_codes.json: a UTF-8 JSON object
+            whose only field, ``blockedAddress``, is an exit status from 1 to
+            255.
+
+    Returns:
+        The exit code.
+
+    Raises:
+        OSError: The file could not be read.
+        ValueError: The file is not that JSON object.
+    """
+    exit_codes = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(exit_codes, dict) or set(exit_codes) != {"blockedAddress"}:
+        raise ValueError(f"{path} does not hold exactly blockedAddress")
+    exit_code = exit_codes["blockedAddress"]
+    if type(exit_code) is not int or not 1 <= exit_code <= 255:
+        raise ValueError(f"{path} holds no exit status as blockedAddress")
+    return exit_code
 
 
 if __name__ == "__main__":
     arguments = sys.argv[1:]
     if len(arguments) != 1:
         raise SystemExit("Usage: python3 dump_dom.py <url>")
+    blocked_address_exit_code = load_blocked_address_exit_code(EXIT_CODES_PATH)
     try:
         page_html = get_page_html(arguments[0])
+    except BlockedAddressError as error:
+        sys.stderr.write(f"Error: {error}\n")
+        raise SystemExit(blocked_address_exit_code) from error
     except PageReadError as error:
         raise SystemExit(f"Error: {error}") from error
     sys.stdout.buffer.write(f"{page_html}\n".encode("utf-8"))

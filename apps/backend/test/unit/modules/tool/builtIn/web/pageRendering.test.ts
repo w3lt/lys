@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
+import pageReaderExitCodes from "../../../../../../src/modules/tool/builtIn/web/page_reader_exit_codes.json" with { type: "json" }
 import {
   getRenderedPage,
   MAXIMUM_PAGE_HTML_LENGTH,
@@ -252,6 +253,128 @@ describe("getRenderedPage", () => {
 
       expect(result).toEqual(buildFailure(kind))
       expect(reportPageReaderFailure).not.toHaveBeenCalled()
+    }
+  )
+
+  it("fails a 502 answer of a reader that exited as blockedAddress as blocked-address, unreported", async () => {
+    const reportPageReaderFailure = vi.fn()
+    const server = await startVmoServer(
+      answerWithBody(
+        502,
+        VMO_JSON_CONTENT_TYPE,
+        JSON.stringify({
+          exitCode: pageReaderExitCodes.blockedAddress,
+          error:
+            "Error: Chromium did not connect to http://[::1]/: its address is blocked\n"
+        })
+      )
+    )
+
+    const result = await getRenderedPage(
+      PAGE_URL,
+      new AbortController().signal,
+      buildVmoReadDependencies(server.origin, { reportPageReaderFailure })
+    )
+
+    expect(result).toEqual(buildFailure("blocked-address"))
+    expect(reportPageReaderFailure).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["exit code 2, of a URL the reader refuses", 2],
+    ["exit code 124", 124],
+    ["exit code 0", 0]
+  ])(
+    "fails a 502 answer with %s as not-loaded, unreported",
+    async (_label, exitCode) => {
+      const reportPageReaderFailure = vi.fn()
+      const server = await startVmoServer(
+        answerWithBody(
+          502,
+          VMO_JSON_CONTENT_TYPE,
+          JSON.stringify({ exitCode, error: "Error: something failed" })
+        )
+      )
+
+      const result = await getRenderedPage(
+        PAGE_URL,
+        new AbortController().signal,
+        buildVmoReadDependencies(server.origin, { reportPageReaderFailure })
+      )
+
+      expect(result).toEqual(buildFailure("not-loaded"))
+      expect(reportPageReaderFailure).not.toHaveBeenCalled()
+    }
+  )
+
+  it("fails a 502 answer one byte over the size limit as not-loaded, unreported", async () => {
+    const reportPageReaderFailure = vi.fn()
+    const frame = JSON.stringify({
+      exitCode: pageReaderExitCodes.blockedAddress,
+      error: ""
+    })
+    const server = await startVmoServer(
+      answerWithBody(
+        502,
+        VMO_JSON_CONTENT_TYPE,
+        JSON.stringify({
+          exitCode: pageReaderExitCodes.blockedAddress,
+          error: "a".repeat(MAXIMUM_VMO_RESPONSE_BYTES + 1 - frame.length)
+        })
+      )
+    )
+
+    const result = await getRenderedPage(
+      PAGE_URL,
+      new AbortController().signal,
+      buildVmoReadDependencies(server.origin, { reportPageReaderFailure })
+    )
+
+    expect(result).toEqual(buildFailure("not-loaded"))
+    expect(reportPageReaderFailure).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["a text body", "text/plain", "Error: secret page text\n"],
+    ["text that is not JSON", VMO_JSON_CONTENT_TYPE, "secret page text {"],
+    [
+      "an exit code that is not an integer",
+      VMO_JSON_CONTENT_TYPE,
+      JSON.stringify({ exitCode: "3", error: "secret page text" })
+    ],
+    [
+      "no error text",
+      VMO_JSON_CONTENT_TYPE,
+      JSON.stringify({ exitCode: pageReaderExitCodes.blockedAddress })
+    ],
+    [
+      "a key vmo does not send",
+      VMO_JSON_CONTENT_TYPE,
+      JSON.stringify({
+        exitCode: pageReaderExitCodes.blockedAddress,
+        error: "secret page text",
+        html: ""
+      })
+    ]
+  ])(
+    "fails a 502 answer with %s as reader-failed and reports it without its body",
+    async (_label, contentType, body) => {
+      const reportPageReaderFailure = vi.fn()
+      const server = await startVmoServer(
+        answerWithBody(502, contentType, body)
+      )
+
+      const result = await getRenderedPage(
+        PAGE_URL,
+        new AbortController().signal,
+        buildVmoReadDependencies(server.origin, { reportPageReaderFailure })
+      )
+
+      expect(result).toEqual(buildFailure("reader-failed"))
+      expect(reportPageReaderFailure).toHaveBeenCalledTimes(1)
+      const reported: unknown = reportPageReaderFailure.mock.calls[0]?.[0]
+      expect(reported).toBeInstanceOf(Error)
+      expect((reported as Error).message).not.toContain("secret")
     }
   )
 

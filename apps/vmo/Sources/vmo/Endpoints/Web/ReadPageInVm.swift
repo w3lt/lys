@@ -34,10 +34,15 @@ struct ImageReference: Equatable, Sendable {
 /// elements, don't reach Lys, and Readability can't use class names to leave
 /// out boilerplate.
 ///
-/// When the reader can't read the page, it exits with a non-zero code.
-/// Chromium's own messages are discarded, so the reader's standard error
-/// gives a reason only when its scripts find one, such as an unsupported URL,
-/// a page Chromium couldn't load, or no HTML from Chromium.
+/// Every connection Chromium makes goes through a proxy of the reader's own,
+/// which applies the backend's address rule and the read's bounds to it.
+///
+/// When the reader can't read the page, it exits with a non-zero code: the
+/// backend's `page_reader_exit_codes.json` names the one for a page at a
+/// blocked address, which vmo passes on like any other. Chromium's own
+/// messages are discarded, so the reader's standard error gives a reason only
+/// when its scripts find one, such as an unsupported URL, a page at a blocked
+/// address, a page Chromium couldn't load, or no HTML from Chromium.
 ///
 /// The reference names the `latest` tag, which the image workflow moves to
 /// each image it builds from `main`. ``createProductionContainerManager()``

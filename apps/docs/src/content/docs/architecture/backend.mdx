@@ -18,7 +18,7 @@ the services together.
 
 | Layer                 | Implementation                    | Responsibility                                                                                                                                                                                                                                                                                            |
 | --------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App bootstrap         | `src/app.ts`                      | Registers CORS, SSE support, singleton services, and all routes, and logs through the logger the entry point passes, as Fastify's logger.                                                                                                                                                                 |
+| App bootstrap         | `src/app.ts`                      | Registers the HTTP transport from `src/http.ts` (the request source check, CORS, and SSE support), singleton services, and all routes, and logs through the logger the entry point passes, as Fastify's logger.                                                                                           |
 | Logging               | `src/log.ts`                      | Creates the logger (level `info`, level names, UTC ISO-8601 times); `BackendLogDestination` writes each line to standard output and the day's file in `$LYS_HOME/logs/`; logs uncaught failures at `fatal` and Node's warnings at `warn`; keeps the backend running when an output fails.                 |
 | Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path and the attachments directory under `LYS_HOME`, the system and title prompts, and title limits; loads the logs directory under `LYS_HOME` on its own, before the rest.                                                                               |
 | Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services and the agent service over SQLite records, LLM services without contacting LM Studio, the built-in tools, and the tool approval service.                                                                                    |
@@ -582,9 +582,10 @@ whole credit), `rejected`,
 although its documentation lists no cost for it; the check still uses it
 because only that answer reports the plan's credits, which Test shows. Each
 check sends the key to Tavily, so it is a
-`POST` with a JSON body, which a page on another site cannot send without a
-CORS preflight that the backend refuses; another body is answered with 400, or
-415 for a media type Fastify cannot parse, before the key is read.
+`POST` with a JSON body, which needs a CORS preflight; the backend refuses
+every page but the desktop's before any route runs anyway. Another body is
+answered with 400, or 415 for a media type Fastify cannot parse, before the
+key is read.
 
 ### `read_attachment`
 
@@ -738,6 +739,7 @@ See the [health response contract](/reference/api/#model-health-responses).
 
 | Condition                                                                                                                    | Current behavior                                                                                                                         |
 | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| A request's `Host` is not the backend's own address, or it carries an `Origin` other than the desktop's                      | `403` with `urn:lys:problem:http:request-source-refused` before CORS, body parsing, or any route runs; nothing is read or changed.       |
 | Chat SSE connection closes                                                                                                   | Only that follower ends; the reply and its title keep generating and are stored.                                                         |
 | Reply-stop request                                                                                                           | The reply's upstream request is aborted, the reply is stored interrupted, and followers receive `interrupted`; the title task continues. |
 | Model operation or health-check client disconnects                                                                           | Accepted work continues until success or failure; user cancellation is unavailable.                                                      |

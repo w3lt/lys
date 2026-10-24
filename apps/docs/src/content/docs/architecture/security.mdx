@@ -24,7 +24,7 @@ results go to the backend and on to LM Studio, both on loopback.
 | Boundary                     | Current state                                                                                                                                                                                                                          |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | React UI -> Tauri host       | Trusted application boundary using Tauri `invoke` commands.                                                                                                                                                                            |
-| React UI -> Fastify backend  | Loopback HTTP and SSE only. No auth layer beyond local binding.                                                                                                                                                                        |
+| React UI -> Fastify backend  | Loopback HTTP and SSE only. A request must name the backend's own address as its `Host` and, when it carries an `Origin`, come from the desktop. No auth layer, so any local process is served.                                        |
 | Fastify backend -> LM Studio | Loopback connections to local LM Studio HTTP and WebSocket endpoints.                                                                                                                                                                  |
 | Backend -> SQLite file       | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                                                                                                                                                                                  |
 | Backend -> attachment files  | Local filesystem access to `$LYS_HOME/attachments/`: the files of each chat request are written under the conversation's and the message's identifiers and the file's own name, read for the model, and removed with the conversation. |
@@ -42,6 +42,7 @@ results go to the backend and on to LM Studio, both on loopback.
 | Control                     | What it does                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Loopback host constants     | Backend and LM Studio addresses default to `127.0.0.1`.                                                                                                                                                                                                                                                                                                                                                                      |
+| Request source check        | Before CORS and every route, the backend refuses with `403` a request whose `Host` is not `127.0.0.1:12345` or `localhost:12345`, which stops DNS rebinding, and one that carries an `Origin` other than a desktop origin, which stops a page on another site even for a request that needs no preflight. A request without `Origin`, such as a local script's, is served.                                                   |
 | CORS policy                 | Fastify admits only the `http://localhost:1420` and `http://127.0.0.1:1420` development origins and the `tauri://localhost` app origin.                                                                                                                                                                                                                                                                                      |
 | Zod validation              | Backend validates route bodies, parameters, and query strings; desktop validates SSE payloads and HTTP responses.                                                                                                                                                                                                                                                                                                            |
 | Attachment name rule        | An attachment name is non-empty, neither `.` nor `..`, holds no `/` and no control character (NUL included), and has at most 255 UTF-8 bytes, so it names one entry of its message's folder; the shared schema refuses any other name with `400`. The file store builds every path only from a validated UUIDv7 and such a name, under the attachments directory, and creates each message folder and each file exclusively. |
@@ -76,27 +77,28 @@ results go to the backend and on to LM Studio, both on loopback.
   would need another source for them.
 - Switching a tool or tool calls off does not stop a reply already running;
   it applies from the next message. Stop ends a running reply at once.
-- There is no auth token or CSRF layer on the loopback backend, and it checks
-  neither the `Host` nor the `Origin` header, so a page that uses DNS
-  rebinding can call it like a local process
-  ([#171](https://github.com/w3lt/lys/issues/171)).
-- Nothing ties an answer to an approval prompt to the person. Any caller that
-  reaches the backend, a local process or a page that uses DNS rebinding, can
-  read a waiting prompt from the reply's events and answer it with `allowed`.
+- There is no auth token on the loopback backend. It refuses web pages by
+  their `Host` and `Origin` headers, a page that uses DNS rebinding included,
+  but it serves every request without an `Origin`, so any local process,
+  including one run by another user account on the machine, can call every
+  route ([#211](https://github.com/w3lt/lys/issues/211)).
+- Nothing ties an answer to an approval prompt to the person. Any local
+  process can read a waiting prompt from the reply's events and answer it
+  with `allowed`.
   For the client tools, such as `read_text_file`, `search_files`, and
   `get_location`, the desktop then runs the call with
   the person's account on a reply it follows, including one it starts
   following when the person opens the conversation, and even while the call's
   card still waits for the person. The model reads what the call returns.
   This stays open until callers are authenticated
-  ([#171](https://github.com/w3lt/lys/issues/171)).
+  ([#211](https://github.com/w3lt/lys/issues/211)).
 - Every tool call's full result is stored with its reply: the text of a file
   `read_text_file` read, the matches of `search_files`, the time
   `get_current_time` read, the location `get_location` returned, and the
-  evidence of `web_search` and `read_page`. Any caller that reaches the backend can read
+  evidence of `web_search` and `read_page`. Any local process can read
   it through the conversation and reply-event routes until the conversation is
-  deleted, so a call answered as above exposes the file's text to that caller
-  ([#171](https://github.com/w3lt/lys/issues/171)).
+  deleted, so a call answered as above exposes the file's text to that process
+  ([#211](https://github.com/w3lt/lys/issues/211)).
 - A saved location reaches a model whenever a call of `get_location` runs:
   on Ask me once the person allows it, and on Just run without the person
   seeing the call. The location is then part of that reply's stored result
@@ -106,10 +108,10 @@ results go to the backend and on to LM Studio, both on loopback.
   `$LYS_HOME/attachments`, readable by the person's OS account and any process
   running as it. The folders and files are created with the process's default
   mode, so the umask decides who else can read them; keep `$LYS_HOME`
-  readable by the account alone. Any caller that reaches the backend can send a chat request
+  readable by the account alone. Any local process can send a chat request
   with attachments, so it can write up to 20 MiB of files per message there,
   and a `read_attachment` result is stored with its reply like every other
-  tool result ([#171](https://github.com/w3lt/lys/issues/171)).
+  tool result ([#211](https://github.com/w3lt/lys/issues/211)).
 - `read_page` runs the scripts of pages the model chooses in Chromium inside
   vmo's micro VM, with Chromium's own sandbox off, so the VM alone confines
   them. The browser is the Alpine `chromium-headless-shell` package of the
@@ -276,12 +278,11 @@ key is saved in Settings → Secrets.
   check says only whether it works, and searches return only results. Such an
   `allowed` answer can also make the desktop run a file tool's call; see
   [Candid limits](#candid-limits).
-- **Web pages.** A page open in the person's browser cannot do either from its
-  own site: the key check and a chat request are `POST`s with a JSON body,
-  which need a CORS preflight that the backend refuses for every origin but
-  the desktop's. A page that uses DNS rebinding reaches the backend under its
-  own name, needs no preflight, and can do what a local process can
-  ([#171](https://github.com/w3lt/lys/issues/171)).
+- **Web pages.** A page open in the person's browser cannot do either. Before
+  any route runs, the backend refuses a request that carries an `Origin` other
+  than the desktop's, and one whose `Host` is not its own address, which is
+  what a page that uses DNS rebinding sends. The key check and a chat request
+  are also `POST`s with a JSON body, which need a CORS preflight.
 
 ## Practical implication
 

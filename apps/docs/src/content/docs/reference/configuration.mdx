@@ -381,9 +381,11 @@ Streamable HTTP (`http`):
   protected by the file's owner-only permissions, like the Tavily API key.
   The backend never sends them back: the server list carries only each
   server's name, transport, and state. No log line holds a setting, but a
-  stdio server's standard error lines and a remote server's error answers
-  are logged as the server wrote them, so a server that prints a secret puts
-  it in the [backend log](/operate/logging/).
+  stdio server's standard error lines and the error messages a server sends
+  are logged as the server wrote them, each cut to 2,000 characters, so a
+  server that prints a secret puts it in the
+  [backend log](/operate/logging/). An HTTP error answer is logged only by
+  its status.
 - The backend reads the group when it starts and whenever the desktop asks it
   to sync, which the MCP pane does after each save. It takes only `mcp`,
   ignoring every other group, and never writes the file. When the file

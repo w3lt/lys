@@ -70,9 +70,6 @@ const HEADER_VALUE_PATTERN = /^(?:[!-~](?:[\t !-~]*[!-~])?)?$/
 /** Finds a control character (Unicode general category Cc), such as a line break. */
 const CONTROL_CHARACTER_PATTERN = /\p{Cc}/u
 
-/** Finds each tab. */
-const TAB_PATTERN = /\t/g
-
 /** Finds white space or a control character. */
 const SPACE_OR_CONTROL_PATTERN = /[\p{White_Space}\p{Cc}]/u
 
@@ -107,7 +104,7 @@ const LOOPBACK_HOSTS: ReadonlySet<string> = new Set([
  * @returns True when a line break or another control character is found.
  */
 function hasControlCharacterOtherThanTab(value: string): boolean {
-  return CONTROL_CHARACTER_PATTERN.test(value.replace(TAB_PATTERN, ""))
+  return CONTROL_CHARACTER_PATTERN.test(value.replaceAll("\t", ""))
 }
 
 /**

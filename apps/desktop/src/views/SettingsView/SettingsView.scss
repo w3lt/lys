@@ -1517,12 +1517,18 @@
   gap: 10px;
 }
 
-/* A rejected save with several problems lists each field to fix, in field order. */
+/*
+ * A rejected save with several problems lists each field to fix, in field
+ * order. The summary is a fieldset, so the browser's fieldset margin, padding,
+ * border, and min-content width are reset, and its heading and list stack as
+ * ordinary blocks, because a fieldset is not a dependable flex container in
+ * every WebKit version.
+ */
 .settings-view__mcp-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  min-inline-size: 0;
+  margin: 0;
   padding: 12px 14px;
+  border: 0;
   border-left: 2px solid var(--app-text-danger);
 }
 
@@ -1532,7 +1538,7 @@
 }
 
 .settings-view__mcp-summary h3 {
-  margin: 0;
+  margin: 0 0 8px;
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 500;

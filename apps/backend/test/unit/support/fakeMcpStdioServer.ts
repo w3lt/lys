@@ -24,6 +24,9 @@ type ReceivedMessage = {
   params?: Record<string, unknown>
 }
 
+/** Identifier of the request being answered; absent for a notification. */
+type RequestId = number | string | undefined
+
 const options = JSON.parse(process.argv[2] ?? "{}") as FakeServerOptions
 
 /**
@@ -41,7 +44,7 @@ function send(message: unknown): void {
  * @param id - Request identifier.
  * @param result - Result to send.
  */
-function answer(id: number | string | undefined, result: unknown): void {
+function answer(id: RequestId, result: unknown): void {
   send({ jsonrpc: "2.0", id, result })
 }
 
@@ -51,7 +54,7 @@ function answer(id: number | string | undefined, result: unknown): void {
  * @param id - Request identifier.
  * @param message - Error message.
  */
-function refuse(id: number | string | undefined, message: string): void {
+function refuse(id: RequestId, message: string): void {
   send({ jsonrpc: "2.0", id, error: { code: -32602, message } })
 }
 
@@ -63,10 +66,7 @@ function refuse(id: number | string | undefined, message: string): void {
  * @param lineBytes - Bytes of the whole line, at least those of an empty
  * text result.
  */
-function answerWithLineOf(
-  id: number | string | undefined,
-  lineBytes: number
-): void {
+function answerWithLineOf(id: RequestId, lineBytes: number): void {
   const emptyLine = JSON.stringify({
     jsonrpc: "2.0",
     id,
@@ -82,10 +82,7 @@ function answerWithLineOf(
  * @param id - Request identifier.
  * @param params - Call parameters.
  */
-function callTool(
-  id: number | string | undefined,
-  params: Record<string, unknown>
-): void {
+function callTool(id: RequestId, params: Record<string, unknown>): void {
   const callArguments = params["arguments"] ?? {}
   switch (params["name"]) {
     case "slow":

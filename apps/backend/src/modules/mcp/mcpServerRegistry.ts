@@ -173,7 +173,7 @@ export default class McpServerRegistry {
           Object.freeze({
             name: entry.settings.name,
             transport: entry.settings.transport,
-            state: entry.session.state
+            state: entry.session.reportedState
           })
         )
       )
@@ -235,7 +235,22 @@ export default class McpServerRegistry {
     for (const entry of this.#entries.values()) entry.session.stop()
     this.#entries = new Map()
     await this.#settingsReads
-    while (this.#tasks.size > 0) await Promise.allSettled([...this.#tasks])
+    await this.#settleTasks()
+  }
+
+  /**
+   * Waits until no background task is left.
+   *
+   * @returns A promise that settles once the tracked tasks, and every task
+   * they start while it waits, have settled.
+   * @remarks A settling task can start another, such as an opening that
+   * finishes after {@link close} and closes its connection, so the wait
+   * repeats until the set stays empty.
+   */
+  async #settleTasks(): Promise<void> {
+    if (this.#tasks.size === 0) return
+    await Promise.allSettled(this.#tasks)
+    await this.#settleTasks()
   }
 
   /**

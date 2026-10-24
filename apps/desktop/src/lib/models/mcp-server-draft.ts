@@ -126,8 +126,8 @@ const HEADER_VALUE_LIMIT_PROBLEM = `A header value is up to ${MAXIMUM_MCP_HEADER
 /** Problem of a server whose name another server already has. */
 const DUPLICATE_NAME_PROBLEM = "Another MCP server already has this name."
 
-/** Finds spaces and tabs at either end of a header value. */
-const HEADER_VALUE_EDGE_PATTERN = /^[ \t]+|[ \t]+$/g
+/** Characters removed from either end of a header value. */
+const HEADER_VALUE_EDGE_CHARACTERS: ReadonlySet<string> = new Set([" ", "\t"])
 
 /**
  * Builds the draft of a saved server, for editing it.
@@ -234,8 +234,27 @@ function readHeaderLine(
 ): { readonly name: string; readonly value: string } | undefined {
   const separator = line.indexOf(":")
   if (separator === -1) return undefined
-  const value = line.slice(separator + 1).replace(HEADER_VALUE_EDGE_PATTERN, "")
+  const value = trimHeaderValueEdges(line.slice(separator + 1))
   return { name: line.slice(0, separator).trim(), value }
+}
+
+/**
+ * Removes the spaces and tabs at either end of a header value.
+ *
+ * @param text - Text after the line's first `:`.
+ * @returns The text without spaces or tabs at either end; other white space
+ * stays, so the shared rule reports it.
+ * @remarks Reads each character at most once, so a long run of spaces costs
+ * linear time, which an end-anchored pattern does not guarantee.
+ */
+function trimHeaderValueEdges(text: string): string {
+  let start = 0
+  let end = text.length
+  while (start < end && HEADER_VALUE_EDGE_CHARACTERS.has(text.charAt(start)))
+    start += 1
+  while (end > start && HEADER_VALUE_EDGE_CHARACTERS.has(text.charAt(end - 1)))
+    end -= 1
+  return text.slice(start, end)
 }
 
 /** One draft read as candidate settings, before the shared schema. */
@@ -315,7 +334,9 @@ function readHttpDraft(draft: McpServerDraft): DraftCandidateRead {
 function isDraftField(
   key: PropertyKey | undefined
 ): key is McpServerDraftField {
-  return MCP_SERVER_DRAFT_FIELDS.some((field) => field === key)
+  const draftFieldKeys: readonly (PropertyKey | undefined)[] =
+    MCP_SERVER_DRAFT_FIELDS
+  return draftFieldKeys.includes(key)
 }
 
 /**

@@ -44,12 +44,7 @@ export class McpResponseTooLargeError extends Error {
  */
 class McpResponseByteLimit implements Transformer<Uint8Array, Uint8Array> {
   /** Bytes passed on so far. */
-  #readBytes: number
-
-  /** Creates a counter that has read nothing. */
-  public constructor() {
-    this.#readBytes = 0
-  }
+  #readBytes = 0
 
   /**
    * Passes on one chunk, or fails the body once it passes the limit.

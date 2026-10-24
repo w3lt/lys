@@ -150,7 +150,7 @@ export default class McpServerSession {
    *
    * @returns A frozen state.
    */
-  public get state(): McpServerState {
+  public get reportedState(): McpServerState {
     switch (this.#state.status) {
       case "connecting":
         return Object.freeze({ status: "connecting" })

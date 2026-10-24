@@ -452,7 +452,7 @@ describe("buildMcpToolCatalog", () => {
     expect(
       readListedDescription({
         name: "find",
-        description: "  Finds​ notes‮.\u{E0041}  ",
+        description: "  Finds\u200B notes\u202E.\u{E0041}  ",
         inputSchema: EMPTY_INPUT_SCHEMA
       })
     ).toBe("Finds notes.")

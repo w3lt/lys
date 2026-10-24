@@ -483,7 +483,7 @@ type McpDraftProblemSummaryProps = {
   /** Fields with a problem, in the editor's order; two or more. */
   readonly problems: readonly McpDraftProblemListing[]
   /** Host the parent moves focus to when a save is rejected. */
-  readonly summaryRef: RefObject<HTMLDivElement | null>
+  readonly summaryRef: RefObject<HTMLFieldSetElement | null>
   /** Requests that the parent move focus to one field. */
   readonly onFieldSelect: (field: McpServerDraftField) => void
 }
@@ -506,11 +506,10 @@ function McpDraftProblemSummary({
   const headingId = useId()
 
   return (
-    <div
+    <fieldset
       aria-labelledby={headingId}
       className="settings-view__mcp-summary"
       ref={summaryRef}
-      role="group"
       tabIndex={-1}
     >
       <h3 id={headingId}>
@@ -525,7 +524,7 @@ function McpDraftProblemSummary({
           />
         ))}
       </ul>
-    </div>
+    </fieldset>
   )
 }
 
@@ -566,7 +565,7 @@ type McpDraftFocusHosts = {
   /** Field hosts. */
   readonly fieldRefs: McpFieldRefs
   /** Problem summary host. */
-  readonly summaryRef: RefObject<HTMLDivElement | null>
+  readonly summaryRef: RefObject<HTMLFieldSetElement | null>
 }
 
 /**
@@ -594,7 +593,7 @@ function useMcpDraftFocus(
   const environmentRef = useRef<HTMLTextAreaElement>(null)
   const urlRef = useRef<HTMLInputElement>(null)
   const headersRef = useRef<HTMLTextAreaElement>(null)
-  const summaryRef = useRef<HTMLDivElement>(null)
+  const summaryRef = useRef<HTMLFieldSetElement>(null)
   const fieldRefs: McpFieldRefs = {
     name: nameRef,
     command: commandRef,

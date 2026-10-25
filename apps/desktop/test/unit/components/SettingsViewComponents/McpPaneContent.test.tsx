@@ -1,8 +1,12 @@
 import type { McpServerList } from "@lys/protocol"
-import { mcpServerSettingsSchema } from "@lys/share"
+import { mcpServerSettingsSchema, type ToolDefinition } from "@lys/share"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
+import {
+  calculateToolTokenEstimate,
+  formatToolTokenEstimate
+} from "@/components/SettingsViewComponents/tool-presentation"
 import {
   buildJsonResponse,
   createTransportFailure,
@@ -18,6 +22,7 @@ import {
   buildMcpServerStatus,
   CONNECTING_MCP_STATE
 } from "../../support/mcpFixtures"
+import { buildLlmInfo } from "../../support/modelFixtures"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import { waitForRenderedWork } from "../../support/rendering"
 import { createControlledPromise } from "../../support/settlement"
@@ -36,6 +41,7 @@ import {
   INVENTORY_ROUTE,
   loadFreshSettingsView
 } from "../../support/settingsViewFixtures"
+import { buildMcpToolDefinition } from "../../support/toolFixtures"
 
 /** Route key of the list read. */
 const LIST_ROUTE = "GET /api/v1/mcp/servers"
@@ -46,14 +52,49 @@ const SYNC_ROUTE = "POST /api/v1/mcp/servers/sync"
 /** Route key of a reconnect of the `notes` server. */
 const RECONNECT_NOTES_ROUTE = "POST /api/v1/mcp/servers/notes/reconnect"
 
+/** Route key of the backend's tool list. */
+const TOOLS_ROUTE = "GET /api/v1/tools"
+
+/** Tools the connected `files` server lists, in the server's order. */
+const FILES_TOOLS = ["read_file", "write_file", "search"].map((name) =>
+  buildMcpToolDefinition("files", name)
+)
+
 /** Both stored servers: the command server connected, the URL one refused. */
 const STORED_LIST = buildMcpServerList([
   buildMcpServerStatus("files", "stdio", buildConnectedMcpState(3)),
   buildMcpServerStatus("notes", "http", buildFailedMcpState("unauthorized"))
 ])
 
-/** Saved values that can be secrets, which the list never shows. */
-const SECRET_VALUES = ["debug", "Bearer fixture-0000"]
+/** Saved values that can be secrets, which the pane never shows as text. */
+const SECRET_VALUES = ["debug", "fixture-0000"]
+
+/** Problem of the stored `notes` server, which refused the request. */
+const UNAUTHORIZED_TEXT =
+  "The server refused the request. Check the token and the headers."
+
+/** A loaded model trained for tool use, so the tools are offered. */
+const TRAINED_RUNTIME: RuntimeArrangement = {
+  ...READY_RUNTIME,
+  modelInventory: {
+    status: "ready",
+    models: [
+      buildLlmInfo("qwen3-8b", { loaded: true, trainedForToolUse: true })
+    ]
+  }
+}
+
+/**
+ * Formats what some tools cost per request, as the pane says it.
+ *
+ * @param tools - Tools switched on.
+ * @returns The estimate, such as `~216 tok`.
+ */
+function formatToolCost(tools: readonly ToolDefinition[]): string {
+  return formatToolTokenEstimate(
+    tools.reduce((total, tool) => total + calculateToolTokenEstimate(tool), 0)
+  )
+}
 
 /**
  * Builds a route that answers with a server list.
@@ -66,8 +107,8 @@ function answerList(list: McpServerList): BackendRoute {
 }
 
 /**
- * Starts a native host holding the stored settings document, whose writes
- * succeed or fail as the case says.
+ * Starts a native host holding the stored settings document and no tools
+ * of the desktop's own, whose writes succeed or fail as the case says.
  *
  * @param saveSettings - Answer of every write; succeeds by default.
  * @returns The host observation handle.
@@ -75,26 +116,31 @@ function answerList(list: McpServerList): BackendRoute {
 function startSettingsHost(saveSettings: () => unknown = () => null) {
   return startNativeHostFake({
     load_settings: () => STORED_SETTINGS_DOCUMENT,
-    save_settings: saveSettings
+    save_settings: saveSettings,
+    list_tools: () => []
   })
 }
 
 /**
  * Renders the settings view on the MCP pane, with the stored settings in the
- * application store, and waits for the pane body and its first read.
+ * application store, and waits for the pane body and its first reads.
  *
  * @param routes - Backend routes the case needs besides the inventory read;
- * the stored list answers the list read unless the case declares it.
- * @param runtime - Backend, LM Studio, and model facts.
+ * the stored list answers the list read and the `files` tools the tool
+ * read unless the case declares them.
+ * @param runtime - Backend, LM Studio, and model facts; a model trained for
+ * tool use by default.
  * @returns The stores and the backend observation handle.
  */
 async function startMcpPane(
   routes: BackendRoutes = {},
-  runtime: RuntimeArrangement = READY_RUNTIME
+  runtime: RuntimeArrangement = TRAINED_RUNTIME
 ) {
   const backend = startBackendFake({
     [INVENTORY_ROUTE]: buildInventoryRoute(runtime),
     [LIST_ROUTE]: answerList(STORED_LIST),
+    [TOOLS_ROUTE]: () =>
+      buildJsonResponse(200, { tools: FILES_TOOLS, unavailableTools: [] }),
     ...routes
   })
   const { useLysStore, SettingsView } = await loadFreshSettingsView(
@@ -102,25 +148,26 @@ async function startMcpPane(
     runtime
   )
   const { useMcpServerStore } = await import("@/lib/store/mcp-servers")
+  const { useToolStore } = await import("@/lib/store/tools")
   useLysStore.setState({ settings: STORED_SETTINGS })
   render(<SettingsView onDone={vi.fn()} />)
   // The closing note is withheld until the lazily loaded pane body is shown.
   await screen.findByText(/^Saved in settings\.json in Lys's home folder/)
   await waitForRenderedWork()
-  return { useLysStore, useMcpServerStore, backend }
+  return { useLysStore, useMcpServerStore, useToolStore, backend }
 }
 
 /**
- * Lists the route keys of the backend requests other than the inventory
- * read, in arrival order.
+ * Lists the route keys of the backend's MCP requests, in arrival order.
  *
  * @param backend - Backend observation handle.
- * @returns The route keys.
+ * @returns The route keys, without the inventory and tool reads.
  */
 function listMcpRouteKeys(backend: BackendFake): string[] {
   return backend.requests
     .map((request) => request.routeKey)
     .filter((routeKey) => routeKey !== INVENTORY_ROUTE)
+    .filter((routeKey) => routeKey !== TOOLS_ROUTE)
 }
 
 /**
@@ -151,6 +198,33 @@ function getServerRow(serverName: string): HTMLElement {
 }
 
 /**
+ * Gets the button that shows or hides one server's details.
+ *
+ * @param serverName - Server name.
+ * @returns The toggle, named by the server.
+ */
+function getServerToggle(serverName: string): HTMLElement {
+  return within(getServerRow(serverName)).getByRole("button", {
+    name: serverName
+  })
+}
+
+/**
+ * Shows one server's details.
+ *
+ * @param user - User-event session of the case.
+ * @param serverName - Server name.
+ * @returns The server's row.
+ */
+async function expandServer(
+  user: ReturnType<typeof userEvent.setup>,
+  serverName: string
+): Promise<HTMLElement> {
+  await user.click(getServerToggle(serverName))
+  return getServerRow(serverName)
+}
+
+/**
  * Gets the pane's status line, which speaks for the servers as a whole.
  *
  * @returns The status named MCP status.
@@ -160,8 +234,21 @@ function getPaneStatus(): HTMLElement {
 }
 
 /**
- * Removes one saved server through its row, confirming the removal, and
- * waits for the save.
+ * Opens the editor of a new server from Add server.
+ *
+ * @param user - User-event session of the case.
+ * @returns The editor form.
+ */
+async function openNewServerEditor(
+  user: ReturnType<typeof userEvent.setup>
+): Promise<HTMLElement> {
+  await user.click(screen.getByRole("button", { name: "Add server" }))
+  return screen.getByRole("form", { name: "New MCP server" })
+}
+
+/**
+ * Removes one saved server through its details, confirming the removal,
+ * and waits for the save.
  *
  * @param user - User-event session of the case.
  * @param serverName - Name of the server to remove.
@@ -170,21 +257,24 @@ async function removeServer(
   user: ReturnType<typeof userEvent.setup>,
   serverName: string
 ): Promise<void> {
+  const row = getServerRow(serverName)
+  if (getServerToggle(serverName).getAttribute("aria-expanded") === "false") {
+    await user.click(getServerToggle(serverName))
+  }
   await user.click(
-    within(getServerRow(serverName)).getByRole("button", {
-      name: `Remove ${serverName}`
-    })
+    within(row).getByRole("button", { name: `Remove ${serverName}` })
   )
   await user.click(
-    within(
-      screen.getByRole("group", { name: `Remove ${serverName}?` })
-    ).getByRole("button", { name: `Remove ${serverName}` })
+    within(within(row).getByRole("group", { name: /^remove / })).getByRole(
+      "button",
+      { name: `Remove ${serverName}` }
+    )
   )
   await waitForRenderedWork()
 }
 
 describe("McpPaneContent", () => {
-  it("lists the saved servers with how Lys reaches them and their state, never a secret", async () => {
+  it("lists the saved servers with how each runs, what it reaches, and its state, never a secret", async () => {
     startSettingsHost()
     const { backend } = await startMcpPane()
 
@@ -193,27 +283,170 @@ describe("McpPaneContent", () => {
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        "Servers that give the agents more tools. Each runs as you, so add only servers you trust."
+        "Programs and services that give the agents more tools. Local ones Lys starts on this machine; remote ones it reaches by URL. Each runs as you, so add only servers you trust."
       )
     ).toBeInTheDocument()
     const section = screen.getByRole("region", { name: "servers" })
-    expect(section).toHaveTextContent("2 of 16")
-    const files = getServerRow("files")
-    expect(files).toHaveTextContent("Command")
-    expect(files).toHaveTextContent(
-      "/opt/homebrew/bin/npx -y @modelcontextprotocol/server-filesystem /tmp"
+    expect(section).toHaveTextContent(
+      `1 of 2 connected · 3 tools · ${formatToolCost(FILES_TOOLS)} per request`
     )
-    expect(files).toHaveTextContent("Connected · 3 tools")
-    const notes = getServerRow("notes")
-    expect(notes).toHaveTextContent("URL")
-    expect(notes).toHaveTextContent("https://mcp.example.test/notes")
-    expect(notes).toHaveTextContent(
-      "Failed: The server refused the request. Check the headers, such as Authorization."
+    const files = getServerToggle("files")
+    expect(files).toHaveAttribute("aria-expanded", "false")
+    expect(files).toHaveAccessibleDescription(
+      "stdio Running /opt/homebrew/bin/npx -y @modelcontextprotocol/server-filesystem /tmp 3 tools"
+    )
+    expect(getServerToggle("notes")).toHaveAccessibleDescription(
+      "http failed https://mcp.example.test/notes"
     )
     for (const secret of SECRET_VALUES) {
       expect(section).not.toHaveTextContent(secret)
     }
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE])
+  })
+
+  it("shows one server's state, tools, approval, and configuration at a time, never a secret", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+
+    const files = await expandServer(user, "files")
+
+    expect(getServerToggle("files")).toHaveAttribute("aria-expanded", "true")
+    expect(within(files).getByRole("status")).toHaveTextContent(
+      "files: Running3 tools listed"
+    )
+    expect(
+      within(files).getByRole("button", { name: "Restart files" })
+    ).toHaveTextContent("Restart")
+    const tools = within(files).getByRole("region", { name: "tools" })
+    expect(tools).toHaveTextContent(
+      `3 of 3 on · ${formatToolCost(FILES_TOOLS)}`
+    )
+    const chips = within(
+      within(tools).getByRole("list", { name: "Tools of files" })
+    ).getAllByRole("button")
+    expect(chips.map((chip) => chip.textContent)).toEqual([
+      "read_file",
+      "write_file",
+      "search"
+    ])
+    for (const chip of chips) {
+      expect(chip).toHaveAttribute("aria-pressed", "true")
+    }
+    expect(chips[0]).toHaveAccessibleDescription("Runs read_file on files.")
+    const approval = within(files).getByRole("group", {
+      name: "Before its tools run"
+    })
+    expect(
+      within(approval).getByRole("button", { name: "Ask me" })
+    ).toHaveAttribute("aria-pressed", "true")
+    expect(approval).toHaveAccessibleDescription(
+      "You see each call and its arguments first. Nothing runs until you say yes."
+    )
+    const configuration = within(files).getByRole("region", {
+      name: "configuration"
+    })
+    expect(configuration).toHaveTextContent(
+      "transportstdio · child process of Lyscommand/opt/homebrew/bin/npxarguments-y @modelcontextprotocol/server-filesystem /tmpenvironmentLOG_LEVEL"
+    )
+
+    const notes = await expandServer(user, "notes")
+
+    expect(getServerToggle("files")).toHaveAttribute("aria-expanded", "false")
+    expect(within(files).queryByRole("region")).toBeNull()
+    expect(within(notes).getByRole("status")).toHaveTextContent(
+      `notes: Failed${UNAUTHORIZED_TEXT}`
+    )
+    expect(
+      within(notes).getByRole("region", { name: "tools" })
+    ).toHaveTextContent(
+      "It stopped before listing any tools. Fix the cause above, then retry."
+    )
+    expect(
+      within(notes).getByRole("region", { name: "configuration" })
+    ).toHaveTextContent(
+      "transportstreamable httpurlhttps://mcp.example.test/notessign-inbearer tokenheadersnone"
+    )
+    for (const secret of SECRET_VALUES) {
+      expect(
+        screen.getByRole("region", { name: "servers" })
+      ).not.toHaveTextContent(secret)
+    }
+  })
+
+  it("switches a server's tool off and on from its chip, which the application store saves", async () => {
+    const host = startSettingsHost()
+    const { useLysStore } = await startMcpPane()
+    const user = userEvent.setup()
+    const files = await expandServer(user, "files")
+    const readFile = within(files).getByRole("button", { name: "read_file" })
+
+    await user.click(readFile)
+    await waitForRenderedWork()
+
+    expect(readFile).toHaveAttribute("aria-pressed", "false")
+    expect(
+      useLysStore.getState().settings.tools.switches.get(FILES_TOOLS[0].name)
+    ).toBe(false)
+    expect(getServerToggle("files")).toHaveAccessibleDescription(
+      expect.stringMatching(/ 2 of 3 tools$/)
+    )
+    expect(
+      within(files).getByRole("region", { name: "tools" })
+    ).toHaveTextContent(`2 of 3 on · ${formatToolCost(FILES_TOOLS.slice(1))}`)
+    expect(listWrittenDocuments(host.commands).at(-1)).toEqual({
+      ...STORED_SETTINGS_DOCUMENT,
+      tools: {
+        ...STORED_SETTINGS_DOCUMENT.tools,
+        switches: {
+          ...STORED_SETTINGS_DOCUMENT.tools.switches,
+          [FILES_TOOLS[0].name]: false
+        }
+      }
+    })
+
+    await user.click(readFile)
+    await waitForRenderedWork()
+
+    expect(readFile).toHaveAttribute("aria-pressed", "true")
+    expect(
+      useLysStore.getState().settings.tools.switches.get(FILES_TOOLS[0].name)
+    ).toBe(true)
+  })
+
+  it("sets every tool of a server to Just run or Ask me at once, and shows differing choices as neither", async () => {
+    startSettingsHost()
+    const { useLysStore } = await startMcpPane()
+    const user = userEvent.setup()
+    const files = await expandServer(user, "files")
+    const approval = within(files).getByRole("group", {
+      name: "Before its tools run"
+    })
+
+    await user.click(within(approval).getByRole("button", { name: "Just run" }))
+    await waitForRenderedWork()
+
+    const justRun = useLysStore.getState().settings.tools.justRunToolNames
+    for (const tool of FILES_TOOLS) {
+      expect(justRun.has(tool.name)).toBe(true)
+    }
+    expect(justRun.has("read_page")).toBe(true)
+    expect(
+      within(approval).getByRole("button", { name: "Just run" })
+    ).toHaveAttribute("aria-pressed", "true")
+
+    useLysStore.getState().updateToolApproval(FILES_TOOLS[1].name, "ask")
+    await waitForRenderedWork()
+
+    for (const name of ["Ask me", "Just run"]) {
+      expect(within(approval).getByRole("button", { name })).toHaveAttribute(
+        "aria-pressed",
+        "false"
+      )
+    }
+    expect(approval).toHaveAccessibleDescription(
+      "Some of its tools ask first and some run at once. Choose one for all of them."
+    )
   })
 
   it("lists the saved servers without state while the backend is not running, and asks nothing of it", async () => {
@@ -222,30 +455,36 @@ describe("McpPaneContent", () => {
       {},
       buildUnreachableRuntime("stopped")
     )
+    const user = userEvent.setup()
 
     expect(getPaneStatus()).toHaveTextContent(
       "Start the backend in Settings → Runtime to connect to MCP servers."
     )
-    expect(getServerRow("files")).not.toHaveTextContent("Connected")
+    expect(screen.getByRole("region", { name: "servers" })).toHaveTextContent(
+      "2 saved"
+    )
+    expect(getServerToggle("files")).toHaveAccessibleDescription(
+      expect.stringContaining("Not connected")
+    )
+    const files = await expandServer(user, "files")
+    expect(within(files).getByRole("status")).toHaveTextContent(
+      "files: Not connectedLys connects once the backend runs."
+    )
     expect(
-      within(getServerRow("files")).getByRole("status")
-    ).toBeEmptyDOMElement()
-    expect(
-      within(getServerRow("files")).getByRole("button", {
-        name: "Reconnect files"
-      })
+      within(files).getByRole("button", { name: "Start files" })
     ).toBeDisabled()
     expect(
-      within(getServerRow("files")).getByRole("button", { name: "Edit files" })
+      within(files).getByRole("button", { name: "Edit files" })
     ).toBeEnabled()
     expect(backend.requests).toEqual([])
   })
 
-  it("says so when no server is saved", async () => {
+  it("offers the two kinds of server when none is saved, each opening its editor", async () => {
     startSettingsHost()
     const { useLysStore } = await startMcpPane({
       [LIST_ROUTE]: answerList(buildMcpServerList([]))
     })
+    const user = userEvent.setup()
 
     useLysStore.setState({
       settings: { ...STORED_SETTINGS, mcp: { servers: [] } }
@@ -254,13 +493,28 @@ describe("McpPaneContent", () => {
 
     expect(
       screen.getByText(
-        "No MCP servers yet. Add one to give the agents its tools."
+        "No servers yet. Each one gives the agents more tools: your issue tracker, a database, a repository. Add one by the command that starts it, or by its URL."
       )
     ).toBeInTheDocument()
     expect(screen.queryByRole("list", { name: "MCP servers" })).toBeNull()
+    expect(screen.getByRole("region", { name: "servers" })).toHaveTextContent(
+      "none yet"
+    )
+    const remote = screen.getByRole("button", { name: "Remote server" })
+    expect(remote).toHaveAccessibleDescription(
+      "http https://mcp.example.com/mcp"
+    )
+
+    await user.click(remote)
+
+    const form = screen.getByRole("form", { name: "New MCP server" })
+    expect(
+      within(form).getByRole("radio", { name: "Remote server" })
+    ).toBeChecked()
+    expect(within(form).getByRole("textbox", { name: "URL" })).toBeRequired()
   })
 
-  it("adds a command server, applies the saved list, and focuses the new server", async () => {
+  it("adds a local program, applies the saved list, and shows the new server with Edit focused", async () => {
     const host = startSettingsHost()
     const syncedList = buildMcpServerList([
       ...STORED_LIST.servers,
@@ -271,30 +525,40 @@ describe("McpPaneContent", () => {
     })
     const user = userEvent.setup()
 
-    await user.click(screen.getByRole("button", { name: "Add server" }))
-    const form = screen.getByRole("form", { name: "New MCP server" })
-    expect(within(form).getByLabelText("Name")).toHaveFocus()
-    await user.type(within(form).getByLabelText("Name"), "tools")
+    const form = await openNewServerEditor(user)
+    expect(
+      within(form).getByRole("heading", { name: "new server" })
+    ).toBeInTheDocument()
+    expect(
+      within(form).getByRole("radio", { name: "Local program" })
+    ).toBeChecked()
+    expect(within(form).getByRole("textbox", { name: "Name" })).toHaveFocus()
+    await user.type(
+      within(form).getByRole("textbox", { name: "Name" }),
+      "tools"
+    )
     await user.type(
       within(form).getByRole("textbox", { name: "Command" }),
       "/usr/bin/tools"
     )
     await user.type(
-      within(form).getByLabelText("Arguments"),
-      "--stdio{Enter}--quiet"
+      within(form).getByRole("textbox", { name: "Arguments" }),
+      '--stdio "two words"'
     )
+    await user.click(within(form).getByRole("button", { name: "add variable" }))
+    await user.keyboard("TOKEN")
     await user.type(
-      within(form).getByLabelText("Environment"),
-      "TOKEN=fixture-1111"
+      within(form).getByLabelText("Value of variable 1"),
+      "fixture-1111"
     )
-    await user.click(within(form).getByRole("button", { name: "Save" }))
+    await user.click(within(form).getByRole("button", { name: "Add server" }))
     await waitForRenderedWork()
 
     const added = mcpServerSettingsSchema.parse({
       name: "tools",
       transport: "stdio",
       command: "/usr/bin/tools",
-      arguments: ["--stdio", "--quiet"],
+      arguments: ["--stdio", "two words"],
       environment: [{ name: "TOKEN", value: "fixture-1111" }]
     })
     expect(listWrittenDocuments(host.commands)).toEqual([
@@ -306,10 +570,64 @@ describe("McpPaneContent", () => {
     expect(useLysStore.getState().settings.mcp.servers).toHaveLength(3)
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, SYNC_ROUTE])
     expect(screen.queryByRole("form")).toBeNull()
-    expect(getServerRow("tools")).toHaveTextContent("Connecting…")
+    expect(getServerToggle("tools")).toHaveAttribute("aria-expanded", "true")
+    expect(within(getServerRow("tools")).getByRole("status")).toHaveTextContent(
+      "tools: Startingstarted · waiting for initialize"
+    )
     expect(
       within(getServerRow("tools")).getByRole("button", { name: "Edit tools" })
     ).toHaveFocus()
+  })
+
+  it("adds a remote server whose token is saved as its Authorization header, hidden until shown", async () => {
+    const host = startSettingsHost()
+    await startMcpPane({ [SYNC_ROUTE]: answerList(STORED_LIST) })
+    const user = userEvent.setup()
+
+    const form = await openNewServerEditor(user)
+    await user.click(within(form).getByRole("radio", { name: "Remote server" }))
+    await user.type(within(form).getByRole("textbox", { name: "Name" }), "docs")
+    await user.type(
+      within(form).getByRole("textbox", { name: "URL" }),
+      "https://docs.example.test/mcp"
+    )
+    const signIn = within(form).getByRole("group", { name: "Sign-in" })
+    expect(signIn).toHaveAccessibleDescription(
+      "Anyone who can reach the URL can use it. Fine for servers on your own network."
+    )
+    expect(within(form).queryByLabelText("Token")).toBeNull()
+    await user.click(within(signIn).getByRole("button", { name: "Token" }))
+    const token = within(form).getByLabelText("Token")
+    expect(signIn).toHaveAccessibleDescription(
+      "Sent as Authorization: Bearer … with each request, and saved in plain text."
+    )
+    await user.type(token, "fixture-2222")
+    expect(token).toHaveAttribute("type", "password")
+    const showToken = within(form).getByRole("button", { name: "Show token" })
+    await user.click(showToken)
+    expect(token).toHaveAttribute("type", "text")
+    expect(showToken).toHaveAttribute("aria-pressed", "true")
+    await user.click(within(form).getByRole("button", { name: "add header" }))
+    await user.keyboard("X-Workspace")
+    await user.type(within(form).getByLabelText("Value of header 1"), "lys")
+    await user.click(within(form).getByRole("button", { name: "Add server" }))
+    await waitForRenderedWork()
+
+    const added = mcpServerSettingsSchema.parse({
+      name: "docs",
+      transport: "http",
+      url: "https://docs.example.test/mcp",
+      headers: [
+        { name: "Authorization", value: "Bearer fixture-2222" },
+        { name: "X-Workspace", value: "lys" }
+      ]
+    })
+    expect(listWrittenDocuments(host.commands)).toEqual([
+      {
+        ...STORED_SETTINGS_DOCUMENT,
+        mcp: { servers: [...STORED_MCP_SETTINGS.servers, added] }
+      }
+    ])
   })
 
   it("shows each field's first problem on Save, focuses a summary that leads to each, and saves nothing", async () => {
@@ -317,11 +635,16 @@ describe("McpPaneContent", () => {
     await startMcpPane()
     const user = userEvent.setup()
 
-    await user.click(screen.getByRole("button", { name: "Add server" }))
-    const form = screen.getByRole("form", { name: "New MCP server" })
-    await user.type(within(form).getByLabelText("Name"), "files")
-    await user.type(within(form).getByLabelText("Environment"), "VERBOSE")
-    await user.click(within(form).getByRole("button", { name: "Save" }))
+    const form = await openNewServerEditor(user)
+    await user.type(
+      within(form).getByRole("textbox", { name: "Name" }),
+      "files"
+    )
+    await user.type(
+      within(form).getByRole("textbox", { name: "Arguments" }),
+      '-y "unclosed'
+    )
+    await user.click(within(form).getByRole("button", { name: "Add server" }))
 
     const summary = within(form).getByRole("group", {
       name: "Fix 3 fields to save:"
@@ -334,20 +657,16 @@ describe("McpPaneContent", () => {
     ).toEqual([
       "Name: Another MCP server already has this name.",
       "Command: Enter the command that starts the server, up to 1024 characters.",
-      "Environment: Line 1: write each variable as NAME=value."
+      "Arguments: Close the quote at character 4."
     ])
-    const name = within(form).getByLabelText("Name")
+    const name = within(form).getByRole("textbox", { name: "Name" })
     expect(name).toHaveAttribute("aria-invalid", "true")
     expect(name).toHaveAccessibleDescription(
-      "up to 20 characters: lowercase letters and digits, joined by single hyphens Another MCP server already has this name."
+      "a-z, 0-9, single hyphens · up to 20 its tools arrive as mcp__files__… Another MCP server already has this name."
     )
     const command = within(form).getByRole("textbox", { name: "Command" })
     expect(command).toHaveAccessibleDescription(
-      "full path, such as /opt/homebrew/bin/npx Enter the command that starts the server, up to 1024 characters."
-    )
-    expect(within(form).getByLabelText("Arguments")).toHaveAttribute(
-      "aria-invalid",
-      "false"
+      "the program Lys starts, by its full path Enter the command that starts the server, up to 1024 characters."
     )
 
     await user.click(
@@ -357,7 +676,7 @@ describe("McpPaneContent", () => {
     )
 
     expect(command).toHaveFocus()
-    expect(within(form).getByLabelText("Name")).toHaveValue("files")
+    expect(name).toHaveValue("files")
     expect(listWrittenDocuments(host.commands)).toEqual([])
   })
 
@@ -366,42 +685,84 @@ describe("McpPaneContent", () => {
     await startMcpPane()
     const user = userEvent.setup()
 
-    await user.click(screen.getByRole("button", { name: "Add server" }))
-    const form = screen.getByRole("form", { name: "New MCP server" })
+    const form = await openNewServerEditor(user)
     await user.type(
       within(form).getByRole("textbox", { name: "Command" }),
       "/usr/bin/tools"
     )
-    await user.click(within(form).getByRole("button", { name: "Save" }))
+    await user.click(within(form).getByRole("button", { name: "Add server" }))
 
-    expect(within(form).getByLabelText("Name")).toHaveFocus()
+    expect(within(form).getByRole("textbox", { name: "Name" })).toHaveFocus()
     expect(within(form).queryByRole("group", { name: /^Fix / })).toBeNull()
   })
 
-  it("marks the required fields and states the name rule before entry", async () => {
+  it("focuses a list of rows whose row breaks a rule, and names the row in its problem", async () => {
     startSettingsHost()
     await startMcpPane()
     const user = userEvent.setup()
 
-    await user.click(screen.getByRole("button", { name: "Add server" }))
-    const form = screen.getByRole("form", { name: "New MCP server" })
-    const name = within(form).getByLabelText("Name")
+    const form = await openNewServerEditor(user)
+    await user.type(
+      within(form).getByRole("textbox", { name: "Name" }),
+      "tools"
+    )
+    await user.type(
+      within(form).getByRole("textbox", { name: "Command" }),
+      "/usr/bin/tools"
+    )
+    await user.click(within(form).getByRole("button", { name: "add variable" }))
+    await user.keyboard("1BAD")
+    await user.click(within(form).getByRole("button", { name: "Add server" }))
+
+    const environment = within(form).getByRole("group", { name: "Environment" })
+    expect(environment).toHaveFocus()
+    expect(environment).toHaveAccessibleDescription(
+      expect.stringMatching(
+        /^NAME: letters, digits, _ · values saved in plain text Variable 1: /
+      )
+    )
+  })
+
+  it("marks the required fields and states each field's format before entry", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+
+    const form = await openNewServerEditor(user)
+    const name = within(form).getByRole("textbox", { name: "Name" })
 
     expect(name).toBeRequired()
     expect(name).toHaveAccessibleDescription(
-      "up to 20 characters: lowercase letters and digits, joined by single hyphens"
+      "a-z, 0-9, single hyphens · up to 20 its tools arrive as mcp__name__…"
+    )
+    await user.type(name, "github")
+    expect(name).toHaveAccessibleDescription(
+      "a-z, 0-9, single hyphens · up to 20 its tools arrive as mcp__github__…"
     )
     expect(
       within(form).getByRole("textbox", { name: "Command" })
-    ).toBeRequired()
-    expect(within(form).getByLabelText("Arguments")).not.toBeRequired()
-    expect(within(form).getByLabelText("Environment")).not.toBeRequired()
+    ).toHaveAccessibleDescription("the program Lys starts, by its full path")
+    expect(
+      within(form).getByRole("textbox", { name: "Arguments" })
+    ).not.toBeRequired()
+    expect(
+      within(form).getByRole("group", { name: "Environment" })
+    ).toHaveAccessibleDescription(
+      "NAME: letters, digits, _ · values saved in plain text"
+    )
     expect(within(form).getAllByText("required")).toHaveLength(2)
 
-    await user.click(within(form).getByRole("radio", { name: "URL" }))
+    await user.click(within(form).getByRole("radio", { name: "Remote server" }))
 
     expect(within(form).getByRole("textbox", { name: "URL" })).toBeRequired()
-    expect(within(form).getByLabelText("Headers")).not.toBeRequired()
+    expect(
+      within(form).getByRole("textbox", { name: "URL" })
+    ).toHaveAccessibleDescription(
+      "streamable http · https://, or http:// for localhost"
+    )
+    expect(
+      within(form).getByRole("group", { name: "Headers" })
+    ).toHaveAccessibleDescription("optional · values saved in plain text")
     expect(within(form).getAllByText("required")).toHaveLength(2)
   })
 
@@ -410,12 +771,14 @@ describe("McpPaneContent", () => {
     await startMcpPane()
     const user = userEvent.setup()
 
-    await user.click(screen.getByRole("button", { name: "Add server" }))
-    const form = screen.getByRole("form", { name: "New MCP server" })
-    await user.click(within(form).getByRole("button", { name: "Save" }))
-    await user.type(within(form).getByLabelText("Name"), "fresh")
+    const form = await openNewServerEditor(user)
+    await user.click(within(form).getByRole("button", { name: "Add server" }))
+    await user.type(
+      within(form).getByRole("textbox", { name: "Name" }),
+      "fresh"
+    )
 
-    expect(within(form).getByLabelText("Name")).toHaveAttribute(
+    expect(within(form).getByRole("textbox", { name: "Name" })).toHaveAttribute(
       "aria-invalid",
       "false"
     )
@@ -424,27 +787,38 @@ describe("McpPaneContent", () => {
     ).toHaveAttribute("aria-invalid", "true")
   })
 
-  it("edits a URL server in place, keeping its place in the list", async () => {
+  it("edits a remote server in place, keeping its place, its token, and saying it is unsaved meanwhile", async () => {
     const host = startSettingsHost()
     const { backend } = await startMcpPane({
       [SYNC_ROUTE]: answerList(STORED_LIST)
     })
     const user = userEvent.setup()
 
-    await user.click(
-      within(getServerRow("notes")).getByRole("button", { name: "Edit notes" })
-    )
+    const notes = await expandServer(user, "notes")
+    await user.click(within(notes).getByRole("button", { name: "Edit notes" }))
     const form = screen.getByRole("form", { name: "notes" })
-    expect(within(form).getByRole("textbox", { name: "URL" })).toHaveValue(
-      "https://mcp.example.test/notes"
-    )
-    expect(within(form).getByLabelText("Headers")).toHaveValue(
-      "Authorization: Bearer fixture-0000"
-    )
-    expect(within(form).getByRole("radio", { name: "URL" })).toBeChecked()
+    expect(
+      within(form).getByRole("heading", { name: "editing · notes" })
+    ).toBeInTheDocument()
+    expect(
+      within(form).getByRole("radio", { name: "Remote server" })
+    ).toBeChecked()
+    expect(
+      within(within(form).getByRole("group", { name: "Sign-in" })).getByRole(
+        "button",
+        { name: "Token" }
+      )
+    ).toHaveAttribute("aria-pressed", "true")
+    const token = within(form).getByLabelText("Token")
+    expect(token).toHaveValue("fixture-0000")
+    expect(token).toHaveAttribute("type", "password")
+    expect(within(form).queryByLabelText("Name of header 1")).toBeNull()
+    expect(within(form).queryByText("unsaved")).toBeNull()
     const url = within(form).getByRole("textbox", { name: "URL" })
     await user.clear(url)
-    await user.type(url, "http://localhost:7000/mcp{Enter}")
+    await user.type(url, "http://localhost:7000/mcp")
+    expect(within(form).getByText("unsaved")).toBeInTheDocument()
+    await user.keyboard("{Enter}")
     await waitForRenderedWork()
 
     expect(listWrittenDocuments(host.commands)).toEqual([
@@ -462,9 +836,27 @@ describe("McpPaneContent", () => {
       }
     ])
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, SYNC_ROUTE])
+    expect(getServerToggle("notes")).toHaveAttribute("aria-expanded", "true")
     expect(
       within(getServerRow("notes")).getByRole("button", { name: "Edit notes" })
     ).toHaveFocus()
+  })
+
+  it("saves on ⌘ Enter from any field", async () => {
+    const host = startSettingsHost()
+    await startMcpPane({ [SYNC_ROUTE]: answerList(STORED_LIST) })
+    const user = userEvent.setup()
+
+    const files = await expandServer(user, "files")
+    await user.click(within(files).getByRole("button", { name: "Edit files" }))
+    const form = screen.getByRole("form", { name: "files" })
+    await user.click(within(form).getByLabelText("Value of variable 1"))
+    await user.keyboard("{Meta>}{Enter}{/Meta}")
+    await waitForRenderedWork()
+
+    expect(listWrittenDocuments(host.commands)).toEqual([
+      STORED_SETTINGS_DOCUMENT
+    ])
   })
 
   it("keeps what was typed for the other transport when switching back", async () => {
@@ -472,32 +864,173 @@ describe("McpPaneContent", () => {
     await startMcpPane()
     const user = userEvent.setup()
 
-    await user.click(screen.getByRole("button", { name: "Add server" }))
-    const form = screen.getByRole("form", { name: "New MCP server" })
+    const form = await openNewServerEditor(user)
     await user.type(
       within(form).getByRole("textbox", { name: "Command" }),
       "/usr/bin/tools"
     )
-    await user.click(within(form).getByRole("radio", { name: "URL" }))
+    await user.click(within(form).getByRole("radio", { name: "Remote server" }))
 
     expect(within(form).queryByRole("textbox", { name: "Command" })).toBeNull()
-    expect(within(form).getByLabelText("Headers")).toBeInTheDocument()
+    expect(
+      within(form).getByRole("group", { name: "Headers" })
+    ).toBeInTheDocument()
 
-    await user.click(within(form).getByRole("radio", { name: "Command" }))
+    await user.click(within(form).getByRole("radio", { name: "Local program" }))
 
     expect(within(form).getByRole("textbox", { name: "Command" })).toHaveValue(
       "/usr/bin/tools"
     )
   })
 
-  it("closes an editor on Cancel or Escape without saving, returning focus to its opener", async () => {
+  it("adds and removes rows, moving focus to a new row's name and, after a removal, to the add button", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+
+    const form = await openNewServerEditor(user)
+    const addVariable = within(form).getByRole("button", {
+      name: "add variable"
+    })
+    await user.click(addVariable)
+
+    expect(within(form).getByLabelText("Name of variable 1")).toHaveFocus()
+    expect(within(form).getByLabelText("Value of variable 1")).toHaveAttribute(
+      "type",
+      "text"
+    )
+    expect(
+      within(form).getByRole("button", { name: "Show value of variable 1" })
+    ).toHaveAttribute("aria-pressed", "true")
+    await user.keyboard("FIRST")
+    await user.click(addVariable)
+    expect(within(form).getByLabelText("Name of variable 2")).toHaveFocus()
+    await user.keyboard("SECOND")
+
+    await user.click(
+      within(form).getByRole("button", { name: "Remove variable 1" })
+    )
+
+    expect(addVariable).toHaveFocus()
+    expect(within(form).getByLabelText("Name of variable 1")).toHaveValue(
+      "SECOND"
+    )
+    expect(within(form).queryByLabelText("Name of variable 2")).toBeNull()
+  })
+
+  it("hides saved values until the person shows them", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+
+    const files = await expandServer(user, "files")
+    await user.click(within(files).getByRole("button", { name: "Edit files" }))
+    const form = screen.getByRole("form", { name: "files" })
+    const value = within(form).getByLabelText("Value of variable 1")
+    const show = within(form).getByRole("button", {
+      name: "Show value of variable 1"
+    })
+
+    expect(within(form).getByLabelText("Name of variable 1")).toHaveValue(
+      "LOG_LEVEL"
+    )
+    expect(value).toHaveAttribute("type", "password")
+    expect(show).toHaveAttribute("aria-pressed", "false")
+
+    await user.click(show)
+
+    expect(value).toHaveAttribute("type", "text")
+    expect(value).toHaveValue("debug")
+  })
+
+  it("fills a new server from a pasted config and says from which server", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+
+    const form = await openNewServerEditor(user)
+    const pasteJson = within(form).getByRole("button", { name: "paste json" })
+    await user.click(pasteJson)
+    const field = within(form).getByRole("textbox", { name: "Paste JSON" })
+    expect(field).toHaveFocus()
+    expect(field).toHaveAccessibleDescription(
+      "claude_desktop_config.json, .cursor/mcp.json or a single server object"
+    )
+    await user.paste(
+      JSON.stringify({
+        mcpServers: {
+          "GitHub Tools": {
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-github"],
+            env: { GITHUB_TOKEN: "fixture-3333" }
+          },
+          other: { url: "https://other.example.test/mcp" }
+        }
+      })
+    )
+
+    expect(field).toHaveAccessibleDescription(
+      "filled from json · first of 2 servers · add the rest the same way"
+    )
+    expect(within(form).getByRole("textbox", { name: "Name" })).toHaveValue(
+      "github-tools"
+    )
+    expect(within(form).getByRole("textbox", { name: "Command" })).toHaveValue(
+      "npx"
+    )
+    expect(
+      within(form).getByRole("textbox", { name: "Arguments" })
+    ).toHaveValue("-y @modelcontextprotocol/server-github")
+    expect(within(form).getByLabelText("Name of variable 1")).toHaveValue(
+      "GITHUB_TOKEN"
+    )
+    expect(within(form).getByLabelText("Value of variable 1")).toHaveAttribute(
+      "type",
+      "password"
+    )
+
+    await user.click(within(form).getByRole("button", { name: "close" }))
+
+    expect(
+      within(form).queryByRole("textbox", { name: "Paste JSON" })
+    ).toBeNull()
+    expect(
+      within(form).getByRole("button", { name: "paste json" })
+    ).toHaveFocus()
+  })
+
+  it("says why a pasted config cannot fill the fields, and leaves them as they are", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+
+    const form = await openNewServerEditor(user)
+    await user.type(within(form).getByRole("textbox", { name: "Name" }), "kept")
+    await user.click(within(form).getByRole("button", { name: "paste json" }))
+    await user.paste(
+      '{ "mcpServers": { "old": { "url": "https://old.test/sse", "type": "sse" } } }'
+    )
+
+    expect(
+      within(form).getByRole("textbox", { name: "Paste JSON" })
+    ).toHaveAccessibleDescription(
+      "lys doesn't speak sse · use the server's streamable http url"
+    )
+    expect(within(form).getByRole("textbox", { name: "Name" })).toHaveValue(
+      "kept"
+    )
+    expect(
+      within(form).getByRole("radio", { name: "Local program" })
+    ).toBeChecked()
+  })
+
+  it("closes an editor on Cancel, Escape, or the back button without saving, returning focus to its opener", async () => {
     const host = startSettingsHost()
     await startMcpPane()
     const user = userEvent.setup()
 
-    await user.click(
-      within(getServerRow("files")).getByRole("button", { name: "Edit files" })
-    )
+    const files = await expandServer(user, "files")
+    await user.click(within(files).getByRole("button", { name: "Edit files" }))
     await user.type(
       within(screen.getByRole("form", { name: "files" })).getByRole("textbox", {
         name: "Command"
@@ -516,32 +1049,44 @@ describe("McpPaneContent", () => {
 
     expect(screen.queryByRole("form")).toBeNull()
     expect(screen.getByRole("button", { name: "Add server" })).toHaveFocus()
+
+    await user.click(
+      within(getServerRow("files")).getByRole("button", { name: "Edit files" })
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Back to MCP servers" })
+    )
+
+    expect(screen.queryByRole("form")).toBeNull()
+    expect(
+      within(getServerRow("files")).getByRole("button", { name: "Edit files" })
+    ).toHaveFocus()
     expect(listWrittenDocuments(host.commands)).toEqual([])
   })
 
-  it("asks before removing a server, keeps it on Escape, and removes it on Remove", async () => {
+  it("asks before removing a server and its secrets, keeps it on Escape, and removes it on Remove", async () => {
     const host = startSettingsHost()
     const { backend } = await startMcpPane({
       [SYNC_ROUTE]: answerList(buildMcpServerList([STORED_LIST.servers[1]]))
     })
     const user = userEvent.setup()
+    const files = await expandServer(user, "files")
 
     await user.click(
-      within(getServerRow("files")).getByRole("button", {
-        name: "Remove files"
-      })
+      within(files).getByRole("button", { name: "Remove files" })
     )
-    const question = screen.getByRole("group", { name: "Remove files?" })
+    const question = within(files).getByRole("group", {
+      name: "remove files and its secrets?"
+    })
     expect(
       within(question).getByRole("button", { name: "Keep files" })
     ).toHaveFocus()
     await user.keyboard("{Escape}")
 
-    expect(screen.queryByRole("group", { name: "Remove files?" })).toBeNull()
-    const remove = within(getServerRow("files")).getByRole("button", {
-      name: "Remove files"
-    })
-    expect(remove).toHaveFocus()
+    expect(within(files).queryByRole("group", { name: /^remove / })).toBeNull()
+    expect(
+      within(files).getByRole("button", { name: "Remove files" })
+    ).toHaveFocus()
     expect(listWrittenDocuments(host.commands)).toEqual([])
 
     await removeServer(user, "files")
@@ -580,9 +1125,8 @@ describe("McpPaneContent", () => {
     const { backend } = await startMcpPane()
     const user = userEvent.setup()
 
-    await user.click(
-      within(getServerRow("files")).getByRole("button", { name: "Edit files" })
-    )
+    const files = await expandServer(user, "files")
+    await user.click(within(files).getByRole("button", { name: "Edit files" }))
     const form = screen.getByRole("form", { name: "files" })
     expect(within(form).getByRole("alert")).toHaveTextContent("")
     await user.click(within(form).getByRole("button", { name: "Save" }))
@@ -611,17 +1155,12 @@ describe("McpPaneContent", () => {
       )
     })
     const user = userEvent.setup()
+    const notes = await expandServer(user, "notes")
 
-    const state = within(getServerRow("notes")).getByRole("status")
+    const state = within(notes).getByRole("status")
     expect(state).toHaveAttribute("aria-atomic", "true")
-    expect(state).toHaveTextContent(
-      "notes: Failed: The server refused the request. Check the headers, such as Authorization."
-    )
-    await user.click(
-      within(getServerRow("notes")).getByRole("button", {
-        name: "Reconnect notes"
-      })
-    )
+    expect(state).toHaveTextContent(`notes: Failed${UNAUTHORIZED_TEXT}`)
+    await user.click(within(notes).getByRole("button", { name: "Retry notes" }))
     await waitForRenderedWork()
 
     expect(listMcpRouteKeys(backend)).toEqual([
@@ -630,7 +1169,12 @@ describe("McpPaneContent", () => {
     ])
     // The row's own status, there before the change, says the new state.
     expect(within(getServerRow("notes")).getByRole("status")).toBe(state)
-    expect(state).toHaveTextContent("notes: Connected · 1 tool")
+    expect(state).toHaveTextContent("notes: Connected1 tool listed")
+    expect(
+      within(getServerRow("notes")).getByRole("button", {
+        name: "Reconnect notes"
+      })
+    ).toBeInTheDocument()
   })
 
   it("says a saved server the backend has not applied is not applied", async () => {
@@ -638,10 +1182,18 @@ describe("McpPaneContent", () => {
     await startMcpPane({
       [LIST_ROUTE]: answerList(buildMcpServerList([STORED_LIST.servers[0]]))
     })
+    const user = userEvent.setup()
 
-    expect(getServerRow("notes")).toHaveTextContent(
-      "Not applied. Reconnect applies the saved servers."
+    expect(getServerToggle("notes")).toHaveAccessibleDescription(
+      expect.stringContaining("not applied")
     )
+    const notes = await expandServer(user, "notes")
+    expect(within(notes).getByRole("status")).toHaveTextContent(
+      "notes: Not appliedConnect applies the saved servers."
+    )
+    expect(
+      within(notes).getByRole("button", { name: "Connect notes" })
+    ).toBeEnabled()
   })
 
   it("says why the backend keeps the servers it applied last", async () => {
@@ -679,15 +1231,21 @@ describe("McpPaneContent", () => {
       }
     })
     const user = userEvent.setup()
-    expect(getServerRow("files")).toHaveTextContent("Connected · 3 tools")
+    expect(getServerToggle("files")).toHaveAccessibleDescription(
+      expect.stringContaining("Running")
+    )
 
     await user.click(screen.getByRole("tab", { name: /^Generation\s*03$/ }))
     await user.click(screen.getByRole("tab", { name: /^MCP\s*06$/ }))
     await screen.findByText(/^Saved in settings\.json in Lys's home folder/)
     await waitForRenderedWork()
 
-    expect(getServerRow("files")).toHaveTextContent(
-      "Failed: The server closed the connection."
+    expect(getServerToggle("files")).toHaveAccessibleDescription(
+      expect.stringContaining("failed")
+    )
+    const files = await expandServer(user, "files")
+    expect(within(files).getByRole("status")).toHaveTextContent(
+      "files: FailedThe server closed the connection."
     )
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, LIST_ROUTE])
   })
@@ -708,14 +1266,18 @@ describe("McpPaneContent", () => {
     expect(getPaneStatus()).toHaveTextContent(
       "Lys couldn't read the state of the MCP servers: The backend could not be reached."
     )
-    expect(getServerRow("files")).not.toHaveTextContent("Connected")
+    expect(getServerToggle("files")).toHaveAccessibleDescription(
+      expect.stringContaining("State unknown")
+    )
     await user.click(screen.getByRole("button", { name: "Retry" }))
     await waitForRenderedWork()
 
     expect(getPaneStatus()).toHaveFocus()
     expect(getPaneStatus()).toHaveTextContent("")
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()
-    expect(getServerRow("files")).toHaveTextContent("Connected · 3 tools")
+    expect(getServerToggle("files")).toHaveAccessibleDescription(
+      expect.stringContaining("Running")
+    )
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, LIST_ROUTE])
   })
 
@@ -740,12 +1302,14 @@ describe("McpPaneContent", () => {
       )
     })
     const user = userEvent.setup()
-    const files = getServerRow("files")
+    const files = await expandServer(user, "files")
     const toggle = within(files).getByRole("button", {
       name: "Skipped tools of files"
     })
 
-    expect(files).toHaveTextContent("Connected · 2 tools · 2 skipped")
+    expect(within(files).getByRole("status")).toHaveTextContent(
+      "files: Running2 tools listed · 2 skipped"
+    )
     expect(toggle).toHaveAttribute("aria-expanded", "false")
     expect(files).not.toHaveTextContent("(no name)")
 
@@ -761,10 +1325,9 @@ describe("McpPaneContent", () => {
     expect(files).toHaveTextContent(
       "The server lists more tools than Lys reads. Lys reads the first 128."
     )
-    expect(getServerRow("notes")).not.toHaveTextContent("Skipped tools")
   })
 
-  it("names each row's actions after its server, starting with their visible text", async () => {
+  it("names each server's actions after it, starting with their visible text", async () => {
     startSettingsHost()
     await startMcpPane({
       [LIST_ROUTE]: answerList(
@@ -781,10 +1344,10 @@ describe("McpPaneContent", () => {
       )
     })
     const user = userEvent.setup()
-    const files = getServerRow("files")
+    const files = await expandServer(user, "files")
 
     for (const [name, text] of [
-      ["Reconnect files", "Reconnect"],
+      ["Restart files", "Restart"],
       ["Edit files", "Edit"],
       ["Remove files", "Remove"],
       ["Skipped tools of files", "Skipped tools"]
@@ -793,14 +1356,11 @@ describe("McpPaneContent", () => {
         text
       )
     }
-    expect(
-      within(getServerRow("notes")).getByRole("button", { name: "Edit notes" })
-    ).toBeInTheDocument()
 
     await user.click(
       within(files).getByRole("button", { name: "Remove files" })
     )
-    const question = screen.getByRole("group", { name: "Remove files?" })
+    const question = within(files).getByRole("group", { name: /^remove / })
 
     expect(
       within(question).getByRole("button", { name: "Keep files" })
@@ -874,7 +1434,7 @@ describe("McpPaneContent", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
   })
 
-  it("disables Add server once the most servers the settings allow are saved", async () => {
+  it("disables Add server once the most servers the settings allow are saved, and says so", async () => {
     startSettingsHost()
     const { useLysStore } = await startMcpPane()
     const servers = Array.from({ length: 16 }, (_, index) =>
@@ -890,9 +1450,53 @@ describe("McpPaneContent", () => {
     })
     await waitForRenderedWork()
 
-    expect(screen.getByRole("region", { name: "servers" })).toHaveTextContent(
-      "16 of 16"
-    )
     expect(screen.getByRole("button", { name: "Add server" })).toBeDisabled()
+    expect(
+      screen.getByText("Lys keeps up to 16 servers. Remove one to add another.")
+    ).toBeInTheDocument()
+  })
+
+  it("warns while the servers' tools are not offered, and opens the Tools pane", async () => {
+    startSettingsHost()
+    const { useLysStore, useToolStore } = await startMcpPane()
+    const user = userEvent.setup()
+
+    expect(screen.queryByText(/nothing from (them|here) is offered/)).toBeNull()
+
+    useToolStore.getState().updateToolCallsOn(false)
+    await waitForRenderedWork()
+
+    expect(
+      screen.getByText(
+        "Tool calls are off · servers stay connected, nothing from them is offered"
+      )
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Open Tools" }))
+
+    expect(useLysStore.getState().settingsPane).toBe("tools")
+  })
+
+  it("warns that a model not trained for tool calls is offered nothing from the servers", async () => {
+    startSettingsHost()
+    await startMcpPane({}, READY_RUNTIME)
+
+    expect(
+      screen.getByText(
+        "qwen3-8b isn't trained for tool calls · nothing from here is offered"
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("reads the tools once when the backend runs and none were read", async () => {
+    const host = startSettingsHost()
+    const { backend, useToolStore } = await startMcpPane()
+
+    expect(
+      backend.requests.filter((request) => request.routeKey === TOOLS_ROUTE)
+    ).toHaveLength(1)
+    expect(
+      host.commands.filter((invoked) => invoked.command === "list_tools")
+    ).toHaveLength(1)
+    expect(useToolStore.getState().list.status).toBe("loaded")
   })
 })

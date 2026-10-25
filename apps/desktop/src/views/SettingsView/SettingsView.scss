@@ -1301,10 +1301,90 @@
   gap: 12px;
 }
 
-.settings-view__mcp-tools {
+/* The live region stays rendered while empty; only a status with content takes space. */
+.settings-view__mcp-status:has(p, button) {
+  margin-bottom: 22px;
+}
+
+/* Tool offers are off: amber, with a dot and words, never color alone. */
+.settings-view__mcp-warning {
+  display: flex;
+  margin-bottom: 22px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px 10px 14px;
+  border: 1px solid
+    color-mix(in oklch, var(--app-status-pending) 40%, var(--app-border-subtle));
+  border-radius: var(--radius-detail);
+  background: color-mix(in oklch, var(--app-status-pending) 6%, transparent);
+}
+
+.settings-view__mcp-warning-text {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  letter-spacing: 0.04em;
+  color: var(--app-status-pending);
+}
+
+.settings-view__mcp-warning-dot {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: var(--radius-capsule);
+  background: var(--app-status-pending);
+  box-shadow: var(--app-status-pending-ring);
+}
+
+.settings-view__mcp-heading {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 10px 10px;
+  border-bottom: 1px solid var(--app-border-default);
+}
+
+.settings-view__mcp-heading-lines {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
   gap: 14px;
+}
+
+.settings-view__mcp-heading-lines h2 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mcp-heading-lines > span {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--app-text-faint);
+}
+
+/* The one way to add, so it wears the brand edge. */
+.settings-view__mcp-add[data-slot="button"] {
+  flex: none;
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--app-surface-field), var(--app-surface-field))
+      padding-box,
+    var(--gradient-border) border-box;
 }
 
 .settings-view__mcp-list {
@@ -1314,95 +1394,342 @@
 }
 
 .settings-view__mcp-row {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px 10px;
   border-bottom: 1px solid var(--app-border-subtle);
+  transition: background var(--duration-standard) var(--ease-standard);
 }
 
-.settings-view__mcp-row-main {
+.settings-view__mcp-row[data-expanded] {
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklch, var(--lys-violet) 10%, transparent),
+    color-mix(in oklch, var(--lys-cyan) 5%, transparent)
+  );
+}
+
+.settings-view__mcp-toggle {
   display: grid;
+  width: 100%;
+  min-height: 44px;
   align-items: center;
-  gap: 18px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  grid-template-columns: 12px 7px minmax(0, 1fr) auto;
+  padding: 13px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--duration-standard) var(--ease-standard);
 }
 
-/* An empty state line takes no space but stays in place as the row's status. */
+.settings-view__mcp-toggle:hover {
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklch, var(--lys-violet) 16%, transparent),
+    color-mix(in oklch, var(--lys-cyan) 8%, transparent)
+  );
+}
+
+.settings-view__mcp-toggle:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: -2px;
+}
+
+.settings-view__mcp-chevron {
+  width: 12px;
+  height: 12px;
+  color: var(--app-text-faint);
+  transition: transform var(--duration-standard) var(--ease-standard);
+}
+
+.settings-view__mcp-toggle[aria-expanded="true"] .settings-view__mcp-chevron {
+  transform: rotate(90deg);
+}
+
+.settings-view__mcp-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-capsule);
+  background: var(--app-status-neutral);
+}
+
+.settings-view__mcp-dot[data-condition="connected"] {
+  background: var(--app-status-success);
+  box-shadow: var(--app-status-success-glow);
+}
+
+.settings-view__mcp-dot[data-condition="connecting"] {
+  background: var(--app-status-pending);
+  box-shadow: var(--app-status-pending-ring);
+  animation: settings-view-status-pulse 1.4s ease-in-out infinite;
+}
+
+.settings-view__mcp-dot[data-condition="failed"] {
+  background: var(--app-status-danger);
+}
+
 .settings-view__mcp-lines {
   display: flex;
   min-width: 0;
   flex-direction: column;
-}
-
-.settings-view__mcp-lines > * + *:not(:empty) {
-  margin-top: 5px;
+  gap: 5px;
 }
 
 .settings-view__mcp-title {
   display: flex;
   min-width: 0;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
 }
 
-.settings-view__mcp-name {
+.settings-view__mcp-name,
+.settings-view__mcp-kind-name {
   overflow: hidden;
-  font-family: var(--font-mono);
-  font-size: 13px;
+  font-family: var(--font-sans);
+  font-size: 14px;
   font-weight: 600;
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--app-text-strong);
 }
 
-.settings-view__mcp-kind {
+/* stdio is violet and http is cyan; the tag's word says which. */
+.settings-view__mcp-transport-tag {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.settings-view__mcp-transport-tag[data-transport="stdio"] {
+  background: color-mix(in oklch, var(--lys-violet) 15%, transparent);
+  color: color-mix(in oklch, var(--lys-violet) 70%, var(--app-text-strong));
+}
+
+.settings-view__mcp-transport-tag[data-transport="http"] {
+  background: color-mix(in oklch, var(--lys-cyan) 14%, transparent);
+  color: color-mix(in oklch, var(--lys-cyan) 55%, var(--app-text-strong));
+}
+
+.settings-view__mcp-state-tag {
   flex: none;
   padding: 2px 6px;
-  border: 1px solid var(--app-border-strong);
+  border: 1px solid
+    color-mix(in oklch, var(--app-status-pending) 45%, transparent);
   font-family: var(--font-mono);
   font-size: 9.5px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--app-text-muted);
+  color: var(--app-status-pending);
+}
+
+.settings-view__mcp-state-tag[data-condition="failed"] {
+  border-color: var(--app-border-danger);
+  color: var(--app-text-danger);
 }
 
 /* The command or URL is what the server runs or reaches, so it reads as text to check. */
 .settings-view__mcp-target {
   overflow: hidden;
   font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.45;
+  font-size: 11px;
+  letter-spacing: 0.02em;
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--app-text-muted);
 }
 
-.settings-view__mcp-state {
+.settings-view__mcp-count {
+  flex: none;
   font-family: var(--font-mono);
   font-size: 11px;
-  line-height: 1.45;
   letter-spacing: 0.04em;
   color: var(--app-text-faint);
 }
 
-.settings-view__mcp-state[data-tone="pending"] {
-  color: var(--app-status-pending);
+/* Details line up under the name: chevron, dot, and their gaps. */
+.settings-view__mcp-details {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 4px 10px 20px 53px;
 }
 
-.settings-view__mcp-state[data-tone="success"] {
-  color: var(--app-status-success);
+.settings-view__mcp-status-line,
+.settings-view__mcp-approval {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
 }
 
-.settings-view__mcp-state[data-tone="danger"] {
+.settings-view__mcp-status-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-view__mcp-status-heading {
+  font-size: 14px;
+  color: var(--app-text);
+}
+
+.settings-view__mcp-status-detail {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mcp-status-detail[data-condition="failed"] {
   color: var(--app-text-danger);
 }
 
-.settings-view__mcp-actions {
+.settings-view__mcp-block {
   display: flex;
-  flex: none;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-view__mcp-subheading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--app-border-default);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--app-text-faint);
+}
+
+.settings-view__mcp-subheading h3 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mcp-detail-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  text-wrap: pretty;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mcp-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+/* A tool that is off is struck through as well as dimmed. */
+.settings-view__mcp-tool {
+  display: flex;
+  min-height: 26px;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid var(--app-border-strong);
+  border-radius: 6px;
+  background: var(--app-surface-field);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--app-text);
+  cursor: pointer;
+  transition:
+    color var(--duration-standard) var(--ease-standard),
+    border-color var(--duration-standard) var(--ease-standard);
+}
+
+.settings-view__mcp-tool:hover {
+  border-color: var(--app-border-interactive);
+}
+
+.settings-view__mcp-tool:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 2px;
+}
+
+.settings-view__mcp-tool[aria-pressed="false"] {
+  border-color: var(--app-border-subtle);
+  background: transparent;
+  text-decoration: line-through;
+  color: var(--app-text-faint);
+}
+
+.settings-view__mcp-tool-dot {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: var(--radius-capsule);
+  background: var(--app-status-success);
+}
+
+.settings-view__mcp-tool[aria-pressed="false"] .settings-view__mcp-tool-dot {
+  background: var(--app-status-neutral);
+}
+
+.settings-view__mcp-config {
+  margin: 0;
+}
+
+.settings-view__mcp-config > div {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 104px minmax(0, 1fr);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--app-border-subtle);
+}
+
+.settings-view__mcp-config dt {
+  font-size: 13px;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mcp-config dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  color: var(--app-text);
+}
+
+.settings-view__mcp-config dd[data-none] {
+  color: var(--app-text-faint);
+}
+
+.settings-view__mcp-detail-actions {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-view__mcp-remove[data-slot="button"] {
+  border-color: var(--app-border-danger);
+  color: var(--app-text-danger);
+}
+
+.settings-view__mcp-remove[data-slot="button"]:hover {
+  background: var(--app-surface-danger);
 }
 
 .settings-view__mcp-confirm {
@@ -1429,6 +1756,7 @@
 
 .settings-view__mcp-skipped-toggle {
   display: inline-flex;
+  min-height: 24px;
   align-items: center;
   gap: 6px;
   padding: 0;
@@ -1480,10 +1808,284 @@
   color: var(--app-text-strong);
 }
 
+.settings-view__mcp-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px 10px 6px;
+}
+
+.settings-view__mcp-empty > p {
+  max-width: 500px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  text-wrap: pretty;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mcp-kinds,
+.settings-view__mcp-transport-cards {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.settings-view__mcp-kind,
+.settings-view__mcp-transport-card {
+  display: flex;
+  min-width: 0;
+  border: 1px solid var(--app-border-default);
+  border-radius: 10px;
+  background: var(--app-surface-panel);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-standard) var(--ease-standard),
+    background var(--duration-standard) var(--ease-standard);
+}
+
+.settings-view__mcp-kind {
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+}
+
+.settings-view__mcp-kind:hover,
+.settings-view__mcp-transport-card:hover,
+.settings-view__mcp-transport-card:has(:checked) {
+  border-color: var(--app-border-interactive);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in oklch, var(--lys-violet) 14%, transparent),
+      color-mix(in oklch, var(--lys-cyan) 6%, transparent)
+    ),
+    var(--app-surface-panel);
+}
+
+.settings-view__mcp-kind:focus-visible,
+.settings-view__mcp-transport-card:has(:focus-visible) {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 2px;
+}
+
+/* Editor */
+
 .settings-view__mcp-editor {
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+.settings-view__mcp-editor-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--app-border-default);
+}
+
+.settings-view__mcp-back,
+.settings-view__mcp-text-button,
+.settings-view__mcp-entry-add {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--app-text-muted);
+  cursor: pointer;
+  transition: color var(--duration-standard) var(--ease-standard);
+}
+
+.settings-view__mcp-back {
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.settings-view__mcp-back svg,
+.settings-view__mcp-entry-add svg {
+  width: 11px;
+  height: 11px;
+}
+
+.settings-view__mcp-text-button {
+  flex: none;
+  color: var(--app-text-link);
+}
+
+.settings-view__mcp-back:hover,
+.settings-view__mcp-text-button:hover,
+.settings-view__mcp-entry-add:hover {
+  color: var(--app-text-strong);
+}
+
+.settings-view__mcp-back:focus-visible,
+.settings-view__mcp-text-button:focus-visible,
+.settings-view__mcp-entry-add:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 2px;
+}
+
+.settings-view__mcp-back:disabled,
+.settings-view__mcp-text-button:disabled,
+.settings-view__mcp-entry-add:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.settings-view__mcp-editor-tags {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-view__mcp-unsaved {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--app-status-pending);
+}
+
+.settings-view__mcp-editor-kind {
+  margin: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--app-border-strong);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mcp-paste-offer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: -6px;
+}
+
+.settings-view__mcp-paste-offer p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mcp-paste-message {
+  min-height: 15px;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--app-text-faint);
+}
+
+.settings-view__mcp-paste-message[data-outcome="filled"] {
+  color: var(--app-status-success);
+}
+
+.settings-view__mcp-paste-message[data-outcome="problem"] {
+  color: var(--app-status-pending);
+}
+
+/* How it runs: radio buttons drawn as cards. */
+.settings-view__mcp-transport {
+  min-inline-size: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.settings-view__mcp-transport legend {
+  margin-bottom: 9px;
+  padding: 0;
+}
+
+.settings-view__mcp-transport-card {
+  position: relative;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 14px 16px;
+}
+
+.settings-view__mcp-transport:disabled .settings-view__mcp-transport-card {
+  cursor: default;
+  opacity: 0.7;
+}
+
+/* Hidden from sight, still reached by Tab and the arrow keys. */
+.settings-view__mcp-transport-radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+
+.settings-view__mcp-transport-ring {
+  display: flex;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+  border: 1px solid var(--app-border-strong);
+  border-radius: var(--radius-capsule);
+}
+
+.settings-view__mcp-transport-ring::after {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-capsule);
+  content: "";
+}
+
+.settings-view__mcp-transport-card:has(:checked)
+  .settings-view__mcp-transport-ring {
+  border-color: var(--lys-violet);
+}
+
+.settings-view__mcp-transport-card:has(:checked)
+  .settings-view__mcp-transport-ring::after {
+  background: var(--lys-violet);
+}
+
+.settings-view__mcp-transport-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-view__mcp-transport-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--app-text-strong);
+}
+
+.settings-view__mcp-transport-blurb {
+  font-size: 12px;
+  line-height: 1.45;
+  text-wrap: pretty;
+  color: var(--app-text-muted);
 }
 
 .settings-view__mcp-field {
@@ -1504,17 +2106,134 @@
   color: var(--app-text-faint);
 }
 
-.settings-view__mcp-field-top label {
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--app-text-muted);
+.settings-view__mcp-field-top
+  > span:last-child:not(.settings-view__mcp-field-label) {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .settings-view__mcp-field-label {
   display: flex;
   align-items: baseline;
   gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--app-text-faint);
+}
+
+.settings-view__mcp-field-label > :first-child,
+legend.settings-view__mcp-field-label {
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mcp-field-note {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+  color: var(--app-text-faint);
+}
+
+.settings-view__mcp-field [data-slot="input"] {
+  height: 38px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+/* Commands, URLs, and values are typed exactly, so they are mono. */
+.settings-view__mcp-mono {
+  font-family: var(--font-mono);
+}
+
+.settings-view__mcp-mono[data-slot="textarea"] {
+  min-height: 104px;
+  padding: 11px 13px;
+  font-size: 12px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+/*
+ * A list of rows is a fieldset that takes focus when it has a problem, so
+ * the browser's fieldset margin, padding, border, and min-content width are
+ * reset.
+ */
+.settings-view__mcp-entries {
+  min-inline-size: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.settings-view__mcp-entries:focus-visible {
+  outline: 2px solid var(--app-focus);
+  outline-offset: 4px;
+}
+
+.settings-view__mcp-entry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.settings-view__mcp-entry {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) 38px;
+}
+
+.settings-view__mcp-field .settings-view__mcp-entry [data-slot="input"] {
+  height: 36px;
+  padding: 9px 11px;
+  font-size: 12px;
+}
+
+.settings-view__mcp-entry-remove[data-slot="button"] {
+  width: 38px;
+  height: 36px;
+  color: var(--app-text-muted);
+}
+
+.settings-view__mcp-entry-remove[data-slot="button"]:hover {
+  border-color: var(--app-border-danger);
+  color: var(--app-text-danger);
+}
+
+.settings-view__mcp-entry-add {
+  align-self: flex-start;
+}
+
+/* A secret and the button that shows it share one field's frame. */
+.settings-view__mcp-secret {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+}
+
+.settings-view__mcp-secret [data-slot="input"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-view__mcp-problem {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  letter-spacing: 0.04em;
+  color: var(--app-text-danger);
 }
 
 /*
@@ -1575,62 +2294,6 @@
   outline-offset: 2px;
 }
 
-.settings-view__mcp-field [data-slot="input"] {
-  height: 38px;
-  padding: 10px 12px;
-  font-size: 14px;
-}
-
-/* Commands, URLs, and lines of values are typed exactly, so they are mono. */
-.settings-view__mcp-mono {
-  font-family: var(--font-mono);
-}
-
-.settings-view__mcp-mono[data-slot="textarea"] {
-  min-height: 96px;
-  padding: 10px 12px;
-  font-size: 12.5px;
-  line-height: 1.6;
-  resize: vertical;
-}
-
-.settings-view__mcp-transport {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 0;
-  margin: 0;
-  border: 0;
-  font-size: 13px;
-}
-
-.settings-view__mcp-transport legend {
-  float: left;
-  margin-right: 6px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--app-text-muted);
-}
-
-.settings-view__mcp-transport label {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  cursor: pointer;
-}
-
-.settings-view__mcp-problem {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.45;
-  letter-spacing: 0.04em;
-  color: var(--app-text-danger);
-}
-
 .settings-view__mcp-footer {
   display: flex;
   align-items: center;
@@ -1639,19 +2302,43 @@
   border-top: 1px solid var(--app-border-subtle);
 }
 
-.settings-view__mcp-footer .settings-view__mcp-actions {
+.settings-view__mcp-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
   margin-left: auto;
 }
 
+/* Saving, a failure, and the hint never show together, so the lines need no gap. */
 .settings-view__mcp-feedback {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 6px;
 }
 
 .settings-view__mcp-feedback .settings-view__note {
   padding-top: 0;
+}
+
+.settings-view__mcp-footer-hint {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  letter-spacing: 0.04em;
+  color: var(--app-text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-view__mcp-dot[data-condition="connecting"] {
+    animation: none;
+  }
+
+  .settings-view__mcp-chevron,
+  .settings-view__mcp-skipped-toggle svg {
+    transition: none;
+  }
 }
 
 /* Load configuration */

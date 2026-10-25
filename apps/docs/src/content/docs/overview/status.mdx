@@ -64,9 +64,10 @@ repository today; it is not a promise of unreleased work.
   each tool's switch and its Ask me or Just run choice are saved, and the Tool calls switch lasts for the session only.
   `read_page` is
   off and cannot be switched on while vmo is not ready. The MCP pane adds,
-  edits, and removes MCP servers, each a command Lys starts or a URL it
-  reaches over Streamable HTTP, shows whether each is connected and which of
-  its tools Lys skipped, and reconnects one. The
+  edits, and removes MCP servers, each a local program Lys starts or a remote
+  server it reaches over Streamable HTTP, fills a new one from a pasted
+  config, shows whether each is connected, switches its tools and sets
+  whether they ask first, lists the tools Lys skipped, and reconnects one. The
   Secrets pane saves the Tavily API key `web_search` needs, and checks it.
 - A chat offers the switched-on tools to a model trained for tool use and
   answers its tool calls: file tools run in the desktop, `read_page` asks vmo

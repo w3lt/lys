@@ -7,6 +7,7 @@ import {
   type ToolDefinition
 } from "@lys/share"
 import type {
+  BuiltInTool,
   BuiltInToolCallArguments,
   BuiltInToolResult,
   ParsedBuiltInToolCall,
@@ -604,22 +605,70 @@ function parseReadAgentStateCall(
   return buildParsedCall((now) => runReadAgentState(code.data, context, now))
 }
 
+/**
+ * Parses one call of a state tool.
+ *
+ * @param context - The turn's agent, reply, and reader.
+ * @param callArguments - The call's arguments.
+ * @returns The parsed call, or `invalid` with what the model reads.
+ */
+type ParseAgentStateToolCall = (
+  context: AgentStateToolContext,
+  callArguments: BuiltInToolCallArguments
+) => ParsedBuiltInToolCall
+
 /** One state tool: its definition and the parser of its calls. */
 type AgentStateToolEntry = Readonly<{
   /** Definition the model is offered. */
   definition: ToolDefinition
-  /**
-   * Parses one call of the tool.
-   *
-   * @param context - The turn's agent, reply, and reader.
-   * @param callArguments - The call's arguments.
-   * @returns The parsed call, or `invalid` with what the model reads.
-   */
-  parseCall: (
-    context: AgentStateToolContext,
-    callArguments: BuiltInToolCallArguments
-  ) => ParsedBuiltInToolCall
+  /** Parses one call of the tool. */
+  parseCall: ParseAgentStateToolCall
 }>
+
+/**
+ * Parses and runs the calls of one state tool for one turn.
+ *
+ * @remarks Implements {@link BuiltInTool}. Built once per state tool a turn
+ * offers, it keeps the turn's context (the agent that asks, the reply the
+ * turn writes, and the borrowed state reader) and the tool's parser.
+ * Invariant: every call of the turn reads as the same agent through the
+ * same reader. Parsing reads nothing; each run reads once, when it runs,
+ * and the reader checks the agent's permission first. Owns no resource; the
+ * reader's owner keeps it usable for the turn. Concurrency model: reentrant,
+ * and parsed calls run independently.
+ */
+class AgentStateTool implements BuiltInTool {
+  /** The turn's agent, reply, and borrowed reader. */
+  readonly #context: AgentStateToolContext
+
+  /** Parser of the tool's calls. */
+  readonly #parseCall: ParseAgentStateToolCall
+
+  /**
+   * Keeps the turn's context and the tool's parser without reading anything.
+   * @param context - The turn's agent, reply, and reader, lent for the turn.
+   * @param parseCall - Parser of the tool's calls.
+   */
+  public constructor(
+    context: AgentStateToolContext,
+    parseCall: ParseAgentStateToolCall
+  ) {
+    this.#context = context
+    this.#parseCall = parseCall
+  }
+
+  /**
+   * Implements {@link BuiltInTool.parseToolCall} for one state tool.
+   * @param callArguments - The interface-defined argument values.
+   * @returns The interface-defined outcome; the run reads what the turn's
+   * agent may see when it runs.
+   */
+  public parseToolCall(
+    callArguments: BuiltInToolCallArguments
+  ): ParsedBuiltInToolCall {
+    return this.#parseCall(this.#context, callArguments)
+  }
+}
 
 /**
  * Builds the state tools one role is offered.
@@ -699,10 +748,7 @@ export function buildAgentStateTools(
     ROLE_TOOLS[context.self.role].map(({ definition, parseCall }) =>
       Object.freeze({
         definition,
-        tool: {
-          parseToolCall: (callArguments: BuiltInToolCallArguments) =>
-            parseCall(context, callArguments)
-        },
+        tool: new AgentStateTool(context, parseCall),
         runsWithoutApproval: true
       })
     )

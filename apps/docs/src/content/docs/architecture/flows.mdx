@@ -90,9 +90,9 @@ seconds. Quitting Lys stops vmo and the backend together.
    the current temperature and an optional reply ceiling; a local zero ceiling
    is omitted from the request.
 4. The backend reads what each attachment is from its bytes and finds the
-   agent that answers. When the request or the conversation holds an
-   attachment, it reads from LM Studio whether the model sees images and is
-   trained for tool use. It then writes the attachment files under
+   agent that answers. It reads from LM Studio whether the model sees images
+   and is trained for tool use, once per model until the backend stops. It
+   then writes the attachment files under
    `$LYS_HOME/attachments/<conversation id>/<message id>/`, creates or reuses
    the conversation, inserts the user message with its numbered attachments,
    and inserts an empty streaming assistant message. When an attachment is
@@ -139,8 +139,9 @@ seconds. Quitting Lys stops vmo and the backend together.
 3. The backend finds the agent and the conversation as the chat route does,
    builds the system prompt, offered tools, and stored messages a turn's first
    round would send, their attachment lists and, for a model with vision,
-   their images included, and `read_attachment` among the tools when the
-   conversation holds a text file and the model is trained for tool use, with
+   their images included, and, when the model is trained for tool use,
+   `read_attachment` among the tools when the conversation holds a text file
+   and the agent state tools the agent's role gives, with
    an empty new message for the markup around the text, and measures them
    with the loaded model's tokenizer through the model operation queue.
 4. The backend answers with the context length and the tokens of each part,

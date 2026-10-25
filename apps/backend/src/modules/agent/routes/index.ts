@@ -152,21 +152,23 @@ function handleCreateAgent(
  * @param reply - HTTP response owner.
  * @param agents - Borrowed agent lookup.
  * @throws If storage access fails.
+ * @remarks A deleted agent is missing to the agent API, as to every other
+ * agent endpoint.
  */
 function handleGetAgent(
   request: FastifyRequest<GetAgentApiRoute>,
   reply: FastifyReply<GetAgentApiRoute>,
   agents: AgentReader
 ): void {
-  const agent = agents.findAgent(request.params.agentCode)
-  if (agent === undefined) {
+  const found = agents.findAgent(request.params.agentCode)
+  if (found?.deletedAt !== null) {
     reply
       .type("application/problem+json")
       .code(404)
       .send(createAgentNotFoundProblem(request.params.agentCode, request.url))
     return
   }
-  reply.code(200).send(agent)
+  reply.code(200).send(found.agent)
 }
 
 /**
@@ -204,9 +206,9 @@ function handleUpdateAgent(
 }
 
 /**
- * Deletes one stored agent before sending a bodyless success, or sends the
- * missing-agent problem, or the built-in agent problem when the code is a
- * built-in agent's.
+ * Marks one stored agent deleted before sending a bodyless success, or sends
+ * the missing-agent problem, also for an agent already deleted, or the
+ * built-in agent problem when the code is a built-in agent's.
  * @param request - Validated agent code.
  * @param reply - HTTP response owner.
  * @param agents - Borrowed agent deletion.

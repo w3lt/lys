@@ -41,13 +41,14 @@ const AGENT_BUILT_IN_PROBLEM_STATUS = 409
  * agent available to that request has.
  *
  * @remarks The get, update, and delete agent endpoints transmit this contract
- * with HTTP 404 when no built-in or stored agent has the code. The chat
- * endpoint transmits it with HTTP 404 when a new conversation names such a
- * code. Either way the request changed nothing. The `type` literal is the
- * machine-readable discriminator; consumers branch on it and never on
- * `detail`, which is occurrence-specific, caller-safe text. A 404 response
- * without this body, such as an unregistered route, is not evidence that an
- * agent is absent. Changing any fixed field requires coordinated consumers.
+ * with HTTP 404 when no built-in or stored agent has the code, or its agent
+ * is deleted. The chat endpoint transmits it with HTTP 404 when a new
+ * conversation names such a code. Either way the request changed nothing.
+ * The `type` literal is the machine-readable discriminator; consumers branch
+ * on it and never on `detail`, which is occurrence-specific, caller-safe
+ * text. A 404 response without this body, such as an unregistered route, is
+ * not evidence that an agent is absent. Changing any fixed field requires
+ * coordinated consumers.
  */
 export const agentNotFoundProblemSchema = z
   .strictObject({

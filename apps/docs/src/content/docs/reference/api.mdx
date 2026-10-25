@@ -42,9 +42,9 @@ route definitions.
 the Fastify route registration.
 
 List, load, health, unload, and chat-context requests, and a chat request
-that reads a model's capabilities for an attachment, answer `503` with
-`urn:lys:problem:llm:runtime-unavailable` while the backend has no connected
-LM Studio runtime. The runtime-status route never contacts LM Studio; the
+for a model whose capabilities the backend has not read yet, answer `503`
+with `urn:lys:problem:llm:runtime-unavailable` while the backend has no
+connected LM Studio runtime. The runtime-status route never contacts LM Studio; the
 runtime-connect route waits for one shared connection attempt.
 
 Every request body is limited to 1 MiB (1,048,576 bytes), Fastify's default,
@@ -95,6 +95,18 @@ stored, after its attachment files are written, so a conversation or agent
 deleted in between gets the same `404` or `409` problem, and the written
 files are deleted again.
 
+Once the agent is found, the route reads from LM Studio's inventory whether
+`model` has `vision` and `trainedForToolUse`, which decide the images the
+model sees and the tools the backend adds to the turn. It remembers what a
+listed model can do until the backend stops, so requests for a model read the
+inventory only until a listing has it: while LM Studio is not connected, such
+a request answers `503` with `urn:lys:problem:llm:runtime-unavailable`, and a
+full model-operation queue `503` with `urn:lys:problem:llm:service-busy`,
+nothing stored. A failed listing is not remembered, and neither is a model
+the inventory does not list: each of its requests reads the inventory again,
+and its turn sees no image and is offered none of the tools the backend
+adds.
+
 `message` and `model` must be non-empty strings. Every turn sends the system
 prompt its agent has when the turn starts, so editing a stored agent changes
 its conversations from their next message. Continuation
@@ -142,15 +154,9 @@ What a file is comes from its bytes, never from its name: a PNG, JPEG, or
 WebP file with a readable header is an image, bytes that decode as UTF-8
 without a NUL character are a text file, and anything else returns `400` with
 `urn:lys:problem:chat:attachment-unsupported`; see
-[an attachment Lys cannot send](#an-attachment-lys-cannot-send). When the
-request or the conversation holds an attachment, the route reads from LM
-Studio's inventory whether `model` has `vision` and `trainedForToolUse`, so a
-full model-operation queue answers `503` with
-`urn:lys:problem:llm:service-busy` and a missing runtime `503` with
-`urn:lys:problem:llm:runtime-unavailable`, nothing stored; a request without
-attachments in a conversation without any never reads the inventory. An
-image attached for a model without vision, or for a model the inventory does
-not list, returns `409` with `urn:lys:problem:chat:image-needs-vision`; see
+[an attachment Lys cannot send](#an-attachment-lys-cannot-send). An image
+attached for a model without vision, or for a model the inventory does not
+list, returns `409` with `urn:lys:problem:chat:image-needs-vision`; see
 [an image for a model without vision](#an-image-for-a-model-without-vision).
 
 The files are written under
@@ -199,15 +205,20 @@ shape `toolDefinitionSchema` from `@lys/share` validates, each with `runner`
 backend runs, each once, as [`GET /api/v1/tools`](#tool-list) lists them; it is
 optional. Together they offer at least one tool, and no name appears in both.
 A request that breaks these rules, names a backend tool the backend does not
-run, or offers `read_attachment` as a client or backend tool, returns `400`
-before anything is stored; the backend adds the reader to a turn itself. A
+run, or offers `read_attachment`, `read_my_state`, `find_agents`, or
+`read_agent_state` as a client or backend tool, returns `400` before anything
+is stored; the backend adds those tools to a turn itself. A
 request that offers a
 backend tool that cannot run now, such as `web_search` without a usable
 Tavily API key or `read_page` while vmo is not ready, returns `409` with
 `urn:lys:problem:chat:backend-tool-unavailable` before anything is stored; see
 [an offered tool that cannot run](#an-offered-tool-that-cannot-run). The model is offered client
-tools first, then backend tools, each in request order. Without `tools`, the
-turn is one round with no tools. The desktop sends `tools`
+tools first, then backend tools, each in request order, then the tools the
+backend adds for a model trained for tool use: `read_attachment` while the
+conversation holds a text file, then the
+[agent state tools](/architecture/backend/#agent-state-tools). Without
+`tools`, a turn of a model that is not trained for tool use is one round
+with no tools. The desktop sends `tools`
 only to a model whose `trainedForToolUse` is true; the backend does not check
 this itself ([#135](https://github.com/w3lt/lys/issues/135)). A reply can make any number of tool calls
 ([#136](https://github.com/w3lt/lys/issues/136)).
@@ -247,9 +258,10 @@ All three fields are optional:
   `switchedOffToolNames` or `unavailableTools`.
 
 A tool appears at most once across `tools`, `switchedOffToolNames`, and
-`unavailableTools`, and neither list names `read_attachment`, which has no
-switch and which the backend adds to a turn itself. A request that breaks
-these rules returns `400` before anything is stored.
+`unavailableTools`, and neither list names `read_attachment`,
+`read_my_state`, `find_agents`, or `read_agent_state`, which have no switch
+and which the backend adds to a turn itself. A request that breaks these
+rules returns `400` before anything is stored.
 
 Every round of the turn sends the agent's system prompt followed by the notes
 these fields call for, each after a blank line:
@@ -277,8 +289,9 @@ The desktop sends these fields only to a model whose `trainedForToolUse` is
 true. With tool calls on, it names every listed tool whose switch is off, and
 every switched-on backend tool the list reports as unable to run, with the
 list's reason. With tool calls off, it sends `areToolCallsSwitchedOff` without
-reading the tool list. `read_attachment` is still offered while the
-conversation holds a text file.
+reading the tool list. The tools the backend adds are still offered while
+tool calls are off: `read_attachment` while the conversation holds a text
+file, and the agent state tools.
 
 ## Chat response shape
 
@@ -335,8 +348,9 @@ current system prompt, followed by the notes about the
 request names any or switches tool calls off, the
 stored messages a turn includes, the empty message,
 and the tools a turn would offer, client tools first, then the backend's,
-then `read_attachment` when the conversation holds a text file for a model
-trained for tool use. It counts them with the loaded model's tokenizer and
+then, for a model trained for tool use, `read_attachment` when the
+conversation holds a text file and the agent state tools the answering
+agent's role gives. It counts them with the loaded model's tokenizer and
 answers `200`:
 
 ```json
@@ -372,9 +386,9 @@ answers `200`:
   sends instead. When a stored message
   holds a text file and the model is trained for tool use, `read_attachment`
   is measured after the offered tools, as a turn offers it. Whether the model
-  sees images and is trained for tool use is read from the inventory only
-  when a stored message has an attachment. A client adds the same estimate
-  for each image it would send.
+  sees images and is trained for tool use is read as the chat request reads
+  it, through the same remembered capabilities. A client adds the same
+  estimate for each image it would send.
 - An offered backend tool is measured whether or not it can run now; the chat
   request refuses one that cannot.
 - The model is matched like a chat request names it: by its model key, as LM
@@ -416,9 +430,11 @@ document). For `read_page`, it is `page-reader-not-ready`: vmo did not answer
 `GET /health` at `127.0.0.1:8080` with `200` within one second. Each name in
 `unavailableTools` is a listed tool, once. The list reads the settings file
 and asks vmo's health route, contacts nothing else, and never contains the
-key. `read_attachment`, the attachment reader, is not listed and cannot be
-offered by name: the chat route adds it to a turn by itself; see
-[attachments](#attachments).
+key. `read_attachment`, the attachment reader, and the agent state tools,
+`read_my_state`, `find_agents`, and `read_agent_state`, are not listed and
+cannot be offered by name: the chat route adds them to a turn by itself; see
+[attachments](#attachments) and
+[agent state tools](/architecture/backend/#agent-state-tools).
 
 ### Key check
 
@@ -448,7 +464,8 @@ fraction Tavily reports is rounded up. The answer never contains the key.
 
 The backend decides which tool calls need the person: every call of a tool
 that is not saved as Just run, client and backend tools alike, except
-`read_attachment`, which runs without approval. It shows such a
+`read_attachment` and the agent state tools, which run without approval. It
+shows such a
 call with a `tool-approval` event, and the client answers it with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`,
 where `callId` is the `id` of the event's call or of its entry in
@@ -609,7 +626,8 @@ Caliginia (`caliginia`) and Lysiptera (`lysiptera`). It has a `code`, a `name`,
 a `bio`, and a `systemPrompt`, belongs to the release, and can be neither
 changed nor deleted. A stored agent is a definition the user created: a `code`, a `name`, a `bio`, a
 `systemPrompt`, and the `createdAt` and `updatedAt` timestamps. The code is the
-agent's identity and never changes: a lowercase slug of 1–64 characters made of
+agent's identity and never changes, nor is it ever free again once the agent is
+deleted: a lowercase slug of 1–64 characters made of
 `a`–`z` and `0`–`9` in hyphen-separated groups, compared exactly. A malformed
 code in a path returns `400` before any lookup. Request bodies reject unknown
 fields; the name is trimmed to 1–64 UTF-16 code units, the bio to 1–128, and the
@@ -633,7 +651,8 @@ stored agent, with them.
 | `cursor`  | Opaque, at most 2048 characters, taken from the previous page. Malformed or foreign cursors return `400`. |
 
 Stored agents are ordered by `createdAt ASC, code ASC`, with keyset pagination, and
-`storedCount` counts every stored agent, never the built-in ones. Neither key changes after creation,
+`storedCount` counts every stored agent that is not deleted, never the built-in
+ones. A deleted agent is neither listed nor counted. Neither key changes after creation,
 so an update never moves an agent between pages. Each response reads the count
 and the page from one snapshot; later pages reflect later changes. The next
 cursor is `null` on the last page.
@@ -644,7 +663,7 @@ browser client on another origin, such as the desktop app, uses the returned
 `code` instead. `code` is optional:
 
 - A given code is stored exactly. If another agent already has it, a built-in
-  agent's included, the request returns `409` with
+  or a deleted agent's included, the request returns `409` with
   `urn:lys:problem:agent:code-taken` and stores nothing.
 - Without a code, the backend derives one from the name: it decomposes the
   name with Unicode compatibility decomposition (NFKD), which removes accents
@@ -653,8 +672,8 @@ browser client on another origin, such as the desktop app, uses the returned
   to fit 64 characters. `Web Researcher` becomes `web-researcher` and `Trợ lý`
   becomes `tro-ly`. A letter without an ASCII form, such as `đ`, acts as a
   separator. A name in which no letter or digit has an ASCII form, such as
-  `日本語`, gives `agent`. When the code is taken, by a stored or a built-in
-  agent, `-2`, `-3`, and so on are added, so the name `Caliginia` gives
+  `日本語`, gives `agent`. When the code is taken, by a stored, deleted, or
+  built-in agent, `-2`, `-3`, and so on are added, so the name `Caliginia` gives
   `caliginia-2`.
 
 Creating an agent is not idempotent: repeating a request without a code creates
@@ -663,9 +682,14 @@ was created. Names need not be unique.
 
 `PATCH` replaces only the given fields, trimmed, and stores the time of the
 change as `updatedAt`, even when the values are unchanged. The body cannot
-contain `code`, and an empty body returns `400`. `DELETE` removes the agent
-permanently and returns `204` without a body. A conversation the deleted agent
-answered keeps its messages and its agent code; see
+contain `code`, and an empty body returns `400`. `DELETE` marks the agent
+deleted and returns `204` without a body. From then on `GET`, `PATCH`, and
+`DELETE` answer `404` for it, no new conversation can name it, and its code
+stays taken: the backend keeps the agent's row, with its definition and the
+time it was deleted, so the built-in agents can still look it up with the
+[agent state tools](/architecture/backend/#agent-state-tools) and a reply it
+was writing when it was deleted runs to its end. A conversation the deleted
+agent answered keeps its messages and its agent code; see
 [a conversation whose agent was deleted](#a-conversation-whose-agent-was-deleted).
 
 `PATCH` or `DELETE` on a built-in agent changes nothing and returns `409` with
@@ -681,7 +705,7 @@ answered keeps its messages and its agent code; see
 }
 ```
 
-A missing agent on GET, PATCH, or DELETE returns `404` with
+A missing or deleted agent on GET, PATCH, or DELETE returns `404` with
 `Content-Type: application/problem+json`:
 
 ```json
@@ -719,9 +743,12 @@ conversation gains no message and no failed reply.
 }
 ```
 
-The conversation accepts messages again once an agent is stored under that
-code, and that agent then answers it. Built-in agents cannot be deleted, so a
-conversation a built-in agent answers never reaches this state.
+A deleted agent's code is never free again, so such a conversation stays
+read-only. Only a conversation whose agent was removed before version 11 of
+the database, when deletion still removed the row, accepts messages again
+once an agent is stored under that code, and that agent then answers it.
+Built-in agents cannot be deleted, so a conversation a built-in agent answers
+never reaches this state.
 
 ### An offered tool that cannot run
 

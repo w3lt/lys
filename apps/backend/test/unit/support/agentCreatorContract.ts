@@ -8,10 +8,15 @@ export type AgentCreatorHarness = Readonly<{
   /** Agent creation under test. */
   agentCreator: AgentCreator
   /**
-   * Reads every agent the store holds, in code order, without going through
-   * the agent creation.
+   * Reads every agent the store holds, deleted ones included, in code order,
+   * without going through the agent creation.
    */
   readStoredAgents: () => readonly Agent[]
+  /**
+   * Marks the stored agent with `code` deleted without going through the
+   * agent creation; fails when no agent that is not deleted has the code.
+   */
+  deleteStoredAgent: (code: string) => void
   /**
    * Makes every later attempt to store an agent fail with an error whose
    * message is `message`, as a failing disk does; the store stays readable.
@@ -125,6 +130,34 @@ export function registerAgentCreatorContractSuite(
       ).toBeUndefined()
 
       expect(readStoredAgents()).toEqual([stored])
+    })
+
+    it("returns undefined for a deleted agent's code and keeps the deleted agent", () => {
+      const { agentCreator, readStoredAgents, deleteStoredAgent } =
+        createHarness()
+      const stored = agentCreator.createAgent(RESEARCHER_DEFINITION)
+      deleteStoredAgent("researcher")
+
+      expect(
+        agentCreator.createAgent({
+          ...RESEARCHER_DEFINITION,
+          name: "Successor"
+        })
+      ).toBeUndefined()
+
+      expect(readStoredAgents()).toEqual([stored])
+    })
+
+    it("skips a deleted agent's code when the name gives it", () => {
+      const { agentCreator, readStoredAgents, deleteStoredAgent } =
+        createHarness()
+      const stored = agentCreator.createAgent(RESEARCHER_DEFINITION)
+      deleteStoredAgent("researcher")
+
+      const created = agentCreator.createAgent(RESEARCHER_NAME_ONLY_DEFINITION)
+
+      expect(created).toMatchObject({ code: "researcher-2" })
+      expect(readStoredAgents()).toEqual([stored, created])
     })
 
     it.each([

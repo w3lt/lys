@@ -5,6 +5,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { onTestFinished, vi, type MockInstance } from "vitest"
 import SqliteAgentRecordStore from "../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
+import AgentRuntimeService, {
+  buildConversationTitleLookup
+} from "../../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../../src/modules/agent/agentService"
 import AttachmentFileStore from "../../../src/modules/attachment/attachmentFileStore"
 import { buildBuiltInAgents } from "../../../src/modules/agent/builtInAgents"
@@ -13,6 +16,10 @@ import LlmReplyContextMeter from "../../../src/modules/chat/llmReplyContextMeter
 import OpenAiReplyModel from "../../../src/modules/chat/openAiReplyModel"
 import type StoredConversationTurns from "../../../src/modules/conversation/turns"
 import ReplyGenerationRegistry from "../../../src/modules/chat/replyGenerationRegistry"
+import {
+  createModelCapabilitiesLookup,
+  type FindModelCapabilities
+} from "../../../src/modules/chat/routes/modelCapabilities"
 import LlmService from "../../../src/modules/llm/llmService"
 import ToolApprovalService, {
   type ReadJustRunToolNames
@@ -65,11 +72,16 @@ export type ChatRouteTestApp = TestFastify &
       LlmService["findLlmContextMeasurement"]
     >
     /**
-     * Downloaded models of `app.llmService`, which the chat route reads for a
-     * model's capabilities when a request or its conversation holds
-     * attachments; rejects until a case configures it.
+     * Downloaded models of `app.llmService`, which {@link findModelCapabilities}
+     * reads for a model's capabilities; lists no model until a case configures
+     * it, so every model sees no image and is offered no attachment reader.
      */
     listDownloadedLlmModels: MockInstance<LlmService["listDownloadedLlmModels"]>
+    /**
+     * Capability lookup over {@link listDownloadedLlmModels}, which a case
+     * passes to the chat route; it remembers each listed model for the test.
+     */
+    findModelCapabilities: FindModelCapabilities
     /**
      * Reader of the saved Just run choices behind `app.toolApprovalService`;
      * rejects until a case configures it.
@@ -102,10 +114,13 @@ export type ChatRouteTestApp = TestFastify &
  * persistence is real and stores on the same in-memory database. The
  * decorated agent service
  * keeps its records on the same in-memory database and builds the built-in
- * agents with {@link TEST_BUILT_IN_AGENT_PROMPTS}; every agent's model calls
+ * agents with {@link TEST_BUILT_IN_AGENT_PROMPTS}; the decorated agent
+ * runtime service keeps the live agents over it and titles their requests'
+ * conversations from the same database; every agent's model calls
  * go through the `completeChatStream` spy, and every measurement, by their
  * meters and by the title task, through the `findLlmContextMeasurement` spy
- * of the decorated LLM service, whose queue rejects anything else. The
+ * of the decorated LLM service, and every inventory read through its
+ * `listDownloadedLlmModels` spy; its queue rejects anything else. The
  * decorated history reader and editor read and edit the same database, so a
  * case can delete a conversation while a request is in flight. The backend
  * tools are
@@ -165,18 +180,21 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     )
   const listDownloadedLlmModels = vi
     .spyOn(llmService, "listDownloadedLlmModels")
-    .mockImplementation(() =>
-      Promise.reject(createUnexpectedCallError("listDownloadedLlmModels"))
-    )
+    .mockResolvedValue([])
   const agentService = new AgentService({
-    recordStore: new SqliteAgentRecordStore(database),
-    builtInAgents: buildBuiltInAgents(TEST_BUILT_IN_AGENT_PROMPTS),
+    recordStore: SqliteAgentRecordStore.create(database),
+    builtInAgents: buildBuiltInAgents(TEST_BUILT_IN_AGENT_PROMPTS)
+  })
+  const agentRuntimeService = new AgentRuntimeService({
+    agents: agentService,
     replyModel: new OpenAiReplyModel((options) =>
       chatService.completeChatStream(options)
     ),
     replyContextMeter: new LlmReplyContextMeter((model, texts) =>
       llmService.findLlmContextMeasurement(model, texts)
-    )
+    ),
+    findConversationTitle: (conversationId) =>
+      buildConversationTitleLookup(history.getConversation(conversationId))
   })
   const readJustRunToolNames = vi.fn<ReadJustRunToolNames>(() =>
     Promise.reject(createUnexpectedCallError("readJustRunToolNames"))
@@ -193,6 +211,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   testFastify.app.decorate("chatService", chatService)
   testFastify.app.decorate("llmService", llmService)
   testFastify.app.decorate("agentService", agentService)
+  testFastify.app.decorate("agentRuntimeService", agentRuntimeService)
   testFastify.app.decorate(
     "toolApprovalService",
     new ToolApprovalService(readJustRunToolNames)
@@ -227,6 +246,9 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     generateTitle,
     findLlmContextMeasurement,
     listDownloadedLlmModels,
+    findModelCapabilities: createModelCapabilitiesLookup(() =>
+      llmService.listDownloadedLlmModels()
+    ),
     readJustRunToolNames,
     attachmentsDirectoryPath,
     generations

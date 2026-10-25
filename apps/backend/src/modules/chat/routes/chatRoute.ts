@@ -53,9 +53,7 @@ import type {
 import type ReplyGenerationRegistry from "../replyGenerationRegistry"
 import createTitleGenerationTask from "../titleGenerationTask"
 import {
-  createModelCapabilitiesLookup,
   findListedModelCapabilities,
-  NO_MODEL_CAPABILITIES,
   type FindModelCapabilities,
   type ModelCapabilities
 } from "./modelCapabilities"
@@ -71,7 +69,7 @@ import {
   type ChatRouteRequest
 } from "./share"
 import {
-  findRequestedAgent,
+  loadRequestedAgent,
   findRequestedBuiltInTools,
   findUnofferedTools,
   sendUnansweredTurnProblem,
@@ -82,11 +80,20 @@ import {
 /** Backend settings the chat route applies to every request. */
 export type ChatRouteOptions = Pick<BackendConfig, "titleGenerationMaxAttempts">
 
-/** Settings and the generation registry the chat route is installed with. */
+/**
+ * Settings, the generation registry, and the capability lookup the chat
+ * route is installed with.
+ */
 export type ChatRouteRegistration = ChatRouteOptions &
   Readonly<{
     /** Registry owning every generation this route starts; not disposed here. */
     generations: ReplyGenerationRegistry
+    /**
+     * Capabilities of the model a request names, read from LM Studio's
+     * inventory and remembered by the lookup; shared with the chat-context
+     * route.
+     */
+    findModelCapabilities: FindModelCapabilities
   }>
 
 /** What the chat route does with attachment files. */
@@ -102,7 +109,7 @@ type AttachmentFiles = Pick<
  * Capabilities and settings borrowed for the lifetime of a registered chat
  * route, including the agent lookup.
  */
-type ChatRouteDependencies = Pick<TurnAgentLookups, "findChatAgent"> &
+type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
   Readonly<{
     /** Turn persistence whose lifetime outlives all active generations. */
     turns: ConversationTurnWriter
@@ -230,6 +237,11 @@ type TurnGenerationInput = Readonly<{
   unofferedTools: UnofferedTools
   /** Whether the model sees images. */
   canSeeImages: boolean
+  /**
+   * Whether the model is trained for tool use, so the agent adds its state
+   * tools to the turn.
+   */
+  trainedForToolUse: boolean
   /** Reads the bytes of one stored image attachment of the conversation. */
   findAttachmentImage: FindAttachmentImage
   /** Logger of the request that started the turn. */
@@ -243,8 +255,8 @@ type TurnGenerationInput = Readonly<{
  * follows that generation on the response stream.
  *
  * @param app - Backend with SSE, validation, and singleton services installed.
- * @param registration - Title attempt limit and the registry that owns the
- * started generations.
+ * @param registration - Title attempt limit, the registry that owns the
+ * started generations, and the model capability lookup.
  * @throws If route registration fails.
  * @remarks The route accepts bodies up to the chat contract's limit, so a
  * message can carry its attachments. A full model-operation queue and a
@@ -253,19 +265,22 @@ type TurnGenerationInput = Readonly<{
  */
 export default function updateFastifyWithChatRoute(
   app: FastifyInstance,
-  { titleGenerationMaxAttempts, generations }: ChatRouteRegistration
+  {
+    titleGenerationMaxAttempts,
+    generations,
+    findModelCapabilities
+  }: ChatRouteRegistration
 ): void {
   const turns = app.conversationTurns
   const dependencies = {
     turns,
     replyParts: app.replyParts,
     titleWriter: turns,
-    findChatAgent: (code: string) => app.agentService.findChatAgent(code),
+    loadChatAgent: (code: string) =>
+      app.agentRuntimeService.loadChatAgent(code),
     findConversation: (conversationId: string) =>
       app.conversationHistoryReader.getConversation(conversationId),
-    findModelCapabilities: createModelCapabilitiesLookup(() =>
-      app.llmService.listDownloadedLlmModels()
-    ),
+    findModelCapabilities,
     attachmentFiles: app.attachmentFileStore,
     generateTitle: (options: TitleGenerationOptions) =>
       app.chatService.generateTitle(options),
@@ -364,11 +379,12 @@ async function handleChatRequest(
  * then the conversation is read once and an agent is
  * looked up for the request, so a request no agent answers is refused
  * before the inventory is read; the conversation's stored attachments come
- * from that read. The model's capabilities are read from LM Studio only when
- * the request or the conversation holds an attachment, so a turn without any
- * never waits for the model-operation queue. The agent found here is not
- * kept: the lookup that decides who answers runs again when the turn is
- * stored.
+ * from that read. The model's capabilities are then read for every turn,
+ * because they decide the images the model sees and the tools the backend
+ * offers it; the lookup lists LM Studio's inventory only until it has seen
+ * the model, so only a model's first turn waits for the model-operation
+ * queue. The agent found here is not kept: the lookup that decides who
+ * answers runs again when the turn is stored.
  */
 async function parseTurnRequest(
   request: ChatRouteRequest,
@@ -393,15 +409,10 @@ async function parseTurnRequest(
   if (builtInTools === undefined) return undefined
   const checked = findTurnConversation(request, reply, dependencies)
   if (checked === undefined) return undefined
-  const capabilities = hasTurnAttachments(
-    checked.storedConversation,
-    attachments.attachments
+  const capabilities = await findListedModelCapabilities(
+    body.model,
+    dependencies.findModelCapabilities
   )
-    ? await findListedModelCapabilities(
-        body.model,
-        dependencies.findModelCapabilities
-      )
-    : NO_MODEL_CAPABILITIES
   const unseenImage = findUnseenImage(attachments.attachments, capabilities)
   if (unseenImage !== undefined) {
     sendProblem(
@@ -443,7 +454,7 @@ function findTurnConversation(
   reply: ChatRouteReply,
   dependencies: Pick<
     ChatRouteDependencies,
-    "findChatAgent" | "findConversation"
+    "loadChatAgent" | "findConversation"
   >
 ): CheckedTurnConversation | undefined {
   const { conversation } = request.body
@@ -451,8 +462,8 @@ function findTurnConversation(
     conversation.kind === "existing"
       ? dependencies.findConversation(conversation.id)
       : undefined
-  const requestedAgent = findRequestedAgent(conversation, {
-    findChatAgent: dependencies.findChatAgent,
+  const requestedAgent = loadRequestedAgent(conversation, {
+    loadChatAgent: dependencies.loadChatAgent,
     findConversationAgentCode: () => storedConversation?.agentCode
   })
   if (requestedAgent.status !== "found") {
@@ -524,27 +535,6 @@ function sendProblem(reply: ChatRouteReply, problem: ChatRouteProblem): void {
 }
 
 /**
- * Answers whether a turn involves an attachment.
- *
- * @param storedConversation - The continued conversation; undefined for a
- * new one.
- * @param attachments - The request's decoded attachments.
- * @returns True when the request carries an attachment or a stored user
- * message of the conversation has one.
- */
-function hasTurnAttachments(
-  storedConversation: Conversation | undefined,
-  attachments: readonly ParsedChatAttachment[]
-): boolean {
-  if (attachments.length > 0) return true
-  return (
-    storedConversation?.messages.some(
-      (message) => message.role === "user" && message.attachments.length > 0
-    ) ?? false
-  )
-}
-
-/**
  * Saves the request's attachment files, then finds the agent that answers
  * and stores the turn.
  *
@@ -576,7 +566,7 @@ async function saveTurn(
   attachments: readonly ParsedChatAttachment[],
   dependencies: Pick<
     ChatRouteDependencies,
-    "turns" | "attachmentFiles" | "findChatAgent" | "findConversation"
+    "turns" | "attachmentFiles" | "loadChatAgent" | "findConversation"
   >
 ): Promise<SavedTurnOutcome> {
   const turnOptions = buildTurnOptions(body, attachments)
@@ -653,11 +643,11 @@ function createAnsweredTurn(
   turnOptions: CreateConversationTurnOptions,
   dependencies: Pick<
     ChatRouteDependencies,
-    "turns" | "findChatAgent" | "findConversation"
+    "turns" | "loadChatAgent" | "findConversation"
   >
 ): SavedTurnOutcome {
-  const requestedAgent = findRequestedAgent(requested, {
-    findChatAgent: dependencies.findChatAgent,
+  const requestedAgent = loadRequestedAgent(requested, {
+    loadChatAgent: dependencies.loadChatAgent,
     findConversationAgentCode: (conversationId) =>
       dependencies.findConversation(conversationId)?.agentCode
   })
@@ -776,6 +766,7 @@ function buildTurnGenerationInput(
       : accepted.builtInTools,
     unofferedTools: accepted.unofferedTools,
     canSeeImages: accepted.capabilities.vision,
+    trainedForToolUse: accepted.capabilities.trainedForToolUse,
     findAttachmentImage: buildAttachmentImageReader(
       conversationId,
       attachmentFiles
@@ -926,12 +917,15 @@ function buildAgentTurn(
   const { replyParts } = dependencies
   const assistantMessageId = turn.assistantMessage.id
   return {
+    conversationId: turn.conversation.id,
+    requestId: assistantMessageId,
     history: turn.conversation.messages,
     sources: turn.conversation.sources,
     userMessage: turn.userMessage,
     canSeeImages: input.canSeeImages,
     findAttachmentImage: input.findAttachmentImage,
     model: input.model,
+    trainedForToolUse: input.trainedForToolUse,
     generationOptions: input.generationOptions,
     clientTools: input.clientTools,
     builtInTools: input.builtInTools,

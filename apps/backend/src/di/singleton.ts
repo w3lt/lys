@@ -4,6 +4,9 @@ import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgen
 import AttachmentFileStore from "../modules/attachment/attachmentFileStore"
 import SqliteDatabase from "../infrastructure/database/sqliteDatabase"
 import LmStudioRuntime from "../modules/llm/runtimes/lmStudioRuntime"
+import AgentRuntimeService, {
+  buildConversationTitleLookup
+} from "../modules/agent/agentRuntimeService"
 import AgentService from "../modules/agent/agentService"
 import { buildBuiltInAgents } from "../modules/agent/builtInAgents"
 import ChatService, {
@@ -113,10 +116,15 @@ export type SingletonServices = Readonly<{
   conversationHistoryEditor: StoredConversationHistoryEditor
   /**
    * The built-in agents and agent definitions over agent records on the
-   * shared database, answering over the chat service; it owns nothing to
-   * release.
+   * shared database; it owns nothing to release.
    */
   agentService: AgentService
+  /**
+   * The live agents, which answer over the chat service and measure through
+   * the LLM service, and what agents may learn about each other; its live
+   * agents own nothing to release.
+   */
+  agentRuntimeService: AgentRuntimeService
   /**
    * Every tool the backend runs, in the order Settings lists them; they own
    * nothing to release.
@@ -180,9 +188,11 @@ type DatabaseServices = Pick<
  * runtime service. The conversation services and the Sqlite records they
  * wrap are created over the database before the runtime service, turn
  * persistence first, so its startup recovery runs before any history is
- * read. The agent service is created after the LLM runtime service, over its
- * Sqlite records, the chat service, and the LLM service; it reads nothing at
- * creation and owns nothing to release.
+ * read. The agent service and the agent runtime service are created after
+ * the LLM runtime service: the agent service over its Sqlite records, and
+ * the runtime service over the agent service, the chat service, the LLM
+ * service, and the history reader; they read nothing at creation and own
+ * nothing to release.
  * The web search tool provider, the built-in tools, the tool approval
  * service, and the attachment file store are created last; they read and
  * contact nothing at creation and own nothing to release.
@@ -219,12 +229,13 @@ export async function createSingletonServices(
     const llmService = new LlmService({
       llmEngineOperationQueue: llmRuntimeServiceAcquisition.service
     })
-    const agentService = createAgentService(
+    const agentServices = createAgentServices(
       config,
       databaseAcquisition.service,
       {
         chatService,
-        llmService
+        llmService,
+        historyReader: databaseServices.conversationHistoryReader
       }
     )
     const toolServices = createToolServices(config, logReporters.pageRendering)
@@ -241,7 +252,7 @@ export async function createSingletonServices(
       llmService,
       llmRuntimeService: llmRuntimeServiceAcquisition.service,
       ...databaseServices,
-      agentService,
+      ...agentServices,
       ...toolServices,
       attachmentFileStore: new AttachmentFileStore(
         config.attachmentsDirectoryPath
@@ -274,44 +285,62 @@ function buildChatServiceOptions(
   }
 }
 
-/** Model services every agent borrows, lent for the agent service's lifetime. */
-type AgentModelServices = Readonly<{
+/** Services the live agents borrow, lent for the runtime service's lifetime. */
+type AgentRuntimeDependencies = Readonly<{
   /** Chat service the agents answer through. */
   chatService: ChatService
   /** LLM service that measures each context against the loaded model. */
   llmService: LlmService
+  /** History reader that gives the titles of the agents' conversations. */
+  historyReader: StoredConversationHistoryReader
 }>
 
+/** Services that define agents and run them; they own nothing to release. */
+type AgentServices = Pick<
+  SingletonServices,
+  "agentService" | "agentRuntimeService"
+>
+
 /**
- * Creates the agent service over the shared database and the model services.
+ * Creates the agent service over the shared database, and the agent runtime
+ * service over it and the services the live agents borrow.
  *
  * @param config - System prompts of the built-in agents.
  * @param database - Shared database lent to the agent records; the caller
  * keeps ownership and closes it.
- * @param modelServices - Chat and LLM services the agents answer and measure
- * through.
- * @returns The agent service, which reads nothing at creation and owns
- * nothing to release.
+ * @param dependencies - Chat and LLM services the agents answer and measure
+ * through, and the history reader that titles their conversations.
+ * @returns Both services, which read nothing at creation and own nothing to
+ * release.
  */
-function createAgentService(
+function createAgentServices(
   config: BackendConfig,
   database: SqliteDatabase,
-  { chatService, llmService }: AgentModelServices
-): AgentService {
-  const builtInAgents = buildBuiltInAgents({
-    caliginia: config.caliginiaSystemPrompt,
-    lysiptera: config.lysipteraSystemPrompt
+  { chatService, llmService, historyReader }: AgentRuntimeDependencies
+): AgentServices {
+  const agentService = new AgentService({
+    recordStore: SqliteAgentRecordStore.create(database),
+    builtInAgents: buildBuiltInAgents({
+      caliginia: config.caliginiaSystemPrompt,
+      lysiptera: config.lysipteraSystemPrompt
+    })
   })
-  return new AgentService({
-    recordStore: new SqliteAgentRecordStore(database),
-    builtInAgents,
-    replyModel: new OpenAiReplyModel((options) =>
-      chatService.completeChatStream(options)
-    ),
-    replyContextMeter: new LlmReplyContextMeter((model, texts) =>
-      llmService.findLlmContextMeasurement(model, texts)
-    )
-  })
+  return {
+    agentService,
+    agentRuntimeService: new AgentRuntimeService({
+      agents: agentService,
+      replyModel: new OpenAiReplyModel((options) =>
+        chatService.completeChatStream(options)
+      ),
+      replyContextMeter: new LlmReplyContextMeter((model, texts) =>
+        llmService.findLlmContextMeasurement(model, texts)
+      ),
+      findConversationTitle: (conversationId) =>
+        buildConversationTitleLookup(
+          historyReader.getConversation(conversationId)
+        )
+    })
+  }
 }
 
 /**

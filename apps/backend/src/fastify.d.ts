@@ -1,5 +1,6 @@
 /// <reference types="fastify" />
 
+import type AgentRuntimeService from "./modules/agent/agentRuntimeService"
 import type AgentService from "./modules/agent/agentService"
 import type AttachmentFileStore from "./modules/attachment/attachmentFileStore"
 import type ChatService from "./modules/chat/chatService"
@@ -30,8 +31,13 @@ declare module "fastify" {
     conversationHistoryReader: StoredConversationHistoryReader
     /** Application-scoped renaming and deletion of stored conversations. */
     conversationHistoryEditor: StoredConversationHistoryEditor
-    /** Application-scoped agent definitions and the agents that answer chats. */
+    /** Application-scoped built-in agents and stored agent definitions. */
     agentService: AgentService
+    /**
+     * Application-scoped live agents that answer chats, and what agents may
+     * learn about themselves and each other.
+     */
+    agentRuntimeService: AgentRuntimeService
     /** Every tool the backend runs, in the order Settings lists them. */
     builtInTools: readonly BuiltInToolEntry[]
     /**

@@ -3,7 +3,7 @@ import { describe, expect, it, onTestFinished } from "vitest"
 import { migrateDatabase } from "../../../../src/infrastructure/database/migrations"
 
 /** Schema version produced by the current migration list. */
-const CURRENT_SCHEMA_VERSION = 10
+const CURRENT_SCHEMA_VERSION = 11
 
 /**
  * Opens an empty in-memory database owned by the current test.
@@ -141,15 +141,14 @@ const VERSION_8_MESSAGES_SQL = `
  * Creates a database with the version-8 schema.
  *
  * @returns A connection at `user_version` 8, closed when the test finishes.
- * @remarks Migrates to the current version, then replaces what migration 9
- * changed with the historical version-8 objects: the sources table goes, and
- * the message table, its index, and its triggers come back as
- * {@link VERSION_8_MESSAGES_SQL}. The other tables are unchanged since
- * version 8.
+ * @remarks Starts from {@link createVersion10Database}, then replaces what
+ * migrations 9 and 10 changed with the historical version-8 objects: the
+ * attachments and sources tables go, and the message table, its index, and
+ * its triggers come back as {@link VERSION_8_MESSAGES_SQL}. The other tables
+ * are unchanged since version 8.
  */
 function createVersion8Database(): DatabaseSync {
-  const database = openEmptyDatabase()
-  migrateDatabase(database)
+  const database = createVersion10Database()
   database.exec(`
     DROP TABLE conversation_attachments;
     DROP TABLE conversation_sources;
@@ -166,14 +165,31 @@ function createVersion8Database(): DatabaseSync {
  *
  * @returns A connection at `user_version` 9, closed when the test finishes.
  * @remarks Migration 10 only adds the attachments table, so dropping it from
- * a current database leaves exactly the version-9 schema.
+ * a version-10 database leaves exactly the version-9 schema.
  */
 function createVersion9Database(): DatabaseSync {
-  const database = openEmptyDatabase()
-  migrateDatabase(database)
+  const database = createVersion10Database()
   database.exec(`
     DROP TABLE conversation_attachments;
     PRAGMA user_version = 9
+  `)
+  return database
+}
+
+/**
+ * Creates a database at version 10: the current schema without the agents'
+ * deletion time.
+ *
+ * @returns A connection at `user_version` 10, closed when the test finishes.
+ * @remarks Migration 11 only adds `agents.deleted_at`, so dropping that
+ * column from a current database leaves exactly the version-10 schema.
+ */
+function createVersion10Database(): DatabaseSync {
+  const database = openEmptyDatabase()
+  migrateDatabase(database)
+  database.exec(`
+    ALTER TABLE agents DROP COLUMN deleted_at;
+    PRAGMA user_version = 10
   `)
   return database
 }
@@ -437,7 +453,9 @@ describe("migrateDatabase", () => {
     expect(listMessageRows(database, "version-8 and content")).toEqual(
       messagesBefore
     )
-    expect(database.prepare("SELECT * FROM agents").all()).toEqual(agentsBefore)
+    expect(database.prepare("SELECT * FROM agents").all()).toEqual(
+      agentsBefore.map((row) => ({ ...row, deleted_at: null }))
+    )
   })
 
   it("upgrades a version-8 database by keeping every message and its conversation's activity time, without reply text", () => {
@@ -1036,6 +1054,48 @@ describe("migrateDatabase", () => {
     expect(
       database.prepare("SELECT id, content FROM conversation_messages").all()
     ).toEqual([{ id: "u1", content: "Hello" }])
+  })
+
+  it("upgrades a version-10 database by adding the agents' deletion time, leaving every stored agent not deleted", () => {
+    const database = createVersion10Database()
+    database.exec(`
+      INSERT INTO agents (code, name, bio, system_prompt, created_at, updated_at)
+      VALUES ('researcher', 'Researcher', 'Searches.', 'You search.', '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z')
+    `)
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
+    expect(listColumns(database, "agents")).toEqual([
+      "code",
+      "name",
+      "bio",
+      "system_prompt",
+      "created_at",
+      "updated_at",
+      "deleted_at"
+    ])
+    expect(
+      database.prepare("SELECT code, updated_at, deleted_at FROM agents").all()
+    ).toEqual([
+      {
+        code: "researcher",
+        updated_at: "2026-01-02T00:00:00.000Z",
+        deleted_at: null
+      }
+    ])
+  })
+
+  it("refuses an empty agent deletion time", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+
+    expect(() =>
+      database.exec(`
+        INSERT INTO agents (code, name, bio, system_prompt, created_at, updated_at, deleted_at)
+        VALUES ('researcher', 'Researcher', 'Searches.', 'You search.', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', '')
+      `)
+    ).toThrow(/CHECK constraint failed/)
   })
 
   /** Stores a conversation with one user message for attachment cases. */

@@ -173,8 +173,7 @@ const FORBIDDEN_MESSAGE = "Only leaders can see other agents."
 
 /** What the state tools offer an agent of each role. */
 const ROLE_SCOPE_TEXT: Readonly<Record<AgentRole, string>> = Object.freeze({
-  leader:
-    "As a leader you can find other agents with find_agents and read their state with read_agent_state.",
+  leader: `As a leader you can find other agents with ${FIND_AGENTS_TOOL_NAME} and read their state with ${READ_AGENT_STATE_TOOL_NAME}.`,
   member: "As a member you can see only your own state."
 })
 
@@ -208,7 +207,7 @@ const NO_SOURCES = Object.freeze([])
  */
 function buildReadMyStateDefinition(role: AgentRole): ToolDefinition {
   const scope = hasAgentPermission(role, "read-any-state")
-    ? "Use find_agents and read_agent_state to see other agents."
+    ? `Use ${FIND_AGENTS_TOOL_NAME} and ${READ_AGENT_STATE_TOOL_NAME} to see other agents.`
     : "You can see only your own state."
   return toolDefinitionSchema.parse({
     name: READ_MY_STATE_TOOL_NAME,

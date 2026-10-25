@@ -15,8 +15,10 @@ import type {
   TurnBuiltInTool
 } from "../../../../src/modules/tool/builtIn/builtInTool"
 import {
+  registerArgumentFreeBuiltInToolContractSuite,
   registerBuiltInToolContractSuite,
-  type BuiltInToolHarness
+  type BuiltInToolHarness,
+  type RunnableBuiltInToolHarness
 } from "../../support/builtInToolContract"
 import { createFixtureUuidV7 } from "../../support/conversationFixtures"
 
@@ -202,6 +204,35 @@ describe("buildAgentStateTools", () => {
   })
 
   describe("read_my_state", () => {
+    registerArgumentFreeBuiltInToolContractSuite(
+      async (): Promise<RunnableBuiltInToolHarness> => {
+        const reader = createReader({
+          state: {
+            status: "found",
+            state: {
+              code: MEMBER.code,
+              name: "Researcher",
+              role: "member",
+              deletedAt: null,
+              requests: [OWN_REQUEST]
+            }
+          }
+        })
+        return {
+          tool: findStateTool(
+            buildAgentStateTools({
+              self: MEMBER,
+              requestId: OWN_REQUEST_ID,
+              reader
+            }),
+            "read_my_state"
+          ),
+          runnableArguments: {},
+          countStartedWork: () => reader.findAgentState.mock.calls.length
+        }
+      }
+    )
+
     it("tells a leader who it is and each request it works on, marking the calling one", async () => {
       const reader = createReader({
         state: {
@@ -357,33 +388,6 @@ describe("buildAgentStateTools", () => {
           "Now: 2026-10-24T10:07:00.000Z.\nWorking on 1 request:\n1. This reply, in this conversation: started 2026-10-24T10:05:00.000Z (2 minutes ago)"
         )
       })
-    })
-  })
-
-  describe("read_my_state when the turn already stopped", () => {
-    it("rejects with the abort reason without reading", async () => {
-      const reader = createReader({})
-      const tool = findStateTool(
-        buildAgentStateTools({
-          self: MEMBER,
-          requestId: OWN_REQUEST_ID,
-          reader
-        }),
-        "read_my_state"
-      )
-      const parsed = tool.parseToolCall({})
-      if (parsed.status !== "parsed") throw new Error("Not parsed")
-      const abortController = new AbortController()
-      const stopReason = new Error("stopped")
-      abortController.abort(stopReason)
-
-      await expect(
-        parsed.runToolCall({
-          abortSignal: abortController.signal,
-          addWebSources: () => []
-        })
-      ).rejects.toBe(stopReason)
-      expect(reader.findAgentState).not.toHaveBeenCalled()
     })
   })
 

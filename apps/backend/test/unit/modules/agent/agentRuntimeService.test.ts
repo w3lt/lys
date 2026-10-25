@@ -1,4 +1,8 @@
-import { CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE } from "@lys/share"
+import {
+  CALIGINIA_AGENT_CODE,
+  LYSIPTERA_AGENT_CODE,
+  type AgentDefinition
+} from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import SqliteAgentRecordStore from "../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
 import type Agent from "../../../../src/modules/agent/agent"
@@ -114,6 +118,23 @@ function createRuntime(options: RuntimeOptions = {}) {
       agents.findAgent.mock.calls.length +
       agents.listAgentMatches.mock.calls.length
   }
+}
+
+/**
+ * Stores one agent a millisecond after the clock's current time, so each
+ * agent stored later is created later.
+ *
+ * @param agentService - Agents of the runtime under test.
+ * @param definition - Valid definition whose code no agent has.
+ * @throws If an agent already has the code.
+ */
+function saveLaterAgent(
+  agentService: AgentService,
+  definition: AgentDefinition
+): void {
+  vi.advanceTimersByTime(1)
+  if (agentService.createAgent(definition) === undefined)
+    throw new Error(`Agent ${definition.code} is already stored`)
 }
 
 /** Where a case's turn belongs and what its model is trained for. */
@@ -305,7 +326,13 @@ describe("AgentRuntimeService", () => {
       vi.setSystemTime(new Date(STATE_READER_DELETED_AT))
       agentService.deleteAgent(STATE_READER_ARCHIVIST.code)
       vi.setSystemTime(new Date(NOW))
-      return { reader: runtime, countAgentReads }
+      return {
+        reader: runtime,
+        countAgentReads,
+        saveAgent: (definition) => {
+          saveLaterAgent(agentService, definition)
+        }
+      }
     })
 
     it("lists a live agent's requests in start order, each with its conversation's title as it is now", async () => {

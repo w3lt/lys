@@ -1,6 +1,7 @@
-import { CALIGINIA_AGENT_CODE } from "@lys/share"
+import { CALIGINIA_AGENT_CODE, type AgentDefinition } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import type { AgentIdentity } from "../../../src/modules/agent/agentRoles"
+import { MAXIMUM_AGENT_SEARCH_MATCHES } from "../../../src/modules/agent/capabilities"
 import type { AgentStateReader } from "../../../src/modules/agent/agentStateTools"
 
 /** Definition of the stored agent every reader under test holds. */
@@ -33,6 +34,11 @@ export type AgentStateReaderHarness = Readonly<{
   reader: AgentStateReader
   /** Number of agent lookups and searches the reader made so far. */
   countAgentReads: () => number
+  /**
+   * Stores one more agent, a member, without going through the reader;
+   * each agent stored later is created later.
+   */
+  saveAgent: (definition: AgentDefinition) => void
 }>
 
 /** Creates one reader for the current test, which releases what it holds. */
@@ -96,6 +102,28 @@ export function registerAgentStateReaderContractSuite(
       expect(
         outcome.status === "found" && Object.isFrozen(outcome.matches)
       ).toBe(true)
+    })
+
+    it("gives a leader only the first matches in search order and counts every match", () => {
+      const harness = createHarness()
+      const codes = Array.from(
+        { length: MAXIMUM_AGENT_SEARCH_MATCHES + 1 },
+        (_unused, index) => `scout-${String(index + 1).padStart(2, "0")}`
+      )
+      for (const code of codes)
+        harness.saveAgent({
+          code,
+          name: `Scout ${code}`,
+          bio: "Scouts ahead.",
+          systemPrompt: "You scout ahead."
+        })
+
+      const outcome = harness.reader.listAgentMatches(LEADER, "scout")
+
+      expect(
+        outcome.status === "found" && outcome.matches.map((match) => match.code)
+      ).toEqual(codes.slice(0, MAXIMUM_AGENT_SEARCH_MATCHES))
+      expect(outcome).toMatchObject({ matchCount: codes.length })
     })
 
     it("refuses a member's search without reading any agent", () => {

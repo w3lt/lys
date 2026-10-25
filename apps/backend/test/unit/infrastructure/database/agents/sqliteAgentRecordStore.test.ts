@@ -175,6 +175,9 @@ describe("SqliteAgentRecordStore", () => {
       expect(() =>
         recordStore.deleteAgent("lys", "2026-02-03T04:05:06.789Z")
       ).toThrow("Database transactions cannot be nested")
+      expect(() =>
+        recordStore.listAgentMatches({ query: "lys", limit: 1 })
+      ).toThrow("Database transactions cannot be nested")
     })
 
     expect(recordStore.listAgents({ after: undefined, limit: 2 })).toEqual({

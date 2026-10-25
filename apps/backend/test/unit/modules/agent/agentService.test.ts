@@ -76,6 +76,19 @@ const AGENT_WRITE_OPERATIONS: readonly string[] = Object.freeze([
 ])
 
 /**
+ * Marks one stored agent deleted at the current time through the records,
+ * bypassing the agent service.
+ *
+ * @param recordStore - Records over a migrated test database.
+ * @param code - Code of an agent that is stored and not deleted.
+ * @throws If no agent that is not deleted has the code.
+ */
+function deleteStoredAgent(recordStore: AgentRecordStore, code: string): void {
+  if (!recordStore.deleteAgent(code, new Date().toISOString()))
+    throw new Error(`Agent ${code} is not stored or already deleted`)
+}
+
+/**
  * Stores one agent through the records, bypassing the agent service.
  *
  * @param recordStore - Records over a migrated test database.
@@ -157,8 +170,9 @@ function startAgentWriteFailures(
  * owned by the current test, for the agent contract suites.
  *
  * @returns The service as each capability under test, its built-in agents,
- * direct writes and reads of the stored agent rows, a write failure raised by
- * temporary triggers on the agents table, and the database's close.
+ * direct writes, deletions, and reads of the stored agent rows, a write
+ * failure raised by temporary triggers on the agents table, and the
+ * database's close.
  */
 function createAgentServiceHarness(): AgentServiceHarness {
   const { database, recordStore, closeRecords } = openSqliteAgentRecordStore()
@@ -177,6 +191,7 @@ function createAgentServiceHarness(): AgentServiceHarness {
     saveAgent: (agent) => saveStoredAgent(recordStore, agent),
     saveInvalidAgent: (code) => saveInvalidAgentRow(database, code),
     readStoredAgents: () => readStoredAgents(database),
+    deleteStoredAgent: (code) => deleteStoredAgent(recordStore, code),
     failAgentWrites: (message) => startAgentWriteFailures(database, message),
     closeStore: closeRecords
   }
@@ -220,37 +235,6 @@ describe("AgentService", () => {
         agent: { kind: "custom", ...expected },
         deletedAt: null
       })
-    })
-
-    it("refuses a deleted agent's code and keeps the deleted agent", () => {
-      const agents = createAgentService()
-      agents.createAgent(RESEARCHER_DEFINITION)
-      agents.deleteAgent("researcher")
-      vi.setSystemTime(new Date(LATER))
-
-      expect(
-        agents.createAgent({ ...RESEARCHER_DEFINITION, name: "Successor" })
-      ).toBeUndefined()
-
-      expect(agents.findAgent("researcher")).toEqual({
-        agent: {
-          kind: "custom",
-          ...RESEARCHER_DEFINITION,
-          createdAt: NOW,
-          updatedAt: NOW
-        },
-        deletedAt: NOW
-      })
-    })
-
-    it("skips a deleted agent's code when the name gives it", () => {
-      const agents = createAgentService()
-      agents.createAgent(RESEARCHER_DEFINITION)
-      agents.deleteAgent("researcher")
-
-      expect(
-        agents.createAgent({ ...RESEARCHER_DEFINITION, code: undefined })
-      ).toMatchObject({ code: "researcher-2" })
     })
 
     it("finds a free code when the first try equals the second", () => {

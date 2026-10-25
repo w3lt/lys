@@ -3685,6 +3685,34 @@ describe("Agent", () => {
         untrainedMeter.findReplyContextMeasurement.mock.calls[0]?.[0].tools
       ).toEqual([LOOK_UP_WORD_FORMAT])
     })
+
+    it("measures only read_my_state after the given tools for a member", async () => {
+      const replyContextMeter = createCharacterReplyContextMeter(8192)
+      const agent = new Agent(
+        { ...AGENT_PROFILE, role: "member" },
+        {
+          replyModel: { openReplyStream: createEventStream() },
+          replyContextMeter,
+          stateReader: UNEXPECTED_STATE_READER
+        }
+      )
+
+      await agent.findContextMeasurement({
+        trainedForToolUse: true,
+        history: [],
+        model: TURN_REQUEST.model,
+        canSeeImages: false,
+        getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
+        tools: [LOOK_UP_WORD_TOOL],
+        unofferedTools: NO_UNOFFERED_TOOLS
+      })
+
+      expect(
+        replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0].tools.map(
+          (tool) => tool.function.name
+        )
+      ).toEqual(["look_up_word", "read_my_state"])
+    })
   })
 
   describe("system prompt changes", () => {

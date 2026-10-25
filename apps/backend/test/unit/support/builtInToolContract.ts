@@ -7,17 +7,29 @@ import type {
   BuiltInToolRunContext
 } from "../../../src/modules/tool/builtIn/builtInTool"
 
-/** One ready built-in tool with arguments it can and cannot run. */
-export type BuiltInToolHarness = Readonly<{
+/** One ready built-in tool with arguments it can run. */
+export type RunnableBuiltInToolHarness = Readonly<{
   /** Tool under test. */
   tool: BuiltInTool
   /** Arguments of a call whose run succeeds. */
   runnableArguments: BuiltInToolCallArguments
-  /** Arguments of a call the tool can never run. */
-  invalidArguments: BuiltInToolCallArguments
   /** Number of runs that started work, such as requests a server received. */
   countStartedWork: () => number
 }>
+
+/** One ready built-in tool with arguments it can and cannot run. */
+export type BuiltInToolHarness = RunnableBuiltInToolHarness &
+  Readonly<{
+    /** Arguments of a call the tool can never run. */
+    invalidArguments: BuiltInToolCallArguments
+  }>
+
+/**
+ * Creates one ready tool that takes no argument for the current test, which
+ * releases everything it acquired when the test finishes.
+ */
+export type RunnableBuiltInToolHarnessFactory =
+  () => Promise<RunnableBuiltInToolHarness>
 
 /**
  * Creates one ready tool for the current test, which releases everything it
@@ -66,7 +78,7 @@ export function createRecordedRunContext(
  * @param createHarness - Creates a fresh tool for each case.
  */
 function registerBuiltInToolSourceCase(
-  createHarness: BuiltInToolHarnessFactory
+  createHarness: RunnableBuiltInToolHarnessFactory
 ): void {
   it("shows only sources the turn numbered for it", async () => {
     const harness = await createHarness()
@@ -79,6 +91,78 @@ function registerBuiltInToolSourceCase(
     if (result.status !== "succeeded") throw new Error("Expected a success")
     for (const source of result.sources)
       expect(recorded.numberedSources).toContainEqual(source)
+  })
+}
+
+/**
+ * Registers the {@link BuiltInTool} cases about parsing and running calls it
+ * can run.
+ *
+ * @param createHarness - Creates a fresh tool for each case.
+ */
+function registerBuiltInToolRunCases(
+  createHarness: RunnableBuiltInToolHarnessFactory
+): void {
+  it("parses runnable arguments without starting any work", async () => {
+    const harness = await createHarness()
+
+    const parsed = harness.tool.parseToolCall(harness.runnableArguments)
+
+    expect(parsed.status).toBe("parsed")
+    expect(harness.countStartedWork()).toBe(0)
+  })
+
+  it("runs a parsed call and gives the model text", async () => {
+    const harness = await createHarness()
+    const parsed = harness.tool.parseToolCall(harness.runnableArguments)
+    if (parsed.status !== "parsed") throw new Error("Expected a parsed call")
+
+    const recorded = createRecordedRunContext(new AbortController().signal)
+
+    const result = await parsed.runToolCall(recorded.context)
+
+    expect(result.status).toBe("succeeded")
+    expect(result.content).not.toBe("")
+    expect(harness.countStartedWork()).toBe(1)
+  })
+
+  registerBuiltInToolSourceCase(createHarness)
+
+  it("runs each invocation of a parsed call independently", async () => {
+    const harness = await createHarness()
+    const parsed = harness.tool.parseToolCall(harness.runnableArguments)
+    if (parsed.status !== "parsed") throw new Error("Expected a parsed call")
+
+    const results = await Promise.all([
+      parsed.runToolCall(
+        createRecordedRunContext(new AbortController().signal).context
+      ),
+      parsed.runToolCall(
+        createRecordedRunContext(new AbortController().signal).context
+      )
+    ])
+
+    expect(results.map((result) => result.status)).toEqual([
+      "succeeded",
+      "succeeded"
+    ])
+    expect(harness.countStartedWork()).toBe(2)
+  })
+
+  it("rejects with the abort reason and starts no work when already stopped", async () => {
+    const harness = await createHarness()
+    const parsed = harness.tool.parseToolCall(harness.runnableArguments)
+    if (parsed.status !== "parsed") throw new Error("Expected a parsed call")
+    const abortController = new AbortController()
+    const stopReason = new Error("stopped")
+    abortController.abort(stopReason)
+
+    await expect(
+      parsed.runToolCall(
+        createRecordedRunContext(abortController.signal).context
+      )
+    ).rejects.toBe(stopReason)
+    expect(harness.countStartedWork()).toBe(0)
   })
 }
 
@@ -101,66 +185,20 @@ export function registerBuiltInToolContractSuite(
       expect(harness.countStartedWork()).toBe(0)
     })
 
-    it("parses runnable arguments without starting any work", async () => {
-      const harness = await createHarness()
+    registerBuiltInToolRunCases(createHarness)
+  })
+}
 
-      const parsed = harness.tool.parseToolCall(harness.runnableArguments)
-
-      expect(parsed.status).toBe("parsed")
-      expect(harness.countStartedWork()).toBe(0)
-    })
-
-    it("runs a parsed call and gives the model text", async () => {
-      const harness = await createHarness()
-      const parsed = harness.tool.parseToolCall(harness.runnableArguments)
-      if (parsed.status !== "parsed") throw new Error("Expected a parsed call")
-
-      const recorded = createRecordedRunContext(new AbortController().signal)
-
-      const result = await parsed.runToolCall(recorded.context)
-
-      expect(result.status).toBe("succeeded")
-      expect(result.content).not.toBe("")
-      expect(harness.countStartedWork()).toBe(1)
-    })
-
-    registerBuiltInToolSourceCase(createHarness)
-
-    it("runs each invocation of a parsed call independently", async () => {
-      const harness = await createHarness()
-      const parsed = harness.tool.parseToolCall(harness.runnableArguments)
-      if (parsed.status !== "parsed") throw new Error("Expected a parsed call")
-
-      const results = await Promise.all([
-        parsed.runToolCall(
-          createRecordedRunContext(new AbortController().signal).context
-        ),
-        parsed.runToolCall(
-          createRecordedRunContext(new AbortController().signal).context
-        )
-      ])
-
-      expect(results.map((result) => result.status)).toEqual([
-        "succeeded",
-        "succeeded"
-      ])
-      expect(harness.countStartedWork()).toBe(2)
-    })
-
-    it("rejects with the abort reason and starts no work when already stopped", async () => {
-      const harness = await createHarness()
-      const parsed = harness.tool.parseToolCall(harness.runnableArguments)
-      if (parsed.status !== "parsed") throw new Error("Expected a parsed call")
-      const abortController = new AbortController()
-      const stopReason = new Error("stopped")
-      abortController.abort(stopReason)
-
-      await expect(
-        parsed.runToolCall(
-          createRecordedRunContext(abortController.signal).context
-        )
-      ).rejects.toBe(stopReason)
-      expect(harness.countStartedWork()).toBe(0)
-    })
+/**
+ * Registers the cases every {@link BuiltInTool} implementation that takes no
+ * argument passes; such a tool has no arguments it can never run.
+ *
+ * @param createHarness - Creates a fresh tool for each case.
+ */
+export function registerArgumentFreeBuiltInToolContractSuite(
+  createHarness: RunnableBuiltInToolHarnessFactory
+): void {
+  describe("BuiltInTool contract", () => {
+    registerBuiltInToolRunCases(createHarness)
   })
 }

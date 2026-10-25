@@ -123,7 +123,7 @@ export type AgentStateOutcome =
  */
 export interface AgentStateReader {
   /**
-   * Finds the agents whose code, name, or bio contains a text.
+   * Lists the agents whose code, name, or bio contains a text.
    *
    * @param reader - The agent that asks.
    * @param query - Trimmed text of 1 to {@link MAXIMUM_AGENT_QUERY_LENGTH}
@@ -137,7 +137,7 @@ export interface AgentStateReader {
   listAgentMatches(reader: AgentIdentity, query: string): AgentSearchOutcome
 
   /**
-   * Reads the state of one agent.
+   * Finds the state of one agent.
    *
    * @param reader - The agent that asks.
    * @param code - Code of the agent to read; the reader's own code reads its

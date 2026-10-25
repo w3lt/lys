@@ -30,7 +30,10 @@ export type AgentPage = Readonly<{
    * at most the requested limit.
    */
   agents: readonly AgentSummary[]
-  /** Number of stored agents, including those on other pages. */
+  /**
+   * Number of stored agents that are not deleted, including those on other
+   * pages.
+   */
   storedCount: number
   /** Whether a stored agent follows the last one on this page. */
   hasMore: boolean
@@ -180,7 +183,7 @@ export interface AgentRecordStore {
  */
 export interface AgentRecordSearcher {
   /**
-   * Finds the stored agents whose code, name, or bio contains a text.
+   * Lists the stored agents whose code, name, or bio contains a text.
    *
    * @param input - Text found literally, under Unicode simple case folding,
    * and the number of matches to read.

@@ -33,13 +33,13 @@ const getAgentApiResponseSchemas = Object.freeze({
 })
 
 /**
- * Describes the GET endpoint that reads one built-in or stored agent,
- * including its system prompt.
+ * Describes the GET endpoint that reads one built-in or stored agent that is
+ * not deleted, including its system prompt.
  *
  * @remarks The endpoint observes the agents and changes nothing. A code that
- * no built-in or stored agent has returns the agent-not-found problem with
- * HTTP 404. Changing the method, path, or schemas requires coordinated
- * consumers.
+ * no built-in or stored agent has, or a deleted agent's, returns the
+ * agent-not-found problem with HTTP 404. Changing the method, path, or
+ * schemas requires coordinated consumers.
  */
 export const getAgentApi = Object.freeze({
   method: "GET",
@@ -56,7 +56,7 @@ export type GetAgentApiResponse = z.infer<typeof getAgentApi.response>
 export type GetAgentApiReply = {
   /** The addressed agent. */
   readonly 200: GetAgentApiResponse
-  /** No built-in or stored agent has the addressed code. */
+  /** No agent that is not deleted has the addressed code. */
   readonly 404: AgentNotFoundProblem
 }
 

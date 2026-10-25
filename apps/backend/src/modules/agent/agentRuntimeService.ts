@@ -111,22 +111,24 @@ function buildAgentProfile(agent: GetAgentApiResponse): AgentProfile {
 }
 
 /**
- * Keeps one live {@link Agent} per agent that has answered a turn, and tells
+ * Keeps one live {@link Agent} per agent a request has loaded, and tells
  * agents about themselves and each other as their roles allow.
  *
- * @remarks An agent becomes live the first time a turn or a measurement loads
- * it, and stays live for the service's lifetime, so every turn of an agent,
- * overlapping or not, runs on one instance that knows all of them. Each load
- * gives the live agent the system prompt the agent has now; a
- * reply already running keeps the prompt it started with. A deleted agent
- * answers no new turn, but its live instance stays, so the replies it still
- * writes stay listed. A state read or search checks the asking agent's
- * permission before it reads anything, and never makes an agent live: an
- * agent that is not live is working on no request. Owns its live agents,
- * which own no resource; the model's owner releases the model access and its
- * meter, and the records' owner closes the store, after which every load,
- * read, and search fails with `Database is closed`. Concurrency model: single-owner,
- * synchronous on the backend's event loop.
+ * @remarks An agent becomes live the first time a chat or a context
+ * measurement loads it, even for a request refused after the load, and stays
+ * live for the service's lifetime, so every turn of an agent, overlapping or
+ * not, runs on one instance that knows all of them. Each load gives the live
+ * agent the system prompt the agent has now; a reply already running keeps
+ * the prompt it started with. A deleted agent answers no new turn, but its
+ * live instance stays, so the replies it still writes stay listed. A state
+ * read or search checks the asking agent's permission before it reads
+ * anything, and never makes an agent live: an agent that is not live is
+ * working on no request. Owns its live agents, which own no resource; the
+ * model's owner releases the model access and its meter, and the records'
+ * owner closes the store. After that, a load of a stored agent's code and a
+ * permitted read or search fail with `Database is closed`; a built-in
+ * agent's load and a refused read or search touch no store. Concurrency
+ * model: single-owner, synchronous on the backend's event loop.
  */
 export default class AgentRuntimeService implements AgentStateReader {
   /** Borrowed lookup and search of every agent. */
@@ -164,7 +166,8 @@ export default class AgentRuntimeService implements AgentStateReader {
    * holding the system prompt the built-in or stored agent has now; undefined
    * when no agent has the code or its agent is deleted, which creates
    * nothing.
-   * @throws If the store is closed or the stored agent is invalid.
+   * @throws For a code that is not a built-in agent's, if the store is closed
+   * or the stored agent is invalid.
    */
   public loadChatAgent(code: string): Agent | undefined {
     const found = this.#agents.findAgent(code)
@@ -184,7 +187,7 @@ export default class AgentRuntimeService implements AgentStateReader {
   }
 
   /**
-   * Finds the agents whose code, name, or bio contains a text.
+   * Lists the agents whose code, name, or bio contains a text.
    * @param reader - The agent that asks.
    * @param query - Trimmed, bounded text, as
    * {@link AgentStateReader.listAgentMatches} takes it.
@@ -209,7 +212,7 @@ export default class AgentRuntimeService implements AgentStateReader {
   }
 
   /**
-   * Reads the state of one agent.
+   * Finds the state of one agent.
    * @param reader - The agent that asks.
    * @param code - Code of the agent to read, compared exactly.
    * @returns `forbidden` without reading when the reader's role does not

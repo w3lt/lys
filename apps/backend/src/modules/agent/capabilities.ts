@@ -15,7 +15,10 @@ export type AgentUpdateOutcome =
       agent: Agent
     }>
   | Readonly<{
-      /** No built-in or stored agent has the code; nothing changed. */
+      /**
+       * No built-in or stored agent that is not deleted has the code;
+       * nothing changed.
+       */
       status: "missing"
     }>
   | Readonly<{
@@ -83,7 +86,8 @@ export interface AgentCreator {
   /**
    * Validates and stores a new agent; a definition without a code is stored
    * under the first free code that `calculateAgentCode` tries for its name.
-   * A built-in agent's code is never free.
+   * A built-in agent's code is never free, nor a stored agent's, deleted or
+   * not.
    * @param definition - Candidate definition, validated and trimmed before any
    * storage work.
    * @returns The stored agent, or undefined when the given code is a built-in
@@ -164,7 +168,7 @@ export type AgentSearchResult = Readonly<{
 /** Synchronous search of every agent, borrowed for one backend lifetime. */
 export interface AgentSearcher {
   /**
-   * Finds the built-in and stored agents, deleted ones included, whose code,
+   * Lists the built-in and stored agents, deleted ones included, whose code,
    * name, or bio contains a text.
    * @param query - Text found literally, under Unicode simple case folding;
    * the caller bounds and trims it.

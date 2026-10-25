@@ -152,10 +152,12 @@ function buildStoredAgent(
  * find agents while keeping each agent code unique across both.
  *
  * @remarks A built-in agent ships with the backend: it is never stored,
- * changed, or deleted, and no stored agent can take its code. Every built-in
- * or stored agent answers chats under its code through the agent runtime
- * service, which reads it here each time a turn looks it up, so a stored
- * agent's latest system prompt is the one sent. Each create, update, or
+ * changed, or deleted, and no stored agent can take its code. A deleted
+ * agent stays stored with its deletion time, so its code is never free
+ * again. Every built-in agent and every stored agent that is not deleted
+ * answers chats under its code through the agent runtime service, which
+ * reads it here each time a turn looks it up, so a stored agent's latest
+ * system prompt is the one sent. Each create, update, or
  * delete reads the current time once and passes it to everything it stores;
  * nothing it calls reads the clock. Each update or delete is one write
  * transaction that commits before it returns; a create is one write
@@ -228,7 +230,7 @@ export default class AgentService
   }
 
   /**
-   * Finds the built-in and stored agents, deleted ones included, whose code,
+   * Lists the built-in and stored agents, deleted ones included, whose code,
    * name, or bio contains a text.
    * @param query - Text found literally, under Unicode simple case folding.
    * @returns At most {@link MAXIMUM_AGENT_SEARCH_MATCHES} frozen matches,
@@ -354,8 +356,9 @@ export default class AgentService
    * have finds nothing.
    * @param changes - Candidate change, validated and trimmed by the agent
    * changes schema before any storage work; it must change at least one field.
-   * @returns The changed agent; `missing` when no agent has the code and
-   * `built-in` when a built-in agent has it, both of which change nothing.
+   * @returns The changed agent; `missing` when no agent that is not deleted
+   * has the code and `built-in` when a built-in agent has it, both of which
+   * change nothing.
    * @throws If validation fails, before any storage work, or the store is
    * closed, the write fails, or the changed agent is invalid; the agent is then
    * unchanged.

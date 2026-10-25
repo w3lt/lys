@@ -24,10 +24,10 @@ const updateAgentApiResponseSchemas = Object.freeze({
  * the path and cannot be changed. Success persists the change and its time
  * as `updatedAt` before responding with the changed agent, even when the
  * given values equal the stored ones; repeating a request stores the same
- * values. A missing agent returns the agent-not-found problem with HTTP 404
- * and a built-in agent the built-in agent problem with HTTP 409; both change
- * nothing. Changing the method, path, or schemas requires coordinated
- * consumers.
+ * values. A missing or deleted agent returns the agent-not-found problem
+ * with HTTP 404 and a built-in agent the built-in agent problem with HTTP
+ * 409; both change nothing. Changing the method, path, or schemas requires
+ * coordinated consumers.
  */
 export const updateAgentApi = Object.freeze({
   method: "PATCH",
@@ -48,7 +48,7 @@ export type UpdateAgentApiResponse = z.infer<typeof updateAgentApi.response>
 export type UpdateAgentApiReply = {
   /** The agent with the change applied. */
   readonly 200: UpdateAgentApiResponse
-  /** No agent is stored under the addressed code. */
+  /** No agent that is not deleted is stored under the addressed code. */
   readonly 404: AgentNotFoundProblem
   /** The addressed agent is built in; nothing was changed. */
   readonly 409: AgentBuiltInProblem

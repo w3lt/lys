@@ -97,7 +97,10 @@ const listAgentsApiResponseSchema = z
       .array(agentSummarySchema)
       .max(MAXIMUM_AGENT_LIST_PAGE_SIZE)
       .readonly(),
-    /** Number of stored agents, including those on other pages. */
+    /**
+     * Number of stored agents that are not deleted, including those on other
+     * pages.
+     */
     storedCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     /** Continuation for the next page, or null when this page is final. */
     nextCursor: z

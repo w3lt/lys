@@ -37,11 +37,11 @@ export const deleteAgentApi = Object.freeze({
 
 /** Status-specific payloads returned by the delete-agent endpoint. */
 export type DeleteAgentApiReply = {
-  /** The agent was removed. */
+  /** The agent was marked deleted; it stays stored and its code taken. */
   readonly 204: undefined
-  /** No agent is stored under the addressed code. */
+  /** No agent that is not deleted is stored under the addressed code. */
   readonly 404: AgentNotFoundProblem
-  /** The addressed agent is built in; nothing was removed. */
+  /** The addressed agent is built in; nothing was deleted. */
   readonly 409: AgentBuiltInProblem
 }
 

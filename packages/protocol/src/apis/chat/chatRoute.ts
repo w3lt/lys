@@ -553,15 +553,15 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
  * @remarks A 400 is the attachment-unsupported problem when an attachment's
  * content is neither text nor an image Lys sends; a body that fails
  * validation is answered with Fastify's own 400. A 404 is the
- * agent-not-found problem when a new conversation names a code no agent has,
- * and the conversation-not-found problem when a continued conversation is
- * not stored. A 409 is the conversation agent missing problem when the
- * continued conversation is stored but its agent no longer exists, the
- * backend tool unavailable problem when an offered backend tool cannot run
- * now, and the image-needs-vision problem when the request attaches an image
- * for a model without vision. A 503 is the service-busy or
- * runtime-unavailable problem when the request or the conversation holds
- * attachments and the model's capabilities cannot be read from LM Studio.
+ * agent-not-found problem when a new conversation names a code no agent has
+ * or a deleted agent's, and the conversation-not-found problem when a
+ * continued conversation is not stored. A 409 is the conversation agent
+ * missing problem when the continued conversation is stored but its agent no
+ * longer exists, the backend tool unavailable problem when an offered
+ * backend tool cannot run now, and the image-needs-vision problem when the
+ * request attaches an image for a model without vision. A 503 is the
+ * service-busy or runtime-unavailable problem when the model's capabilities,
+ * which every request reads, cannot be read from LM Studio.
  */
 const chatApiResponseSchemas = Object.freeze({
   400: chatAttachmentUnsupportedProblemSchema,

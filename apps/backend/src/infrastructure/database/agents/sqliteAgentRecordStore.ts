@@ -12,13 +12,13 @@ import type {
   StoredAgentSearchPage,
   UpdateAgentInput
 } from "../../../modules/agent/records"
-import { calculateConversationSearchMatch } from "../conversations/conversationSearch"
 import type {
   DatabaseFunctionRegistry,
   DatabaseReader,
   DatabaseStatementCompiler,
   DatabaseWriter
 } from "../databaseTransactions"
+import { registerSearchFunctions } from "../searchFunctions"
 
 /** Validates the number of stored agents read with a list page. */
 const agentCountSchema = z.strictObject({
@@ -293,17 +293,13 @@ export default class SqliteAgentRecordStore
    * snapshots and transactions.
    * @returns The ready records; they own nothing to release.
    * @throws If the database is closed or SQLite rejects the registration.
-   * @remarks Registers `contains_search`, the case-insensitive match the
-   * conversation records register too, replacing a function already
-   * registered under that name.
+   * @remarks Registers the shared search functions, among them
+   * `contains_search`, the case-insensitive match agent search uses.
    */
   public static create(
     database: DatabaseReader & DatabaseWriter & DatabaseFunctionRegistry
   ): SqliteAgentRecordStore {
-    database.registerDatabaseFunction(
-      "contains_search",
-      calculateConversationSearchMatch
-    )
+    registerSearchFunctions(database)
     return new SqliteAgentRecordStore(database)
   }
 

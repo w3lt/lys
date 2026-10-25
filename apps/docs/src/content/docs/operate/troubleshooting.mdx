@@ -126,21 +126,21 @@ unavailable until **Stop**.
 
 ## An MCP server shows Failed
 
-A row in Settings → MCP that says `Failed:` names why the backend could not
-connect to the server, or why its connection ended. The backend log has an
+A server tagged `failed` in Settings → MCP says in its details why the
+backend could not connect to it, or why its connection ended. The backend log has an
 `MCP server could not be connected` entry with the same `reason` and what Lys
 saw in `failure`, or an `MCP server connection ended` entry; a command
 server's own error output is logged as `MCP server log line` entries (see
 [MCP server entries](/operate/logging/#mcp-server-entries)). Nothing
-reconnects by itself: fix the cause, then press **Reconnect** on the row. A
-save that changes the server also tries again.
+reconnects by itself: fix the cause, then press **Retry** in the server's
+details. A save that changes the server also tries again.
 
 | `reason`         | Cause and what to do                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `start-failed`   | The command could not be started, usually because it was not found. Lys starts it without a shell and with the short `PATH` of an app opened from Finder or the Dock; see [the command works in a terminal](#an-mcp-command-works-in-a-terminal-but-not-in-lys).                                                                                                                                                                                                          |
 | `closed`         | The process exited, or the connection ended, while connecting or later. Read the server's log lines: a wrong argument, a missing variable such as an API key, or a crash. Running the same command in a terminal shows its output too. A URL server that no longer knows its session, such as after it restarted, answers a call with HTTP `404`, which also ends the connection; press **Reconnect**. A command server whose answer is larger than 16 MiB ends here too. |
-| `timed-out`      | The server did not connect and list its tools within two minutes. A first `npx -y` downloads the package and can take that long; press **Reconnect** once it is done. A command that waits for input, such as a sign-in prompt, never answers.                                                                                                                                                                                                                            |
-| `unauthorized`   | The server answered HTTP `401` or `403`. Check the headers, such as `Authorization: Bearer <token>`. A server that needs an OAuth sign-in cannot be used yet ([#253](https://github.com/w3lt/lys/issues/253)).                                                                                                                                                                                                                                                            |
+| `timed-out`      | The server did not connect and list its tools within two minutes. A first `npx -y` downloads the package and can take that long; press **Retry** once it is done. A command that waits for input, such as a sign-in prompt, never answers.                                                                                                                                                                                                                                |
+| `unauthorized`   | The server answered HTTP `401` or `403`. Check the token under Sign-in and the headers. A server that needs an OAuth sign-in cannot be used yet ([#253](https://github.com/w3lt/lys/issues/253)).                                                                                                                                                                                                                                                                         |
 | `unreachable`    | No connection could be made: the host or port is wrong, the name does not resolve, or the server is not running. A server on `localhost` must be started before Lys connects.                                                                                                                                                                                                                                                                                             |
 | `http-error`     | The server answered another HTTP error, or a redirect, which Lys does not follow. Check the URL's path, such as a missing `/mcp`, and use the address a redirect points to.                                                                                                                                                                                                                                                                                               |
 | `protocol-error` | The server's answers are not valid MCP, or a URL server's answer is larger than 16 MiB, or it refused to connect or to list its tools; a `refused` failure in the log carries its message. Check that the URL is the server's MCP endpoint, not a web page, and that it speaks Streamable HTTP.                                                                                                                                                                           |
@@ -149,9 +149,9 @@ Lys speaks only Streamable HTTP to a URL server. A server that offers only the
 older HTTP+SSE transport cannot be used yet
 ([#254](https://github.com/w3lt/lys/issues/254)).
 
-A row that says "Not applied. Reconnect applies the saved servers." shows a
-saved server the backend does not list, such as one saved while the backend
-could not apply the settings. **Reconnect** applies the saved servers.
+A server tagged `not applied` is a saved server the backend does not list,
+such as one saved while the backend could not apply the settings. **Start**,
+or **Connect** for a remote server, in its details applies the saved servers.
 
 ## An MCP command works in a terminal but not in Lys
 
@@ -163,27 +163,28 @@ manager's, so a bare `npx`, `uvx`, or `node` is often not found
 ([#258](https://github.com/w3lt/lys/issues/258)). Enter the command's full
 path, which `command -v npx` prints in a terminal. A command that is a script,
 such as `npx`, also needs its interpreter: when the server then fails as
-`closed` because `node` is not found, add a `PATH=` line in Environment
-that holds the interpreter's folder, followed by `:/usr/bin:/bin`.
+`closed` because `node` is not found, add a `PATH` variable in Environment
+whose value holds the interpreter's folder, followed by `:/usr/bin:/bin`.
 
-Shell syntax does not work either: Lys passes each argument line as it is,
-so `~`, `$VARIABLE`, quotes, pipes, and `&&` reach the command unchanged.
+Shell syntax does not work either: quotes in Arguments only group an argument
+that holds a space, and `~`, `$VARIABLE`, pipes, and `&&` reach the command
+unchanged.
 
 ## An MCP server's tools are missing or skipped
 
 - The backend lists a server's tools only while the server is connected, so
   the Tools pane has an `MCP · <server>` group only then.
 - The backend reads a server's tool list once, when it connects. A server
-  that adds tools later needs **Reconnect**
+  that adds tools later needs **Restart** or **Reconnect**
   ([#256](https://github.com/w3lt/lys/issues/256)).
-- A connected server's row ends with `· N skipped` when the backend left
+- A connected server's details say `· N skipped` when the backend left
   tools out; **Skipped tools** lists each with why. A tool is named
   `mcp__<server>__<tool>` in at most 64 characters, so a tool name that is
   too long can fit under a shorter server name. Two tools whose names become
   the same once their unsupported characters are replaced keep only the first;
   a tool whose input schema Lys cannot offer, or one larger than 64 KiB,
   cannot be used through Lys.
-- Lys reads a server's first 128 tools, and the row says so when it lists
+- Lys reads a server's first 128 tools, and its details say so when it lists
   more.
 
 ## A message fails because an MCP server is not connected
@@ -193,7 +194,7 @@ Settings → MCP, or switch `<tool>` off." The backend refused the message
 because the message offered a tool of a server that is not connected now, such
 as one whose connection ended after the tool list was read. Lys reads the tool
 list again, so the next message leaves that server's tools out; press
-**Reconnect** on the server's row to bring them back. The MCP pane can still
+**Restart** or **Reconnect** in the server's details to bring them back. The MCP pane can still
 show the server as connected, because it does not read the states again then.
 
 A call whose server stops being connected during a reply fails instead: the

@@ -2,38 +2,27 @@ import type { McpServerName, McpServerSettings } from "@lys/share"
 import { useEffect, useRef, useState, type ReactElement } from "react"
 
 import { Button } from "@/components/ui/button"
+import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
 import { useLysStore } from "@/lib/store"
 import {
   useMcpServerStore,
   type McpServerListState
 } from "@/lib/store/mcp-servers"
+import type { ToolApproval } from "@/lib/store/tool-settings"
+import { useToolStore } from "@/lib/store/tools"
 
-import { McpServerEditor } from "./McpServerEditor"
+import { McpServerEditor, type McpEditorTarget } from "./McpServerEditor"
 import {
   McpServerSection,
+  McpToolOfferWarning,
   type McpServerListFocusTarget
 } from "./McpServerList"
 import {
   findMcpPaneRetry,
+  formatMcpToolOfferWarning,
   listMcpPaneNotes,
   type McpPaneNote
 } from "./mcp-presentation"
-
-/** Server the editor is open for. */
-type McpEditorTarget =
-  | {
-      /** The editor is open for a new server. */
-      readonly kind: "new"
-    }
-  | {
-      /** The editor is open for one saved server. */
-      readonly kind: "server"
-      /** Saved name of that server. */
-      readonly serverName: McpServerName
-    }
-
-/** Editor target of a new server. */
-const NEW_SERVER_EDITOR: McpEditorTarget = Object.freeze({ kind: "new" })
 
 /** Focus target that leaves focus where it is. */
 const NO_FOCUS_TARGET: McpServerListFocusTarget = Object.freeze({
@@ -42,7 +31,7 @@ const NO_FOCUS_TARGET: McpServerListFocusTarget = Object.freeze({
 
 /**
  * Calculates the list control that takes focus when the list returns from
- * an editor.
+ * an editor that closes without saving.
  *
  * @param editor - Editor that closes.
  * @returns A new request for the edited server's Edit button, or for Add
@@ -52,7 +41,7 @@ function calculateEditorReturnTarget(
   editor: McpEditorTarget
 ): McpServerListFocusTarget {
   return editor.kind === "server"
-    ? { kind: "server", serverName: editor.serverName }
+    ? { kind: "server", serverName: editor.server.name }
     : { kind: "add-server" }
 }
 
@@ -72,7 +61,7 @@ function buildServersWithSaved(
 ): readonly McpServerSettings[] {
   if (editor.kind === "new") return [...servers, server]
   return servers.map((saved) =>
-    saved.name === editor.serverName ? server : saved
+    saved.name === editor.server.name ? server : saved
   )
 }
 
@@ -87,25 +76,10 @@ function listOtherServerNames(
   servers: readonly McpServerSettings[],
   editor: McpEditorTarget
 ): ReadonlySet<string> {
-  const editedName = editor.kind === "server" ? editor.serverName : undefined
+  const editedName = editor.kind === "server" ? editor.server.name : undefined
   return new Set(
     servers.map((server) => server.name).filter((name) => name !== editedName)
   )
-}
-
-/**
- * Finds the saved server an editor is open for.
- *
- * @param servers - Saved servers.
- * @param editor - Open editor.
- * @returns The saved server, or undefined for a new server.
- */
-function findEditedServer(
-  servers: readonly McpServerSettings[],
-  editor: McpEditorTarget
-): McpServerSettings | undefined {
-  if (editor.kind === "new") return undefined
-  return servers.find((server) => server.name === editor.serverName)
 }
 
 /** Properties accepted by {@link McpPaneStatus}. */
@@ -164,50 +138,95 @@ function McpPaneStatus({ notes, onRetry }: McpPaneStatusProps): ReactElement {
   )
 }
 
+/**
+ * Warns, while servers are saved, when their tools are not offered to the
+ * model, with a way to the Tools pane.
+ *
+ * @remarks The tool store owns whether tool calls are on, and the
+ * application store owns the model state and which settings pane is shown;
+ * the component owns no state. The warning shows while tool calls are off,
+ * or while the loaded model is not trained for tool use; Open Tools selects
+ * the Tools pane.
+ * @returns The warning, or null while the tools are offered.
+ */
+function McpToolOfferNotice(): ReactElement | null {
+  const areToolCallsOn = useToolStore((state) => state.areToolCallsOn)
+  const modelRuntime = useLysStore((state) => state.modelRuntime)
+  const modelInventory = useLysStore((state) => state.modelInventory)
+  const setSettingsPane = useLysStore((state) => state.setSettingsPane)
+  const text = formatMcpToolOfferWarning(
+    areToolCallsOn,
+    calculateToolModelSupport(modelRuntime, modelInventory)
+  )
+
+  if (text === "") return null
+  return (
+    <McpToolOfferWarning
+      onOpenTools={() => setSettingsPane("tools")}
+      text={text}
+    />
+  )
+}
+
 /** Properties accepted by {@link McpServerListView}. */
 type McpServerListViewProps = {
   /** Whether the backend is running. */
   readonly isBackendRunning: boolean
   /** Lifecycle of the list of applied servers. */
   readonly list: McpServerListState
+  /** Name of the server whose details are shown, or null when none is. */
+  readonly expandedServerName: McpServerName | null
   /** Control that takes focus when the list appears. */
   readonly focusTarget: McpServerListFocusTarget
+  /** Proposes showing one server's details, or none with null. */
+  readonly onExpandedServerNameChange: (
+    serverName: McpServerName | null
+  ) => void
   /** Requests that the parent open an editor in place of the list. */
   readonly onOpenEditor: (editor: McpEditorTarget) => void
-  /** Requests that the parent move focus to another list control. */
-  readonly onFocusTargetChange: (target: McpServerListFocusTarget) => void
+  /** Reports to the parent that the removal of a server was saved. */
+  readonly onRemoveServerComplete: () => void
 }
 
 /**
- * Presents the saved servers with their states and actions.
+ * Presents the saved servers with their states, tools, and actions.
  *
- * @remarks The application store owns the saved servers and their save; the
- * MCP server store owns the reconnect and the save that applies the list.
- * The parent owns the list's states, which editor opens, and the focus
- * target. A server is removed once its removal is saved, and Add server then
- * takes focus through a new request, so it does after each removal.
- * @param props - Backend status, the list, focus, and the parent-owned
- * editor and focus changes.
- * @returns The section of the saved servers.
+ * @remarks The application store owns the saved servers, their save, and
+ * the tool switches and approvals, which it saves as each changes; the MCP
+ * server store owns the reconnect and the save that applies the list; the
+ * tool store owns the list of tools. The parent owns the list's states,
+ * which server's details are shown, which editor opens, and the focus
+ * target. A server's approval sets every listed tool of the server. A
+ * server is removed once its removal is saved, which the parent is told.
+ * @param props - Backend status, the list, expansion, focus, and the
+ * parent-owned changes.
+ * @returns The warning, when one is due, and the section of the saved
+ * servers.
  */
 function McpServerListView({
   isBackendRunning,
   list,
+  expandedServerName,
   focusTarget,
+  onExpandedServerNameChange,
   onOpenEditor,
-  onFocusTargetChange
+  onRemoveServerComplete
 }: McpServerListViewProps): ReactElement {
   const servers = useLysStore((state) => state.settings.mcp.servers)
   const isSaving = useLysStore(
     (state) => state.mcpSettingsSave.status === "saving"
   )
+  const toolSettings = useLysStore((state) => state.settings.tools)
+  const updateToolOn = useLysStore((state) => state.updateToolOn)
+  const updateToolApproval = useLysStore((state) => state.updateToolApproval)
+  const toolList = useToolStore((state) => state.list)
   const reconnectMcpServer = useMcpServerStore(
     (state) => state.reconnectMcpServer
   )
   const saveMcpServers = useMcpServerStore((state) => state.saveMcpServers)
 
   /**
-   * Removes one server and, once saved, moves focus to Add server.
+   * Removes one server and, once saved, tells the parent.
    *
    * @param serverName - Name of the server to remove.
    */
@@ -215,34 +234,54 @@ function McpServerListView({
     const outcome = await saveMcpServers(
       servers.filter((server) => server.name !== serverName)
     )
-    if (outcome === "saved") onFocusTargetChange({ kind: "add-server" })
+    if (outcome === "saved") onRemoveServerComplete()
+  }
+
+  /**
+   * Proposes one approval for several tools, which the store saves.
+   *
+   * @param toolNames - Names of the tools.
+   * @param approval - Approval for each of them.
+   */
+  function handleToolApprovalChange(
+    toolNames: readonly string[],
+    approval: ToolApproval
+  ): void {
+    for (const toolName of toolNames) updateToolApproval(toolName, approval)
   }
 
   return (
-    <McpServerSection
-      focusTarget={focusTarget}
-      isBackendRunning={isBackendRunning}
-      isSaving={isSaving}
-      list={list}
-      onAddServer={() => onOpenEditor(NEW_SERVER_EDITOR)}
-      onEditServer={(serverName) =>
-        onOpenEditor({ kind: "server", serverName })
-      }
-      onReconnectServer={(serverName) => void reconnectMcpServer(serverName)}
-      onRemoveServer={(serverName) => void handleRemoveServer(serverName)}
-      servers={servers}
-    />
+    <>
+      {servers.length === 0 ? null : <McpToolOfferNotice />}
+      <McpServerSection
+        expandedServerName={expandedServerName}
+        focusTarget={focusTarget}
+        isBackendRunning={isBackendRunning}
+        isSaving={isSaving}
+        list={list}
+        onAddServer={(transport) => onOpenEditor({ kind: "new", transport })}
+        onEditServer={(server) => onOpenEditor({ kind: "server", server })}
+        onExpandedServerNameChange={onExpandedServerNameChange}
+        onReconnectServer={(serverName) => void reconnectMcpServer(serverName)}
+        onRemoveServer={(serverName) => void handleRemoveServer(serverName)}
+        onToolApprovalChange={handleToolApprovalChange}
+        onToolOnChange={updateToolOn}
+        servers={servers}
+        toolList={toolList}
+        toolSettings={toolSettings}
+      />
+    </>
   )
 }
 
 /** Properties accepted by {@link McpServerEditorView}. */
 type McpServerEditorViewProps = {
-  /** Server the editor is open for. */
+  /** What the editor is open for. */
   readonly editor: McpEditorTarget
   /** Requests that the parent close the editor without saving. */
   readonly onClose: () => void
   /** Reports to the parent that the server was saved under a name. */
-  readonly onSaved: (serverName: McpServerName) => void
+  readonly onSaveServerComplete: (serverName: McpServerName) => void
 }
 
 /**
@@ -259,7 +298,7 @@ type McpServerEditorViewProps = {
 function McpServerEditorView({
   editor,
   onClose,
-  onSaved
+  onSaveServerComplete
 }: McpServerEditorViewProps): ReactElement {
   const servers = useLysStore((state) => state.settings.mcp.servers)
   const saveState = useLysStore((state) => state.mcpSettingsSave)
@@ -274,7 +313,7 @@ function McpServerEditorView({
     const outcome = await saveMcpServers(
       buildServersWithSaved(servers, server, editor)
     )
-    if (outcome === "saved") onSaved(server.name)
+    if (outcome === "saved") onSaveServerComplete(server.name)
   }
 
   return (
@@ -283,51 +322,43 @@ function McpServerEditorView({
       onSaveServer={(server) => void handleSaveServer(server)}
       otherServerNames={listOtherServerNames(servers, editor)}
       saveState={saveState}
-      server={findEditedServer(servers, editor)}
+      target={editor}
     />
   )
 }
 
+/** Properties accepted by {@link McpPaneStatusView}. */
+type McpPaneStatusViewProps = {
+  /** Whether the backend is running. */
+  readonly isBackendRunning: boolean
+  /** Lifecycle of the list of applied servers. */
+  readonly list: McpServerListState
+  /** Whether the editor is open, which shows a failed save itself. */
+  readonly isEditing: boolean
+}
+
 /**
- * Presents the MCP pane: the saved MCP servers with each one's state, and
- * the editor that adds or changes one.
+ * Says what the backend's answers and the latest save mean for the
+ * servers, and sends again what failed when asked.
  *
- * @remarks The application store owns the saved servers, their save, and
- * the backend's status; the MCP server store owns the backend's states of
- * the servers. The pane owns which server the editor is open for, at most
- * one, which replaces the list while open, and which list control takes
- * focus when the list returns. The servers are listed from the settings
- * whether or not the backend runs, and can be edited either way. Each time
- * the pane appears while the backend runs, or the backend starts while it is
- * shown, it reads the states; while a server connects, the application
- * shell reads them again every second. A connection that ends while the
- * pane stays open shows once the states are read again. A status line stays
- * mounted above the list; while the editor is open, the editor shows a
- * failed save itself. Each editor is a separate instance, keyed by the
- * server's name; the new server's editor is keyed `:new`, which no name can
- * take. The pane accepts no props and is loaded lazily by the settings view.
- * @returns The MCP pane body.
+ * @remarks The application store owns the latest save; the MCP server store
+ * owns the latest sync or reconnect failure, the read, and the sync. The
+ * parent owns the list, the backend's status, and whether the editor is
+ * open. Retry sends the sync when that failed, or else the read.
+ * @param props - Backend status, the list, and whether the editor is open.
+ * @returns The pane's status.
  */
-export default function McpPane(): ReactElement {
-  const isBackendRunning = useLysStore(
-    (state) => state.backendServerInfo.status === "running"
-  )
+function McpPaneStatusView({
+  isBackendRunning,
+  list,
+  isEditing
+}: McpPaneStatusViewProps): ReactElement {
   const saveState = useLysStore((state) => state.mcpSettingsSave)
-  const list = useMcpServerStore((state) => state.list)
   const actionFailure = useMcpServerStore((state) => state.actionFailure)
   const loadMcpServers = useMcpServerStore((state) => state.loadMcpServers)
   const syncMcpServers = useMcpServerStore((state) => state.syncMcpServers)
-  const [editor, setEditor] = useState<McpEditorTarget | null>(null)
-  const [focusTarget, setFocusTarget] = useState(NO_FOCUS_TARGET)
-  const facts = { isBackendRunning, list, actionFailure, saveState }
-  const notes = listMcpPaneNotes({ ...facts, isEditing: editor !== null })
-  const retry = findMcpPaneRetry({ ...facts, isEditing: editor !== null })
-
-  // Read the states each time the pane opens while the backend runs, so a
-  // connection that ended since the last read shows.
-  useEffect(() => {
-    if (isBackendRunning) void loadMcpServers()
-  }, [isBackendRunning, loadMcpServers])
+  const facts = { isBackendRunning, list, actionFailure, saveState, isEditing }
+  const retry = findMcpPaneRetry(facts)
 
   /** Sends again what failed: the sync, or else the read. */
   function handleRetry(): void {
@@ -335,36 +366,120 @@ export default function McpPane(): ReactElement {
     else void loadMcpServers()
   }
 
+  return (
+    <McpPaneStatus
+      notes={listMcpPaneNotes(facts)}
+      onRetry={retry === undefined ? undefined : handleRetry}
+    />
+  )
+}
+
+/**
+ * Reads the servers' states each time the pane appears while the backend
+ * runs, or the backend starts while it is shown, and the tools when they
+ * were never read.
+ *
+ * @remarks The MCP server store and the tool store own their reads, which
+ * continue if the pane is left; the tool store keeps the tools in step with
+ * the MCP servers once read. Reading the states again on each appearance
+ * shows a connection that ended since the last read. While the backend is
+ * stopped, nothing is read. The hook returns nothing; the stores publish
+ * what the reads find.
+ * @param isBackendRunning - Whether the backend is running; reactive.
+ */
+function useMcpPaneReads(isBackendRunning: boolean): void {
+  const loadMcpServers = useMcpServerStore((state) => state.loadMcpServers)
+  const isToolListIdle = useToolStore((state) => state.list.status === "idle")
+  const loadTools = useToolStore((state) => state.loadTools)
+
+  useEffect(() => {
+    if (isBackendRunning) void loadMcpServers()
+  }, [isBackendRunning, loadMcpServers])
+
+  useEffect(() => {
+    if (isBackendRunning && isToolListIdle) void loadTools()
+  }, [isBackendRunning, isToolListIdle, loadTools])
+}
+
+/**
+ * Presents the MCP pane: the saved MCP servers with each one's state and
+ * tools, and the editor that adds or changes one.
+ *
+ * @remarks The application store owns the saved servers, their save, and
+ * the backend's status; the MCP server store owns the backend's states of
+ * the servers. The pane owns which server the editor is open for, at most
+ * one, which replaces the list while open, which server's details are
+ * shown, and which list control takes focus when the list returns. After a
+ * save, or after closing a saved server's editor, that server's details
+ * show and its Edit button takes focus; closing a new server's editor, or
+ * removing a server, moves focus to Add server. The servers are listed from
+ * the settings whether or not the backend runs, and can be edited either
+ * way. Each time the pane appears while the backend runs, or the backend
+ * starts while it is shown, it reads the states, and it reads the tools
+ * once; while a server connects, the application shell reads the states
+ * again every second. A status line stays mounted above the list; while the
+ * editor is open, the editor shows a failed save itself. Each editor is a
+ * separate instance, keyed by the server's name; a new server's editor is
+ * keyed `:new`, which no name can take. The pane accepts no props and is
+ * loaded lazily by the settings view.
+ * @returns The MCP pane body.
+ */
+export default function McpPane(): ReactElement {
+  const isBackendRunning = useLysStore(
+    (state) => state.backendServerInfo.status === "running"
+  )
+  const list = useMcpServerStore((state) => state.list)
+  const [editor, setEditor] = useState<McpEditorTarget | null>(null)
+  const [expandedServerName, setExpandedServerName] =
+    useState<McpServerName | null>(null)
+  const [focusTarget, setFocusTarget] = useState(NO_FOCUS_TARGET)
+
+  useMcpPaneReads(isBackendRunning)
+
   /**
-   * Closes the editor and moves focus to a list control.
+   * Closes the editor, shows a server's details, and moves focus to a list
+   * control.
    *
-   * @param target - Control that takes focus when the list returns.
+   * @param target - Control that takes focus when the list returns; a
+   * server's Edit button also shows that server's details.
    */
   function closeEditor(target: McpServerListFocusTarget): void {
+    if (target.kind === "server") setExpandedServerName(target.serverName)
     setFocusTarget(target)
     setEditor(null)
   }
 
+  /** Collapses the removed server's details and moves focus to Add server. */
+  function handleRemoveServerComplete(): void {
+    setExpandedServerName(null)
+    setFocusTarget({ kind: "add-server" })
+  }
+
   return (
     <div className="settings-view__mcp-pane">
-      <McpPaneStatus
-        notes={notes}
-        onRetry={retry === undefined ? undefined : handleRetry}
+      <McpPaneStatusView
+        isBackendRunning={isBackendRunning}
+        isEditing={editor !== null}
+        list={list}
       />
       {editor === null ? (
         <McpServerListView
+          expandedServerName={expandedServerName}
           focusTarget={focusTarget}
           isBackendRunning={isBackendRunning}
           list={list}
-          onFocusTargetChange={setFocusTarget}
+          onExpandedServerNameChange={setExpandedServerName}
           onOpenEditor={setEditor}
+          onRemoveServerComplete={handleRemoveServerComplete}
         />
       ) : (
         <McpServerEditorView
           editor={editor}
-          key={editor.kind === "server" ? editor.serverName : ":new"}
+          key={editor.kind === "server" ? editor.server.name : ":new"}
           onClose={() => closeEditor(calculateEditorReturnTarget(editor))}
-          onSaved={(serverName) => closeEditor({ kind: "server", serverName })}
+          onSaveServerComplete={(serverName) =>
+            closeEditor({ kind: "server", serverName })
+          }
         />
       )}
     </div>

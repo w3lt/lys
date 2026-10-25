@@ -452,7 +452,9 @@ The MCP pane saves the servers only when the person saves a server in its
 editor or confirms removing one, replacing only the `mcp` group in the same
 serialized way, and then asks the running backend to apply them. After a
 failed save, the pane says the save failed, an open editor keeps the server
-as typed, and the backend keeps the servers it applied before.
+as typed, and the backend keeps the servers it applied before. Its tool chips
+and a server's Ask me or Just run choice save the `tools` group the way the
+Tools pane does.
 
 The other runtime edits, such as default-model selection, remain in memory for
 the current session. A save of another group does not persist those unsaved

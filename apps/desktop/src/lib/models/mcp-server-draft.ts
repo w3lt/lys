@@ -1,5 +1,6 @@
 import {
   MAXIMUM_MCP_COMMAND_ARGUMENT_COUNT,
+  MAXIMUM_MCP_COMMAND_ARGUMENT_LENGTH,
   MAXIMUM_MCP_COMMAND_LENGTH,
   MAXIMUM_MCP_ENVIRONMENT_VARIABLE_COUNT,
   MAXIMUM_MCP_HEADER_COUNT,
@@ -7,14 +8,45 @@ import {
   MAXIMUM_MCP_SERVER_NAME_LENGTH,
   MAXIMUM_MCP_SERVER_URL_LENGTH,
   mcpServerSettingsSchema,
+  type McpHeader,
   type McpServerSettings,
   type McpServerSettingsCandidate,
   type McpServerTransport
 } from "@lys/share"
 
+import {
+  formatMcpCommandArguments,
+  parseMcpCommandArguments
+} from "./mcp-command-arguments"
+
+/** One row of a list of names and values in the editor. */
+export type McpDraftEntry = {
+  /** Identity of the row in its draft; no other row of the draft takes it. */
+  readonly id: number
+  /** Name as typed. */
+  readonly name: string
+  /** Value as typed, which may be a secret. */
+  readonly value: string
+}
+
+/** List of rows of a draft: a command server's variables, or a URL server's headers. */
+export type McpDraftEntryList = "environment" | "headers"
+
+/** How Lys signs in to a URL server: not at all, or with a bearer token. */
+export type McpSignIn = "none" | "token"
+
+/** Ways to sign in, in the order the editor offers them. */
+export const MCP_SIGN_INS: readonly McpSignIn[] = Object.freeze([
+  "none",
+  "token"
+])
+
 /**
- * One MCP server as the person types it in the editor: every field as text,
- * the lists one item per line.
+ * One MCP server as the person types it in the editor.
+ *
+ * @remarks The fields of both transports are kept, so switching back shows
+ * what was typed. A token is saved as the `Authorization: Bearer <token>`
+ * header, and only while `signIn` is `token`.
  */
 export type McpServerDraft = {
   /** Server name as typed. */
@@ -23,19 +55,33 @@ export type McpServerDraft = {
   readonly transport: McpServerTransport
   /** Command as typed; used for a command server. */
   readonly command: string
-  /** Arguments, one per line; used for a command server. */
-  readonly argumentLines: string
-  /** Environment variables as `NAME=value`, one per line; command server. */
-  readonly environmentLines: string
+  /** Arguments on one line, quoted where needed; used for a command server. */
+  readonly argumentText: string
+  /** Environment variables, one row each; used for a command server. */
+  readonly environment: readonly McpDraftEntry[]
   /** URL as typed; used for a URL server. */
   readonly url: string
-  /** Headers as `Name: value`, one per line; used for a URL server. */
-  readonly headerLines: string
+  /** How Lys signs in to a URL server. */
+  readonly signIn: McpSignIn
+  /** Bearer token as typed; sent only while signing in with a token. */
+  readonly token: string
+  /** Headers other than the token's, one row each; used for a URL server. */
+  readonly headers: readonly McpDraftEntry[]
+  /** Identity the next added row takes. */
+  readonly nextEntryId: number
+}
+
+/** A draft with one row added, and the row's identity. */
+export type McpDraftEntryAddition = {
+  /** Draft holding the new, empty row at the end of its list. */
+  readonly draft: McpServerDraft
+  /** Identity of the new row. */
+  readonly entryId: number
 }
 
 /** Field of the editor a problem concerns. */
 export type McpServerDraftField =
-  "name" | "command" | "arguments" | "environment" | "url" | "headers"
+  "name" | "command" | "arguments" | "environment" | "url" | "token" | "headers"
 
 /** Problem of each field that has one, as one sentence. */
 export type McpServerDraftProblems = Readonly<
@@ -57,33 +103,36 @@ export type McpServerDraftParse =
       readonly problems: McpServerDraftProblems
     }
 
-/** One non-empty line of a list field, with where it is. */
-type DraftLine = {
-  /** One-based number of the line in the field. */
-  readonly lineNumber: number
-  /** Text of the line. */
-  readonly text: string
-}
-
-/** Items read from a list field, and the line each one came from. */
-type DraftListRead<TItem> = {
-  /** Items in line order. */
-  readonly items: readonly TItem[]
-  /** Line number of each item, by item index. */
-  readonly lineNumbers: readonly number[]
-  /** Problem of the first line that is not an item, if any. */
-  readonly problem: string | undefined
-}
-
 /** One problem the shared server schema reports. */
 type McpServerSchemaIssue = NonNullable<
   ReturnType<typeof mcpServerSettingsSchema.safeParse>["error"]
 >["issues"][number]
 
-/** Lines of every list field of a draft, by field. */
-type DraftLineNumbers = Readonly<
-  Partial<Record<McpServerDraftField, readonly number[]>>
->
+/** List of the candidate settings whose items come from rows or the token. */
+type CandidateList = "arguments" | "environment" | "headers"
+
+/** Field and row an item of a candidate list comes from. */
+type DraftItemSource = {
+  /** Field the item was typed in. */
+  readonly field: McpServerDraftField
+  /** One-based position of its row or argument, or 0 for the token. */
+  readonly position: number
+}
+
+/** A row the person wrote something in, with where it is. */
+type WrittenDraftEntry = McpDraftEntry & Pick<DraftItemSource, "position">
+
+/** One draft read as candidate settings, before the shared schema. */
+type DraftCandidateRead = {
+  /** Candidate settings for the shared server schema. */
+  readonly candidate: McpServerSettingsCandidate
+  /** Source of each item of the candidate's lists, by list and index. */
+  readonly itemSources: Readonly<
+    Partial<Record<CandidateList, readonly DraftItemSource[]>>
+  >
+  /** Problems found before the schema. */
+  readonly problems: McpServerDraftProblems
+}
 
 /** Fields of the editor, in the order they are shown. */
 export const MCP_SERVER_DRAFT_FIELDS: readonly McpServerDraftField[] =
@@ -93,19 +142,29 @@ export const MCP_SERVER_DRAFT_FIELDS: readonly McpServerDraftField[] =
     "arguments",
     "environment",
     "url",
+    "token",
     "headers"
   ])
 
-/** Draft of a new server: a command server with every field empty. */
-export const EMPTY_MCP_SERVER_DRAFT: McpServerDraft = Object.freeze({
-  name: "",
-  transport: "stdio",
-  command: "",
-  argumentLines: "",
-  environmentLines: "",
-  url: "",
-  headerLines: ""
-})
+/** Fields of a draft compared by value to tell whether it changed. */
+const DRAFT_TEXT_FIELDS = Object.freeze([
+  "name",
+  "transport",
+  "command",
+  "argumentText",
+  "url",
+  "signIn",
+  "token"
+] as const)
+
+/** Header a token is sent in. */
+const TOKEN_HEADER_NAME = "Authorization"
+
+/** Text before the token in its header's value. */
+const TOKEN_VALUE_PREFIX = "Bearer "
+
+/** Finds a bearer header value, ignoring case, and captures the token. */
+const BEARER_VALUE_PATTERN = /^bearer[ \t]+(\S(?:.*\S)?)$/iu
 
 /**
  * Rule of each field broken by its length or its number of items, which the
@@ -117,131 +176,306 @@ const FIELD_LIMIT_PROBLEMS = Object.freeze({
   arguments: `A server takes at most ${MAXIMUM_MCP_COMMAND_ARGUMENT_COUNT} arguments.`,
   environment: `A server sets at most ${MAXIMUM_MCP_ENVIRONMENT_VARIABLE_COUNT} environment variables.`,
   url: `A URL is up to ${MAXIMUM_MCP_SERVER_URL_LENGTH} characters.`,
-  headers: `A server is sent at most ${MAXIMUM_MCP_HEADER_COUNT} headers.`
+  token: `A token is up to ${MAXIMUM_MCP_HEADER_VALUE_LENGTH - TOKEN_VALUE_PREFIX.length} characters.`,
+  headers: `A server is sent at most ${MAXIMUM_MCP_HEADER_COUNT} headers, the token's included.`
 } satisfies Readonly<Record<McpServerDraftField, string>>)
 
-/** Rule of a header value broken by its length. */
-const HEADER_VALUE_LIMIT_PROBLEM = `A header value is up to ${MAXIMUM_MCP_HEADER_VALUE_LENGTH} characters.`
+/** Rule of one item broken by its length, by the field it was typed in. */
+const ITEM_LIMIT_PROBLEMS: Readonly<
+  Partial<Record<McpServerDraftField, string>>
+> = Object.freeze({
+  arguments: `An argument is 1 to ${MAXIMUM_MCP_COMMAND_ARGUMENT_LENGTH} characters.`,
+  token: FIELD_LIMIT_PROBLEMS.token,
+  headers: `A header value is up to ${MAXIMUM_MCP_HEADER_VALUE_LENGTH} characters.`
+})
+
+/** What a row's position is called in a problem, by field. */
+const ITEM_NAMES: Readonly<Partial<Record<McpServerDraftField, string>>> =
+  Object.freeze({
+    arguments: "Argument",
+    environment: "Variable",
+    headers: "Header"
+  })
+
+/** Problem of a token that breaks the header value rule. */
+const TOKEN_FORMAT_PROBLEM =
+  "A token is visible ASCII characters and spaces, without line breaks."
+
+/** Problem of an empty token while signing in with one. */
+const EMPTY_TOKEN_PROBLEM = "Enter the token, or set sign-in to None."
+
+/** Problem of an Authorization header beside a token. */
+const AUTHORIZATION_HEADER_PROBLEM =
+  "The token is sent as the Authorization header. Remove this header, or set sign-in to None."
 
 /** Problem of a server whose name another server already has. */
 const DUPLICATE_NAME_PROBLEM = "Another MCP server already has this name."
 
-/** Characters removed from either end of a header value. */
+/** Characters removed from either end of a header value or a token. */
 const HEADER_VALUE_EDGE_CHARACTERS: ReadonlySet<string> = new Set([" ", "\t"])
+
+/**
+ * Builds the draft of a new server.
+ *
+ * @param transport - How Lys talks to the server.
+ * @returns A frozen draft of that transport with every field empty, no row,
+ * and no sign-in.
+ */
+export function buildEmptyMcpServerDraft(
+  transport: McpServerTransport
+): McpServerDraft {
+  return Object.freeze({
+    name: "",
+    transport,
+    command: "",
+    argumentText: "",
+    environment: Object.freeze([]),
+    url: "",
+    signIn: "none",
+    token: "",
+    headers: Object.freeze([]),
+    nextEntryId: 1
+  })
+}
+
+/**
+ * Reads the token of a header that carries one.
+ *
+ * @param header - Header name and value.
+ * @returns The token of an `Authorization` header whose value is `Bearer`
+ * and the token, ignoring case and the spaces between; otherwise undefined.
+ */
+export function readBearerToken(header: McpHeader): string | undefined {
+  if (header.name.toLowerCase() !== "authorization") return undefined
+  return BEARER_VALUE_PATTERN.exec(header.value)?.[1]
+}
+
+/**
+ * Builds the rows of a list of names and values.
+ *
+ * @param pairs - Names and values in order.
+ * @param firstEntryId - Identity of the first row.
+ * @returns A frozen list of frozen rows numbered from `firstEntryId`.
+ */
+function buildMcpDraftEntries(
+  pairs: readonly Pick<McpDraftEntry, "name" | "value">[],
+  firstEntryId: number
+): readonly McpDraftEntry[] {
+  return Object.freeze(
+    pairs.map((pair, index) =>
+      Object.freeze({
+        id: firstEntryId + index,
+        name: pair.name,
+        value: pair.value
+      })
+    )
+  )
+}
+
+/**
+ * Fills a draft with a URL server's fields.
+ *
+ * @param draft - Draft to fill; its name and the command fields are kept.
+ * @param url - Endpoint of the server.
+ * @param headers - Headers in order. The first one carrying a bearer token
+ * becomes the token; the others become rows, numbered from the draft's next
+ * row identity.
+ * @returns A new frozen draft whose transport is `http`, signing in with a
+ * token when a header carries one.
+ */
+export function fillMcpHttpDraft(
+  draft: McpServerDraft,
+  url: string,
+  headers: readonly McpHeader[]
+): McpServerDraft {
+  const tokens = headers.map(readBearerToken)
+  const tokenIndex = tokens.findIndex((token) => token !== undefined)
+  const token = tokens[tokenIndex]
+  const otherHeaders = headers.filter((_, index) => index !== tokenIndex)
+  return Object.freeze({
+    ...draft,
+    transport: "http",
+    url,
+    signIn: token === undefined ? "none" : "token",
+    token: token ?? "",
+    headers: buildMcpDraftEntries(otherHeaders, draft.nextEntryId),
+    nextEntryId: draft.nextEntryId + otherHeaders.length
+  })
+}
+
+/**
+ * Fills a draft with a command server's fields.
+ *
+ * @param draft - Draft to fill; its name and the URL fields are kept.
+ * @param command - Program that starts the server.
+ * @param commandArguments - Arguments in order.
+ * @param variables - Environment variables in order, which become rows
+ * numbered from the draft's next row identity.
+ * @returns A new frozen draft whose transport is `stdio`, with the arguments
+ * on one line, quoted where needed.
+ */
+export function fillMcpStdioDraft(
+  draft: McpServerDraft,
+  command: string,
+  commandArguments: readonly string[],
+  variables: readonly Pick<McpDraftEntry, "name" | "value">[]
+): McpServerDraft {
+  return Object.freeze({
+    ...draft,
+    transport: "stdio",
+    command,
+    argumentText: formatMcpCommandArguments(commandArguments),
+    environment: buildMcpDraftEntries(variables, draft.nextEntryId),
+    nextEntryId: draft.nextEntryId + variables.length
+  })
+}
 
 /**
  * Builds the draft of a saved server, for editing it.
  *
  * @param server - Saved server settings.
- * @returns A frozen draft whose fields read back as the same settings: one
- * argument per line, variables as `NAME=value`, headers as `Name: value`.
- * The fields of the other transport are empty.
+ * @returns A frozen draft that reads back as the same settings, except that
+ * a bearer token is saved again as `Authorization: Bearer <token>`, the
+ * first header. The fields of the other transport are empty.
  */
 export function buildMcpServerDraft(server: McpServerSettings): McpServerDraft {
+  const draft = buildEmptyMcpServerDraft(server.transport)
+  const named = Object.freeze({ ...draft, name: server.name })
   if (server.transport === "http") {
-    return Object.freeze({
-      ...EMPTY_MCP_SERVER_DRAFT,
-      name: server.name,
-      transport: "http",
-      url: server.url,
-      headerLines: server.headers
-        .map((header) => `${header.name}: ${header.value}`)
-        .join("\n")
-    })
+    return fillMcpHttpDraft(named, server.url, server.headers)
   }
-  return Object.freeze({
-    ...EMPTY_MCP_SERVER_DRAFT,
-    name: server.name,
-    command: server.command,
-    argumentLines: server.arguments.join("\n"),
-    environmentLines: server.environment
-      .map((variable) => `${variable.name}=${variable.value}`)
-      .join("\n")
+  return fillMcpStdioDraft(
+    named,
+    server.command,
+    server.arguments,
+    server.environment
+  )
+}
+
+/**
+ * Adds an empty row at the end of one list of a draft.
+ *
+ * @param draft - Draft, left unchanged.
+ * @param list - List that takes the row.
+ * @returns The new frozen draft and the row's identity.
+ */
+export function addMcpDraftEntry(
+  draft: McpServerDraft,
+  list: McpDraftEntryList
+): McpDraftEntryAddition {
+  const entry: McpDraftEntry = Object.freeze({
+    id: draft.nextEntryId,
+    name: "",
+    value: ""
   })
+  const entries = Object.freeze([...draft[list], entry])
+  const nextDraft = Object.freeze({
+    ...draft,
+    [list]: entries,
+    nextEntryId: draft.nextEntryId + 1
+  })
+  return Object.freeze({ draft: nextDraft, entryId: entry.id })
 }
 
 /**
- * Lists the non-empty lines of a list field.
+ * Replaces one row of a draft.
  *
- * @param text - Field text.
- * @returns Each line that is not empty, with its one-based number; a line of
- * spaces is kept.
+ * @param draft - Draft, left unchanged.
+ * @param list - List that holds the row.
+ * @param entry - Row with the identity of the row it replaces.
+ * @returns A new frozen draft with the row replaced in place; unchanged
+ * rows keep their values.
  */
-function listDraftLines(text: string): readonly DraftLine[] {
-  return text
-    .split("\n")
-    .map((line, index) => ({ lineNumber: index + 1, text: line }))
-    .filter((line) => line.text !== "")
+export function updateMcpDraftEntry(
+  draft: McpServerDraft,
+  list: McpDraftEntryList,
+  entry: McpDraftEntry
+): McpServerDraft {
+  const entries = draft[list].map((current) =>
+    current.id === entry.id ? Object.freeze({ ...entry }) : current
+  )
+  return Object.freeze({ ...draft, [list]: Object.freeze(entries) })
 }
 
 /**
- * Reads the items of a list field, one per line, and the line of each.
+ * Removes one row of a draft.
  *
- * @typeParam TItem - Item a line holds.
- * @param text - Field text.
- * @param readLine - Reads one line's item, or undefined when the line is not
- * written as one.
- * @param formatProblem - Explains a line that is not an item.
- * @returns The items, their lines, and the problem of the first line that is
- * not an item.
+ * @param draft - Draft, left unchanged.
+ * @param list - List that holds the row.
+ * @param entryId - Identity of the row.
+ * @returns A new frozen draft without the row; its identity is not reused.
  */
-function readDraftList<TItem>(
-  text: string,
-  readLine: (line: string) => TItem | undefined,
-  formatProblem: (lineNumber: number) => string
-): DraftListRead<TItem> {
-  const items: TItem[] = []
-  const lineNumbers: number[] = []
-  let problem: string | undefined
-  for (const line of listDraftLines(text)) {
-    const item = readLine(line.text)
-    if (item !== undefined) {
-      items.push(item)
-      lineNumbers.push(line.lineNumber)
-    } else problem ??= formatProblem(line.lineNumber)
-  }
-  return { items, lineNumbers, problem }
+export function removeMcpDraftEntry(
+  draft: McpServerDraft,
+  list: McpDraftEntryList,
+  entryId: number
+): McpServerDraft {
+  const entries = draft[list].filter((entry) => entry.id !== entryId)
+  return Object.freeze({ ...draft, [list]: Object.freeze(entries) })
 }
 
 /**
- * Reads one `NAME=value` line.
+ * Answers whether two lists of rows hold the same names and values.
  *
- * @param line - Line text.
- * @returns The variable, its name without spaces at either end and its value
- * as written, or undefined when the line has no `=`.
+ * @param first - One list.
+ * @param second - The other list.
+ * @returns True when both have the same rows in the same order, compared by
+ * name and value only.
  */
-function readEnvironmentLine(
-  line: string
-): { readonly name: string; readonly value: string } | undefined {
-  const separator = line.indexOf("=")
-  if (separator === -1) return undefined
-  return {
-    name: line.slice(0, separator).trim(),
-    value: line.slice(separator + 1)
-  }
+function hasSameEntries(
+  first: readonly McpDraftEntry[],
+  second: readonly McpDraftEntry[]
+): boolean {
+  return (
+    first.length === second.length &&
+    first.every(
+      (entry, index) =>
+        entry.name === second[index]?.name &&
+        entry.value === second[index]?.value
+    )
+  )
 }
 
 /**
- * Reads one `Name: value` line.
+ * Answers whether the person changed a draft.
  *
- * @param line - Line text.
- * @returns The header, its name without spaces at either end and its value
- * without spaces or tabs at either end, or undefined when the line has no
- * `:`.
+ * @param initial - Draft the editor opened with.
+ * @param draft - Draft as it is now.
+ * @returns True when a field or a row's name or value differs; row
+ * identities are not compared.
  */
-function readHeaderLine(
-  line: string
-): { readonly name: string; readonly value: string } | undefined {
-  const separator = line.indexOf(":")
-  if (separator === -1) return undefined
-  const value = trimHeaderValueEdges(line.slice(separator + 1))
-  return { name: line.slice(0, separator).trim(), value }
+export function isMcpServerDraftChanged(
+  initial: McpServerDraft,
+  draft: McpServerDraft
+): boolean {
+  const hasSameText = DRAFT_TEXT_FIELDS.every(
+    (field) => initial[field] === draft[field]
+  )
+  const hasSameRows =
+    hasSameEntries(initial.environment, draft.environment) &&
+    hasSameEntries(initial.headers, draft.headers)
+  return !(hasSameText && hasSameRows)
+}
+
+/**
+ * Lists the rows the person wrote something in.
+ *
+ * @param entries - Rows in order.
+ * @returns Each row whose name or value is not empty, with its one-based
+ * position among all rows; a row of spaces is kept.
+ */
+function listWrittenEntries(
+  entries: readonly McpDraftEntry[]
+): readonly WrittenDraftEntry[] {
+  return entries
+    .map((entry, index) => ({ ...entry, position: index + 1 }))
+    .filter((entry) => entry.name !== "" || entry.value !== "")
 }
 
 /**
  * Removes the spaces and tabs at either end of a header value.
  *
- * @param text - Text after the line's first `:`.
+ * @param text - Value as typed.
  * @returns The text without spaces or tabs at either end; other white space
  * stays, so the shared rule reports it.
  * @remarks Reads each character at most once, so a long run of spaces costs
@@ -257,46 +491,69 @@ function trimHeaderValueEdges(text: string): string {
   return text.slice(start, end)
 }
 
-/** One draft read as candidate settings, before the shared schema. */
-type DraftCandidateRead = {
-  /** Candidate settings for the shared server schema. */
-  readonly candidate: McpServerSettingsCandidate
-  /** Line of each item of the list fields. */
-  readonly lineNumbers: DraftLineNumbers
-  /** Problems found before the schema: lines not written as items. */
-  readonly problems: McpServerDraftProblems
-}
-
 /**
  * Reads a command server's draft as candidate settings.
  *
  * @param draft - Draft whose transport is `stdio`.
- * @returns The candidate, its lines, and the lines not written as items.
+ * @returns The candidate, the source of each argument and variable, and a
+ * quote left open in the arguments.
  */
 function readStdioDraft(draft: McpServerDraft): DraftCandidateRead {
-  const argumentLines = listDraftLines(draft.argumentLines)
-  const environment = readDraftList(
-    draft.environmentLines,
-    readEnvironmentLine,
-    (lineNumber) => `Line ${lineNumber}: write each variable as NAME=value.`
-  )
+  const parsedArguments = parseMcpCommandArguments(draft.argumentText)
+  const commandArguments =
+    parsedArguments.status === "parsed" ? parsedArguments.arguments : []
+  const variables = listWrittenEntries(draft.environment)
   const candidate: McpServerSettingsCandidate = {
     name: draft.name.trim(),
     transport: "stdio",
     command: draft.command.trim(),
-    arguments: argumentLines.map((line) => line.text),
-    environment: environment.items
+    arguments: [...commandArguments],
+    environment: variables.map(({ name, value }) => ({
+      name: name.trim(),
+      value
+    }))
   }
+  const problems: McpServerDraftProblems =
+    parsedArguments.status === "parsed"
+      ? {}
+      : {
+          arguments: `Close the quote at character ${parsedArguments.position}.`
+        }
   return {
     candidate,
-    lineNumbers: {
-      arguments: argumentLines.map((line) => line.lineNumber),
-      environment: environment.lineNumbers
+    itemSources: {
+      arguments: commandArguments.map((_, index) => ({
+        field: "arguments",
+        position: index + 1
+      })),
+      environment: variables.map(({ position }) => ({
+        field: "environment",
+        position
+      }))
     },
-    problems:
-      environment.problem === undefined
-        ? {}
-        : { environment: environment.problem }
+    problems
+  }
+}
+
+/**
+ * Finds what keeps a URL draft's sign-in from being sent.
+ *
+ * @param draft - Draft whose transport is `http`.
+ * @param token - Token without spaces or tabs at either end.
+ * @returns An empty token's problem, or an Authorization header beside the
+ * token; none without a token sign-in.
+ */
+function findSignInProblems(
+  draft: McpServerDraft,
+  token: string
+): McpServerDraftProblems {
+  if (draft.signIn !== "token") return {}
+  const hasAuthorizationHeader = draft.headers.some(
+    (header) => header.name.trim().toLowerCase() === "authorization"
+  )
+  return {
+    ...(token === "" ? { token: EMPTY_TOKEN_PROBLEM } : {}),
+    ...(hasAuthorizationHeader ? { headers: AUTHORIZATION_HEADER_PROBLEM } : {})
   }
 }
 
@@ -304,25 +561,48 @@ function readStdioDraft(draft: McpServerDraft): DraftCandidateRead {
  * Reads a URL server's draft as candidate settings.
  *
  * @param draft - Draft whose transport is `http`.
- * @returns The candidate, its lines, and the lines not written as items.
+ * @returns The candidate, whose first header is the token's while signing
+ * in with one, the source of each header, and the sign-in's problems.
  */
 function readHttpDraft(draft: McpServerDraft): DraftCandidateRead {
-  const headers = readDraftList(
-    draft.headerLines,
-    readHeaderLine,
-    (lineNumber) => `Line ${lineNumber}: write each header as Name: value.`
-  )
+  const token = trimHeaderValueEdges(draft.token)
+  const isTokenSent = draft.signIn === "token" && token !== ""
+  const tokenHeaders: McpHeader[] = isTokenSent
+    ? [{ name: TOKEN_HEADER_NAME, value: `${TOKEN_VALUE_PREFIX}${token}` }]
+    : []
+  const rows = listWrittenEntries(draft.headers)
+  const rowHeaders = rows.map(({ name, value }) => ({
+    name: name.trim(),
+    value: trimHeaderValueEdges(value)
+  }))
+  const tokenSources: DraftItemSource[] = isTokenSent
+    ? [{ field: "token", position: 0 }]
+    : []
+  const rowSources = rows.map(({ position }): DraftItemSource => ({
+    field: "headers",
+    position
+  }))
   const candidate: McpServerSettingsCandidate = {
     name: draft.name.trim(),
     transport: "http",
     url: draft.url.trim(),
-    headers: headers.items
+    headers: [...tokenHeaders, ...rowHeaders]
   }
   return {
     candidate,
-    lineNumbers: { headers: headers.lineNumbers },
-    problems: headers.problem === undefined ? {} : { headers: headers.problem }
+    itemSources: { headers: [...tokenSources, ...rowSources] },
+    problems: findSignInProblems(draft, token)
   }
+}
+
+/**
+ * Answers whether a schema path names a list whose items come from rows.
+ *
+ * @param key - First key of the path.
+ * @returns True for `arguments`, `environment`, and `headers`.
+ */
+function isCandidateList(key: PropertyKey | undefined): key is CandidateList {
+  return key === "arguments" || key === "environment" || key === "headers"
 }
 
 /**
@@ -340,28 +620,46 @@ function isDraftField(
 }
 
 /**
- * Formats one schema problem as the sentence its field shows.
+ * Formats the problem of one item of a list.
  *
- * @param issue - Problem the shared schema reported.
- * @param field - Field the problem concerns.
- * @param lineNumbers - Line of each item of the list fields.
- * @returns The schema's sentence, or the rule of a length or count the
- * schema reports without one; a problem of one item of a list starts with
- * the item's line. Of the items, only a header value has such a rule.
+ * @param issue - Problem the shared schema reported for the item.
+ * @param source - Field and position of the item.
+ * @returns The rule the item breaks, after its position, such as
+ * `Variable 2: `; a token's problem names the token instead.
  */
-function formatDraftIssue(
+function formatItemIssue(
   issue: McpServerSchemaIssue,
-  field: McpServerDraftField,
-  lineNumbers: DraftLineNumbers
+  source: DraftItemSource
 ): string {
   const isLimit = issue.code === "too_big" || issue.code === "too_small"
-  const itemIndex = issue.path[1]
-  if (typeof itemIndex !== "number") {
-    return isLimit ? FIELD_LIMIT_PROBLEMS[field] : issue.message
-  }
-  const message = isLimit ? HEADER_VALUE_LIMIT_PROBLEM : issue.message
-  const lineNumber = lineNumbers[field]?.[itemIndex] ?? itemIndex + 1
-  return `Line ${lineNumber}: ${message}`
+  const limitProblem = isLimit ? ITEM_LIMIT_PROBLEMS[source.field] : undefined
+  if (source.field === "token") return limitProblem ?? TOKEN_FORMAT_PROBLEM
+  const itemName = ITEM_NAMES[source.field] ?? "Item"
+  return `${itemName} ${source.position}: ${limitProblem ?? issue.message}`
+}
+
+/**
+ * Places one schema problem in its field and formats it.
+ *
+ * @param issue - Problem the shared schema reported.
+ * @param read - Draft read, with the source of each item.
+ * @returns The field and its sentence, or undefined for a path outside the
+ * editor's fields.
+ */
+function placeDraftIssue(
+  issue: McpServerSchemaIssue,
+  read: DraftCandidateRead
+): readonly [McpServerDraftField, string] | undefined {
+  const [key, itemIndex] = issue.path
+  const source =
+    isCandidateList(key) && typeof itemIndex === "number"
+      ? read.itemSources[key]?.[itemIndex]
+      : undefined
+  if (source !== undefined)
+    return [source.field, formatItemIssue(issue, source)]
+  if (!isDraftField(key)) return undefined
+  const isLimit = issue.code === "too_big" || issue.code === "too_small"
+  return [key, isLimit ? FIELD_LIMIT_PROBLEMS[key] : issue.message]
 }
 
 /**
@@ -379,9 +677,8 @@ function collectDraftProblems(
     ...read.problems
   }
   for (const issue of issues) {
-    const field = issue.path[0]
-    if (!isDraftField(field)) continue
-    problems[field] ??= formatDraftIssue(issue, field, read.lineNumbers)
+    const placed = placeDraftIssue(issue, read)
+    if (placed !== undefined) problems[placed[0]] ??= placed[1]
   }
   return problems
 }
@@ -394,9 +691,11 @@ function collectDraftProblems(
  * @param otherServerNames - Names of the other saved servers; the edited
  * server's own saved name is not among them.
  * @returns `valid` with the settings the shared server schema returns, or
- * `invalid` with the first problem of each field. The name, command, and URL
- * are read without spaces at either end; empty lines of a list are skipped,
- * and every other line is one item.
+ * `invalid` with the first problem of each field. The name, command, URL,
+ * and variable and header names are read without spaces at either end, and
+ * header values and the token without spaces or tabs at either end. Rows
+ * with neither a name nor a value are skipped. A token is sent as the first
+ * header, `Authorization: Bearer <token>`.
  */
 export function parseMcpServerDraft(
   draft: McpServerDraft,

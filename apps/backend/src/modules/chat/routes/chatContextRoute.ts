@@ -24,14 +24,11 @@ import handleLlmServiceRequestFailure from "../../llm/routes/handleLlmServiceReq
 import type { McpTurnToolLookup } from "../../mcp/mcpServerRegistry"
 import type { BuiltInToolEntry } from "../../tool/builtIn/builtInTool"
 import {
-  createModelCapabilitiesLookup,
   findListedModelCapabilities,
-  NO_MODEL_CAPABILITIES,
-  type FindModelCapabilities,
-  type ModelCapabilities
+  type FindModelCapabilities
 } from "./modelCapabilities"
 import {
-  findRequestedAgent,
+  loadRequestedAgent,
   findRequestedBackendTools,
   findUnofferedTools,
   sendUnansweredTurnProblem,
@@ -40,7 +37,7 @@ import {
 } from "./turnRequest"
 
 /** Lookups the chat-context route borrows for its lifetime. */
-type ChatContextRouteDependencies = Pick<TurnAgentLookups, "findChatAgent"> &
+type ChatContextRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
   Readonly<{
     /**
      * Stored conversation with its messages and their attachments; undefined
@@ -105,25 +102,30 @@ const MODEL_NOT_LOADED_DETAIL =
  * message would be sent with.
  *
  * @param app - Backend with validation, the Zod response serializer, the
- * agent service, the conversation reader, the LLM service behind the agents,
- * the built-in tools, the MCP server registry, and the attachment file store
- * installed.
+ * agent runtime service, the conversation reader, the LLM service behind the
+ * agents, the built-in tools, the MCP server registry, and the attachment
+ * file store installed.
+ * @param findModelCapabilities - Capabilities of the model a request names,
+ * read from LM Studio's inventory and remembered by the lookup; shared with
+ * the chat route, so a measurement offers what a turn would.
  * @throws If route registration fails.
  * @remarks Every response prevents caching, because a measurement observes
  * the loaded model at the moment it ran. A full model-operation queue and a
  * missing or lost LLM runtime are answered with their 503 problems.
  */
-export default function registerChatContextRoute(app: FastifyInstance): void {
+export default function registerChatContextRoute(
+  app: FastifyInstance,
+  findModelCapabilities: FindModelCapabilities
+): void {
   const dependencies = {
-    findChatAgent: (code: string) => app.agentService.findChatAgent(code),
+    loadChatAgent: (code: string) =>
+      app.agentRuntimeService.loadChatAgent(code),
     findConversation: (conversationId: string) =>
       app.conversationHistoryReader.getConversation(conversationId),
     builtInTools: app.builtInTools,
     findMcpTool: (toolName: string) =>
       app.mcpServerRegistry.findTurnTool(toolName),
-    findModelCapabilities: createModelCapabilitiesLookup(() =>
-      app.llmService.listDownloadedLlmModels()
-    ),
+    findModelCapabilities,
     attachmentFiles: app.attachmentFileStore
   } satisfies ChatContextRouteDependencies
   app.route<ChatContextApiRoute>({
@@ -157,13 +159,13 @@ export default function registerChatContextRoute(app: FastifyInstance): void {
  * @remarks A continued conversation is read once, and its agent and stored
  * messages both come from that read, before the measurement waits for the
  * model's runtime. Whether the model sees images and is trained for tool
- * use is read from LM Studio's inventory only when a stored message has an
- * attachment, so the history's images and the attachment reader are
- * measured as a turn would send and offer them; a model the inventory does
- * not list sees no image and is offered no reader. Image files are looked
- * up, never read: an image counts from its stored sides. An offered MCP tool
- * whose server is not connected is left out, because its definition is
- * known only while the server is connected.
+ * use is read through the capability lookup for every measurement, after
+ * the agent is found, so the history's images and the tools the backend
+ * adds are measured as a turn would send and offer them; a model the
+ * inventory does not list sees no image and is offered no reader. Image
+ * files are looked up, never read: an image counts from its stored sides.
+ * An offered MCP tool whose server is not connected is left out, because
+ * its definition is known only while the server is connected.
  */
 async function handleChatContextRequest(
   request: FastifyRequest<ChatContextApiRoute>,
@@ -181,8 +183,8 @@ async function handleChatContextRequest(
     body.conversation.kind === "existing"
       ? dependencies.findConversation(body.conversation.id)
       : undefined
-  const requestedAgent = findRequestedAgent(body.conversation, {
-    findChatAgent: dependencies.findChatAgent,
+  const requestedAgent = loadRequestedAgent(body.conversation, {
+    loadChatAgent: dependencies.loadChatAgent,
     findConversationAgentCode: () => storedConversation?.agentCode
   })
   if (requestedAgent.status !== "found") {
@@ -193,9 +195,8 @@ async function handleChatContextRequest(
     storedConversation,
     dependencies.attachmentFiles
   )
-  const capabilities = await findAttachmentCapabilities(
+  const capabilities = await findListedModelCapabilities(
     body.model,
-    measured.attachments,
     dependencies.findModelCapabilities
   )
   const measurement = await requestedAgent.agent.findContextMeasurement({
@@ -203,6 +204,7 @@ async function handleChatContextRequest(
     model: body.model,
     canSeeImages: capabilities.vision,
     getAttachmentImageFileStatus: measured.getAttachmentImageFileStatus,
+    trainedForToolUse: capabilities.trainedForToolUse,
     tools: buildOfferedDefinitions(
       body,
       requestedTools,
@@ -216,26 +218,6 @@ async function handleChatContextRequest(
     return
   }
   reply.code(200).send(measurement)
-}
-
-/**
- * Finds what a model can do with a measured history's attachments.
- *
- * @param model - Model the request names.
- * @param attachments - Every attachment of the stored messages.
- * @param findModelCapabilities - Capability lookup over LM Studio's
- * inventory; borrowed for the call.
- * @returns The model's listed capabilities when the history holds an
- * attachment, read from the inventory; otherwise none, without reading it.
- * @throws The inventory read's failure.
- */
-async function findAttachmentCapabilities(
-  model: string,
-  attachments: readonly ReadableAttachment[],
-  findModelCapabilities: FindModelCapabilities
-): Promise<ModelCapabilities> {
-  if (attachments.length === 0) return NO_MODEL_CAPABILITIES
-  return await findListedModelCapabilities(model, findModelCapabilities)
 }
 
 /**

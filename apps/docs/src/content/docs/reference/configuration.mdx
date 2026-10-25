@@ -263,8 +263,10 @@ before each call. `switches` holds each tool the person switched on or off,
 `true` for on and `false` for off. A tool without an entry starts on when it
 only reads this machine and off when it sends requests off it (`network`), so
 a tool a later build adds starts at its own default; a tool switched back to
-its default keeps its entry. `read_attachment`, which the backend adds to a
-turn itself, has neither entry: it never asks and cannot be switched off.
+its default keeps its entry. `read_attachment` and the agent state tools
+(`read_my_state`, `find_agents`, `read_agent_state`), which the backend adds
+to a turn itself, have neither entry: they never ask and cannot be switched
+off.
 
 - A name is 1 to 64 ASCII letters, digits, underscores, or hyphens, the rule
   every tool name follows. Any other name, `null` for the group, `justRun`, or

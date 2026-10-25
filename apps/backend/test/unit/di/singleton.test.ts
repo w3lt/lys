@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
 import type { AgentTurn } from "../../../src/modules/agent/agent"
+import AgentRuntimeService from "../../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../../src/modules/agent/agentService"
 import { NO_UNOFFERED_TOOLS } from "../../../src/modules/agent/unofferedTools"
 import ChatService from "../../../src/modules/chat/chatService"
@@ -96,6 +97,9 @@ function createAcquisition<Service>(
  */
 function buildHelloAgentTurn(): AgentTurn {
   return {
+    conversationId: createFixtureUuidV7(1),
+    requestId: createFixtureUuidV7(2),
+    trainedForToolUse: false,
     history: [],
     sources: [],
     userMessage: createUserMessage(1, "Hello"),
@@ -299,6 +303,7 @@ describe("createSingletonServices", () => {
       StoredConversationHistoryEditor
     )
     expect(services.agentService).toBeInstanceOf(AgentService)
+    expect(services.agentRuntimeService).toBeInstanceOf(AgentRuntimeService)
     expect(services.llmRuntimeService).toBe(acquisitions.llmRuntime.service)
     expect(services.llmService).toBeInstanceOf(LlmService)
     expect(services.attachmentFileStore).toBeInstanceOf(AttachmentFileStore)
@@ -393,8 +398,8 @@ describe("createSingletonServices", () => {
         .spyOn(acquisitions.chat.service, "completeChatStream")
         .mockRejectedValue(new Error("model not loaded"))
 
-      await services.agentService
-        .findChatAgent(agentCode)
+      await services.agentRuntimeService
+        .loadChatAgent(agentCode)
         ?.createReply(buildHelloAgentTurn())
 
       expect(engine.findLlmContextMeasurement).toHaveBeenCalledWith(

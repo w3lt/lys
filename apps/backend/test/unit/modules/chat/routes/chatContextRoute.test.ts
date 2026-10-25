@@ -8,6 +8,9 @@ import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import type { McpSettingsRead } from "../../../../../src/infrastructure/settings/mcpSettingsFile"
 import SqliteAgentRecordStore from "../../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
+import AgentRuntimeService, {
+  buildConversationTitleLookup
+} from "../../../../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../../../../src/modules/agent/agentService"
 import { formatSystemPrompt } from "../../../../../src/modules/agent/agentContext"
 import { TOOL_CALLS_OFF } from "../../../../../src/modules/agent/unofferedTools"
@@ -15,6 +18,7 @@ import type { ReplyModel } from "../../../../../src/modules/agent/replyModel"
 import AttachmentFileStore from "../../../../../src/modules/attachment/attachmentFileStore"
 import { buildReadAttachmentDefinition } from "../../../../../src/modules/attachment/readAttachmentTool"
 import registerChatContextRoute from "../../../../../src/modules/chat/routes/chatContextRoute"
+import { createModelCapabilitiesLookup } from "../../../../../src/modules/chat/routes/modelCapabilities"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import LlmService from "../../../../../src/modules/llm/llmService"
@@ -47,7 +51,10 @@ import {
   ScriptedBuiltInTool
 } from "../../../support/scriptedBuiltInTool"
 import { ScriptedBuiltInToolProvider } from "../../../support/scriptedBuiltInToolProvider"
-import { READ_TEXT_FILE_TOOL } from "../../../support/toolFixtures"
+import {
+  LEADER_STATE_TOOL_FORMATS,
+  READ_TEXT_FILE_TOOL
+} from "../../../support/toolFixtures"
 
 /** Built-in agent that answers the cases' conversations. */
 const CALIGINIA: BuiltInAgent = Object.freeze({
@@ -105,11 +112,12 @@ const VISION_MODEL_INFO: DownloadedLlmModel = Object.freeze({
  *
  * @returns The application, the database for seeding rows, the context
  * meter spy every agent measures with, which every context fits by default,
- * the downloaded-model spy, which rejects until a case configures it, the
- * attachment file store, over a directory removed when the test finishes,
- * and the settings reader of the real MCP server registry, which reads no
- * server until a case configures it; the registry opens servers with a
- * 10-second limit, logs nothing, and is closed when the test finishes.
+ * the downloaded-model spy behind the route's capability lookup, which lists
+ * no model until a case configures it, the attachment file store, over a
+ * directory removed when the test finishes, and the settings reader of the
+ * real MCP server registry, which reads no server until a case configures
+ * it; the registry opens servers with a 10-second limit, logs nothing, and
+ * is closed when the test finishes.
  */
 async function createChatContextRouteApp() {
   const { app } = createTestFastify()
@@ -130,9 +138,7 @@ async function createChatContextRouteApp() {
   })
   const listDownloadedLlmModels = vi
     .spyOn(llmService, "listDownloadedLlmModels")
-    .mockRejectedValue(
-      new Error("Unexpected context route call: listDownloadedLlmModels")
-    )
+    .mockResolvedValue([])
   const readMcpSettings = vi.fn<() => Promise<McpSettingsRead>>(() =>
     Promise.resolve(
       Object.freeze({
@@ -155,12 +161,16 @@ async function createChatContextRouteApp() {
   app.decorate("mcpServerRegistry", mcpServerRegistry)
   app.decorate("attachmentFileStore", attachmentFileStore)
   app.decorate(
-    "agentService",
-    new AgentService({
-      recordStore: new SqliteAgentRecordStore(database),
-      builtInAgents: [CALIGINIA],
+    "agentRuntimeService",
+    new AgentRuntimeService({
+      agents: new AgentService({
+        recordStore: SqliteAgentRecordStore.create(database),
+        builtInAgents: [CALIGINIA]
+      }),
       replyModel: UNUSED_REPLY_MODEL,
-      replyContextMeter
+      replyContextMeter,
+      findConversationTitle: (conversationId) =>
+        buildConversationTitleLookup(history.getConversation(conversationId))
     })
   )
   app.decorate("conversationHistoryReader", history)
@@ -185,7 +195,10 @@ async function createChatContextRouteApp() {
   )
   await app.register(async (scope) => {
     scope.setSerializerCompiler(serializerCompiler)
-    registerChatContextRoute(scope)
+    registerChatContextRoute(
+      scope,
+      createModelCapabilitiesLookup(() => llmService.listDownloadedLlmModels())
+    )
   })
   return {
     app,
@@ -668,7 +681,8 @@ describe("registerChatContextRoute", () => {
     })
     expect(measured?.tools).toEqual([
       new AgentTool(LOOK_UP_WORD_TOOL).buildAgentFormat(),
-      new AgentTool(buildReadAttachmentDefinition()).buildAgentFormat()
+      new AgentTool(buildReadAttachmentDefinition()).buildAgentFormat(),
+      ...LEADER_STATE_TOOL_FORMATS
     ])
   })
 
@@ -718,7 +732,7 @@ describe("registerChatContextRoute", () => {
     expect(response.statusCode).toBe(200)
     expect(
       replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0].tools
-    ).toEqual([])
+    ).toEqual(LEADER_STATE_TOOL_FORMATS)
   })
 
   it("responds with the 503 problem of a full model-operation queue met while the inventory is read, without measuring", async () => {
@@ -787,7 +801,7 @@ describe("registerChatContextRoute", () => {
     ])
   })
 
-  it("measures the attachment reader after the built-in tools and before a connected MCP server's tool, as a turn offers them", async () => {
+  it("measures the attachment reader after the built-in tools and before a connected MCP server's tool, then the agent state tools, as a turn offers them", async () => {
     const testApp = await createChatContextRouteApp()
     saveConversationWithAttachment(
       testApp.database,
@@ -821,7 +835,8 @@ describe("registerChatContextRoute", () => {
       new AgentTool(READ_TEXT_FILE_TOOL).buildAgentFormat(),
       new AgentTool(LOOK_UP_WORD_TOOL).buildAgentFormat(),
       new AgentTool(buildReadAttachmentDefinition()).buildAgentFormat(),
-      new AgentTool(echoDefinition).buildAgentFormat()
+      new AgentTool(echoDefinition).buildAgentFormat(),
+      ...LEADER_STATE_TOOL_FORMATS
     ])
   })
 
@@ -928,8 +943,9 @@ describe("registerChatContextRoute", () => {
     }
   )
 
-  it("responds with the agent-not-found problem without measuring for a new conversation's unknown agent", async () => {
-    const { app, replyContextMeter } = await createChatContextRouteApp()
+  it("responds with the agent-not-found problem without measuring or reading the inventory for a new conversation's unknown agent", async () => {
+    const { app, replyContextMeter, listDownloadedLlmModels } =
+      await createChatContextRouteApp()
 
     const response = await sendChatContextRequest(app, {
       conversation: { kind: "new", agentCode: "nobody" },
@@ -939,6 +955,39 @@ describe("registerChatContextRoute", () => {
     expect(response.statusCode).toBe(404)
     expect(chatContextApi.responses[404].parse(response.json())).toMatchObject({
       type: "urn:lys:problem:agent:not-found"
+    })
+    expect(replyContextMeter.findReplyContextMeasurement).not.toHaveBeenCalled()
+    expect(listDownloadedLlmModels).not.toHaveBeenCalled()
+  })
+
+  it("reads the model's capabilities for a new conversation, which has no attachment", async () => {
+    const { app, listDownloadedLlmModels } = await createChatContextRouteApp()
+    listDownloadedLlmModels.mockResolvedValue([VISION_MODEL_INFO])
+
+    const response = await sendChatContextRequest(app, {
+      conversation: { kind: "new", agentCode: "caliginia" },
+      model: MODEL
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(listDownloadedLlmModels).toHaveBeenCalledOnce()
+  })
+
+  it("responds with the runtime-unavailable 503 problem for a new conversation when LM Studio cannot be reached, without measuring", async () => {
+    const { app, replyContextMeter, listDownloadedLlmModels } =
+      await createChatContextRouteApp()
+    listDownloadedLlmModels.mockRejectedValue(
+      createLlmRuntimeUnavailableError([])
+    )
+
+    const response = await sendChatContextRequest(app, {
+      conversation: { kind: "new", agentCode: "caliginia" },
+      model: MODEL
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(chatContextApi.responses[503].parse(response.json())).toMatchObject({
+      type: "urn:lys:problem:llm:runtime-unavailable"
     })
     expect(replyContextMeter.findReplyContextMeasurement).not.toHaveBeenCalled()
   })

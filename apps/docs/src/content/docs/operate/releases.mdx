@@ -112,22 +112,66 @@ says which branch a pull request targets. A patch release ships one day's fixes
 for issues with the `Patch Fix` label to `stable`. A day without such a fix has
 no patch release. For a patch from `0.4.0` to `0.4.1`:
 
-1. When the day's first fix is needed, the maintainer creates the patch branch
-   from `stable`:
-
-   ```sh
-   git fetch origin
-   git push origin origin/stable:refs/heads/patch/v0.4.1
-   ```
-
+1. At 00:00 UTC, the [patch branch workflow](#patch-branch-workflow) creates
+   `patch/v0.4.1` from `stable`.
 2. Each fix reaches the patch branch through its own pull request.
-3. Before the end-of-day merge, one commit on the patch branch sets the version
-   to `0.4.1` as [Versioning](#versioning) describes, and records the release
-   as [Recording a release](/changelog/#recording-a-release) describes.
-4. At the end of the day, the maintainer merges the patch branch into `stable`
-   and tags the result `v0.4.1`.
-5. The maintainer then merges `stable` into `main`, so that `main` keeps every
-   fix.
+3. At 20:00 UTC, the workflow deletes the branch when it holds no fix, and that
+   day has no patch release. Otherwise it opens a pull request from the branch
+   into `stable`.
+4. Before merging, the maintainer adds one commit to that pull request that
+   sets the version to `0.4.1` as [Versioning](#versioning) describes, and
+   records the release as
+   [Recording a release](/changelog/#recording-a-release) describes.
+5. The maintainer merges the pull request into `stable` and tags the result
+   `v0.4.1`.
+6. At the next 00:00 UTC, the
+   [stable into main workflow](#stable-into-main-workflow) opens a pull request
+   from `stable` into `main`. The maintainer squashes it, so that `main` keeps
+   every fix.
+
+### Patch branch workflow
+
+`.github/workflows/patch-branch.yml` runs at 00:00 and 20:00 UTC. GitHub runs
+scheduled workflows only from `main`, and may start a run late. The workflow
+can also be run by hand with the task `open` or `close`.
+
+- It names the branch from `VERSION` on `stable`, and fails when that file does
+  not hold a `major.minor.patch` version.
+- `open` creates the branch from `stable`, unless it already exists. A pull
+  request that is not merged by 00:00 leaves `stable`'s version unchanged, so
+  the same branch, with its open pull request, carries over to the next day.
+- `close` deletes the branch when `stable` already has every commit on it.
+  Otherwise it opens a pull request into `stable`, unless one is already open.
+  The pull request lists the fixes and the steps above, and the workflow never
+  merges it.
+- The workflow creates and deletes branches with its own token, and opens the
+  pull request with the `PATCH_PR_TOKEN` repository secret. GitHub starts no
+  workflow for a pull request opened with the workflow's own token, so the CI
+  checks would not run on it. The secret is a fine-grained personal access
+  token for `w3lt/lys` with read and write access to pull requests and
+  read-only access to contents. Without it, `close` fails and opens no pull
+  request.
+- Merged patch branches are not deleted.
+
+### Stable into main workflow
+
+`.github/workflows/stable-into-main.yml` runs at 00:00 UTC from `main`, and can
+also be run by hand.
+
+- It reads `VERSION` on `stable` and on `main`, and fails, naming the branch,
+  when either does not hold a `major.minor.patch` version.
+- It compares the two as numbers, major first, then minor, then patch. When
+  `stable`'s version is newer and no pull request from `stable` into `main` is
+  open, it opens one. Otherwise it does nothing, and it never merges.
+- It opens the pull request with the same `PATCH_PR_TOKEN` secret as the patch
+  branch workflow, and fails without it.
+- The maintainer squashes that pull request, because `main` requires a linear
+  history. The squash brings `stable`'s `VERSION` to `main`, so the versions
+  match and the workflow stays quiet until the next patch release.
+- It relies on `main`'s `VERSION` staying at the released version until the
+  next release is prepared. If `main` is raised to the next version earlier,
+  `stable`'s patch versions are older than `main`'s, and no pull request
+  opens.
 
 <RelatedDocuments
   documents={[

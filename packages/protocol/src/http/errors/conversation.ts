@@ -61,11 +61,14 @@ export type ConversationNotFoundProblem = z.infer<
  * conversation whose agent no longer exists.
  *
  * @remarks The chat endpoint transmits this contract with HTTP 409 when the
- * conversation is stored but no built-in or stored agent has the code it was
- * started with, as after that agent was deleted. Nothing is stored: the
- * conversation keeps its messages and gains none, so it stays readable. The
- * request succeeds again only once an agent has that code. The `type` literal
- * is the machine-readable discriminator; `detail` is caller-safe text.
+ * conversation is stored but its agent is deleted, or no built-in or stored
+ * agent has the code it was started with. Nothing is stored: the
+ * conversation keeps its messages and gains none, so it stays readable. A
+ * deleted agent's code is never free again, so the request keeps failing;
+ * only a conversation whose agent was removed before version 11 of the
+ * database succeeds again once an agent is stored under that code. The
+ * `type` literal is the machine-readable discriminator; `detail` is
+ * caller-safe text.
  * Changing any fixed field requires coordinated consumers.
  */
 export const conversationAgentMissingProblemSchema = z

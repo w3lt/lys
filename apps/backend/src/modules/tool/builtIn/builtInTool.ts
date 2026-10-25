@@ -168,7 +168,9 @@ export type TurnBuiltInTool = Readonly<{
   /**
    * Whether the tool's calls run without asking the person: true only for a
    * tool that reads what the person gave Lys for this conversation, such as
-   * the attachment reader; every other tool's calls pass the approval gate.
+   * the attachment reader, or what the backend knows about its agents, such
+   * as the agent state tools; every other tool's calls pass the approval
+   * gate.
    */
   runsWithoutApproval: boolean
 }>

@@ -2,23 +2,28 @@ import type { BuiltInAgentSummary, ListAgentsApiResponse } from "@lys/protocol"
 import type { Agent, BuiltInAgent } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
-import type {
-  AgentDeleter,
-  AgentEditor,
-  AgentLister,
-  AgentReader
+import {
+  MAXIMUM_AGENT_SEARCH_MATCHES,
+  type AgentDeleter,
+  type AgentEditor,
+  type AgentLister,
+  type AgentReader,
+  type AgentSearcher,
+  type AgentSearchMatch
 } from "../../../src/modules/agent/capabilities"
 import { parseAgentListOptions } from "../../../src/modules/agent/listOptions"
 
 /**
- * Agent listing, lookup, change, and deletion over one store holding no
- * agent, with the controls a case needs.
+ * Agent listing, lookup, search, change, and deletion over one store holding
+ * no agent, with the controls a case needs.
  */
 export type AgentCapabilitiesHarness = Readonly<{
   /** Agent listing under test. */
   agentLister: AgentLister
   /** Agent lookup under test. */
   agentReader: AgentReader
+  /** Agent search under test. */
+  agentSearcher: AgentSearcher
   /** Agent change under test. */
   agentEditor: AgentEditor
   /** Agent deletion under test. */
@@ -89,6 +94,9 @@ const ABSENT_AGENT_CODES: readonly string[] = Object.freeze([
   "writer"
 ])
 
+/** Matches a time in the stored format, such as `2026-01-01T00:00:00.000Z`. */
+const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+
 /** Message of the write failure that cases induce. */
 const AGENT_WRITE_FAILURE_MESSAGE = "Agent write failed"
 
@@ -130,6 +138,38 @@ function saveListedAgents(harness: AgentCapabilitiesHarness): void {
  */
 function buildBuiltInAgentSummary(agent: BuiltInAgent): BuiltInAgentSummary {
   return { code: agent.code, name: agent.name, bio: agent.bio }
+}
+
+/**
+ * Builds the search match of one built-in agent.
+ *
+ * @param agent - Built-in agent as shipped.
+ * @returns The match, which is never deleted.
+ */
+function buildBuiltInAgentMatch(agent: BuiltInAgent): AgentSearchMatch {
+  return {
+    kind: "built-in",
+    code: agent.code,
+    name: agent.name,
+    bio: agent.bio,
+    deletedAt: null
+  }
+}
+
+/**
+ * Reads the first built-in agent the capabilities ship.
+ *
+ * @param builtInAgents - Built-in agents in the order they are listed.
+ * @returns The first one.
+ * @throws If no built-in agent ships.
+ */
+function readFirstBuiltInAgent(
+  builtInAgents: readonly BuiltInAgent[]
+): BuiltInAgent {
+  const [agent] = builtInAgents
+  if (agent === undefined)
+    throw new Error("Expected at least one built-in agent")
+  return agent
 }
 
 /**
@@ -275,18 +315,32 @@ export function registerAgentReaderContractSuite(
 
       expect(builtInAgents.length).toBeGreaterThan(0)
       expect(found).toEqual(
-        builtInAgents.map((agent) => ({ kind: "built-in", ...agent }))
+        builtInAgents.map((agent) => ({
+          agent: { kind: "built-in", ...agent },
+          deletedAt: null
+        }))
       )
     })
 
-    it("finds a stored agent exactly as stored, tagged custom", () => {
+    it("finds a stored agent exactly as stored, tagged custom and not deleted", () => {
       const { agentReader, saveAgent } = createHarness()
       saveAgent(RESEARCHER)
       saveAgent(ARCHIVIST)
 
       expect(agentReader.findAgent("researcher")).toEqual({
-        kind: "custom",
-        ...RESEARCHER
+        agent: { kind: "custom", ...RESEARCHER },
+        deletedAt: null
+      })
+    })
+
+    it("finds a deleted agent as stored, with the time it was deleted", () => {
+      const { agentReader, agentDeleter, saveAgent } = createHarness()
+      saveAgent(RESEARCHER)
+      agentDeleter.deleteAgent("researcher")
+
+      expect(agentReader.findAgent("researcher")).toEqual({
+        agent: { kind: "custom", ...RESEARCHER },
+        deletedAt: expect.stringMatching(TIMESTAMP_PATTERN)
       })
     })
 
@@ -348,6 +402,19 @@ export function registerAgentEditorContractSuite(
         expect(readStoredAgents()).toEqual([RESEARCHER])
       }
     )
+
+    it("reports a deleted agent as missing and changes nothing", () => {
+      const { agentEditor, agentDeleter, saveAgent, readStoredAgents } =
+        createHarness()
+      saveAgent(RESEARCHER)
+      agentDeleter.deleteAgent("researcher")
+
+      expect(
+        agentEditor.updateAgent("researcher", { name: "Renamed" })
+      ).toEqual({ status: "missing" })
+
+      expect(readStoredAgents()).toEqual([RESEARCHER])
+    })
 
     it("refuses to change a built-in agent and stores nothing", () => {
       const { agentEditor, builtInAgents, readStoredAgents } = createHarness()
@@ -423,24 +490,43 @@ export function registerAgentDeleterContractSuite(
   createHarness: AgentCapabilitiesHarnessFactory
 ): void {
   describe("AgentDeleter contract", () => {
-    it("deletes a stored agent and keeps every other", () => {
-      const { agentDeleter, saveAgent, readStoredAgents } = createHarness()
-      saveAgent(RESEARCHER)
-      saveAgent(ARCHIVIST)
+    it("marks a stored agent deleted, keeping it as stored and every other agent", () => {
+      const harness = createHarness()
+      harness.saveAgent(RESEARCHER)
+      harness.saveAgent(ARCHIVIST)
 
-      expect(agentDeleter.deleteAgent("researcher")).toBe("deleted")
+      expect(harness.agentDeleter.deleteAgent("researcher")).toBe("deleted")
 
-      expect(readStoredAgents()).toEqual([ARCHIVIST])
+      expect(harness.readStoredAgents()).toEqual([ARCHIVIST, RESEARCHER])
+      expect(harness.agentReader.findAgent("researcher")?.deletedAt).toEqual(
+        expect.stringMatching(TIMESTAMP_PATTERN)
+      )
+      expect(harness.agentReader.findAgent("archivist")?.deletedAt).toBeNull()
     })
 
-    it("reports a repeated deletion as missing without recreating the agent", () => {
-      const { agentDeleter, saveAgent, readStoredAgents } = createHarness()
+    it("reports a repeated deletion as missing and keeps the first deletion time", () => {
+      const { agentDeleter, agentReader, saveAgent } = createHarness()
       saveAgent(RESEARCHER)
       agentDeleter.deleteAgent("researcher")
+      const firstDeletedAt = agentReader.findAgent("researcher")?.deletedAt
 
       expect(agentDeleter.deleteAgent("researcher")).toBe("missing")
 
-      expect(readStoredAgents()).toEqual([])
+      expect(agentReader.findAgent("researcher")?.deletedAt).toBe(
+        firstDeletedAt
+      )
+    })
+
+    it("leaves a deleted agent out of the listing and the stored count", () => {
+      const { agentDeleter, agentLister, saveAgent } = createHarness()
+      saveAgent(RESEARCHER)
+      saveAgent(ARCHIVIST)
+      agentDeleter.deleteAgent("researcher")
+
+      const page = agentLister.listAgents(parseAgentListOptions({}))
+
+      expect(page.agents.map((agent) => agent.code)).toEqual(["archivist"])
+      expect(page.storedCount).toBe(1)
     })
 
     it.each(ABSENT_AGENT_CODES)(
@@ -478,6 +564,7 @@ export function registerAgentDeleterContractSuite(
       )
 
       expect(harness.readStoredAgents()).toEqual([RESEARCHER])
+      expect(harness.agentReader.findAgent("researcher")?.deletedAt).toBeNull()
     })
 
     it("fails with `Database is closed` after the owner closes the store", () => {
@@ -485,6 +572,146 @@ export function registerAgentDeleterContractSuite(
       closeStore()
 
       expect(() => agentDeleter.deleteAgent("researcher")).toThrow(
+        "Database is closed"
+      )
+    })
+  })
+}
+
+/**
+ * Registers the provider-independent {@link AgentSearcher} contract cases.
+ *
+ * @param createHarness - Creates the capabilities over one empty store per
+ * case. Every built-in agent it ships names Lys in its bio, and no other
+ * built-in agent contains the first one's code or name.
+ */
+export function registerAgentSearcherContractSuite(
+  createHarness: AgentCapabilitiesHarnessFactory
+): void {
+  describe("AgentSearcher contract", () => {
+    it("finds the built-in agents that match, ignoring case, in shipped order", () => {
+      const { agentSearcher, builtInAgents } = createHarness()
+
+      expect(agentSearcher.listAgentMatches("LYS")).toEqual({
+        matches: builtInAgents.map(buildBuiltInAgentMatch),
+        matchCount: builtInAgents.length
+      })
+    })
+
+    it("puts a stored agent whose code equals the query before a built-in agent that only contains it", () => {
+      const { agentSearcher, builtInAgents, saveAgent } = createHarness()
+      const builtInAgent = readFirstBuiltInAgent(builtInAgents)
+      const code = builtInAgent.code.slice(0, 4)
+      saveAgent(createListedAgent(code, FIRST_CREATED_AT))
+
+      const result = agentSearcher.listAgentMatches(code.toUpperCase())
+
+      expect(result.matches.map((match) => [match.kind, match.code])).toEqual([
+        ["custom", code],
+        ["built-in", builtInAgent.code]
+      ])
+    })
+
+    it("puts a built-in agent whose name equals the query before an equal stored one, and both before the others", () => {
+      const { agentSearcher, builtInAgents, saveAgent } = createHarness()
+      const builtInAgent = readFirstBuiltInAgent(builtInAgents)
+      saveAgent({ ...RESEARCHER, bio: `${builtInAgent.name}'s fan.` })
+      saveAgent({
+        ...createListedAgent("admirer", SECOND_CREATED_AT),
+        name: builtInAgent.name.toLowerCase()
+      })
+
+      const result = agentSearcher.listAgentMatches(builtInAgent.name)
+
+      expect(result.matches.map((match) => [match.kind, match.code])).toEqual([
+        ["built-in", builtInAgent.code],
+        ["custom", "admirer"],
+        ["custom", "researcher"]
+      ])
+      expect(result.matchCount).toBe(3)
+    })
+
+    it("includes a deleted stored agent with the time it was deleted", () => {
+      const { agentSearcher, agentDeleter, saveAgent } = createHarness()
+      saveAgent(RESEARCHER)
+      agentDeleter.deleteAgent("researcher")
+
+      expect(agentSearcher.listAgentMatches("research")).toEqual({
+        matches: [
+          {
+            kind: "custom",
+            code: RESEARCHER.code,
+            name: RESEARCHER.name,
+            bio: RESEARCHER.bio,
+            deletedAt: expect.stringMatching(TIMESTAMP_PATTERN)
+          }
+        ],
+        matchCount: 1
+      })
+    })
+
+    it("lists the other stored agents by creation time and then code", () => {
+      const harness = createHarness()
+      saveListedAgents(harness)
+
+      expect(
+        harness.agentSearcher
+          .listAgentMatches("agent")
+          .matches.map((match) => match.code)
+      ).toEqual(["b", "c", "a"])
+    })
+
+    it(`keeps the first ${MAXIMUM_AGENT_SEARCH_MATCHES} matches, frozen, and counts every built-in and stored match`, () => {
+      const { agentSearcher, builtInAgents, saveAgent } = createHarness()
+      const builtInAgent = readFirstBuiltInAgent(builtInAgents)
+      const firstCreatedAt = Date.parse(FIRST_CREATED_AT)
+      for (let index = 1; index <= MAXIMUM_AGENT_SEARCH_MATCHES; index += 1)
+        saveAgent({
+          ...createListedAgent(
+            `fan-${index}`,
+            new Date(firstCreatedAt + index).toISOString()
+          ),
+          name: `${builtInAgent.name} fan ${index}`
+        })
+
+      const result = agentSearcher.listAgentMatches(builtInAgent.name)
+
+      expect(result.matches).toHaveLength(MAXIMUM_AGENT_SEARCH_MATCHES)
+      expect(result.matches[0]).toEqual(buildBuiltInAgentMatch(builtInAgent))
+      expect(result.matches.at(-1)?.code).toBe(
+        `fan-${MAXIMUM_AGENT_SEARCH_MATCHES - 1}`
+      )
+      expect(result.matchCount).toBe(MAXIMUM_AGENT_SEARCH_MATCHES + 1)
+      expect(Object.isFrozen(result)).toBe(true)
+      expect(Object.isFrozen(result.matches)).toBe(true)
+      expect(Object.isFrozen(result.matches[0])).toBe(true)
+      expect(Object.isFrozen(result.matches.at(-1))).toBe(true)
+    })
+
+    it("takes the query literally", () => {
+      const { agentSearcher, saveAgent } = createHarness()
+      saveAgent(createListedAgent("abc", FIRST_CREATED_AT))
+
+      expect(agentSearcher.listAgentMatches("a.c")).toEqual({
+        matches: [],
+        matchCount: 0
+      })
+    })
+
+    it("fails when a matched stored agent is invalid", () => {
+      const { agentSearcher, saveInvalidAgent } = createHarness()
+      saveInvalidAgent("damaged")
+
+      expect(() => agentSearcher.listAgentMatches("damaged")).toThrow(
+        z.ZodError
+      )
+    })
+
+    it("fails with `Database is closed` after the owner closes the store", () => {
+      const { agentSearcher, closeStore } = createHarness()
+      closeStore()
+
+      expect(() => agentSearcher.listAgentMatches("research")).toThrow(
         "Database is closed"
       )
     })

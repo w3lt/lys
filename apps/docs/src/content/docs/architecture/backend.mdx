@@ -16,26 +16,27 @@ Each module in `src/modules/` keeps its HTTP routes in `routes/` and its
 services, contracts, and domain logic at the module root. `src/di/` only wires
 the services together.
 
-| Layer                 | Implementation                    | Responsibility                                                                                                                                                                                                                                                                                            |
-| --------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App bootstrap         | `src/app.ts`                      | Registers CORS, SSE support, singleton services, and all routes, and logs through the logger the entry point passes, as Fastify's logger.                                                                                                                                                                 |
-| Logging               | `src/log.ts`                      | Creates the logger (level `info`, level names, UTC ISO-8601 times); `BackendLogDestination` writes each line to standard output and the day's file in `$LYS_HOME/logs/`; logs uncaught failures at `fatal` and Node's warnings at `warn`; keeps the backend running when an output fails.                 |
-| Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path and the attachments directory under `LYS_HOME`, the system and title prompts, and title limits; loads the logs directory under `LYS_HOME` on its own, before the rest.                                                                               |
-| Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services and the agent service over SQLite records, LLM services without contacting LM Studio, the built-in tools, the tool approval service, and the MCP server registry without reading the settings or starting a server.         |
-| Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                                                                                                         |
-| Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, and finds the agent that answers a chat; contains no SQL. |
-| Database              | `src/infrastructure/database`     | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and runs every conversation query in `conversations/` and every agent query in `agents/`.                                                                                         |
-| Chat routes           | `src/modules/chat/routes`         | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                                                                                                                                                                                                        |
-| Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                    |
-| Agent routes          | `src/modules/agent/routes`        | Lists the built-in and stored agents, retrieves one, and creates, changes, and deletes stored agents; changing or deleting a built-in agent is refused.                                                                                                                                                   |
-| LLM routes            | `src/modules/llm/routes`          | Lists LM Studio models, checks loaded-model health, loads or unloads a model, and reports or refreshes the LM Studio connection.                                                                                                                                                                          |
-| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page through vmo, which loads it in a micro VM; `web_search` (`web/`) searches the web through Tavily.                                                                                                   |
-| Attachments           | `src/modules/attachment`          | Decodes a chat request's attachments and reads what each is from its bytes, keeps the files under the attachments directory by conversation and message, and runs `read_attachment`, the reader the backend adds to a turn itself; its calls run without approval.                                        |
-| Tool routes           | `src/modules/tool/routes`         | Lists the tools the backend runs: the built-in tools, then the tools of the connected MCP servers.                                                                                                                                                                                                        |
-| MCP servers           | `src/modules/mcp`                 | Connects to the MCP servers the `mcp` settings group names, over stdio or Streamable HTTP, lists their tools, and runs each allowed call of one on its server; see [MCP servers](#mcp-servers).                                                                                                           |
-| MCP routes            | `src/modules/mcp/routes`          | Lists the applied servers and their states, applies the `mcp` group again, and reconnects one server.                                                                                                                                                                                                     |
-| Tool approval service | `src/modules/toolApproval`        | Reads the Just run choices saved in `settings.json` once per round of tool calls and decides, for client, backend, and MCP tools alike, which calls the person must allow first; every call asks when the file cannot be read.                                                                            |
-| Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                                                                                                                 |
+| Layer                 | Implementation                    | Responsibility                                                                                                                                                                                                                                                                                                                       |
+| --------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| App bootstrap         | `src/app.ts`                      | Registers CORS, SSE support, singleton services, and all routes, and logs through the logger the entry point passes, as Fastify's logger.                                                                                                                                                                                            |
+| Logging               | `src/log.ts`                      | Creates the logger (level `info`, level names, UTC ISO-8601 times); `BackendLogDestination` writes each line to standard output and the day's file in `$LYS_HOME/logs/`; logs uncaught failures at `fatal` and Node's warnings at `warn`; keeps the backend running when an output fails.                                            |
+| Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path and the attachments directory under `LYS_HOME`, the system and title prompts, and title limits; loads the logs directory under `LYS_HOME` on its own, before the rest.                                                                                                          |
+| Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services, the agent service over SQLite records and the agent runtime service over it, LLM services without contacting LM Studio, the built-in tools, the tool approval service, and the MCP server registry without reading the settings or starting a server. |
+| Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                                                                                                                                    |
+| Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, marks a deleted agent deleted, and searches every agent; contains no SQL.            |
+| Agent runtime service | `src/modules/agent`               | Keeps one live agent per agent a chat or a context measurement has loaded, finds the one that answers a chat, and tells agents about themselves and each other as their roles allow; see [live agents](#live-agents).                                                                                                                |
+| Database              | `src/infrastructure/database`     | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and runs every conversation query in `conversations/` and every agent query in `agents/`.                                                                                                                    |
+| Chat routes           | `src/modules/chat/routes`         | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                                                                                                                                                                                                                                   |
+| Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                                               |
+| Agent routes          | `src/modules/agent/routes`        | Lists the built-in and stored agents, retrieves one, and creates, changes, and deletes stored agents; changing or deleting a built-in agent is refused.                                                                                                                                                                              |
+| LLM routes            | `src/modules/llm/routes`          | Lists LM Studio models, checks loaded-model health, loads or unloads a model, and reports or refreshes the LM Studio connection.                                                                                                                                                                                                     |
+| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page through vmo, which loads it in a micro VM; `web_search` (`web/`) searches the web through Tavily.                                                                                                                              |
+| Attachments           | `src/modules/attachment`          | Decodes a chat request's attachments and reads what each is from its bytes, keeps the files under the attachments directory by conversation and message, and runs `read_attachment`, the reader the backend adds to a turn itself; its calls run without approval.                                                                   |
+| Tool routes           | `src/modules/tool/routes`         | Lists the tools the backend runs: the built-in tools, then the tools of the connected MCP servers.                                                                                                                                                                                                                                   |
+| MCP servers           | `src/modules/mcp`                 | Connects to the MCP servers the `mcp` settings group names, over stdio or Streamable HTTP, lists their tools, and runs each allowed call of one on its server; see [MCP servers](#mcp-servers).                                                                                                                                      |
+| MCP routes            | `src/modules/mcp/routes`          | Lists the applied servers and their states, applies the `mcp` group again, and reconnects one server.                                                                                                                                                                                                                                |
+| Tool approval service | `src/modules/toolApproval`        | Reads the Just run choices saved in `settings.json` once per round of tool calls and decides, for client, backend, and MCP tools alike, which calls the person must allow first; every call asks when the file cannot be read.                                                                                                       |
+| Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                                                                                                                                            |
 
 ## Chat request flow
 
@@ -51,21 +52,26 @@ the services together.
    applied but not connected, answers `409` with the
    backend-tool-unavailable problem, storing nothing either.
 2. The route finds the agent that answers before it stores anything. For a
-   new conversation it asks the agent service (`app.agentService`) for the
-   requested agent, built-in or stored; if no agent has that code, it answers
+   new conversation it asks the agent runtime service
+   (`app.agentRuntimeService`) for the requested agent, built-in or stored
+   and not deleted; if no such agent has that code, it answers
    `404` with the agent-not-found problem. For an existing conversation it
    reads the conversation's agent code through the history reader, answers
    `404` with the conversation-not-found problem when the conversation is not
    stored, and answers `409` with the conversation agent missing problem when
    no agent has that code any more, as after the agent was deleted. In each
    of those cases nothing is stored.
-   When the request or the conversation holds an attachment, the route then
-   reads from LM Studio's inventory whether the model sees images and is
-   trained for tool use: a full model-operation queue or a missing runtime
-   answers its `503` problem, and an image attached for a model without
-   vision, or for one the inventory does not list, answers `409` with the
-   image-needs-vision problem, nothing stored either way. A request without
-   attachments in a conversation without any never reads the inventory. The
+   The route then reads whether the model sees images and is trained for
+   tool use through the capability lookup the chat and chat-context routes
+   share (`createModelCapabilitiesLookup`), which lists LM Studio's inventory
+   until it has seen the model and then remembers what the model can do
+   until the backend stops, because a model's capabilities come from its
+   downloaded files. A model the inventory does not list is not remembered,
+   and its turn sees no image and is offered none of the tools the backend
+   adds. While the lookup lists, a full model-operation queue or a missing
+   runtime answers its `503` problem, and an image attached for a model
+   without vision, or for one the inventory does not list, answers `409`
+   with the image-needs-vision problem, nothing stored either way. The
    route makes the identities of a new conversation and of the user message
    and writes the attachment files under them, so they are in place when the
    turn commits; see [attachments](#attachments). Once the files are written,
@@ -88,7 +94,10 @@ the services together.
    OpenAI-compatible streaming completion against LM Studio through
    `OpenAiReplyModel`, offers the request's tools (client tools first, then
    built-in tools, then the attachment reader when the conversation holds a
-   text file and the model is trained for tool use, then MCP tools), and runs rounds while
+   text file and the model is trained for tool use, then MCP tools, then,
+   when the model is trained for tool use, the
+   [agent state tools](#agent-state-tools) the agent's role gives), and runs
+   rounds while
    the model calls them: each call is
    checked by `AgentTool`, then passes the round's
    [approval gate](#tool-approval). A call of a backend tool is first parsed by
@@ -145,13 +154,14 @@ asks the agent's `findContextMeasurement` for the system prompt, with the
 notes about the tools the request does not offer when it names any or
 switches tool calls off, the tools, and
 stored messages a turn's first round would send, with an empty new message
-that measures the markup around the text. When a stored message holds an
-attachment, it reads the model's capabilities as the chat route does, so the
-images a model with vision sees are counted and `read_attachment` is among
-the measured tools when a turn would offer it. An offered MCP tool is
-measured, after the reader, only while its server is connected, because its
-definition is known only then; one whose server is not connected is left out,
-and a name no applied server lists answers `400`. It never reads an image's
+that measures the markup around the text. It reads the model's capabilities
+through the chat route's lookup, so the images a model with vision sees are
+counted, and `read_attachment` and the agent state tools are among the
+measured tools when a turn would offer them. An offered MCP tool is
+measured, after the reader and before the agent state tools, only while its
+server is connected, because its definition is known only then; one whose
+server is not connected is left out, and a name no applied server lists
+answers `400`. It never reads an image's
 bytes: `getAgentContextImageSides` asks the attachment file store whether
 each file is still there, and the measured context carries a stored image's
 sides, or a missing one's placeholder, where a turn sends the image. See the
@@ -343,13 +353,16 @@ the reply's stored parts, so later turns resend them like every other tool
 result.
 
 Whether the model sees images and is trained for tool use is read from LM
-Studio's inventory (`src/modules/chat/routes/modelCapabilities.ts`) only for
-a turn that involves an attachment, so a turn without any never waits for
-the model-operation queue. The read lists the downloaded models only
-(`LlmService.listDownloadedLlmModels()`), without the loaded state and
-context lengths the model list adds. A model the inventory does not list has
-neither capability: an image attached for it is refused, and no reader is
-offered.
+Studio's inventory (`src/modules/chat/routes/modelCapabilities.ts`) for
+every turn and every context measurement, as it decides the images the model
+sees and the tools the backend offers it. A listed model's capabilities are
+remembered until the backend stops, so only requests made before a listing
+had the model wait for the model-operation queue; a failed listing and a
+model it does not list are not remembered. The read lists the downloaded
+models only (`LlmService.listDownloadedLlmModels()`), without the loaded
+state and context lengths the model list adds. A model the inventory does
+not list has neither capability: an image attached for it is refused, and no
+reader is offered.
 
 ## Tool approval
 
@@ -357,7 +370,9 @@ offered.
 approval gateway for every tool call of every turn, client, backend, and MCP
 tools alike, except a call of a backend tool that runs without approval:
 `read_attachment` reads only what the person attached to the conversation,
-so its calls are stored as `running` at once and never pass the gate. When a
+and the [agent state tools](#agent-state-tools) only read what agents are
+doing, so their calls are stored as `running` at once and never pass the
+gate. When a
 round with a call to gate arrives, `createToolCallGate` reads
 `tools.justRun` from the desktop's settings file with `readJustRunToolNames`
 (`src/infrastructure/settings/justRunToolsFile.ts`) and returns a
@@ -402,9 +417,11 @@ now (`page-reader-not-ready`, `api-key-missing`, `api-key-invalid`, or
 `settings-unreadable`). `createBuiltInTools()` builds the list once at
 startup: `read_page`, found by `ReadPageToolProvider`, then `web_search`,
 found by `WebSearchToolProvider`. The attachment reader, `read_attachment`,
-is in neither the registry nor the tool list: the chat route builds it for
-each turn whose conversation holds a text attachment, and its calls run
-without asking; see [`read_attachment`](#read_attachment). `ReadPageToolProvider` sends vmo one
+and the agent state tools are in neither the registry nor the tool list: the
+chat route builds the reader for each turn whose conversation holds a text
+attachment, the agent adds its state tools to each turn, and their calls run
+without asking; see [`read_attachment`](#read_attachment) and
+[agent state tools](#agent-state-tools). `ReadPageToolProvider` sends vmo one
 `GET /health` per lookup (`web/vmoHealth.ts`), on a connection of its own, and
 gives the tool only for a `200` within one second. Any other status, a refused
 or broken connection, an answer that is not HTTP, or no answer in time is
@@ -628,6 +645,80 @@ fails the call with a result the model reads; a file that cannot be read for
 another reason rejects the call with the reader's failure, as a defect, and
 Stop ends a read in progress.
 
+### Agent state tools
+
+The agent state tools let an agent say what it and the other agents are
+doing in its own voice. `buildAgentStateTools`
+(`src/modules/agent/agentStateTools.ts`) builds them for each turn of a model
+trained for tool use, also while tool calls are switched off, after every
+other tool of the turn. Their definitions have group `agents`, access
+`reads`, and runner `backend`; they have no Tools pane row and no saved
+choice, and their calls run without approval. Which ones an agent gets
+follows its role (see [roles](#roles)):
+
+| Tool               | Offered to          | Arguments                    | Result                                                                                                  |
+| ------------------ | ------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `read_my_state`    | every agent         | none                         | Who the agent is, its role, and each request it is working on, the reply that calls the tool included.  |
+| `find_agents`      | the built-in agents | `query`, 1 to 100 characters | Up to 20 agents whose code, name, or bio contains the query, deleted ones included, and how many match. |
+| `read_agent_state` | the built-in agents | `code`, an agent code        | Another agent's name, role, when it was deleted if it was, and the requests it is working on.           |
+
+A state names each request's conversation by its title, read when the tool
+runs (`This reply, in this conversation` for the calling reply, otherwise
+`In "<title>"`, `In an untitled conversation`, or
+`In a conversation that was deleted`), the model, when it
+started and how long ago, and its step: getting ready to answer, reading
+tool results, thinking, writing the reply, or using tools, with each call of
+the round and its status, `running in the app` for a client tool. A state
+also gives the time it was read. A query is trimmed first; a query that is
+then empty or longer than 100 characters, and a code that is not an agent
+code, fail the call with a result that says the rule. A code no agent has
+fails with a hint to use `find_agents`. A member that calls a leader's tool
+gets the failed result of a tool the turn does not offer, and the runtime
+service refuses such a search or read before it reads anything. Names, bios,
+and titles are put on one line, as they may hold line breaks. Results are
+stored with the reply like every tool result.
+
+## Live agents
+
+`AgentRuntimeService` (`src/modules/agent/agentRuntimeService.ts`) keeps one
+live `Agent` per agent that a turn or a context measurement has loaded
+(`loadChatAgent`), created on that first load and kept until the backend
+stops, so every turn of an agent, overlapping or not, runs on one instance
+that knows all of them. Each load gives the live agent the system prompt the
+built-in or
+stored agent has then; a reply already running keeps the prompt it started
+with. A deleted agent answers no new turn, but its live instance stays, so
+the replies it was writing when it was deleted run to their end and stay
+listed in its state. Nothing of it is stored: a restart starts with no live
+agent and no request.
+
+While a reply runs, its agent follows the request in `AgentActivity`
+(`src/modules/agent/agentActivity.ts`): the conversation, the model, the
+start time, and the step of its current round, from the parts the reply
+stores. A request is added when `createReply` starts and removed when it
+ends, whether the reply completed, failed, or was stopped. A newer turn in the
+conversation or a deletion ends a reply only once its next write is refused,
+so a reply waiting for an approval or a tool result stays listed until the
+call is answered, the reply is stopped, or the backend stops
+([#137](https://github.com/w3lt/lys/issues/137)).
+
+### Roles
+
+Roles are fixed in code (`src/modules/agent/agentRoles.ts`), from the
+agent's kind:
+
+| Role     | Agents              | Permissions                                     |
+| -------- | ------------------- | ----------------------------------------------- |
+| `leader` | the built-in agents | read its own state, find agents, read any state |
+| `member` | the stored agents   | read its own state                              |
+
+The tools an agent is offered and every check follow these permissions.
+The runtime service answers each state read and search
+(`AgentStateReader`): it checks the asking agent's permission before it
+reads anything, reads agents through the agent service, deleted ones
+included, and reads the requests of the agent's live instance; an agent with
+no live instance is working on no request, and a read never creates one.
+
 ## MCP servers
 
 The backend is the Model Context Protocol client of Lys: it connects to the
@@ -782,7 +873,8 @@ only when the server stopped being connected after the list was read.
 
 The turn keeps each tool's definition and a call function, and `Agent` adds
 MCP tools to the toolset after the client tools, the built-in tools, and the
-reader. `AgentTool.parseCallArguments` checks only the shape of an MCP call's
+reader, and before the [agent state tools](#agent-state-tools).
+`AgentTool.parseCallArguments` checks only the shape of an MCP call's
 arguments before the person is asked: argument text of at most 256 KiB, a
 JSON object whose keys follow the argument name rule, every name the input
 schema requires, at most 32 levels of nesting, and no `__proto__` key. The
@@ -835,13 +927,13 @@ The backend stores conversations and agent definitions in SQLite at
 `$LYS_HOME/lys_db.sqlite`, in the
 [Lys home directory](/reference/configuration/#lys-home-directory).
 
-| Table                      | Purpose                                                                                                      |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `conversations`            | Stores conversation metadata: title, agent code, and timestamps.                                             |
-| `conversation_messages`    | Stores ordered user messages and replies with status, finish reason, and timestamps, and each reply's parts. |
-| `conversation_sources`     | Stores each conversation's numbered web sources.                                                             |
-| `conversation_attachments` | Stores each attachment of a user message: number, name, kind, size, and an image's media type and sides.     |
-| `agents`                   | Stores agent definitions: code, name, bio, system prompt, and timestamps.                                    |
+| Table                      | Purpose                                                                                                       |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `conversations`            | Stores conversation metadata: title, agent code, and timestamps.                                              |
+| `conversation_messages`    | Stores ordered user messages and replies with status, finish reason, and timestamps, and each reply's parts.  |
+| `conversation_sources`     | Stores each conversation's numbered web sources.                                                              |
+| `conversation_attachments` | Stores each attachment of a user message: number, name, kind, size, and an image's media type and sides.      |
+| `agents`                   | Stores agent definitions: code, name, bio, system prompt, timestamps, and the time a deleted one was deleted. |
 
 The backend's database owner, `SqliteDatabase` in `src/infrastructure/database/`,
 opens the file once, applies the schema from `migrations.ts` using
@@ -860,15 +952,20 @@ agents, Caliginia (`caliginia`) and Lysiptera (`lysiptera`), which
 `buildBuiltInAgents` (`src/modules/agent/builtInAgents.ts`) builds from the
 two configured system prompts. A built-in agent is never stored: the service
 lists it with every page, reads it with `kind: "built-in"`, refuses to change
-or delete it, and refuses to store another agent under its code. The
-composition root creates the service after the conversation services, over
-the agent records and the chat service.
+or delete it, and refuses to store another agent under its code. Deleting a
+stored agent marks its row deleted at the time of the deletion and keeps the
+rest: listings, counts, `GET`, and changes skip it, but its code stays taken,
+a lookup or search still finds it, and a code derived from a name skips it.
+The composition root creates the service after the conversation services,
+over the agent records, and the agent runtime service over it, the chat
+service, the LLM service, and the history reader, which gives the titles of
+the requests' conversations.
 
 `Agent` (`src/modules/agent/agent.ts`) answers turns with its own system prompt
-through a `ReplyModel`. `AgentService.findChatAgent` returns the agent that
-answers chats under a code: a built-in agent, or a new `Agent` built from the
-stored agent's current record, so an edited prompt is sent from the
-conversation's next turn. The chat module's `OpenAiReplyModel` implements `ReplyModel`
+through a `ReplyModel`. `AgentRuntimeService.loadChatAgent` returns the
+[live agent](#live-agents) that answers chats under a code, built-in or
+stored and not deleted, holding the agent's current system prompt, so an
+edited prompt is sent from the conversation's next turn. The chat module's `OpenAiReplyModel` implements `ReplyModel`
 over `ChatService`'s streaming completion, using only choice 0 and refusing
 finish reasons other than `stop` and `length`. The chat route passes the agent
 the turn's history, its reply writes, its event sender, its Stop signal, and
@@ -876,16 +973,19 @@ three reporters that log with the request's logger: a cancelled reply and a
 round that was not sent, because it did not fit or its model was not loaded,
 at debug level, and any other failed reply at error level. A new
 conversation must name a built-in or stored agent, or the chat route answers
-`404` before storing anything. When a stored conversation's agent no longer
-exists, the chat route answers `409` and stores nothing, so the conversation
-stays readable and accepts messages again once an agent has that code.
+`404` before storing anything. When a stored conversation's agent is deleted
+or no longer exists, the chat route answers `409` and stores nothing, so the
+conversation stays readable. A deleted agent's code is never free again;
+only an agent removed before version 11 left its code free, and its
+conversations accept messages again once an agent has that code.
 Version 4 preserves activity
 timestamps on rename, version 5 preserves them on status-only message updates,
 version 6 adds the `agents` table, version 7 replaces the stored system prompt
 with the conversation's agent code, version 8 moves every conversation stored
 under the former built-in code `lys` to `caliginia`, version 9 stores each
 reply's parts as rows of their own and adds the conversation sources,
-version 10 adds the attachment rows, and
+version 10 adds the attachment rows, version 11 adds `agents.deleted_at`, so
+deleting an agent only marks it, and
 turn persistence's startup recovers streaming assistants and their open tool
 calls without reordering history.
 Two triggers keep `conversations.updated_at` in sync with message and part
@@ -948,39 +1048,39 @@ See the [health response contract](/reference/api/#model-health-responses).
 
 ## Failure behavior
 
-| Condition                                                                                                                       | Current behavior                                                                                                                                                                                                  |
-| ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat SSE connection closes                                                                                                      | Only that follower ends; the reply and its title keep generating and are stored.                                                                                                                                  |
-| Reply-stop request                                                                                                              | The reply's upstream request is aborted, the reply is stored interrupted, and followers receive `interrupted`; the title task continues.                                                                          |
-| Model operation or health-check client disconnects                                                                              | Accepted work continues until success or failure; user cancellation is unavailable.                                                                                                                               |
-| LLM runtime queue already has nine accepted operations (including connection attempts)                                          | New inventory/health/load/unload requests receive `503` with `urn:lys:problem:llm:service-busy` before acceptance.                                                                                                |
-| LM Studio is not connected                                                                                                      | List, load, unload, and health requests receive `503` with `urn:lys:problem:llm:runtime-unavailable` before acceptance.                                                                                           |
-| A runtime call fails and LM Studio stopped answering                                                                            | The runtime is released, the status becomes `unreachable`, and a rejected request receives the runtime-unavailable `503`.                                                                                         |
-| A request resolves after a failed runtime call; the probe or release then fails                                                 | The response keeps its result; the backend logs the probe or release failure at `error`.                                                                                                                          |
-| A reply round does not fit the loaded model, or its model is not loaded                                                         | The round is not sent; the reply is stored failed and followers receive an `error` that says why.                                                                                                                 |
-| A reply round cannot be measured (LM Studio not connected, queue full)                                                          | The round is not sent; the reply is stored failed and followers receive the general `error`.                                                                                                                      |
-| Model stream ends without a finish reason                                                                                       | The route treats it as an error and may emit `error`.                                                                                                                                                             |
-| Assistant row was deleted or already finalized                                                                                  | Late writes return false without recreating data.                                                                                                                                                                 |
-| Assistant terminal state cannot be persisted                                                                                    | The task aggregates the original and storage failures, plus a failed fallback's, and rejects; the generation logs it. No final event.                                                                             |
-| Unknown finish reason                                                                                                           | The backend throws instead of silently coercing it.                                                                                                                                                               |
-| Title generation produces no usable title                                                                                       | The task logs a warning and sends no `error` or `title` event; a later turn retries if the conversation is still untitled.                                                                                        |
-| A generated title cannot be saved                                                                                               | The task logs an error and sends no `title` event; a later turn retries if the conversation is still untitled.                                                                                                    |
-| A stored title cannot be sent after turn start                                                                                  | That follower ends silently while generation continues; a later turn attempts reconciliation again.                                                                                                               |
-| A follower falls 4,096 events behind                                                                                            | That follower closes without a final event while generation continues; following the reply again returns its stored state.                                                                                        |
-| A chat request's attachment is neither UTF-8 text nor a PNG, JPEG, or WebP image                                                | The route answers `400` with `urn:lys:problem:chat:attachment-unsupported`; nothing is stored or written.                                                                                                         |
-| An image is attached for a model without vision, or for one the inventory does not list                                         | The route answers `409` with `urn:lys:problem:chat:image-needs-vision`; nothing is stored or written.                                                                                                             |
-| LM Studio is not connected, or the queue is full, while a request that involves an attachment reads the model's capabilities    | The route answers the runtime-unavailable or service-busy `503` problem; nothing is stored or written.                                                                                                            |
-| An attachment file cannot be written                                                                                            | The message's folder and the files written into it are deleted, and the route rethrows; nothing is stored.                                                                                                        |
-| A turn cannot be stored after its attachment files were written                                                                 | The message's folder is deleted again and the route answers `500`; a folder that cannot be deleted fails the request with both failures.                                                                          |
-| A stored attachment's file is missing from disk                                                                                 | An image becomes a placeholder sentence in its message; a read of a text file fails with a result the model reads. The turn goes on.                                                                              |
-| A deleted conversation's attachment folder cannot be removed                                                                    | The delete still answers `204`; the backend logs the failure with its cause at `error`, and the folder stays.                                                                                                     |
-| A request offers a backend tool that is neither a built-in tool nor a tool an applied MCP server lists                          | The route answers `400`, naming every such name; nothing is stored.                                                                                                                                               |
-| A request offers a tool whose MCP server is applied but not connected                                                           | The route answers `409` with `urn:lys:problem:chat:backend-tool-unavailable` and `mcp-server-not-connected`; nothing is stored.                                                                                   |
-| An MCP server cannot be started or reached, refuses Lys, or does not finish opening within two minutes                          | The server is `failed` with its reason and its tools are not listed; the backend logs a warning, or an error with what was thrown for a failure it cannot tell apart. Reconnect or a changed setting tries again. |
-| A connected MCP server's process exits, its connection ends, or it answers a call with HTTP 404                                 | The server becomes `failed` with `closed`, its tools are no longer listed, and the backend logs a warning; a call that then runs fails with a result the model reads.                                             |
-| An MCP tool call fails before the server returns a result (five minutes passed, the connection ended, an HTTP error, a refusal) | The call is stored `failed` with the reason the model reads, and the backend logs it; the reply goes on.                                                                                                          |
-| The `mcp` settings group fails its rules, or the settings file cannot be read, when it is applied                               | The servers applied before are kept, the server list reports `invalid` or `unreadable`, and the backend logs a warning without any value.                                                                         |
-| Starting a turn fails for another reason                                                                                        | The route rethrows; Fastify logs it and responds `500` if no event was sent. Written rows stay.                                                                                                                   |
+| Condition                                                                                                                         | Current behavior                                                                                                                                                                                                  |
+| --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat SSE connection closes                                                                                                        | Only that follower ends; the reply and its title keep generating and are stored.                                                                                                                                  |
+| Reply-stop request                                                                                                                | The reply's upstream request is aborted, the reply is stored interrupted, and followers receive `interrupted`; the title task continues.                                                                          |
+| Model operation or health-check client disconnects                                                                                | Accepted work continues until success or failure; user cancellation is unavailable.                                                                                                                               |
+| LLM runtime queue already has nine accepted operations (including connection attempts)                                            | New inventory/health/load/unload requests receive `503` with `urn:lys:problem:llm:service-busy` before acceptance.                                                                                                |
+| LM Studio is not connected                                                                                                        | List, load, unload, and health requests receive `503` with `urn:lys:problem:llm:runtime-unavailable` before acceptance.                                                                                           |
+| A runtime call fails and LM Studio stopped answering                                                                              | The runtime is released, the status becomes `unreachable`, and a rejected request receives the runtime-unavailable `503`.                                                                                         |
+| A request resolves after a failed runtime call; the probe or release then fails                                                   | The response keeps its result; the backend logs the probe or release failure at `error`.                                                                                                                          |
+| A reply round does not fit the loaded model, or its model is not loaded                                                           | The round is not sent; the reply is stored failed and followers receive an `error` that says why.                                                                                                                 |
+| A reply round cannot be measured (LM Studio not connected, queue full)                                                            | The round is not sent; the reply is stored failed and followers receive the general `error`.                                                                                                                      |
+| Model stream ends without a finish reason                                                                                         | The route treats it as an error and may emit `error`.                                                                                                                                                             |
+| Assistant row was deleted or already finalized                                                                                    | Late writes return false without recreating data.                                                                                                                                                                 |
+| Assistant terminal state cannot be persisted                                                                                      | The task aggregates the original and storage failures, plus a failed fallback's, and rejects; the generation logs it. No final event.                                                                             |
+| Unknown finish reason                                                                                                             | The backend throws instead of silently coercing it.                                                                                                                                                               |
+| Title generation produces no usable title                                                                                         | The task logs a warning and sends no `error` or `title` event; a later turn retries if the conversation is still untitled.                                                                                        |
+| A generated title cannot be saved                                                                                                 | The task logs an error and sends no `title` event; a later turn retries if the conversation is still untitled.                                                                                                    |
+| A stored title cannot be sent after turn start                                                                                    | That follower ends silently while generation continues; a later turn attempts reconciliation again.                                                                                                               |
+| A follower falls 4,096 events behind                                                                                              | That follower closes without a final event while generation continues; following the reply again returns its stored state.                                                                                        |
+| A chat request's attachment is neither UTF-8 text nor a PNG, JPEG, or WebP image                                                  | The route answers `400` with `urn:lys:problem:chat:attachment-unsupported`; nothing is stored or written.                                                                                                         |
+| An image is attached for a model without vision, or for one the inventory does not list                                           | The route answers `409` with `urn:lys:problem:chat:image-needs-vision`; nothing is stored or written.                                                                                                             |
+| LM Studio is not connected, or the queue is full, while a chat or context request reads a model's capabilities for the first time | The route answers the runtime-unavailable or service-busy `503` problem; nothing is stored or written.                                                                                                            |
+| An attachment file cannot be written                                                                                              | The message's folder and the files written into it are deleted, and the route rethrows; nothing is stored.                                                                                                        |
+| A turn cannot be stored after its attachment files were written                                                                   | The message's folder is deleted again and the route answers `500`; a folder that cannot be deleted fails the request with both failures.                                                                          |
+| A stored attachment's file is missing from disk                                                                                   | An image becomes a placeholder sentence in its message; a read of a text file fails with a result the model reads. The turn goes on.                                                                              |
+| A deleted conversation's attachment folder cannot be removed                                                                      | The delete still answers `204`; the backend logs the failure with its cause at `error`, and the folder stays.                                                                                                     |
+| A request offers a backend tool that is neither a built-in tool nor a tool an applied MCP server lists                            | The route answers `400`, naming every such name; nothing is stored.                                                                                                                                               |
+| A request offers a tool whose MCP server is applied but not connected                                                             | The route answers `409` with `urn:lys:problem:chat:backend-tool-unavailable` and `mcp-server-not-connected`; nothing is stored.                                                                                   |
+| An MCP server cannot be started or reached, refuses Lys, or does not finish opening within two minutes                            | The server is `failed` with its reason and its tools are not listed; the backend logs a warning, or an error with what was thrown for a failure it cannot tell apart. Reconnect or a changed setting tries again. |
+| A connected MCP server's process exits, its connection ends, or it answers a call with HTTP 404                                   | The server becomes `failed` with `closed`, its tools are no longer listed, and the backend logs a warning; a call that then runs fails with a result the model reads.                                             |
+| An MCP tool call fails before the server returns a result (five minutes passed, the connection ended, an HTTP error, a refusal)   | The call is stored `failed` with the reason the model reads, and the backend logs it; the reply goes on.                                                                                                          |
+| The `mcp` settings group fails its rules, or the settings file cannot be read, when it is applied                                 | The servers applied before are kept, the server list reports `invalid` or `unreadable`, and the backend logs a warning without any value.                                                                         |
+| Starting a turn fails for another reason                                                                                          | The route rethrows; Fastify logs it and responds `500` if no event was sent. Written rows stay.                                                                                                                   |
 
 See the [provider cancellation policy](/architecture/providers/#cancellation-policy)
 for the separate inference and model-management lifetimes.

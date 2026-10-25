@@ -62,7 +62,7 @@ describe("findListedModelCapabilities", () => {
 })
 
 describe("createModelCapabilitiesLookup", () => {
-  it("lists the downloaded models on each call and answers with the matching model's capabilities", async () => {
+  it("answers with the matching model's capabilities, listing the downloaded models once per model", async () => {
     const listDownloadedLlmModels = vi.fn(async () => [
       TEXT_MODEL,
       VISION_MODEL
@@ -77,6 +77,59 @@ describe("createModelCapabilitiesLookup", () => {
     expect(vision).toEqual({ vision: true, trainedForToolUse: true })
     expect(Object.isFrozen(vision)).toBe(true)
     expect(text).toEqual({ vision: false, trainedForToolUse: true })
+    expect(listDownloadedLlmModels).toHaveBeenCalledTimes(2)
+  })
+
+  it("remembers a listed model's capabilities, so later lookups of it list nothing", async () => {
+    const listDownloadedLlmModels = vi.fn(async () => [TEXT_MODEL])
+    const findModelCapabilities = createModelCapabilitiesLookup(
+      listDownloadedLlmModels
+    )
+
+    const first = await findModelCapabilities("qwen/qwen3-8b")
+    listDownloadedLlmModels.mockResolvedValue([])
+    const second = await findModelCapabilities("qwen/qwen3-8b")
+
+    expect(second).toBe(first)
+    expect(listDownloadedLlmModels).toHaveBeenCalledOnce()
+  })
+
+  it("lists again for a model the inventory did not list, and remembers it once listed", async () => {
+    const listDownloadedLlmModels = vi.fn(
+      async (): Promise<readonly DownloadedLlmModel[]> => []
+    )
+    const findModelCapabilities = createModelCapabilitiesLookup(
+      listDownloadedLlmModels
+    )
+
+    await expect(
+      findModelCapabilities("qwen/qwen3-8b")
+    ).resolves.toBeUndefined()
+    listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL])
+    await expect(findModelCapabilities("qwen/qwen3-8b")).resolves.toEqual({
+      vision: false,
+      trainedForToolUse: true
+    })
+    await findModelCapabilities("qwen/qwen3-8b")
+
+    expect(listDownloadedLlmModels).toHaveBeenCalledTimes(2)
+  })
+
+  it("lists again after a failed listing", async () => {
+    const failure = new Error("queue full")
+    const listDownloadedLlmModels = vi
+      .fn(async (): Promise<readonly DownloadedLlmModel[]> => [TEXT_MODEL])
+      .mockRejectedValueOnce(failure)
+    const findModelCapabilities = createModelCapabilitiesLookup(
+      listDownloadedLlmModels
+    )
+
+    await expect(findModelCapabilities("qwen/qwen3-8b")).rejects.toBe(failure)
+    await expect(findModelCapabilities("qwen/qwen3-8b")).resolves.toEqual({
+      vision: false,
+      trainedForToolUse: true
+    })
+
     expect(listDownloadedLlmModels).toHaveBeenCalledTimes(2)
   })
 

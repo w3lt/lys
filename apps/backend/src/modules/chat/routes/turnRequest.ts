@@ -28,10 +28,10 @@ import { findBuiltInTools } from "../../tool/builtIn/builtInTools"
 /** Lookups that find the agent answering a requested turn. */
 export type TurnAgentLookups = Readonly<{
   /**
-   * Agent lookup of the agent service; undefined means no built-in or stored
-   * agent has the code.
+   * Live agent loading of the agent runtime service; undefined means no
+   * built-in or stored agent has the code, or its agent is deleted.
    */
-  findChatAgent: (code: string) => Agent | undefined
+  loadChatAgent: (code: string) => Agent | undefined
   /**
    * Agent code lookup of a stored conversation; undefined means the
    * conversation is not stored.
@@ -202,22 +202,23 @@ export function findUnofferedTools(
 }
 
 /**
- * Finds the agent that answers the requested turn.
+ * Loads the live agent that answers the requested turn.
  *
  * @param conversation - Conversation the validated request starts or
  * continues.
- * @param dependencies - Borrowed agent and conversation lookups.
- * @returns The agent, or why no agent answers: a new conversation names a
+ * @param dependencies - Borrowed live agent loading and conversation lookup.
+ * @returns The live agent, made live when it was not, or why no agent
+ * answers: a new conversation names a
  * code no agent has, a continued conversation is not stored, or its agent no
  * longer exists. Nothing is stored or sent.
  * @throws Any persistence failure of a lookup.
  */
-export function findRequestedAgent(
+export function loadRequestedAgent(
   conversation: ChatApiRequestBody["conversation"],
   dependencies: TurnAgentLookups
 ): RequestedAgentOutcome {
   if (conversation.kind === "new") {
-    const agent = dependencies.findChatAgent(conversation.agentCode)
+    const agent = dependencies.loadChatAgent(conversation.agentCode)
     return agent === undefined
       ? { status: "agent-not-found", agentCode: conversation.agentCode }
       : { status: "found", agent }
@@ -226,7 +227,7 @@ export function findRequestedAgent(
   const agentCode = dependencies.findConversationAgentCode(conversation.id)
   if (agentCode === undefined)
     return { status: "conversation-not-found", conversationId: conversation.id }
-  const agent = dependencies.findChatAgent(agentCode)
+  const agent = dependencies.loadChatAgent(agentCode)
   return agent === undefined
     ? { status: "conversation-agent-missing", agentCode }
     : { status: "found", agent }

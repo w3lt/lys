@@ -67,6 +67,21 @@ type OfferedMcpTool = Extract<OfferedTool, { runner: "mcp" }>
 /** Tools offered for one turn, by the name the model calls them by, in offer order. */
 export type AgentToolset = ReadonlyMap<string, OfferedTool>
 
+/** Tools one turn offers, by kind, each name once across all of them. */
+export type AgentToolsetInput = Readonly<{
+  /** Validated definitions of the client tools, in offer order. */
+  clientTools: readonly ToolDefinition[]
+  /** Built-in tools found for the turn, in offer order. */
+  builtInTools: readonly TurnBuiltInTool[]
+  /** MCP tools found for the turn, in offer order. */
+  mcpTools: readonly TurnMcpTool[]
+  /**
+   * The agent's state tools for the turn, in offer order; empty when the
+   * turn offers none.
+   */
+  agentStateTools: readonly TurnBuiltInTool[]
+}>
+
 /** A round that ended with tool calls: the text it wrote and the calls it made. */
 export type ToolCallRound = Readonly<{
   /** Zero-based index of the round in its reply. */
@@ -255,37 +270,45 @@ const ALLOWED_TOOL_CALL_APPROVAL: ToolCallApproval = Object.freeze({
 /**
  * Builds the tools of one turn from the offered tools.
  *
- * @param clientTools - Validated definitions of the client tools, each name
- * once.
- * @param builtInTools - Backend tools found for the turn, each name once.
- * @param mcpTools - MCP tools found for the turn, each name once.
- * @returns The tools by name: client tools in offer order, then backend
- * tools, then MCP tools, each in offer order.
+ * @param input - The turn's client, built-in, MCP, and agent state tools.
+ * @returns The tools by name: client tools, then built-in tools, then MCP
+ * tools, then the agent's state tools, each in offer order.
  * @throws If two tools share a name; the chat request contract and the
  * `mcp__` names of MCP tools prevent that.
  */
-export function buildAgentToolset(
-  clientTools: readonly ToolDefinition[],
-  builtInTools: readonly TurnBuiltInTool[],
-  mcpTools: readonly TurnMcpTool[]
-): AgentToolset {
+export function buildAgentToolset(input: AgentToolsetInput): AgentToolset {
   const tools = new Map<string, OfferedTool>(
-    clientTools.map(buildClientToolEntry)
+    input.clientTools.map(buildClientToolEntry)
   )
-  for (const entry of builtInTools)
+  addBuiltInTools(tools, input.builtInTools)
+  for (const mcpTool of input.mcpTools)
+    addOfferedTool(tools, new AgentTool(mcpTool.definition), (agentTool) => ({
+      runner: "mcp",
+      agentTool,
+      mcpTool
+    }))
+  addBuiltInTools(tools, input.agentStateTools)
+  return tools
+}
+
+/**
+ * Adds built-in tools to a turn's toolset, each under its name.
+ *
+ * @param tools - Toolset being built.
+ * @param entries - Built-in tools found for the turn, in offer order.
+ * @throws If the toolset already has a tool of one of their names.
+ */
+function addBuiltInTools(
+  tools: Map<string, OfferedTool>,
+  entries: readonly TurnBuiltInTool[]
+): void {
+  for (const entry of entries)
     addOfferedTool(tools, new AgentTool(entry.definition), (agentTool) => ({
       runner: "backend",
       agentTool,
       builtInTool: entry.tool,
       runsWithoutApproval: entry.runsWithoutApproval
     }))
-  for (const mcpTool of mcpTools)
-    addOfferedTool(tools, new AgentTool(mcpTool.definition), (agentTool) => ({
-      runner: "mcp",
-      agentTool,
-      mcpTool
-    }))
-  return tools
 }
 
 /**

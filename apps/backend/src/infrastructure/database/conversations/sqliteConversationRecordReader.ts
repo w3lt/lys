@@ -7,8 +7,8 @@ import type {
   DatabaseFunctionRegistry,
   DatabaseReader
 } from "../databaseTransactions"
+import { registerSearchFunctions } from "../searchFunctions"
 import type { Conversation } from "@lys/share"
-import { calculateConversationSearchMatch } from "./conversationSearch"
 import { findConversation } from "./findConversation"
 import { listConversations } from "./listConversations"
 
@@ -43,16 +43,13 @@ export default class SqliteConversationRecordReader implements ConversationRecor
    * database owner; the records retain only the read snapshots.
    * @returns The ready records; they own nothing to release.
    * @throws If the database is closed or SQLite rejects the registration.
-   * @remarks Registers `contains_search`, the case-insensitive match used by
-   * history search, replacing a function already registered under that name.
+   * @remarks Registers the shared search functions, among them
+   * `contains_search`, the case-insensitive match used by history search.
    */
   public static create(
     database: DatabaseReader & DatabaseFunctionRegistry
   ): SqliteConversationRecordReader {
-    database.registerDatabaseFunction(
-      "contains_search",
-      calculateConversationSearchMatch
-    )
+    registerSearchFunctions(database)
     return new SqliteConversationRecordReader(database)
   }
 

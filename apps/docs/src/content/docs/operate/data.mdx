@@ -71,6 +71,12 @@ text of a file `read_text_file` read, the location `get_location`
 returned, or an MCP server's answer as the model read it. All of it is kept until the
 conversation is deleted.
 
+An agent definition holds the agent's code, name, short description, and
+system prompt. Deleting an agent keeps its definition, the system prompt
+included, marked with the time it was deleted, so its code is never used
+again and its conversations stay readable; Lys offers no way to erase it.
+Only an agent deleted before version 11 of the database is gone.
+
 The database runs in write-ahead-log mode, so `lys_db.sqlite-wal` and
 `lys_db.sqlite-shm` sit beside it. They usually remain after the app quits,
 because the desktop stops the backend without a clean close, and

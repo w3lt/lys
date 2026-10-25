@@ -10,6 +10,7 @@ import {
   MAXIMUM_OFFERED_BACKEND_TOOL_COUNT
 } from "@lys/protocol"
 import {
+  CALIGINIA_AGENT_CODE,
   MAXIMUM_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
   type McpServerSettings
@@ -43,6 +44,7 @@ import { buildFakeStdioServerSettings } from "../../../support/mcpTestServers"
 import { createChatCompletionChunk } from "../../../support/openAiEndpointFake"
 import { LOOK_UP_WORD_FORMAT } from "../../../support/scriptedBuiltInTool"
 import {
+  LEADER_STATE_TOOL_NAMES,
   READ_TEXT_FILE_FORMAT,
   READ_TEXT_FILE_TOOL
 } from "../../../support/toolFixtures"
@@ -59,6 +61,17 @@ const NEW_CONVERSATION_REQUEST = Object.freeze({
   model: "qwen/qwen3-8b",
   generationOptions: { temperature: 0.4 }
 })
+
+/** Refusal of a request that offers a tool the backend adds itself. */
+const RESERVED_OFFERED_TOOL_MESSAGE =
+  "A request does not offer read_attachment, read_my_state, find_agents, or read_agent_state; the backend adds them to a turn itself."
+
+/**
+ * Refusal of a request that names a tool the backend adds itself as switched
+ * off or unable to run.
+ */
+const RESERVED_UNOFFERED_TOOL_MESSAGE =
+  "A request does not name read_attachment, read_my_state, find_agents, or read_agent_state as switched off or unable to run; they have no switch and the backend adds them to a turn itself."
 
 /**
  * Builds the request form of a text attachment.
@@ -123,7 +136,8 @@ function registerStoringChatRoute(testApp: ChatRouteTestApp): void {
   testApp.generateTitle.mockResolvedValue("Trip plan")
   updateFastifyWithChatRoute(testApp.app, {
     ...CHAT_ROUTE_OPTIONS,
-    generations: testApp.generations
+    generations: testApp.generations,
+    findModelCapabilities: testApp.findModelCapabilities
   })
 }
 
@@ -161,12 +175,29 @@ async function* createChunkStream(
   yield* chunks
 }
 
+/**
+ * Lists the names of the tools a chat completion call offered.
+ *
+ * @param testApp - Test application.
+ * @param callIndex - Index of the chat completion call.
+ * @returns The offered tool names in offer order.
+ */
+function listOfferedToolNames(
+  testApp: ChatRouteTestApp,
+  callIndex: number
+): readonly string[] {
+  return (
+    testApp.completeChatStream.mock.calls[callIndex]?.[0].tools ?? []
+  ).map((tool) => tool.function.name)
+}
+
 describe("updateFastifyWithChatRoute", () => {
   it("responds with the missing-conversation problem before storing a turn or contacting the model", async () => {
     const testApp = await createChatRouteTestApp()
     updateFastifyWithChatRoute(testApp.app, {
       ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations
+      generations: testApp.generations,
+      findModelCapabilities: testApp.findModelCapabilities
     })
     const conversationId = createFixtureUuidV7(404)
 
@@ -197,7 +228,8 @@ describe("updateFastifyWithChatRoute", () => {
     })
     updateFastifyWithChatRoute(testApp.app, {
       ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations
+      generations: testApp.generations,
+      findModelCapabilities: testApp.findModelCapabilities
     })
 
     const response = await sendChatRequest(
@@ -423,7 +455,8 @@ describe("updateFastifyWithChatRoute", () => {
     const testApp = await createChatRouteTestApp()
     updateFastifyWithChatRoute(testApp.app, {
       ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations
+      generations: testApp.generations,
+      findModelCapabilities: testApp.findModelCapabilities
     })
 
     const response = await sendChatRequest(testApp.app, payload)
@@ -440,7 +473,8 @@ describe("updateFastifyWithChatRoute", () => {
       const testApp = await createChatRouteTestApp()
       updateFastifyWithChatRoute(testApp.app, {
         ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations
+        generations: testApp.generations,
+        findModelCapabilities: testApp.findModelCapabilities
       })
 
       const response = await sendChatRequest(testApp.app, {
@@ -615,15 +649,16 @@ describe("updateFastifyWithChatRoute", () => {
     expect(testApp.generateTitle).not.toHaveBeenCalled()
   })
 
-  it("answers a conversation again once an agent is stored under its deleted agent's code", async () => {
+  it("keeps a deleted agent's conversation refused, because no new agent can take its code", async () => {
     const testApp = await createChatRouteTestApp()
     registerStoringChatRoute(testApp)
     const conversationId = await startWebResearcherConversation(testApp)
     testApp.app.agentService.deleteAgent("web-researcher")
-    testApp.app.agentService.createAgent({
+    const successor = testApp.app.agentService.createAgent({
       ...WEB_RESEARCHER_DEFINITION,
       systemPrompt: "You are the second researcher."
     })
+    testApp.completeChatStream.mockClear()
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
@@ -631,21 +666,22 @@ describe("updateFastifyWithChatRoute", () => {
       message: "And the budget?"
     })
 
-    expect(response.statusCode).toBe(200)
-    expect(testApp.completeChatStream).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        messages: expect.arrayContaining([
-          { role: "system", content: "You are the second researcher." }
-        ])
-      })
-    )
+    expect(successor).toBeUndefined()
+    expect(response.statusCode).toBe(409)
+    expect(
+      conversationAgentMissingProblemSchema.parse(response.json())
+    ).toMatchObject({
+      instance: chatApi.path
+    })
+    expect(testApp.completeChatStream).not.toHaveBeenCalled()
   })
 
   it("rejects a backend tool the backend does not run before storing a turn, naming it", async () => {
     const testApp = await createChatRouteTestApp()
     updateFastifyWithChatRoute(testApp.app, {
       ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations
+      generations: testApp.generations,
+      findModelCapabilities: testApp.findModelCapabilities
     })
 
     const response = await sendChatRequest(testApp.app, {
@@ -669,7 +705,8 @@ describe("updateFastifyWithChatRoute", () => {
     const testApp = await createChatRouteTestApp()
     updateFastifyWithChatRoute(testApp.app, {
       ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations
+      generations: testApp.generations,
+      findModelCapabilities: testApp.findModelCapabilities
     })
     const backendToolNames = Array.from(
       { length: MAXIMUM_OFFERED_BACKEND_TOOL_COUNT + 1 },
@@ -692,7 +729,8 @@ describe("updateFastifyWithChatRoute", () => {
     const testApp = await createChatRouteTestApp()
     updateFastifyWithChatRoute(testApp.app, {
       ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations
+      generations: testApp.generations,
+      findModelCapabilities: testApp.findModelCapabilities
     })
 
     const response = await sendChatRequest(testApp.app, {
@@ -727,7 +765,8 @@ describe("updateFastifyWithChatRoute", () => {
     const testApp = await createChatRouteTestApp()
     updateFastifyWithChatRoute(testApp.app, {
       ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations
+      generations: testApp.generations,
+      findModelCapabilities: testApp.findModelCapabilities
     })
 
     const response = await sendChatRequest(testApp.app, {
@@ -752,7 +791,8 @@ describe("updateFastifyWithChatRoute", () => {
     testApp.generateTitle.mockResolvedValue("Trip plan")
     updateFastifyWithChatRoute(testApp.app, {
       ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations
+      generations: testApp.generations,
+      findModelCapabilities: testApp.findModelCapabilities
     })
 
     const response = await sendChatRequest(testApp.app, {
@@ -783,7 +823,8 @@ describe("updateFastifyWithChatRoute", () => {
     testApp.generateTitle.mockResolvedValue("Trip plan")
     updateFastifyWithChatRoute(testApp.app, {
       ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations
+      generations: testApp.generations,
+      findModelCapabilities: testApp.findModelCapabilities
     })
 
     const response = await sendChatRequest(testApp.app, {
@@ -814,7 +855,8 @@ describe("updateFastifyWithChatRoute", () => {
     testApp.generateTitle.mockResolvedValue("Trip plan")
     updateFastifyWithChatRoute(testApp.app, {
       ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations
+      generations: testApp.generations,
+      findModelCapabilities: testApp.findModelCapabilities
     })
 
     const response = await sendChatRequest(testApp.app, {
@@ -851,20 +893,6 @@ describe("updateFastifyWithChatRoute", () => {
         ]
       },
       "A request names each tool once across its offered, switched-off, and unable-to-run tools."
-    ],
-    [
-      "the attachment reader switched off",
-      { switchedOffToolNames: ["read_attachment"] },
-      "A request does not name read_attachment as switched off or unable to run; it has no switch and the backend adds it to a turn itself."
-    ],
-    [
-      "the attachment reader named as unable to run",
-      {
-        unavailableTools: [
-          { name: "read_attachment", reason: "page-reader-not-ready" }
-        ]
-      },
-      "A request does not name read_attachment as switched off or unable to run; it has no switch and the backend adds it to a turn itself."
     ],
     [
       "65 switched-off tools",
@@ -906,7 +934,64 @@ describe("updateFastifyWithChatRoute", () => {
       const testApp = await createChatRouteTestApp()
       updateFastifyWithChatRoute(testApp.app, {
         ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations
+        generations: testApp.generations,
+        findModelCapabilities: testApp.findModelCapabilities
+      })
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        ...fields
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(response.json()).toMatchObject({
+        message: expect.stringContaining(message)
+      })
+      expect(testApp.createConversationTurn).not.toHaveBeenCalled()
+      expect(testApp.completeChatStream).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(
+    [
+      "read_attachment",
+      "read_my_state",
+      "find_agents",
+      "read_agent_state"
+    ].flatMap((name) => [
+      [
+        name,
+        "offered as a client tool",
+        { tools: { definitions: [{ ...READ_TEXT_FILE_TOOL, name }] } },
+        RESERVED_OFFERED_TOOL_MESSAGE
+      ],
+      [
+        name,
+        "offered as a backend tool",
+        { tools: { definitions: [], backendToolNames: [name] } },
+        RESERVED_OFFERED_TOOL_MESSAGE
+      ],
+      [
+        name,
+        "named as switched off",
+        { switchedOffToolNames: [name] },
+        RESERVED_UNOFFERED_TOOL_MESSAGE
+      ],
+      [
+        name,
+        "named as unable to run",
+        { unavailableTools: [{ name, reason: "page-reader-not-ready" }] },
+        RESERVED_UNOFFERED_TOOL_MESSAGE
+      ]
+    ])
+  )(
+    "rejects a request with the backend's own tool %s %s before storing a turn",
+    async (_name, _position, fields, message) => {
+      const testApp = await createChatRouteTestApp()
+      updateFastifyWithChatRoute(testApp.app, {
+        ...CHAT_ROUTE_OPTIONS,
+        generations: testApp.generations,
+        findModelCapabilities: testApp.findModelCapabilities
       })
 
       const response = await sendChatRequest(testApp.app, {
@@ -954,7 +1039,8 @@ describe("updateFastifyWithChatRoute", () => {
     testApp.generateTitle.mockResolvedValue("Trip plan")
     updateFastifyWithChatRoute(testApp.app, {
       ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations
+      generations: testApp.generations,
+      findModelCapabilities: testApp.findModelCapabilities
     })
 
     await sendChatRequest(
@@ -992,7 +1078,8 @@ describe("updateFastifyWithChatRoute", () => {
       testApp.generateTitle.mockResolvedValue("Trip plan")
       updateFastifyWithChatRoute(testApp.app, {
         ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations
+        generations: testApp.generations,
+        findModelCapabilities: testApp.findModelCapabilities
       })
 
       const response = await sendChatRequest(
@@ -1092,7 +1179,8 @@ describe("updateFastifyWithChatRoute", () => {
       )
       updateFastifyWithChatRoute(testApp.app, {
         ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations
+        generations: testApp.generations,
+        findModelCapabilities: testApp.findModelCapabilities
       })
 
       /**
@@ -1269,7 +1357,8 @@ describe("updateFastifyWithChatRoute", () => {
       )
       updateFastifyWithChatRoute(testApp.app, {
         ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations
+        generations: testApp.generations,
+        findModelCapabilities: testApp.findModelCapabilities
       })
 
       /**
@@ -1296,7 +1385,8 @@ describe("updateFastifyWithChatRoute", () => {
       )
       updateFastifyWithChatRoute(testApp.app, {
         ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations
+        generations: testApp.generations,
+        findModelCapabilities: testApp.findModelCapabilities
       })
 
       const response = await sendChatRequest(testApp.app, {
@@ -1335,7 +1425,8 @@ describe("updateFastifyWithChatRoute", () => {
       )
       updateFastifyWithChatRoute(testApp.app, {
         ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations
+        generations: testApp.generations,
+        findModelCapabilities: testApp.findModelCapabilities
       })
 
       const response = await sendChatRequest(testApp.app, {
@@ -1530,7 +1621,8 @@ describe("updateFastifyWithChatRoute", () => {
       })
       updateFastifyWithChatRoute(testApp.app, {
         ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations
+        generations: testApp.generations,
+        findModelCapabilities: testApp.findModelCapabilities
       })
       return testApp
     }
@@ -1610,6 +1702,15 @@ describe("updateFastifyWithChatRoute", () => {
       trainedForToolUse: true
     })
 
+    /**
+     * A second text-only model; a turn that names it after a turn that named
+     * the request model reads the inventory again.
+     */
+    const OTHER_TEXT_MODEL_INFO: DownloadedLlmModel = Object.freeze({
+      ...TEXT_MODEL_INFO,
+      modelKey: "qwen/qwen3-14b"
+    })
+
     /** The request model as the inventory lists a model that sees images. */
     const VISION_MODEL_INFO: DownloadedLlmModel = Object.freeze({
       ...TEXT_MODEL_INFO,
@@ -1675,22 +1776,6 @@ describe("updateFastifyWithChatRoute", () => {
       if (start.type !== "start-new-conversation-turn")
         throw new Error("The chat route did not start a new conversation")
       return start
-    }
-
-    /**
-     * Lists the names of the tools a chat completion call offered.
-     *
-     * @param testApp - Test application.
-     * @param callIndex - Index of the chat completion call.
-     * @returns The offered tool names in offer order.
-     */
-    function listOfferedToolNames(
-      testApp: ChatRouteTestApp,
-      callIndex: number
-    ): readonly string[] {
-      return (
-        testApp.completeChatStream.mock.calls[callIndex]?.[0].tools ?? []
-      ).map((tool) => tool.function.name)
     }
 
     /**
@@ -1776,9 +1861,7 @@ describe("updateFastifyWithChatRoute", () => {
 
         expect(response.statusCode).toBe(400)
         expect(response.json()).toMatchObject({
-          message: expect.stringContaining(
-            "A request does not offer read_attachment; the backend adds it to a turn itself."
-          )
+          message: expect.stringContaining(RESERVED_OFFERED_TOOL_MESSAGE)
         })
         expect(testApp.listDownloadedLlmModels).not.toHaveBeenCalled()
         expect(testApp.completeChatStream).not.toHaveBeenCalled()
@@ -1934,19 +2017,48 @@ describe("updateFastifyWithChatRoute", () => {
       }
     )
 
-    it("does not read the inventory, and creates no folder, for a turn without attachments in a conversation without any", async () => {
+    it("reads a model's capabilities once for every turn it answers, and creates no folder for turns without attachments", async () => {
       const testApp = await createChatRouteTestApp()
       registerStoringChatRoute(testApp)
+      testApp.listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
+
+      const first = await sendChatRequest(testApp.app, NEW_CONVERSATION_REQUEST)
+      const second = await sendChatRequest(
+        testApp.app,
+        NEW_CONVERSATION_REQUEST
+      )
+
+      expect(first.statusCode).toBe(200)
+      expect(second.statusCode).toBe(200)
+      expect(testApp.listDownloadedLlmModels).toHaveBeenCalledOnce()
+      expect(readdirSync(testApp.attachmentsDirectoryPath)).toEqual([])
+    })
+
+    it("responds with the runtime-unavailable 503 problem for a first message without attachments when LM Studio cannot be reached, storing nothing", async () => {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+      testApp.listDownloadedLlmModels.mockRejectedValue(
+        createLlmRuntimeUnavailableError([])
+      )
 
       const response = await sendChatRequest(
         testApp.app,
         NEW_CONVERSATION_REQUEST
       )
 
-      expect(response.statusCode).toBe(200)
-      expect(testApp.listDownloadedLlmModels).not.toHaveBeenCalled()
-      expect(listOfferedToolNames(testApp, 0)).toEqual([])
-      expect(readdirSync(testApp.attachmentsDirectoryPath)).toEqual([])
+      expect(response.statusCode).toBe(503)
+      expect(response.json()).toMatchObject({
+        type: "urn:lys:problem:llm:runtime-unavailable",
+        status: 503
+      })
+      expect(testApp.completeChatStream).not.toHaveBeenCalled()
+      expect(
+        testApp.app.conversationHistoryReader.listConversations({
+          query: "",
+          cursor: undefined,
+          limit: 30
+        }).storedCount
+      ).toBe(0)
     })
 
     it("refuses a turn whose conversation was deleted while the inventory was read, and leaves no file of it", async () => {
@@ -1957,12 +2069,13 @@ describe("updateFastifyWithChatRoute", () => {
       const conversationId = readNewConversationStart(first).conversation.id
       testApp.listDownloadedLlmModels.mockImplementationOnce(async () => {
         testApp.app.conversationHistoryEditor.deleteConversation(conversationId)
-        return [TEXT_MODEL_INFO]
+        return [TEXT_MODEL_INFO, OTHER_TEXT_MODEL_INFO]
       })
 
       const second = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
         conversation: { kind: "existing", id: conversationId },
+        model: OTHER_TEXT_MODEL_INFO.modelKey,
         message: "One more",
         attachments: [buildTextAttachmentPayload("plan.txt", "Go")]
       })
@@ -1988,12 +2101,13 @@ describe("updateFastifyWithChatRoute", () => {
       const storedFiles = listStoredFiles(testApp)
       testApp.listDownloadedLlmModels.mockImplementationOnce(async () => {
         testApp.app.agentService.deleteAgent(WEB_RESEARCHER_DEFINITION.code)
-        return [TEXT_MODEL_INFO]
+        return [TEXT_MODEL_INFO, OTHER_TEXT_MODEL_INFO]
       })
 
       const second = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
         conversation: { kind: "existing", id: conversationId },
+        model: OTHER_TEXT_MODEL_INFO.modelKey,
         message: "One more",
         attachments: [buildTextAttachmentPayload("plan.txt", "Go")]
       })
@@ -2073,7 +2187,10 @@ describe("updateFastifyWithChatRoute", () => {
       expect(testApp.completeChatStream.mock.calls[0]?.[0].messages[1]).toEqual(
         { role: "user", content: NOTES_MESSAGE_TEXT }
       )
-      expect(listOfferedToolNames(testApp, 0)).toEqual(["read_attachment"])
+      expect(listOfferedToolNames(testApp, 0)).toEqual([
+        "read_attachment",
+        ...LEADER_STATE_TOOL_NAMES
+      ])
       expect(
         testApp.completeChatStream.mock.calls[1]?.[0].messages.at(-1)
       ).toEqual({
@@ -2165,7 +2282,7 @@ describe("updateFastifyWithChatRoute", () => {
       expect(testApp.completeChatStream.mock.calls[0]?.[0].messages[1]).toEqual(
         imageMessage
       )
-      expect(listOfferedToolNames(testApp, 0)).toEqual([])
+      expect(listOfferedToolNames(testApp, 0)).toEqual(LEADER_STATE_TOOL_NAMES)
       expect(
         testApp.completeChatStream.mock.calls[1]?.[0].messages.slice(1)
       ).toEqual([
@@ -2173,7 +2290,7 @@ describe("updateFastifyWithChatRoute", () => {
         { role: "assistant", content: "Hi" },
         { role: "user", content: "And now?" }
       ])
-      expect(testApp.listDownloadedLlmModels).toHaveBeenCalledTimes(2)
+      expect(testApp.listDownloadedLlmModels).toHaveBeenCalledOnce()
     })
 
     it("numbers a later turn's attachments after the conversation's, and offers the reader on a turn without new attachments", async () => {
@@ -2216,12 +2333,15 @@ describe("updateFastifyWithChatRoute", () => {
           ]
         }
       })
-      expect(listOfferedToolNames(testApp, 2)).toEqual(["read_attachment"])
+      expect(listOfferedToolNames(testApp, 2)).toEqual([
+        "read_attachment",
+        ...LEADER_STATE_TOOL_NAMES
+      ])
       expect(
         testApp.completeChatStream.mock.calls[2]?.[0].messages.at(-1)
       ).toEqual({ role: "user", content: "Read them" })
       expect(listStoredFiles(testApp)).toHaveLength(2)
-      expect(testApp.listDownloadedLlmModels).toHaveBeenCalledTimes(3)
+      expect(testApp.listDownloadedLlmModels).toHaveBeenCalledOnce()
     })
 
     it("deletes the written files and responds with a server error when the turn cannot be stored", async () => {
@@ -2233,7 +2353,8 @@ describe("updateFastifyWithChatRoute", () => {
       testApp.listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
       updateFastifyWithChatRoute(testApp.app, {
         ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations
+        generations: testApp.generations,
+        findModelCapabilities: testApp.findModelCapabilities
       })
 
       const response = await sendChatRequest(testApp.app, NOTES_REQUEST)
@@ -2292,7 +2413,8 @@ describe("updateFastifyWithChatRoute", () => {
       testApp.listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
       updateFastifyWithChatRoute(testApp.app, {
         ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations
+        generations: testApp.generations,
+        findModelCapabilities: testApp.findModelCapabilities
       })
 
       const response = await sendChatRequest(testApp.app, NOTES_REQUEST)
@@ -2316,6 +2438,221 @@ describe("updateFastifyWithChatRoute", () => {
         })
       )
       expect(testApp.completeChatStream).not.toHaveBeenCalled()
+    })
+  })
+  describe("agent state tools", () => {
+    /** The request model as the inventory lists a model trained for tool use. */
+    const TOOL_MODEL_INFO: DownloadedLlmModel = Object.freeze({
+      ...createDownloadedLlmModel({ modelKey: NEW_CONVERSATION_REQUEST.model }),
+      trainedForToolUse: true
+    })
+
+    /**
+     * Registers the chat route on a test application whose turns are stored
+     * for real and whose request model is trained for tool use.
+     *
+     * @returns The test application.
+     */
+    async function createStateToolApp(): Promise<ChatRouteTestApp> {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+      testApp.listDownloadedLlmModels.mockResolvedValue([TOOL_MODEL_INFO])
+      return testApp
+    }
+
+    it("offers a built-in agent's model, trained for tool use, the leader's state tools after the turn's tools", async () => {
+      const testApp = await createStateToolApp()
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: { definitions: [], backendToolNames: ["look_up_word"] }
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(listOfferedToolNames(testApp, 0)).toEqual([
+        "look_up_word",
+        ...LEADER_STATE_TOOL_NAMES
+      ])
+    })
+
+    it("offers the state tools while tool calls are switched off", async () => {
+      const testApp = await createStateToolApp()
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        areToolCallsSwitchedOff: true
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(listOfferedToolNames(testApp, 0)).toEqual(LEADER_STATE_TOOL_NAMES)
+    })
+
+    it("offers a stored agent's model, trained for tool use, only read_my_state", async () => {
+      const testApp = await createStateToolApp()
+
+      await startWebResearcherConversation(testApp)
+
+      expect(listOfferedToolNames(testApp, 0)).toEqual(["read_my_state"])
+    })
+
+    it("shows a reply in its agent's state, with its conversation and title, while the person decides on a call, and drops it once the reply ends", async () => {
+      const testApp = await createStateToolApp()
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set()
+      })
+      testApp.completeChatStream.mockImplementationOnce(async () =>
+        createChunkStream(
+          createChatCompletionChunk({
+            toolCalls: [
+              {
+                index: 0,
+                id: "call_0",
+                type: "function",
+                function: {
+                  name: "look_up_word",
+                  arguments: '{"word":"moth"}'
+                }
+              }
+            ]
+          }),
+          createChatCompletionChunk({ finishReason: "tool_calls" })
+        )
+      )
+      const startReplyGeneration = vi.spyOn(
+        testApp.generations,
+        "startReplyGeneration"
+      )
+      const leader = Object.freeze({
+        code: CALIGINIA_AGENT_CODE,
+        role: "leader" as const
+      })
+
+      const responsePromise = sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: { definitions: [], backendToolNames: ["look_up_word"] }
+      })
+      await vi.waitFor(() => {
+        expect(
+          testApp.app.agentRuntimeService.findAgentState(
+            leader,
+            CALIGINIA_AGENT_CODE
+          )
+        ).toMatchObject({
+          status: "found",
+          state: {
+            requests: [
+              {
+                conversationTitle: { status: "found", title: "Trip plan" },
+                step: {
+                  kind: "using-tools",
+                  toolCalls: [
+                    { toolName: "look_up_word", status: "awaiting-approval" }
+                  ]
+                }
+              }
+            ]
+          }
+        })
+      })
+      const waitingState = testApp.app.agentRuntimeService.findAgentState(
+        leader,
+        CALIGINIA_AGENT_CODE
+      )
+      const generation = startReplyGeneration.mock.results[0]
+      if (generation?.type !== "return")
+        throw new Error("No generation started.")
+      const [prompt] = generation.value.pendingToolCalls.toolApprovals
+      if (prompt === undefined) throw new Error("No prompt was sent.")
+      generation.value.resolveToolCall(prompt.id, {
+        status: "rejected",
+        reason: "declined",
+        content: "The person declined this call."
+      })
+      const response = await responsePromise
+
+      const start = chatApiStreamEventSchema.parse(
+        parseSseEvents(response.body)[0]?.data
+      )
+      if (start.type !== "start-new-conversation-turn")
+        throw new Error("The chat route did not start a new conversation")
+      expect(waitingState).toMatchObject({
+        status: "found",
+        state: {
+          requests: [
+            {
+              requestId: start.assistantMessage.id,
+              conversationId: start.conversation.id,
+              model: NEW_CONVERSATION_REQUEST.model
+            }
+          ]
+        }
+      })
+      expect(
+        testApp.app.agentRuntimeService.findAgentState(
+          leader,
+          CALIGINIA_AGENT_CODE
+        )
+      ).toMatchObject({ status: "found", state: { requests: [] } })
+    })
+
+    it("runs a read_my_state call without asking the person, stores the agent's state as its result, and leaves no request behind", async () => {
+      const testApp = await createStateToolApp()
+      testApp.completeChatStream.mockImplementationOnce(async () =>
+        createChunkStream(
+          createChatCompletionChunk({
+            toolCalls: [
+              {
+                index: 0,
+                id: "call_0",
+                type: "function",
+                function: { name: "read_my_state", arguments: "{}" }
+              }
+            ]
+          }),
+          createChatCompletionChunk({ finishReason: "tool_calls" })
+        )
+      )
+
+      const response = await sendChatRequest(
+        testApp.app,
+        NEW_CONVERSATION_REQUEST
+      )
+
+      expect(response.statusCode).toBe(200)
+      const events = parseSseEvents(response.body)
+      expect(events.map((event) => event.event)).not.toContain("tool-approval")
+      expect(events.at(-1)?.event).toBe("done")
+      expect(testApp.readJustRunToolNames).not.toHaveBeenCalled()
+      const start = chatApiStreamEventSchema.parse(events[0]?.data)
+      if (start.type !== "start-new-conversation-turn")
+        throw new Error("The chat route did not start a new conversation")
+      const reply = testApp.app.conversationHistoryReader.getConversation(
+        start.conversation.id
+      )?.messages[1]
+      const callPart = reply?.role === "assistant" ? reply.parts[0] : undefined
+      if (callPart?.kind !== "tool-call" || callPart.status !== "succeeded")
+        throw new Error("The reply did not store a succeeded call first")
+      expect(callPart.toolName).toBe("read_my_state")
+      expect(callPart.result).toMatch(
+        /^You are Caliginia \(code caliginia\), a leader\. /
+      )
+      expect(callPart.result).toMatch(
+        /\nWorking on 1 request:\n1\. This reply, in this conversation: started [^\n]+ with qwen\/qwen3-8b; using tools: read_my_state running\.\nNothing else is in progress\.$/
+      )
+      expect(
+        testApp.completeChatStream.mock.calls[1]?.[0].messages.at(-1)
+      ).toEqual({
+        role: "tool",
+        tool_call_id: expect.any(String),
+        content: callPart.result
+      })
+      expect(
+        testApp.app.agentRuntimeService.findAgentState(
+          { code: CALIGINIA_AGENT_CODE, role: "leader" },
+          CALIGINIA_AGENT_CODE
+        )
+      ).toMatchObject({ status: "found", state: { requests: [] } })
     })
   })
 })

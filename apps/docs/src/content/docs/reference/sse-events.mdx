@@ -158,7 +158,8 @@ too.
 Carries one tool call the backend shows to the person before anything runs,
 in the same shape as a `tool-call` event's `call`. The backend's tool approval
 service sends it for every call of a tool that is not saved as Just run,
-client, backend, and MCP tools alike except `read_attachment`, which runs
+client, backend, and MCP tools alike except `read_attachment` and the agent
+state tools (`read_my_state`, `find_agents`, `read_agent_state`), which run
 without approval, right after the call's `reply-part` stored it
 as `awaiting-approval`; a call of a tool on Just run gets no prompt. The
 client shows the call and answers with the

@@ -46,7 +46,7 @@ operation cannot change data.
 | `conversation_messages`    | SQLite conversation records | Ordered user messages and replies, with each reply's `status`, `finish_reason`, and `model`, and each reply's reasoning, text, and tool-call parts as rows under it.                                               |
 | `conversation_sources`     | SQLite conversation records | One row per numbered web source of a conversation: `number`, `url`, and `title`, each number and URL once.                                                                                                         |
 | `conversation_attachments` | SQLite conversation records | One row per attachment of a user message: `number`, `name`, `kind`, `size_bytes`, and an image's `media_type`, `width`, and `height`; each number once per conversation, each name once per message ignoring case. |
-| `agents`                   | SQLite agent records        | One row per agent definition, keyed by its `code`, with `name`, `bio`, `system_prompt`, `created_at`, and `updated_at`.                                                                                            |
+| `agents`                   | SQLite agent records        | One row per agent definition, keyed by its `code`, with `name`, `bio`, `system_prompt`, `created_at`, `updated_at`, and `deleted_at`, the time a deleted agent was deleted; a deleted agent's row stays.           |
 
 The desktop does not query SQLite directly and the Tauri host does not proxy
 conversation SQL. The backend creates four SQLite record providers over the
@@ -65,13 +65,19 @@ The agent service `AgentService` (`src/modules/agent/agentService.ts`) uses
 `SqliteAgentRecordStore` the same way: it validates each definition or change,
 reads the current time once per change, and lists and stores agents through
 records it declares in `records.ts`. Unlike the conversation records, the
-agent records are one interface: the service is their only consumer and uses
-all five operations, while the routes receive narrow capabilities of the
-service instead. The service is not a database service: it also owns the
+agent records are just two interfaces, `AgentRecordStore` for listing,
+lookup, and changes and `AgentRecordSearcher` for search: the service is
+their only consumer and uses every operation of both, while the routes
+receive narrow capabilities of the service instead. Deleting an agent only sets its `deleted_at`, so its code is
+never free again and the built-in agents can still look it up; listings,
+counts, and changes skip it. The service is not a database service: it also owns the
 built-in agents Caliginia and Lysiptera, which are never stored, and refuses
 to store another agent under their codes `caliginia` and `lysiptera`. It is
 decorated as `app.agentService`; the agent routes in
-`src/modules/agent/routes/` and the chat route call it.
+`src/modules/agent/routes/` call it. The agent runtime service, decorated as
+`app.agentRuntimeService`, reads agents through it for the chat routes and
+keeps the [live agents](/architecture/backend/#live-agents) and the requests
+they work on in memory only; nothing of them is stored.
 Every borrowed operation fails once the database closes,
 and the database remains open until every reply generation has stored its final
 state.
@@ -84,7 +90,8 @@ On startup the database owner:
 1. Opens the SQLite file with foreign keys enabled.
 2. Acquires a write transaction and reads `PRAGMA user_version`.
 3. Rejects unsupported future versions or applies each missing migration in order.
-4. Records version 9 and commits; a migration failure rolls back all pending work.
+4. Records the latest version, 11, and commits; a migration failure rolls back
+   all pending work.
 5. Switches to write-ahead logging with `synchronous = NORMAL`. A database from
    a newer version was refused in step 3, before anything changed its file.
 6. Turns on write protection, which only a write transaction lifts.
@@ -109,7 +116,9 @@ updates preserve it too. Version 6 adds the `agents` table and changes no
 existing row. Version 9 rebuilds the message table so a reply's reasoning,
 text, and tool calls are rows of their own under the reply's row, moves each
 stored reply's text into one text part, and adds `conversation_sources`; it
-cannot be undone.
+cannot be undone. Version 10 adds `conversation_attachments`. Version 11 adds
+`agents.deleted_at`; agents deleted before it are gone, and their codes stay
+free.
 Turn creation is atomic and first interrupts a reply still streaming in the same
 conversation: the turn service runs it as one callback inside one write
 transaction of the turn records, which refuse every call once the callback

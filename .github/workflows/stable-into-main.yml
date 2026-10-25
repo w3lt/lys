@@ -1,0 +1,114 @@
+name: Stable into main
+
+# Opens a pull request from stable into main at 00:00 UTC when stable's VERSION
+# is newer than main's, which happens after a patch release. The maintainer
+# squashes it, which brings stable's VERSION to main and keeps this workflow
+# quiet until the next patch release; this workflow never merges.
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stable-into-main
+  cancel-in-progress: false
+
+jobs:
+  stable-into-main:
+    name: Open the pull request from stable into main
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Compare the versions on stable and main
+        id: compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pattern='^[[:space:]]*(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)[[:space:]]*$'
+          for branch in stable main; do
+            version="$(gh api \
+              -H "Accept: application/vnd.github.raw+json" \
+              "repos/$GH_REPO/contents/VERSION?ref=$branch")"
+            if [[ ! "$version" =~ $pattern ]]; then
+              echo "::error::VERSION on $branch must use major.minor.patch, such as 1.2.3."
+              exit 1
+            fi
+            printf -v "${branch}_version" '%s.%s.%s' "${BASH_REMATCH[@]:1:3}"
+          done
+
+          # Compare major, then minor, then patch as numbers, so 0.4.10 is newer than 0.4.9.
+          IFS=. read -r -a stable_parts <<< "$stable_version"
+          IFS=. read -r -a main_parts <<< "$main_version"
+          newer=false
+          for i in 0 1 2; do
+            if [ "${stable_parts[i]}" -gt "${main_parts[i]}" ]; then
+              newer=true
+              break
+            elif [ "${stable_parts[i]}" -lt "${main_parts[i]}" ]; then
+              break
+            fi
+          done
+
+          if [ "$newer" = false ]; then
+            echo "stable is at $stable_version and main at $main_version, so there is nothing to bring into main."
+            echo "open-pull-request=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          open="$(gh api "repos/$GH_REPO/pulls?state=open&base=main&head=$OWNER:stable" --jq length)"
+          if [ "$open" != "0" ]; then
+            echo "A pull request from stable into main is already open."
+            echo "open-pull-request=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "stable-version=$stable_version"
+            echo "main-version=$main_version"
+            echo "open-pull-request=true"
+          } >> "$GITHUB_OUTPUT"
+
+      # A pull request opened with the workflow's own token starts no other
+      # workflow, so the CI checks would never run on it.
+      - name: Open the pull request into main
+        if: steps.compare.outputs.open-pull-request == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PATCH_PR_TOKEN }}
+          STABLE_VERSION: ${{ steps.compare.outputs.stable-version }}
+          MAIN_VERSION: ${{ steps.compare.outputs.main-version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::The PATCH_PR_TOKEN secret is not set, so no pull request was opened. Add it as the Patch branch workflow section of the release docs describes, then run this workflow again."
+            exit 1
+          fi
+
+          {
+            echo "Brings the patch releases on \`stable\` into \`main\`. Opened when \`stable\` was at \`$STABLE_VERSION\` and \`main\` at \`$MAIN_VERSION\`."
+            echo
+            echo "Squash it, so that \`main\`'s \`VERSION\` matches \`stable\`'s and the [Stable into main workflow]($RUN_URL) stays quiet until the next patch release. See [Patch releases](https://lys.negentropy.studio/operate/releases/#patch-releases)."
+          } > "$RUNNER_TEMP/pull-request.md"
+
+          url="$(gh api "repos/$GH_REPO/pulls" \
+            -f title="chore: merge stable into main" \
+            -f head=stable \
+            -f base=main \
+            -F body=@"$RUNNER_TEMP/pull-request.md" \
+            --jq .html_url)"
+          echo "Opened $url."

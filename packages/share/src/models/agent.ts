@@ -59,6 +59,31 @@ export const CALIGINIA_AGENT_CODE = "caliginia"
 export const LYSIPTERA_AGENT_CODE = "lysiptera"
 
 /**
+ * Name the model calls the tool by that tells an agent its own state: who it
+ * is, its role, and the requests it is working on.
+ *
+ * @remarks The backend offers it to every agent whose model is trained for
+ * tool use, so a chat request may not offer or name a tool of this name.
+ */
+export const READ_MY_STATE_TOOL_NAME = "read_my_state"
+
+/**
+ * Name the model calls the tool by that finds agents by code, name, or bio.
+ *
+ * @remarks The backend offers it to the leaders only, so a chat request may
+ * not offer or name a tool of this name.
+ */
+export const FIND_AGENTS_TOOL_NAME = "find_agents"
+
+/**
+ * Name the model calls the tool by that tells the state of another agent.
+ *
+ * @remarks The backend offers it to the leaders only, so a chat request may
+ * not offer or name a tool of this name.
+ */
+export const READ_AGENT_STATE_TOOL_NAME = "read_agent_state"
+
+/**
  * Lowercase ASCII letters and digits in hyphen-separated groups, with no
  * leading, trailing, or doubled hyphen.
  */

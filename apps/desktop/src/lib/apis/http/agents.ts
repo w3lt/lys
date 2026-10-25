@@ -88,7 +88,7 @@ export type UpdateAgentResult =
 /** Outcome of permanently deleting one stored agent. */
 export type DeleteAgentResult =
   | {
-      /** The backend removed the agent. */
+      /** The backend deleted the agent; its code stays taken. */
       readonly status: "deleted"
     }
   | AgentNotFoundResult
@@ -431,14 +431,14 @@ export async function updateAgent(
 }
 
 /**
- * Permanently deletes one stored agent.
+ * Deletes one stored agent for good; the backend keeps its code taken.
  *
  * @param agentCode - Code of the agent to delete.
  * @param connection - Backend origin and local cancellation signal.
  * @returns The deletion outcome, or the absence outcome when the backend
  * reports the declared missing-agent problem; both establish that the agent
- * is no longer stored. The built-in outcome, when the backend reports the
- * declared built-in agent problem, establishes that the agent stays.
+ * is deleted. The built-in outcome, when the backend reports the declared
+ * built-in agent problem, establishes that the agent stays.
  * @throws On an invalid code, cancellation, transport failure, any other
  * failed status, or an unexpected success status.
  * @remarks Aborting after the backend accepted the request can still delete

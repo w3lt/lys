@@ -523,8 +523,10 @@ and moves focus to the message field once that conversation is shown, when
 the field can take focus again. Start a new one in past conversations moves
 focus the same way. While the list is unread the desktop does not claim a
 deletion: sending stays possible, and the backend's refusal is shown as the
-same sentence. A conversation accepts messages again once an agent is stored
-under its code.
+same sentence. A deleted agent's code is never free again, so its
+conversations stay read-only; only a conversation whose agent was removed
+before version 11 of the database accepts messages again once an agent is
+stored under its code.
 
 ## Tool settings
 
@@ -833,7 +835,8 @@ list is read again so the next request leaves the tool out.
 
 The backend's tool approval service decides which calls need the person: every
 call of a tool that is not saved as Just run, client, backend, and MCP tools
-alike, except `read_attachment`, which runs without approval (see the
+alike, except `read_attachment` and the agent state tools, which run without
+approval (see the
 [backend's tool approval](/architecture/backend/#tool-approval)). The
 desktop does not decide; it reads neither the switches nor the saved Just run
 list when a call arrives.

@@ -3,6 +3,7 @@ import * as z from "zod"
 import {
   agentCodeSchema,
   attachmentNameSchema,
+  BACKEND_INTERNAL_TOOL_NAMES,
   conversationAssistantMessageSchema,
   conversationMetadataSchema,
   conversationUserMessageSchema,
@@ -14,7 +15,6 @@ import {
   MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_COUNT,
   MAXIMUM_MCP_SERVER_COUNT,
-  READ_ATTACHMENT_TOOL_NAME,
   toolDefinitionSchema,
   toolNameSchema,
   type ToolDefinition
@@ -189,18 +189,30 @@ function hasOnlyClientTools(definitions: readonly ToolDefinition[]): boolean {
   return isEveryToolRunBy(definitions, "client")
 }
 
-/** Explanation of a refused offer that names the backend's attachment reader. */
-const RESERVED_TOOL_NAME_MESSAGE = `A request does not offer ${READ_ATTACHMENT_TOOL_NAME}; the backend adds it to a turn itself.`
+/**
+ * Lists the tools the backend adds to a turn itself for a refusal message.
+ *
+ * @returns `a, b, c, or d`, in {@link BACKEND_INTERNAL_TOOL_NAMES} order.
+ */
+function formatBackendInternalToolNames(): string {
+  const names = [...BACKEND_INTERNAL_TOOL_NAMES]
+  const lastName = names.pop()
+  return `${names.join(", ")}, or ${lastName}`
+}
+
+/** Explanation of a refused offer that names a tool the backend adds itself. */
+const RESERVED_TOOL_NAME_MESSAGE = `A request does not offer ${formatBackendInternalToolNames()}; the backend adds them to a turn itself.`
 
 /**
- * Answers whether no offered name is the backend's attachment reader, which
- * the backend adds to a turn itself.
+ * Answers whether no name is a tool the backend adds to a turn itself.
  *
- * @param toolNames - Offered tool names.
- * @returns True when none is `READ_ATTACHMENT_TOOL_NAME`.
+ * @param toolNames - Offered or named tool names.
+ * @returns True when none is in `BACKEND_INTERNAL_TOOL_NAMES`.
  */
 function hasNoReservedToolName(toolNames: readonly string[]): boolean {
-  return !toolNames.includes(READ_ATTACHMENT_TOOL_NAME)
+  return !toolNames.some((toolName) =>
+    BACKEND_INTERNAL_TOOL_NAMES.includes(toolName)
+  )
 }
 
 /**
@@ -221,7 +233,7 @@ export const MAXIMUM_OFFERED_BACKEND_TOOL_COUNT =
 const chatToolOfferListsSchema = z.strictObject({
   /**
    * Definitions of the switched-on client tools, each name once and none
-   * named like the backend's attachment reader; may be empty.
+   * named like a tool the backend adds itself; may be empty.
    */
   definitions: z
     .array(toolDefinitionSchema)
@@ -235,7 +247,7 @@ const chatToolOfferListsSchema = z.strictObject({
     .readonly(),
   /**
    * Names of the switched-on tools from the backend's tool list, each name
-   * once and none the backend's attachment reader: the backend's own tools
+   * once and none a tool the backend adds itself: the backend's own tools
    * and the tools of its MCP servers; at most
    * {@link MAXIMUM_OFFERED_BACKEND_TOOL_COUNT}. Absence means the request
    * offers no backend tool.
@@ -284,12 +296,13 @@ function hasDistinctOfferedToolNames(offer: ChatToolOfferCandidate): boolean {
  * because the backend does not know them, and the switched-on tools the
  * backend runs by name, because the backend owns their definitions. At least
  * one tool is offered, no name is offered twice across the two lists, and
- * neither list names the backend's attachment reader
- * (`READ_ATTACHMENT_TOOL_NAME`), which the backend adds to a turn itself
- * when the conversation holds a text attachment. The backend rejects a
- * backend tool name it does not run (400) and an offered backend tool that
- * cannot run now (409), such as an MCP tool whose server is configured but
- * not connected. Offered only to a model trained for tool use.
+ * neither list names a tool the backend adds to a turn itself
+ * (`BACKEND_INTERNAL_TOOL_NAMES`): the attachment reader, when the
+ * conversation holds a text attachment, and the agent state tools. The
+ * backend rejects a backend tool name it does not run (400) and an offered
+ * backend tool that cannot run now (409), such as an MCP tool whose server
+ * is configured but not connected. Offered only to a model trained for tool
+ * use.
  */
 export const chatToolOfferSchema = chatToolOfferListsSchema
   .refine(hasOfferedTool, "A tool offer names at least one tool.")
@@ -313,17 +326,17 @@ export type ChatToolOffer = z.infer<typeof chatToolOfferSchema>
 const MAXIMUM_UNOFFERED_TOOL_COUNT = 64
 
 /**
- * Explanation of a refused switched-off or unavailable list that names the
- * backend's attachment reader.
+ * Explanation of a refused switched-off or unavailable list that names a
+ * tool the backend adds to a turn itself.
  */
-const RESERVED_UNOFFERED_TOOL_NAME_MESSAGE = `A request does not name ${READ_ATTACHMENT_TOOL_NAME} as switched off or unable to run; it has no switch and the backend adds it to a turn itself.`
+const RESERVED_UNOFFERED_TOOL_NAME_MESSAGE = `A request does not name ${formatBackendInternalToolNames()} as switched off or unable to run; they have no switch and the backend adds them to a turn itself.`
 
 /**
  * Validates the names of the tools the person switched off in the client.
  *
  * @remarks One to {@link MAXIMUM_UNOFFERED_TOOL_COUNT} names, each passing
- * the shared tool-name rule, each once, and none the backend's attachment
- * reader, which has no switch. A name need not be a tool the backend runs,
+ * the shared tool-name rule, each once, and none a tool the backend adds to
+ * a turn itself, which has no switch. A name need not be a tool the backend runs,
  * because the client's own tools are named too. The backend tells the model
  * these tools are off and answers a call of one as off; it never runs one.
  */
@@ -336,10 +349,11 @@ export const switchedOffToolNamesSchema = z
   .readonly()
 
 /**
- * Answers whether no unavailable tool names the backend's attachment reader.
+ * Answers whether no unavailable tool is one the backend adds to a turn
+ * itself.
  *
  * @param unavailableTools - Validated unavailable tools of one request.
- * @returns True when none is `READ_ATTACHMENT_TOOL_NAME`.
+ * @returns True when none is in `BACKEND_INTERNAL_TOOL_NAMES`.
  */
 function hasNoReservedUnavailableTool(
   unavailableTools: readonly UnavailableBackendTool[]
@@ -352,9 +366,9 @@ function hasNoReservedUnavailableTool(
  * each with why, as the client last read them from the backend's tool list.
  *
  * @remarks One to {@link MAXIMUM_UNOFFERED_TOOL_COUNT} tools, each name once
- * and none the backend's attachment reader. The backend rejects a name it
- * does not run (400) but does not check the reason again, so the note
- * repeats the client's reading. The backend tells the model these tools
+ * and none a tool the backend adds to a turn itself. The backend rejects a
+ * name it does not run (400) but does not check the reason again, so the
+ * note repeats the client's reading. The backend tells the model these tools
  * cannot run now, why, and what would fix it, and answers a call of one the
  * same way; it never runs one.
  */
@@ -557,15 +571,15 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
  * @remarks A 400 is the attachment-unsupported problem when an attachment's
  * content is neither text nor an image Lys sends; a body that fails
  * validation is answered with Fastify's own 400. A 404 is the
- * agent-not-found problem when a new conversation names a code no agent has,
- * and the conversation-not-found problem when a continued conversation is
- * not stored. A 409 is the conversation agent missing problem when the
- * continued conversation is stored but its agent no longer exists, the
- * backend tool unavailable problem when an offered backend tool cannot run
- * now, and the image-needs-vision problem when the request attaches an image
- * for a model without vision. A 503 is the service-busy or
- * runtime-unavailable problem when the request or the conversation holds
- * attachments and the model's capabilities cannot be read from LM Studio.
+ * agent-not-found problem when a new conversation names a code no agent has
+ * or a deleted agent's, and the conversation-not-found problem when a
+ * continued conversation is not stored. A 409 is the conversation agent
+ * missing problem when the continued conversation is stored but its agent no
+ * longer exists, the backend tool unavailable problem when an offered
+ * backend tool cannot run now, and the image-needs-vision problem when the
+ * request attaches an image for a model without vision. A 503 is the
+ * service-busy or runtime-unavailable problem when the model's capabilities,
+ * which every request reads, cannot be read from LM Studio.
  */
 const chatApiResponseSchemas = Object.freeze({
   400: chatAttachmentUnsupportedProblemSchema,

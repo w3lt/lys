@@ -620,6 +620,20 @@ export function registerAgentRecordSearcherContractSuite(
       ])
     })
 
+    it("compares a name that contains NUL whole when it looks for an exact match", () => {
+      const { recordStore, recordSearcher } = createHarness()
+      const agent = { ...RESEARCHER, name: "Res\u0000earcher" }
+      recordStore.createAgent(agent)
+
+      expect(
+        recordSearcher.searchAgents({ query: "res", limit: 20 }).matches
+      ).toEqual([buildMatch(agent, { deletedAt: null, isExactMatch: false })])
+      expect(
+        recordSearcher.searchAgents({ query: "RES\u0000EARCHER", limit: 20 })
+          .matches
+      ).toEqual([buildMatch(agent, { deletedAt: null, isExactMatch: true })])
+    })
+
     it("cuts the ordered matches at the limit and still counts every match", () => {
       const { recordStore, recordSearcher } = createHarness()
       saveSearchedAgents(recordStore)

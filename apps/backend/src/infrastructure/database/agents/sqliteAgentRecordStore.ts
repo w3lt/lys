@@ -64,12 +64,11 @@ const AGENT_MATCH_SQL = `contains_search(code, $query)
 
 /**
  * Value of whether an agent's code or name equals the bound `$query`,
- * ignoring case: the same number of characters and a case-insensitive
- * match mean the whole text matches.
+ * ignoring case; requires the `equals_search` function on the connection,
+ * which compares the whole text, as SQLite's `length` does not past a NUL.
  */
-const AGENT_EXACT_MATCH_SQL = `(length(code) = length($query)
-  AND contains_search(code, $query))
-  OR (length(name) = length($query) AND contains_search(name, $query))`
+const AGENT_EXACT_MATCH_SQL = `equals_search(code, $query)
+  OR equals_search(name, $query)`
 
 /**
  * Builds the frozen match of one validated row.
@@ -95,7 +94,8 @@ function buildAgentMatch(
  * @returns The frozen page: matches whose code or name equals the query
  * first, then the others, each group by creation time and code.
  * @throws If SQLite fails or a matched row violates the agent schema.
- * @remarks Requires the `contains_search` function on the connection.
+ * @remarks Requires the `contains_search` and `equals_search` functions on
+ * the connection.
  */
 function searchAgents(
   statements: DatabaseStatementCompiler,
@@ -257,8 +257,8 @@ function updateAgent(
  * Borrows the shared database's read snapshots and write transactions to keep
  * stored agent definitions.
  *
- * @remarks Invariant: once created, `contains_search` is registered on the
- * shared connection for its search queries. Owns no resource: the database's
+ * @remarks Invariant: once created, `contains_search` and `equals_search`
+ * are registered on the shared connection for its search queries. Owns no resource: the database's
  * owner closes the connection, after which every operation fails with
  * `Database is closed`. Each listing, search, or lookup is one read snapshot
  * and each change one write transaction that commits before it returns.
@@ -294,7 +294,8 @@ export default class SqliteAgentRecordStore
    * @returns The ready records; they own nothing to release.
    * @throws If the database is closed or SQLite rejects the registration.
    * @remarks Registers the shared search functions, among them
-   * `contains_search`, the case-insensitive match agent search uses.
+   * `contains_search` and `equals_search`, the case-insensitive containment
+   * and equality agent search uses.
    */
   public static create(
     database: DatabaseReader & DatabaseWriter & DatabaseFunctionRegistry

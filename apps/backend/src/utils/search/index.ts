@@ -28,8 +28,7 @@ export function hasSearchText(content: string, query: string): boolean {
  * @returns True when the text contains the query under Unicode simple case
  * folding and both have the same number of code points. Simple case folding
  * maps each code point to one code point, so that means the whole text
- * matches; SQL gets the same answer from `length(content) = length(query)`
- * and `contains_search(content, query)`.
+ * matches.
  */
 export function isExactSearchMatch(content: string, query: string): boolean {
   return (

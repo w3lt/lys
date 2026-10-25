@@ -528,7 +528,10 @@ export default class Agent {
    * start, preparing round 0, until the returned promise settles, whatever
    * the outcome: each round's start shows it preparing that round, and each
    * part or tool call change the reply stores shows the step it puts the
-   * request at.
+   * request at. A reply that a newer turn of its conversation supersedes, or
+   * whose conversation is deleted, settles only once its next write is
+   * refused, so one waiting on an approval or a tool result stays listed
+   * until the call is answered, the reply is stopped, or the backend stops.
    */
   public async createReply(turn: AgentTurn): Promise<void> {
     const systemPrompt = this.#systemPrompt

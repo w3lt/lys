@@ -24,7 +24,7 @@ the services together.
 | Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services, the agent service over SQLite records and the agent runtime service over it, LLM services without contacting LM Studio, the built-in tools, and the tool approval service.                                                                 |
 | Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                                                                                                                         |
 | Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, marks a deleted agent deleted, and searches every agent; contains no SQL. |
-| Agent runtime service | `src/modules/agent`               | Keeps one live agent per agent that has answered, finds the one that answers a chat, and tells agents about themselves and each other as their roles allow; see [live agents](#live-agents).                                                                                                                              |
+| Agent runtime service | `src/modules/agent`               | Keeps one live agent per agent a chat or a context measurement has loaded, finds the one that answers a chat, and tells agents about themselves and each other as their roles allow; see [live agents](#live-agents).                                                                                                     |
 | Database              | `src/infrastructure/database`     | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and runs every conversation query in `conversations/` and every agent query in `agents/`.                                                                                                         |
 | Chat routes           | `src/modules/chat/routes`         | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                                                                                                                                                                                                                        |
 | Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                                    |
@@ -277,11 +277,15 @@ desktop to run and approval prompts, which the reply-events snapshot reports
 and the tool-result and tool-approval routes answer. Each stream is
 a `ReplyEventSubscription`, an ordered queue that never makes the generation
 wait and closes a follower that falls 4,096 events behind. Only the reply-stop
-route (reply task only) and shutdown (both tasks) cancel work. A newer turn or a
-deletion also ends a reply, but only when the model sends its next content: that
-write is refused, which ends the upstream request. A reply waiting for a tool
-result or an approval is not ended this way
-([#137](https://github.com/w3lt/lys/issues/137)).
+route (reply task only), a newer turn (the reply tasks of its conversation),
+and shutdown (both tasks) cancel work. Once the chat route has stored a turn,
+it stops every running reply of that conversation through
+`stopConversationReplies` before it starts the new generation, so a
+superseded reply's model request, tool calls, and approval prompts end and
+its title task goes on. A deletion also ends a reply, but only when the model
+sends its next content: that write is refused, which ends the upstream
+request. A reply waiting for a tool result or an approval is not ended this
+way ([#137](https://github.com/w3lt/lys/issues/137)).
 The title task of a deleted conversation still runs to its end. The registry is
 disposed in Fastify's `preClose` hook, while streams are still open: it closes
 admission, cancels every generation, and waits until each has stored its final
@@ -341,13 +345,16 @@ the reply's stored parts, so later turns resend them like every other tool
 result.
 
 Whether the model sees images and is trained for tool use is read from LM
-Studio's inventory (`src/modules/chat/routes/modelCapabilities.ts`) only for
-a turn that involves an attachment, so a turn without any never waits for
-the model-operation queue. The read lists the downloaded models only
-(`LlmService.listDownloadedLlmModels()`), without the loaded state and
-context lengths the model list adds. A model the inventory does not list has
-neither capability: an image attached for it is refused, and no reader is
-offered.
+Studio's inventory (`src/modules/chat/routes/modelCapabilities.ts`) for
+every turn and every context measurement, as it decides the images the model
+sees and the tools the backend offers it. A listed model's capabilities are
+remembered until the backend stops, so only requests made before a listing
+had the model wait for the model-operation queue; a failed listing and a
+model it does not list are not remembered. The read lists the downloaded
+models only (`LlmService.listDownloadedLlmModels()`), without the loaded
+state and context lengths the model list adds. A model the inventory does
+not list has neither capability: an image attached for it is refused, and no
+reader is offered.
 
 ## Tool approval
 

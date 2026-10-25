@@ -98,12 +98,14 @@ files are deleted again.
 Once the agent is found, the route reads from LM Studio's inventory whether
 `model` has `vision` and `trainedForToolUse`, which decide the images the
 model sees and the tools the backend adds to the turn. It remembers what a
-listed model can do until the backend stops, so only the first request for a
-model reads the inventory: while LM Studio is not connected, that request
-answers `503` with `urn:lys:problem:llm:runtime-unavailable`, and a full
-model-operation queue `503` with `urn:lys:problem:llm:service-busy`, nothing
-stored. A model the inventory does not list is not remembered; its turn sees
-no image and is offered none of the tools the backend adds.
+listed model can do until the backend stops, so requests for a model read the
+inventory only until a listing has it: while LM Studio is not connected, such
+a request answers `503` with `urn:lys:problem:llm:runtime-unavailable`, and a
+full model-operation queue `503` with `urn:lys:problem:llm:service-busy`,
+nothing stored. A failed listing is not remembered, and neither is a model
+the inventory does not list: each of its requests reads the inventory again,
+and its turn sees no image and is offered none of the tools the backend
+adds.
 
 `message` and `model` must be non-empty strings. Every turn sends the system
 prompt its agent has when the turn starts, so editing a stored agent changes
@@ -531,9 +533,10 @@ approval instead, or whose reply ended returns `409` with
 `urn:lys:problem:chat:tool-call-not-pending` and changes nothing, so repeating
 a request whose response was lost is harmless. The backend sets no time limit
 on a pending call.
-It waits until the call is answered, the reply is stopped, or the backend
-shuts down. A newer turn in the conversation or deleting the conversation does
-not end the wait yet ([#137](https://github.com/w3lt/lys/issues/137)).
+It waits until the call is answered, the reply is stopped, a newer turn in
+the conversation stops it, or the backend shuts down. Deleting the
+conversation does not end the wait yet
+([#137](https://github.com/w3lt/lys/issues/137)).
 
 ## Conversation history
 
@@ -922,11 +925,12 @@ disconnecting the client does not cancel an accepted query. The runtime's
 inventory RPC has no enforced completion deadline, so an unresponsive engine
 can keep the query and shutdown pending.
 
-Chat inference is cancelled only by the reply-stop route or by backend
-shutdown; closing a chat stream does not cancel it. A newer turn or a deletion
-also ends a reply's inference, once the model sends its next content. A reply
-waiting for a tool result writes nothing, so it is not ended this way
-([#137](https://github.com/w3lt/lys/issues/137)). See the
+Chat inference is cancelled only by the reply-stop route, by a newer turn in
+the conversation, which stops the conversation's running replies once it is
+stored, or by backend shutdown; closing a chat stream does not cancel it. A
+deletion also ends a reply's inference, once the model sends its next
+content. A reply waiting for a tool result writes nothing, so it is not ended
+this way ([#137](https://github.com/w3lt/lys/issues/137)). See the
 [provider cancellation policy](/architecture/providers/#cancellation-policy).
 
 ## Model health responses

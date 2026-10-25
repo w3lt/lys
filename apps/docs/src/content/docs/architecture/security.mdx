@@ -111,11 +111,14 @@ results go to the backend and on to LM Studio, both on loopback.
   with attachments, so it can write up to 20 MiB of files per message there,
   and a `read_attachment` result is stored with its reply like every other
   tool result ([#171](https://github.com/w3lt/lys/issues/171)).
-- A built-in agent's state reads name the title of every conversation an
-  agent is working on, so a reply in one conversation can show the title of
-  another, and its stored result keeps that title after the other
-  conversation is renamed or deleted. Any caller that reaches the backend can
-  chat with a built-in agent and so learn those titles
+- An agent's state reads name the title of every conversation the read
+  agent is working on: `read_my_state`, offered to every agent, names the
+  titles of the asking agent's own conversations, and a built-in agent's
+  reads of other agents name theirs. So a reply in one conversation can show
+  the title of another, and its stored result keeps that title after the
+  other conversation is renamed or deleted. Any caller that reaches the
+  backend can chat with any agent and so learn the titles of that agent's
+  conversations, and with a built-in agent those of every agent
   ([#171](https://github.com/w3lt/lys/issues/171)).
 - Deleting a stored agent keeps its row, its system prompt included, in
   `lys_db.sqlite`, so that its code is never reused; Lys offers no way to

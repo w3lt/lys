@@ -521,8 +521,10 @@ and moves focus to the message field once that conversation is shown, when
 the field can take focus again. Start a new one in past conversations moves
 focus the same way. While the list is unread the desktop does not claim a
 deletion: sending stays possible, and the backend's refusal is shown as the
-same sentence. A conversation accepts messages again once an agent is stored
-under its code.
+same sentence. A deleted agent's code is never free again, so its
+conversations stay read-only; only a conversation whose agent was removed
+before version 11 of the database accepts messages again once an agent is
+stored under its code.
 
 ## Tool settings
 
@@ -711,9 +713,9 @@ to the [tool-approval route](/reference/api/#tool-approvals) and results to
 the [tool-result route](/reference/api/#tool-results). When an answer cannot
 be sent, the card says so and Try again sends the same answer without running
 the tool again. An allowed answer still in flight when the call's run request
-arrives does not hold the run back. When the reply ends, by finishing, Stop, or backend shutdown, its
-waiting calls disappear. A newer turn in the conversation or deleting the
-conversation does not end a waiting reply yet
+arrives does not hold the run back. When the reply ends, by finishing, Stop,
+a newer turn in the conversation, or backend shutdown, its waiting calls
+disappear. Deleting the conversation does not end a waiting reply yet
 ([#137](https://github.com/w3lt/lys/issues/137)). After a renderer reload, a
 call still waiting is found again through the reply's snapshot when its
 conversation is shown. Quitting the app stops the backend, so its waiting calls

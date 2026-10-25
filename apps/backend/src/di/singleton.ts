@@ -4,7 +4,9 @@ import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgen
 import AttachmentFileStore from "../modules/attachment/attachmentFileStore"
 import SqliteDatabase from "../infrastructure/database/sqliteDatabase"
 import LmStudioRuntime from "../modules/llm/runtimes/lmStudioRuntime"
-import AgentRuntimeService from "../modules/agent/agentRuntimeService"
+import AgentRuntimeService, {
+  buildConversationTitleLookup
+} from "../modules/agent/agentRuntimeService"
 import AgentService from "../modules/agent/agentService"
 import { buildBuiltInAgents } from "../modules/agent/builtInAgents"
 import ChatService, {
@@ -334,7 +336,9 @@ function createAgentServices(
         llmService.findLlmContextMeasurement(model, texts)
       ),
       findConversationTitle: (conversationId) =>
-        historyReader.getConversation(conversationId)?.title
+        buildConversationTitleLookup(
+          historyReader.getConversation(conversationId)
+        )
     })
   }
 }

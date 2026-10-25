@@ -42,14 +42,24 @@ export type AgentListing = Readonly<{
   deletedAt: string | null
 }>
 
+/** Outcome of looking up the title of a request's conversation. */
+export type ConversationTitleLookup =
+  | Readonly<{
+      /** No stored conversation has the id: it was deleted. */
+      status: "missing"
+    }>
+  | Readonly<{
+      /** The conversation is stored. */
+      status: "found"
+      /** Its title; null while it has none. */
+      title: string | null
+    }>
+
 /** One request an agent is working on, with the title of its conversation. */
 export type AgentRequestView = AgentRequestState &
   Readonly<{
-    /**
-     * Title of the request's conversation: null while it has none, and
-     * undefined once the conversation was deleted.
-     */
-    conversationTitle: string | null | undefined
+    /** Title of the request's conversation, looked up when it was read. */
+    conversationTitle: ConversationTitleLookup
   }>
 
 /** State of one agent: who it is and the requests it is working on. */
@@ -344,10 +354,10 @@ function formatRequestPlace(
   requestId: string
 ): string {
   if (request.requestId === requestId) return "This reply, in this conversation"
-  if (request.conversationTitle === undefined)
-    return "In a conversation that was deleted"
-  if (request.conversationTitle === null) return "In an untitled conversation"
-  return `In "${formatOneLine(request.conversationTitle)}"`
+  const lookup = request.conversationTitle
+  if (lookup.status === "missing") return "In a conversation that was deleted"
+  if (lookup.title === null) return "In an untitled conversation"
+  return `In "${formatOneLine(lookup.title)}"`
 }
 
 /**

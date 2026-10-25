@@ -3595,9 +3595,10 @@ describe("Agent", () => {
               name: "Lys",
               role: "leader",
               deletedAt: null,
-              requests: agent
-                .listRequests()
-                .map((request) => ({ ...request, conversationTitle: null }))
+              requests: agent.listRequests().map((request) => ({
+                ...request,
+                conversationTitle: { status: "found", title: null }
+              }))
             }
           })
         )

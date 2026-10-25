@@ -7,7 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import SqliteAgentRecordStore from "../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
 import type Agent from "../../../../src/modules/agent/agent"
 import type { AgentIdentity } from "../../../../src/modules/agent/agentRoles"
-import AgentRuntimeService from "../../../../src/modules/agent/agentRuntimeService"
+import AgentRuntimeService, {
+  buildConversationTitleLookup
+} from "../../../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../../../src/modules/agent/agentService"
 import { buildBuiltInAgents } from "../../../../src/modules/agent/builtInAgents"
 import type {
@@ -49,8 +51,11 @@ const LEADER: AgentIdentity = Object.freeze({
 type RuntimeOptions = Readonly<{
   /** Model access every live agent borrows; ends every reply by default. */
   replyModel?: ReplyModel
-  /** Conversation titles by id; a conversation it lacks is not stored. */
-  titles?: ReadonlyMap<string, string | null>
+  /**
+   * Stored conversations by id, each with its title; a conversation it lacks
+   * is not stored.
+   */
+  conversations?: ReadonlyMap<string, Readonly<{ title: string | null }>>
 }>
 
 /**
@@ -89,7 +94,7 @@ function createWaitingReplyModel() {
  * Creates the runtime service over an agent service on an in-memory database
  * owned by the current test.
  *
- * @param options - Model access and conversation titles.
+ * @param options - Model access and stored conversations.
  * @returns The runtime, the agent service it reads, and how many agent
  * lookups and searches it made.
  */
@@ -104,12 +109,13 @@ function createRuntime(options: RuntimeOptions = {}) {
       agentService.listAgentMatches(query)
     )
   }
-  const titles = options.titles ?? new Map<string, string | null>()
+  const conversations = options.conversations ?? new Map()
   const runtime = new AgentRuntimeService({
     agents,
     replyModel: options.replyModel ?? createFinishingReplyModel(),
     replyContextMeter: createRoomyReplyContextMeter(),
-    findConversationTitle: (conversationId) => titles.get(conversationId)
+    findConversationTitle: (conversationId) =>
+      buildConversationTitleLookup(conversations.get(conversationId))
   })
   return {
     runtime,
@@ -214,6 +220,24 @@ function findLiveAgent(runtime: AgentRuntimeService, code: string): Agent {
   if (agent === undefined) throw new Error(`No live agent ${code}`)
   return agent
 }
+
+describe("buildConversationTitleLookup", () => {
+  it.each([
+    ["a titled conversation", { title: "Trip to Kyoto" }, "Trip to Kyoto"],
+    ["an untitled conversation", { title: null }, null]
+  ])("finds the title of %s", (_label, conversation, title) => {
+    const lookup = buildConversationTitleLookup(conversation)
+
+    expect(lookup).toEqual({ status: "found", title })
+    expect(Object.isFrozen(lookup)).toBe(true)
+  })
+
+  it("answers missing when no conversation is stored", () => {
+    expect(buildConversationTitleLookup(undefined)).toEqual({
+      status: "missing"
+    })
+  })
+})
 
 describe("AgentRuntimeService", () => {
   beforeEach(() => {
@@ -342,9 +366,9 @@ describe("AgentRuntimeService", () => {
       const { replyModel, releaseReplies } = createWaitingReplyModel()
       const { runtime } = createRuntime({
         replyModel,
-        titles: new Map([
-          [titled, "Trip to Kyoto"],
-          [untitled, null]
+        conversations: new Map([
+          [titled, { title: "Trip to Kyoto" }],
+          [untitled, { title: null }]
         ])
       })
       const caliginia = findLiveAgent(runtime, CALIGINIA_AGENT_CODE)
@@ -366,17 +390,17 @@ describe("AgentRuntimeService", () => {
             {
               requestId: createFixtureUuidV7(21),
               conversationId: titled,
-              conversationTitle: "Trip to Kyoto",
+              conversationTitle: { status: "found", title: "Trip to Kyoto" },
               model: "qwen/qwen3-8b",
               startedAt: NOW
             },
             {
               requestId: createFixtureUuidV7(22),
-              conversationTitle: null
+              conversationTitle: { status: "found", title: null }
             },
             {
               requestId: createFixtureUuidV7(23),
-              conversationTitle: undefined
+              conversationTitle: { status: "missing" }
             }
           ]
         }

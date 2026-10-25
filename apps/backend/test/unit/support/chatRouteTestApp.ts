@@ -5,7 +5,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { onTestFinished, vi, type MockInstance } from "vitest"
 import SqliteAgentRecordStore from "../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
-import AgentRuntimeService from "../../../src/modules/agent/agentRuntimeService"
+import AgentRuntimeService, {
+  buildConversationTitleLookup
+} from "../../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../../src/modules/agent/agentService"
 import AttachmentFileStore from "../../../src/modules/attachment/attachmentFileStore"
 import { buildBuiltInAgents } from "../../../src/modules/agent/builtInAgents"
@@ -192,7 +194,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
       llmService.findLlmContextMeasurement(model, texts)
     ),
     findConversationTitle: (conversationId) =>
-      history.getConversation(conversationId)?.title
+      buildConversationTitleLookup(history.getConversation(conversationId))
   })
   const readJustRunToolNames = vi.fn<ReadJustRunToolNames>(() =>
     Promise.reject(createUnexpectedCallError("readJustRunToolNames"))

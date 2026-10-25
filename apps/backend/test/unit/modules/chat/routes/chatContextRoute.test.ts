@@ -7,7 +7,9 @@ import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import SqliteAgentRecordStore from "../../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
-import AgentRuntimeService from "../../../../../src/modules/agent/agentRuntimeService"
+import AgentRuntimeService, {
+  buildConversationTitleLookup
+} from "../../../../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../../../../src/modules/agent/agentService"
 import { formatSystemPrompt } from "../../../../../src/modules/agent/agentContext"
 import { TOOL_CALLS_OFF } from "../../../../../src/modules/agent/unofferedTools"
@@ -143,7 +145,7 @@ async function createChatContextRouteApp() {
       replyModel: UNUSED_REPLY_MODEL,
       replyContextMeter,
       findConversationTitle: (conversationId) =>
-        history.getConversation(conversationId)?.title
+        buildConversationTitleLookup(history.getConversation(conversationId))
     })
   )
   app.decorate("conversationHistoryReader", history)

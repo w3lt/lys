@@ -12,7 +12,8 @@ import type {
   AgentSearchOutcome,
   AgentStateOutcome,
   AgentStateReader,
-  AgentStateView
+  AgentStateView,
+  ConversationTitleLookup
 } from "./agentStateTools"
 import type {
   AgentReader,
@@ -27,13 +28,33 @@ import type { ReplyModel } from "./replyModel"
  * Finds the title of a stored conversation.
  *
  * @param conversationId - UUIDv7 of the conversation.
- * @returns Its title; null while it has none, and undefined when it is not
- * stored.
+ * @returns `found` with its title, null while it has none; `missing` when it
+ * is not stored.
  * @throws If the store is closed or the conversation is invalid.
  */
 export type FindConversationTitle = (
   conversationId: string
-) => string | null | undefined
+) => ConversationTitleLookup
+
+/** Shared lookup of a conversation that is not stored. */
+const MISSING_CONVERSATION_TITLE: ConversationTitleLookup = Object.freeze({
+  status: "missing"
+})
+
+/**
+ * Builds the title lookup of a conversation as its store found it.
+ *
+ * @param conversation - The stored conversation, or undefined when none has
+ * the id.
+ * @returns `missing` for no conversation; else frozen `found` with its title,
+ * null while it has none.
+ */
+export function buildConversationTitleLookup(
+  conversation: Readonly<{ title: string | null }> | undefined
+): ConversationTitleLookup {
+  if (conversation === undefined) return MISSING_CONVERSATION_TITLE
+  return Object.freeze({ status: "found", title: conversation.title })
+}
 
 /** What the agent runtime service is built from. */
 export type AgentRuntimeServiceOptions = Readonly<{

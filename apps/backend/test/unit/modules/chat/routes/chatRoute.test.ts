@@ -2222,7 +2222,7 @@ describe("updateFastifyWithChatRoute", () => {
           state: {
             requests: [
               {
-                conversationTitle: "Trip plan",
+                conversationTitle: { status: "found", title: "Trip plan" },
                 step: {
                   kind: "using-tools",
                   toolCalls: [

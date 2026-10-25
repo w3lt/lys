@@ -1,4 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type {
+  AgentRequestStep,
+  AgentToolCallState,
+  AgentToolCallStatus
+} from "../../../../src/modules/agent/agentActivity"
 import type { AgentIdentity } from "../../../../src/modules/agent/agentRoles"
 import {
   buildAgentStateDefinitions,
@@ -6,7 +11,8 @@ import {
   type AgentRequestView,
   type AgentSearchOutcome,
   type AgentStateOutcome,
-  type AgentStateReader
+  type AgentStateReader,
+  type ConversationTitleLookup
 } from "../../../../src/modules/agent/agentStateTools"
 import type {
   BuiltInTool,
@@ -47,21 +53,57 @@ const OWN_REQUEST: AgentRequestView = Object.freeze({
   model: "qwen/qwen3-8b",
   startedAt: "2026-10-24T10:05:00.000Z",
   step: Object.freeze({ kind: "preparing", round: 0 }),
-  conversationTitle: "Trip to Kyoto"
+  conversationTitle: Object.freeze({ status: "found", title: "Trip to Kyoto" })
 })
 
+/** What another request of the agent may change from the own request. */
+type RequestVariation = Readonly<{
+  /** Start time; the own request's by default. */
+  startedAt?: string
+  /** Model; the own request's by default. */
+  model?: string
+  /** Step; the own request's by default. */
+  step?: AgentRequestStep
+  /** Title of its conversation; the own request's by default. */
+  conversationTitle?: ConversationTitleLookup
+}>
+
 /**
- * Builds another request of the agent.
+ * Builds another request of the agent, in the own request's conversation.
  *
  * @param sequence - Identity sequence of its reply.
- * @param view - Fields that differ from the own request.
+ * @param variation - Fields that differ from the own request.
  * @returns The request as the reader shows it.
  */
 function buildRequest(
   sequence: number,
-  view: Partial<AgentRequestView>
+  variation: RequestVariation
 ): AgentRequestView {
-  return { ...OWN_REQUEST, requestId: createFixtureUuidV7(sequence), ...view }
+  return {
+    requestId: createFixtureUuidV7(sequence),
+    conversationId: OWN_REQUEST.conversationId,
+    model: variation.model ?? OWN_REQUEST.model,
+    startedAt: variation.startedAt ?? OWN_REQUEST.startedAt,
+    step: variation.step ?? OWN_REQUEST.step,
+    conversationTitle:
+      variation.conversationTitle ?? OWN_REQUEST.conversationTitle
+  }
+}
+
+/**
+ * Builds one tool call of a request's round.
+ *
+ * @param sequence - Identity sequence of the call.
+ * @param toolName - Name of the called tool.
+ * @param status - Status of the call.
+ * @returns The call's state.
+ */
+function buildToolCall(
+  sequence: number,
+  toolName: string,
+  status: AgentToolCallStatus
+): AgentToolCallState {
+  return { toolCallId: createFixtureUuidV7(sequence), toolName, status }
 }
 
 /**
@@ -250,19 +292,11 @@ describe("buildAgentStateTools", () => {
                   kind: "using-tools",
                   round: 1,
                   toolCalls: [
-                    {
-                      toolCallId: createFixtureUuidV7(201),
-                      toolName: "web_search",
-                      status: "succeeded"
-                    },
-                    {
-                      toolCallId: createFixtureUuidV7(202),
-                      toolName: "read_page",
-                      status: "awaiting-approval"
-                    }
+                    buildToolCall(201, "web_search", "succeeded"),
+                    buildToolCall(202, "read_page", "awaiting-approval")
                   ]
                 },
-                conversationTitle: "Weekly plan"
+                conversationTitle: { status: "found", title: "Weekly plan" }
               }),
               OWN_REQUEST
             ]
@@ -451,7 +485,12 @@ describe("buildAgentStateTools", () => {
               role: "member",
               deletedAt: null,
               requests: [
-                buildRequest(104, { conversationTitle: "Trip\n to  Kyoto" })
+                buildRequest(104, {
+                  conversationTitle: {
+                    status: "found",
+                    title: "Trip\n to  Kyoto"
+                  }
+                })
               ]
             }
           }
@@ -472,16 +511,19 @@ describe("buildAgentStateTools", () => {
       })
     })
 
-    it.each([
+    it.each<readonly [string, RequestVariation, string]>([
       [
         "in an untitled conversation, thinking",
-        { conversationTitle: null, step: { kind: "thinking", round: 0 } },
+        {
+          conversationTitle: { status: "found", title: null },
+          step: { kind: "thinking", round: 0 }
+        },
         "In an untitled conversation: started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; thinking."
       ],
       [
         "in a deleted conversation, writing, a minute in",
         {
-          conversationTitle: undefined,
+          conversationTitle: { status: "missing" },
           startedAt: "2026-10-24T10:04:30.000Z",
           step: { kind: "writing", round: 2 }
         },
@@ -499,21 +541,17 @@ describe("buildAgentStateTools", () => {
             kind: "using-tools",
             round: 0,
             toolCalls: [
-              ["a", "running"],
-              ["b", "running-in-app"],
-              ["c", "failed"],
-              ["d", "rejected"],
-              ["e", "interrupted"]
-            ].map(([toolName, status], index) => ({
-              toolCallId: createFixtureUuidV7(300 + index),
-              toolName,
-              status
-            }))
+              buildToolCall(300, "a", "running"),
+              buildToolCall(301, "b", "running-in-app"),
+              buildToolCall(302, "c", "failed"),
+              buildToolCall(303, "d", "rejected"),
+              buildToolCall(304, "e", "interrupted")
+            ]
           }
         },
         `In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; using tools: a running, b running in the app, c failed, d rejected by the person, e interrupted.`
       ]
-    ])("tells another agent's request %s", async (_label, view, line) => {
+    ])("tells another agent's request %s", async (_label, variation, line) => {
       const reader = createReader({
         state: {
           status: "found",
@@ -522,7 +560,7 @@ describe("buildAgentStateTools", () => {
             name: "Lysiptera",
             role: "leader",
             deletedAt: null,
-            requests: [buildRequest(103, view as Partial<AgentRequestView>)]
+            requests: [buildRequest(103, variation)]
           }
         }
       })

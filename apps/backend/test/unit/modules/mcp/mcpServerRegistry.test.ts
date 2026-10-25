@@ -5,9 +5,14 @@ import {
   type McpServerState,
   type SkippedMcpTool
 } from "@lys/protocol"
-import { mcpSettingsSchema, type McpServerSettings } from "@lys/share"
-import { realpathSync } from "node:fs"
+import {
+  mcpSettingsSchema,
+  type McpEnvironmentVariable,
+  type McpServerSettings
+} from "@lys/share"
+import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   describe,
   expect,
@@ -94,6 +99,44 @@ const LOOK_UNDERSCORE_UP_TOOL = buildTool("look_up")
 /** State of a server being opened. */
 const CONNECTING: McpServerState = Object.freeze({ status: "connecting" })
 
+/** How long a one-copy fake server takes to exit once its input closes. */
+const ONE_COPY_SHUTDOWN_MILLISECONDS = 1000
+
+/**
+ * Creates an empty folder for the stdio servers of one case, removed after
+ * the case.
+ *
+ * @returns Absolute path of the folder.
+ */
+function createServerFolder(): string {
+  const folder = mkdtempSync(join(WORKING_DIRECTORY, "lys-mcp-servers-"))
+  onTestFinished(() => rmSync(folder, { recursive: true, force: true }))
+  return folder
+}
+
+/**
+ * Builds a command server that runs one copy at a time, like a server that
+ * holds a lock or a port: it holds a lock file in the folder it runs in, and
+ * exits only {@link ONE_COPY_SHUTDOWN_MILLISECONDS} after its input closes.
+ *
+ * @param name - Server name.
+ * @param environment - Its variables.
+ * @returns Validated settings of the server.
+ */
+function buildOneCopyServerSettings(
+  name: string,
+  environment: readonly McpEnvironmentVariable[]
+): McpServerSettings {
+  return buildFakeStdioServerSettings(
+    name,
+    {
+      holdLock: true,
+      shutdownDelayMilliseconds: ONE_COPY_SHUTDOWN_MILLISECONDS
+    },
+    environment
+  )
+}
+
 /**
  * Opens one server as production does, with the test time limit.
  *
@@ -143,6 +186,8 @@ type RegistryHarnessOptions = Readonly<{
    * @param testEnded - Settles once the case ended.
    */
   readSettings?: (testEnded: Promise<void>) => Promise<McpSettingsRead>
+  /** Folder the stdio servers start in; {@link WORKING_DIRECTORY} when omitted. */
+  workingDirectory?: string
 }>
 
 /** A registry under test, what it was given, and what it reported. */
@@ -281,7 +326,7 @@ function createRegistryHarness(
   const registry = new McpServerRegistry({
     readSettings,
     openServer,
-    workingDirectory: WORKING_DIRECTORY,
+    workingDirectory: options.workingDirectory ?? WORKING_DIRECTORY,
     reportEvent: (event) => events.push(event)
   })
   onTestFinished(async () => {
@@ -393,6 +438,26 @@ async function waitForServerList(
   await vi.waitFor(() => {
     expect(registry.listServers()).toEqual(expected)
   }, STATE_WAIT)
+}
+
+/**
+ * Creates a registry harness whose only server, `alpha`, runs one copy at a
+ * time, and waits until it is connected.
+ *
+ * @param serverFolder - Folder the server starts in, which holds its lock.
+ * @returns The harness, with `alpha` connected.
+ */
+async function createConnectedOneCopyHarness(
+  serverFolder: string
+): Promise<RegistryHarness> {
+  const harness = createRegistryHarness({ workingDirectory: serverFolder })
+  harness.setServers([buildOneCopyServerSettings("alpha", [])])
+  await harness.registry.applySettings()
+  await waitForServerList(
+    harness.registry,
+    buildList([buildStdioStatus("alpha", buildConnectedState(1))])
+  )
+  return harness
 }
 
 /**
@@ -644,6 +709,28 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       expect(harness.openServer).toHaveBeenCalledTimes(2)
       expect(harness.openServer.mock.calls[1]?.[0]).toEqual(changedSettings)
       expect(filterEvents(harness.events, "connection-closed")).toEqual([])
+    })
+
+    it("opens a changed command server only once its previous process ended, so a server that runs one copy at a time connects", async () => {
+      const harness = await createConnectedOneCopyHarness(createServerFolder())
+      const changedSettings = buildOneCopyServerSettings("alpha", [
+        { name: "LYS_TEST_MODE", value: "changed" }
+      ])
+      harness.setServers([changedSettings])
+
+      await harness.registry.applySettings()
+      await waitForMicrotasks()
+
+      expect(harness.registry.listServers()).toEqual(
+        buildList([buildStdioStatus("alpha", CONNECTING)])
+      )
+      expect(harness.openServer).toHaveBeenCalledOnce()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("alpha", buildConnectedState(1))])
+      )
+      expect(harness.openServer.mock.calls[1]?.[0]).toEqual(changedSettings)
+      expect(filterEvents(harness.events, "opening-failed")).toEqual([])
     })
 
     it("closes a server the settings no longer name", async () => {
@@ -972,6 +1059,64 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       expect(filterEvents(harness.events, "connection-closed")).toEqual([])
     })
 
+    it("opens a command server again only once its previous process ended, so a server that runs one copy at a time connects", async () => {
+      const harness = await createConnectedOneCopyHarness(createServerFolder())
+
+      expect(harness.registry.reconnect("alpha")).toBe("reconnecting")
+      await waitForMicrotasks()
+
+      expect(harness.registry.listServers()).toEqual(
+        buildList([buildStdioStatus("alpha", CONNECTING)])
+      )
+      expect(harness.openServer).toHaveBeenCalledOnce()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("alpha", buildConnectedState(1))])
+      )
+      expect(harness.openServer).toHaveBeenCalledTimes(2)
+      expect(filterEvents(harness.events, "opening-failed")).toEqual([])
+    })
+
+    it("opens a server reconnected twice while its previous process ends only once", async () => {
+      const harness = await createConnectedOneCopyHarness(createServerFolder())
+
+      expect(harness.registry.reconnect("alpha")).toBe("reconnecting")
+      expect(harness.registry.reconnect("alpha")).toBe("reconnecting")
+
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("alpha", buildConnectedState(1))])
+      )
+      expect(harness.openServer).toHaveBeenCalledTimes(2)
+      expect(filterEvents(harness.events, "opening-failed")).toEqual([])
+    })
+
+    it("opens nothing for a server removed while its previous process ends", async () => {
+      const harness = await createConnectedOneCopyHarness(createServerFolder())
+      expect(harness.registry.reconnect("alpha")).toBe("reconnecting")
+      harness.setServers([])
+
+      await harness.registry.applySettings()
+      await harness.registry.close()
+
+      expect(harness.openServer).toHaveBeenCalledOnce()
+      expect(harness.registry.listServers()).toEqual(buildList([]))
+    })
+
+    it("opens nothing when the registry closes while a reconnected server's previous process ends, and waits for that process", async () => {
+      const serverFolder = createServerFolder()
+      const harness = await createConnectedOneCopyHarness(serverFolder)
+      expect(harness.registry.reconnect("alpha")).toBe("reconnecting")
+
+      await harness.registry.close()
+
+      expect(harness.openServer).toHaveBeenCalledOnce()
+      expect(
+        findOpenedConnection(harness.openedConnections, "alpha").close
+      ).toHaveBeenCalledOnce()
+      expect(readdirSync(serverFolder)).toEqual([])
+    })
+
     it("opens a failed server again, which connects once the server answers", async () => {
       let route: McpHttpRoute = answerWithStatus(401)
       const server = await startFakeMcpHttpServer((request, body, response) => {
@@ -1006,8 +1151,9 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       ])
     })
 
-    it("cancels an opening it supersedes, and closes the connection that opening still ends with", async () => {
+    it("cancels an opening it supersedes, and opens again only once the connection that opening still ends with closed", async () => {
       const lateRelease = Promise.withResolvers<void>()
+      const closeRelease = Promise.withResolvers<void>()
       let openingCount = 0
       const harness = createRegistryHarness({
         open: async (settings, context, testEnded) => {
@@ -1020,6 +1166,11 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
             abortSignal: NEVER_ABORTED
           })
           await Promise.race([lateRelease.promise, testEnded])
+          if (opening.status === "connected")
+            holdCloseUntil(
+              opening.connection,
+              Promise.race([closeRelease.promise, testEnded])
+            )
           return opening
         }
       })
@@ -1031,23 +1182,26 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       expect(harness.openServer.mock.calls[0]?.[1].abortSignal.aborted).toBe(
         true
       )
+      lateRelease.resolve()
+      await vi.waitFor(() => {
+        expect(
+          findOpenedConnection(harness.openedConnections, "alpha").close
+        ).toHaveBeenCalledOnce()
+      }, STATE_WAIT)
+      await waitForMicrotasks()
+      expect(harness.openServer).toHaveBeenCalledOnce()
+      expect(harness.registry.listServers()).toEqual(
+        buildList([buildStdioStatus("alpha", CONNECTING)])
+      )
+      closeRelease.resolve()
       await waitForServerList(
         harness.registry,
         buildList([buildStdioStatus("alpha", buildConnectedState(1))])
       )
-      lateRelease.resolve()
-      await vi.waitFor(() => {
-        expect(harness.openedConnections).toHaveLength(2)
-      }, STATE_WAIT)
-      await waitForRegistryClose(
-        findOpenedConnection(harness.openedConnections, "alpha", 1)
-      )
+      expect(harness.openServer).toHaveBeenCalledTimes(2)
       expect(
-        findOpenedConnection(harness.openedConnections, "alpha", 0).close
+        findOpenedConnection(harness.openedConnections, "alpha", 1).close
       ).not.toHaveBeenCalled()
-      expect(harness.registry.listServers()).toEqual(
-        buildList([buildStdioStatus("alpha", buildConnectedState(1))])
-      )
       expect(filterEvents(harness.events, "connected")).toHaveLength(1)
       await expect(
         findTool(harness.registry, "mcp__alpha__echo").callTool(

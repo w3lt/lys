@@ -101,15 +101,17 @@ const UNKNOWN_TOOL_LOOKUP: McpSessionToolLookup = Object.freeze({
 /**
  * One attempt to open an MCP server, and the connection it leads to.
  *
- * @remarks Lifecycle: {@link open} runs once and ends connected, failed, or
- * cancelled; {@link stop} ends the session for good, cancelling its opening
- * or closing its connection. A connection that ends by itself fails the
- * session as `closed`; a session never reconnects, its owner starts a new
- * one. Resource ownership: owns the connection its opening led to until it
- * closes it; a connection an opening returns after {@link stop} is closed
- * at once. Every close runs in the background through `trackTask`.
- * Concurrency model: single-threaded; every state change happens
- * synchronously, so a reader always sees one consistent state.
+ * @remarks Lifecycle: {@link open} runs once, waits until the session it
+ * replaces released the server, and ends connected, failed, or cancelled;
+ * {@link stop} ends the session for good, cancelling its opening or closing
+ * its connection, and tells when the session released the server. A
+ * connection that ends by itself fails the session as `closed`; a session
+ * never reconnects, its owner starts a new one. Resource ownership: owns the
+ * connection its opening led to until it closes it; a connection an opening
+ * returns after {@link stop} is closed at once. Every close runs in the
+ * background through `trackTask`. Concurrency model: single-threaded; every
+ * state change happens synchronously, so a reader always sees one
+ * consistent state.
  */
 export default class McpServerSession {
   /** Validated settings the session opens. */
@@ -124,6 +126,8 @@ export default class McpServerSession {
   #isStopped: boolean
   /** Whether the opening's connection ended by itself. */
   #hasConnectionEnded: boolean
+  /** Settles once the opening and every close the session started ended. */
+  #work: Promise<void>
 
   /**
    * Creates a session that is connecting.
@@ -143,6 +147,7 @@ export default class McpServerSession {
     this.#state = Object.freeze({ status: "connecting" })
     this.#isStopped = false
     this.#hasConnectionEnded = false
+    this.#work = Promise.resolve()
   }
 
   /**
@@ -155,14 +160,35 @@ export default class McpServerSession {
   }
 
   /**
-   * Opens the server and reads its tools.
+   * Opens the server and reads its tools once the session it replaces
+   * released the server.
    *
+   * @param previousRelease - What {@link stop} returned for the session this
+   * one replaces, so two copies of a command server never run at once;
+   * undefined when it replaces none, and the opening starts at once.
    * @returns A promise that settles once the opening ended; it never
    * rejects. Call it once.
-   * @remarks An opener that throws fails the session as `protocol-error`,
-   * keeping what was thrown for the log.
+   * @remarks A session stopped before the previous one released the server
+   * opens nothing. An opener that throws fails the session as
+   * `protocol-error`, keeping what was thrown for the log.
    */
-  public async open(): Promise<void> {
+  public open(previousRelease: Promise<void> | undefined): Promise<void> {
+    const opening = this.#openAfter(previousRelease)
+    this.#addWork(opening)
+    return opening
+  }
+
+  /**
+   * Waits for the previous session's release, then opens the server unless
+   * the session was stopped meanwhile.
+   *
+   * @param previousRelease - Release of the replaced session, or undefined.
+   * @returns A promise that settles once the opening ended; it never
+   * rejects.
+   */
+  async #openAfter(previousRelease: Promise<void> | undefined): Promise<void> {
+    if (previousRelease !== undefined) await previousRelease
+    if (this.#isStopped) return
     const serverName = this.#settings.name
     const { reportEvent } = this.#dependencies
     let opening: McpServerOpening
@@ -260,15 +286,41 @@ export default class McpServerSession {
   /**
    * Ends the session: cancels its opening or closes its connection.
    *
-   * @remarks Idempotent. The state stays as it was; the owner forgets the
-   * session.
+   * @returns A promise that settles once the session released the server:
+   * its opening ended and every connection it led to closed, a command
+   * server's process included. It never rejects.
+   * @remarks Idempotent; every call's promise settles once the same work
+   * ended. The state stays as it was; the owner forgets the session.
    */
-  public stop(): void {
-    if (this.#isStopped) return
-    this.#isStopped = true
-    if (this.#state.status === "connecting") this.#controller.abort()
-    else if (this.#state.status === "connected")
-      this.#closeConnection(this.#state.connection)
+  public stop(): Promise<void> {
+    if (!this.#isStopped) {
+      this.#isStopped = true
+      if (this.#state.status === "connecting") this.#controller.abort()
+      else if (this.#state.status === "connected")
+        this.#closeConnection(this.#state.connection)
+    }
+    return this.#waitForWork()
+  }
+
+  /**
+   * Waits until the opening and every close the session started ended.
+   *
+   * @returns A promise that settles once no work is left, including a close
+   * an ending opening starts while it waits.
+   */
+  async #waitForWork(): Promise<void> {
+    const work = this.#work
+    await work
+    if (work !== this.#work) await this.#waitForWork()
+  }
+
+  /**
+   * Adds one task to the work {@link stop} waits for.
+   *
+   * @param task - Task that never rejects.
+   */
+  #addWork(task: Promise<void>): void {
+    this.#work = Promise.all([this.#work, task]).then(() => undefined)
   }
 
   /**
@@ -363,15 +415,15 @@ export default class McpServerSession {
    */
   #closeConnection(connection: McpServerConnection): void {
     const serverName = this.#settings.name
-    this.#dependencies.trackTask(
-      connection.close().then(undefined, (error: unknown) => {
-        this.#dependencies.reportEvent({
-          kind: "close-failed",
-          serverName,
-          error
-        })
+    const closing = connection.close().then(undefined, (error: unknown) => {
+      this.#dependencies.reportEvent({
+        kind: "close-failed",
+        serverName,
+        error
       })
-    )
+    })
+    this.#addWork(closing)
+    this.#dependencies.trackTask(closing)
   }
 }
 

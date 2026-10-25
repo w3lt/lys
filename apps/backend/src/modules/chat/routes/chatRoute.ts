@@ -807,19 +807,14 @@ function buildTurnBuiltInTools(
 }
 
 /**
- * Stops the replies a stored turn supersedes, then starts the generation that
- * writes the turn's reply and, for an untitled conversation, its title unless
- * another turn of that conversation is already generating one.
+ * Starts the generation that writes one stored turn's reply and, for an
+ * untitled conversation, its title unless another turn of that conversation
+ * is already generating one.
  *
  * @param input - Stored turn and the request values its tasks keep.
  * @returns The registered generation.
  * @throws If the registry no longer admits generations; the stored reply is
  * finalized as interrupted first, so no reply stays streaming.
- * @remarks Storing the turn already marked the conversation's streaming
- * replies interrupted; stopping their generations ends the model requests,
- * tool calls, and approval prompts they still wait on, so their agent no
- * longer counts them as requests in progress. The new generation does not
- * wait for them to settle.
  */
 function startTurnGeneration(input: TurnGenerationInput): ReplyGeneration {
   const { turn, dependencies, logger } = input
@@ -828,7 +823,6 @@ function startTurnGeneration(input: TurnGenerationInput): ReplyGeneration {
     assistantMessageId: turn.assistantMessage.id
   }
   try {
-    void dependencies.generations.stopConversationReplies(target.conversationId)
     return dependencies.generations.startReplyGeneration(target, {
       startReplyTask: (context) => createTurnReplyTask(input, context),
       startTitleTask:

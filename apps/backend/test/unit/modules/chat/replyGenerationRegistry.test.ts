@@ -290,52 +290,6 @@ describe("ReplyGenerationRegistry", () => {
     })
   })
 
-  describe("stopConversationReplies", () => {
-    it("stops every running reply of the conversation, keeps its title, and settles once the stopped replies settle", async () => {
-      const { registry, createTask, createLaunchers } = createRegistryHarness()
-      const firstReplyOfX = createTask()
-      const titleOfX = createTask()
-      const secondReplyOfX = createTask()
-      const replyOfY = createTask()
-      registry.startReplyGeneration(
-        FIRST_REPLY_OF_X,
-        createLaunchers(firstReplyOfX, titleOfX)
-      )
-      registry.startReplyGeneration(
-        SECOND_REPLY_OF_X,
-        createLaunchers(secondReplyOfX)
-      )
-      registry.startReplyGeneration(REPLY_OF_Y, createLaunchers(replyOfY))
-      await waitForMicrotasks()
-
-      const stop = registry.stopConversationReplies(CONVERSATION_X_ID)
-      const stopSettlement = createSettlementReader(stop)
-
-      expect(
-        [firstReplyOfX, secondReplyOfX, titleOfX, replyOfY].map(
-          (task) => task.context.abortSignal.aborted
-        )
-      ).toEqual([true, true, false, false])
-      firstReplyOfX.resolve()
-      await waitForMicrotasks()
-      expect(stopSettlement()).toBe("pending")
-      secondReplyOfX.resolve()
-      await expect(stop).resolves.toBeUndefined()
-    })
-
-    it("settles at once for a conversation without running generations", async () => {
-      const { registry, createTask, createLaunchers } = createRegistryHarness()
-      const replyOfY = createTask()
-      registry.startReplyGeneration(REPLY_OF_Y, createLaunchers(replyOfY))
-      await waitForMicrotasks()
-
-      await expect(
-        registry.stopConversationReplies(CONVERSATION_X_ID)
-      ).resolves.toBeUndefined()
-      expect(replyOfY.context.abortSignal.aborted).toBe(false)
-    })
-  })
-
   describe("[Symbol.asyncDispose]", () => {
     it("cancels both tasks of every generation and resolves only after all settle", async () => {
       const { registry, createTask, createLaunchers } = createRegistryHarness()
@@ -419,7 +373,7 @@ describe("ReplyGenerationRegistry", () => {
       await expect(registry[Symbol.asyncDispose]()).resolves.toBeUndefined()
     })
 
-    it("rejects starting, finding, and stopping generations once disposal began", async () => {
+    it("rejects starting and finding generations once disposal began", async () => {
       const { registry, createTask, createLaunchers } = createRegistryHarness()
       const runningReply = createTask()
       const running = registry.startReplyGeneration(
@@ -439,9 +393,6 @@ describe("ReplyGenerationRegistry", () => {
         )
       ).toThrow(Error)
       expect(() => registry.findReplyGeneration(FIRST_REPLY_OF_X)).toThrow(
-        Error
-      )
-      expect(() => registry.stopConversationReplies(CONVERSATION_X_ID)).toThrow(
         Error
       )
       runningReply.resolve()

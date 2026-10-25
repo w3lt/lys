@@ -592,7 +592,7 @@ export function registerAgentSearcherContractSuite(
     it("finds the built-in agents that match, ignoring case, in shipped order", () => {
       const { agentSearcher, builtInAgents } = createHarness()
 
-      expect(agentSearcher.searchAgents("LYS")).toEqual({
+      expect(agentSearcher.listAgentMatches("LYS")).toEqual({
         matches: builtInAgents.map(buildBuiltInAgentMatch),
         matchCount: builtInAgents.length
       })
@@ -604,7 +604,7 @@ export function registerAgentSearcherContractSuite(
       const code = builtInAgent.code.slice(0, 4)
       saveAgent(createListedAgent(code, FIRST_CREATED_AT))
 
-      const result = agentSearcher.searchAgents(code.toUpperCase())
+      const result = agentSearcher.listAgentMatches(code.toUpperCase())
 
       expect(result.matches.map((match) => [match.kind, match.code])).toEqual([
         ["custom", code],
@@ -621,7 +621,7 @@ export function registerAgentSearcherContractSuite(
         name: builtInAgent.name.toLowerCase()
       })
 
-      const result = agentSearcher.searchAgents(builtInAgent.name)
+      const result = agentSearcher.listAgentMatches(builtInAgent.name)
 
       expect(result.matches.map((match) => [match.kind, match.code])).toEqual([
         ["built-in", builtInAgent.code],
@@ -636,7 +636,7 @@ export function registerAgentSearcherContractSuite(
       saveAgent(RESEARCHER)
       agentDeleter.deleteAgent("researcher")
 
-      expect(agentSearcher.searchAgents("research")).toEqual({
+      expect(agentSearcher.listAgentMatches("research")).toEqual({
         matches: [
           {
             kind: "custom",
@@ -656,7 +656,7 @@ export function registerAgentSearcherContractSuite(
 
       expect(
         harness.agentSearcher
-          .searchAgents("agent")
+          .listAgentMatches("agent")
           .matches.map((match) => match.code)
       ).toEqual(["b", "c", "a"])
     })
@@ -674,7 +674,7 @@ export function registerAgentSearcherContractSuite(
           name: `${builtInAgent.name} fan ${index}`
         })
 
-      const result = agentSearcher.searchAgents(builtInAgent.name)
+      const result = agentSearcher.listAgentMatches(builtInAgent.name)
 
       expect(result.matches).toHaveLength(MAXIMUM_AGENT_SEARCH_MATCHES)
       expect(result.matches[0]).toEqual(buildBuiltInAgentMatch(builtInAgent))
@@ -692,7 +692,7 @@ export function registerAgentSearcherContractSuite(
       const { agentSearcher, saveAgent } = createHarness()
       saveAgent(createListedAgent("abc", FIRST_CREATED_AT))
 
-      expect(agentSearcher.searchAgents("a.c")).toEqual({
+      expect(agentSearcher.listAgentMatches("a.c")).toEqual({
         matches: [],
         matchCount: 0
       })
@@ -702,14 +702,16 @@ export function registerAgentSearcherContractSuite(
       const { agentSearcher, saveInvalidAgent } = createHarness()
       saveInvalidAgent("damaged")
 
-      expect(() => agentSearcher.searchAgents("damaged")).toThrow(z.ZodError)
+      expect(() => agentSearcher.listAgentMatches("damaged")).toThrow(
+        z.ZodError
+      )
     })
 
     it("fails with `Database is closed` after the owner closes the store", () => {
       const { agentSearcher, closeStore } = createHarness()
       closeStore()
 
-      expect(() => agentSearcher.searchAgents("research")).toThrow(
+      expect(() => agentSearcher.listAgentMatches("research")).toThrow(
         "Database is closed"
       )
     })

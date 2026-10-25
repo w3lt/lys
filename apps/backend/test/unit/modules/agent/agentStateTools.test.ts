@@ -76,11 +76,11 @@ function createReader(
   }>
 ) {
   return {
-    findAgents: vi.fn<AgentStateReader["findAgents"]>(() => {
+    listAgentMatches: vi.fn<AgentStateReader["listAgentMatches"]>(() => {
       if (answers.search === undefined) throw new Error("Unexpected search")
       return answers.search
     }),
-    readAgentState: vi.fn<AgentStateReader["readAgentState"]>(() => {
+    findAgentState: vi.fn<AgentStateReader["findAgentState"]>(() => {
       if (answers.state === undefined) throw new Error("Unexpected read")
       return answers.state
     })
@@ -257,7 +257,7 @@ describe("buildAgentStateTools", () => {
         ].join("\n"),
         sources: []
       })
-      expect(reader.readAgentState).toHaveBeenCalledExactlyOnceWith(
+      expect(reader.findAgentState).toHaveBeenCalledExactlyOnceWith(
         LEADER,
         "caliginia"
       )
@@ -344,7 +344,7 @@ describe("buildAgentStateTools", () => {
       })
       const parsed = readMyState?.tool.parseToolCall({})
 
-      expect(reader.readAgentState).not.toHaveBeenCalled()
+      expect(reader.findAgentState).not.toHaveBeenCalled()
       if (parsed?.status !== "parsed") throw new Error("Not parsed")
       vi.setSystemTime(new Date("2026-10-24T10:07:00.000Z"))
       const result = await parsed.runToolCall({
@@ -383,7 +383,7 @@ describe("buildAgentStateTools", () => {
           addWebSources: () => []
         })
       ).rejects.toBe(stopReason)
-      expect(reader.readAgentState).not.toHaveBeenCalled()
+      expect(reader.findAgentState).not.toHaveBeenCalled()
     })
   })
 
@@ -412,7 +412,7 @@ describe("buildAgentStateTools", () => {
         ),
         runnableArguments: { code: "lysiptera" },
         invalidArguments: { code: "Lysiptera" },
-        countStartedWork: () => reader.readAgentState.mock.calls.length
+        countStartedWork: () => reader.findAgentState.mock.calls.length
       }
     })
 
@@ -431,7 +431,7 @@ describe("buildAgentStateTools", () => {
         message:
           'The code must be an agent code: lowercase letters and digits in groups joined by single hyphens, such as "caliginia". Use find_agents to look an agent up by name.'
       })
-      expect(reader.readAgentState).not.toHaveBeenCalled()
+      expect(reader.findAgentState).not.toHaveBeenCalled()
     })
 
     it("puts an agent name and a conversation title with line breaks on one line", async () => {
@@ -542,7 +542,7 @@ describe("buildAgentStateTools", () => {
         ].join("\n"),
         sources: []
       })
-      expect(reader.readAgentState).toHaveBeenCalledExactlyOnceWith(
+      expect(reader.findAgentState).toHaveBeenCalledExactlyOnceWith(
         LEADER,
         "lysiptera"
       )
@@ -630,7 +630,7 @@ describe("buildAgentStateTools", () => {
         ),
         runnableArguments: { query: "lys" },
         invalidArguments: { query: " " },
-        countStartedWork: () => reader.findAgents.mock.calls.length
+        countStartedWork: () => reader.listAgentMatches.mock.calls.length
       }
     })
 
@@ -676,7 +676,10 @@ describe("buildAgentStateTools", () => {
         ].join("\n"),
         sources: []
       })
-      expect(reader.findAgents).toHaveBeenCalledExactlyOnceWith(LEADER, "lys")
+      expect(reader.listAgentMatches).toHaveBeenCalledExactlyOnceWith(
+        LEADER,
+        "lys"
+      )
     })
 
     it("says how many more matched than it shows", async () => {
@@ -771,7 +774,7 @@ describe("buildAgentStateTools", () => {
         status: "invalid",
         message: "The query must be 1 to 100 characters long after trimming."
       })
-      expect(reader.findAgents).not.toHaveBeenCalled()
+      expect(reader.listAgentMatches).not.toHaveBeenCalled()
     })
 
     it("accepts a 100-character query", async () => {
@@ -786,7 +789,7 @@ describe("buildAgentStateTools", () => {
 
       await runStateTool(tools, "find_agents", { query: "a".repeat(100) })
 
-      expect(reader.findAgents).toHaveBeenCalledOnce()
+      expect(reader.listAgentMatches).toHaveBeenCalledOnce()
     })
 
     it("answers a refused search as failed, saying only leaders see other agents", async () => {

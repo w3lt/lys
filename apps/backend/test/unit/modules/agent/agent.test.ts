@@ -636,8 +636,8 @@ function buildScenarioReplyStorage(
 
 /** State reader of an agent whose case reads no state; any read fails it. */
 const UNEXPECTED_STATE_READER: AgentStateReader = Object.freeze({
-  findAgents: handleUnexpectedToolCall,
-  readAgentState: handleUnexpectedToolCall
+  listAgentMatches: handleUnexpectedToolCall,
+  findAgentState: handleUnexpectedToolCall
 })
 
 /**
@@ -3587,7 +3587,7 @@ describe("Agent", () => {
       "runs a read_my_state call at once while tool calls are %s, telling the agent the reply it writes",
       async (_label, unofferedTools) => {
         const store = openAgentTurnStore()
-        const readAgentState = vi.fn<AgentStateReader["readAgentState"]>(
+        const findAgentState = vi.fn<AgentStateReader["findAgentState"]>(
           () => ({
             status: "found",
             state: {
@@ -3613,7 +3613,7 @@ describe("Agent", () => {
         const agent = createTestAgent(
           { openReplyStream },
           createRoomyReplyContextMeter(),
-          { findAgents: handleUnexpectedToolCall, readAgentState }
+          { listAgentMatches: handleUnexpectedToolCall, findAgentState }
         )
         const createToolCallGate = vi.fn(handleUnexpectedToolCall)
 
@@ -3633,7 +3633,7 @@ describe("Agent", () => {
           "Nothing else is in progress."
         ].join("\n")
         expect(createToolCallGate).not.toHaveBeenCalled()
-        expect(readAgentState).toHaveBeenCalledExactlyOnceWith(
+        expect(findAgentState).toHaveBeenCalledExactlyOnceWith(
           { code: AGENT_PROFILE.code, role: "leader" },
           AGENT_PROFILE.code
         )

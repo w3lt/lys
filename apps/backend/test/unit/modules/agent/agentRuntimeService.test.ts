@@ -96,7 +96,9 @@ function createRuntime(options: RuntimeOptions = {}) {
   })
   const agents = {
     findAgent: vi.fn((code: string) => agentService.findAgent(code)),
-    searchAgents: vi.fn((query: string) => agentService.searchAgents(query))
+    listAgentMatches: vi.fn((query: string) =>
+      agentService.listAgentMatches(query)
+    )
   }
   const titles = options.titles ?? new Map<string, string | null>()
   const runtime = new AgentRuntimeService({
@@ -109,7 +111,8 @@ function createRuntime(options: RuntimeOptions = {}) {
     runtime,
     agentService,
     countAgentReads: () =>
-      agents.findAgent.mock.calls.length + agents.searchAgents.mock.calls.length
+      agents.findAgent.mock.calls.length +
+      agents.listAgentMatches.mock.calls.length
   }
 }
 
@@ -325,7 +328,7 @@ describe("AgentRuntimeService", () => {
         })
       )
 
-      const outcome = runtime.readAgentState(LEADER, CALIGINIA_AGENT_CODE)
+      const outcome = runtime.findAgentState(LEADER, CALIGINIA_AGENT_CODE)
       releaseReplies()
       await Promise.all(replies)
 
@@ -355,7 +358,7 @@ describe("AgentRuntimeService", () => {
         outcome.status === "found" && Object.isFrozen(outcome.state.requests[0])
       ).toBe(true)
       expect(
-        runtime.readAgentState(LEADER, CALIGINIA_AGENT_CODE)
+        runtime.findAgentState(LEADER, CALIGINIA_AGENT_CODE)
       ).toMatchObject({ state: { requests: [] } })
     })
 
@@ -366,7 +369,7 @@ describe("AgentRuntimeService", () => {
       const reply = createHelloReply(findLiveAgent(runtime, "researcher"))
 
       agentService.deleteAgent("researcher")
-      const outcome = runtime.readAgentState(LEADER, "researcher")
+      const outcome = runtime.findAgentState(LEADER, "researcher")
       releaseReplies()
       await reply
 
@@ -385,7 +388,7 @@ describe("AgentRuntimeService", () => {
       const { runtime, agentService } = createRuntime({ replyModel })
       agentService.createAgent(STATE_READER_RESEARCHER)
 
-      const outcome = runtime.readAgentState(LEADER, "researcher")
+      const outcome = runtime.findAgentState(LEADER, "researcher")
       agentService.updateAgent("researcher", {
         systemPrompt: "You cite sources."
       })

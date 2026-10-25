@@ -172,5 +172,5 @@ export interface AgentSearcher {
    * @throws With `Database is closed` once the store's owner has closed it,
    * or if the store holds an invalid agent.
    */
-  searchAgents(query: string): AgentSearchResult
+  listAgentMatches(query: string): AgentSearchResult
 }

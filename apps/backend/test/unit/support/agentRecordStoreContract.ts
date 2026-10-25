@@ -547,7 +547,7 @@ export function registerAgentRecordSearcherContractSuite(
       recordStore.createAgent(RESEARCHER)
 
       expect(
-        recordSearcher.searchAgents({ query: "RESEARCH", limit: 20 })
+        recordSearcher.listAgentMatches({ query: "RESEARCH", limit: 20 })
       ).toEqual({
         matches: [
           buildMatch(RESEARCHER, { deletedAt: null, isExactMatch: false })
@@ -555,7 +555,8 @@ export function registerAgentRecordSearcherContractSuite(
         matchCount: 1
       })
       expect(
-        recordSearcher.searchAgents({ query: "assistant", limit: 20 }).matches
+        recordSearcher.listAgentMatches({ query: "assistant", limit: 20 })
+          .matches
       ).toEqual([buildMatch(LYS, { deletedAt: null, isExactMatch: false })])
     })
 
@@ -563,7 +564,9 @@ export function registerAgentRecordSearcherContractSuite(
       const { recordStore, recordSearcher } = createHarness()
       recordStore.createAgent(createListedAgent("abc", FIRST_CREATED_AT))
 
-      expect(recordSearcher.searchAgents({ query: "a.c", limit: 20 })).toEqual({
+      expect(
+        recordSearcher.listAgentMatches({ query: "a.c", limit: 20 })
+      ).toEqual({
         matches: [],
         matchCount: 0
       })
@@ -575,7 +578,7 @@ export function registerAgentRecordSearcherContractSuite(
       recordStore.deleteAgent("web-researcher", DELETED_AT)
 
       expect(
-        recordSearcher.searchAgents({ query: "researcher", limit: 20 })
+        recordSearcher.listAgentMatches({ query: "researcher", limit: 20 })
       ).toEqual({
         matches: [
           buildMatch(RESEARCHER, {
@@ -591,7 +594,10 @@ export function registerAgentRecordSearcherContractSuite(
       const { recordStore, recordSearcher } = createHarness()
       saveSearchedAgents(recordStore)
 
-      const page = recordSearcher.searchAgents({ query: "Agent", limit: 20 })
+      const page = recordSearcher.listAgentMatches({
+        query: "Agent",
+        limit: 20
+      })
 
       expect(
         page.matches.map((match) => [match.agent.code, match.isExactMatch])
@@ -610,7 +616,7 @@ export function registerAgentRecordSearcherContractSuite(
       recordStore.createAgent({ ...RESEARCHER, bio: "Researcher web" })
 
       expect(
-        recordSearcher.searchAgents({ query: "researcher web", limit: 20 })
+        recordSearcher.listAgentMatches({ query: "researcher web", limit: 20 })
           .matches
       ).toEqual([
         buildMatch(
@@ -626,11 +632,13 @@ export function registerAgentRecordSearcherContractSuite(
       recordStore.createAgent(agent)
 
       expect(
-        recordSearcher.searchAgents({ query: "res", limit: 20 }).matches
+        recordSearcher.listAgentMatches({ query: "res", limit: 20 }).matches
       ).toEqual([buildMatch(agent, { deletedAt: null, isExactMatch: false })])
       expect(
-        recordSearcher.searchAgents({ query: "RES\u0000EARCHER", limit: 20 })
-          .matches
+        recordSearcher.listAgentMatches({
+          query: "RES\u0000EARCHER",
+          limit: 20
+        }).matches
       ).toEqual([buildMatch(agent, { deletedAt: null, isExactMatch: true })])
     })
 
@@ -638,7 +646,7 @@ export function registerAgentRecordSearcherContractSuite(
       const { recordStore, recordSearcher } = createHarness()
       saveSearchedAgents(recordStore)
 
-      const page = recordSearcher.searchAgents({ query: "agent", limit: 2 })
+      const page = recordSearcher.listAgentMatches({ query: "agent", limit: 2 })
 
       expect(page.matches.map((match) => match.agent.code)).toEqual([
         "agent",
@@ -651,7 +659,7 @@ export function registerAgentRecordSearcherContractSuite(
       const { recordStore, recordSearcher } = createHarness()
       recordStore.createAgent(RESEARCHER)
 
-      const page = recordSearcher.searchAgents({ query: "web", limit: 20 })
+      const page = recordSearcher.listAgentMatches({ query: "web", limit: 20 })
 
       expect(Object.isFrozen(page)).toBe(true)
       expect(Object.isFrozen(page.matches)).toBe(true)
@@ -665,7 +673,7 @@ export function registerAgentRecordSearcherContractSuite(
       closeRecords()
 
       expect(() =>
-        recordSearcher.searchAgents({ query: "lys", limit: 1 })
+        recordSearcher.listAgentMatches({ query: "lys", limit: 1 })
       ).toThrow("Database is closed")
     })
   })

@@ -237,11 +237,11 @@ export default class AgentService
    * by creation time and code; and the number of all matches.
    * @throws If the store is closed or a matched agent is invalid.
    */
-  public searchAgents(query: string): AgentSearchResult {
+  public listAgentMatches(query: string): AgentSearchResult {
     const builtInAgents = this.#builtInAgentSummaries.filter((agent) =>
       hasAgentSearchMatch(agent, query)
     )
-    const page = this.#recordStore.searchAgents({
+    const page = this.#recordStore.listAgentMatches({
       query,
       limit: MAXIMUM_AGENT_SEARCH_MATCHES
     })

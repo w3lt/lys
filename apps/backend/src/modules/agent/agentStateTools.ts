@@ -123,7 +123,7 @@ export interface AgentStateReader {
    * Bounded synchronous work with no side effect.
    * @throws Only on a defect, such as a closed store.
    */
-  findAgents(reader: AgentIdentity, query: string): AgentSearchOutcome
+  listAgentMatches(reader: AgentIdentity, query: string): AgentSearchOutcome
 
   /**
    * Reads the state of one agent.
@@ -138,7 +138,7 @@ export interface AgentStateReader {
    * Bounded synchronous work with no side effect.
    * @throws Only on a defect, such as a closed store.
    */
-  readAgentState(reader: AgentIdentity, code: string): AgentStateOutcome
+  findAgentState(reader: AgentIdentity, code: string): AgentStateOutcome
 }
 
 /** What the state tools of one turn need. */
@@ -455,7 +455,7 @@ function runReadMyState(
   context: AgentStateToolContext,
   now: Date
 ): BuiltInToolResult {
-  const outcome = context.reader.readAgentState(context.self, context.self.code)
+  const outcome = context.reader.findAgentState(context.self, context.self.code)
   if (outcome.status !== "found")
     return buildRefusedStateResult(outcome, context.self.code)
   return buildSucceededResult([
@@ -477,7 +477,7 @@ function runReadAgentState(
   context: AgentStateToolContext,
   now: Date
 ): BuiltInToolResult {
-  const outcome = context.reader.readAgentState(context.self, code)
+  const outcome = context.reader.findAgentState(context.self, code)
   if (outcome.status !== "found") return buildRefusedStateResult(outcome, code)
   return buildSucceededResult([
     formatOtherHeader(outcome.state),
@@ -535,7 +535,7 @@ function runFindAgents(
   query: string,
   context: AgentStateToolContext
 ): BuiltInToolResult {
-  const outcome = context.reader.findAgents(context.self, query)
+  const outcome = context.reader.listAgentMatches(context.self, query)
   if (outcome.status === "forbidden")
     return Object.freeze({ status: "failed", content: FORBIDDEN_MESSAGE })
   return buildSucceededResult(formatSearch(query, outcome))

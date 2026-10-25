@@ -40,7 +40,7 @@ const AGENT_ROLE_PERMISSIONS: Readonly<
  * @param kind - Whether the agent ships with the backend or was stored.
  * @returns `leader` for a built-in agent, `member` for a stored one.
  */
-export function findAgentRole(kind: "built-in" | "custom"): AgentRole {
+export function calculateAgentRole(kind: "built-in" | "custom"): AgentRole {
   return kind === "built-in" ? "leader" : "member"
 }
 

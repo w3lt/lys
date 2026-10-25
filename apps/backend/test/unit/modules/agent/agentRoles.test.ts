@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest"
 import {
-  findAgentRole,
+  calculateAgentRole,
   hasAgentPermission
 } from "../../../../src/modules/agent/agentRoles"
 
-describe("findAgentRole", () => {
+describe("calculateAgentRole", () => {
   it("makes a built-in agent a leader and a stored agent a member", () => {
-    expect(findAgentRole("built-in")).toBe("leader")
-    expect(findAgentRole("custom")).toBe("member")
+    expect(calculateAgentRole("built-in")).toBe("leader")
+    expect(calculateAgentRole("custom")).toBe("member")
   })
 })
 

@@ -2213,7 +2213,7 @@ describe("updateFastifyWithChatRoute", () => {
       })
       await vi.waitFor(() => {
         expect(
-          testApp.app.agentRuntimeService.readAgentState(
+          testApp.app.agentRuntimeService.findAgentState(
             leader,
             CALIGINIA_AGENT_CODE
           )
@@ -2234,7 +2234,7 @@ describe("updateFastifyWithChatRoute", () => {
           }
         })
       })
-      const waitingState = testApp.app.agentRuntimeService.readAgentState(
+      const waitingState = testApp.app.agentRuntimeService.findAgentState(
         leader,
         CALIGINIA_AGENT_CODE
       )
@@ -2268,7 +2268,7 @@ describe("updateFastifyWithChatRoute", () => {
         }
       })
       expect(
-        testApp.app.agentRuntimeService.readAgentState(
+        testApp.app.agentRuntimeService.findAgentState(
           leader,
           CALIGINIA_AGENT_CODE
         )
@@ -2327,7 +2327,7 @@ describe("updateFastifyWithChatRoute", () => {
         content: callPart.result
       })
       expect(
-        testApp.app.agentRuntimeService.readAgentState(
+        testApp.app.agentRuntimeService.findAgentState(
           { code: CALIGINIA_AGENT_CODE, role: "leader" },
           CALIGINIA_AGENT_CODE
         )

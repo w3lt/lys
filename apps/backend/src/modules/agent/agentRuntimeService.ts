@@ -2,7 +2,7 @@ import type { GetAgentApiResponse } from "@lys/protocol"
 import Agent, { type AgentProfile } from "./agent"
 import type { AgentRequestState } from "./agentActivity"
 import {
-  findAgentRole,
+  calculateAgentRole,
   hasAgentPermission,
   type AgentIdentity
 } from "./agentRoles"
@@ -70,7 +70,7 @@ function buildAgentListing(match: AgentSearchMatch): AgentListing {
     code: match.code,
     name: match.name,
     bio: match.bio,
-    role: findAgentRole(match.kind),
+    role: calculateAgentRole(match.kind),
     deletedAt: match.deletedAt
   })
 }
@@ -84,7 +84,7 @@ function buildAgentListing(match: AgentSearchMatch): AgentListing {
 function buildAgentProfile(agent: GetAgentApiResponse): AgentProfile {
   return Object.freeze({
     code: agent.code,
-    role: findAgentRole(agent.kind),
+    role: calculateAgentRole(agent.kind),
     systemPrompt: agent.systemPrompt
   })
 }
@@ -166,17 +166,20 @@ export default class AgentRuntimeService implements AgentStateReader {
    * Finds the agents whose code, name, or bio contains a text.
    * @param reader - The agent that asks.
    * @param query - Trimmed, bounded text, as
-   * {@link AgentStateReader.findAgents} takes it.
+   * {@link AgentStateReader.listAgentMatches} takes it.
    * @returns `forbidden` without searching when the reader's role does not
    * grant `find-agents`; otherwise `found` with the frozen first matches in
    * search order, deleted agents included, each with the role its kind
    * gives, and the number of all matches.
    * @throws If the store is closed or a matched agent is invalid.
    */
-  public findAgents(reader: AgentIdentity, query: string): AgentSearchOutcome {
+  public listAgentMatches(
+    reader: AgentIdentity,
+    query: string
+  ): AgentSearchOutcome {
     if (!hasAgentPermission(reader.role, "find-agents"))
       return FORBIDDEN_OUTCOME
-    const result = this.#agents.searchAgents(query)
+    const result = this.#agents.listAgentMatches(query)
     return Object.freeze({
       status: "found",
       matches: Object.freeze(result.matches.map(buildAgentListing)),
@@ -197,7 +200,7 @@ export default class AgentRuntimeService implements AgentStateReader {
    * @throws If the store is closed, or the agent or a conversation is
    * invalid.
    */
-  public readAgentState(
+  public findAgentState(
     reader: AgentIdentity,
     code: string
   ): AgentStateOutcome {
@@ -221,7 +224,7 @@ export default class AgentRuntimeService implements AgentStateReader {
     return Object.freeze({
       code: found.agent.code,
       name: found.agent.name,
-      role: findAgentRole(found.agent.kind),
+      role: calculateAgentRole(found.agent.kind),
       deletedAt: found.deletedAt,
       requests: Object.freeze(
         requests.map((request): AgentRequestView =>

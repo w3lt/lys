@@ -58,7 +58,7 @@ export type StoredAgentRecord = Readonly<{
 }>
 
 /** Search text and the number of matches to read. */
-export type SearchAgentsInput = Readonly<{
+export type ListAgentMatchesInput = Readonly<{
   /** Text found literally, ignoring case, in a code, name, or bio. */
   query: string
   /** Inclusive maximum number of matches to read, at least one. */
@@ -190,5 +190,5 @@ export interface AgentRecordSearcher {
    * @throws If the store is closed, the snapshot cannot begin or be released,
    * or a matched row violates the agent schema; the records stay usable.
    */
-  searchAgents(input: SearchAgentsInput): StoredAgentSearchPage
+  listAgentMatches(input: ListAgentMatchesInput): StoredAgentSearchPage
 }

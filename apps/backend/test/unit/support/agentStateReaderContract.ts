@@ -62,7 +62,7 @@ export function registerAgentStateReaderContractSuite(
     it("lets a leader find agents, deleted ones included, each with the role its kind gives", () => {
       const harness = createHarness()
 
-      const outcome = harness.reader.findAgents(LEADER, "ar")
+      const outcome = harness.reader.listAgentMatches(LEADER, "ar")
 
       expect(outcome).toEqual({
         status: "found",
@@ -101,7 +101,7 @@ export function registerAgentStateReaderContractSuite(
     it("refuses a member's search without reading any agent", () => {
       const harness = createHarness()
 
-      expect(harness.reader.findAgents(MEMBER, "ar")).toEqual({
+      expect(harness.reader.listAgentMatches(MEMBER, "ar")).toEqual({
         status: "forbidden"
       })
       expect(harness.countAgentReads()).toBe(0)
@@ -115,7 +115,7 @@ export function registerAgentStateReaderContractSuite(
       (_label, reader) => {
         const harness = createHarness()
 
-        const outcome = harness.reader.readAgentState(
+        const outcome = harness.reader.findAgentState(
           reader,
           STATE_READER_RESEARCHER.code
         )
@@ -141,7 +141,7 @@ export function registerAgentStateReaderContractSuite(
       const harness = createHarness()
 
       expect(
-        harness.reader.readAgentState(LEADER, CALIGINIA_AGENT_CODE)
+        harness.reader.findAgentState(LEADER, CALIGINIA_AGENT_CODE)
       ).toEqual({
         status: "found",
         state: {
@@ -158,7 +158,7 @@ export function registerAgentStateReaderContractSuite(
       const harness = createHarness()
 
       expect(
-        harness.reader.readAgentState(LEADER, STATE_READER_ARCHIVIST.code)
+        harness.reader.findAgentState(LEADER, STATE_READER_ARCHIVIST.code)
       ).toMatchObject({
         status: "found",
         state: {
@@ -171,7 +171,7 @@ export function registerAgentStateReaderContractSuite(
     it("answers a leader's read of a code no agent has as missing", () => {
       const harness = createHarness()
 
-      expect(harness.reader.readAgentState(LEADER, "nobody")).toEqual({
+      expect(harness.reader.findAgentState(LEADER, "nobody")).toEqual({
         status: "missing"
       })
     })
@@ -181,7 +181,7 @@ export function registerAgentStateReaderContractSuite(
       (code) => {
         const harness = createHarness()
 
-        expect(harness.reader.readAgentState(MEMBER, code)).toEqual({
+        expect(harness.reader.findAgentState(MEMBER, code)).toEqual({
           status: "forbidden"
         })
         expect(harness.countAgentReads()).toBe(0)

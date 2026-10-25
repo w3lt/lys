@@ -6,7 +6,7 @@ import type {
   AgentRecordSearcher,
   AgentRecordStore,
   ListAgentsInput,
-  SearchAgentsInput,
+  ListAgentMatchesInput,
   StoredAgentMatch,
   StoredAgentRecord,
   StoredAgentSearchPage,
@@ -72,7 +72,7 @@ const AGENT_EXACT_MATCH_SQL = `equals_search(code, $query)
 
 /**
  * Builds the frozen match of one validated row.
- * @param row - Matched row read by {@link searchAgents}.
+ * @param row - Matched row read by {@link listAgentMatches}.
  * @returns The match, its agent summary frozen.
  */
 function buildAgentMatch(
@@ -97,9 +97,9 @@ function buildAgentMatch(
  * @remarks Requires the `contains_search` and `equals_search` functions on
  * the connection.
  */
-function searchAgents(
+function listAgentMatches(
   statements: DatabaseStatementCompiler,
-  input: SearchAgentsInput
+  input: ListAgentMatchesInput
 ): StoredAgentSearchPage {
   const { matchCount } = agentMatchCountSchema.parse(
     statements
@@ -376,15 +376,15 @@ export default class SqliteAgentRecordStore
   }
 
   /**
-   * Implements {@link AgentRecordSearcher.searchAgents} in one read snapshot, so
-   * the count and the matches agree.
+   * Implements {@link AgentRecordSearcher.listAgentMatches} in one read
+   * snapshot, so the count and the matches agree.
    * @param input - Interface-defined search text and number of matches.
    * @returns The interface-defined page.
    * @throws The interface-defined closed and validation failures.
    */
-  public searchAgents(input: SearchAgentsInput): StoredAgentSearchPage {
+  public listAgentMatches(input: ListAgentMatchesInput): StoredAgentSearchPage {
     return this.#databaseReader.handleDatabaseReadRequest((statements) =>
-      searchAgents(statements, input)
+      listAgentMatches(statements, input)
     )
   }
 }

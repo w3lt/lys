@@ -240,8 +240,8 @@ calls it stored are part of the new turn's context.
    linked, and the sources the answer cites under it.
 
 The backend sets no time limit on a prompt or a pending call. It waits until
-the call is answered, the reply is stopped, a newer turn in the conversation
-stops it, or the backend shuts down; a deletion does not end it yet
+the call is answered, the reply is stopped, or the backend shuts down; a newer
+turn or a deletion does not end it yet
 ([#137](https://github.com/w3lt/lys/issues/137)). A client that was not
 following when a prompt or call was sent finds it in the next
 `reply-snapshot`'s `pendingToolApprovals` or `pendingToolCalls`.

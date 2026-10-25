@@ -277,15 +277,11 @@ desktop to run and approval prompts, which the reply-events snapshot reports
 and the tool-result and tool-approval routes answer. Each stream is
 a `ReplyEventSubscription`, an ordered queue that never makes the generation
 wait and closes a follower that falls 4,096 events behind. Only the reply-stop
-route (reply task only), a newer turn (the reply tasks of its conversation),
-and shutdown (both tasks) cancel work. Once the chat route has stored a turn,
-it stops every running reply of that conversation through
-`stopConversationReplies` before it starts the new generation, so a
-superseded reply's model request, tool calls, and approval prompts end and
-its title task goes on. A deletion also ends a reply, but only when the model
-sends its next content: that write is refused, which ends the upstream
-request. A reply waiting for a tool result or an approval is not ended this
-way ([#137](https://github.com/w3lt/lys/issues/137)).
+route (reply task only) and shutdown (both tasks) cancel work. A newer turn or a
+deletion also ends a reply, but only when the model sends its next content: that
+write is refused, which ends the upstream request. A reply waiting for a tool
+result or an approval is not ended this way
+([#137](https://github.com/w3lt/lys/issues/137)).
 The title task of a deleted conversation still runs to its end. The registry is
 disposed in Fastify's `preClose` hook, while streams are still open: it closes
 admission, cancels every generation, and waits until each has stored its final
@@ -687,7 +683,11 @@ While a reply runs, its agent follows the request in `AgentActivity`
 (`src/modules/agent/agentActivity.ts`): the conversation, the model, the
 start time, and the step of its current round, from the parts the reply
 stores. A request is added when `createReply` starts and removed when it
-ends, whether the reply completed, failed, was stopped, or was superseded.
+ends, whether the reply completed, failed, or was stopped. A newer turn in the
+conversation or a deletion ends a reply only once its next write is refused,
+so a reply waiting for an approval or a tool result stays listed until the
+call is answered, the reply is stopped, or the backend stops
+([#137](https://github.com/w3lt/lys/issues/137)).
 
 ### Roles
 

@@ -362,9 +362,9 @@ rules and the [API reference](/reference/api/#mcp-servers) for the routes.
   file's text to the server with no card shown.
 - **Time and size.** Connecting and reading the tool list take at most two
   minutes, and a call at most five; Stop tells the server a call was
-  cancelled. The backend reads at most 16 MiB of one answer: a longer HTTP
-  answer fails its request, and a longer stdio message line ends the
-  connection. A result is cut at 20,000 characters.
+  cancelled. The backend reads at most 16 MiB of one answer, an HTTP body or
+  a stdio message line; a longer answer ends the connection and fails every
+  request in flight at once. A result is cut at 20,000 characters.
 - **Output schemas.** A tool's output schema is never compiled or checked, so
   a server cannot make the backend run a regular expression it chose; a
   result's structured content is read as untrusted JSON within Lys's limits.

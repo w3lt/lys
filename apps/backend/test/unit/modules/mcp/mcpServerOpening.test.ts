@@ -22,6 +22,13 @@ import {
 /** Opening time limit for cases that do not test it. */
 const OPENING_TIMEOUT_MILLISECONDS = 10_000
 
+/**
+ * Opening time limit for the over-limit event stream cases, shorter than
+ * {@link OPENING_TIMEOUT_MILLISECONDS} so an opening that waits for the
+ * limit instead of failing at once ends as `timed-out` within the case.
+ */
+const TOO_LARGE_STREAM_OPENING_TIMEOUT_MILLISECONDS = 3000
+
 /** Longest a test waits for something a server process does. */
 const EVENT_WAIT = Object.freeze({ timeout: 5000 })
 
@@ -311,6 +318,42 @@ describe("openMcpServer", () => {
       unknownError: undefined
     })
   })
+
+  it.each(["initialize", "tools/list"])(
+    "reports an event stream answer to %s that passes the response limit as a protocol error at once",
+    async (method) => {
+      const answerOther = answerAsMcpServer()
+      const server = await startFakeMcpHttpServer((request, body, response) => {
+        const message =
+          request.method === "POST"
+            ? (JSON.parse(body) as { method?: string })
+            : {}
+        if (message.method !== method) {
+          answerOther(request, body, response)
+          return
+        }
+        response.writeHead(200, {
+          "content-type": "text/event-stream",
+          "mcp-session-id": "test-session"
+        })
+        response.write(`data: ${"x".repeat(MAXIMUM_MCP_RESPONSE_BYTES)}`)
+      })
+      const { context } = createRecordingContext()
+
+      const opening = await openForTest(
+        buildHttpServerSettings("remote", server.url),
+        context,
+        TOO_LARGE_STREAM_OPENING_TIMEOUT_MILLISECONDS
+      )
+
+      expect(opening).toEqual({
+        status: "failed",
+        reason: "protocol-error",
+        failure: { kind: "too-large" },
+        unknownError: undefined
+      })
+    }
+  )
 
   it("reports a server that does not answer within the limit as timed out and stops it", async () => {
     const { context, events } = createRecordingContext()

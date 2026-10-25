@@ -1,11 +1,15 @@
 import { SdkErrorCode } from "@modelcontextprotocol/client"
 import { mkdtemp, realpath, rm } from "node:fs/promises"
+import type { ServerResponse } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { classifyMcpRequestFailure } from "../../../../src/modules/mcp/mcpError"
 import McpServerConnection from "../../../../src/modules/mcp/mcpServerConnection"
-import { MAXIMUM_MCP_RESPONSE_BYTES } from "../../../../src/modules/mcp/mcpResponseLimit"
+import {
+  MAXIMUM_MCP_RESPONSE_BYTES,
+  McpResponseTooLargeError
+} from "../../../../src/modules/mcp/mcpResponseLimit"
 import {
   answerAsMcpServer,
   answerToolCallsWith,
@@ -27,6 +31,12 @@ const SYNTHETIC_AUTHORIZATION = "Bearer synthetic-token-0123"
 /** Headers of a fake server's JSON answer within its session. */
 const JSON_ANSWER_HEADERS = Object.freeze({
   "content-type": "application/json",
+  "mcp-session-id": "test-session"
+})
+
+/** Headers of a fake server's event stream answer within its session. */
+const EVENT_STREAM_ANSWER_HEADERS = Object.freeze({
+  "content-type": "text/event-stream",
   "mcp-session-id": "test-session"
 })
 
@@ -58,6 +68,16 @@ async function createWorkingFolder(): Promise<string> {
   const folder = await mkdtemp(join(tmpdir(), "lys-mcp-cwd-"))
   onTestFinished(() => rm(folder, { recursive: true, force: true }))
   return await realpath(folder)
+}
+
+/**
+ * Keeps the reported failures that name an answer over the response limit.
+ *
+ * @param errors - Failures the connection reported.
+ * @returns Each one that is a {@link McpResponseTooLargeError}.
+ */
+function filterTooLargeErrors(errors: readonly Error[]): readonly Error[] {
+  return errors.filter((error) => error instanceof McpResponseTooLargeError)
 }
 
 /**
@@ -350,11 +370,51 @@ describe("McpServerConnection over HTTP", () => {
     expect(result.content).toHaveLength(1)
   })
 
-  it("fails a call whose answer is longer than the response limit as too-large", async () => {
-    const server = await startFakeMcpHttpServer(
-      answerToolCallsWith((id, response) => {
+  it.each([
+    {
+      form: "JSON",
+      answerCall: (id: number, response: ServerResponse): void => {
         response.writeHead(200, JSON_ANSWER_HEADERS)
         response.end(buildSizedTextResult(id, MAXIMUM_MCP_RESPONSE_BYTES + 1))
+      }
+    },
+    {
+      form: "event stream",
+      answerCall: (_id: number, response: ServerResponse): void => {
+        response.writeHead(200, EVENT_STREAM_ANSWER_HEADERS)
+        response.write(`data: ${"x".repeat(MAXIMUM_MCP_RESPONSE_BYTES)}`)
+      }
+    }
+  ])(
+    "fails a call at once as too-large when its $form answer passes the response limit, and ends the connection",
+    async ({ answerCall }) => {
+      const server = await startFakeMcpHttpServer(
+        answerToolCallsWith(answerCall)
+      )
+      const { context, events } = createRecordingContext()
+      const connection = await openForTest(
+        buildHttpServerSettings("remote", server.url),
+        context
+      )
+
+      const error = await captureRejection(
+        connection.callTool("echo", {}, NEVER_ABORTED)
+      )
+
+      expect(classifyMcpRequestFailure(error)).toEqual({ kind: "too-large" })
+      expect(events.closedCount).toBe(1)
+      expect(filterTooLargeErrors(events.errors)).toHaveLength(1)
+    }
+  )
+
+  it("fails every call in flight once one answer passes the response limit", async () => {
+    let answeredCallCount = 0
+    const server = await startFakeMcpHttpServer(
+      answerToolCallsWith((id, response) => {
+        answeredCallCount += 1
+        response.writeHead(200, JSON_ANSWER_HEADERS)
+        if (answeredCallCount > 1)
+          response.end(buildSizedTextResult(id, MAXIMUM_MCP_RESPONSE_BYTES + 1))
       })
     )
     const { context } = createRecordingContext()
@@ -362,41 +422,19 @@ describe("McpServerConnection over HTTP", () => {
       buildHttpServerSettings("remote", server.url),
       context
     )
+    const waitingCall = captureRejection(
+      connection.callTool("echo", {}, NEVER_ABORTED)
+    )
+    await vi.waitFor(() => expect(answeredCallCount).toBe(1), EVENT_WAIT)
 
-    const error = await captureRejection(
+    const failedCall = await captureRejection(
       connection.callTool("echo", {}, NEVER_ABORTED)
     )
 
-    expect(classifyMcpRequestFailure(error)).toEqual({ kind: "too-large" })
-  })
-
-  it("ends an event stream answer once it passes the response limit, reporting why", async () => {
-    const server = await startFakeMcpHttpServer(
-      answerToolCallsWith((_id, response) => {
-        response.writeHead(200, {
-          "content-type": "text/event-stream",
-          "mcp-session-id": "test-session"
-        })
-        response.write(`data: ${"x".repeat(MAXIMUM_MCP_RESPONSE_BYTES)}`)
-      })
-    )
-    const { context, events } = createRecordingContext()
-    const connection = await openForTest(
-      buildHttpServerSettings("remote", server.url),
-      context
-    )
-    const controller = new AbortController()
-    const call = captureRejection(
-      connection.callTool("echo", {}, controller.signal)
-    )
-
-    await vi.waitFor(() => {
-      expect(events.errors.map((reported) => reported.message)).toContainEqual(
-        expect.stringContaining("McpResponseTooLargeError")
-      )
-    }, EVENT_WAIT)
-    controller.abort()
-    await call
+    expect(classifyMcpRequestFailure(failedCall)).toEqual({ kind: "too-large" })
+    expect(classifyMcpRequestFailure(await waitingCall)).toEqual({
+      kind: "too-large"
+    })
   })
 
   it("reports a session the server answers with HTTP 404 once as an ended connection, and fails the calls", async () => {

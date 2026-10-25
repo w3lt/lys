@@ -24,7 +24,8 @@ const CLOSED_REGISTRY_MESSAGE = "Reply generation registry is closed"
 
 /**
  * Owns every running reply generation: admits new ones, finds one for a
- * follower or a stop request, and ends them all at shutdown.
+ * follower or a stop request, stops a conversation's replies when a new turn
+ * supersedes them, and ends them all at shutdown.
  *
  * @remarks The invariants are that at most one registered generation exists
  * per assistant reply, a generation stays registered from
@@ -32,9 +33,9 @@ const CLOSED_REGISTRY_MESSAGE = "Reply generation registry is closed"
  * conversation. The registry holds no reply text.
  * Lifecycle: ready until disposal begins; disposal permanently closes the
  * registry, cancels every generation, and settles after all of them settle,
- * and repeated calls share that completion. After disposal begins, starting
- * or finding a generation throws the closed-registry failure. Concurrency
- * model: single-owner, on the backend's event loop.
+ * and repeated calls share that completion. After disposal begins, starting,
+ * finding, or stopping generations throws the closed-registry failure.
+ * Concurrency model: single-owner, on the backend's event loop.
  */
 export default class ReplyGenerationRegistry implements AsyncDisposable {
   /** Running generations keyed by assistant message identifier. */
@@ -98,6 +99,28 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
     return registered?.conversationId === target.conversationId
       ? registered.generation
       : undefined
+  }
+
+  /**
+   * Stops the reply of every running generation of one conversation, as a new
+   * turn that supersedes them does.
+   *
+   * @param conversationId - Conversation whose running replies end.
+   * @returns Settlement after each stopped reply task settled, so each
+   * reply's final state is stored; it never rejects.
+   * @throws If the registry is closed; nothing is stopped then.
+   * @remarks Each generation is stopped as {@link ReplyGeneration.stopReply}
+   * does: every tool call and approval prompt its reply waits on ends without
+   * an answer, and its title task continues. A generation started after the
+   * call is not stopped.
+   */
+  public stopConversationReplies(conversationId: string): Promise<void> {
+    if (this.#disposal !== undefined) throw new Error(CLOSED_REGISTRY_MESSAGE)
+
+    const stops = [...this.#generations.values()]
+      .filter((registered) => registered.conversationId === conversationId)
+      .map(({ generation }) => generation.stopReply())
+    return Promise.all(stops).then(() => undefined)
   }
 
   /**

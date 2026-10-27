@@ -31,16 +31,25 @@ The Tauri desktop host reads and writes one JSON settings file at
 `$LYS_HOME/settings.json`.
 
 The current schema contains `runtime`, `generation`, `loadConfiguration`,
-`secrets`, `tools`, and `location` groups. Rust
+`secrets`, `providers`, `tools`, and `location` groups. Rust
 and the TypeScript settings projection use the same camelCase field names. See
 the [configuration reference](/reference/configuration/) for the complete field
 list, defaults, and accepted values.
 
 The composer's context meter, the Agents pane's prompt measure, and the reply
 ceiling slider's usual range use the context length the loaded model is
-loaded with, as LM Studio reports it, which a model's load configuration can
-set. Files saved by earlier versions also hold a `model` group with a local
+loaded with, as the model provider reports it, which a model's load
+configuration can set for LM Studio. Files saved by earlier versions also hold a `model` group with a local
 context-size estimate; Lys ignores it, and the next save leaves it out.
+
+The `providers` group holds the model provider every request goes to,
+chosen in Settings → Providers: LM Studio, Ollama on a local server or in its
+cloud, or Groq, with the address of LM Studio's and the local Ollama
+server, `null` for the default. Ollama's cloud and Groq need their keys,
+`ollamaApiKey` and `groqApiKey` in the `secrets` group, beside the Tavily
+key. The backend reads both groups at each connection attempt; Refresh on the
+Runtime pane's provider card makes one after a hand edit. See
+[Providers](/reference/configuration/#providers).
 
 The `tools` group lists, in `justRun`, the tools set to Just run in Settings →
 Tools; every other tool asks before each call. The backend reads the list when
@@ -136,8 +145,11 @@ The backend and desktop currently use compiled-in local addresses rather than a
 documented user-editable configuration source:
 
 - backend HTTP address: `127.0.0.1:12345`
-- LM Studio address used by the backend: `127.0.0.1:1234`
 - vmo address, used by the backend and the desktop host: `127.0.0.1:8080`
+
+The default model provider addresses, LM Studio's `127.0.0.1:1234` and
+Ollama's `127.0.0.1:11434`, are compiled in too, but Settings → Providers
+can replace each with another address.
 
 The desktop store also derives its backend base URL from those same protocol
 constants. The persisted `runtime.backendAddress` is used in status copy;
@@ -161,7 +173,7 @@ The repository does not currently document or implement:
 - an environment-variable contract for runtime settings; `LYS_HOME` selects
   only the Lys home directory
 - a separate setting for the database path; it follows `LYS_HOME`
-- a supported way to change backend or LM Studio ports without editing code
+- a supported way to change the backend port without editing code
 - a published configuration file for docs deployment beyond the checked-in
   GitHub Actions workflow and Astro configuration
 

@@ -37,24 +37,36 @@ terminal of a development build (see
 that stopped on a failure, such as a prompt file it cannot read or a port
 already in use, logs it there at level `fatal`; only a missing or relative
 `LYS_HOME` stops it before it can log, with the reason on standard error.
-LM Studio is not required for the backend to listen. For standalone startup,
+The model provider is not required for the backend to listen. For standalone startup,
 also ensure `LYS_HOME` is set to an absolute path and its directory exists as
 described in [Running Lys locally](/develop/running/).
 
-## LM Studio is not reachable
+## The model provider is not reachable
 
-The Runtime pane's LM Studio card shows **LM Studio not reachable** when the
-backend cannot connect to `127.0.0.1:1234`, and the model list stays empty.
-Start LM Studio and its local server, then press **Refresh** on that card. The
-backend does not retry on its own.
+The Runtime pane's provider card shows, for example, **LM Studio not
+reachable** when the backend cannot connect to the provider chosen in
+Settings → Providers, and the model list stays empty. The backend does not
+retry on its own. Check the provider, then press **Refresh** on that card:
+
+- **LM Studio, or a local Ollama server**: start it, and check that the
+  address on its card in Settings → Providers matches where it listens;
+  `127.0.0.1:1234` and `127.0.0.1:11434` are the defaults. A server on another
+  machine must listen on an address that machine accepts connections on.
+- **Ollama's cloud, or Groq**: the card says **needs key** until a key is
+  saved. With a key saved, a provider that refuses it, or a network that does
+  not reach `ollama.com` or `api.groq.com`, shows the same state; save the key
+  again from the provider's key page.
+
+The backend log has a `Model provider runtime acquisition failed` line for
+each failed attempt; see [Process logging](/operate/logging/#process-logging).
 
 ## The backend starts but model operations fail
 
-The backend is wired to LM Studio at `127.0.0.1:1234`. If model listing,
-loading, or chat requests fail after HTTP readiness was established, verify
-that LM Studio is still reachable. When LM Studio stops while connected, the
-next failing model request marks it not reachable; press **Refresh** after
-restarting it. The
+If model listing, loading, or chat requests fail after HTTP readiness was
+established, verify that the provider is still reachable. When it stops
+answering while connected, the next failing model request marks it not
+reachable; press **Refresh** after restarting it. Load and Unload exist only
+for LM Studio; Ollama and Groq load a model when a message names it. The
 [model health endpoint](/operate/logging/#model-health-observation) can report
 loaded state; it does not test inference success.
 

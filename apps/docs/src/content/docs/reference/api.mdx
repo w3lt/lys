@@ -44,8 +44,9 @@ the Fastify route registration.
 List, load, health, unload, and chat-context requests, and a chat request
 for a model whose capabilities the backend has not read yet, answer `503`
 with `urn:lys:problem:llm:runtime-unavailable` while the backend has no
-connected LM Studio runtime. The runtime-status route never contacts LM Studio; the
-runtime-connect route waits for one shared connection attempt.
+connected model provider. The runtime-status route never contacts the
+provider; the runtime-connect route waits for one shared connection attempt,
+which reads the provider saved in `settings.json` again.
 
 Every request body is limited to 1 MiB (1,048,576 bytes), Fastify's default,
 except a tool result, which is limited to 8 MiB (8,388,608 bytes) so that a
@@ -95,11 +96,11 @@ stored, after its attachment files are written, so a conversation or agent
 deleted in between gets the same `404` or `409` problem, and the written
 files are deleted again.
 
-Once the agent is found, the route reads from LM Studio's inventory whether
+Once the agent is found, the route reads from the provider's inventory whether
 `model` has `vision` and `trainedForToolUse`, which decide the images the
 model sees and the tools the backend adds to the turn. It remembers what a
 listed model can do until the backend stops, so requests for a model read the
-inventory only until a listing has it: while LM Studio is not connected, such
+inventory only until a listing has it: while the provider is not connected, such
 a request answers `503` with `urn:lys:problem:llm:runtime-unavailable`, and a
 full model-operation queue `503` with `urn:lys:problem:llm:service-busy`,
 nothing stored. A failed listing is not remembered, and neither is a model
@@ -299,7 +300,7 @@ Accepted chat turns respond as SSE. A missing conversation, a new
 conversation naming a code no agent has, a stored conversation whose agent no
 longer exists, an offered backend tool that cannot run now, an attachment Lys
 cannot send, an image for a model without vision, or a model-capability read
-LM Studio cannot answer returns JSON Problem Details before the stream
+the provider cannot answer returns JSON Problem Details before the stream
 starts, and nothing is stored or written: no message, no file, and no failed
 reply. Each event payload must match one of
 the eleven variants documented in [SSE events](/reference/sse-events/).
@@ -824,10 +825,10 @@ it then shows the sentence and keeps the files staged.
 `LlmInfo` currently includes:
 
 - `modelKey`
-- `format`
+- optional `format`
 - `displayName`
-- `path`
-- `sizeBytes`
+- optional `path`
+- optional `sizeBytes`
 - optional `paramsString`, `architecture`, and `quantization`
 - `vision`
 - `trainedForToolUse`
@@ -835,7 +836,14 @@ it then shows the sentence and keeps the files staged.
 - `loaded`
 - optional `loadedContextLength`
 
-`GET /api/v1/llm/list` returns `llms` ordered by `modelKey`, then by `path`.
+`format`, `path`, and `sizeBytes` are present for LM Studio's models. Ollama
+reports a model's format and size but no path, and Groq reports none of the
+three. Groq reports no capabilities either: its models have `vision` false
+and `trainedForToolUse` true. Ollama and Groq report every listed model as
+`loaded`.
+
+`GET /api/v1/llm/list` returns `llms` ordered by `modelKey`, then by `path`,
+an absent path sorting first.
 On a loaded model, `loadedContextLength` is the context length it is loaded
 with, in tokens: the smallest among its loaded instances, the window a chat
 request to it is measured against. It is absent on a model that is not loaded,

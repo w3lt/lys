@@ -12,15 +12,19 @@ preference.
 
 ## Shared constants
 
-| Constant        | Value       | Used by                                                |
-| --------------- | ----------- | ------------------------------------------------------ |
-| `API_PREFIX_V1` | `/api/v1`   | Route path composition                                 |
-| `BACKEND_HOST`  | `127.0.0.1` | Backend bind host and desktop backend URL              |
-| `BACKEND_PORT`  | `12345`     | Backend bind port and desktop backend URL              |
-| `LMSTUDIO_HOST` | `127.0.0.1` | Backend LM Studio HTTP and WebSocket clients           |
-| `LMSTUDIO_PORT` | `1234`      | Backend LM Studio HTTP and WebSocket clients           |
-| `VMO_HOST`      | `127.0.0.1` | Backend page reads and health checks, desktop vmo card |
-| `VMO_PORT`      | `8080`      | Backend page reads and health checks, desktop vmo card |
+| Constant                | Value          | Used by                                                                 |
+| ----------------------- | -------------- | ----------------------------------------------------------------------- |
+| `API_PREFIX_V1`         | `/api/v1`      | Route path composition                                                  |
+| `BACKEND_HOST`          | `127.0.0.1`    | Backend bind host and desktop backend URL                               |
+| `BACKEND_PORT`          | `12345`        | Backend bind port and desktop backend URL                               |
+| `LMSTUDIO_HOST`         | `127.0.0.1`    | LM Studio's default address, while `providers.lmStudio.address` is null |
+| `LMSTUDIO_PORT`         | `1234`         | LM Studio's default address, while `providers.lmStudio.address` is null |
+| `OLLAMA_HOST`           | `127.0.0.1`    | Ollama's default address, while `providers.ollama.address` is null      |
+| `OLLAMA_PORT`           | `11434`        | Ollama's default address, while `providers.ollama.address` is null      |
+| `OLLAMA_CLOUD_API_HOST` | `ollama.com`   | Host of Ollama's cloud API, reached over HTTPS                          |
+| `GROQ_API_HOST`         | `api.groq.com` | Host of Groq's API, reached over HTTPS                                  |
+| `VMO_HOST`              | `127.0.0.1`    | Backend page reads and health checks, desktop vmo card                  |
+| `VMO_PORT`              | `8080`         | Backend page reads and health checks, desktop vmo card                  |
 
 The Tauri host's health check of vmo and vmo's own listener are Rust and
 Swift, so they declare `127.0.0.1:8080` again. A desktop unit test fails when
@@ -81,10 +85,8 @@ not find a runtime that `build.sh` installed under another directory.
 | Value                          | Current source                                                                                                                                                                                                    |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Backend listen address         | `BACKEND_HOST` and `BACKEND_PORT`                                                                                                                                                                                 |
-| LM Studio HTTP base URL        | `http://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}/v1`                                                                                                                                                                     |
-| LM Studio WebSocket base URL   | `ws://${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`                                                                                                                                                                          |
 | SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)                                                                                                                                          |
-| Settings file path             | `$LYS_HOME/settings.json`, as `settingsFilePath`; read for the Tavily API key                                                                                                                                     |
+| Settings file path             | `$LYS_HOME/settings.json`, as `settingsFilePath`; read for the model provider, its address and key, and the Tavily API key                                                                                        |
 | Attachments directory          | `$LYS_HOME/attachments`, as `attachmentsDirectoryPath`; created with its folders on the first attachment stored                                                                                                   |
 | vmo endpoint                   | `127.0.0.1:8080`, as `vmoHost` and `vmoPort`, from `VMO_HOST` and `VMO_PORT` in `@lys/protocol`; where vmo listens. It reads every `read_page` page, and its `GET /health` decides whether `read_page` is offered |
 | Caliginia system prompt        | `src/utils/prompts/caliginia.txt`, as `caliginiaSystemPrompt`                                                                                                                                                     |
@@ -95,6 +97,9 @@ not find a runtime that `build.sh` installed under another directory.
 
 `loadBackendConfig()` builds these values once when the backend starts, so a
 changed `LYS_HOME`, prompt file, or limit takes effect after a restart. The
+model provider is not among them: the backend reads it from the settings file
+at each connection attempt, and builds its URLs from the
+[provider settings](#providers). The
 attempt limit applies to each chat turn. The title length limit counts Unicode
 code points before surrounding whitespace is trimmed.
 
@@ -109,8 +114,7 @@ and no defaults are applied.
 | Key                                                                       | Accepted values                                                                               |
 | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `backendHost`                                                             | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers |
-| `backendPort`, `lmstudioPort`, `vmoPort`                                  | An integer from 1 to 65535                                                                    |
-| `lmstudioHost`                                                            | A host name or IPv4 address, used unbracketed in the `http://` and `ws://` URLs               |
+| `backendPort`, `vmoPort`                                                  | An integer from 1 to 65535                                                                    |
 | `vmoHost`                                                                 | An IPv4 loopback address (`127.x.x.x`); vmo does not authenticate its callers                 |
 | `databaseFilePath`, `settingsFilePath`, `attachmentsDirectoryPath`        | An absolute path                                                                              |
 | `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `titleGenerationPrompt` | Non-empty text without leading or trailing whitespace                                         |
@@ -143,7 +147,14 @@ defaults:
     "models": {}
   },
   "secrets": {
-    "tavilyApiKey": null
+    "tavilyApiKey": null,
+    "ollamaApiKey": null,
+    "groqApiKey": null
+  },
+  "providers": {
+    "active": "lmStudio",
+    "lmStudio": { "address": null },
+    "ollama": { "mode": "local", "address": null }
   },
   "tools": {
     "justRun": [],
@@ -167,6 +178,9 @@ defaults:
 | `generation.replyCeiling`  | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                                           |
 | `loadConfiguration`        | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                                    |
 | `secrets.tavilyApiKey`     | `string \| null`        | Tavily API key of `web_search`, 1 to 256 visible ASCII characters, stored as plain text; see [Secrets](#secrets)     |
+| `secrets.ollamaApiKey`     | `string \| null`        | API key of Ollama's cloud, under the same rule; see [Secrets](#secrets)                                              |
+| `secrets.groqApiKey`       | `string \| null`        | Groq API key, under the same rule; see [Secrets](#secrets)                                                           |
+| `providers`                | object                  | The model provider every request goes to, and where to find it; see [Providers](#providers)                          |
 | `tools.justRun`            | array of tool names     | Tools that run without asking when a model calls them; every other tool asks; see [Tools](#tools)                    |
 | `tools.switches`           | object of `boolean`     | Whether each tool the person switched is on, by tool name; any other tool starts at its default; see [Tools](#tools) |
 | `location.city`            | `string \| null`        | City the person saved for `get_location`; see [Location](#location)                                                  |
@@ -175,7 +189,7 @@ defaults:
 
 A missing group, or a missing field in one of them, uses the host defaults;
 for `loadConfiguration` that default is empty, for `secrets` it holds no
-key, for `tools` it puts no tool on Just run and switches no tool, and for
+key, for `providers` it is LM Studio at its default address, for `tools` it puts no tool on Just run and switches no tool, and for
 `location` it saves no location. A `model` group, which
 older files hold for a context-size estimate Lys no longer has, is ignored,
 and the next save leaves it out. Loading never rewrites an
@@ -187,7 +201,7 @@ Every save writes a temporary file beside `settings.json`, readable and
 writable only by its owner on Unix, flushes it to disk, and renames it over the
 file, so a reader sees the previous document or the whole new one, never part
 of a write. The Tauri host is the file's only writer; the backend reads it for
-the Tavily API key.
+the model provider and its key, and for the Tavily API key.
 
 The file carries no version marker. The maintainer accepted that for
 [PR #143](https://github.com/w3lt/lys/pull/143); see the
@@ -238,17 +252,56 @@ load configurations.
 ### Secrets
 
 The `secrets` group holds the keys of the services Lys calls on the person's
-behalf; today only `tavilyApiKey`, the key `web_search` sends to Tavily. The
-key is opaque: Lys never changes it, and Rust and the backend accept 1 to 256
-visible ASCII characters (`!` through `~`), so it cannot hold a space or a line
-break. An invalid key makes the file fail to load, like an out-of-range
-temperature. The key is plain text, protected by the file's owner-only
-permissions; there is no keychain storage yet.
+behalf: `tavilyApiKey`, the key `web_search` sends to Tavily; `ollamaApiKey`,
+sent to Ollama's cloud; and `groqApiKey`, sent to Groq. Each key is opaque:
+Lys never changes it, and Rust and the backend accept 1 to 256 visible ASCII
+characters (`!` through `~`), so it cannot hold a space or a line break. An
+invalid key makes the file fail to load, like an out-of-range temperature.
+Each key goes only to its own service. The keys are plain text, protected by
+the file's owner-only permissions; there is no keychain storage yet.
 
-The backend reads the key from this file when the desktop lists the tools,
-when a chat request offers `web_search`, and when the person checks the key, so
-a saved or removed key applies to the next of these without restarting
-anything. A turn keeps the key it started with.
+The desktop saves one key at a time: it reads the group on disk and replaces
+only the key that changed, so saving one key never overwrites another.
+
+The backend reads the Tavily key from this file when the desktop lists the
+tools, when a chat request offers `web_search`, and when the person checks the
+key, so a saved or removed key applies to the next of these without
+restarting anything. A turn keeps the key it started with. It reads a
+provider key at each connection attempt; see [Providers](#providers).
+
+### Providers
+
+The `providers` group holds the model provider every request goes to, chosen
+in Settings → Providers, and where to find it.
+
+| Key                          | Type                               | Meaning                                                                                  |
+| ---------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------- |
+| `providers.active`           | `"lmStudio" \| "ollama" \| "groq"` | Provider every request goes to                                                           |
+| `providers.lmStudio.address` | `string \| null`                   | LM Studio's server, or `null` for `LMSTUDIO_HOST:LMSTUDIO_PORT`                          |
+| `providers.ollama.mode`      | `"local" \| "cloud"`               | A local Ollama server, or Ollama's cloud, which needs `secrets.ollamaApiKey`             |
+| `providers.ollama.address`   | `string \| null`                   | The local server, or `null` for `OLLAMA_HOST:OLLAMA_PORT`; kept, unused, in `cloud` mode |
+
+- An address is a host name or IPv4 address, a colon, and a port from 1 to
+  65535, such as `127.0.0.1:1234`. A scheme, a path, a user name, or an IPv6
+  address is not an address. It may name another machine; Lys reaches it over
+  plain HTTP, without a key.
+- A `null` address means the default, which only `@lys/protocol` declares, so
+  changing a default moves every file that saved none.
+- Groq, and Ollama in `cloud` mode, need their key in the `secrets` group.
+  Without it the backend does not connect, and reports the provider as not
+  reachable.
+- A missing group or field means LM Studio at its default address, as before
+  providers could be chosen. An unknown provider, mode, or field, or an
+  invalid address, makes loading the settings fail.
+- The backend reads the group, and the key it needs, at each connection
+  attempt: when it starts, and each time the desktop asks it to reconnect.
+  The desktop asks after every save from the Providers pane that changes
+  where requests go. When it cannot read the file, or the group or the key is
+  invalid, it does not connect. It never writes the file.
+
+An older Lys build does not know the group or the two provider keys. It
+ignores them and removes them the next time it saves settings, so it goes
+back to LM Studio at its default address.
 
 ### Tools
 
@@ -320,8 +373,8 @@ back to an older build.
 
 ## Settings updates
 
-The settings view provides Runtime, Model, Generation, Agents, Tools, and
-Secrets panes. Model
+The settings view provides Runtime, Model, Generation, Agents, Tools,
+Providers, and Secrets panes. Model
 inventory, load, unload, and loaded-state health controls call the backend
 through the application store. The user's agents are stored by the backend,
 not in `settings.json`, and the built-in agents ship with the backend and are
@@ -342,8 +395,16 @@ kinds of save one at a time, so neither writes back an older copy of the other
 group.
 
 The Secrets pane saves the Tavily API key only when the person presses Save or
-Enter, replacing only the `secrets` group in the same serialized way; Remove
-saves `null`.
+Enter, replacing only that key of the `secrets` group in the same serialized
+way; Remove saves `null`.
+
+The Providers pane saves a picked provider, an Ollama mode, or an address at
+once, replacing only the `providers` group in the same serialized way; an
+address is saved when the person presses Save or Enter, and an emptied field
+saves `null`. A provider key is saved like the Tavily key, replacing only that
+key. After a save that changes where requests go, including a key the active
+provider uses, the desktop asks the backend to reconnect. After a failed save,
+the backend keeps the provider last saved, and the pane says the save failed.
 
 Choosing Ask me or Just run in the Tools pane, and switching a tool on or off,
 is saved automatically the same way, replacing only the `tools` group. An

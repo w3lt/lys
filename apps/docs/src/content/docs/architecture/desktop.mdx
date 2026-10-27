@@ -112,8 +112,8 @@ one is staged.
 
 Send is disabled while the current measurement, the draft, and the reserve
 exceed the window. While a newer measurement is pending, before the first one
-settles, and when the window cannot be measured (the model is not loaded in LM
-Studio, LM Studio cannot be reached, or the request fails), the meter says so
+settles, and when the window cannot be measured (the provider has not loaded
+the model, the provider cannot be reached, or the request fails), the meter says so
 and sending stays allowed, because the backend checks every round before sending
 it. "Change the window" opens the Model pane, where the model's load
 configuration sets the context length for its next load.
@@ -265,7 +265,7 @@ conversation as `{ kind: "existing", id }`, so the backend continues it. Deletin
 chat view presents, or learning that it no longer exists, resets the view to a
 new conversation.
 
-## Backend and LM Studio status
+## Backend and provider status
 
 The shell store tracks three facts separately. The Tauri host reports whether
 the backend process exists. The store reports the backend as `running` only
@@ -278,13 +278,16 @@ second. Once the backend runs, the store reads `GET /api/v1/llm/runtime`,
 joining the backend's startup attempt through
 `POST /api/v1/llm/runtime/connect` while it is still `connecting`.
 
-The Runtime pane's LM Studio card shows `unknown`, `connecting`, `connected`,
-or `unreachable` with the address `127.0.0.1:1234`. Its **Refresh** button is
-the only control that asks the backend to reconnect. A failed model request
-re-reads the status, so a lost LM Studio appears as not reachable without
-polling. The composer banner names the first missing prerequisite—the
-backend, LM Studio, or model weights—and opens the settings pane that fixes
-it. `initialize` shows the shell as soon as settings load; the backend and vmo
+The Runtime pane's provider card names the provider chosen in Settings →
+Providers and shows `unknown`, `connecting`, `connected`, or `unreachable`
+with where it is reached: the saved or default address of LM Studio or a
+local Ollama server, or the host of Ollama's cloud or Groq. Its **Refresh**
+button, and Test on the active provider's card in the Providers pane, ask the
+backend to reconnect; saving a provider choice does too. A failed model
+request re-reads the status, so a lost provider appears as not reachable
+without polling. The composer banner names the first missing
+prerequisite—the backend, the provider, or model weights—and opens the
+settings pane that fixes it. `initialize` shows the shell as soon as settings load; the backend and vmo
 then start in the background, together and without waiting for each other,
 each when its startup switch is on or the host already owns its process. A
 vmo the host is still stopping, as after a window reload during Stop, is
@@ -340,12 +343,16 @@ to no later session.
 
 ## Model settings
 
-The shell store refreshes `GET /api/v1/llm/list` when LM Studio becomes
-connected and on entry into settings while it stays connected. While LM Studio
-is not connected, the model list is empty, model actions are disabled, and the
-pane explains how to recover. A manual Refresh action picks up changes made in
-LM Studio. Inventory metadata and each model's `loaded` flag drive the model
-rows and composer menu; several models may be loaded at once.
+The shell store refreshes `GET /api/v1/llm/list` when the provider becomes
+connected and on entry into settings while it stays connected. While the
+provider is not connected, the model list is empty, model actions are
+disabled, and the pane explains how to recover. A manual Refresh action picks
+up changes made in the provider. Inventory metadata and each model's `loaded`
+flag drive the model rows and composer menu; several models may be loaded at
+once. Ollama and Groq report every model they list as loaded, so the Model
+pane and the Runtime pane's model card show neither Load nor Unload, nor the
+load configuration, for them, and the composer's banner offers Choose model
+instead of Load model.
 
 Load sends `{ modelId, configuration }` to `POST /api/v1/llm/load`. Unload sends
 `{ modelId }` to `PATCH /api/v1/llm/unload` and accepts its bodyless `204`
@@ -402,7 +409,7 @@ shared protocol and exposes request failures inline.
 
 The application store owns requests across pane changes. Stopping the backend
 invalidates pending observations before aborting their local HTTP transport;
-a late response cannot restore obsolete residency. LM Studio owns weights
+a late response cannot restore obsolete residency. The provider owns weights
 separately from the backend process, so a reconnect queries their actual state.
 Until the inventory can be read again, the Runtime pane shows the model state
 as unavailable rather than as no model loaded, and the Composer label keeps
@@ -617,6 +624,36 @@ location is saved. The application store's location slice owns the save,
 serialized with the other group saves, and changes its location only once the
 file holds the new one, because the tool reads the file.
 
+## Providers
+
+The Providers pane lists the three model providers as native radio buttons
+in one group: LM Studio, Ollama, and Groq, each with its bundled logo, its
+name, a `local` or `cloud` tag, a line on where requests go, and a badge:
+`standby` for the providers not chosen, `needs key` for the chosen one
+without its key, and otherwise the connection status. Picking a provider
+saves it as active at once; the radio buttons are disabled while a save runs.
+
+Only the active card opens. For Ollama, a mode row switches between Local
+and Cloud. LM Studio and a local Ollama server show a Server address form:
+an `http://` prefix, a field that starts empty with the saved or default
+address as its placeholder, and one button that reads Save while the field
+holds a new valid address and Test otherwise. Ollama's cloud and Groq show a
+key form like the Tavily card: a password field with the masked key as its
+placeholder, a show button, a link to the provider's key page, Save, and,
+once a key is saved, Test and Remove. Enter saves a valid new draft, Escape
+discards it, and an emptied address saves the default. A polite status line
+under the form describes the field: what an edit means, a running or failed
+save, a missing key, or the connection with its address.
+
+The application store's provider slice owns the saves, serialized with the
+other group saves. A choice, mode, or address replaces only the `providers`
+group; a key replaces only its own key of the `secrets` group. After a
+save that changes where requests go, including a key the active provider
+uses, the store asks the backend to reconnect, and the model inventory
+follows the new connection. The pane owns only the field's draft and
+whether a key is shown, which reset after a save and whenever the form
+changes between address and key.
+
 ## Secrets
 
 The Secrets pane holds the keys of the services Lys calls on the person's
@@ -630,8 +667,8 @@ its placeholder (its first 5 and last 4 characters for a key of 16 or more
 characters). Typing makes a draft; Save, or Enter, saves a draft that is a
 valid key different from the saved one, after removing surrounding whitespace,
 and Escape discards it. An invalid draft says why and cannot be saved. A save
-replaces only the `secrets` group of `settings.json`, serialized with the other
-group saves; Remove saves `null`. After a save or removal, the pane reads the
+replaces only the Tavily key of the `secrets` group of `settings.json`,
+serialized with the other group saves; Remove saves `null`. After a save or removal, the pane reads the
 tool list again, so `web_search`'s availability in the Tools pane follows the
 key. Test asks the backend to check the saved key with Tavily and shows the
 result, with the plan's credits when Tavily reports them. Test is unavailable
@@ -735,19 +772,22 @@ are gone and the reply is marked interrupted when the backend next starts.
   unknown until the conversation, the model, or the tools change.
 - The KV cache load setting has no effect with the installed LM Studio SDK; see
   the [load request](/reference/api/#model-load-request).
-- Model observations refresh on LM Studio connection, entry into settings,
-  manual refresh, and model operations. The LM Studio status changes only on
-  backend start, Refresh, and failed model requests; it is not polled. Changes
-  made by another LM Studio client between observations are not pushed to the
-  desktop.
+- Model observations refresh on provider connection, entry into settings,
+  manual refresh, and model operations. The provider status changes only on
+  backend start, Refresh, a provider save, and failed model requests; it is
+  not polled. Changes made by another client of the provider between
+  observations are not pushed to the desktop.
+- The provider card's status follows the provider the backend last tried. A
+  save that fails leaves the backend on the provider last saved.
 - The composer's attachment tray takes only files the loaded model can use: an
   image only for a model with vision, a text file only for one trained for
   tool use, and nothing while no loaded model is listed. An image pasted from
   the clipboard is not staged; images are chosen or dropped as files. The
   transcript shows an attachment's kind and name only, without a preview or a
   way to open it.
-- The Tavily API key is stored as plain text in `settings.json`, protected
-  only by the file's owner-only permissions; there is no keychain storage.
+- The Tavily, Ollama, and Groq API keys are stored as plain text in
+  `settings.json`, protected only by the file's owner-only permissions; there
+  is no keychain storage.
 - The Tool calls switch lasts for the session only; after a restart it is on
   again. Each tool's switch and approval are saved.
 - There is no "Allow for this chat": each call on Ask me is asked about.

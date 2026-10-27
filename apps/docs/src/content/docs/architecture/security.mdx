@@ -1,15 +1,20 @@
 ---
 title: Security and trust boundaries
-description: "The current local trust boundary: loopback services, schema validation, approved web reads in a micro VM and searches, a plain-text search key, and file-backed settings without credential management."
+description: "The current trust boundary: loopback services, a chosen model provider that may be remote, schema validation, approved web reads in a micro VM and searches, plain-text keys, and file-backed settings without credential management."
 docType: architecture
 sidebar:
   order: 8
 ---
 
-The current security posture is intentionally simple and local. The backend and
-LM Studio both run on loopback, request and event payloads are validated with
-Zod, and there is no credential-management subsystem yet. There are two
-outbound connections, and both start off: the `read_page` tool asks vmo, a
+The current security posture is intentionally simple. The backend runs on
+loopback, request and event payloads are validated with Zod, and there is no
+credential-management subsystem yet. Every conversation goes to the model
+provider the person chose in Settings → Providers: LM Studio or a local
+Ollama server at an address the person sets, `127.0.0.1` by default and
+reached over plain HTTP, or Ollama's cloud or Groq over HTTPS with the
+person's key. A remote address, Ollama's cloud, and Groq receive the
+conversations they answer. Besides the provider, there are two outbound
+connections, and both start off: the `read_page` tool asks vmo, a
 page reader on the same machine, to read a public web page in a headless
 browser inside a micro VM, which also loads what the page needs, and the
 `web_search` tool sends a query and the person's Tavily
@@ -17,7 +22,8 @@ API key to Tavily's search service. Each runs after the person allows the call, 
 at once when the person set that tool to Just run, a choice Lys saves. The
 backend decides which calls ask; the desktop shows the prompts. The clock and
 location tools, `get_current_time` and `get_location`, reach no network: their
-results go to the backend and on to LM Studio, both on loopback.
+results go to the backend and on to the model provider with the rest of the
+conversation.
 
 ## Current trust boundaries
 
@@ -25,7 +31,9 @@ results go to the backend and on to LM Studio, both on loopback.
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | React UI -> Tauri host       | Trusted application boundary using Tauri `invoke` commands.                                                                                                                                                                            |
 | React UI -> Fastify backend  | Loopback HTTP and SSE only. No auth layer beyond local binding.                                                                                                                                                                        |
-| Fastify backend -> LM Studio | Loopback connections to local LM Studio HTTP and WebSocket endpoints.                                                                                                                                                                  |
+| Fastify backend -> LM Studio | HTTP and WebSocket connections to LM Studio at the saved address, loopback by default, without encryption or a key.                                                                                                                    |
+| Backend -> Ollama            | Plain HTTP to a local Ollama server at the saved address, loopback by default, without a key; or HTTPS to `ollama.com` with the saved Ollama key as a bearer token. Either receives every conversation it answers.                     |
+| Backend -> Groq              | HTTPS to `api.groq.com` with the saved Groq key as a bearer token. Groq receives every conversation it answers.                                                                                                                        |
 | Backend -> SQLite file       | Local filesystem access to `$LYS_HOME/lys_db.sqlite`.                                                                                                                                                                                  |
 | Backend -> attachment files  | Local filesystem access to `$LYS_HOME/attachments/`: the files of each chat request are written under the conversation's and the message's identifiers and the file's own name, read for the model, and removed with the conversation. |
 | Tauri host -> settings file  | Local filesystem access to `$LYS_HOME/settings.json`; `get_location` reads its `location` group and never creates or writes the file.                                                                                                  |
@@ -35,13 +43,14 @@ results go to the backend and on to LM Studio, both on loopback.
 | Backend -> vmo               | Each tool lookup sends `GET /health` to vmo, and each `read_page` call sends the page's URL, over loopback HTTP on `127.0.0.1:8080`, without authentication.                                                                           |
 | vmo -> micro VM -> web       | vmo reads the page in headless Chromium in a fresh micro VM, which loads the page, its redirects, and what it loads.                                                                                                                   |
 | Backend -> Tavily            | `web_search` sends one query and the saved API key to `api.tavily.com` per allowed call.                                                                                                                                               |
-| Backend -> settings file     | Reads the Tavily API key and the saved Just run choices from `$LYS_HOME/settings.json`; the Tauri host is the only writer.                                                                                                             |
+| Backend -> settings file     | Reads the model provider, its address and key, the Tavily API key, and the saved Just run choices from `$LYS_HOME/settings.json`; the Tauri host is the only writer.                                                                   |
 
 ## Current controls
 
 | Control                     | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Loopback host constants     | Backend and LM Studio addresses default to `127.0.0.1`.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Loopback host constants     | The backend address is `127.0.0.1`; LM Studio and Ollama addresses default to it, and the person may set another.                                                                                                                                                                                                                                                                                                                                                                   |
+| Provider key handling       | A provider key goes only to its own provider, in the `Authorization` header over HTTPS; it never appears in the model's context, events, API answers, logs, or errors, and a failed provider request never quotes the provider's answer.                                                                                                                                                                                                                                            |
 | CORS policy                 | Fastify admits only the `http://localhost:1420` and `http://127.0.0.1:1420` development origins and the `tauri://localhost` app origin.                                                                                                                                                                                                                                                                                                                                             |
 | Zod validation              | Backend validates route bodies, parameters, and query strings; desktop validates SSE payloads and HTTP responses.                                                                                                                                                                                                                                                                                                                                                                   |
 | Attachment name rule        | An attachment name is non-empty, neither `.` nor `..`, holds no `/` and no control character (NUL included), and has at most 255 UTF-8 bytes, so it names one entry of its message's folder; the shared schema refuses any other name with `400`. The file store builds every path only from a validated UUIDv7 and such a name, under the attachments directory, and creates each message folder and each file exclusively.                                                        |
@@ -65,9 +74,13 @@ results go to the backend and on to LM Studio, both on loopback.
 
 ## Candid limits
 
-- There is no keychain integration. The Tavily API key and the saved
-  location are stored as plain text in `settings.json`, readable by the
-  person's OS account and by any process running as it.
+- There is no keychain integration. The Tavily, Ollama, and Groq API keys
+  and the saved location are stored as plain text in `settings.json`,
+  readable by the person's OS account and by any process running as it.
+- A provider address may name another machine. Lys reaches it over plain
+  HTTP without authentication, so the network between them can read and
+  change the conversation. Lys does not warn when an address leaves the
+  machine.
 - There is no scoped credential-handle layer.
 - The saved Just run choices live in `settings.json`, so any process running
   as the person's OS account can edit the file to put a tool on Just run. The
@@ -164,8 +177,9 @@ results go to the backend and on to LM Studio, both on loopback.
   machine Lys runs on, as they would from any browser.
 - The current Tauri configuration sets no Content Security Policy (`csp` is
   `null`).
-- The backend currently uses a dummy API key value when talking to local
-  OpenAI-compatible LM Studio endpoints that expect an API key field.
+- The backend currently uses a dummy API key value when talking to the
+  OpenAI-compatible endpoints of LM Studio and a local Ollama server, which
+  take no key but whose client expects one.
 - Runtime settings and conversation data live on disk in user-space files.
 - The backend's log files keep every request's full URL, history searches
   included, and the failures the backend reports on disk without redaction,
@@ -309,7 +323,7 @@ does not yet implement those guarantees.
   [file tool path exception](/reference/standard-application/#file-tool-path-exception)
   ([issue #122](https://github.com/w3lt/lys/issues/122))
 - Credential storage and retrieval, which would replace the plain-text Tavily
-  API key
+  and provider API keys
 - Provider authentication flows
 - More explicit diagnostics and log-redaction policy
 - Security review of release-mode desktop and backend packaging

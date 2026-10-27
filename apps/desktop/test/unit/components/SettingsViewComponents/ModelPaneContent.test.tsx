@@ -1,7 +1,8 @@
 import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
-import { LM_STUDIO_UNREACHABLE_MESSAGE } from "@/lib/models/lm-studio-connection"
+import { formatProviderUnreachableMessage } from "@/lib/models/lm-studio-connection"
+import { LM_STUDIO_TARGET } from "../../support/providerTargetFixtures"
 import {
   buildJsonResponse,
   startBackendFake,
@@ -22,6 +23,9 @@ import {
 import { createControlledPromise } from "../../support/settlement"
 import { startHover, waitForRenderedWork } from "../../support/rendering"
 import { FIRST_RUN_LOAD_CONFIGURATION } from "../../support/settingsFixtures"
+
+/** Explanation shown while the first-run provider, LM Studio, is not reachable. */
+const UNREACHABLE_MESSAGE = formatProviderUnreachableMessage(LM_STUDIO_TARGET)
 
 /** One resident model chosen as default, and one on disk. */
 const TWO_MODELS: RuntimeArrangement = {
@@ -222,10 +226,8 @@ describe("ModelPaneContent", () => {
     await startModelPane(buildUnreachableRuntime("running", "unreachable"))
 
     expect(getRefreshButton()).toBeDisabled()
-    expect(getRefreshButton()).toHaveAccessibleDescription(
-      LM_STUDIO_UNREACHABLE_MESSAGE
-    )
-    expect(screen.getByText(LM_STUDIO_UNREACHABLE_MESSAGE)).toBeInTheDocument()
+    expect(getRefreshButton()).toHaveAccessibleDescription(UNREACHABLE_MESSAGE)
+    expect(screen.getByText(UNREACHABLE_MESSAGE)).toBeInTheDocument()
   })
 
   it("repeats why Refresh is disabled in a tooltip after 600 ms of hover", async () => {
@@ -241,13 +243,13 @@ describe("ModelPaneContent", () => {
     act(() => {
       vi.advanceTimersByTime(599)
     })
-    const beforeDelay = screen.getAllByText(LM_STUDIO_UNREACHABLE_MESSAGE)
+    const beforeDelay = screen.getAllByText(UNREACHABLE_MESSAGE)
     act(() => {
       vi.advanceTimersByTime(1)
     })
 
     expect(beforeDelay).toHaveLength(1)
-    expect(screen.getAllByText(LM_STUDIO_UNREACHABLE_MESSAGE)).toHaveLength(2)
+    expect(screen.getAllByText(UNREACHABLE_MESSAGE)).toHaveLength(2)
   })
 
   it("describes Refresh only while LM Studio is not reachable", async () => {

@@ -113,13 +113,17 @@ describe("SecretsPaneContent", () => {
         args: {
           newSettings: {
             ...STORED_SETTINGS_DOCUMENT,
-            secrets: { tavilyApiKey: "tvly-new-key" }
+            secrets: {
+              ...STORED_SETTINGS_DOCUMENT.secrets,
+              tavilyApiKey: "tvly-new-key"
+            }
           }
         }
       },
       { command: "list_tools", args: {} }
     ])
     expect(useLysStore.getState().settings.secrets).toEqual({
+      ...STORED_SETTINGS.secrets,
       tavilyApiKey: "tvly-new-key"
     })
     expect(listRouteRequests(backend, TOOLS_ROUTE)).toHaveLength(1)
@@ -138,9 +142,7 @@ describe("SecretsPaneContent", () => {
     await user.click(screen.getByRole("button", { name: "Remove" }))
     await waitForRenderedWork()
 
-    expect(useLysStore.getState().settings.secrets).toEqual({
-      tavilyApiKey: null
-    })
+    expect(useLysStore.getState().settings.secrets.tavilyApiKey).toBeNull()
     expect(listRouteRequests(backend, TOOLS_ROUTE)).toHaveLength(1)
     expect(screen.getByRole("article", { name: "Tavily" })).toHaveTextContent(
       "no key"

@@ -2,6 +2,7 @@ import {
   saveGenerationSettings,
   saveLoadConfigurationSettings,
   saveLocationSettings,
+  saveProviderSettings,
   saveRuntimeAutoStartSettings,
   saveSecretsSettings,
   saveToolSettings
@@ -11,6 +12,7 @@ import type {
   GenerationSettings,
   LoadConfigurationSettings,
   LocationSettings,
+  ProvidersSettings,
   RuntimeAutoStartSettings,
   SecretsSettings,
   ToolSettings
@@ -44,13 +46,25 @@ export type SettingsGroupSaves = {
     loadConfiguration: LoadConfigurationSettings
   ) => Promise<void>
   /**
-   * Saves the secrets group after every save sent earlier has settled.
+   * Saves some keys of the secrets group after every save sent earlier has
+   * settled.
    *
-   * @param secrets - Secrets to persist.
+   * @param changedSecrets - Keys to persist; a key not given keeps the value
+   * on disk.
    * @returns Resolves after the settings file is written, and rejects with
    * the native load or save rejection.
    */
-  readonly saveSecretsSettings: (secrets: SecretsSettings) => Promise<void>
+  readonly saveSecretsSettings: (
+    changedSecrets: Partial<SecretsSettings>
+  ) => Promise<void>
+  /**
+   * Saves the providers group after every save sent earlier has settled.
+   *
+   * @param providers - Provider choice and addresses to persist.
+   * @returns Resolves after the settings file is written, and rejects with
+   * the native load or save rejection.
+   */
+  readonly saveProviderSettings: (providers: ProvidersSettings) => Promise<void>
   /**
    * Saves the tools group after every save sent earlier has settled.
    *
@@ -133,8 +147,10 @@ export function createSettingsGroupSaves(): SettingsGroupSaves {
       saveSettingsGroupInOrder(() =>
         saveLoadConfigurationSettings(loadConfiguration)
       ),
-    saveSecretsSettings: (secrets) =>
-      saveSettingsGroupInOrder(() => saveSecretsSettings(secrets)),
+    saveSecretsSettings: (changedSecrets) =>
+      saveSettingsGroupInOrder(() => saveSecretsSettings(changedSecrets)),
+    saveProviderSettings: (providers) =>
+      saveSettingsGroupInOrder(() => saveProviderSettings(providers)),
     saveToolSettings: (tools) =>
       saveSettingsGroupInOrder(() => saveToolSettings(tools)),
     saveLocationSettings: (location) =>

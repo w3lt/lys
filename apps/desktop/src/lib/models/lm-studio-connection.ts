@@ -1,19 +1,13 @@
-import { LMSTUDIO_HOST, LMSTUDIO_PORT } from "@lys/protocol"
 import type { BackendServerStatus } from "@/lib/store"
 import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
-
-/** LM Studio address the backend connects to, as shown to the user. */
-export const LM_STUDIO_ADDRESS = `${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`
-
-/** Explanation shown wherever model features wait for an unreachable LM Studio. */
-export const LM_STUDIO_UNREACHABLE_MESSAGE =
-  "LM Studio is not reachable. Start LM Studio, then press Refresh on its status in Runtime."
+import type { LlmProviderTarget } from "./llm-provider-target"
 
 /**
- * Whether model requests can reach LM Studio, and why not.
+ * Whether model requests can reach the active provider, and why not.
  *
- * @remarks Ordered by prerequisite: the backend must answer before the LM
- * Studio status matters.
+ * @remarks Ordered by prerequisite: the backend must answer before the
+ * provider's status matters. The `lm-studio-` names predate other providers
+ * and cover every provider.
  */
 export type ModelRuntimeAvailability =
   | "backend-offline"
@@ -21,15 +15,34 @@ export type ModelRuntimeAvailability =
   | "lm-studio-unreachable"
   | "available"
 
-/** Visual tone of the LM Studio status indicator. */
+/** Visual tone of the provider status indicator. */
 export type LmStudioStatusTone = "active" | "pending" | "idle" | "danger"
 
 /**
- * Calculates whether model requests can reach LM Studio, and why not.
+ * Formats the explanation shown wherever model features wait for an
+ * unreachable provider.
+ *
+ * @param provider - Active provider.
+ * @returns What to check: a server at an address, or a key and the network
+ * for a hosted provider; then where to refresh.
+ */
+export function formatProviderUnreachableMessage(
+  provider: LlmProviderTarget
+): string {
+  const check =
+    provider.access === "address"
+      ? `Start ${provider.name}, or check its address in Providers`
+      : "Check its key in Providers and your network"
+  return `${provider.name} is not reachable. ${check}, then press Refresh on its status in Runtime.`
+}
+
+/**
+ * Calculates whether model requests can reach the active provider, and why
+ * not.
  *
  * @param backendStatus - Store-owned backend lifecycle state.
- * @param lmStudioStatus - Latest published LM Studio status.
- * @returns `available` only while the backend runs and LM Studio is
+ * @param lmStudioStatus - Latest published provider status.
+ * @returns `available` only while the backend runs and the provider is
  * connected. An `unknown` status while the backend runs counts as connecting,
  * because the store reads it right after the backend becomes ready.
  */
@@ -50,28 +63,30 @@ export function calculateModelRuntimeAvailability(
 }
 
 /**
- * Formats the LM Studio card heading.
+ * Formats the provider status card heading.
  *
- * @param lmStudioStatus - Latest published LM Studio status.
- * @returns The heading naming the connection state.
+ * @param lmStudioStatus - Latest published provider status.
+ * @param provider - Active provider.
+ * @returns The heading naming the provider and the connection state.
  */
 export function formatLmStudioStatusLabel(
-  lmStudioStatus: LmStudioStatus
+  lmStudioStatus: LmStudioStatus,
+  provider: LlmProviderTarget
 ): string {
   switch (lmStudioStatus) {
     case "unknown":
-      return "LM Studio status unknown"
+      return `${provider.name} status unknown`
     case "connecting":
-      return "Connecting to LM Studio"
+      return `Connecting to ${provider.name}`
     case "connected":
-      return "LM Studio connected"
+      return `${provider.name} connected`
     case "unreachable":
-      return "LM Studio not reachable"
+      return `${provider.name} not reachable`
   }
 }
 
 /**
- * Formats why the LM Studio status is not known, for the backend's state.
+ * Formats why the provider status is not known, for the backend's state.
  *
  * @param backendStatus - Store-owned backend lifecycle state.
  * @returns What the backend is doing while it is starting, stopping, or not
@@ -96,33 +111,39 @@ function formatUnknownLmStudioStatusReason(
 }
 
 /**
- * Formats the address and next step shown under the LM Studio heading.
+ * Formats where the provider is and the next step, shown under the provider
+ * status heading.
  *
- * @param lmStudioStatus - Latest published LM Studio status.
+ * @param lmStudioStatus - Latest published provider status.
  * @param backendStatus - Store-owned backend lifecycle state.
- * @returns The meta line; an `unknown` status adds why it is not known,
- * which depends on the backend's state.
+ * @param provider - Active provider.
+ * @returns The meta line, starting with the provider's location; an
+ * `unknown` status adds why it is not known, which depends on the backend's
+ * state, and an `unreachable` one what to check.
  */
 export function formatLmStudioStatusMeta(
   lmStudioStatus: LmStudioStatus,
-  backendStatus: BackendServerStatus
+  backendStatus: BackendServerStatus,
+  provider: LlmProviderTarget
 ): string {
   switch (lmStudioStatus) {
     case "unknown":
-      return `${LM_STUDIO_ADDRESS} · ${formatUnknownLmStudioStatusReason(backendStatus)}`
+      return `${provider.location} · ${formatUnknownLmStudioStatusReason(backendStatus)}`
     case "connecting":
-      return `${LM_STUDIO_ADDRESS} · connecting`
+      return `${provider.location} · connecting`
     case "connected":
-      return LM_STUDIO_ADDRESS
+      return provider.location
     case "unreachable":
-      return `${LM_STUDIO_ADDRESS} · start LM Studio, then refresh`
+      return provider.access === "address"
+        ? `${provider.location} · start ${provider.name}, then refresh`
+        : `${provider.location} · check the key in Providers, then refresh`
   }
 }
 
 /**
- * Selects the LM Studio status indicator tone.
+ * Selects the provider status indicator tone.
  *
- * @param lmStudioStatus - Latest published LM Studio status.
+ * @param lmStudioStatus - Latest published provider status.
  * @returns The tone consumed by the status dot's styles.
  */
 export function calculateLmStudioStatusTone(

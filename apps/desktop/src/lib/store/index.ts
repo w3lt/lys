@@ -27,6 +27,10 @@ import {
 } from "./secrets-settings"
 import { createSettingsGroupSaves } from "./settings-group-saves"
 import {
+  createProviderSettingsSlice,
+  type ProviderSettingsSlice
+} from "./provider-settings"
+import {
   createToolSettingsSlice,
   isToolSettingsEqual,
   type ToolSettingsSlice
@@ -156,6 +160,7 @@ type LysStore = LysState &
   GenerationSettingsSlice &
   LoadConfigurationSettingsSlice &
   SecretsSettingsSlice &
+  ProviderSettingsSlice &
   LocationSettingsSlice &
   ToolSettingsSlice &
   RuntimeAutoStartSettingsSlice &
@@ -178,7 +183,7 @@ const initialState: LysState = {
 
 /**
  * Zustand hook and store for application view, settings, backend and vmo
- * lifecycles, and LM Studio status.
+ * lifecycles, and the model provider's status.
  *
  * @remarks Initialization and process actions are application-owned
  * asynchronous transitions. Tauri errors propagate from the returned promises;
@@ -186,14 +191,15 @@ const initialState: LysState = {
  * updateToolApproval. The generation, load configuration, tool-settings, and
  * runtime-autostart slices own automatic saves and retain their completion or
  * failure state across pane changes; the store runs every group's writes one at a time, so
- * one group's save never writes back another group's older value.
+ * one group's save never writes back another group's older value. A saved
+ * provider choice, address, or key in use makes the backend connect again.
  *
  * Model requests are owned by the model slice, use the shared HTTP protocol,
- * and are admitted only while the backend runs and LM Studio is connected.
- * An LM Studio status change to `connected` refreshes inventory; any other
- * change releases model observations. A failed model request re-reads the
- * LM Studio status. Every load sends the stored load configuration of the
- * model being loaded.
+ * and are admitted only while the backend runs and the provider is
+ * connected. A provider status change to `connected` refreshes inventory;
+ * any other change releases model observations. A failed model request
+ * re-reads the provider status. Every load sends the stored load
+ * configuration of the model being loaded.
  */
 export const useLysStore = create<LysStore>()((set, get) => {
   const settingsGroupSaves = createSettingsGroupSaves()
@@ -318,6 +324,11 @@ export const useLysStore = create<LysStore>()((set, get) => {
       saveSecretsSettings: settingsGroupSaves.saveSecretsSettings,
       sendWebSearchKeyCheck: () =>
         sendWebSearchKeyCheck({ backendUrl: get().backendUrl })
+    }),
+    ...createProviderSettingsSlice(set, get, {
+      saveProviderSettings: settingsGroupSaves.saveProviderSettings,
+      saveSecretsSettings: settingsGroupSaves.saveSecretsSettings,
+      connectLlmProvider: () => get().connectLmStudio()
     }),
     ...createLocationSettingsSlice(set, get, {
       saveLocationSettings: settingsGroupSaves.saveLocationSettings

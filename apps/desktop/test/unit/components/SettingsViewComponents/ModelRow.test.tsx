@@ -32,6 +32,7 @@ function startModelRow(props: Partial<ComponentProps<typeof ModelRow>> = {}) {
       <ModelRow
         disabled={false}
         isDefault={false}
+        isModelLoadingManaged
         model={ON_DISK}
         modelRuntime={{ status: "loaded", modelKey: "qwen3-8b" }}
         {...actions}
@@ -113,5 +114,14 @@ describe("ModelRow", () => {
     await user.click(screen.getByRole("button", { name: /^gemma-3/ }))
 
     expect(actions.onSelect).toHaveBeenCalledOnce()
+  })
+
+  it("offers Test but no Load or Unload for a provider that loads its own models", () => {
+    startModelRow({ model: RESIDENT, isModelLoadingManaged: false })
+
+    expect(
+      screen.getByRole("button", { name: "Test qwen3-8b" })
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Unload qwen3-8b" })).toBeNull()
   })
 })

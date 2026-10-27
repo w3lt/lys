@@ -1,5 +1,8 @@
 import type {
+  GroqApiKey,
+  LlmProviderSettings,
   ModelLoadConfiguration,
+  OllamaApiKey,
   PlaceName,
   TavilyApiKey
 } from "@lys/share"
@@ -100,16 +103,35 @@ export type LoadConfigurationSettings = {
 /**
  * Secrets persisted under the `secrets` JSON object.
  *
- * @remarks Mirrors Rust's `SecretsSettings`. Rust validates the key on load,
- * and the Tauri settings adapter parses it again with the shared key schema,
- * which brands it. The key is saved only by an explicit Save in the Secrets
- * pane; the backend reads it from the settings file for each turn that offers
- * `web_search`. The renderer never logs or sends it.
+ * @remarks Mirrors Rust's `SecretsSettings`. Rust validates each key on
+ * load, and the Tauri settings adapter parses it again with the shared key
+ * schema of its service, which brands it. Each key is saved only by an
+ * explicit Save: the Tavily key in the Secrets pane, the Ollama and Groq keys
+ * in the Providers pane. The backend reads them from the settings file: the
+ * Tavily key for each turn that offers `web_search`, a provider's key at
+ * each connection attempt while that provider is active. The renderer never
+ * logs or sends them.
  */
 export type SecretsSettings = {
   /** Saved Tavily API key, or null when none is saved; a secret. */
   readonly tavilyApiKey: TavilyApiKey | null
+  /** Saved key of Ollama's cloud, or null when none is saved; a secret. */
+  readonly ollamaApiKey: OllamaApiKey | null
+  /** Saved Groq API key, or null when none is saved; a secret. */
+  readonly groqApiKey: GroqApiKey | null
 }
+
+/**
+ * Provider choice and server addresses persisted under the `providers` JSON
+ * object.
+ *
+ * @remarks Mirrors Rust's `ProvidersSettings`; the Tauri settings adapter
+ * parses the group with the shared provider settings schema, which brands the
+ * addresses. A null address means the provider's default address. The group
+ * is saved when the Providers pane picks a provider, a mode, or an address;
+ * the backend reads it at each connection attempt.
+ */
+export type ProvidersSettings = LlmProviderSettings
 
 /**
  * Tool choices persisted under the `tools` JSON object.
@@ -159,7 +181,7 @@ export type LocationSettings = {
 /**
  * Renderer projection of the complete Tauri-persisted settings document.
  *
- * @remarks Holds the six groups of Rust's `LysSettings` under the same
+ * @remarks Holds the seven groups of Rust's `LysSettings` under the same
  * names, so a saved value cannot silently drop a persisted group. The
  * runtime and generation groups match Rust field for field. The load
  * configuration group differs only in its per-model settings, a map here and
@@ -177,6 +199,8 @@ export type LysSettings = {
   loadConfiguration: LoadConfigurationSettings
   /** Keys of the services Lys calls on the person's behalf. */
   secrets: SecretsSettings
+  /** Provider every request goes to, and its server's address. */
+  providers: ProvidersSettings
   /** Tools the person set to Just run and tools the person switched. */
   tools: ToolSettings
   /** Location the person saved for the `get_location` tool. */
@@ -209,7 +233,19 @@ const INITIAL_LOAD_CONFIGURATION_SETTINGS: LoadConfigurationSettings =
  * first-run settings file.
  */
 const INITIAL_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
-  tavilyApiKey: null
+  tavilyApiKey: null,
+  ollamaApiKey: null,
+  groqApiKey: null
+})
+
+/**
+ * Providers shown before Tauri initialization completes: LM Studio at its
+ * default address, as in a first-run settings file.
+ */
+const INITIAL_PROVIDERS_SETTINGS: ProvidersSettings = Object.freeze({
+  active: "lmStudio",
+  lmStudio: Object.freeze({ address: null }),
+  ollama: Object.freeze({ mode: "local", address: null })
 })
 
 /**
@@ -251,6 +287,7 @@ export const initialSettingsState: LysSettings = {
   },
   loadConfiguration: INITIAL_LOAD_CONFIGURATION_SETTINGS,
   secrets: INITIAL_SECRETS_SETTINGS,
+  providers: INITIAL_PROVIDERS_SETTINGS,
   tools: INITIAL_TOOL_SETTINGS,
   location: INITIAL_LOCATION_SETTINGS
 }

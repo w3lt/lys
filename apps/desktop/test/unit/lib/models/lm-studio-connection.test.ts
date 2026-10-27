@@ -3,8 +3,13 @@ import {
   calculateLmStudioStatusTone,
   calculateModelRuntimeAvailability,
   formatLmStudioStatusLabel,
-  formatLmStudioStatusMeta
+  formatLmStudioStatusMeta,
+  formatProviderUnreachableMessage
 } from "@/lib/models/lm-studio-connection"
+import {
+  GROQ_TARGET,
+  LM_STUDIO_TARGET
+} from "../../support/providerTargetFixtures"
 
 describe("calculateModelRuntimeAvailability", () => {
   it.each(["starting", "stopping", "stopped", "unresponsive"] as const)(
@@ -38,7 +43,15 @@ describe("formatLmStudioStatusLabel", () => {
     ["connected", "LM Studio connected"],
     ["unreachable", "LM Studio not reachable"]
   ] as const)("labels %s as %j", (lmStudioStatus, label) => {
-    expect(formatLmStudioStatusLabel(lmStudioStatus)).toBe(label)
+    expect(formatLmStudioStatusLabel(lmStudioStatus, LM_STUDIO_TARGET)).toBe(
+      label
+    )
+  })
+
+  it("names the active provider", () => {
+    expect(formatLmStudioStatusLabel("connected", GROQ_TARGET)).toBe(
+      "Groq connected"
+    )
   })
 })
 
@@ -67,9 +80,35 @@ describe("formatLmStudioStatusMeta", () => {
   ] as const)(
     "describes %s with the backend %s as %j",
     (lmStudioStatus, backendStatus, meta) => {
-      expect(formatLmStudioStatusMeta(lmStudioStatus, backendStatus)).toBe(meta)
+      expect(
+        formatLmStudioStatusMeta(
+          lmStudioStatus,
+          backendStatus,
+          LM_STUDIO_TARGET
+        )
+      ).toBe(meta)
     }
   )
+
+  it("asks to check the key of a hosted provider that is not reachable", () => {
+    expect(
+      formatLmStudioStatusMeta("unreachable", "running", GROQ_TARGET)
+    ).toBe("api.groq.com · check the key in Providers, then refresh")
+  })
+})
+
+describe("formatProviderUnreachableMessage", () => {
+  it("asks to start a provider at an address, or to check its address", () => {
+    expect(formatProviderUnreachableMessage(LM_STUDIO_TARGET)).toBe(
+      "LM Studio is not reachable. Start LM Studio, or check its address in Providers, then press Refresh on its status in Runtime."
+    )
+  })
+
+  it("asks to check a hosted provider's key and the network", () => {
+    expect(formatProviderUnreachableMessage(GROQ_TARGET)).toBe(
+      "Groq is not reachable. Check its key in Providers and your network, then press Refresh on its status in Runtime."
+    )
+  })
 })
 
 describe("calculateLmStudioStatusTone", () => {

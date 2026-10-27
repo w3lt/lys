@@ -68,6 +68,11 @@ type ModelRowActionsProps = {
   readonly model: LocalModelDescriptor
   /** Prevents new requests while the backend is stopped or busy. */
   readonly disabled: boolean
+  /**
+   * Whether Lys loads and unloads the active provider's models; Load and
+   * Unload are absent otherwise.
+   */
+  readonly isModelLoadingManaged: boolean
   /** Loads the selected key and handles failures in shared state. */
   readonly onLoad: (modelKey: string) => Promise<void>
   /** Unloads the selected key and handles failures in shared state. */
@@ -79,7 +84,8 @@ type ModelRowActionsProps = {
 /**
  * Presents model operations supported by the backend.
  * @param props - Model, availability, and store-owned asynchronous callbacks.
- * @returns Named native controls for health and residency.
+ * @returns Named native controls for health and, while Lys manages the
+ * provider's model loading, residency.
  * @remarks The store observes all failures;
  * this row does not cancel application work on unmount. Health path eligibility
  * comes from the shared parameter validator rather than a copied length limit.
@@ -87,6 +93,7 @@ type ModelRowActionsProps = {
 function ModelRowActions({
   model,
   disabled,
+  isModelLoadingManaged,
   onLoad,
   onUnload,
   onTest
@@ -111,21 +118,23 @@ function ModelRowActions({
       >
         Test
       </Button>
-      <Button
-        aria-label={`${model.loaded ? "Unload" : "Load"} ${model.modelKey}`}
-        className="settings-view__model-act"
-        disabled={disabled}
-        onClick={() =>
-          void (model.loaded
-            ? onUnload(model.modelKey)
-            : onLoad(model.modelKey))
-        }
-        size="sm"
-        type="button"
-        variant={model.loaded ? "outline" : "default"}
-      >
-        {model.loaded ? "Unload" : "Load"}
-      </Button>
+      {isModelLoadingManaged ? (
+        <Button
+          aria-label={`${model.loaded ? "Unload" : "Load"} ${model.modelKey}`}
+          className="settings-view__model-act"
+          disabled={disabled}
+          onClick={() =>
+            void (model.loaded
+              ? onUnload(model.modelKey)
+              : onLoad(model.modelKey))
+          }
+          size="sm"
+          type="button"
+          variant={model.loaded ? "outline" : "default"}
+        >
+          {model.loaded ? "Unload" : "Load"}
+        </Button>
+      ) : null}
     </div>
   )
 }
@@ -145,6 +154,7 @@ export default function ModelRow({
   modelRuntime,
   onSelect,
   disabled,
+  isModelLoadingManaged,
   onLoad,
   onUnload,
   onTest
@@ -163,6 +173,7 @@ export default function ModelRow({
       <ModelRowActions
         model={model}
         disabled={disabled}
+        isModelLoadingManaged={isModelLoadingManaged}
         onLoad={onLoad}
         onUnload={onUnload}
         onTest={onTest}

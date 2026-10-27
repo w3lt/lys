@@ -14,6 +14,7 @@ import {
   buildLoadConfigurationSettings,
   type ModelLoadConfigurationChange
 } from "@/lib/models/model-load-configuration"
+import { describeLlmProviderTarget } from "@/lib/models/llm-provider-target"
 import { type BackendServerStatus, useLysStore } from "@/lib/store"
 import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
 import type { ModelRuntimeState } from "@/lib/store/model-runtime"
@@ -69,6 +70,16 @@ const ToolPane = lazy(
 )
 
 /**
+ * Lazily loads the providers settings body; the parent supplies the fallback.
+ *
+ * @remarks React owns module loading and
+ * suspension while the settings view owns pane selection and the fallback.
+ */
+const ProvidersPane = lazy(
+  () => import("@/components/SettingsViewComponents/ProvidersPaneContent")
+)
+
+/**
  * Lazily loads the secrets settings body; the parent supplies the fallback.
  *
  * @remarks React owns module loading and
@@ -85,6 +96,7 @@ type SettingsPaneContentComponent =
   | typeof GenerationPaneContent
   | typeof AgentPane
   | typeof ToolPane
+  | typeof ProvidersPane
   | typeof SecretsPane
 
 /** Metadata and lazy body used to render one settings pane. */
@@ -111,7 +123,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "01",
     note: "Start the server, then load the weights. Nothing runs until you say so.",
     footNote:
-      "Starting launches the Lys backend, which then connects to LM Studio. Lys doesn't start LM Studio for you; model weights are managed by LM Studio, and stopping the backend does not unload them.",
+      "Starting launches the Lys backend, which then connects to the provider chosen in Providers. Lys doesn't start the provider for you, and stopping the backend does not unload its models.",
     contentComponent: RuntimePaneContent
   },
   {
@@ -151,9 +163,18 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     contentComponent: ToolPane
   },
   {
+    value: "providers",
+    label: "Providers",
+    ordinal: "06",
+    note: "Where every message is answered. One provider at a time; switching reconnects Lys.",
+    footNote:
+      "Saved in settings.json in Lys's home folder, readable only by your user account; keys are kept in plain text there and go only to their own provider. LM Studio and a local Ollama server keep conversations on the machine at the address you give, over plain HTTP. Ollama's cloud and Groq receive your conversations to answer them.",
+    contentComponent: ProvidersPane
+  },
+  {
     value: "secrets",
     label: "Secrets",
-    ordinal: "06",
+    ordinal: "07",
     note: "Keys for the services Lys calls on your behalf. Each key goes only to its own service and is never sent to the model.",
     footNote:
       "Saved in plain text in settings.json in Lys's home folder, readable only by your user account. Lys's backend reads it when it lists tools and when a message offers web_search; a reply keeps the key it started with.",
@@ -188,21 +209,25 @@ function formatRailBackendStatus(
 }
 
 /**
- * Formats the rail summary for a running backend without a connected LM Studio.
+ * Formats the rail summary for a running backend without a connected
+ * provider.
  *
- * @param lmStudioStatus - Latest published LM Studio status other than `connected`.
- * @returns The LM Studio state, matching the Runtime pane's LM Studio card.
+ * @param lmStudioStatus - Latest published provider status other than
+ * `connected`.
+ * @param providerName - Name of the active provider.
+ * @returns The provider state, matching the Runtime pane's provider card.
  */
 function formatRailLmStudioStatus(
-  lmStudioStatus: Exclude<LmStudioStatus, "connected">
+  lmStudioStatus: Exclude<LmStudioStatus, "connected">,
+  providerName: string
 ): string {
   switch (lmStudioStatus) {
     case "unknown":
-      return "backend up · LM Studio status unknown"
+      return `backend up · ${providerName} status unknown`
     case "connecting":
-      return "backend up · connecting to LM Studio"
+      return `backend up · connecting to ${providerName}`
     case "unreachable":
-      return "backend up · LM Studio not reachable"
+      return `backend up · ${providerName} not reachable`
   }
 }
 
@@ -210,19 +235,21 @@ function formatRailLmStudioStatus(
  * Formats the one-line runtime summary shown under the settings rail.
  *
  * @param backendStatus - Store-owned backend lifecycle state.
- * @param lmStudioStatus - Latest published LM Studio status.
+ * @param lmStudioStatus - Latest published provider status.
  * @param modelRuntime - Current weight residency state.
+ * @param providerName - Name of the active provider.
  * @returns The rail's summary of the first missing prerequisite—the backend,
- * then LM Studio—or of the weights once both are available.
+ * then the provider—or of the weights once both are available.
  */
 function formatRailStatus(
   backendStatus: BackendServerStatus,
   lmStudioStatus: LmStudioStatus,
-  modelRuntime: ModelRuntimeState
+  modelRuntime: ModelRuntimeState,
+  providerName: string
 ): string {
   if (backendStatus !== "running") return formatRailBackendStatus(backendStatus)
   if (lmStudioStatus !== "connected") {
-    return formatRailLmStudioStatus(lmStudioStatus)
+    return formatRailLmStudioStatus(lmStudioStatus, providerName)
   }
 
   switch (modelRuntime.status) {
@@ -386,7 +413,8 @@ export default function SettingsView({
   const railStatus = formatRailStatus(
     backendStatus,
     lmStudioStatus,
-    modelRuntime
+    modelRuntime,
+    describeLlmProviderTarget(settings.providers).name
   )
 
   return (

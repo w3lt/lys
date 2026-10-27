@@ -1,7 +1,6 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
-import { LM_STUDIO_ADDRESS } from "@/lib/models/lm-studio-connection"
 import type { BackendServerStatus } from "@/lib/store"
 import { initialSettingsState } from "@/lib/store/settings"
 import {
@@ -56,6 +55,7 @@ const FIRST_RUN_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   generation: initialSettingsState.generation,
   loadConfiguration: Object.freeze({ default: {}, models: {} }),
   secrets: initialSettingsState.secrets,
+  providers: initialSettingsState.providers,
   tools: Object.freeze({
     justRun: Object.freeze([]),
     switches: Object.freeze({})
@@ -401,7 +401,7 @@ describe("RuntimePaneContent", () => {
       expect(
         screen.getByRole("heading", { name: "LM Studio connected" })
       ).toBeInTheDocument()
-      expect(screen.getByText(LM_STUDIO_ADDRESS)).toBeInTheDocument()
+      expect(screen.getByText("127.0.0.1:1234")).toBeInTheDocument()
       expect(listRouteKeys(backend)).toContain(
         "POST /api/v1/llm/runtime/connect"
       )

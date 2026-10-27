@@ -250,7 +250,14 @@ describe("useLysStore", () => {
       models: new Map()
     })
     expect(useLysStore.getState().settings.secrets).toEqual({
-      tavilyApiKey: null
+      tavilyApiKey: null,
+      ollamaApiKey: null,
+      groqApiKey: null
+    })
+    expect(useLysStore.getState().settings.providers).toEqual({
+      active: "lmStudio",
+      lmStudio: { address: null },
+      ollama: { mode: "local", address: null }
     })
   })
 
@@ -807,11 +814,12 @@ describe("useLysStore", () => {
         args: {
           newSettings: {
             ...DISK_SETTINGS_DOCUMENT,
-            secrets: { tavilyApiKey: null }
+            secrets: { ...DISK_SETTINGS_DOCUMENT.secrets, tavilyApiKey: null }
           }
         }
       })
       expect(useLysStore.getState().settings.secrets).toEqual({
+        ...DISK_SETTINGS.secrets,
         tavilyApiKey: null
       })
     })

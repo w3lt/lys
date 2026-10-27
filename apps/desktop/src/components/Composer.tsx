@@ -42,6 +42,7 @@ import {
   calculateLocalRuntimeConnection
 } from "./ComposerComponents/composer-presentation"
 import { calculateModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
+import { describeLlmProviderTarget } from "@/lib/models/llm-provider-target"
 
 import "./Composer.scss"
 
@@ -196,6 +197,7 @@ export function Composer({
   const isModelRuntimeAvailable =
     calculateModelRuntimeAvailability(backendStatus, lmStudioStatus) ===
     "available"
+  const provider = describeLlmProviderTarget(settings.providers)
   const isUnavailable = connection !== "ready"
   const activity = calculateComposerActivity(request, conversationOpen)
   const activityLabel = formatComposerActivity(activity)
@@ -374,7 +376,7 @@ export function Composer({
       return
     }
 
-    // Runtime owns backend and LM Studio recovery; Model owns inventory and loading.
+    // Runtime owns backend and provider recovery; Model owns inventory and loading.
     setSettingsPane(isModelRuntimeAvailable ? "model" : "runtime")
     setActiveView("settings")
   }
@@ -398,12 +400,14 @@ export function Composer({
           action={formatReconnectAction(
             backendStatus,
             lmStudioStatus,
-            modelRuntime
+            modelRuntime,
+            provider
           )}
           message={formatUnavailableRuntimeMessage({
             backendStatus,
             backendAddress: settings.runtime.backendAddress,
             lmStudioStatus,
+            provider,
             modelRuntime
           })}
           onReconnect={handleReconnect}
@@ -472,7 +476,8 @@ export function Composer({
               placeholder={formatComposerPlaceholder(
                 connection,
                 activity,
-                answeringAgent
+                answeringAgent,
+                provider.name
               )}
               ref={messageFieldRef}
               rows={1}

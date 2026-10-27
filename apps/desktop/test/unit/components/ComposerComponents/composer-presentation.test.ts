@@ -9,12 +9,15 @@ import {
   formatReconnectAction,
   formatUnavailableRuntimeMessage
 } from "@/components/ComposerComponents/composer-presentation"
-import { LM_STUDIO_ADDRESS } from "@/lib/models/lm-studio-connection"
 import type { BackendServerStatus } from "@/lib/store"
 import type { ConversationAgent } from "@/lib/store/agents/conversation-agent"
 import type { ChatRequestState } from "@/lib/store/chat-view"
 import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
 import type { ModelRuntimeState } from "@/lib/store/model-runtime"
+import {
+  GROQ_TARGET,
+  LM_STUDIO_TARGET
+} from "../../support/providerTargetFixtures"
 
 /** Backend origin named in the banner copy. */
 const BACKEND_ADDRESS = "http://127.0.0.1:12345"
@@ -146,28 +149,42 @@ describe("formatUnavailableRuntimeMessage", () => {
         backendStatus,
         backendAddress: BACKEND_ADDRESS,
         lmStudioStatus: "unreachable",
+        provider: LM_STUDIO_TARGET,
         modelRuntime: UNAVAILABLE
       })
     ).toBe(message)
   })
 
   it.each<[LmStudioStatus, string]>([
-    ["unreachable", `LM Studio is not reachable on ${LM_STUDIO_ADDRESS}.`],
-    ["connecting", `Connecting to LM Studio on ${LM_STUDIO_ADDRESS}…`],
-    ["unknown", `Connecting to LM Studio on ${LM_STUDIO_ADDRESS}…`]
+    ["unreachable", "LM Studio is not reachable on 127.0.0.1:1234."],
+    ["connecting", "Connecting to LM Studio on 127.0.0.1:1234…"],
+    ["unknown", "Connecting to LM Studio on 127.0.0.1:1234…"]
   ])(
-    "names LM Studio when it is %s while the backend runs",
+    "names the provider and its location when it is %s while the backend runs",
     (lmStudioStatus, message) => {
       expect(
         formatUnavailableRuntimeMessage({
           backendStatus: "running",
           backendAddress: BACKEND_ADDRESS,
           lmStudioStatus,
+          provider: LM_STUDIO_TARGET,
           modelRuntime: UNAVAILABLE
         })
       ).toBe(message)
     }
   )
+
+  it("names a hosted provider at its host", () => {
+    expect(
+      formatUnavailableRuntimeMessage({
+        backendStatus: "running",
+        backendAddress: BACKEND_ADDRESS,
+        lmStudioStatus: "unreachable",
+        provider: GROQ_TARGET,
+        modelRuntime: UNAVAILABLE
+      })
+    ).toBe("Groq is not reachable on api.groq.com.")
+  })
 
   it.each<[ModelRuntimeState, string]>([
     [UNKNOWN, "The backend is up, but model state is unavailable."],
@@ -183,6 +200,7 @@ describe("formatUnavailableRuntimeMessage", () => {
           backendStatus: "running",
           backendAddress: BACKEND_ADDRESS,
           lmStudioStatus: "connected",
+          provider: LM_STUDIO_TARGET,
           modelRuntime
         })
       ).toBe(message)
@@ -202,10 +220,24 @@ describe("formatReconnectAction", () => {
     "offers %s/%s/%o recovery as %s",
     (backendStatus, lmStudioStatus, modelRuntime, label) => {
       expect(
-        formatReconnectAction(backendStatus, lmStudioStatus, modelRuntime)
+        formatReconnectAction(
+          backendStatus,
+          lmStudioStatus,
+          modelRuntime,
+          LM_STUDIO_TARGET
+        )
       ).toEqual({ label, isEnabled: true })
     }
   )
+
+  it("names the provider to check, and chooses a model for one that loads its own", () => {
+    expect(
+      formatReconnectAction("running", "unreachable", UNAVAILABLE, GROQ_TARGET)
+    ).toEqual({ label: "Check Groq", isEnabled: true })
+    expect(
+      formatReconnectAction("running", "connected", NONE, GROQ_TARGET)
+    ).toEqual({ label: "Choose model", isEnabled: true })
+  })
 
   it.each<[BackendServerStatus, LmStudioStatus, ModelRuntimeState]>([
     ["starting", "unknown", UNAVAILABLE],
@@ -218,7 +250,12 @@ describe("formatReconnectAction", () => {
     "offers no action while %s/%s/%o is already changing",
     (backendStatus, lmStudioStatus, modelRuntime) => {
       expect(
-        formatReconnectAction(backendStatus, lmStudioStatus, modelRuntime)
+        formatReconnectAction(
+          backendStatus,
+          lmStudioStatus,
+          modelRuntime,
+          LM_STUDIO_TARGET
+        )
       ).toEqual({ label: "Working", isEnabled: false })
     }
   )
@@ -263,22 +300,22 @@ describe("formatComposerPlaceholder", () => {
   ] as const)(
     "reads %s/%s with a listed agent as %j",
     (connection, activity, placeholder) => {
-      expect(formatComposerPlaceholder(connection, activity, LYSIPTERA)).toBe(
-        placeholder
-      )
+      expect(
+        formatComposerPlaceholder(connection, activity, LYSIPTERA, "LM Studio")
+      ).toBe(placeholder)
     }
   )
 
   it("invites the agent by its code while the agent list is unread", () => {
-    expect(formatComposerPlaceholder("ready", "idle", UNREAD_AGENT)).toBe(
-      "Say something to caliginia"
-    )
+    expect(
+      formatComposerPlaceholder("ready", "idle", UNREAD_AGENT, "LM Studio")
+    ).toBe("Say something to caliginia")
   })
 
   it("says a conversation whose agent was deleted is read-only", () => {
-    expect(formatComposerPlaceholder("ready", "idle", DELETED_AGENT)).toBe(
-      "This conversation is read-only."
-    )
+    expect(
+      formatComposerPlaceholder("ready", "idle", DELETED_AGENT, "LM Studio")
+    ).toBe("This conversation is read-only.")
   })
 
   it.each([
@@ -288,9 +325,14 @@ describe("formatComposerPlaceholder", () => {
   ] as const)(
     "names what it waits on while %s, before a deleted agent",
     (connection, placeholder) => {
-      expect(formatComposerPlaceholder(connection, "idle", DELETED_AGENT)).toBe(
-        placeholder
-      )
+      expect(
+        formatComposerPlaceholder(
+          connection,
+          "idle",
+          DELETED_AGENT,
+          "LM Studio"
+        )
+      ).toBe(placeholder)
     }
   )
 })

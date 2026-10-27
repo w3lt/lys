@@ -1,6 +1,7 @@
 import type { ReactElement } from "react"
 import { Button } from "@/components/ui/button"
 import type { ModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
+import type { LlmProviderTarget } from "@/lib/models/llm-provider-target"
 import {
   formatModelResidencyHeading,
   formatModelResidencyMeta,
@@ -80,7 +81,9 @@ function buildModelCommandHandler(
 
 /** Properties accepted by {@link ModelResidencyRow}. */
 type ModelResidencyRowProps = {
-  /** Whether model requests can reach LM Studio, and why not. */
+  /** Active provider, which the meta line names. */
+  readonly provider: LlmProviderTarget
+  /** Whether model requests can reach the active provider, and why not. */
   readonly availability: ModelRuntimeAvailability
   /** Key of the default model, or null when none is chosen. */
   readonly defaultModel: string | null
@@ -88,7 +91,7 @@ type ModelResidencyRowProps = {
   readonly modelInventory: ModelInventoryState
   /** The model request in flight, if any. */
   readonly modelRequest: ModelRequestState
-  /** Which weights are resident in LM Studio or in transition. */
+  /** Which weights are resident in the provider or in transition. */
   readonly modelRuntime: ModelRuntimeState
   /**
    * Requests one load, once per press of Load.
@@ -106,18 +109,20 @@ type ModelResidencyRowProps = {
 
 /**
  * Presents the residency summary, a tone dot, the heading, and the meta line,
- * with Load and Unload.
+ * with Load and Unload while Lys manages the provider's model loading.
  *
- * @remarks Owns no state or effects. A command can be sent only while LM
- * Studio is connected and no model request is in flight. Load is offered
- * then only while the inventory lists the default model and it is not
- * loaded, and requests the default; Unload only while a model is loaded, and
- * requests that model. The dot is hidden from assistive technology; the
+ * @remarks Owns no state or effects. Load and Unload are absent for a
+ * provider that loads its models itself. A command can be sent only while
+ * the provider is connected and no model request is in flight. Load is
+ * offered then only while the inventory lists the default model and it is
+ * not loaded, and requests the default; Unload only while a model is loaded,
+ * and requests that model. The dot is hidden from assistive technology; the
  * heading carries the state.
- * @param props - Parent-owned model state and requests.
+ * @param props - Parent-owned provider, model state, and requests.
  * @returns The card's first row.
  */
 function ModelResidencyRow({
+  provider,
   availability,
   defaultModel,
   modelInventory,
@@ -143,35 +148,44 @@ function ModelResidencyRow({
         <div className="settings-view__identity-lines">
           <h2>{formatModelResidencyHeading(modelRuntime)}</h2>
           <p className="settings-view__meta">
-            {formatModelResidencyMeta(modelRuntime, availability, defaultModel)}
+            {formatModelResidencyMeta(
+              modelRuntime,
+              availability,
+              defaultModel,
+              provider.name
+            )}
           </p>
         </div>
       </div>
-      <div className="settings-view__actions">
-        <Button
-          disabled={loadModelKey === null}
-          onClick={buildModelCommandHandler(loadModelKey, onLoadModel)}
-          type="button"
-          variant="default"
-        >
-          Load
-        </Button>
-        <Button
-          disabled={unloadModelKey === null}
-          onClick={buildModelCommandHandler(unloadModelKey, onUnloadModel)}
-          type="button"
-          variant="outline"
-        >
-          Unload
-        </Button>
-      </div>
+      {provider.managesModelLoading ? (
+        <div className="settings-view__actions">
+          <Button
+            disabled={loadModelKey === null}
+            onClick={buildModelCommandHandler(loadModelKey, onLoadModel)}
+            type="button"
+            variant="default"
+          >
+            Load
+          </Button>
+          <Button
+            disabled={unloadModelKey === null}
+            onClick={buildModelCommandHandler(unloadModelKey, onUnloadModel)}
+            type="button"
+            variant="outline"
+          >
+            Unload
+          </Button>
+        </div>
+      ) : null}
     </div>
   )
 }
 
 /** Properties accepted by {@link ModelResidencyCard}. */
 type ModelResidencyCardProps = {
-  /** Whether model requests can reach LM Studio, and why not. */
+  /** Active provider, which the card names and whose loading it manages. */
+  readonly provider: LlmProviderTarget
+  /** Whether model requests can reach the active provider, and why not. */
   readonly availability: ModelRuntimeAvailability
   /** Key of the default model, or null when none is chosen. */
   readonly defaultModel: string | null
@@ -179,7 +193,7 @@ type ModelResidencyCardProps = {
   readonly modelInventory: ModelInventoryState
   /** The model request in flight, if any. */
   readonly modelRequest: ModelRequestState
-  /** Which weights are resident in LM Studio or in transition. */
+  /** Which weights are resident in the provider or in transition. */
   readonly modelRuntime: ModelRuntimeState
   /**
    * Requests one load, once per press of Load.
@@ -202,21 +216,25 @@ type ModelResidencyCardProps = {
 }
 
 /**
- * Presents which model weights are resident in LM Studio, with Load for the
- * default model and Unload for the loaded one.
+ * Presents which model weights are resident in the active provider, with
+ * Load for the default model and Unload for the loaded one while Lys manages
+ * the provider's model loading.
  *
  * @remarks The parent owns every input and the requests; the card owns no
  * state, effect, or store access. Its first row shows the residency and the
  * commands, which the parent's request feedback, rendered last, reports on.
- * The card recedes unless LM Studio is connected. While a load or unload is
- * in flight the card is marked busy and shows an indeterminate progress bar
- * named after the heading: the backend reports completion without progress,
- * so no value is claimed. A note says that the commands go to LM Studio
- * through the backend and where every loaded model is managed.
- * @param props - Parent-owned model state, requests, and request feedback.
+ * The card recedes unless the provider is connected. While a load or unload
+ * is in flight the card is marked busy and shows an indeterminate progress
+ * bar named after the heading: the backend reports completion without
+ * progress, so no value is claimed. A note says that the commands go to the
+ * provider through the backend, or that the provider loads its models
+ * itself, and where every model is listed.
+ * @param props - Parent-owned provider, model state, requests, and request
+ * feedback.
  * @returns The model card.
  */
 export default function ModelResidencyCard({
+  provider,
   availability,
   defaultModel,
   modelInventory,
@@ -236,6 +254,7 @@ export default function ModelResidencyCard({
     >
       <ModelResidencyRow
         availability={availability}
+        provider={provider}
         defaultModel={defaultModel}
         modelInventory={modelInventory}
         modelRequest={modelRequest}
@@ -262,8 +281,9 @@ export default function ModelResidencyCard({
       <div className="settings-view__card-divider" />
 
       <p className="settings-view__card-note">
-        Loading and unloading use LM Studio through the backend. This summary
-        prefers the loaded default; manage every loaded model in Model settings.
+        {provider.managesModelLoading
+          ? `Loading and unloading use ${provider.name} through the backend. This summary prefers the loaded default; manage every loaded model in Model settings.`
+          : `${provider.name} decides which models are in memory, so Lys does not load or unload them. This summary prefers the default; see every model in Model settings.`}
       </p>
       {children}
     </section>

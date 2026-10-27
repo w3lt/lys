@@ -4,12 +4,17 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import ModelResidencyCard from "@/components/SettingsViewComponents/ModelResidencyCard"
 import type { ModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
+import type { LlmProviderTarget } from "@/lib/models/llm-provider-target"
 import type {
   ModelInventoryState,
   ModelRequestState,
   ModelRuntimeState
 } from "@/lib/store/model-runtime"
 import { buildLlmInfo } from "../../support/modelFixtures"
+import {
+  GROQ_TARGET,
+  LM_STUDIO_TARGET
+} from "../../support/providerTargetFixtures"
 
 /** What the card shows and whether its commands can be sent. */
 type ModelResidencyArrangement = {
@@ -181,15 +186,21 @@ const INVENTORY_READ_FAILED: ModelResidencyArrangement = Object.freeze({
  * request feedback.
  *
  * @param arrangement - What the card shows.
+ * @param provider - Active provider; LM Studio, whose loading Lys manages,
+ * when omitted.
  * @returns The spies and the render result's rerender function.
  */
-function startModelResidencyCard(arrangement: ModelResidencyArrangement) {
+function startModelResidencyCard(
+  arrangement: ModelResidencyArrangement,
+  provider: LlmProviderTarget = LM_STUDIO_TARGET
+) {
   const spies: ModelResidencyCardSpies = {
     onLoadModel: vi.fn(),
     onUnloadModel: vi.fn()
   }
   const { rerender } = render(
     <ModelResidencyCard
+      provider={provider}
       availability={arrangement.availability}
       defaultModel={arrangement.defaultModel}
       modelInventory={arrangement.modelInventory}
@@ -382,6 +393,7 @@ describe("ModelResidencyCard", () => {
 
     rerender(
       <ModelResidencyCard
+        provider={LM_STUDIO_TARGET}
         availability="available"
         defaultModel={DEFAULT_MODEL}
         modelInventory={DEFAULT_LISTED_RESIDENT}
@@ -415,5 +427,20 @@ describe("ModelResidencyCard", () => {
         .getByRole("button", { name: "Unload" })
         .compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+  })
+
+  it("offers no Load or Unload for a provider that loads its own models", () => {
+    startModelResidencyCard(READY_TO_UNLOAD, GROQ_TARGET)
+
+    expect(
+      screen.getByText(`${DEFAULT_MODEL} · loaded in Groq`)
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Load" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Unload" })).toBeNull()
+    expect(
+      screen.getByText(
+        "Groq decides which models are in memory, so Lys does not load or unload them. This summary prefers the default; see every model in Model settings."
+      )
+    ).toBeInTheDocument()
   })
 })

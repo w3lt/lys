@@ -1,3 +1,4 @@
+import { llmProviderSettingsSchema, ollamaApiKeySchema } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   createSettingsGroupSaves,
@@ -141,7 +142,58 @@ describe("createSettingsGroupSaves", () => {
     expect(readStoredDocument()).toEqual({
       ...STORED_SETTINGS_DOCUMENT,
       generation: EDITED_GENERATION,
-      secrets: { tavilyApiKey: null }
+      secrets: { ...STORED_SETTINGS_DOCUMENT.secrets, tavilyApiKey: null }
+    })
+  })
+
+  it("applies one key's save after another key's save sent before it, keeping both keys", async () => {
+    const { writes, readStoredDocument } = startSettingsFileHost()
+    const saves = createSettingsGroupSaves()
+    const ollamaApiKey = ollamaApiKeySchema.parse("ollama-fixture-000000")
+
+    const tavilySave = saves.saveSecretsSettings({ tavilyApiKey: null })
+    const ollamaSave = saves.saveSecretsSettings({ ollamaApiKey })
+    await waitForMicrotasks()
+    writes[0]?.resolve(null)
+    await tavilySave
+    await waitForMicrotasks()
+    writes[1]?.resolve(null)
+    await ollamaSave
+
+    expect(readStoredDocument()).toEqual({
+      ...STORED_SETTINGS_DOCUMENT,
+      secrets: {
+        ...STORED_SETTINGS_DOCUMENT.secrets,
+        tavilyApiKey: null,
+        ollamaApiKey
+      }
+    })
+  })
+
+  it("applies a providers save after a secrets save sent before it, keeping both groups", async () => {
+    const { writes, readStoredDocument } = startSettingsFileHost()
+    const saves = createSettingsGroupSaves()
+    const providers = llmProviderSettingsSchema.parse({
+      active: "groq",
+      lmStudio: { address: null },
+      ollama: { mode: "local", address: null }
+    })
+
+    const secretsSave = saves.saveSecretsSettings({ tavilyApiKey: null })
+    const providersSave = saves.saveProviderSettings(providers)
+    await waitForMicrotasks()
+    const writesDuringFirst = writes.length
+    writes[0]?.resolve(null)
+    await secretsSave
+    await waitForMicrotasks()
+    writes[1]?.resolve(null)
+    await providersSave
+
+    expect(writesDuringFirst).toBe(1)
+    expect(readStoredDocument()).toEqual({
+      ...STORED_SETTINGS_DOCUMENT,
+      secrets: { ...STORED_SETTINGS_DOCUMENT.secrets, tavilyApiKey: null },
+      providers
     })
   })
 
@@ -165,7 +217,7 @@ describe("createSettingsGroupSaves", () => {
     expect(writesDuringFirst).toBe(1)
     expect(readStoredDocument()).toEqual({
       ...STORED_SETTINGS_DOCUMENT,
-      secrets: { tavilyApiKey: null },
+      secrets: { ...STORED_SETTINGS_DOCUMENT.secrets, tavilyApiKey: null },
       tools: { justRun: ["find_files"], switches: { web_search: true } }
     })
   })
@@ -188,7 +240,7 @@ describe("createSettingsGroupSaves", () => {
     expect(writesDuringFirst).toBe(1)
     expect(readStoredDocument()).toEqual({
       ...STORED_SETTINGS_DOCUMENT,
-      secrets: { tavilyApiKey: null },
+      secrets: { ...STORED_SETTINGS_DOCUMENT.secrets, tavilyApiKey: null },
       location: noLocation
     })
   })

@@ -122,17 +122,22 @@ each call still asks first unless the person set the tool to Just run; see
   and Lys does not confine it. A command such as `npx -y <package>` runs
   whatever the package registry serves at each start. Closing a server
   signals only the process Lys started, not the processes it started in turn.
-- An MCP server writes its tools' descriptions and results, and both reach the
-  model. A description is offered as the tool's description, cleaned of
-  invisible characters and cut to 4,096 characters, without framing, so a
-  server can put instructions in it. Results are framed as untrusted, which
+- An MCP server writes its tools' descriptions, input schemas, and results,
+  and all reach the model. A description is offered as the tool's
+  description, cleaned of invisible characters and cut to 4,096 characters,
+  and an input schema as the server wrote it, both without framing, so a
+  server can put instructions in either; a tool whose name or schema holds a
+  character a person cannot see is not listed, so Settings shows the text
+  the model reads. Results are framed as untrusted, which
   lowers the risk but cannot remove it. On Just run, an MCP tool's calls run
   with no card shown.
 - The environment variables and headers of the MCP servers are stored as
   plain text in `settings.json`, like the Tavily API key, readable by the
   person's OS account and by any process running as it. A stdio server
   receives its variables, and a remote server its headers, with every
-  request.
+  request. A key in a URL's query is stored the same way; Settings → MCP
+  shows the URL with its query hidden as `?…` in the list and the details,
+  but the editor's URL field shows it whole.
 - A stdio MCP server's standard error lines reach the backend log as the
   server wrote them, each cut to 2,000 characters. An error is logged with its
   message and stack, each cut to 2,000 characters, which can carry part of
@@ -362,12 +367,21 @@ rules and the [API reference](/reference/api/#mcp-servers) for the routes.
   A result sits between `<<<mcp result>>>` delimiters the server cannot write,
   after a notice never to follow it, and loses invisible characters like a
   network tool's result. A tool whose schema Lys cannot check, or larger than
-  64 KiB, is not listed.
+  64 KiB, is not listed, and neither is one whose name or schema holds a
+  character a person cannot see, since Lys sends both unchanged.
 - **Approval.** Every call of an MCP tool asks the person first unless the
   tool is on Just run; MCP tools start switched on, because adding the server
   is the person's opt-in, and none starts on Just run. Before asking, the backend
   checks only the arguments' shape: a JSON object of at most 256 KiB whose
   keys follow the argument name rule. The server checks the values.
+- **Choices kept by name.** A tool's switch and Just run choice are saved
+  under the name the model calls it by, `mcp__<server>__<tool>`, and stay
+  when the server is removed or renamed. A server saved later under an
+  earlier server's name therefore keeps that server's Just run choices for
+  tools of the same name, without asking again. Renaming a server resets
+  its tools to their defaults, switched on and Ask me, so a tool switched
+  off comes back on; the choices under the old name apply again to a server
+  saved under it.
 - **Prompt injection.** A server, or a page or file one of its tools reads,
   can try to steer the model, and a description is not framed as untrusted.
   On Ask me each further call still needs the person's approval; on Just run
@@ -375,9 +389,10 @@ rules and the [API reference](/reference/api/#mcp-servers) for the routes.
   file's text to the server with no card shown.
 - **Time and size.** Connecting and reading the tool list take at most two
   minutes, and a call at most five; Stop tells the server a call was
-  cancelled. The backend reads at most 16 MiB of one answer, an HTTP body or
-  a stdio message line; a longer answer ends the connection and fails every
-  request in flight at once. A result is cut at 20,000 characters.
+  cancelled. The backend reads at most 16 MiB of one answer: an HTTP body,
+  one event of an event stream the SDK reads one event at a time, or a stdio
+  message line; a longer answer ends the connection and fails every request
+  in flight at once. A result is cut at 20,000 characters.
 - **Output schemas.** A tool's output schema is never compiled or checked, so
   a server cannot make the backend run a regular expression it chose; a
   result's structured content is read as untrusted JSON within Lys's limits.

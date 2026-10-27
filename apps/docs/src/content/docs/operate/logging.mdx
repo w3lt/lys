@@ -166,6 +166,7 @@ calls it, in `tool`.
 | `MCP server connection ended; it can be reconnected in Settings`                  | `warn`                        | none                                             | A connection that Lys did not close ended, such as a server process that exited                                    |
 | `MCP server connection reported an error`                                         | `warn`                        | `err`                                            | The connection reported an error; it may go on                                                                     |
 | `MCP server log line`                                                             | `info`                        | `line`                                           | A command server wrote a line to its standard error                                                                |
+| `MCP tool call was not sent to the server`                                        | `warn`                        | `tool`, `reason`                                 | A call failed before it was sent: its server was not connected, or no longer listed the tool                       |
 | `MCP tool call failed before the server returned a result`                        | `warn`, or `error` with `err` | `tool`, `failure`                                | A call timed out, its connection ended, or the server could not be reached, refused it, or answered something else |
 | `Closing an MCP server connection failed`                                         | `error`                       | `err`                                            | Closing a connection Lys was done with failed                                                                      |
 | `The mcp settings group fails its rules; the MCP servers applied before are kept` | `warn`                        | `problems`                                       | The backend read `settings.json` and the `mcp` group broke its rules                                               |
@@ -173,6 +174,9 @@ calls it, in `tool`.
 
 - `reason` is the failure reason the MCP pane shows, such as `unauthorized`;
   see [troubleshooting](/operate/troubleshooting/#an-mcp-server-shows-failed).
+  For a call that was not sent, it is `server-not-connected`, which includes
+  a server the settings no longer name, or `tool-no-longer-listed`. The
+  call's arguments are not logged.
   `failure` is what Lys saw, such as `{ "kind": "http-status", "status": 401 }`,
   or `{ "kind": "refused", "message": "…" }` with the server's own message,
   cut to 2,000 characters.
@@ -184,10 +188,13 @@ calls it, in `tool`.
   answer is described only by its `type`, `code`, and `status`, because its
   message holds the server's whole answer. A thrown text is logged cut to
   2,000 characters.
-- One failure can be logged twice: a failure the MCP SDK reports on the
-  connection, such as an answer that is not valid JSON, is logged as
-  `MCP server connection reported an error`, and the opening or call it ends
-  is logged too.
+- A failure the MCP SDK reports on the connection outside any request, such
+  as an event of an event stream that is not valid JSON, is logged as
+  `MCP server connection reported an error`. A failed request is logged once,
+  as the opening or call it ended, also when the SDK reports its failure on
+  the connection too. A command server's message line that is not valid JSON
+  is logged as a connection error and dropped, so the request it answered
+  fails later, when its time limit passes, and is logged then.
 - `problems` lists each broken rule as `<path>: <rule>`, such as
   `servers.0.url: …`.
 - A command server's standard error is read line by line. Each line is

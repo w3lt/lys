@@ -183,9 +183,11 @@ unchanged.
   too long can fit under a shorter server name. Two tools whose names become
   the same once their unsupported characters are replaced keep only the first;
   a tool whose input schema Lys cannot offer, or one larger than 64 KiB,
-  cannot be used through Lys.
+  cannot be used through Lys, and neither can one whose name or input schema
+  holds a character a person cannot see, such as a zero-width space.
 - Lys reads a server's first 128 tools, and its details say so when it lists
-  more.
+  more. It reads the tool list across at most 16 pages: a server that splits
+  its list into more pages fails to connect, even with fewer than 128 tools.
 
 ## A message fails because an MCP server is not connected
 

@@ -362,18 +362,31 @@ Streamable HTTP (`http`):
 | `command`     | `stdio` | 1 to 1,024 characters, no control character or tab, no white space at either end. A bare name such as `npx` is found through the backend's `PATH`; see [Configuration](/operate/configuration/#mcp-servers)                                             |
 | `arguments`   | `stdio` | Up to 64 arguments in order, each 1 to 1,024 characters without a line break or another control character but a tab; omitted means none. Passed as they are, without a shell                                                                            |
 | `environment` | `stdio` | Up to 32 `{ name, value }` variables, each name once: a name is an ASCII letter or underscore, then up to 127 letters, digits, or underscores; a value is up to 4,096 characters without a control character but a tab, and may be empty                |
-| `url`         | `http`  | Up to 2,048 characters without spaces: `https://`, or `http://` only for `localhost`, `127.0.0.1`, or `[::1]`; no user name, password, or `#`                                                                                                           |
+| `url`         | `http`  | Up to 2,048 characters without spaces: `https://`, or `http://` only for `localhost`, `127.0.0.1`, or `[::1]`; no user name, password, or `#`; no internationalized domain name, see below                                                              |
 | `headers`     | `http`  | Up to 32 `{ name, value }` headers, each name once ignoring case: a name is an HTTP token of up to 128 characters, and not one Lys sets itself; a value is up to 8,192 visible ASCII characters, spaces, and tabs, without a space or tab at either end |
 
-- The group holds at most 16 servers. Characters are counted as Unicode code
-  points. A server object with an unknown field, a field of the other
-  transport, a broken rule, or `null` for the group makes loading the settings
-  fail; an error about a server names the broken rule and never quotes a
-  value. An error about the group itself, such as a `servers` value that is
-  not a list, can quote that value.
+- The group holds at most 16 servers, which take at most 512 KiB together:
+  the UTF-8 bytes of the group written as compact JSON, with every omitted
+  list filled in. That is half of the 1 MiB of `settings.json` the backend
+  reads, so the group, the indentation the host writes, and the other groups
+  fit in the file. Characters are counted as Unicode code points, and a text
+  with a lone surrogate, which only an escape such as `\ud800` can write, is
+  refused. A server object with an unknown field, a field of the other
+  transport, a broken rule, a larger group, or `null` for the group makes
+  loading the settings fail; an error about a server names the broken rule
+  and never quotes a value. An error about the group itself, such as a
+  `servers` value that is not a list, can quote that value.
+- A URL whose host has a part starting with `xn--` is refused, and so is one
+  to a Unicode host such as `bücher.example`, which the URL parser writes in
+  that form. The host's URL parser and the backend's convert such
+  internationalized domain names differently, so one of them could accept a
+  name the other refuses. A host whose characters map to ASCII, such as
+  fullwidth letters, is accepted as its ASCII name.
 - Lys sets these headers itself and refuses them in `headers`: `Accept`,
   `Content-Length`, `Content-Type`, `Host`, `Last-Event-ID`,
-  `MCP-Protocol-Version`, and `Mcp-Session-Id`.
+  `MCP-Protocol-Version`, and `Mcp-Session-Id`. It also refuses `Expect`,
+  `Keep-Alive`, `Transfer-Encoding`, and `Upgrade`, which Node's fetch, the
+  backend's HTTP client, refuses to send.
 - A stdio server starts in the person's home folder, with `HOME`, `LOGNAME`,
   `PATH`, `SHELL`, `TERM`, and `USER` from the backend's environment, then the
   configured variables, which win over those. No other variable of the

@@ -208,9 +208,9 @@ following finding I-9 of its
 [second review](https://github.com/w3lt/lys/pull/203#issuecomment-6267044781):
 `read_page` reads through vmo, which starts one micro VM per read with no
 limit on that VM's connections or on what it receives, until
-[#196](https://github.com/w3lt/lys/issues/196). Its extension to the calls of
-MCP tools, in the scope and the risk below, is proposed for
-[#243](https://github.com/w3lt/lys/issues/243) and not yet approved.
+[#196](https://github.com/w3lt/lys/issues/196). On 2026-10-24 the maintainer
+extended it, for [PR #263](https://github.com/w3lt/lys/pull/263), to the calls
+of MCP tools, in the scope and the risk below.
 
 - **Scope:** the tool loop of `Agent.createReply`, including the backend tool
   runs and the MCP tool calls of one round, and the `tools` offer of
@@ -304,11 +304,11 @@ control text for [PR #203](https://github.com/w3lt/lys/pull/203), following
 finding I-9 of its
 [second review](https://github.com/w3lt/lys/pull/203#issuecomment-6267044781):
 a `read_page` run that keeps going is a read through vmo, bounded by the
-backend's 60 seconds and 16 MiB, whose VM vmo deletes. Its extension to the
-calls of MCP tools, in the scope and the risk below, is proposed for
-[#243](https://github.com/w3lt/lys/issues/243) and not yet approved, and so is
-answering an MCP call's failure that Lys cannot tell apart as the call's
-failed result instead of failing the reply.
+backend's 60 seconds and 16 MiB, whose VM vmo deletes. On 2026-10-24 the
+maintainer extended it, for [PR #263](https://github.com/w3lt/lys/pull/263), to
+the calls of MCP tools, in the scope and the risk below, and approved answering
+an MCP call's failure that Lys cannot tell apart as the call's failed result
+instead of failing the reply.
 
 - **Scope:** `handleToolCallRound`, `handleBuiltInToolCall`, and
   `handleMcpToolCall` in `apps/backend/src/modules/agent/toolCallRound.ts`,
@@ -349,9 +349,9 @@ and [CONFIG-038](https://github.com/w3lt/lys/blob/main/docs/code_standards/CONFI
 `$LYS_HOME/settings.json` carries no version, so a reader cannot identify its
 format before interpreting it. The exception was approved by the maintainer on
 2026-10-10 for [PR #143](https://github.com/w3lt/lys/pull/143), which adds the
-`loadConfiguration` group to the file. Its extension to the `mcp` group, in
-the scope and the risk below, is proposed for
-[#243](https://github.com/w3lt/lys/issues/243) and not yet approved.
+`loadConfiguration` group to the file. On 2026-10-24 the maintainer extended
+it, for [PR #263](https://github.com/w3lt/lys/pull/263), to the `mcp` group, in
+the scope and the risk below.
 
 - **Scope:** only `$LYS_HOME/settings.json`, which the
   [native settings module](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/settings.rs)
@@ -378,9 +378,12 @@ the scope and the risk below, is proposed for
   the `secrets` group, and the saved Tavily API key with it; a build from
   before MCP support drops the `mcp` group, and every configured server, its
   variables and headers included, with it. Nothing stops an older build from
-  rewriting a newer file. The current build rejects an unknown setting inside
-  `loadConfiguration`, but it ignores an unknown group and an unknown field in
-  the other groups. A file that fails to load is never rewritten.
+  rewriting a newer file. The current build rejects an unknown field inside
+  `loadConfiguration`, `tools`, `location`, and `mcp`, a server object
+  included, so a newer file that adds a field to one of these groups fails to
+  load in this build, every setting with it. It ignores an unknown group and
+  an unknown field of `runtime`, `generation`, and `secrets`, and drops them
+  on its next save. A file that fails to load is never rewritten.
 - **Removal condition:** [#146](https://github.com/w3lt/lys/issues/146) adds
   the version and refuses unknown versions, and this exception is removed with
   it.

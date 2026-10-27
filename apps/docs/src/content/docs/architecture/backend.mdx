@@ -739,7 +739,7 @@ listens, so the first request already sees every configured server,
 connecting. The servers connect in the background and never delay
 listening.
 
-`applySettings()` reads the group with `readMcpSettings`
+`updateServers()` reads the group with `readMcpSettings`
 (`src/infrastructure/settings/mcpSettingsFile.ts`), which shares the bounded
 settings-file read (at most 1 MiB, UTF-8) and takes only the `mcp` group, and
 applies what it read in one synchronous step. Reads run one after another in
@@ -754,10 +754,10 @@ rule, never a value, and a JSON parse error, which can quote the file, is
 dropped unread. `POST /api/v1/mcp/servers/sync` applies the group again;
 nothing else reads it after startup.
 
-`reconnect(name)` stops the server's session and starts a new one with the
+`openServerAgain(name)` stops the server's session and starts a new one with the
 settings applied before, without reading the file; the new session opens once
-the old one released the server. Nothing reconnects by
-itself: a server whose connection ended stays failed until Reconnect or a
+the old one, and every other stopped session, released its server. Nothing
+reconnects by itself: a server whose connection ended stays failed until Reconnect or a
 changed setting. The registry also lists the servers and their states, lists
 the tools of every connected server, and finds one tool by its model-facing
 name: the server name sits between `mcp__` and the next `__`, which is exact
@@ -777,9 +777,17 @@ the background, and the registry keeps each until it settles. Stopping also
 returns the session's release, which settles once its opening ended and every
 connection it led to closed, a command server's process included; for a
 process that does not exit when its input closes, that takes up to about four
-seconds. A session that replaces another, after Reconnect or a changed
-setting, opens only once that release settled, so two copies of a command
-server never run at once, and one stopped while it waits opens nothing. Every
+seconds. The registry keeps the release of every session it stopped until it
+settles, and every new session, after Reconnect or a new, changed, renamed,
+or re-added server, opens only once all of them settled, whatever names
+their servers had; applying the group stops every session it does not keep
+before it starts any. So the process a command started has ended before the
+next one starts, and a session stopped while it waits opens nothing. That
+covers only the process the command started, not processes it starts
+itself: behind a launcher such as `npx`, a server that ignores both its
+input closing and `SIGTERM` still runs after the release, as `SIGKILL`
+reaches only the launcher. It runs until the desktop app stops a running
+backend, which ends the backend's whole process group. Every
 state change happens in one synchronous step, so a lookup sees one consistent
 state.
 
@@ -809,17 +817,37 @@ declares no client capabilities.
   than 16 MiB ends the connection. Closing the connection ends the process: the
   SDK closes its standard input, and sends `SIGTERM` when the process has not
   exited two seconds later, then `SIGKILL` after two more.
+  `McpStdioTransport` (`mcpStdioTransport.ts`) wraps the SDK's transport so
+  that every close, the SDK's own after a failed or cancelled handshake
+  included, waits for that one end of the process. A close settles once the
+  process exited, or once `SIGKILL` was sent, without waiting for the killed
+  process to exit. The SDK's own close at a message line past 16 MiB does not
+  go through the wrapper: a close Lys makes while that one still stops the
+  process returns at once, so a session opened in those few seconds can start
+  the command while the old process still runs.
 - **Streamable HTTP.** The SDK's `StreamableHTTPClientTransport` sends each
   request to the configured URL with the configured headers, and
   `redirect: "manual"`, so a redirect is an HTTP error and is never
-  followed. `fetchMcpResponse` (`mcpResponseLimit.ts`) reads at most 16 MiB of
-  each answer's body, an event stream included. An answer past that ends the
+  followed. `sendMcpHttpRequest` (`mcpResponseLimit.ts`) reads at most 16 MiB of
+  each answer's body. An event stream the SDK reads one event at a time, a
+  success other than `202` whose media type is `text/event-stream`, is counted
+  per event instead: an event's lines with their line ends, the count starting
+  again after each blank line. A stream that stays open, such as the one the
+  SDK opens for the server's own messages, can so send any number of events
+  within the limit. Every other answer the SDK reads whole, an error answer
+  included, and is counted whole. An answer or event past the limit ends the
   connection, as a long stdio message line does: `McpServerConnection` closes
   the client at once, so every request in flight fails as too large. The SDK
   alone would leave a request whose event stream breaks waiting for its time
   limit. A call answered with HTTP 404 ends the connection, because the server
-  no longer knows the session. Closing the connection aborts its open requests;
-  Lys does not ask the server to end its session.
+  no longer knows the session. `McpHttpTransport` (`mcpHttpTransport.ts`)
+  wraps the SDK's transport. A failure the SDK both reports on the connection
+  and throws from a send reaches Lys once, as the failure of that request; a
+  failure it reports while a send is pending is passed on once the send
+  settles; and an HTTP error a send throws carries the status but never the
+  answer's body. Closing the connection aborts its open requests, which fail
+  without being reported as connection errors; Lys does not ask the server to
+  end its session.
 
 The tool list is read past the SDK's response cache, so the SDK holds no
 tool's output schema and never checks a result against one: it would compile
@@ -828,9 +856,11 @@ A result's structured content is read as untrusted JSON within Lys's own
 limits instead.
 
 The tool list is read across at most 16 pages; a longer one fails the
-opening. `classifyMcpRequestFailure` (`mcpError.ts`) tells failures apart by
-the SDK's error types and their causes: a time limit that passed, a process
-that exited or a connection that ended, an HTTP status, no connection at all,
+opening as an answer that is not valid MCP. `calculateMcpRequestFailure`
+(`mcpError.ts`) tells failures apart by the SDK's error types and their
+causes: a time limit that passed, a process that exited or a connection that
+ended, an HTTP status (403 also when the SDK reports a missing scope), no
+connection at all,
 a command that could not be started, a JSON-RPC error the server answered
 with, an answer that is not valid MCP, an HTTP answer longer than 16 MiB, or
 none of these. An opening reports them as `timed-out`, `closed`,
@@ -844,17 +874,26 @@ that is not MCP or is too long, or a failure Lys cannot tell apart).
 server lists and says when there are more. Each tool is offered to the model
 as `mcp__<server>__<tool>`, with every character of the server's name for it
 other than an ASCII letter, a digit, `_`, or `-` replaced by `_`. A tool is
-skipped, with its reason, when the server's name for it is empty or longer
-than 128 characters, or its `mcp__` name would pass 64 characters
-(`unsupported-name`);
+skipped, with its reason, when the server's name for it is empty, longer
+than 128 characters, or holds a character a person cannot see, or its
+`mcp__` name would pass 64 characters (`unsupported-name`);
 when a tool listed before it gets the same name (`duplicate-name`); when its
 input schema is not an object schema, names an argument outside the argument
-name rule, nests deeper than 32 levels, or holds a `__proto__` key
+name rule, nests deeper than 32 levels, holds a `__proto__` key, or holds a
+character a person cannot see in any key or text
 (`unsupported-input-schema`); or when that schema is larger than 64 KiB as
-JSON (`input-schema-too-large`). Its description is the server's description,
-else its title, cleaned of invisible characters and cut to 4,096 characters,
-or else a sentence naming the tool and its server. Its input schema is kept
-as the server gave it and is the function's parameters for the model. Every
+JSON (`input-schema-too-large`). The catalog never sees a schema nested
+thousands of levels deep: the SDK checks the `tools/list` answer against its
+own recursive schema first, runs out of stack, and the opening fails as
+`protocol-error`, losing every tool of that server. Skipping only such a tool
+would mean Lys parsing and rewriting each `tools/list` answer before the SDK
+reads it, on both transports. A listed tool's description is the server's
+description, else its title, else its annotations' title, cleaned of
+invisible characters and cut to 4,096 characters, or else a sentence naming
+the tool and its server. Its name and input schema are kept as the server
+gave them, the schema as the function's parameters for the model; because
+Lys does not change them, a tool is listed only when both hold text a person
+can see, so the approval prompt and Settings show what the model reads. Every
 MCP tool has group `mcp`, access `unknown`, and runner `mcp`: what it does
 depends on its server, which Lys cannot tell. The catalog is read once, when
 the server connects ([#256](https://github.com/w3lt/lys/issues/256)).
@@ -886,7 +925,7 @@ unless they saved the tool as Just run. An allowed call runs on its server as
 the server is connected when the call runs, with five minutes to answer, and
 the reply's Stop signal tells the server that the call was cancelled. A call
 whose server is no longer connected, or no longer lists the tool, fails with a
-sentence the model reads. Because an MCP tool's access is `unknown`, its
+sentence the model reads and is logged as a call that was not sent. Because an MCP tool's access is `unknown`, its
 result, failure, or rejection is cleaned of invisible characters like a
 network tool's before it is stored and read.
 
@@ -907,7 +946,7 @@ logged at `error` with what was thrown, and the reply goes on.
 
 ### MCP log entries
 
-`logMcpServerEvent` (`mcpServerEventLog.ts`) writes what the servers do that no
+`handleMcpServerEvent` (`mcpServerEventLog.ts`) writes what the servers do that no
 caller observes to the backend log, through the reporter the composition root
 passes; each entry names the server as `mcpServer`. A settings group that
 fails its rules or cannot be read, a connection that ended, a connection error
@@ -917,8 +956,9 @@ each standard-error line of a stdio server are information. A failure Lys
 cannot tell apart and a failed close are errors, with what was thrown. Lys
 builds no entry from a command, an argument, an environment variable, a URL,
 or a header. An error is logged as it was thrown, though, so its message can
-carry what the server answered, such as the body of an HTTP error, and a
-stdio server's line is logged as the server wrote it; see
+carry part of what the server answered, such as a piece of an answer that is
+not JSON; an HTTP error is logged only by its code and status, never its
+body. A stdio server's line is logged as the server wrote it; see
 [process logging](/operate/logging/#process-logging).
 
 ## Persistence

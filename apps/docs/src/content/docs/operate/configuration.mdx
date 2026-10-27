@@ -131,16 +131,19 @@ you trust. A server is reached in one of two ways:
   for `localhost`, `127.0.0.1`, and `[::1]`. A server that needs a token:
   choose Token under Sign-in, and Lys sends `Authorization: Bearer <token>`.
   Add any other headers under Headers. Lys does not follow redirects, cannot sign
-  in with OAuth yet ([#253](https://github.com/w3lt/lys/issues/253)), and does
+  in with OAuth yet ([#253](https://github.com/w3lt/lys/issues/253)), does
   not speak the older HTTP+SSE transport
-  ([#254](https://github.com/w3lt/lys/issues/254)).
+  ([#254](https://github.com/w3lt/lys/issues/254)), and refuses a URL to an
+  internationalized domain name, such as `https://bücher.example/mcp`.
 
 A new server's editor can fill its fields from a config pasted from another
 app: press **paste json** and paste the `mcpServers` object of
 `claude_desktop_config.json` or `.cursor/mcp.json`, a `servers` map, or a
 single server. Lys takes the first server, its name from its key, and says
-when the config holds more; add the others the same way. An SSE server is
-refused.
+when the config holds more; add the others the same way. A server whose
+`type` is `sse` is refused. A server given only by its URL is taken as a
+Streamable HTTP server, so check that an older server's URL is not its SSE
+endpoint.
 
 Saving a server in the editor, or removing one, writes the `mcp` group of
 `settings.json`. While the backend runs, the pane then asks it to apply the

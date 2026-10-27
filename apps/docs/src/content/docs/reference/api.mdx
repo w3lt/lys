@@ -480,10 +480,13 @@ An MCP tool's definition has `runner` and `group` `mcp`, and `access`
 
 `name` is `mcp__`, the server's name, `__`, and the server's name for the tool
 with every character outside the tool name rule replaced by `_`; it is at
-most 64 characters. `description` is the server's, without invisible
-characters, cut to 4,096 characters; a tool without one gets a sentence naming
-it and its server. `inputSchema` is the server's input schema as it sent it,
-at most 64 KiB as JSON. The model is offered `name`, `description`, and
+most 64 characters. `description` is the first of the server's
+`description`, `title`, and `annotations.title` that is not blank once
+cleaned of invisible characters, cut to 4,096 characters; a tool without any
+gets a sentence naming it and its server. `serverToolName` and `inputSchema`
+are the server's name for the tool and its input schema as it sent them, the
+schema at most 64 KiB as JSON; a tool is listed only when neither holds a
+character a person cannot see. The model is offered `name`, `description`, and
 `inputSchema` as the function's parameters. An MCP tool is never named in
 `unavailableTools`. Listing the tools never contacts a server; the list holds
 what each server listed when it connected.
@@ -650,18 +653,22 @@ an argument, an environment variable, a URL, or a header.
 | `http-error`     | The server answered another HTTP error, or a redirect, which Lys does not follow                                                                                                                                                                           |
 | `protocol-error` | The server's answers are not valid MCP, a URL server's answer while connecting was larger than 16 MiB, or it answered the connection or the tool list with an error                                                                                        |
 
-A connected server's tools are read once, when it connects. Lys reads the
-first 128 and lists each one it can offer; `skippedTools` names the others it
-read, each with why: `unsupported-name` (its name is empty or longer than
-128 characters, or its `mcp__<server>__<tool>` name would pass 64
-characters), `duplicate-name` (a tool listed before it gets the same name
-once every character other than an ASCII letter, a digit, `_`, or `-` is
-replaced by `_`),
+A connected server's tools are read once, when it connects, across at most 16
+pages of its tool list; a list with more pages fails the opening. Lys reads
+the first 128 tools and lists each one it can offer; `skippedTools` names the
+others it read, each with why: `unsupported-name` (its name is empty, longer
+than 128 characters, or holds a character a person cannot see, or its
+`mcp__<server>__<tool>` name would pass 64 characters), `duplicate-name` (a
+tool listed before it gets the same name once every character other than an
+ASCII letter, a digit, `_`, or `-` is replaced by `_`),
 `unsupported-input-schema` (its input schema is not an object schema, names
-an argument outside the argument name rule, nests deeper than 32 levels, or
-holds a `__proto__` key), or `input-schema-too-large` (its schema is larger
-than 64 KiB as JSON). A skipped name is cleaned of invisible characters and
-cut to 128 characters.
+an argument outside the argument name rule, nests deeper than 32 levels,
+holds a `__proto__` key, or holds a character a person cannot see in any key
+or text), or `input-schema-too-large` (its schema is larger than 64 KiB as
+JSON). A skipped name is cleaned of invisible characters and cut to 128
+characters. A schema nested thousands of levels deep fails the whole opening
+as `protocol-error` instead of being skipped: the SDK checks the tool list
+before Lys reads it and runs out of stack on such a schema.
 
 `POST /api/v1/mcp/servers/sync` reads the `mcp` group again and applies it,
 then answers `200` with the list as it is right after applying. A server

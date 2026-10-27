@@ -9,6 +9,7 @@ pub mod commands;
 pub mod generation;
 pub mod load_configuration;
 pub mod location;
+pub mod providers;
 pub mod runtime;
 pub mod secrets;
 pub mod tools;
@@ -16,6 +17,7 @@ pub mod tools;
 use generation::GenerationSettings;
 use load_configuration::LoadConfigurationSettings;
 use location::LocationSettings;
+use providers::ProvidersSettings;
 use runtime::RunTimeSettings;
 use secrets::SecretsSettings;
 use tools::ToolSettings;
@@ -42,12 +44,13 @@ static TEMPORARY_FILE_COUNT: AtomicU64 = AtomicU64::new(0);
 /// Complete persisted Lys settings value.
 ///
 /// The private fields group runtime, generation, load configuration, secrets,
-/// tools, and location settings in the serialized JSON representation while
-/// keeping those groups behind the settings module's API boundary. A missing
-/// group takes that group's defaults; the load configuration group's default
-/// is empty, the secrets group's default holds no key, the tools group's
-/// default puts no tool on Just run and saves no tool switch, and the
-/// location group's default saves no location. A group the value does not
+/// tools, location, and provider settings in the serialized JSON
+/// representation while keeping those groups behind the settings module's
+/// API boundary. A missing group takes that group's defaults; the load
+/// configuration group's default is empty, the secrets group's default holds
+/// no key, the tools group's default puts no tool on Just run and saves no
+/// tool switch, the location group's default saves no location, and the
+/// providers group's default is LM Studio at its default address. A group the value does not
 /// hold, such as
 /// the `model` group of files written before the local context estimate was
 /// removed, is ignored when loading and left out of the next save.
@@ -64,6 +67,9 @@ pub struct LysSettings {
     tools: ToolSettings,
     /// Location the person saved, in the `location` object.
     location: LocationSettings,
+    /// Provider every request goes to and the servers' addresses, in the
+    /// `providers` object.
+    providers: ProvidersSettings,
 }
 
 impl LysSettings {
@@ -344,13 +350,30 @@ mod tests {
             "switches": { "read_page": true, "search_files": false }
         });
         settings["location"] = json!({ "city": "Lyon", "region": null, "country": "France" });
+        settings["secrets"]["ollamaApiKey"] = json!("ollama-synthetic-0123456789");
+        settings["secrets"]["groqApiKey"] = json!("gsk_synthetic_0123456789");
+        settings["providers"] = json!({
+            "active": "groq",
+            "lmStudio": { "address": "studio-box.local:1234" },
+            "ollama": { "mode": "cloud", "address": null }
+        });
 
         settings
     }
 
     /// Secrets group of a settings file without a saved key.
     fn get_empty_secrets() -> Value {
-        json!({ "tavilyApiKey": null })
+        json!({ "tavilyApiKey": null, "ollamaApiKey": null, "groqApiKey": null })
+    }
+
+    /// Providers group of a settings file that chose no provider: LM Studio
+    /// at its default address.
+    fn get_default_providers() -> Value {
+        json!({
+            "active": "lmStudio",
+            "lmStudio": { "address": null },
+            "ollama": { "mode": "local", "address": null }
+        })
     }
 
     /// Tools group of a settings file in which every tool asks first and no
@@ -399,6 +422,7 @@ mod tests {
         assert_eq!(stored["secrets"], get_empty_secrets());
         assert_eq!(stored["tools"], get_empty_tools());
         assert_eq!(stored["location"], get_empty_location());
+        assert_eq!(stored["providers"], get_default_providers());
     }
 
     #[test]
@@ -424,6 +448,7 @@ mod tests {
         expected["secrets"] = get_empty_secrets();
         expected["tools"] = get_empty_tools();
         expected["location"] = get_empty_location();
+        expected["providers"] = get_default_providers();
         assert_eq!(get_settings_json(&settings), expected);
         assert_eq!(
             fs::read_to_string(&path).expect("read the settings file"),
@@ -600,17 +625,23 @@ mod tests {
     }
 
     #[test]
-    fn reads_a_saved_tavily_api_key_and_hides_it_from_debug_output() {
+    fn reads_saved_api_keys_and_hides_them_from_debug_output() {
         let directory = TestDirectory::create("settings-secret");
         let path = directory.create_file("settings.json", get_complete_settings().to_string());
 
-        let settings = load_settings_file(&path).expect("settings with a key");
+        let settings = load_settings_file(&path).expect("settings with keys");
 
+        let secrets = &get_settings_json(&settings)["secrets"];
+        assert_eq!(secrets["tavilyApiKey"], json!("tvly-synthetic-0123456789"));
         assert_eq!(
-            get_settings_json(&settings)["secrets"]["tavilyApiKey"],
-            json!("tvly-synthetic-0123456789")
+            secrets["ollamaApiKey"],
+            json!("ollama-synthetic-0123456789")
         );
-        assert!(!format!("{settings:?}").contains("tvly-synthetic"));
+        assert_eq!(secrets["groqApiKey"], json!("gsk_synthetic_0123456789"));
+        let debug_output = format!("{settings:?}");
+        for key_text in ["tvly-synthetic", "ollama-synthetic", "gsk_synthetic"] {
+            assert!(!debug_output.contains(key_text), "{key_text}");
+        }
     }
 
     #[test]

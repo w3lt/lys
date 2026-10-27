@@ -3,7 +3,7 @@ import type { BackendConfig } from "../config"
 import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgentRecordStore"
 import AttachmentFileStore from "../modules/attachment/attachmentFileStore"
 import SqliteDatabase from "../infrastructure/database/sqliteDatabase"
-import LmStudioRuntime from "../modules/llm/runtimes/lmStudioRuntime"
+import { acquireLlmProviderRuntime } from "../modules/llm/runtimes/llmProviderRuntime"
 import AgentRuntimeService, {
   buildConversationTitleLookup
 } from "../modules/agent/agentRuntimeService"
@@ -26,6 +26,8 @@ import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
 } from "../modules/llm/llmRuntimeService"
 import LlmService from "../modules/llm/llmService"
+import { buildLlmChatEndpoint } from "../modules/llm/llmProviderAccess"
+import { findLlmProviderAccess } from "../infrastructure/settings/llmProviderSettingsFile"
 import ToolApprovalService from "../modules/toolApproval/toolApprovalService"
 import { readJustRunToolNames } from "../infrastructure/settings/justRunToolsFile"
 import { readTavilyApiKey } from "../infrastructure/settings/tavilyApiKeyFile"
@@ -53,7 +55,10 @@ export type SingletonServiceAcquisition<Service> = Readonly<{
 
 /** Factories for the independently created application services and the database they share. */
 export type SingletonServiceFactories = Readonly<{
-  /** Creates the chat service for one OpenAI-compatible HTTP endpoint and its title settings. */
+  /**
+   * Creates the chat service for the connected provider's OpenAI-compatible
+   * endpoint and its title settings.
+   */
   createChatService: (
     options: ChatServiceCreationOptions
   ) => SingletonServiceAcquisition<ChatService>
@@ -62,11 +67,11 @@ export type SingletonServiceFactories = Readonly<{
     databaseFilePath: BackendConfig["databaseFilePath"]
   ) => SingletonServiceAcquisition<SqliteDatabase>
   /**
-   * Creates the owned LLM runtime service for one LM Studio WebSocket endpoint
-   * without contacting it.
+   * Creates the owned LLM runtime service for the provider the settings file
+   * names, without reading the file or contacting the provider.
    */
   createLlmRuntimeService: (
-    lmsBaseUrl: string,
+    settingsFilePath: BackendConfig["settingsFilePath"],
     llmRuntimeFailureReporters: LlmRuntimeFailureReporters,
     lmStudioSdkLogger: LoggerInterface
   ) => SingletonServiceAcquisition<LlmRuntimeService>
@@ -97,7 +102,7 @@ const DEFAULT_SINGLETON_SERVICE_FACTORIES = Object.freeze({
 
 /** Application-scoped services owned for a Fastify application's lifetime. */
 export type SingletonServices = Readonly<{
-  /** Chat completion adapter configured for the backend's local endpoint. */
+  /** Chat completion adapter for the connected provider's endpoint. */
   chatService: ChatService
   /** LLM model policy served through the runtime service's queue. */
   llmService: LlmService
@@ -167,38 +172,39 @@ type DatabaseServices = Pick<
 /**
  * Creates the application-scoped service bundle from backend network configuration.
  *
- * @param config - LM Studio host and port used to derive local service endpoints,
- * the title-generation prompt and title length limit given to the chat
- * service, the built-in agents' system prompts given to the agent service,
+ * @param config - Settings file the LLM runtime service reads the active
+ * provider from, the title-generation prompt and title length limit given to
+ * the chat service, the built-in agents' system prompts given to the agent service,
  * vmo's host and port given to the read-page tool, and the attachments
  * directory given to the attachment file store.
  * @param logReporters - Receive, for logging, the LLM runtime failures that
  * no caller observes, the causes of read failures the model learns only by
  * kind, and the LM Studio SDK's messages.
  * @param factories - Service factories owned by the composition root.
- * @returns A promise resolving to the frozen bundle of owned services,
- * configured with the HTTP `/v1` chat endpoint and WebSocket LM Studio
- * endpoint. No service contacts LM Studio during creation; the runtime service
- * connects later.
+ * @returns A promise resolving to the frozen bundle of owned services. No
+ * service reads the active provider or contacts it during creation; the
+ * runtime service connects later, and the chat service sends each request to
+ * the provider connected when the request starts.
  * @throws The original construction failure, after every resource acquired
  * before it is closed.
  * @throws {AggregateError} If closing the acquired resources also fails; its
  * errors hold the construction failure followed by the cleanup failure.
- * @remarks Resources are acquired in the order chat service, database, LLM
- * runtime service. The conversation services and the Sqlite records they
- * wrap are created over the database before the runtime service, turn
- * persistence first, so its startup recovery runs before any history is
- * read. The agent service and the agent runtime service are created after
- * the LLM runtime service: the agent service over its Sqlite records, and
- * the runtime service over the agent service, the chat service, the LLM
- * service, and the history reader; they read nothing at creation and own
- * nothing to release.
+ * @remarks Resources are acquired in the order database, LLM runtime
+ * service, chat service; the chat service comes after the runtime service
+ * because it reads the connected provider from it. The conversation services
+ * and the Sqlite records they wrap are created over the database before the
+ * runtime service, turn persistence first, so its startup recovery runs
+ * before any history is read. The agent service and the agent runtime
+ * service are created after the chat service: the agent service over its
+ * Sqlite records, and the runtime service over the agent service, the chat
+ * service, the LLM service, and the history reader; they read nothing at
+ * creation and own nothing to release.
  * The web search tool provider, the built-in tools, the tool approval
  * service, and the attachment file store are created last; they read and
  * contact nothing at creation and own nothing to release.
  * Creation stops at the first failure. The database is not part of the
- * returned bundle: the bundle's cleanup closes it after the LLM runtime
- * service and before the chat service.
+ * returned bundle: the bundle's cleanup closes it last, after the chat
+ * service and the LLM runtime service.
  */
 export async function createSingletonServices(
   config: BackendConfig,
@@ -208,12 +214,6 @@ export async function createSingletonServices(
   const serviceLifetime = new AsyncDisposableStack()
 
   try {
-    const chatServiceAcquisition = factories.createChatService(
-      buildChatServiceOptions(config)
-    )
-    serviceLifetime.defer(chatServiceAcquisition.closeService)
-    const chatService = chatServiceAcquisition.service
-
     const databaseAcquisition = factories.createDatabase(
       config.databaseFilePath
     )
@@ -221,11 +221,18 @@ export async function createSingletonServices(
     const databaseServices = createDatabaseServices(databaseAcquisition.service)
 
     const llmRuntimeServiceAcquisition = factories.createLlmRuntimeService(
-      `ws://${config.lmstudioHost}:${config.lmstudioPort}`,
+      config.settingsFilePath,
       logReporters.llmRuntime,
       logReporters.lmStudioSdk
     )
     serviceLifetime.defer(llmRuntimeServiceAcquisition.closeService)
+
+    const chatServiceAcquisition = factories.createChatService(
+      buildChatServiceOptions(config, llmRuntimeServiceAcquisition.service)
+    )
+    serviceLifetime.defer(chatServiceAcquisition.closeService)
+    const chatService = chatServiceAcquisition.service
+
     const llmService = new LlmService({
       llmEngineOperationQueue: llmRuntimeServiceAcquisition.service
     })
@@ -271,15 +278,21 @@ export async function createSingletonServices(
 /**
  * Builds the settings the chat service is created with.
  *
- * @param config - LM Studio host and port, and the title-generation prompt
- * and title length limit.
- * @returns The HTTP `/v1` endpoint of LM Studio and the title settings.
+ * @param config - Title-generation prompt and title length limit.
+ * @param llmRuntimeService - Runtime service whose connected provider every
+ * chat request goes to; borrowed for the chat service's lifetime.
+ * @returns A lookup of the connected provider's OpenAI-compatible endpoint,
+ * undefined while none is connected, and the title settings.
  */
 function buildChatServiceOptions(
-  config: BackendConfig
+  config: BackendConfig,
+  llmRuntimeService: LlmRuntimeService
 ): ChatServiceCreationOptions {
   return {
-    openAiBaseUrl: `http://${config.lmstudioHost}:${config.lmstudioPort}/v1`,
+    findChatEndpoint: () => {
+      const access = llmRuntimeService.connectedLlmProviderAccess
+      return access === undefined ? undefined : buildLlmChatEndpoint(access)
+    },
     titleGenerationPrompt: config.titleGenerationPrompt,
     generatedTitleMaxLength: config.generatedTitleMaxLength
   }
@@ -403,10 +416,10 @@ function createDatabaseServices(database: SqliteDatabase): DatabaseServices {
 }
 
 /**
- * Creates the production chat adapter for one HTTP endpoint.
+ * Creates the production chat adapter for the connected provider.
  *
- * @param options - OpenAI-compatible base URL used by the chat SDK and the
- * title-generation settings.
+ * @param options - Lookup of the connected provider's OpenAI-compatible
+ * endpoint and the title-generation settings.
  * @returns The newly owned chat service and its cleanup capability.
  */
 function createChatService(
@@ -442,24 +455,30 @@ function createDatabase(
 }
 
 /**
- * Creates the production LLM runtime service for one WebSocket endpoint.
+ * Creates the production LLM runtime service for the provider the settings
+ * file names.
  *
- * @param lmsBaseUrl - WebSocket endpoint used by each acquired SDK client.
- * @param llmRuntimeFailureReporters - Receive failures that no caller observes.
- * @param lmStudioSdkLogger - Receives the messages of each acquired SDK
- * client.
+ * @param settingsFilePath - Settings file read for the active provider, its
+ * address, and its key at every connection attempt.
+ * @param llmRuntimeFailureReporters - Receive failures that no caller
+ * observes, including a missing key or an unreadable settings file.
+ * @param lmStudioSdkLogger - Receives the messages of each acquired LM
+ * Studio SDK client.
  * @returns The newly owned runtime service and its cleanup capability. No
- * connection is attempted until the service is asked to connect.
+ * file is read and no connection is attempted until the service is asked to
+ * connect.
  */
 function createLlmRuntimeService(
-  lmsBaseUrl: string,
+  settingsFilePath: BackendConfig["settingsFilePath"],
   llmRuntimeFailureReporters: LlmRuntimeFailureReporters,
   lmStudioSdkLogger: LoggerInterface
 ): SingletonServiceAcquisition<LlmRuntimeService> {
   const llmRuntimeService = new LlmRuntimeService({
     ...llmRuntimeFailureReporters,
-    acquireLlmRuntime: async () =>
-      await LmStudioRuntime.create(lmsBaseUrl, lmStudioSdkLogger)
+    findLlmProviderAccess: async () =>
+      await findLlmProviderAccess(settingsFilePath),
+    acquireLlmRuntime: async (access) =>
+      await acquireLlmProviderRuntime(access, lmStudioSdkLogger)
   })
   return Object.freeze({
     service: llmRuntimeService,

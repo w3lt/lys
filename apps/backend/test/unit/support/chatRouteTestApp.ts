@@ -20,11 +20,14 @@ import {
   createModelCapabilitiesLookup,
   type FindModelCapabilities
 } from "../../../src/modules/chat/routes/modelCapabilities"
+import LlmRuntimeService from "../../../src/modules/llm/llmRuntimeService"
 import LlmService from "../../../src/modules/llm/llmService"
 import ToolApprovalService, {
   type ReadJustRunToolNames
 } from "../../../src/modules/toolApproval/toolApprovalService"
 import { createChatSseTestApp } from "./chatSseRoute"
+import { createFakeLlmRuntime } from "./fakeLlmRuntime"
+import { DEFAULT_LM_STUDIO_ACCESS } from "./llmFixtures"
 import { openConversationTestServices } from "./conversationDatabase"
 import type { TestFastify } from "./fastifyTestApp"
 import {
@@ -129,7 +132,10 @@ export type ChatRouteTestApp = TestFastify &
  * `check_spelling`, whose provider is never ready (`api-key-missing`). The
  * decorated tool approval service reads the saved Just run choices through
  * the `readJustRunToolNames` spy. The decorated attachment file store is
- * real, over a directory created for the test. When the test finishes, the
+ * real, over a directory created for the test. The decorated LLM runtime
+ * service is connected to {@link DEFAULT_LM_STUDIO_ACCESS} over a runtime
+ * double that no case reaches, so the capability lookups remember models
+ * for that provider. When the test finishes, the
  * registry is disposed first, so every generation it holds has stored its
  * final state before the in-memory conversation database is closed; the
  * directory is removed last.
@@ -148,7 +154,10 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     .spyOn(turns, "createConversationTurn")
     .mockImplementation(() => handleUnexpectedCall("createConversationTurn"))
   const chatService = new ChatService({
-    openAiBaseUrl: "http://lmstudio.test/v1",
+    findChatEndpoint: () => ({
+      baseUrl: "http://lmstudio.test/v1",
+      apiKey: undefined
+    }),
     titleGenerationPrompt: "Summarize the message as a short title.",
     generatedTitleMaxLength: 50
   })
@@ -181,6 +190,14 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   const listDownloadedLlmModels = vi
     .spyOn(llmService, "listDownloadedLlmModels")
     .mockResolvedValue([])
+  const llmRuntimeService = new LlmRuntimeService({
+    reportLlmRuntimeAcquisitionFailure: vi.fn(),
+    reportLlmRuntimeAvailabilityCheckFailure: vi.fn(),
+    findLlmProviderAccess: async () => DEFAULT_LM_STUDIO_ACCESS,
+    acquireLlmRuntime: async () => createFakeLlmRuntime()
+  })
+  await llmRuntimeService.connectLlmRuntime()
+  onTestFinished(async () => await llmRuntimeService[Symbol.asyncDispose]())
   const agentService = new AgentService({
     recordStore: SqliteAgentRecordStore.create(database),
     builtInAgents: buildBuiltInAgents(TEST_BUILT_IN_AGENT_PROMPTS)
@@ -210,6 +227,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   testFastify.app.decorate("conversationHistoryEditor", editor)
   testFastify.app.decorate("chatService", chatService)
   testFastify.app.decorate("llmService", llmService)
+  testFastify.app.decorate("llmRuntimeService", llmRuntimeService)
   testFastify.app.decorate("agentService", agentService)
   testFastify.app.decorate("agentRuntimeService", agentRuntimeService)
   testFastify.app.decorate(
@@ -246,8 +264,9 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     generateTitle,
     findLlmContextMeasurement,
     listDownloadedLlmModels,
-    findModelCapabilities: createModelCapabilitiesLookup(() =>
-      llmService.listDownloadedLlmModels()
+    findModelCapabilities: createModelCapabilitiesLookup(
+      () => llmService.listDownloadedLlmModels(),
+      () => llmRuntimeService.connectedLlmProviderAccess
     ),
     readJustRunToolNames,
     attachmentsDirectoryPath,

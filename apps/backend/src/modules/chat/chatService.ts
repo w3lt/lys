@@ -13,17 +13,19 @@ import {
   ChatCompletionCancelledError,
   TitleGenerationOutputError
 } from "../../utils/errors"
+import type { LlmChatEndpoint } from "../llm/llmProviderAccess"
+import { createLlmRuntimeUnavailableError } from "../llm/llmRuntimeUnavailableError"
 
-/** Settings used to create an application-scoped OpenAI-compatible chat client. */
+/** Settings used to create the application-scoped chat service. */
 export type ChatServiceCreationOptions = {
-  /** Base URL of the OpenAI-compatible chat completion endpoint. */
-  openAiBaseUrl: string
   /**
-   * Optional endpoint credential.
+   * Finds the OpenAI-compatible endpoint of the provider requests go to now.
    *
-   * @remarks Defaults to a non-secret placeholder because local OpenAI-compatible servers require a value but may not authenticate it.
+   * @returns The endpoint, or undefined while no provider is connected.
+   * @remarks Called synchronously at the start of every request, so a
+   * request goes to the provider connected when it starts.
    */
-  apiKey?: string
+  findChatEndpoint: () => LlmChatEndpoint | undefined
   /** Non-empty system prompt sent with every title-generation request. */
   titleGenerationPrompt: string
   /**
@@ -77,8 +79,19 @@ type TitleGenerationOutputSchema = ReturnType<
 /** Structured title output parsed from a reply, before trimming. */
 type TitleGenerationOutput = z.infer<TitleGenerationOutputSchema>
 
-/** Fallback credential value for unauthenticated OpenAI-compatible local endpoints. */
+/**
+ * Credential sent to a server that takes none, such as LM Studio; the OpenAI
+ * SDK requires a value. Not a secret.
+ */
 const DUMMY_API_KEY = "dummy-api-key"
+
+/** OpenAI SDK client created for one chat endpoint. */
+type ChatEndpointClient = Readonly<{
+  /** Endpoint the client sends requests to. */
+  endpoint: LlmChatEndpoint
+  /** Client owned by the chat service. */
+  openaiClient: OpenAI
+}>
 
 /**
  * Matches reply content wrapped in one Markdown code fence, with an optional
@@ -87,19 +100,22 @@ const DUMMY_API_KEY = "dummy-api-key"
 const MARKDOWN_JSON_CODE_FENCE_PATTERN = /^```(?:json)?([\s\S]*)```$/i
 
 /**
- * Owns an OpenAI client that adapts chat and title generation to the backend's
- * OpenAI-compatible local endpoint.
+ * Adapts chat and title generation to the OpenAI-compatible endpoint of the
+ * connected provider.
  *
- * @remarks The instance
- * owns its SDK client and its title prompt and schema for its application
- * lifetime; request inputs are borrowed and cancellation is owned by each
- * caller. Concurrency model: reentrant at this service boundary; no
- * request-local mutable state is retained and request concurrency is delegated
- * to the SDK.
+ * @remarks The instance owns an SDK client for the latest endpoint it used
+ * and replaces it when the connected provider's endpoint changes; it owns its
+ * title prompt and schema for its application lifetime. Request inputs are
+ * borrowed and cancellation is owned by each caller. Concurrency model:
+ * reentrant at this service boundary; a request keeps the client it started
+ * with, no request-local mutable state is retained, and request concurrency
+ * is delegated to the SDK.
  */
 export default class ChatService {
-  /** Owned OpenAI SDK client used to create chat completions. */
-  readonly #openaiClient: OpenAI
+  /** Finds the connected provider's chat endpoint at each request. */
+  readonly #findChatEndpoint: () => LlmChatEndpoint | undefined
+  /** Client for the latest endpoint used, or undefined before the first request. */
+  #chatEndpointClient: ChatEndpointClient | undefined = undefined
   /** Frozen system message sent before the user message in every title request. */
   readonly #titleSystemMessage: ChatCompletionMessageParam
   /** Validates title replies, including the configured title length limit. */
@@ -108,15 +124,14 @@ export default class ChatService {
   readonly #titleResponseFormat: ResponseFormatJSONSchema
 
   /**
-   * Creates a chat completion adapter for an endpoint, an optional credential,
-   * and the title-generation settings.
+   * Creates a chat completion adapter for the connected provider and the
+   * title-generation settings, without contacting any provider.
    *
-   * @param options - Endpoint, optional credential, title prompt, and title
-   * length limit used to create the client and title request parts.
+   * @param options - Endpoint lookup, title prompt, and title length limit
+   * used to create clients and title request parts.
    */
   constructor({
-    openAiBaseUrl,
-    apiKey,
+    findChatEndpoint,
     titleGenerationPrompt,
     generatedTitleMaxLength
   }: ChatServiceCreationOptions) {
@@ -124,10 +139,7 @@ export default class ChatService {
       generatedTitleMaxLength
     )
 
-    this.#openaiClient = new OpenAI({
-      baseURL: openAiBaseUrl,
-      apiKey: apiKey ?? DUMMY_API_KEY
-    })
+    this.#findChatEndpoint = findChatEndpoint
     this.#titleSystemMessage = Object.freeze({
       role: "system",
       content: titleGenerationPrompt
@@ -147,8 +159,11 @@ export default class ChatService {
    * @returns A promise that resolves to the asynchronous stream of chat completion chunks after the request is established.
    * @throws {@link ChatCompletionCancelledError} If the SDK reports that
    * request creation was cancelled; the SDK failure is kept as the cause.
+   * @throws A runtime-unavailable error recognized by
+   * `isLlmRuntimeUnavailableError` while no provider is connected; nothing is
+   * sent.
    * @throws If the request is otherwise rejected or cannot be streamed by the
-   * configured endpoint.
+   * connected provider's endpoint.
    */
   public async completeChatStream({
     messages,
@@ -159,8 +174,9 @@ export default class ChatService {
   }: CompleteChatOptions): Promise<AsyncIterable<ChatCompletionChunk>> {
     const { temperature, replyCeiling } = generationOptions
     const toolOffer = tools.length === 0 ? {} : { tools: [...tools] }
+    const openaiClient = this.#getChatEndpointClient()
     try {
-      return await this.#openaiClient.chat.completions.create(
+      return await openaiClient.chat.completions.create(
         {
           messages,
           model,
@@ -197,6 +213,9 @@ export default class ChatService {
    * @throws {@link TitleGenerationOutputError} If the endpoint answers with a
    * reply that is truncated, has no content, is not JSON, does not match the
    * title shape, has a title longer than the limit, or contains a blank title.
+   * @throws A runtime-unavailable error recognized by
+   * `isLlmRuntimeUnavailableError` while no provider is connected; nothing is
+   * sent.
    * @throws If the request is rejected, cannot reach the endpoint, or is
    * cancelled.
    */
@@ -210,7 +229,8 @@ export default class ChatService {
       content: message
     }
 
-    const completion = await this.#openaiClient.chat.completions.create(
+    const openaiClient = this.#getChatEndpointClient()
+    const completion = await openaiClient.chat.completions.create(
       {
         messages: [this.#titleSystemMessage, userMessage],
         model,
@@ -231,6 +251,32 @@ export default class ChatService {
    */
   public async [Symbol.asyncDispose]() {
     // This method does nothing as described above
+  }
+
+  /**
+   * Gets the client for the connected provider's endpoint, creating one when
+   * the endpoint differs from the latest one used.
+   *
+   * @returns The client a new request uses.
+   * @throws A runtime-unavailable error while no provider is connected.
+   */
+  #getChatEndpointClient(): OpenAI {
+    const endpoint = this.#findChatEndpoint()
+    if (endpoint === undefined) throw createLlmRuntimeUnavailableError([])
+    const current = this.#chatEndpointClient
+    if (
+      current !== undefined &&
+      current.endpoint.baseUrl === endpoint.baseUrl &&
+      current.endpoint.apiKey === endpoint.apiKey
+    ) {
+      return current.openaiClient
+    }
+    const openaiClient = new OpenAI({
+      baseURL: endpoint.baseUrl,
+      apiKey: endpoint.apiKey ?? DUMMY_API_KEY
+    })
+    this.#chatEndpointClient = Object.freeze({ endpoint, openaiClient })
+    return openaiClient
   }
 }
 

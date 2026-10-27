@@ -16,8 +16,6 @@ import { backendConfigSchema } from "../../../src/config"
 export const TEST_BACKEND_CONFIG = backendConfigSchema.parse({
   backendHost: "127.0.0.1",
   backendPort: 12_345,
-  lmstudioHost: "lmstudio.test",
-  lmstudioPort: 4321,
   databaseFilePath: "/nonexistent/lys-test/lys_db.sqlite",
   settingsFilePath: "/nonexistent/lys-test/settings.json",
   attachmentsDirectoryPath: "/nonexistent/lys-test/attachments",

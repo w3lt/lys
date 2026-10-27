@@ -39,7 +39,10 @@ import {
   createTextPart
 } from "../../../support/conversationFixtures"
 import { createTestFastify } from "../../../support/fastifyTestApp"
-import { createDownloadedLlmModel } from "../../../support/llmFixtures"
+import {
+  createDownloadedLlmModel,
+  DEFAULT_LM_STUDIO_ACCESS
+} from "../../../support/llmFixtures"
 import { createRoomyReplyContextMeter } from "../../../support/replyContextMeterFakes"
 import {
   CHECK_SPELLING_TOOL,
@@ -172,7 +175,10 @@ async function createChatContextRouteApp() {
     scope.setSerializerCompiler(serializerCompiler)
     registerChatContextRoute(
       scope,
-      createModelCapabilitiesLookup(() => llmService.listDownloadedLlmModels())
+      createModelCapabilitiesLookup(
+        () => llmService.listDownloadedLlmModels(),
+        () => DEFAULT_LM_STUDIO_ACCESS
+      )
     )
   })
   return {
@@ -735,7 +741,7 @@ describe("registerChatContextRoute", () => {
       title: "Model not loaded",
       status: 503,
       detail:
-        "The model is not loaded in LM Studio. Load it in Settings → Model to measure the conversation.",
+        "The provider has not loaded the model. Load it, or choose a model the provider serves, in Settings → Model to measure the conversation.",
       instance: chatContextApi.path
     })
   })

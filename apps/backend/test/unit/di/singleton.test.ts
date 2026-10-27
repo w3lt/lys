@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { groqApiKeySchema } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
 import type { AgentTurn } from "../../../src/modules/agent/agent"
@@ -128,8 +129,9 @@ function buildHelloAgentTurn(): AgentTurn {
  *
  * @returns The factory mocks, their acquisitions, and the cleanup log.
  * @remarks The database is in memory and closed when the test finishes, and the
- * LLM runtime service is never connected: its runtime acquisition rejects if
- * anything attempts it. No external resource is acquired.
+ * LLM runtime service is never connected: its provider lookup and runtime
+ * acquisition reject if anything attempts them, and the chat service finds no
+ * endpoint. No external resource is acquired.
  */
 function createRecordedFactories() {
   const closeLog: AcquisitionName[] = []
@@ -140,7 +142,7 @@ function createRecordedFactories() {
   const acquisitions = {
     chat: createAcquisition(
       new ChatService({
-        openAiBaseUrl: "http://lmstudio.test/v1",
+        findChatEndpoint: () => undefined,
         titleGenerationPrompt: "prompt",
         generatedTitleMaxLength: 10
       }),
@@ -151,6 +153,9 @@ function createRecordedFactories() {
     llmRuntime: createAcquisition(
       new LlmRuntimeService({
         ...createLogReporters().llmRuntime,
+        findLlmProviderAccess: async () => {
+          throw new Error("Unexpected provider lookup")
+        },
         acquireLlmRuntime: async () => {
           throw new Error("Unexpected LLM runtime acquisition")
         }
@@ -186,7 +191,7 @@ describe("createSingletonServices", () => {
     onTestFinished(async () => await closeSingletonServices(services))
 
     expect(factories.createChatService).toHaveBeenCalledWith({
-      openAiBaseUrl: "http://lmstudio.test:4321/v1",
+      findChatEndpoint: expect.any(Function),
       titleGenerationPrompt: TEST_BACKEND_CONFIG.titleGenerationPrompt,
       generatedTitleMaxLength: TEST_BACKEND_CONFIG.generatedTitleMaxLength
     })
@@ -194,10 +199,40 @@ describe("createSingletonServices", () => {
       TEST_BACKEND_CONFIG.databaseFilePath
     )
     expect(factories.createLlmRuntimeService).toHaveBeenCalledWith(
-      "ws://lmstudio.test:4321",
+      TEST_BACKEND_CONFIG.settingsFilePath,
       reporters.llmRuntime,
       reporters.lmStudioSdk
     )
+  })
+
+  it("gives the chat service the endpoint of the provider the runtime service connected", async () => {
+    const { factories, closeLog } = createRecordedFactories()
+    const apiKey = groqApiKeySchema.parse("gsk_synthetic_0123456789")
+    const llmRuntimeService = new LlmRuntimeService({
+      ...createLogReporters().llmRuntime,
+      findLlmProviderAccess: async () => ({ provider: "groq", apiKey }),
+      acquireLlmRuntime: async () => createFakeLlmRuntime()
+    })
+    factories.createLlmRuntimeService.mockReturnValue(
+      createAcquisition(llmRuntimeService, "llm-runtime", closeLog)
+    )
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createLogReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    onTestFinished(async () => await llmRuntimeService[Symbol.asyncDispose]())
+    const findChatEndpoint =
+      factories.createChatService.mock.lastCall?.[0].findChatEndpoint
+
+    expect(findChatEndpoint?.()).toBeUndefined()
+    await llmRuntimeService.connectLlmRuntime()
+
+    expect(findChatEndpoint?.()).toEqual({
+      baseUrl: "https://api.groq.com/openai/v1",
+      apiKey
+    })
   })
 
   it("lists read_page, then web_search found by the bundle's web search tool provider", async () => {
@@ -433,7 +468,7 @@ describe("createSingletonServices", () => {
     expect(handleLlmEngineOperationRequest).toHaveBeenCalledOnce()
   })
 
-  it("releases the chat service when the database cannot be opened", async () => {
+  it("acquires nothing else when the database cannot be opened", async () => {
     const { factories, closeLog } = createRecordedFactories()
     const creationFailure = new Error("unable to open database file")
     factories.createDatabase.mockImplementation(() => {
@@ -448,11 +483,12 @@ describe("createSingletonServices", () => {
       )
     ).rejects.toBe(creationFailure)
 
-    expect(closeLog).toEqual(["chat"])
+    expect(closeLog).toEqual([])
     expect(factories.createLlmRuntimeService).not.toHaveBeenCalled()
+    expect(factories.createChatService).not.toHaveBeenCalled()
   })
 
-  it("releases the database and the chat service when the conversation adapters cannot be created", async () => {
+  it("releases the database when the conversation adapters cannot be created", async () => {
     const { factories, acquisitions, closeLog } = createRecordedFactories()
     acquisitions.database.service[Symbol.dispose]()
 
@@ -464,11 +500,11 @@ describe("createSingletonServices", () => {
       )
     ).rejects.toThrow("Database is closed")
 
-    expect(closeLog).toEqual(["database", "chat"])
+    expect(closeLog).toEqual(["database"])
     expect(factories.createLlmRuntimeService).not.toHaveBeenCalled()
   })
 
-  it("releases earlier acquisitions in reverse order when the LLM runtime service cannot be created", async () => {
+  it("releases the database when the LLM runtime service cannot be created", async () => {
     const { factories, closeLog } = createRecordedFactories()
     const creationFailure = new Error("LLM runtime service construction failed")
     factories.createLlmRuntimeService.mockImplementation(() => {
@@ -483,14 +519,33 @@ describe("createSingletonServices", () => {
       )
     ).rejects.toBe(creationFailure)
 
-    expect(closeLog).toEqual(["database", "chat"])
+    expect(closeLog).toEqual(["database"])
+    expect(factories.createChatService).not.toHaveBeenCalled()
+  })
+
+  it("releases earlier acquisitions in reverse order when the chat service cannot be created", async () => {
+    const { factories, closeLog } = createRecordedFactories()
+    const creationFailure = new Error("Chat service construction failed")
+    factories.createChatService.mockImplementation(() => {
+      throw creationFailure
+    })
+
+    await expect(
+      createSingletonServices(
+        TEST_BACKEND_CONFIG,
+        createLogReporters(),
+        factories
+      )
+    ).rejects.toBe(creationFailure)
+
+    expect(closeLog).toEqual(["llm-runtime", "database"])
   })
 
   it("keeps both failures when releasing earlier acquisitions also fails", async () => {
     const { factories, acquisitions, closeLog } = createRecordedFactories()
-    const creationFailure = new Error("LLM runtime service construction failed")
+    const creationFailure = new Error("Chat service construction failed")
     const cleanupFailure = new Error("database is locked")
-    factories.createLlmRuntimeService.mockImplementation(() => {
+    factories.createChatService.mockImplementation(() => {
       throw creationFailure
     })
     acquisitions.database.closeService.mockRejectedValue(cleanupFailure)
@@ -505,7 +560,7 @@ describe("createSingletonServices", () => {
     expect(failure).toMatchObject({
       errors: [creationFailure, cleanupFailure]
     })
-    expect(closeLog).toEqual(["chat"])
+    expect(closeLog).toEqual(["llm-runtime"])
   })
 
   it("opens the configured database with the production factories and closes it with the bundle", async () => {
@@ -556,7 +611,7 @@ describe("closeSingletonServices", () => {
 
     await closeSingletonServices(services)
 
-    expect(closeLog).toEqual(["llm-runtime", "database", "chat"])
+    expect(closeLog).toEqual(["chat", "llm-runtime", "database"])
   })
 
   it("joins repeated and concurrent calls to one release of each acquisition", async () => {
@@ -580,7 +635,7 @@ describe("closeSingletonServices", () => {
 
     await expect(closeSingletonServices(services)).rejects.toBe(releaseFailure)
 
-    expect(closeLog).toEqual(["database", "chat"])
+    expect(closeLog).toEqual(["chat", "database"])
     await expect(closeSingletonServices(services)).rejects.toBe(releaseFailure)
     expect(acquisitions.llmRuntime.closeService).toHaveBeenCalledOnce()
   })

@@ -45,8 +45,8 @@ type ChatContextRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
     /** Every tool the backend runs, which a request may offer by name. */
     builtInTools: readonly BuiltInToolEntry[]
     /**
-     * Capabilities of the model a request names, read from LM Studio's
-     * inventory.
+     * Capabilities of the model a request names, read from the connected
+     * provider's inventory.
      */
     findModelCapabilities: FindModelCapabilities
     /** Examines stored attachment files without reading them. */
@@ -88,7 +88,7 @@ const NEW_CONVERSATION_HISTORY: MeasuredHistory = Object.freeze({
 
 /** Explanation sent when no loaded instance matches the requested model. */
 const MODEL_NOT_LOADED_DETAIL =
-  "The model is not loaded in LM Studio. Load it in Settings → Model to measure the conversation."
+  "The provider has not loaded the model. Load it, or choose a model the provider serves, in Settings → Model to measure the conversation."
 
 /**
  * Registers the endpoint that measures the context a conversation's next
@@ -98,7 +98,8 @@ const MODEL_NOT_LOADED_DETAIL =
  * agent runtime service, the conversation reader, the LLM service behind the
  * agents, the backend tools, and the attachment file store installed.
  * @param findModelCapabilities - Capabilities of the model a request names,
- * read from LM Studio's inventory and remembered by the lookup; shared with
+ * read from the connected provider's inventory and remembered by the lookup
+ * while that provider stays connected; shared with
  * the chat route, so a measurement offers what a turn would.
  * @throws If route registration fails.
  * @remarks Every response prevents caching, because a measurement observes

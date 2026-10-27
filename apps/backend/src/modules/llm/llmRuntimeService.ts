@@ -5,6 +5,10 @@ import type {
   LlmRuntimeConnectionObserver,
   LlmRuntimeConnector
 } from "./llmRuntimeCapabilities"
+import {
+  isSameLlmProviderAccess,
+  type LlmProviderAccess
+} from "./llmProviderAccess"
 import { createLlmRuntimeUnavailableError } from "./llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "./llmServiceBusyError"
 import type { LlmEngineOperation, LlmEngineOperationQueue } from "./llmService"
@@ -24,10 +28,17 @@ export type LlmRuntimeFailureReporters = {
 /** Dependencies supplied when creating the application-scoped LLM runtime service. */
 export type LlmRuntimeServiceCreationOptions = LlmRuntimeFailureReporters & {
   /**
-   * Acquires a ready, provider-available runtime. A resolved runtime transfers
-   * to the service; a rejection means no runtime was acquired.
+   * Finds how to reach the provider the person saved as active. Called at
+   * the start of every connection attempt; a rejection means no usable
+   * provider is saved, such as a hosted provider without its key.
    */
-  readonly acquireLlmRuntime: () => Promise<LlmRuntime>
+  readonly findLlmProviderAccess: () => Promise<LlmProviderAccess>
+  /**
+   * Acquires a ready, provider-available runtime for one provider. A resolved
+   * runtime transfers to the service; a rejection means no runtime was
+   * acquired.
+   */
+  readonly acquireLlmRuntime: (access: LlmProviderAccess) => Promise<LlmRuntime>
 }
 
 /** Connection to the LLM runtime; a runtime is held exactly while connected. */
@@ -41,6 +52,8 @@ type LlmRuntimeConnectionState =
       status: "connected"
       /** Exclusively owned runtime used by accepted model operations. */
       llmRuntime: LlmRuntime
+      /** How the runtime's provider is reached; may hold a secret key. */
+      llmProviderAccess: LlmProviderAccess
     }>
   | Readonly<{
       /** The latest attempt failed, or the held runtime stopped answering and was released. */
@@ -119,8 +132,11 @@ const UNREACHABLE_LLM_RUNTIME_CONNECTION_STATE = Object.freeze({
  * operation against it.
  *
  * @remarks Owns at most one runtime, acquired through the supplied
- * capability, and the FIFO queue shared by connection attempts and model
- * operations: one active and at most eight waiting; excess requests reject
+ * capability for the provider the person saved, which each connection
+ * attempt reads again; a held runtime for a provider that is no longer saved
+ * is released before another is acquired. It also owns the FIFO queue
+ * shared by connection attempts and model operations: one active and at most
+ * eight waiting; excess requests reject
  * with the service-busy error before acceptance. Invariant: a runtime is held
  * exactly while the status is `connected`, and only queued work acquires,
  * probes, or releases it, so no attempt overlaps a model operation.
@@ -142,8 +158,13 @@ export default class LlmRuntimeService
     LlmRuntimeConnector,
     LlmEngineOperationQueue
 {
+  /** Finds how to reach the saved provider at each connection attempt. */
+  readonly #findLlmProviderAccess: () => Promise<LlmProviderAccess>
+
   /** Borrowed acquisition capability; each resolved runtime transfers to this service. */
-  readonly #acquireLlmRuntime: () => Promise<LlmRuntime>
+  readonly #acquireLlmRuntime: (
+    access: LlmProviderAccess
+  ) => Promise<LlmRuntime>
 
   /** Borrowed reporter for acquisition failures that became `unreachable`. */
   readonly #reportLlmRuntimeAcquisitionFailure: (failure: unknown) => void
@@ -174,10 +195,12 @@ export default class LlmRuntimeService
    * @param options - Borrowed acquisition and failure-reporting capabilities.
    */
   public constructor({
+    findLlmProviderAccess,
     acquireLlmRuntime,
     reportLlmRuntimeAcquisitionFailure,
     reportLlmRuntimeAvailabilityCheckFailure
   }: LlmRuntimeServiceCreationOptions) {
+    this.#findLlmProviderAccess = findLlmProviderAccess
     this.#acquireLlmRuntime = acquireLlmRuntime
     this.#reportLlmRuntimeAcquisitionFailure =
       reportLlmRuntimeAcquisitionFailure
@@ -192,6 +215,22 @@ export default class LlmRuntimeService
    */
   public get llmRuntimeConnectionStatus(): LlmRuntimeConnectionStatus {
     return this.#connection.status
+  }
+
+  /**
+   * How the provider of the held runtime is reached.
+   *
+   * @returns The access the held runtime was acquired for while the status is
+   * `connected`, otherwise undefined. A synchronous in-memory read that never
+   * contacts the provider or enters the queue.
+   * @remarks Chat requests use it, so they reach the same provider as the
+   * model operations and context measurements.
+   */
+  public get connectedLlmProviderAccess(): LlmProviderAccess | undefined {
+    const connection = this.#connection
+    return connection.status === "connected"
+      ? connection.llmProviderAccess
+      : undefined
   }
 
   /**
@@ -275,38 +314,77 @@ export default class LlmRuntimeService
   }
 
   /**
-   * Keeps a held runtime that still answers, or acquires a new one.
+   * Reads the saved provider, then keeps a held runtime for it that still
+   * answers, or acquires a new one.
    *
    * @returns The settled status after the attempt.
    * @throws If probing or releasing the held runtime fails.
-   * @remarks Runs only as queued work, so no model operation overlaps it.
+   * @remarks Runs only as queued work, so no model operation overlaps it. A
+   * held runtime for a provider that is no longer the saved one is released
+   * before the new one is acquired; when no usable provider is saved, the
+   * held runtime is released and the status becomes `unreachable`.
    */
   async #updateLlmRuntimeConnection(): Promise<LlmRuntimeConnectionStatus> {
+    const llmProviderAccess = await this.#findSavedLlmProviderAccess()
     const connection = this.#connection
     if (connection.status === "connected") {
-      const status = await this.#updateLlmRuntimeAvailability(
-        connection.llmRuntime
-      )
-      if (status === "connected") {
-        return status
+      if (
+        llmProviderAccess !== undefined &&
+        isSameLlmProviderAccess(connection.llmProviderAccess, llmProviderAccess)
+      ) {
+        const status = await this.#updateLlmRuntimeAvailability(
+          connection.llmRuntime
+        )
+        if (status === "connected") {
+          return status
+        }
+      } else {
+        await this.#closeLlmRuntimeConnection(connection.llmRuntime)
       }
     }
 
-    return await this.#openLlmRuntimeConnection()
+    if (llmProviderAccess === undefined) {
+      this.#connection = UNREACHABLE_LLM_RUNTIME_CONNECTION_STATE
+      return "unreachable"
+    }
+    return await this.#openLlmRuntimeConnection(llmProviderAccess)
+  }
+
+  /**
+   * Finds the saved provider for one connection attempt.
+   *
+   * @returns How to reach it, or undefined after a reported failure to find a
+   * usable provider.
+   * @throws If the failure reporter throws.
+   */
+  async #findSavedLlmProviderAccess(): Promise<LlmProviderAccess | undefined> {
+    try {
+      return await this.#findLlmProviderAccess()
+    } catch (findingError) {
+      this.#reportLlmRuntimeAcquisitionFailure(findingError)
+      return undefined
+    }
   }
 
   /**
    * Acquires a new runtime and records the outcome as the connection status.
    *
+   * @param llmProviderAccess - How the provider is reached.
    * @returns `connected` after acquisition, or `unreachable` after a reported
    * acquisition failure.
    * @throws If the failure reporter throws; the status is already `unreachable`.
    */
-  async #openLlmRuntimeConnection(): Promise<LlmRuntimeConnectionStatus> {
+  async #openLlmRuntimeConnection(
+    llmProviderAccess: LlmProviderAccess
+  ): Promise<LlmRuntimeConnectionStatus> {
     this.#connection = CONNECTING_LLM_RUNTIME_CONNECTION_STATE
     try {
-      const llmRuntime = await this.#acquireLlmRuntime()
-      this.#connection = Object.freeze({ status: "connected", llmRuntime })
+      const llmRuntime = await this.#acquireLlmRuntime(llmProviderAccess)
+      this.#connection = Object.freeze({
+        status: "connected",
+        llmRuntime,
+        llmProviderAccess
+      })
       return "connected"
     } catch (acquisitionError) {
       this.#connection = UNREACHABLE_LLM_RUNTIME_CONNECTION_STATE

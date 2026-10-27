@@ -28,10 +28,12 @@ export interface LlmRuntimeConnectionObserver {
  */
 export interface LlmRuntimeConnector {
   /**
-   * Keeps a held runtime that still answers, or acquires a new one.
+   * Keeps a held runtime that still answers for the saved provider, or
+   * acquires a new one for it.
    *
    * @returns A promise resolving to the settled status, `connected` or
-   * `unreachable`. An acquisition failure resolves to `unreachable`.
+   * `unreachable`. An acquisition failure, or no usable saved provider,
+   * resolves to `unreachable`.
    * @throws `The LLM runtime is closed.` after cleanup begins.
    * @throws A service-busy error recognized by
    * [isLlmServiceBusyError](./llmServiceBusyError.ts) when the queue is full;

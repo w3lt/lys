@@ -202,7 +202,10 @@ function createOpenAiReplyModelHarness(
     return createScriptedResponse(script, requestRelease.resolve)
   })
   const chatService = new ChatService({
-    openAiBaseUrl: "http://lmstudio.test/v1",
+    findChatEndpoint: () => ({
+      baseUrl: "http://lmstudio.test/v1",
+      apiKey: undefined
+    }),
     titleGenerationPrompt: "Summarize the message as a short title.",
     generatedTitleMaxLength: 50
   })

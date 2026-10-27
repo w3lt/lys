@@ -1,5 +1,15 @@
 import type { LLMInfo } from "@lmstudio/sdk"
+import {
+  DEFAULT_LM_STUDIO_ADDRESS,
+  type LlmProviderAccess
+} from "../../../src/modules/llm/llmProviderAccess"
 import type { DownloadedLlmModel } from "../../../src/modules/llm/llmRuntimeTypes"
+
+/** LM Studio at its default address, the provider most cases connect to. */
+export const DEFAULT_LM_STUDIO_ACCESS: LlmProviderAccess = Object.freeze({
+  provider: "lmStudio",
+  address: DEFAULT_LM_STUDIO_ADDRESS
+})
 
 /** Identity fields that distinguish one fixture model from another. */
 export type LlmModelFixtureIdentity = Readonly<{

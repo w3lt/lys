@@ -22,7 +22,7 @@ type SingletonServicePluginOptions = {
  * @remarks The services are exposed as Fastify decorations and disposed when
  * Fastify closes. After the HTTP listener opens, an `onListen` hook performs
  * the first LLM runtime connection attempt. Fastify resolves `listen()` before
- * running the hook and logs a hook rejection, so LM Studio never delays or
+ * running the hook and logs a hook rejection, so the provider never delays or
  * prevents listening. `inject()` and `ready()` do not run the hook. The
  * services' failures that no caller observes, and the messages of the LM
  * Studio SDK, are logged through the application's logger.
@@ -32,12 +32,15 @@ const singletonPlugin: FastifyPluginAsync<
 > = async (app, { config }) => {
   const llmRuntime: LlmRuntimeFailureReporters = {
     reportLlmRuntimeAcquisitionFailure: (failure) => {
-      app.log.warn({ err: failure }, "LM Studio runtime acquisition failed")
+      app.log.warn(
+        { err: failure },
+        "Model provider runtime acquisition failed"
+      )
     },
     reportLlmRuntimeAvailabilityCheckFailure: (failure) => {
       app.log.error(
         { err: failure },
-        "LM Studio runtime check or release failed after a model operation"
+        "Model provider runtime check or release failed after a model operation"
       )
     }
   }

@@ -1,9 +1,4 @@
-import {
-  BACKEND_HOST,
-  BACKEND_PORT,
-  LMSTUDIO_HOST,
-  LMSTUDIO_PORT
-} from "@lys/protocol"
+import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import * as z from "zod"
 import {
@@ -29,8 +24,6 @@ const FIXTURE_PROMPTS = Object.freeze({
 const VALID_RAW_CONFIG = Object.freeze({
   backendHost: BACKEND_HOST,
   backendPort: BACKEND_PORT,
-  lmstudioHost: LMSTUDIO_HOST,
-  lmstudioPort: LMSTUDIO_PORT,
   databaseFilePath: "/test-home/lys/lys_db.sqlite",
   settingsFilePath: "/test-home/lys/settings.json",
   attachmentsDirectoryPath: "/test-home/lys/attachments",
@@ -116,8 +109,6 @@ describe("loadBackendConfig", () => {
     expect(loadBackendConfig()).toEqual({
       backendHost: BACKEND_HOST,
       backendPort: BACKEND_PORT,
-      lmstudioHost: LMSTUDIO_HOST,
-      lmstudioPort: LMSTUDIO_PORT,
       databaseFilePath: "/test-home/lys/lys_db.sqlite",
       settingsFilePath: "/test-home/lys/settings.json",
       attachmentsDirectoryPath: "/test-home/lys/attachments",
@@ -214,26 +205,18 @@ describe("loadBackendLogsDirectoryPath", () => {
 
 describe("backendConfigSchema", () => {
   it.each([
-    [
-      "the lowest ports",
-      { ...VALID_RAW_CONFIG, backendPort: 1, lmstudioPort: 1, vmoPort: 1 }
-    ],
+    ["the lowest ports", { ...VALID_RAW_CONFIG, backendPort: 1, vmoPort: 1 }],
     [
       "the highest ports",
       {
         ...VALID_RAW_CONFIG,
         backendPort: 65_535,
-        lmstudioPort: 65_535,
         vmoPort: 65_535
       }
     ],
     [
       "other IPv4 loopback backend and vmo hosts",
       { ...VALID_RAW_CONFIG, backendHost: "127.0.0.2", vmoHost: "127.1.2.3" }
-    ],
-    [
-      "an IPv4 LM Studio host",
-      { ...VALID_RAW_CONFIG, lmstudioHost: "192.168.1.20" }
     ],
     [
       "limits of 1",
@@ -272,16 +255,6 @@ describe("backendConfigSchema", () => {
       "backendPort"
     ],
     [
-      "an LM Studio port of 0",
-      { ...VALID_RAW_CONFIG, lmstudioPort: 0 },
-      "lmstudioPort"
-    ],
-    [
-      "an LM Studio port of 65536",
-      { ...VALID_RAW_CONFIG, lmstudioPort: 65_536 },
-      "lmstudioPort"
-    ],
-    [
       "a host name as the backend host",
       { ...VALID_RAW_CONFIG, backendHost: "localhost" },
       "backendHost"
@@ -295,16 +268,6 @@ describe("backendConfigSchema", () => {
       "a non-loopback IPv4 backend host",
       { ...VALID_RAW_CONFIG, backendHost: "10.0.0.1" },
       "backendHost"
-    ],
-    [
-      "an LM Studio host with a scheme",
-      { ...VALID_RAW_CONFIG, lmstudioHost: "http://localhost" },
-      "lmstudioHost"
-    ],
-    [
-      "an LM Studio host with a port",
-      { ...VALID_RAW_CONFIG, lmstudioHost: "localhost:1234" },
-      "lmstudioHost"
     ],
     [
       "a relative database path",

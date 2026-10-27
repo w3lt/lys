@@ -1,8 +1,10 @@
 import type { LlmRuntimeConnectionStatus } from "@lys/protocol"
+import { groqApiKeySchema, providerAddressSchema } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import LlmRuntimeService from "../../../../src/modules/llm/llmRuntimeService"
 import type { LlmEngineOperation } from "../../../../src/modules/llm/llmService"
 import type { LlmRuntime } from "../../../../src/modules/llm/llmRuntime"
+import type { LlmProviderAccess } from "../../../../src/modules/llm/llmProviderAccess"
 import { isLlmRuntimeUnavailableError } from "../../../../src/modules/llm/llmRuntimeUnavailableError"
 import type { LlmRuntimeAvailability } from "../../../../src/modules/llm/llmRuntimeTypes"
 import { isLlmServiceBusyError } from "../../../../src/modules/llm/llmServiceBusyError"
@@ -15,18 +17,37 @@ const SERVICE_CAPACITY = 9
 /** Message of the failure raised for work requested after cleanup begins. */
 const CLOSED_MESSAGE = "The LLM runtime is closed."
 
+/** LM Studio at its default address, the provider most cases save. */
+const LM_STUDIO_ACCESS: LlmProviderAccess = Object.freeze({
+  provider: "lmStudio",
+  address: providerAddressSchema.parse("127.0.0.1:1234")
+})
+
+/** Groq with a synthetic key, the provider a switch moves to. */
+const GROQ_ACCESS: LlmProviderAccess = Object.freeze({
+  provider: "groq",
+  apiKey: groqApiKeySchema.parse("gsk_synthetic_0123456789")
+})
+
 /**
  * Creates a service over one acquisition capability with recording reporters.
  *
  * @param acquireLlmRuntime - Acquisition capability the service borrows.
+ * @param findLlmProviderAccess - Saved-provider lookup the service borrows;
+ * LM Studio at its default address unless a case supplies another.
  * @returns The ready service, which holds no runtime until it connects, and
  * both failure reporters.
  */
-function createService(acquireLlmRuntime: () => Promise<LlmRuntime>) {
+function createService(
+  acquireLlmRuntime: (access: LlmProviderAccess) => Promise<LlmRuntime>,
+  findLlmProviderAccess: () => Promise<LlmProviderAccess> = async () =>
+    LM_STUDIO_ACCESS
+) {
   const reportLlmRuntimeAcquisitionFailure = vi.fn<(failure: unknown) => void>()
   const reportLlmRuntimeAvailabilityCheckFailure =
     vi.fn<(failure: unknown) => void>()
   const service = new LlmRuntimeService({
+    findLlmProviderAccess,
     acquireLlmRuntime,
     reportLlmRuntimeAcquisitionFailure,
     reportLlmRuntimeAvailabilityCheckFailure
@@ -315,6 +336,67 @@ describe("LlmRuntimeService", () => {
         created.reportLlmRuntimeAcquisitionFailure
       ).toHaveBeenCalledExactlyOnceWith(failure)
       expect(statusesSeenByReporter).toEqual(["unreachable"])
+    })
+
+    it("acquires a runtime for the saved provider and exposes how it is reached", async () => {
+      const runtime = createFakeLlmRuntime()
+      const acquireLlmRuntime = vi.fn(async () => runtime)
+      const { service } = createService(
+        acquireLlmRuntime,
+        async () => GROQ_ACCESS
+      )
+
+      expect(service.connectedLlmProviderAccess).toBeUndefined()
+      expect(await service.connectLlmRuntime()).toBe("connected")
+
+      expect(acquireLlmRuntime).toHaveBeenCalledExactlyOnceWith(GROQ_ACCESS)
+      expect(service.connectedLlmProviderAccess).toBe(GROQ_ACCESS)
+    })
+
+    it("releases the held runtime and acquires one for a newly saved provider", async () => {
+      const heldRuntime = createFakeLlmRuntime()
+      const newRuntime = createFakeLlmRuntime()
+      const acquireLlmRuntime = vi
+        .fn<(access: LlmProviderAccess) => Promise<LlmRuntime>>()
+        .mockResolvedValueOnce(heldRuntime)
+        .mockResolvedValueOnce(newRuntime)
+      const findLlmProviderAccess = vi
+        .fn<() => Promise<LlmProviderAccess>>()
+        .mockResolvedValueOnce(LM_STUDIO_ACCESS)
+        .mockResolvedValueOnce(GROQ_ACCESS)
+      const { service } = createService(
+        acquireLlmRuntime,
+        findLlmProviderAccess
+      )
+      await service.connectLlmRuntime()
+
+      expect(await service.connectLlmRuntime()).toBe("connected")
+
+      expect(heldRuntime.getRuntimeAvailability).not.toHaveBeenCalled()
+      expect(heldRuntime[Symbol.asyncDispose]).toHaveBeenCalledOnce()
+      expect(acquireLlmRuntime).toHaveBeenLastCalledWith(GROQ_ACCESS)
+      expect(service.connectedLlmProviderAccess).toBe(GROQ_ACCESS)
+    })
+
+    it("releases the held runtime when no usable provider is saved", async () => {
+      const runtime = createFakeLlmRuntime()
+      const acquireLlmRuntime = vi.fn(async () => runtime)
+      const findingFailure = new Error("No Groq API key is saved.")
+      const findLlmProviderAccess = vi
+        .fn<() => Promise<LlmProviderAccess>>()
+        .mockResolvedValueOnce(LM_STUDIO_ACCESS)
+        .mockRejectedValueOnce(findingFailure)
+      const created = createService(acquireLlmRuntime, findLlmProviderAccess)
+      await created.service.connectLlmRuntime()
+
+      expect(await created.service.connectLlmRuntime()).toBe("unreachable")
+
+      expect(runtime[Symbol.asyncDispose]).toHaveBeenCalledOnce()
+      expect(acquireLlmRuntime).toHaveBeenCalledOnce()
+      expect(created.service.connectedLlmProviderAccess).toBeUndefined()
+      expect(
+        created.reportLlmRuntimeAcquisitionFailure
+      ).toHaveBeenCalledExactlyOnceWith(findingFailure)
     })
 
     it("keeps a held runtime that still answers", async () => {

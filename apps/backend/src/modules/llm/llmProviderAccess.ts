@@ -1,0 +1,129 @@
+import {
+  GROQ_API_HOST,
+  LMSTUDIO_HOST,
+  LMSTUDIO_PORT,
+  OLLAMA_CLOUD_API_HOST,
+  OLLAMA_HOST,
+  OLLAMA_PORT
+} from "@lys/protocol"
+import {
+  providerAddressSchema,
+  type GroqApiKey,
+  type OllamaApiKey,
+  type ProviderAddress
+} from "@lys/share"
+
+/** LM Studio's address while the person has saved none. */
+export const DEFAULT_LM_STUDIO_ADDRESS: ProviderAddress =
+  providerAddressSchema.parse(`${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`)
+
+/** A local Ollama server's address while the person has saved none. */
+export const DEFAULT_OLLAMA_ADDRESS: ProviderAddress =
+  providerAddressSchema.parse(`${OLLAMA_HOST}:${OLLAMA_PORT}`)
+
+/**
+ * How the backend reaches the provider every request goes to, resolved from
+ * the person's saved settings.
+ *
+ * @remarks Each variant holds exactly what reaching its provider needs: a
+ * server address for a provider the person runs, an API key for a hosted
+ * one. The keys are secrets: the value is never logged or sent anywhere but
+ * its provider's host.
+ */
+export type LlmProviderAccess =
+  | Readonly<{
+      /** LM Studio, reached over its SDK and its OpenAI-compatible API. */
+      provider: "lmStudio"
+      /** LM Studio's server. */
+      address: ProviderAddress
+    }>
+  | Readonly<{
+      /** Ollama, reached over its native and OpenAI-compatible APIs. */
+      provider: "ollama"
+      /** A server the person runs, reached over plain HTTP. */
+      mode: "local"
+      /** The Ollama server. */
+      address: ProviderAddress
+    }>
+  | Readonly<{
+      /** Ollama, reached over its native and OpenAI-compatible APIs. */
+      provider: "ollama"
+      /** Ollama's cloud service at {@link OLLAMA_CLOUD_API_HOST}. */
+      mode: "cloud"
+      /** Key sent as a bearer token with every request; a secret. */
+      apiKey: OllamaApiKey
+    }>
+  | Readonly<{
+      /** Groq's API at {@link GROQ_API_HOST}. */
+      provider: "groq"
+      /** Key sent as a bearer token with every request; a secret. */
+      apiKey: GroqApiKey
+    }>
+
+/**
+ * OpenAI-compatible chat endpoint of one provider.
+ *
+ * @remarks The API key is a secret, sent only to the base URL's host.
+ */
+export type LlmChatEndpoint = Readonly<{
+  /** Base URL that chat completion paths are appended to. */
+  baseUrl: string
+  /** Bearer credential, or undefined for a server that takes none. */
+  apiKey: string | undefined
+}>
+
+/**
+ * Finds the OpenAI-compatible chat endpoint of a provider.
+ *
+ * @param access - How the provider is reached.
+ * @returns `http://<address>/v1` for LM Studio and a local Ollama server,
+ * `https://ollama.com/v1` with the key for Ollama's cloud, and
+ * `https://api.groq.com/openai/v1` with the key for Groq.
+ */
+export function buildLlmChatEndpoint(
+  access: LlmProviderAccess
+): LlmChatEndpoint {
+  switch (access.provider) {
+    case "lmStudio":
+      return Object.freeze({
+        baseUrl: `http://${access.address}/v1`,
+        apiKey: undefined
+      })
+    case "ollama":
+      return access.mode === "local"
+        ? Object.freeze({
+            baseUrl: `http://${access.address}/v1`,
+            apiKey: undefined
+          })
+        : Object.freeze({
+            baseUrl: `https://${OLLAMA_CLOUD_API_HOST}/v1`,
+            apiKey: access.apiKey
+          })
+    case "groq":
+      return Object.freeze({
+        baseUrl: `https://${GROQ_API_HOST}/openai/v1`,
+        apiKey: access.apiKey
+      })
+  }
+}
+
+/**
+ * Answers whether two accesses reach the same provider in the same way.
+ *
+ * @param left - First access.
+ * @param right - Second access.
+ * @returns True when the provider, mode, address, and key are all equal, so
+ * a runtime acquired for one serves the other.
+ */
+export function isSameLlmProviderAccess(
+  left: LlmProviderAccess,
+  right: LlmProviderAccess
+): boolean {
+  const leftChat = buildLlmChatEndpoint(left)
+  const rightChat = buildLlmChatEndpoint(right)
+  return (
+    left.provider === right.provider &&
+    leftChat.baseUrl === rightChat.baseUrl &&
+    leftChat.apiKey === rightChat.apiKey
+  )
+}

@@ -38,11 +38,11 @@ export default function handleLlmServiceRequestFailure(
     if (failure.errors.length > 0) {
       request.log.warn(
         { err: failure },
-        "LM Studio stopped answering during a model operation"
+        "The model provider stopped answering during a model operation"
       )
     }
     const problem = createLlmRuntimeUnavailableProblem(
-      "LM Studio is not reachable. Start LM Studio, then refresh its status in Lys."
+      "The model provider is not reachable. Check it in Settings → Providers, then refresh its status in Lys."
     )
     reply.type(problemDetailsMediaType).code(503).send(problem)
     return

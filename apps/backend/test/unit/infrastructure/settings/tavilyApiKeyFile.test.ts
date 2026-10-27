@@ -1,6 +1,6 @@
+import { MAXIMUM_SETTINGS_FILE_BYTES } from "@lys/share"
 import { mkdir } from "node:fs/promises"
 import { describe, expect, it } from "vitest"
-import { MAXIMUM_SETTINGS_FILE_BYTES } from "../../../../src/infrastructure/settings/settingsFile"
 import { readTavilyApiKey } from "../../../../src/infrastructure/settings/tavilyApiKeyFile"
 import {
   createSettingsFilePath,

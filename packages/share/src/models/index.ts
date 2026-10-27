@@ -99,6 +99,7 @@ export {
   MAXIMUM_MCP_SERVER_COUNT,
   MAXIMUM_MCP_SERVER_NAME_LENGTH,
   MAXIMUM_MCP_SERVER_URL_LENGTH,
+  MAXIMUM_MCP_SETTINGS_BYTES,
   MCP_TOOL_NAME_PREFIX,
   mcpServerNameSchema,
   mcpServerSettingsSchema,
@@ -113,6 +114,7 @@ export {
   type McpSettings
 } from "./mcp"
 export { tavilyApiKeySchema, type TavilyApiKey } from "./secrets"
+export { MAXIMUM_SETTINGS_FILE_BYTES } from "./settingsFile"
 export {
   BACKEND_INTERNAL_TOOL_NAMES,
   buildToolFunctionFormat,

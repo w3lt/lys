@@ -1,5 +1,9 @@
 import * as z from "zod"
-import { hasDistinctValues } from "./values"
+import { MAXIMUM_SETTINGS_FILE_BYTES } from "./settingsFile"
+import { calculateUtf8ByteLength, hasDistinctValues } from "./values"
+
+/** Bytes in one kibibyte. */
+const BYTES_PER_KIBIBYTE = 1024
 
 /**
  * Most MCP servers the `mcp` settings group may hold, inclusive.
@@ -10,6 +14,17 @@ import { hasDistinctValues } from "./values"
  * and backend release.
  */
 export const MAXIMUM_MCP_SERVER_COUNT = 16
+
+/**
+ * Most bytes the `mcp` settings group may take, inclusive: the UTF-8 bytes
+ * of the group written as compact JSON, with every omitted list filled in.
+ *
+ * @remarks Half of {@link MAXIMUM_SETTINGS_FILE_BYTES}, so that the group,
+ * the indentation the desktop host adds when it writes the file, and the
+ * other groups fit in the file the backend reads. The per-field limits
+ * alone allow a group of several mebibytes.
+ */
+export const MAXIMUM_MCP_SETTINGS_BYTES = MAXIMUM_SETTINGS_FILE_BYTES / 2
 
 /** Most characters an MCP server name may have, inclusive. */
 export const MAXIMUM_MCP_SERVER_NAME_LENGTH = 20
@@ -77,6 +92,21 @@ const SPACE_OR_CONTROL_PATTERN = /[\p{White_Space}\p{Cc}]/u
 const EDGE_WHITE_SPACE_PATTERN = /^\p{White_Space}|\p{White_Space}$/u
 
 /**
+ * Finds a lone surrogate: half of a UTF-16 pair without the other half.
+ *
+ * @remarks The settings file can hold one only as a JSON escape, which the
+ * desktop host's JSON reader refuses.
+ */
+const LONE_SURROGATE_PATTERN = /\p{Cs}/u
+
+/** Rule of a text that holds a lone surrogate. */
+const LONE_SURROGATE_MESSAGE =
+  "A setting holds only complete Unicode characters."
+
+/** Start of a label of an internationalized domain name, in ASCII form. */
+const PUNYCODE_LABEL_PREFIX = "xn--"
+
+/**
  * Header names the HTTP transport sets itself, in lowercase; a server is
  * never sent another value for them.
  */
@@ -88,6 +118,18 @@ const TRANSPORT_HEADER_NAMES: ReadonlySet<string> = new Set([
   "last-event-id",
   "mcp-protocol-version",
   "mcp-session-id"
+])
+
+/**
+ * Header names, in lowercase, that Node's fetch, which the backend sends
+ * MCP requests with, refuses: a request with one of them fails before it is
+ * sent.
+ */
+const UNSENDABLE_HEADER_NAMES: ReadonlySet<string> = new Set([
+  "expect",
+  "keep-alive",
+  "transfer-encoding",
+  "upgrade"
 ])
 
 /** Hosts a server URL may reach over plain `http:`. */
@@ -120,11 +162,22 @@ function hasCodePointsWithin(value: string, maximumLength: number): boolean {
 }
 
 /**
- * Builds the schema of a text of 1 or more code points up to a limit,
- * without a control character other than a tab.
+ * Answers whether a text holds a lone surrogate.
+ *
+ * @param value - Text to inspect.
+ * @returns True when half of a UTF-16 pair stands without the other half.
+ */
+function hasLoneSurrogate(value: string): boolean {
+  return LONE_SURROGATE_PATTERN.test(value)
+}
+
+/**
+ * Builds the schema of a text up to a number of code points, without a
+ * control character other than a tab and without a lone surrogate.
  *
  * @param maximumLength - Most code points allowed, inclusive.
- * @param message - What the rule is, for a refused value.
+ * @param message - What the length and character rule is, for a refused
+ * value.
  * @returns A schema of such texts.
  */
 function buildSettingTextSchema(
@@ -139,6 +192,7 @@ function buildSettingTextSchema(
         !hasControlCharacterOtherThanTab(value),
       message
     )
+    .refine((value) => !hasLoneSurrogate(value), LONE_SURROGATE_MESSAGE)
 }
 
 /**
@@ -288,10 +342,30 @@ function isMcpServerUrl(value: string): boolean {
 }
 
 /**
+ * Answers whether a URL text names an internationalized domain name.
+ *
+ * @param value - URL text.
+ * @returns True when the text parses as an absolute URL whose host, as the
+ * URL parser writes it in lowercase ASCII, has a label starting with
+ * `xn--`, which a Unicode host such as `bücher.example` also gets; false
+ * for every other text, including one that does not parse.
+ * @remarks URL parsers do not convert such names alike: the desktop host's
+ * and Node's accept different ones, so a name one accepts can be refused by
+ * the other. Refusing them all keeps one judgement of every server URL.
+ */
+function hasInternationalizedHost(value: string): boolean {
+  const url = parseAbsoluteUrl(value)
+  if (url === undefined) return false
+  return url.hostname
+    .split(".")
+    .some((label) => label.startsWith(PUNYCODE_LABEL_PREFIX))
+}
+
+/**
  * Validates the URL of a remote MCP server: at most
- * {@link MAXIMUM_MCP_SERVER_URL_LENGTH} code points, no white space or
- * control character, `https:` or loopback `http:`, without credentials or a
- * fragment.
+ * {@link MAXIMUM_MCP_SERVER_URL_LENGTH} code points, no white space, control
+ * character, or lone surrogate, `https:` or loopback `http:`, without
+ * credentials, a fragment, or an internationalized domain name.
  */
 const mcpServerUrlSchema = z
   .string()
@@ -301,9 +375,14 @@ const mcpServerUrlSchema = z
       !SPACE_OR_CONTROL_PATTERN.test(value),
     `A URL is up to ${MAXIMUM_MCP_SERVER_URL_LENGTH} characters, without spaces.`
   )
+  .refine((value) => !hasLoneSurrogate(value), LONE_SURROGATE_MESSAGE)
   .refine(
     isMcpServerUrl,
     "A URL starts with https://, or http:// for localhost, 127.0.0.1, or [::1], and has no user name, password, or #."
+  )
+  .refine(
+    (value) => !hasInternationalizedHost(value),
+    "A URL's host is not an internationalized domain name: no part of it starts with xn--."
   )
 
 /**
@@ -312,7 +391,10 @@ const mcpServerUrlSchema = z
  */
 const mcpHeaderSchema = z
   .strictObject({
-    /** Header name: an HTTP token, not one the transport sets itself. */
+    /**
+     * Header name: an HTTP token, not one the transport sets itself or one
+     * Node's fetch cannot send.
+     */
     name: z
       .string()
       .regex(
@@ -322,6 +404,10 @@ const mcpHeaderSchema = z
       .refine(
         (name) => !TRANSPORT_HEADER_NAMES.has(name.toLowerCase()),
         "Lys sets this header itself."
+      )
+      .refine(
+        (name) => !UNSENDABLE_HEADER_NAMES.has(name.toLowerCase()),
+        "Lys cannot send this header."
       ),
     /** Value, which may be a secret such as a bearer token; empty is allowed. */
     value: z
@@ -381,9 +467,21 @@ export type McpServerSettings = z.infer<typeof mcpServerSettingsSchema>
 export type McpServerSettingsCandidate = z.input<typeof mcpServerSettingsSchema>
 
 /**
+ * Calculates the bytes a settings group takes as compact JSON.
+ *
+ * @param group - Parsed group, free of lone surrogates.
+ * @returns The UTF-8 bytes of its JSON text without indentation, which the
+ * desktop host measures alike.
+ */
+function calculateCompactJsonBytes(group: unknown): number {
+  return calculateUtf8ByteLength(JSON.stringify(group))
+}
+
+/**
  * Validates the `mcp` settings group: the MCP servers Lys connects to, each
- * name once, in the order Settings lists them. The output is frozen; unknown
- * fields are rejected.
+ * name once, in the order Settings lists them, taking at most
+ * {@link MAXIMUM_MCP_SETTINGS_BYTES} together. The output is frozen;
+ * unknown fields are rejected.
  *
  * @remarks An omitted list means no server. The desktop host is the only
  * writer of the group; the backend only reads it.
@@ -401,6 +499,10 @@ export const mcpSettingsSchema = z
       .default([])
       .readonly()
   })
+  .refine(
+    (group) => calculateCompactJsonBytes(group) <= MAXIMUM_MCP_SETTINGS_BYTES,
+    `The MCP servers take at most ${MAXIMUM_MCP_SETTINGS_BYTES / BYTES_PER_KIBIBYTE} KiB of settings together.`
+  )
   .readonly()
 
 /** The `mcp` settings group. */

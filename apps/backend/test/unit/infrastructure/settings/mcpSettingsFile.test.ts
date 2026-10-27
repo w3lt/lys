@@ -1,9 +1,17 @@
+import { MAXIMUM_OFFERED_BACKEND_TOOL_COUNT } from "@lys/protocol"
+import {
+  MAXIMUM_MCP_COMMAND_ARGUMENT_COUNT,
+  MAXIMUM_MCP_ENVIRONMENT_VALUE_LENGTH,
+  MAXIMUM_MCP_ENVIRONMENT_VARIABLE_COUNT,
+  MAXIMUM_MCP_SERVER_COUNT,
+  MAXIMUM_MCP_SETTINGS_BYTES,
+  MAXIMUM_SETTINGS_FILE_BYTES
+} from "@lys/share"
 import { readFileSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import { readMcpSettings } from "../../../../src/infrastructure/settings/mcpSettingsFile"
-import { MAXIMUM_SETTINGS_FILE_BYTES } from "../../../../src/infrastructure/settings/settingsFile"
 import {
   createSettingsFilePath,
   writeSettingsFile
@@ -85,6 +93,104 @@ function buildSettingsText(mcp: unknown): string {
     mcp
   })
 }
+
+/**
+ * Builds settings file text the way the desktop host writes it, indented by
+ * two spaces with a final line break, with every group it writes. The other
+ * groups are at their largest: the longest key and place names, and every
+ * tool the backend can offer, each with a 64-character name, on Just run and
+ * switched.
+ *
+ * @param mcp - Value of the `mcp` group.
+ * @returns The JSON text.
+ */
+function buildLargestSettingsText(mcp: unknown): string {
+  const toolNames = Array.from(
+    { length: MAXIMUM_OFFERED_BACKEND_TOOL_COUNT },
+    (_, index) => String(index).padStart(64, "t")
+  )
+  const settings = {
+    runtime: {
+      autoStartBackend: true,
+      autoStartVmo: true,
+      defaultModel: "qwen/qwen3-8b",
+      backendAddress: "http://127.0.0.1:23456"
+    },
+    generation: { temperature: 0.7, replyCeiling: 2048 },
+    loadConfiguration: { default: {}, models: {} },
+    secrets: { tavilyApiKey: "tvly-synthetic-".padEnd(256, "0") },
+    tools: {
+      justRun: toolNames,
+      switches: Object.fromEntries(toolNames.map((name) => [name, false]))
+    },
+    location: {
+      city: "c".repeat(100),
+      region: "r".repeat(100),
+      country: "k".repeat(100)
+    },
+    mcp
+  }
+  return `${JSON.stringify(settings, null, 2)}\n`
+}
+
+/** One stdio server of {@link buildMcpGroupOfBytes}, with every list written. */
+type FilledStdioServer = {
+  /** Server name, distinct in the group. */
+  name: string
+  /** Always a stdio server. */
+  transport: "stdio"
+  /** Command of one character. */
+  command: string
+  /** The most arguments, each of one character. */
+  arguments: string[]
+  /** The most variables; the builder fills their values to size. */
+  environment: { name: string; value: string }[]
+}
+
+/**
+ * Builds an `mcp` group that takes exactly a number of bytes as compact
+ * JSON: the most stdio servers, each with the most one-character arguments
+ * and the most environment variables, whose values take the remaining bytes
+ * in list order. Its many short entries make the host's indentation add as
+ * much as a group of that size can get.
+ *
+ * @param bytes - UTF-8 bytes of the group's compact JSON; at least the bytes
+ * of the group with empty values, at most those with full values.
+ * @returns The group, which a new call builds anew.
+ */
+function buildMcpGroupOfBytes(bytes: number): { servers: FilledStdioServer[] } {
+  const servers = Array.from(
+    { length: MAXIMUM_MCP_SERVER_COUNT },
+    (_, serverIndex): FilledStdioServer => ({
+      name: `server-${serverIndex}`,
+      transport: "stdio",
+      command: "c",
+      arguments: Array.from(
+        { length: MAXIMUM_MCP_COMMAND_ARGUMENT_COUNT },
+        () => "a"
+      ),
+      environment: Array.from(
+        { length: MAXIMUM_MCP_ENVIRONMENT_VARIABLE_COUNT },
+        (_, variableIndex) => ({ name: `V${variableIndex}`, value: "" })
+      )
+    })
+  )
+  let remaining = bytes - Buffer.byteLength(JSON.stringify({ servers }))
+  for (const variable of servers.flatMap((server) => server.environment)) {
+    const length = Math.min(remaining, MAXIMUM_MCP_ENVIRONMENT_VALUE_LENGTH)
+    variable.value = "v".repeat(length)
+    remaining -= length
+  }
+  return { servers }
+}
+
+/** Problem of a group past {@link MAXIMUM_MCP_SETTINGS_BYTES}. */
+const GROUP_SIZE_PROBLEM =
+  "The MCP servers take at most 512 KiB of settings together."
+
+/** Problem of a text that holds a lone surrogate. */
+const LONE_SURROGATE_PROBLEM =
+  "A setting holds only complete Unicode characters."
 
 describe("readMcpSettings", () => {
   it("reads a valid group, ignoring every other group", async () => {
@@ -312,6 +418,142 @@ describe("readMcpSettings", () => {
     expect(await readMcpSettings(path)).toEqual({
       status: "invalid",
       problems: ["servers: Each MCP server has its own name."]
+    })
+  })
+
+  it("reads a group of exactly the MCP size limit in a file the host writes with its other groups at their largest", async () => {
+    const group = buildMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES)
+    const text = buildLargestSettingsText(group)
+
+    const read = await readMcpSettings(await writeSettingsFile(text))
+
+    expect(Buffer.byteLength(JSON.stringify(group))).toBe(
+      MAXIMUM_MCP_SETTINGS_BYTES
+    )
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(
+      MAXIMUM_SETTINGS_FILE_BYTES
+    )
+    expect(read).toEqual({ status: "read", settings: group })
+  })
+
+  it("reports a group one byte over the MCP size limit as invalid", async () => {
+    const group = buildMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES + 1)
+
+    const read = await readMcpSettings(
+      await writeSettingsFile(buildSettingsText(group))
+    )
+
+    expect(read).toEqual({ status: "invalid", problems: [GROUP_SIZE_PROBLEM] })
+  })
+
+  it("counts the group's size in UTF-8 bytes, not in characters", async () => {
+    const group = buildMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES)
+    const [firstVariable] = group.servers[0]?.environment ?? []
+    if (firstVariable === undefined) throw new Error("Expected a variable")
+    firstVariable.value = "é".repeat(
+      MAXIMUM_MCP_ENVIRONMENT_VALUE_LENGTH / 2 + 1
+    )
+
+    const read = await readMcpSettings(
+      await writeSettingsFile(buildSettingsText(group))
+    )
+
+    expect(JSON.stringify(group).length).toBeLessThan(
+      MAXIMUM_MCP_SETTINGS_BYTES
+    )
+    expect(read).toEqual({ status: "invalid", problems: [GROUP_SIZE_PROBLEM] })
+  })
+
+  it.each([
+    [
+      "a command",
+      { name: "files", transport: "stdio", command: "server\uD800" },
+      "servers.0.command"
+    ],
+    [
+      "an argument",
+      {
+        name: "files",
+        transport: "stdio",
+        command: "server",
+        arguments: ["--token", "\uDC00"]
+      },
+      "servers.0.arguments.1"
+    ],
+    [
+      "a variable value",
+      {
+        name: "files",
+        transport: "stdio",
+        command: "server",
+        environment: [
+          { name: "FILES_TOKEN", value: `${SYNTHETIC_VARIABLE_VALUE}\uD83D` }
+        ]
+      },
+      "servers.0.environment.0.value"
+    ],
+    [
+      "a URL",
+      {
+        name: "remote",
+        transport: "http",
+        url: "https://mcp.example.com/\uDC00"
+      },
+      "servers.0.url"
+    ]
+  ])(
+    "reports a lone surrogate in %s, which the desktop host cannot read, as invalid",
+    async (_label, server, path) => {
+      const read = await readMcpSettings(
+        await writeSettingsFile(buildSettingsText({ servers: [server] }))
+      )
+
+      expect(read).toEqual({
+        status: "invalid",
+        problems: [`${path}: ${LONE_SURROGATE_PROBLEM}`]
+      })
+      expect(JSON.stringify(read)).not.toContain("synthetic-variable")
+    }
+  )
+
+  it("reports a URL to an internationalized domain name with its rule", async () => {
+    const path = await writeSettingsFile(
+      buildSettingsText({
+        servers: [
+          {
+            name: "remote",
+            transport: "http",
+            url: "https://bücher.example/mcp"
+          }
+        ]
+      })
+    )
+
+    expect(await readMcpSettings(path)).toEqual({
+      status: "invalid",
+      problems: [
+        "servers.0.url: A URL's host is not an internationalized domain name: no part of it starts with xn--."
+      ]
+    })
+  })
+
+  it("reports a header that Node's fetch cannot send with its rule", async () => {
+    const path = await writeSettingsFile(
+      buildSettingsText({
+        servers: [
+          {
+            name: "remote",
+            transport: "http",
+            url: "https://mcp.example.com/mcp",
+            headers: [{ name: "Expect", value: "100-continue" }]
+          }
+        ]
+      })
+    )
+
+    expect(await readMcpSettings(path)).toEqual({
+      status: "invalid",
+      problems: ["servers.0.headers.0.name: Lys cannot send this header."]
     })
   })
 

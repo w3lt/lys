@@ -3056,6 +3056,153 @@
     "accepted": false
   },
   {
+    "case": "an https URL to a punycode host",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn--cgbu.com/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a punycode host that only the host's URL parser accepts",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn--xn--ls8h/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL with a punycode label in uppercase",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://MCP.XN--9CA.COM/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a Unicode host",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://bücher.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a Unicode host that only the share package's URL parser accepts",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://1א.com/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a percent-encoded Unicode host",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://%E0%A1%B0%D8%A8.com/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL whose host holds xn inside a label",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.axn--b.com/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.axn--b.com/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL whose fullwidth host maps to ASCII",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://ｅｘａｍｐｌｅ.com/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://ｅｘａｍｐｌｅ.com/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL with a Unicode path",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/café"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/café"
+        }
+      ]
+    }
+  },
+  {
     "case": "32 headers",
     "group": {
       "servers": [
@@ -3779,6 +3926,116 @@
       ]
     },
     "accepted": false
+  },
+  {
+    "case": "the header Expect, which Node's fetch cannot send",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "Expect",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "the header keep-alive, which Node's fetch cannot send",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "keep-alive",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "the header TRANSFER-ENCODING, which Node's fetch cannot send",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "TRANSFER-ENCODING",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "the header Upgrade, which Node's fetch cannot send",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "Upgrade",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a header whose name only starts like one Node's fetch cannot send",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [
+            {
+              "name": "Upgrade-Insecure-Requests",
+              "value": "v"
+            }
+          ]
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [
+            {
+              "name": "Upgrade-Insecure-Requests",
+              "value": "v"
+            }
+          ],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp"
+        }
+      ]
+    }
   },
   {
     "case": "two headers whose names differ only in case",

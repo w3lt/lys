@@ -491,6 +491,25 @@ mod tests {
     }
 
     #[test]
+    fn ignores_a_newer_group_and_newer_runtime_generation_and_secrets_fields_and_saves_without_them(
+    ) {
+        let directory = TestDirectory::create("settings-newer-fields");
+        let mut stored = get_complete_settings();
+        stored["futureGroup"] = json!({ "enabled": true });
+        stored["runtime"]["futureField"] = json!(1);
+        stored["generation"]["topK"] = json!(40);
+        stored["secrets"]["futureApiKey"] = json!("future-synthetic-value");
+        let path = directory.create_file("settings.json", stored.to_string());
+        let saved_path = directory.path().join("saved.json");
+
+        let settings = load_settings_file(&path).expect("settings for a newer file");
+        save_settings_file(&settings, &saved_path).expect("save the settings");
+
+        assert_eq!(get_settings_json(&settings), get_complete_settings());
+        assert_eq!(read_settings_json(&saved_path), get_complete_settings());
+    }
+
+    #[test]
     fn returns_a_complete_file_without_rewriting_it() {
         let directory = TestDirectory::create("settings-complete");
         let stored_text = get_complete_settings().to_string();
@@ -533,6 +552,19 @@ mod tests {
         invalid_server_name["mcp"]["servers"][0]["name"] = json!("My Files");
         let mut plain_http_url = get_complete_settings();
         plain_http_url["mcp"]["servers"][1]["url"] = json!("http://mcp.example.com/mcp");
+        let mut newer_load_field = get_complete_settings();
+        newer_load_field["loadConfiguration"]["default"]["ropeScaling"] = json!(2);
+        let mut newer_tools_field = get_complete_settings();
+        newer_tools_field["tools"]["order"] = json!(["read_page"]);
+        let mut newer_location_field = get_complete_settings();
+        newer_location_field["location"]["latitude"] = json!(45.76);
+        let mut newer_mcp_field = get_complete_settings();
+        newer_mcp_field["mcp"]["enabled"] = json!(true);
+        let mut newer_server_field = get_complete_settings();
+        newer_server_field["mcp"]["servers"][1]["timeoutSeconds"] = json!(30);
+        let lone_surrogate = get_complete_settings()
+            .to_string()
+            .replace("env-synthetic-value", "env-synthetic-value\\ud800");
         let unusable_files = [
             invalid_group.to_string(),
             null_group.to_string(),
@@ -547,6 +579,12 @@ mod tests {
             null_mcp.to_string(),
             invalid_server_name.to_string(),
             plain_http_url.to_string(),
+            newer_load_field.to_string(),
+            newer_tools_field.to_string(),
+            newer_location_field.to_string(),
+            newer_mcp_field.to_string(),
+            newer_server_field.to_string(),
+            lone_surrogate,
             String::from("{ not json"),
         ];
 

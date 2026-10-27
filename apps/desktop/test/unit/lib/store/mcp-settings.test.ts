@@ -1,4 +1,9 @@
-import { mcpServerSettingsSchema } from "@lys/share"
+import {
+  MAXIMUM_MCP_ENVIRONMENT_VALUE_LENGTH,
+  MAXIMUM_MCP_ENVIRONMENT_VARIABLE_COUNT,
+  mcpServerSettingsSchema,
+  type McpServerSettings
+} from "@lys/share"
 import { describe, expect, it } from "vitest"
 import { createStore } from "zustand/vanilla"
 import {
@@ -34,6 +39,36 @@ const SERVERS_WITH_ADDED = Object.freeze([
   ...STORED_MCP_SETTINGS.servers,
   ADDED_SERVER
 ])
+
+/**
+ * Builds a command server whose variables all reach the shared length limit.
+ *
+ * @param name - Server name.
+ * @returns A server the shared server rules accept, about 130 KiB as JSON.
+ */
+function buildServerWithLongestVariables(name: string): McpServerSettings {
+  const environment = Array.from(
+    { length: MAXIMUM_MCP_ENVIRONMENT_VARIABLE_COUNT },
+    (_, index) => ({
+      name: `VARIABLE_${index}`,
+      value: "v".repeat(MAXIMUM_MCP_ENVIRONMENT_VALUE_LENGTH)
+    })
+  )
+  return mcpServerSettingsSchema.parse({
+    name,
+    transport: "stdio",
+    command: "node",
+    environment
+  })
+}
+
+/**
+ * Servers that each pass the shared server rules but together take more
+ * than the 512 KiB the `mcp` group may take of the settings file.
+ */
+const SERVERS_PAST_GROUP_LIMIT = Object.freeze(
+  ["one", "two", "three", "four", "five"].map(buildServerWithLongestVariables)
+)
 
 /**
  * Creates a store holding the stored settings, with two saved servers.
@@ -146,6 +181,23 @@ describe("createMcpSettingsSlice", () => {
       status: "failed",
       error: "Lys couldn't write the MCP servers to its settings file."
     })
+    expect(store.getState().settings.mcp).toEqual(STORED_MCP_SETTINGS)
+  })
+
+  it("refuses servers that take more than the group's share of the settings file, naming the limit, without writing", async () => {
+    const { host } = startControlledSettingsHost()
+    const store = createMcpStore()
+
+    const outcome = await store
+      .getState()
+      .saveMcpServers(SERVERS_PAST_GROUP_LIMIT)
+
+    expect(outcome).toBe("failed")
+    expect(store.getState().mcpSettingsSave).toEqual({
+      status: "failed",
+      error: "The MCP servers take at most 512 KiB of settings together."
+    })
+    expect(listSettingsWrites(host.commands)).toEqual([])
     expect(store.getState().settings.mcp).toEqual(STORED_MCP_SETTINGS)
   })
 

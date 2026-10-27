@@ -9,12 +9,18 @@
 //! this module only stores it.
 //!
 //! Every rule matches `mcpSettingsSchema` in `@lys/share`, which the renderer
-//! and the backend check. Environment variable values and header values can
-//! hold secrets, such as tokens: they are stored as plain text in the
-//! owner-only settings file, `Debug` never shows them, and a validation error
-//! about a server entry, where they sit, never quotes a value. An error about
-//! the group itself, such as a `servers` value that is not a list, can quote
-//! that value, because it is the JSON reader's own message.
+//! and the backend check. A text with a lone surrogate, which that schema
+//! refuses, never reaches these rules: the JSON reader refuses its escape, so
+//! the whole settings file fails to load. URLs to internationalized domain
+//! names are refused on both sides, because this host's URL parser and the
+//! JavaScript ones convert such names differently.
+//!
+//! Environment variable values and header values can hold secrets, such as
+//! tokens: they are stored as plain text in the owner-only settings file,
+//! `Debug` never shows them, and a validation error about a server entry,
+//! where they sit, never quotes a value. An error about the group itself,
+//! such as a `servers` value that is not a list, can quote that value, because
+//! it is the JSON reader's own message.
 
 use std::{collections::HashSet, fmt};
 
@@ -26,6 +32,12 @@ use tauri::Url;
 /// Most servers the group may hold, inclusive. Matches
 /// `MAXIMUM_MCP_SERVER_COUNT` in `@lys/share`.
 const SERVER_MAX_COUNT: usize = 16;
+
+/// Most bytes the group may take, inclusive: the UTF-8 bytes of the group
+/// written as compact JSON. Matches `MAXIMUM_MCP_SETTINGS_BYTES` in
+/// `@lys/share`, half of the settings file the backend reads, so the group,
+/// the indentation this host writes, and the other groups fit in it.
+const SETTINGS_MAX_BYTES: usize = 512 * 1024;
 
 /// Most characters a server name may have, inclusive. Matches
 /// `MAXIMUM_MCP_SERVER_NAME_LENGTH` in `@lys/share`.
@@ -83,9 +95,17 @@ const TRANSPORT_HEADER_NAMES: [&str; 7] = [
     "mcp-session-id",
 ];
 
+/// Header names, in lowercase, that Node's fetch, which the backend sends MCP
+/// requests with, refuses: a request with one of them fails before it is
+/// sent. Matches the list of `@lys/share`.
+const UNSENDABLE_HEADER_NAMES: [&str; 4] = ["expect", "keep-alive", "transfer-encoding", "upgrade"];
+
 /// Hosts a server URL may reach over plain `http:`, as the URL parser writes
 /// them.
 const LOOPBACK_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
+
+/// Start of a label of an internationalized domain name, in ASCII form.
+const PUNYCODE_LABEL_PREFIX: &str = "xn--";
 
 /// Characters an HTTP header name may hold besides ASCII letters and digits:
 /// the rest of an RFC 9110 token.
@@ -100,7 +120,8 @@ const SERVER_SHAPE_ERROR: &str = "an MCP server must be an object whose transpor
 ///
 /// A missing group or a missing `servers` list means no server. The group and
 /// the list may not be `null`, and unknown fields are rejected. It holds at
-/// most 16 servers, each name once, in the order Settings lists them.
+/// most 16 servers, each name once, in the order Settings lists them, which
+/// take at most 512 KiB together as compact JSON.
 pub struct McpSettings {
     /// Servers in list order.
     servers: Vec<McpServer>,
@@ -119,7 +140,7 @@ impl<'de> Deserialize<'de> for McpSettings {
     where
         D: Deserializer<'de>,
     {
-        let stored: StoredMcpSettings = deserialize_object(deserializer)?;
+        let stored: StoredMcpSettings = parse_json_object(deserializer)?;
 
         Self::try_from(stored).map_err(D::Error::custom)
     }
@@ -136,12 +157,14 @@ struct StoredMcpSettings {
 impl TryFrom<StoredMcpSettings> for McpSettings {
     type Error = &'static str;
 
-    /// Applies the server count and the distinct-name rule.
+    /// Applies the server count, the distinct-name rule, and the group's
+    /// size limit.
     ///
     /// # Errors
     ///
     /// Returns a message without any value when there are more than 16
-    /// servers or two share a name.
+    /// servers, two share a name, or the group takes more than 512 KiB as
+    /// compact JSON.
     fn try_from(stored: StoredMcpSettings) -> Result<Self, Self::Error> {
         if stored.servers.len() > SERVER_MAX_COUNT {
             return Err("the mcp group may hold at most 16 servers");
@@ -149,10 +172,22 @@ impl TryFrom<StoredMcpSettings> for McpSettings {
         if !has_distinct_values(stored.servers.iter().map(McpServer::name)) {
             return Err("each MCP server must have its own name");
         }
-
-        Ok(Self {
+        let settings = Self {
             servers: stored.servers,
-        })
+        };
+        if !settings.is_within_size_limit() {
+            return Err("the MCP servers may take at most 512 KiB of settings together");
+        }
+
+        Ok(settings)
+    }
+}
+
+impl McpSettings {
+    /// Reports whether the group takes at most [`SETTINGS_MAX_BYTES`] as
+    /// compact JSON, as it is written with every list filled in.
+    fn is_within_size_limit(&self) -> bool {
+        serde_json::to_vec(self).is_ok_and(|bytes| bytes.len() <= SETTINGS_MAX_BYTES)
     }
 }
 
@@ -191,7 +226,7 @@ impl<'de> Deserialize<'de> for McpServer {
         D: Deserializer<'de>,
     {
         let stored: StoredMcpServer =
-            deserialize_object(deserializer).map_err(|_| D::Error::custom(SERVER_SHAPE_ERROR))?;
+            parse_json_object(deserializer).map_err(|_| D::Error::custom(SERVER_SHAPE_ERROR))?;
 
         Self::try_from(stored).map_err(D::Error::custom)
     }
@@ -251,7 +286,7 @@ struct StoredStdioMcpServer {
     #[serde(default)]
     arguments: Vec<String>,
     /// Variables; a missing list means none.
-    #[serde(default, deserialize_with = "deserialize_objects")]
+    #[serde(default, deserialize_with = "parse_json_objects")]
     environment: Vec<StoredNamedValue>,
 }
 
@@ -264,7 +299,7 @@ impl TryFrom<StoredStdioMcpServer> for StdioMcpServer {
     ///
     /// Returns the message of the first broken rule, without any value.
     fn try_from(stored: StoredStdioMcpServer) -> Result<Self, Self::Error> {
-        check_server_name(&stored.name)?;
+        let name = parse_server_name(stored.name)?;
         if !is_command(&stored.command) {
             return Err("a command must be 1 to 1024 characters, without control characters or tabs, and without white space at either end");
         }
@@ -280,7 +315,7 @@ impl TryFrom<StoredStdioMcpServer> for StdioMcpServer {
         }
 
         Ok(Self {
-            name: stored.name,
+            name,
             command: stored.command,
             arguments: stored.arguments,
             environment: build_environment(stored.environment)?,
@@ -311,7 +346,7 @@ struct StoredHttpMcpServer {
     /// URL text.
     url: String,
     /// Headers; a missing list means none.
-    #[serde(default, deserialize_with = "deserialize_objects")]
+    #[serde(default, deserialize_with = "parse_json_objects")]
     headers: Vec<StoredNamedValue>,
 }
 
@@ -324,13 +359,16 @@ impl TryFrom<StoredHttpMcpServer> for HttpMcpServer {
     ///
     /// Returns the message of the first broken rule, without any value.
     fn try_from(stored: StoredHttpMcpServer) -> Result<Self, Self::Error> {
-        check_server_name(&stored.name)?;
+        let name = parse_server_name(stored.name)?;
         if !is_server_url(&stored.url) {
             return Err("a URL must be up to 2048 characters without spaces, start with https://, or http:// for localhost, 127.0.0.1, or [::1], and have no user name, password, or #");
         }
+        if has_internationalized_host(&stored.url) {
+            return Err("a URL's host must not be an internationalized domain name: no part of it may start with xn--");
+        }
 
         Ok(Self {
-            name: stored.name,
+            name,
             url: stored.url,
             headers: build_headers(stored.headers)?,
         })
@@ -433,7 +471,7 @@ struct StoredNamedValue {
 ///
 /// Returns the deserializer's error when the input is not a JSON object, and
 /// the shape's error when the object does not match it.
-fn deserialize_object<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+fn parse_json_object<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
     T: DeserializeOwned,
@@ -444,13 +482,13 @@ where
 }
 
 /// Reads a JSON array of objects into stored shapes, refusing any item that is
-/// not a JSON object, as [`deserialize_object`] does for one.
+/// not a JSON object, as [`parse_json_object`] does for one.
 ///
 /// # Errors
 ///
 /// Returns the deserializer's error when the input is not an array of JSON
 /// objects, and the shape's error when an object does not match it.
-fn deserialize_objects<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+fn parse_json_objects<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
 where
     D: Deserializer<'de>,
     T: DeserializeOwned,
@@ -461,14 +499,14 @@ where
         .collect()
 }
 
-/// Checks a server name.
+/// Parses a stored server name.
 ///
 /// # Errors
 ///
 /// Returns the name rule when `name` breaks it.
-fn check_server_name(name: &str) -> Result<(), &'static str> {
-    if is_server_name(name) {
-        Ok(())
+fn parse_server_name(name: String) -> Result<String, &'static str> {
+    if is_server_name(&name) {
+        Ok(name)
     } else {
         Err("an MCP server name must be 1 to 20 lowercase letters and digits, with single hyphens between them")
     }
@@ -522,7 +560,7 @@ fn build_headers(stored: Vec<StoredNamedValue>) -> Result<Vec<McpHeader>, &'stat
         return Err("a server may be sent at most 32 headers");
     }
     if !stored.iter().all(|header| is_header_name(&header.name)) {
-        return Err("a header name must be up to 128 letters, digits, and the characters !#$%&'*+.^_`|~-, and not one Lys sets itself");
+        return Err("a header name must be up to 128 letters, digits, and the characters !#$%&'*+.^_`|~-, and not one Lys sets itself or cannot send");
     }
     if !stored.iter().all(|header| is_header_value(&header.value)) {
         return Err("a header value must be up to 8192 visible ASCII characters, spaces, and tabs, with no space or tab at either end");
@@ -637,15 +675,35 @@ fn is_server_url(value: &str) -> bool {
     }
 }
 
+/// Reports whether `value` parses as a URL whose host, as the URL parser
+/// writes it in lowercase ASCII, has a label starting with `xn--`, which a
+/// Unicode host such as `bücher.example` also gets.
+///
+/// URL parsers do not convert such names alike: this host's and Node's
+/// accept different ones. Refusing them all keeps one judgement of every
+/// server URL with `@lys/share`.
+fn has_internationalized_host(value: &str) -> bool {
+    Url::parse(value).is_ok_and(|url| {
+        url.host_str().is_some_and(|host| {
+            host.split('.')
+                .any(|label| label.starts_with(PUNYCODE_LABEL_PREFIX))
+        })
+    })
+}
+
 /// Reports whether `value` is a header name: 1 to 128 characters of an RFC
-/// 9110 token, and not one the transport sets itself, ignoring case.
+/// 9110 token, and not one the transport sets itself or Node's fetch cannot
+/// send, ignoring case.
 fn is_header_name(value: &str) -> bool {
     let is_token = (1..=HEADER_NAME_MAX_LENGTH).contains(&value.len())
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || HEADER_NAME_SYMBOLS.contains(&byte));
+    let lowercase_name = value.to_ascii_lowercase();
 
-    is_token && !TRANSPORT_HEADER_NAMES.contains(&value.to_ascii_lowercase().as_str())
+    is_token
+        && !TRANSPORT_HEADER_NAMES.contains(&lowercase_name.as_str())
+        && !UNSENDABLE_HEADER_NAMES.contains(&lowercase_name.as_str())
 }
 
 /// Reports whether `value` is a header value: up to 8192 visible ASCII
@@ -665,7 +723,10 @@ fn is_header_value(value: &str) -> bool {
 mod tests {
     use serde_json::{json, Value};
 
-    use super::McpSettings;
+    use super::{
+        McpSettings, COMMAND_ARGUMENT_MAX_COUNT, ENVIRONMENT_VALUE_MAX_LENGTH,
+        ENVIRONMENT_VARIABLE_MAX_COUNT, SERVER_MAX_COUNT, SETTINGS_MAX_BYTES,
+    };
 
     /// Reads `stored` as the `mcp` group.
     fn parse_mcp_settings(stored: Value) -> Result<McpSettings, serde_json::Error> {
@@ -727,6 +788,41 @@ mod tests {
         server[field] = value;
 
         server
+    }
+
+    /// Returns the bytes `value` takes as compact JSON.
+    fn calculate_compact_json_bytes(value: &Value) -> usize {
+        serde_json::to_vec(value).expect("serialize").len()
+    }
+
+    /// Returns an `mcp` group that takes exactly `bytes` as compact JSON: the
+    /// most stdio servers, each with the most one-character arguments and the
+    /// most variables, whose values take the remaining bytes in list order.
+    fn build_group_of_bytes(bytes: usize) -> Value {
+        let mut servers: Vec<Value> = (0..SERVER_MAX_COUNT)
+            .map(|server_index| {
+                let environment: Vec<Value> = (0..ENVIRONMENT_VARIABLE_MAX_COUNT)
+                    .map(|variable_index| json!({ "name": format!("V{variable_index}"), "value": "" }))
+                    .collect();
+                json!({
+                    "name": format!("server-{server_index}"),
+                    "transport": "stdio",
+                    "command": "c",
+                    "arguments": vec!["a"; COMMAND_ARGUMENT_MAX_COUNT],
+                    "environment": environment
+                })
+            })
+            .collect();
+        let mut remaining = bytes - calculate_compact_json_bytes(&json!({ "servers": servers }));
+        for server in &mut servers {
+            for variable in server["environment"].as_array_mut().expect("variables") {
+                let length = remaining.min(ENVIRONMENT_VALUE_MAX_LENGTH);
+                variable["value"] = json!("v".repeat(length));
+                remaining -= length;
+            }
+        }
+
+        json!({ "servers": servers })
     }
 
     /// Groups that the host and `mcpSettingsSchema` in `@lys/share` must judge
@@ -839,6 +935,47 @@ mod tests {
             json!({ "servers": [get_stdio_server("files"), get_http_server("files")] }),
         ] {
             assert!(parse_mcp_settings(stored.clone()).is_err(), "{stored}");
+        }
+    }
+
+    #[test]
+    fn accepts_a_group_of_512_kib_and_rejects_one_byte_more() {
+        let group = build_group_of_bytes(SETTINGS_MAX_BYTES);
+        let too_large_group = build_group_of_bytes(SETTINGS_MAX_BYTES + 1);
+
+        let settings = parse_mcp_settings(group.clone()).expect("a group at the limit");
+        let failure = parse_mcp_settings(too_large_group).expect_err("a group past the limit");
+
+        assert_eq!(calculate_compact_json_bytes(&group), 512 * 1024);
+        assert_eq!(serde_json::to_value(&settings).expect("serialize"), group);
+        assert!(failure.to_string().contains("512 KiB"), "{failure}");
+    }
+
+    #[test]
+    fn counts_the_group_in_utf8_bytes_not_in_characters() {
+        let mut group = build_group_of_bytes(SETTINGS_MAX_BYTES);
+        group["servers"][0]["environment"][0]["value"] =
+            json!("é".repeat(ENVIRONMENT_VALUE_MAX_LENGTH / 2 + 1));
+        let characters = group.to_string().chars().count();
+
+        let parsed = parse_mcp_settings(group);
+
+        assert!(characters < SETTINGS_MAX_BYTES, "{characters}");
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn rejects_a_lone_surrogate_in_every_text_field() {
+        for stored in [
+            r#"{ "servers": [{ "name": "files", "transport": "stdio", "command": "server\ud800" }] }"#,
+            r#"{ "servers": [{ "name": "files", "transport": "stdio", "command": "server", "arguments": ["\udc00"] }] }"#,
+            r#"{ "servers": [{ "name": "files", "transport": "stdio", "command": "server", "environment": [{ "name": "TOKEN", "value": "secret\ud83d" }] }] }"#,
+            r#"{ "servers": [{ "name": "docs", "transport": "http", "url": "https://mcp.example.com/\udc00" }] }"#,
+        ] {
+            let failure =
+                serde_json::from_str::<McpSettings>(stored).expect_err("a lone surrogate");
+
+            assert!(!failure.to_string().contains("secret"), "{failure}");
         }
     }
 
@@ -1005,6 +1142,8 @@ mod tests {
             " https://secret.example.com/mcp".to_string(),
             "https://secret.example.com/m cp".to_string(),
             "https://secret.example.com/\u{0007}".to_string(),
+            "https://secret.bücher.example/mcp".to_string(),
+            "https://secret.xn--bcher-kva.example/mcp".to_string(),
         ] {
             assert_server_refused(get_http_server_with("url", json!(url)), "secret");
         }
@@ -1050,6 +1189,10 @@ mod tests {
             json!([{ "name": "Last-Event-ID", "value": "secret" }]),
             json!([{ "name": "Content-Length", "value": "secret" }]),
             json!([{ "name": "mcp-protocol-version", "value": "secret" }]),
+            json!([{ "name": "Expect", "value": "secret" }]),
+            json!([{ "name": "keep-alive", "value": "secret" }]),
+            json!([{ "name": "Transfer-Encoding", "value": "secret" }]),
+            json!([{ "name": "UPGRADE", "value": "secret" }]),
             json!([{ "name": "X-Token", "value": " secret" }]),
             json!([{ "name": "X-Token", "value": "secret\t" }]),
             json!([{ "name": "X-Token", "value": "secret\r\nX-Other: 1" }]),

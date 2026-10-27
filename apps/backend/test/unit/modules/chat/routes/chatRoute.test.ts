@@ -1299,7 +1299,7 @@ describe("updateFastifyWithChatRoute", () => {
         status: "read",
         settings: { servers: [settings] }
       })
-      await testApp.app.mcpServerRegistry.applySettings()
+      await testApp.app.mcpServerRegistry.updateServers()
       await vi.waitFor(
         () => {
           expect(
@@ -1412,6 +1412,37 @@ describe("updateFastifyWithChatRoute", () => {
         chatBackendToolUnavailableProblemSchema.safeParse(response.json())
           .success
       ).toBe(true)
+      expect(testApp.createConversationTurn).not.toHaveBeenCalled()
+      expect(testApp.completeChatStream).not.toHaveBeenCalled()
+    })
+
+    it("names a built-in tool that cannot run now before an MCP tool whose server is not connected, even when the MCP tool is offered first", async () => {
+      const testApp = await createChatRouteTestApp()
+      await applyMcpServer(
+        testApp,
+        buildFakeStdioServerSettings("files", { exitOnStart: 1 }),
+        "failed"
+      )
+      updateFastifyWithChatRoute(testApp.app, {
+        ...CHAT_ROUTE_OPTIONS,
+        generations: testApp.generations,
+        findModelCapabilities: testApp.findModelCapabilities
+      })
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: {
+          definitions: [],
+          backendToolNames: [ECHO_TOOL_NAME, "check_spelling"]
+        }
+      })
+
+      expect(response.statusCode).toBe(409)
+      expect(response.json()).toMatchObject({
+        type: "urn:lys:problem:chat:backend-tool-unavailable",
+        toolName: "check_spelling",
+        reason: "api-key-missing"
+      })
       expect(testApp.createConversationTurn).not.toHaveBeenCalled()
       expect(testApp.completeChatStream).not.toHaveBeenCalled()
     })

@@ -8,13 +8,15 @@ import {
 } from "@modelcontextprotocol/client"
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 import { version as LYS_VERSION } from "../../../package.json"
-import { classifyMcpRequestFailure, isSpawnFailure } from "./mcpError"
+import { calculateMcpRequestFailure, isSpawnFailure } from "./mcpError"
 import {
-  fetchMcpResponse,
+  sendMcpHttpRequest,
   MAXIMUM_MCP_RESPONSE_BYTES,
   McpResponseTooLargeError
 } from "./mcpResponseLimit"
+import McpHttpTransport from "./mcpHttpTransport"
 import McpServerLogLines from "./mcpServerLogLines"
+import McpStdioTransport from "./mcpStdioTransport"
 
 /** Arguments of one call, by argument name, as the backend checked them. */
 export type McpToolCallArguments = Readonly<Record<string, JsonValue>>
@@ -37,10 +39,11 @@ export type McpServerConnectionContext = Readonly<{
   reportConnectionClosed: () => void
   /**
    * Receives a failure the SDK reports outside any request, such as a bad
-   * message, or a {@link McpResponseTooLargeError} when an HTTP answer passes
-   * {@link MAXIMUM_MCP_RESPONSE_BYTES}; never a failure to start the
-   * command, which the opening reports, because Node's error for it holds
-   * the command's arguments.
+   * message, or a {@link McpResponseTooLargeError} when an HTTP answer or
+   * one event of it passes {@link MAXIMUM_MCP_RESPONSE_BYTES}; never a
+   * failure a request rejects with, which reaches its caller, and never a
+   * failure to start the command, which the opening reports, because Node's
+   * error for it holds the command's arguments.
    */
   reportConnectionError: (error: Error) => void
 }>
@@ -72,8 +75,9 @@ const LYS_CLIENT_INFO = Object.freeze({ name: "lys", version: LYS_VERSION })
  *
  * @remarks Created by {@link McpServerConnection.open}, which finishes the
  * MCP handshake before it returns, so a connection is ready to list and call
- * tools. Closing ends the session and, for stdio, the process; it is
- * idempotent. When the connection ends by itself, the context's
+ * tools. Closing ends a stdio server's process and aborts an HTTP
+ * connection's requests; it is idempotent, and see {@link close} for what
+ * it waits for. When the connection ends by itself, the context's
  * `reportConnectionClosed` is told once; calls in flight then fail. An HTTP
  * 404 answer to a call counts as such an end, because the server no longer
  * knows the session, though the SDK keeps its transport open. So does an
@@ -148,10 +152,10 @@ export default class McpServerConnection {
     })
     const connection = new McpServerConnection(client, context)
     client.onerror = (error) => {
-      connection.#reportError(error)
+      connection.#handleClientError(error)
     }
     const transport = createTransport(settings, context, () => {
-      connection.#endAtTooLargeAnswer()
+      connection.#handleTooLargeAnswer()
     })
     try {
       await client.connect(transport, {
@@ -160,10 +164,10 @@ export default class McpServerConnection {
       })
     } catch (error) {
       await client.close()
-      throw connection.#explainFailure(error)
+      throw connection.#buildRequestFailure(error)
     }
     client.onclose = () => {
-      connection.#reportEnd()
+      connection.#handleConnectionEnd()
     }
     return connection
   }
@@ -179,7 +183,7 @@ export default class McpServerConnection {
    * answer passed {@link MAXIMUM_MCP_RESPONSE_BYTES}, a
    * {@link McpResponseTooLargeError} with the SDK's failure as its cause.
    * @remarks The list bypasses the SDK's response cache, so the SDK holds no
-   * tool's output schema and {@link callTool} never checks a result against
+   * tool's output schema and {@link sendToolCall} never checks a result against
    * one. The SDK would compile such a schema and run its `pattern` keywords
    * on the backend's event loop, where one pattern a server chose could
    * block the backend for minutes. Lys treats a result's structured content
@@ -194,7 +198,7 @@ export default class McpServerConnection {
       })
       return result.tools
     } catch (error) {
-      throw this.#explainFailure(error)
+      throw this.#buildRequestFailure(error)
     }
   }
 
@@ -216,7 +220,7 @@ export default class McpServerConnection {
    * an HTTP answer passed {@link MAXIMUM_MCP_RESPONSE_BYTES}, a
    * {@link McpResponseTooLargeError} with the SDK's failure as its cause.
    */
-  public async callTool(
+  public async sendToolCall(
     serverToolName: string,
     callArguments: McpToolCallArguments,
     abortSignal: AbortSignal
@@ -227,29 +231,37 @@ export default class McpServerConnection {
         { signal: abortSignal, timeout: MCP_TOOL_CALL_TIMEOUT_MILLISECONDS }
       )
     } catch (error) {
-      if (isSessionEnded(error)) this.#reportEnd()
-      throw this.#explainFailure(error)
+      if (isSessionEnded(error)) this.#handleConnectionEnd()
+      throw this.#buildRequestFailure(error)
     }
   }
 
   /**
-   * Ends the session and, for stdio, the process.
+   * Closes the connection: over stdio, ends the server's process; over
+   * HTTP, aborts the requests in flight without asking the server to end
+   * its session.
    *
-   * @returns A promise that settles once the transport closed; every later
-   * call returns the same promise.
-   * @remarks `reportConnectionClosed` is not told about a close asked for
-   * here.
+   * @returns A promise that settles once the transport closed, which every
+   * later call returns too. Over stdio, that is once the process exited
+   * after its standard input closed or after `SIGTERM`, or once `SIGKILL`
+   * was sent, without waiting for the killed process to exit.
+   * @remarks The connection counts as closing before its client starts to
+   * close, so `reportConnectionClosed` is not told about a close asked for
+   * here, even though the HTTP transport reports its end while it closes.
    */
   public close(): Promise<void> {
-    this.#closing ??= this.#client.close()
-    return this.#closing
+    if (this.#closing !== undefined) return this.#closing
+    const { promise, resolve, reject } = Promise.withResolvers<void>()
+    this.#closing = promise
+    this.#client.close().then(resolve, reject)
+    return promise
   }
 
   /**
    * Reports an end Lys did not ask for, once, unless the connection is
    * closing.
    */
-  #reportEnd(): void {
+  #handleConnectionEnd(): void {
     if (this.#closing !== undefined || this.#hasReportedEnd) return
     this.#hasReportedEnd = true
     this.#reportConnectionClosed()
@@ -263,7 +275,7 @@ export default class McpServerConnection {
    * the handshake, the client's close is reported as an end Lys did not ask
    * for.
    */
-  #endAtTooLargeAnswer(): void {
+  #handleTooLargeAnswer(): void {
     this.#hasPassedResponseLimit = true
     this.#reportConnectionError(new McpResponseTooLargeError())
     this.#client.close().catch((cause: unknown) => {
@@ -283,7 +295,7 @@ export default class McpServerConnection {
    * once an answer passed the response limit, so the request reports why
    * the connection ended; the error unchanged otherwise.
    */
-  #explainFailure(error: unknown): unknown {
+  #buildRequestFailure(error: unknown): unknown {
     return this.#hasPassedResponseLimit
       ? new McpResponseTooLargeError({ cause: error })
       : error
@@ -297,7 +309,7 @@ export default class McpServerConnection {
    * without its arguments, and an answer over the response limit, which the
    * connection reports as it ends.
    */
-  #reportError(error: Error): void {
+  #handleClientError(error: Error): void {
     if (isSpawnFailure(error) || error instanceof McpResponseTooLargeError)
       return
     this.#reportConnectionError(error)
@@ -312,7 +324,7 @@ export default class McpServerConnection {
  * server sends for a session it no longer knows.
  */
 function isSessionEnded(error: unknown): boolean {
-  const failure = classifyMcpRequestFailure(error)
+  const failure = calculateMcpRequestFailure(error)
   return failure.kind === "http-status" && failure.status === 404
 }
 
@@ -321,14 +333,17 @@ function isSessionEnded(error: unknown): boolean {
  *
  * @param settings - Validated server settings.
  * @param context - Working folder and the server log reporter.
- * @param reportLimitPassed - Told when an HTTP answer passes the response
- * limit, before its body fails; borrowed.
+ * @param reportLimitPassed - Told when an HTTP answer, or one event of it,
+ * passes the response limit, before its body fails; borrowed.
  * @returns A stdio transport that starts the command in the working folder
  * with the SDK's default environment plus the configured variables, its
- * standard error read line by line; or a Streamable HTTP transport that
- * sends the configured headers and refuses redirects. Each reads at most
- * {@link MAXIMUM_MCP_RESPONSE_BYTES} of one answer: a longer stdio message
- * line ends the connection, and a longer HTTP body is reported and fails.
+ * standard error read line by line, and whose every close waits for the
+ * same end of the process; or a Streamable HTTP transport that sends the
+ * configured headers, refuses redirects, passes on each failure once, and
+ * keeps answers' bodies out of the errors its sends throw. Each reads at
+ * most {@link MAXIMUM_MCP_RESPONSE_BYTES} of one answer: a longer stdio
+ * message line ends the connection, and a longer HTTP body, or event of an
+ * event stream, is reported and fails.
  */
 function createTransport(
   settings: McpServerSettings,
@@ -352,18 +367,21 @@ function createTransport(
       })
       const logLines = new McpServerLogLines(context.reportServerLogLine)
       transport.stderr?.on("data", (chunk: Buffer) => logLines.read(chunk))
-      return transport
+      return new McpStdioTransport(transport)
     }
     case "http":
-      return new StreamableHTTPClientTransport(new URL(settings.url), {
-        fetch: (url, init) => fetchMcpResponse(url, init, reportLimitPassed),
-        requestInit: {
-          headers: settings.headers.map((header) => [
-            header.name,
-            header.value
-          ]),
-          redirect: "manual"
-        }
-      })
+      return new McpHttpTransport(
+        new StreamableHTTPClientTransport(new URL(settings.url), {
+          fetch: (url, init) =>
+            sendMcpHttpRequest(url, init, reportLimitPassed),
+          requestInit: {
+            headers: settings.headers.map((header) => [
+              header.name,
+              header.value
+            ]),
+            redirect: "manual"
+          }
+        })
+      )
   }
 }

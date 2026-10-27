@@ -86,7 +86,7 @@ function registerSyncMcpServersRoute(
       response: syncMcpServersApi.responses
     },
     handler: async () => {
-      await registry.applySettings()
+      await registry.updateServers()
       return registry.listServers()
     }
   })
@@ -130,7 +130,7 @@ function handleReconnect(
   registry: McpServerRegistry
 ): void {
   const { serverName } = request.params
-  if (registry.reconnect(serverName) === "not-found") {
+  if (registry.openServerAgain(serverName) === "not-found") {
     reply
       .type("application/problem+json")
       .code(404)

@@ -1,6 +1,6 @@
 import type { McpServerFailure, McpServerState } from "@lys/protocol"
 import type { McpServerSettings, McpToolDefinition } from "@lys/share"
-import { classifyMcpRequestFailure } from "./mcpError"
+import { calculateMcpRequestFailure } from "./mcpError"
 import type McpServerConnection from "./mcpServerConnection"
 import type {
   McpServerConnectionContext,
@@ -36,7 +36,7 @@ export type McpServerSessionDependencies = Readonly<{
    * Keeps one background close, which never rejects, until it settles, so
    * its owner can wait for it.
    */
-  trackTask: (task: Promise<void>) => void
+  addTask: (task: Promise<void>) => void
 }>
 
 /** Outcome of looking up one tool in a session. */
@@ -101,15 +101,16 @@ const UNKNOWN_TOOL_LOOKUP: McpSessionToolLookup = Object.freeze({
 /**
  * One attempt to open an MCP server, and the connection it leads to.
  *
- * @remarks Lifecycle: {@link open} runs once, waits until the session it
- * replaces released the server, and ends connected, failed, or cancelled;
+ * @remarks Lifecycle: {@link open} runs once, waits until the sessions its
+ * owner stopped before it released their servers, and ends connected,
+ * failed, or cancelled;
  * {@link stop} ends the session for good, cancelling its opening or closing
  * its connection, and tells when the session released the server. A
  * connection that ends by itself fails the session as `closed`; a session
  * never reconnects, its owner starts a new one. Resource ownership: owns the
  * connection its opening led to until it closes it; a connection an opening
  * returns after {@link stop} is closed at once. Every close runs in the
- * background through `trackTask`. Concurrency model: single-threaded; every
+ * background through `addTask`. Concurrency model: single-threaded; every
  * state change happens synchronously, so a reader always sees one
  * consistent state.
  */
@@ -160,15 +161,17 @@ export default class McpServerSession {
   }
 
   /**
-   * Opens the server and reads its tools once the session it replaces
-   * released the server.
+   * Opens the server and reads its tools once the sessions stopped before
+   * this one released their servers.
    *
-   * @param previousRelease - What {@link stop} returned for the session this
-   * one replaces, so two copies of a command server never run at once;
-   * undefined when it replaces none, and the opening starts at once.
+   * @param previousRelease - Settles once what {@link stop} returned for
+   * each of those sessions settled, so the process each of their commands
+   * started has ended before this one's starts, whatever name each was
+   * applied under; undefined when none is releasing, and the opening starts
+   * at once.
    * @returns A promise that settles once the opening ended; it never
    * rejects. Call it once.
-   * @remarks A session stopped before the previous one released the server
+   * @remarks A session stopped before those sessions released their servers
    * opens nothing. An opener that throws fails the session as
    * `protocol-error`, keeping what was thrown for the log.
    */
@@ -179,10 +182,10 @@ export default class McpServerSession {
   }
 
   /**
-   * Waits for the previous session's release, then opens the server unless
+   * Waits for the earlier sessions' releases, then opens the server unless
    * the session was stopped meanwhile.
    *
-   * @param previousRelease - Release of the replaced session, or undefined.
+   * @param previousRelease - Releases of the earlier sessions, or undefined.
    * @returns A promise that settles once the opening ended; it never
    * rejects.
    */
@@ -206,11 +209,11 @@ export default class McpServerSession {
       opening = Object.freeze({
         status: "failed",
         reason: PROTOCOL_ERROR,
-        failure: classifyMcpRequestFailure(error),
+        failure: calculateMcpRequestFailure(error),
         unknownError: error
       })
     }
-    this.#finishOpening(opening)
+    this.#handleOpeningEnd(opening)
   }
 
   /**
@@ -248,22 +251,27 @@ export default class McpServerSession {
    * cancelled.
    * @returns The server's result; or a failed outcome when the server is not
    * connected, no longer lists the tool under the same server name, or the
-   * request failed, which is also reported.
+   * request failed, each of which is also reported.
    * @throws Only once the signal aborted.
    */
-  public async callTool(
+  public async sendToolCall(
     definition: McpToolDefinition,
     callArguments: McpToolCallArguments,
     abortSignal: AbortSignal
   ): Promise<McpToolCallOutcome> {
     const subject = buildCallSubject(definition)
-    if (this.#state.status !== "connected")
+    const { reportEvent } = this.#dependencies
+    if (this.#state.status !== "connected") {
+      reportEvent(buildCallNotSentEvent(definition, "server-not-connected"))
       return buildFailedOutcome(formatMcpServerNotConnected(subject))
+    }
     const listed = this.#state.toolsByName.get(definition.name)
-    if (listed?.serverToolName !== definition.serverToolName)
+    if (listed?.serverToolName !== definition.serverToolName) {
+      reportEvent(buildCallNotSentEvent(definition, "tool-no-longer-listed"))
       return buildFailedOutcome(formatMcpToolNoLongerListed(subject))
+    }
     try {
-      const result = await this.#state.connection.callTool(
+      const result = await this.#state.connection.sendToolCall(
         definition.serverToolName,
         callArguments,
         abortSignal
@@ -271,8 +279,8 @@ export default class McpServerSession {
       return formatMcpToolResult(subject, result)
     } catch (error) {
       if (abortSignal.aborted) throw error
-      const failure = classifyMcpRequestFailure(error)
-      this.#dependencies.reportEvent({
+      const failure = calculateMcpRequestFailure(error)
+      reportEvent({
         kind: "tool-call-failed",
         serverName: definition.server,
         serverToolName: definition.serverToolName,
@@ -287,8 +295,9 @@ export default class McpServerSession {
    * Ends the session: cancels its opening or closes its connection.
    *
    * @returns A promise that settles once the session released the server:
-   * its opening ended and every connection it led to closed, a command
-   * server's process included. It never rejects.
+   * its opening ended and every connection it led to closed, the process a
+   * command server's command started included, though not processes that
+   * one started itself. It never rejects.
    * @remarks Idempotent; every call's promise settles once the same work
    * ended. The state stays as it was; the owner forgets the session.
    */
@@ -324,13 +333,13 @@ export default class McpServerSession {
   }
 
   /**
-   * Records how the opening ended.
+   * Handles the end of the opening: records how it ended.
    *
    * @param opening - How it ended.
    * @remarks A connection that arrives after {@link stop} is closed. A
    * connection that ended while its tools were read fails as `closed`.
    */
-  #finishOpening(opening: McpServerOpening): void {
+  #handleOpeningEnd(opening: McpServerOpening): void {
     if (this.#isStopped) {
       if (opening.status === "connected")
         this.#closeConnection(opening.connection)
@@ -353,17 +362,17 @@ export default class McpServerSession {
         })
         return
       case "connected":
-        this.#finishConnectedOpening(opening)
+        this.#handleOpeningConnected(opening)
         return
     }
   }
 
   /**
-   * Records an opening that connected.
+   * Handles an opening that connected: records the connection and its tools.
    *
    * @param opening - The connected opening.
    */
-  #finishConnectedOpening(
+  #handleOpeningConnected(
     opening: Extract<McpServerOpening, { status: "connected" }>
   ): void {
     const serverName = this.#settings.name
@@ -423,7 +432,7 @@ export default class McpServerSession {
       })
     })
     this.#addWork(closing)
-    this.#dependencies.trackTask(closing)
+    this.#dependencies.addTask(closing)
   }
 }
 
@@ -485,4 +494,24 @@ export function buildServerNotConnectedOutcome(
   return buildFailedOutcome(
     formatMcpServerNotConnected(buildCallSubject(definition))
   )
+}
+
+/**
+ * Builds the event of a call that failed before it was sent to the server.
+ *
+ * @param definition - The called tool.
+ * @param reason - Why it was not sent.
+ * @returns A frozen `tool-call-not-sent` event naming the server and the
+ * name the server calls the tool by, without the call's arguments.
+ */
+export function buildCallNotSentEvent(
+  definition: McpToolDefinition,
+  reason: Extract<McpServerEvent, { kind: "tool-call-not-sent" }>["reason"]
+): McpServerEvent {
+  return Object.freeze({
+    kind: "tool-call-not-sent",
+    serverName: definition.server,
+    serverToolName: definition.serverToolName,
+    reason
+  })
 }

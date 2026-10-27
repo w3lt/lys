@@ -26,7 +26,7 @@ type McpConnectionEvent = Extract<
 /** A failed opening or tool call. */
 type McpRequestFailureEvent = Extract<
   McpServerEvent,
-  { kind: "opening-failed" | "tool-call-failed" }
+  { kind: "opening-failed" | "tool-call-not-sent" | "tool-call-failed" }
 >
 
 /** Most causes of a thrown error an entry describes. */
@@ -60,7 +60,7 @@ type LoggedError =
  */
 const MCP_LOG_OPTIONS = Object.freeze({
   serializers: Object.freeze({
-    err: (thrown: unknown): LoggedError => describeThrown(thrown, 0)
+    err: (thrown: unknown): LoggedError => buildLoggedThrown(thrown, 0)
   })
 })
 
@@ -80,7 +80,7 @@ const MCP_LOG_OPTIONS = Object.freeze({
  * refused call is cut the same way. A message or stack can still name a
  * remote server's host.
  */
-export function logMcpServerEvent(
+export function handleMcpServerEvent(
   parentLogger: FastifyBaseLogger,
   event: McpServerEvent
 ): void {
@@ -88,18 +88,19 @@ export function logMcpServerEvent(
   switch (event.kind) {
     case "settings-invalid":
     case "settings-unreadable":
-      logSettingsEvent(logger, event)
+      handleSettingsEvent(logger, event)
       return
     case "connected":
     case "connection-closed":
     case "connection-error":
     case "server-log-line":
     case "close-failed":
-      logConnectionEvent(logger, event)
+      handleConnectionEvent(logger, event)
       return
     case "opening-failed":
+    case "tool-call-not-sent":
     case "tool-call-failed":
-      logRequestFailureEvent(logger, event)
+      handleRequestFailureEvent(logger, event)
       return
   }
 }
@@ -110,7 +111,7 @@ export function logMcpServerEvent(
  * @param logger - Backend logger.
  * @param event - Settings event.
  */
-function logSettingsEvent(
+function handleSettingsEvent(
   logger: FastifyBaseLogger,
   event: McpSettingsEvent
 ): void {
@@ -132,7 +133,7 @@ function logSettingsEvent(
  * @param logger - Backend logger.
  * @param event - Connection event.
  */
-function logConnectionEvent(
+function handleConnectionEvent(
   logger: FastifyBaseLogger,
   event: McpConnectionEvent
 ): void {
@@ -178,54 +179,36 @@ function logConnectionEvent(
  *
  * @param logger - Backend logger.
  * @param event - Failure event.
+ * @remarks A call that was not sent is a warning with its reason. A failed
+ * opening or call is a warning when Lys could tell what it was, else an
+ * error with what was thrown.
  */
-function logRequestFailureEvent(
+function handleRequestFailureEvent(
   logger: FastifyBaseLogger,
   event: McpRequestFailureEvent
 ): void {
-  if (event.kind === "opening-failed") {
-    logFailure(
-      logger,
+  if (event.kind === "tool-call-not-sent") {
+    logger.warn(
       {
         mcpServer: event.serverName,
-        reason: event.reason,
-        failure: boundFailure(event.failure)
+        tool: event.serverToolName,
+        reason: event.reason
       },
-      event.unknownError,
-      "MCP server could not be connected"
+      "MCP tool call was not sent to the server"
     )
     return
   }
-  logFailure(
-    logger,
-    {
-      mcpServer: event.serverName,
-      tool: event.serverToolName,
-      failure: boundFailure(event.failure)
-    },
-    event.unknownError,
-    "MCP tool call failed before the server returned a result"
-  )
-}
-
-/**
- * Writes one failure: a warning when Lys could tell what it was, else an
- * error with what was thrown.
- *
- * @param logger - Backend logger.
- * @param fields - Fields that describe the failure.
- * @param unknownError - What was thrown when Lys could not tell what it
- * was; otherwise undefined.
- * @param message - Log message.
- */
-function logFailure(
-  logger: FastifyBaseLogger,
-  fields: Readonly<Record<string, unknown>>,
-  unknownError: unknown,
-  message: string
-): void {
-  if (unknownError === undefined) logger.warn(fields, message)
-  else logger.error({ ...fields, err: unknownError }, message)
+  const failure = buildBoundedFailure(event.failure)
+  const fields =
+    event.kind === "opening-failed"
+      ? { mcpServer: event.serverName, reason: event.reason, failure }
+      : { mcpServer: event.serverName, tool: event.serverToolName, failure }
+  const message =
+    event.kind === "opening-failed"
+      ? "MCP server could not be connected"
+      : "MCP tool call failed before the server returned a result"
+  if (event.unknownError === undefined) logger.warn(fields, message)
+  else logger.error({ ...fields, err: event.unknownError }, message)
 }
 
 /**
@@ -235,9 +218,9 @@ function logFailure(
  * @returns The same failure, except that a refusal's message is cut to
  * {@link MAXIMUM_SERVER_LOG_LINE_LENGTH} characters.
  */
-function boundFailure(failure: McpRequestFailure): McpRequestFailure {
+function buildBoundedFailure(failure: McpRequestFailure): McpRequestFailure {
   if (failure.kind !== "refused") return failure
-  return { kind: "refused", message: cutText(failure.message) }
+  return { kind: "refused", message: formatLoggedText(failure.message) }
 }
 
 /**
@@ -248,11 +231,11 @@ function boundFailure(failure: McpRequestFailure): McpRequestFailure {
  * @returns A cut text for a thrown text; the code and status of an HTTP
  * error; the description of another error; or the `typeof` of another value.
  */
-function describeThrown(thrown: unknown, causeDepth: number): LoggedError {
+function buildLoggedThrown(thrown: unknown, causeDepth: number): LoggedError {
   if (thrown instanceof SdkHttpError)
     return { type: "SdkHttpError", code: thrown.code, status: thrown.status }
-  if (thrown instanceof Error) return describeError(thrown, causeDepth)
-  if (typeof thrown === "string") return cutText(thrown)
+  if (thrown instanceof Error) return buildLoggedError(thrown, causeDepth)
+  if (typeof thrown === "string") return formatLoggedText(thrown)
   return { type: typeof thrown }
 }
 
@@ -265,16 +248,20 @@ function describeThrown(thrown: unknown, causeDepth: number): LoggedError {
  * description of its cause until {@link MAXIMUM_LOGGED_CAUSE_DEPTH} causes
  * were followed.
  */
-function describeError(error: Error, causeDepth: number): LoggedError {
+function buildLoggedError(error: Error, causeDepth: number): LoggedError {
   const hasCause =
     error.cause !== undefined && causeDepth < MAXIMUM_LOGGED_CAUSE_DEPTH
   const code = "code" in error ? error.code : undefined
   return {
     type: error.constructor.name,
-    message: cutText(error.message),
-    ...(error.stack === undefined ? {} : { stack: cutText(error.stack) }),
-    ...(typeof code === "string" ? { code: cutText(code) } : {}),
-    ...(hasCause ? { cause: describeThrown(error.cause, causeDepth + 1) } : {})
+    message: formatLoggedText(error.message),
+    ...(error.stack === undefined
+      ? {}
+      : { stack: formatLoggedText(error.stack) }),
+    ...(typeof code === "string" ? { code: formatLoggedText(code) } : {}),
+    ...(hasCause
+      ? { cause: buildLoggedThrown(error.cause, causeDepth + 1) }
+      : {})
   }
 }
 
@@ -284,6 +271,6 @@ function describeError(error: Error, causeDepth: number): LoggedError {
  * @param text - Text that may come from a server.
  * @returns Its first characters.
  */
-function cutText(text: string): string {
+function formatLoggedText(text: string): string {
   return text.slice(0, MAXIMUM_SERVER_LOG_LINE_LENGTH)
 }

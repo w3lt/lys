@@ -218,7 +218,7 @@ describe("registerToolRoutes", () => {
       const registry = createMcpServerRegistry([
         buildHttpServerSettings("notes", mcpServer.url)
       ])
-      await registry.applySettings()
+      await registry.updateServers()
       await vi.waitFor(() => {
         expect(registry.listToolDefinitions()).toHaveLength(1)
       }, MCP_STATE_WAIT)

@@ -571,19 +571,19 @@ const ECHO_MOTH_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
 /**
  * Builds the MCP echo tool offered for one case.
  *
- * @param callTool - Runs each call; answers `echo: <text>` by default.
+ * @param sendToolCall - Runs each call; answers `echo: <text>` by default.
  * @returns The tool and a spy over its calls.
  */
 function createMcpEchoTool(
-  callTool: TurnMcpTool["callTool"] = async (callArguments) => ({
+  sendToolCall: TurnMcpTool["sendToolCall"] = async (callArguments) => ({
     status: "succeeded",
     content: `echo: ${JSON.stringify(callArguments)}`
   })
 ) {
-  const call = vi.fn<TurnMcpTool["callTool"]>(callTool)
+  const call = vi.fn<TurnMcpTool["sendToolCall"]>(sendToolCall)
   const tool: TurnMcpTool = Object.freeze({
     definition: MCP_ECHO_DEFINITION,
-    callTool: call
+    sendToolCall: call
   })
   return { tool, call }
 }

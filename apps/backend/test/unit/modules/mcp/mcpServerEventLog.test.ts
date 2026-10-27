@@ -1,7 +1,7 @@
 import { SdkErrorCode, SdkHttpError } from "@modelcontextprotocol/client"
 import { describe, expect, it } from "vitest"
 import { createBackendLogger } from "../../../../src/log"
-import { logMcpServerEvent } from "../../../../src/modules/mcp/mcpServerEventLog"
+import { handleMcpServerEvent } from "../../../../src/modules/mcp/mcpServerEventLog"
 import type { McpServerEvent } from "../../../../src/modules/mcp/mcpServerEvent"
 import {
   CapturedLogDestination,
@@ -40,7 +40,7 @@ const COMMON_FIELDS = ["time", "pid", "hostname"] as const
  */
 function logEvent(event: McpServerEvent): Record<string, unknown> {
   const destination = new CapturedLogDestination()
-  logMcpServerEvent(createBackendLogger(destination), event)
+  handleMcpServerEvent(createBackendLogger(destination), event)
   const records = destination.records
   if (records.length !== 1)
     throw new Error(`Expected one log line, got ${records.length}`)
@@ -61,7 +61,7 @@ function withoutCommonFields(
   return fields
 }
 
-describe("logMcpServerEvent", () => {
+describe("handleMcpServerEvent", () => {
   it("warns of an invalid settings group with its problems", () => {
     expect(
       logEvent({
@@ -359,6 +359,37 @@ describe("logMcpServerEvent", () => {
       mcpServer: "notes",
       err: expect.objectContaining({ type: "Error", message: "kill EPERM" }),
       msg: "Closing an MCP server connection failed"
+    })
+  })
+
+  it("warns of a tool call that was not sent, with its reason", () => {
+    expect(
+      logEvent({
+        kind: "tool-call-not-sent",
+        serverName: "notes",
+        serverToolName: "lookup",
+        reason: "server-not-connected"
+      })
+    ).toEqual({
+      level: "warn",
+      mcpServer: "notes",
+      tool: "lookup",
+      reason: "server-not-connected",
+      msg: "MCP tool call was not sent to the server"
+    })
+    expect(
+      logEvent({
+        kind: "tool-call-not-sent",
+        serverName: "notes",
+        serverToolName: "lookup",
+        reason: "tool-no-longer-listed"
+      })
+    ).toEqual({
+      level: "warn",
+      mcpServer: "notes",
+      tool: "lookup",
+      reason: "tool-no-longer-listed",
+      msg: "MCP tool call was not sent to the server"
     })
   })
 

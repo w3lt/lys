@@ -195,6 +195,26 @@ describe("buildMcpToolCatalog", () => {
     ])
   })
 
+  it("skips a tool whose name holds characters a person cannot see, naming it without them", () => {
+    const catalog = buildMcpToolCatalog(
+      SERVER_NAME,
+      readServerTools([
+        buildTool("read\u202Efile"),
+        buildTool("fi\u200Bnd"),
+        buildTool("list\u{E0041}"),
+        buildTool("bell\u0007")
+      ])
+    )
+
+    expect(catalog.definitions).toEqual([])
+    expect(catalog.skippedTools).toEqual([
+      { name: "readfile", reason: "unsupported-name" },
+      { name: "find", reason: "unsupported-name" },
+      { name: "list", reason: "unsupported-name" },
+      { name: "bell", reason: "unsupported-name" }
+    ])
+  })
+
   it("skips a later tool with the same name as a listed one", () => {
     const catalog = buildMcpToolCatalog(
       SERVER_NAME,
@@ -293,6 +313,82 @@ describe("buildMcpToolCatalog", () => {
     expect(catalog.definitions).toEqual([])
     expect(catalog.skippedTools).toEqual([
       { name: "bad", reason: "unsupported-input-schema" }
+    ])
+  })
+
+  it.each([
+    {
+      where: "an argument's description",
+      inputSchema: {
+        type: "object",
+        properties: { path: { type: "string", description: "Path\u200B" } }
+      }
+    },
+    {
+      where: "a nested title",
+      inputSchema: {
+        type: "object",
+        properties: {
+          note: {
+            type: "object",
+            properties: { body: { type: "string", title: "Body\u{E0049}" } }
+          }
+        }
+      }
+    },
+    {
+      where: "an enum value",
+      inputSchema: {
+        type: "object",
+        properties: { mode: { type: "string", enum: ["fast\u2066", "slow"] } }
+      }
+    },
+    {
+      where: "a key outside the arguments",
+      inputSchema: {
+        type: "object",
+        $defs: { "Note\u200D": { type: "string" } }
+      }
+    },
+    {
+      where: "a description with a control character",
+      inputSchema: { type: "object", description: "Ring\u0007" }
+    }
+  ])(
+    "skips a tool whose input schema holds a character a person cannot see in $where",
+    ({ inputSchema }) => {
+      const catalog = buildMcpToolCatalog(
+        SERVER_NAME,
+        readServerTools([{ name: "write", inputSchema }])
+      )
+
+      expect(catalog.definitions).toEqual([])
+      expect(catalog.skippedTools).toEqual([
+        { name: "write", reason: "unsupported-input-schema" }
+      ])
+    }
+  )
+
+  it("lists an input schema whose text holds joined and styled emoji, tabs, and line breaks", () => {
+    const inputSchema = {
+      type: "object",
+      properties: {
+        mood: {
+          type: "string",
+          description: "First line\n\tsecond line",
+          enum: ["👩\u200D💻", "❤\uFE0F"]
+        }
+      }
+    }
+
+    const catalog = buildMcpToolCatalog(
+      SERVER_NAME,
+      readServerTools([{ name: "write", inputSchema }])
+    )
+
+    expect(catalog.skippedTools).toEqual([])
+    expect(catalog.definitions.map((tool) => tool.inputSchema)).toEqual([
+      inputSchema
     ])
   })
 
@@ -439,15 +535,6 @@ describe("buildMcpToolCatalog", () => {
     ).toBe("Tool find of the MCP server notes.")
   })
 
-  it("names the tool without invisible characters in that sentence", () => {
-    expect(
-      readListedDescription({
-        name: "fi​nd",
-        inputSchema: EMPTY_INPUT_SCHEMA
-      })
-    ).toBe("Tool find of the MCP server notes.")
-  })
-
   it("cleans invisible characters out of the description and trims it", () => {
     expect(
       readListedDescription({
@@ -488,22 +575,6 @@ describe("buildMcpToolCatalog", () => {
         inputSchema: EMPTY_INPUT_SCHEMA
       })
     ).toBe(`${"d".repeat(4094)}…`)
-  })
-
-  it("lists a skipped tool's name without invisible characters", () => {
-    const catalog = buildMcpToolCatalog(
-      SERVER_NAME,
-      readServerTools([
-        {
-          name: "hid​den",
-          inputSchema: { type: "object", required: ["1st"] }
-        }
-      ])
-    )
-
-    expect(catalog.skippedTools).toEqual([
-      { name: "hidden", reason: "unsupported-input-schema" }
-    ])
   })
 
   it("lists a skipped tool's long name cut to 128 characters without splitting a character", () => {

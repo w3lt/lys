@@ -8,6 +8,7 @@ import { isDeepStrictEqual } from "node:util"
 import type { McpSettingsRead } from "../../infrastructure/settings/mcpSettingsFile"
 import type { McpToolCallArguments } from "./mcpServerConnection"
 import McpServerSession, {
+  buildCallNotSentEvent,
   buildServerNotConnectedOutcome,
   type McpServerSessionDependencies
 } from "./mcpServerSession"
@@ -21,7 +22,7 @@ export type McpServerRegistryDependencies = Readonly<{
   /** Reads the `mcp` group from the settings file again. */
   readSettings: () => Promise<McpSettingsRead>
 }> &
-  Omit<McpServerSessionDependencies, "trackTask">
+  Omit<McpServerSessionDependencies, "addTask">
 
 /** One MCP tool found for a turn. */
 export type TurnMcpTool = Readonly<{
@@ -38,7 +39,7 @@ export type TurnMcpTool = Readonly<{
    * call failed, such as the server not being connected any more.
    * @throws Only once the signal aborted.
    */
-  callTool: (
+  sendToolCall: (
     callArguments: McpToolCallArguments,
     abortSignal: AbortSignal
   ) => Promise<McpToolCallOutcome>
@@ -82,15 +83,19 @@ const UNKNOWN_TOOL: McpTurnToolLookup = Object.freeze({ status: "unknown" })
  * Owns the MCP servers the settings file names, one session each, for the
  * backend's lifetime.
  *
- * @remarks {@link applySettings} reads the `mcp` group and applies it: a
+ * @remarks {@link updateServers} reads the `mcp` group and applies it: a
  * new or changed server gets a new session, an unchanged one keeps its
  * session, with its connection or failure, and a removed one's session is
  * stopped. Opening runs in the background; the list reports each server as
  * connecting until its opening ends. Nothing reconnects by itself:
- * {@link reconnect} or a changed setting starts a new session, which opens
- * only once the session it replaces released the server, so a command
- * server's old process has ended before its new one starts. Settings that
- * fail their rules or cannot be read keep the servers applied before.
+ * {@link openServerAgain} or a changed setting starts a new session. Every new
+ * session opens only once every session the registry stopped before it
+ * released its server, whatever name either has, so the process a command
+ * server's command started has ended before the next one starts, after a
+ * rename or a removal and re-adding too; processes that process started
+ * itself, such as the server a launcher like `npx` runs, are not waited for.
+ * Settings that fail their rules or cannot be read keep the servers applied
+ * before.
  * Resource ownership: owns every session it started until it stops it; a
  * stopped session closes its connection, now or when its opening ends.
  * Concurrency model: single-threaded with background tasks; settings reads
@@ -110,6 +115,11 @@ export default class McpServerRegistry {
   #settingsReads: Promise<unknown>
   /** Openings and closes still running. */
   readonly #tasks: Set<Promise<void>>
+  /**
+   * Releases of the stopped sessions that have not released their servers
+   * yet; a new session opens once all of them settled.
+   */
+  readonly #releases: Set<Promise<void>>
   /** Whether {@link close} was called. */
   #isClosed: boolean
 
@@ -126,6 +136,7 @@ export default class McpServerRegistry {
     this.#settingsStatus = "applied"
     this.#settingsReads = Promise.resolve()
     this.#tasks = new Set()
+    this.#releases = new Set()
     this.#isClosed = false
   }
 
@@ -138,7 +149,7 @@ export default class McpServerRegistry {
    * @remarks Reads run one after another in call order. After
    * {@link close}, it reads nothing.
    */
-  public applySettings(): Promise<void> {
+  public updateServers(): Promise<void> {
     const applying = this.#settingsReads.then(() => this.#readAndApply())
     this.#settingsReads = Promise.allSettled([applying])
     return applying
@@ -152,12 +163,14 @@ export default class McpServerRegistry {
    * @returns `reconnecting` once the new session was started, or `not-found`
    * when no applied server has the name, which is always the case after
    * {@link close}.
-   * @remarks The new session opens once the old one released the server.
+   * @remarks The new session opens once the old one, and every other session
+   * stopped before, released its server.
    */
-  public reconnect(serverName: string): McpServerReconnection {
+  public openServerAgain(serverName: string): McpServerReconnection {
     const entry = this.#entries.get(serverName)
     if (entry === undefined) return "not-found"
-    this.#startSession(entry.settings, entry.session.stop())
+    this.#stopSession(entry.session)
+    this.#startSession(entry.settings)
     return "reconnecting"
   }
 
@@ -218,10 +231,10 @@ export default class McpServerRegistry {
       status: "found",
       tool: Object.freeze({
         definition,
-        callTool: (
+        sendToolCall: (
           callArguments: McpToolCallArguments,
           abortSignal: AbortSignal
-        ) => this.#callTool(definition, callArguments, abortSignal)
+        ) => this.#sendToolCall(definition, callArguments, abortSignal)
       })
     })
   }
@@ -237,7 +250,7 @@ export default class McpServerRegistry {
     for (const entry of this.#entries.values()) void entry.session.stop()
     this.#entries = new Map()
     await this.#settingsReads
-    await this.#settleTasks()
+    await this.#waitForNoTaskLeft()
   }
 
   /**
@@ -249,10 +262,10 @@ export default class McpServerRegistry {
    * finishes after {@link close} and closes its connection, so the wait
    * repeats until the set stays empty.
    */
-  async #settleTasks(): Promise<void> {
+  async #waitForNoTaskLeft(): Promise<void> {
     if (this.#tasks.size === 0) return
     await Promise.allSettled(this.#tasks)
-    await this.#settleTasks()
+    await this.#waitForNoTaskLeft()
   }
 
   /**
@@ -268,7 +281,7 @@ export default class McpServerRegistry {
     switch (read.status) {
       case "read":
         this.#settingsStatus = "applied"
-        this.#applyServers(read.settings.servers)
+        this.#updateSessions(read.settings.servers)
         return
       case "invalid":
         this.#settingsStatus = "invalid"
@@ -288,51 +301,68 @@ export default class McpServerRegistry {
    * Applies the servers of a settings group that passed its rules.
    *
    * @param servers - Validated servers in the group's order, each name once.
+   * @remarks Stops every session it does not keep before it starts any, so
+   * each new session waits for all of them, such as when two servers swap
+   * their settings.
    */
-  #applyServers(servers: readonly McpServerSettings[]): void {
+  #updateSessions(servers: readonly McpServerSettings[]): void {
     const previousEntries = this.#entries
-    const appliedNames = new Set(servers.map((settings) => settings.name))
+    const keptEntries = new Map<string, ServerEntry>()
+    for (const settings of servers) {
+      const entry = findUnchangedEntry(previousEntries, settings)
+      if (entry !== undefined) keptEntries.set(settings.name, entry)
+    }
     for (const [serverName, entry] of previousEntries)
-      if (!appliedNames.has(serverName)) void entry.session.stop()
+      if (!keptEntries.has(serverName)) this.#stopSession(entry.session)
     this.#entries = new Map()
     for (const settings of servers) {
-      const entry = previousEntries.get(settings.name)
-      if (entry !== undefined && isDeepStrictEqual(entry.settings, settings)) {
-        this.#entries.set(settings.name, entry)
-        continue
-      }
-      this.#startSession(settings, entry?.session.stop())
+      const entry = keptEntries.get(settings.name)
+      if (entry === undefined) this.#startSession(settings)
+      else this.#entries.set(settings.name, entry)
     }
+  }
+
+  /**
+   * Stops one session the registry no longer keeps, and keeps its release
+   * until it settles, so later sessions open only after it.
+   *
+   * @param session - Session to stop.
+   */
+  #stopSession(session: McpServerSession): void {
+    const release = session.stop()
+    this.#releases.add(release)
+    void release.finally(() => this.#releases.delete(release))
   }
 
   /**
    * Starts a session that opens one server, and records it as the server's.
    *
    * @param settings - Validated settings of the server.
-   * @param previousRelease - Release of the session it replaces, which the
-   * opening waits for; undefined when it replaces none.
+   * @remarks The opening waits until every session stopped so far released
+   * its server; it starts at once when none is releasing.
    */
-  #startSession(
-    settings: McpServerSettings,
-    previousRelease: Promise<void> | undefined
-  ): void {
+  #startSession(settings: McpServerSettings): void {
     const session = new McpServerSession(settings, {
       openServer: this.#dependencies.openServer,
       workingDirectory: this.#dependencies.workingDirectory,
       reportEvent: this.#dependencies.reportEvent,
-      trackTask: (task) => this.#trackTask(task)
+      addTask: (task) => this.#addTask(task)
     })
     this.#entries.set(settings.name, Object.freeze({ settings, session }))
-    this.#trackTask(session.open(previousRelease))
+    const previousRelease =
+      this.#releases.size === 0
+        ? undefined
+        : Promise.all(this.#releases).then(() => undefined)
+    this.#addTask(session.open(previousRelease))
   }
 
   /**
-   * Keeps one background task until it settles, so {@link close} can wait
-   * for it.
+   * Adds one background task to the tracked tasks until it settles, so
+   * {@link close} can wait for it.
    *
    * @param task - Task that never rejects.
    */
-  #trackTask(task: Promise<void>): void {
+  #addTask(task: Promise<void>): void {
     this.#tasks.add(task)
     void task.finally(() => this.#tasks.delete(task))
   }
@@ -344,19 +374,41 @@ export default class McpServerRegistry {
    * @param callArguments - Arguments whose shape the backend checked.
    * @param abortSignal - Stops the call.
    * @returns The server's result, or why the call failed, such as the
-   * server not being applied any more.
+   * server not being applied any more, which is reported as a call that was
+   * not sent.
    * @throws Only once the signal aborted.
    */
-  #callTool(
+  #sendToolCall(
     definition: McpToolDefinition,
     callArguments: McpToolCallArguments,
     abortSignal: AbortSignal
   ): Promise<McpToolCallOutcome> {
     const entry = this.#entries.get(definition.server)
-    return entry === undefined
-      ? Promise.resolve(buildServerNotConnectedOutcome(definition))
-      : entry.session.callTool(definition, callArguments, abortSignal)
+    if (entry !== undefined)
+      return entry.session.sendToolCall(definition, callArguments, abortSignal)
+    this.#dependencies.reportEvent(
+      buildCallNotSentEvent(definition, "server-not-connected")
+    )
+    return Promise.resolve(buildServerNotConnectedOutcome(definition))
   }
+}
+
+/**
+ * Finds the applied entry a server keeps under new settings.
+ *
+ * @param entries - Applied servers by name.
+ * @param settings - The server's settings in the group just read.
+ * @returns The entry of the same name whose settings are equal, or undefined
+ * when the server is new or its settings changed.
+ */
+function findUnchangedEntry(
+  entries: ReadonlyMap<string, ServerEntry>,
+  settings: McpServerSettings
+): ServerEntry | undefined {
+  const entry = entries.get(settings.name)
+  return entry !== undefined && isDeepStrictEqual(entry.settings, settings)
+    ? entry
+    : undefined
 }
 
 /**

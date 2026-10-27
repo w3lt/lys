@@ -92,7 +92,10 @@ function answerWithLineOf(id: RequestId, lineBytes: number): void {
  * @param id - Request identifier.
  * @param params - Call parameters.
  */
-function callTool(id: RequestId, params: Record<string, unknown>): void {
+function handleToolCallRequest(
+  id: RequestId,
+  params: Record<string, unknown>
+): void {
   const callArguments = params["arguments"] ?? {}
   switch (params["name"]) {
     case "slow":
@@ -198,7 +201,7 @@ function handleMessage(message: ReceivedMessage): void {
       })
       return
     case "tools/call":
-      callTool(message.id, params)
+      handleToolCallRequest(message.id, params)
       return
     case "notifications/cancelled":
       process.stderr.write(`cancelled ${JSON.stringify(params["requestId"])}\n`)

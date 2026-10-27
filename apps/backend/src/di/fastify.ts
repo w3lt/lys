@@ -3,7 +3,7 @@ import { type FastifyInstance, type FastifyPluginAsync } from "fastify"
 import type { BackendConfig } from "../config"
 import type { LlmRuntimeFailureReporters } from "../modules/llm/llmRuntimeService"
 import PinoLmStudioSdkLogger from "../modules/llm/runtimes/pinoLmStudioSdkLogger"
-import { logMcpServerEvent } from "../modules/mcp/mcpServerEventLog"
+import { handleMcpServerEvent } from "../modules/mcp/mcpServerEventLog"
 import type { PageRenderingFailureReporters } from "../modules/tool/builtIn/web/pageRendering"
 import {
   closeSingletonServices,
@@ -63,7 +63,7 @@ const singletonPlugin: FastifyPluginAsync<
     pageRendering,
     lmStudioSdk: new PinoLmStudioSdkLogger(app.log),
     reportMcpServerEvent: (event) => {
-      logMcpServerEvent(app.log, event)
+      handleMcpServerEvent(app.log, event)
     }
   })
 
@@ -74,21 +74,21 @@ const singletonPlugin: FastifyPluginAsync<
     await singletonServices.llmRuntimeService.connectLlmRuntime()
   })
   app.addHook("onReady", async () => {
-    await singletonServices.mcpServerRegistry.applySettings()
+    await singletonServices.mcpServerRegistry.updateServers()
   })
 
-  decorateSingletonServices(app, singletonServices)
+  registerSingletonServices(app, singletonServices)
 }
 
 /**
- * Adds every singleton service to the application, so routes reach them as
- * `app.<service>`.
+ * Registers every singleton service with the application, so routes reach
+ * them as `app.<service>`.
  *
  * @param app - Application the plugin runs in.
  * @param singletonServices - Services the plugin created; the application
  * borrows them until it closes.
  */
-function decorateSingletonServices(
+function registerSingletonServices(
   app: FastifyInstance,
   singletonServices: SingletonServices
 ): void {

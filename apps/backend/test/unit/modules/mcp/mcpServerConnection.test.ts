@@ -4,7 +4,7 @@ import type { ServerResponse } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
-import { classifyMcpRequestFailure } from "../../../../src/modules/mcp/mcpError"
+import { calculateMcpRequestFailure } from "../../../../src/modules/mcp/mcpError"
 import McpServerConnection from "../../../../src/modules/mcp/mcpServerConnection"
 import {
   MAXIMUM_MCP_RESPONSE_BYTES,
@@ -42,6 +42,26 @@ const EVENT_STREAM_ANSWER_HEADERS = Object.freeze({
 
 /** A signal that never aborts, for calls a test does not cancel. */
 const NEVER_ABORTED = new AbortController().signal
+
+/** Synthetic body of a server's HTTP error answer, which no log may hold. */
+const SYNTHETIC_ANSWER_BODY = "SYNTHETIC-SERVER-ANSWER-BODY-0123"
+
+/**
+ * Lists the texts an error carries that a log entry could hold: its string
+ * form, message, and stack, and those of its causes.
+ *
+ * @param error - What was thrown or reported.
+ * @returns The texts, the error's own first.
+ */
+function listErrorTexts(error: unknown): readonly string[] {
+  if (!(error instanceof Error)) return [String(error)]
+  return [
+    String(error),
+    error.message,
+    error.stack ?? "",
+    ...(error.cause === undefined ? [] : listErrorTexts(error.cause))
+  ]
+}
 
 /**
  * Opens a connection and closes it when the current test finishes.
@@ -155,7 +175,7 @@ describe("McpServerConnection over stdio", () => {
       McpServerConnection.open(settings, context)
     )
 
-    expect(classifyMcpRequestFailure(rejection)).toEqual({
+    expect(calculateMcpRequestFailure(rejection)).toEqual({
       kind: "start-failed"
     })
     expect(events.errors).toEqual([])
@@ -178,7 +198,7 @@ describe("McpServerConnection over stdio", () => {
       context
     )
 
-    const result = await connection.callTool(
+    const result = await connection.sendToolCall(
       "echo",
       { text: "hi" },
       NEVER_ABORTED
@@ -210,7 +230,11 @@ describe("McpServerConnection over stdio", () => {
     )
     await connection.listTools(NEVER_ABORTED)
 
-    const result = await connection.callTool("structured", {}, NEVER_ABORTED)
+    const result = await connection.sendToolCall(
+      "structured",
+      {},
+      NEVER_ABORTED
+    )
 
     expect(result).toEqual({ content: [], structuredContent: { answer: 42 } })
   })
@@ -222,7 +246,7 @@ describe("McpServerConnection over stdio", () => {
       context
     )
 
-    const result = await connection.callTool(
+    const result = await connection.sendToolCall(
       "sized",
       { lineBytes: MAXIMUM_MCP_RESPONSE_BYTES },
       NEVER_ABORTED
@@ -239,14 +263,14 @@ describe("McpServerConnection over stdio", () => {
     )
 
     const error = await captureRejection(
-      connection.callTool(
+      connection.sendToolCall(
         "sized",
         { lineBytes: MAXIMUM_MCP_RESPONSE_BYTES + 1 },
         NEVER_ABORTED
       )
     )
 
-    expect(classifyMcpRequestFailure(error)).toEqual({ kind: "closed" })
+    expect(calculateMcpRequestFailure(error)).toEqual({ kind: "closed" })
     await vi.waitFor(() => expect(events.closedCount).toBe(1), EVENT_WAIT)
     expect(events.errors.map((reported) => reported.message)).toContainEqual(
       expect.stringContaining(`${MAXIMUM_MCP_RESPONSE_BYTES} bytes`)
@@ -260,10 +284,10 @@ describe("McpServerConnection over stdio", () => {
       context
     )
     const controller = new AbortController()
-    const call = connection.callTool("slow", {}, controller.signal)
+    const call = connection.sendToolCall("slow", {}, controller.signal)
     // The server answers in arrival order, so this answer proves it received
     // the slow call.
-    await connection.callTool("echo", { text: "after" }, NEVER_ABORTED)
+    await connection.sendToolCall("echo", { text: "after" }, NEVER_ABORTED)
 
     controller.abort(new Error("The person stopped the reply"))
 
@@ -285,12 +309,12 @@ describe("McpServerConnection over stdio", () => {
     )
 
     const error = await captureRejection(
-      connection.callTool("exit", {}, NEVER_ABORTED)
+      connection.sendToolCall("exit", {}, NEVER_ABORTED)
     )
     await vi.waitFor(() => expect(events.closedCount).toBe(1), EVENT_WAIT)
     await connection.close()
 
-    expect(classifyMcpRequestFailure(error)).toEqual({ kind: "closed" })
+    expect(calculateMcpRequestFailure(error)).toEqual({ kind: "closed" })
     expect(events.closedCount).toBe(1)
   })
 
@@ -324,7 +348,7 @@ describe("McpServerConnection over HTTP", () => {
     )
 
     await connection.listTools(NEVER_ABORTED)
-    await connection.callTool("echo", { text: "hi" }, NEVER_ABORTED)
+    await connection.sendToolCall("echo", { text: "hi" }, NEVER_ABORTED)
     await connection.close()
 
     expect(server.receivedRequests.map((request) => request.rpcMethod)).toEqual(
@@ -348,7 +372,7 @@ describe("McpServerConnection over HTTP", () => {
     )
 
     expect(
-      await connection.callTool("echo", { text: "hi" }, NEVER_ABORTED)
+      await connection.sendToolCall("echo", { text: "hi" }, NEVER_ABORTED)
     ).toEqual({ content: [{ type: "text", text: 'echo: {"text":"hi"}' }] })
   })
 
@@ -365,7 +389,7 @@ describe("McpServerConnection over HTTP", () => {
       context
     )
 
-    const result = await connection.callTool("echo", {}, NEVER_ABORTED)
+    const result = await connection.sendToolCall("echo", {}, NEVER_ABORTED)
 
     expect(result.content).toHaveLength(1)
   })
@@ -398,10 +422,10 @@ describe("McpServerConnection over HTTP", () => {
       )
 
       const error = await captureRejection(
-        connection.callTool("echo", {}, NEVER_ABORTED)
+        connection.sendToolCall("echo", {}, NEVER_ABORTED)
       )
 
-      expect(classifyMcpRequestFailure(error)).toEqual({ kind: "too-large" })
+      expect(calculateMcpRequestFailure(error)).toEqual({ kind: "too-large" })
       expect(events.closedCount).toBe(1)
       expect(filterTooLargeErrors(events.errors)).toHaveLength(1)
     }
@@ -423,16 +447,18 @@ describe("McpServerConnection over HTTP", () => {
       context
     )
     const waitingCall = captureRejection(
-      connection.callTool("echo", {}, NEVER_ABORTED)
+      connection.sendToolCall("echo", {}, NEVER_ABORTED)
     )
     await vi.waitFor(() => expect(answeredCallCount).toBe(1), EVENT_WAIT)
 
     const failedCall = await captureRejection(
-      connection.callTool("echo", {}, NEVER_ABORTED)
+      connection.sendToolCall("echo", {}, NEVER_ABORTED)
     )
 
-    expect(classifyMcpRequestFailure(failedCall)).toEqual({ kind: "too-large" })
-    expect(classifyMcpRequestFailure(await waitingCall)).toEqual({
+    expect(calculateMcpRequestFailure(failedCall)).toEqual({
+      kind: "too-large"
+    })
+    expect(calculateMcpRequestFailure(await waitingCall)).toEqual({
       kind: "too-large"
     })
   })
@@ -451,17 +477,17 @@ describe("McpServerConnection over HTTP", () => {
     )
 
     const firstError = await captureRejection(
-      connection.callTool("echo", {}, NEVER_ABORTED)
+      connection.sendToolCall("echo", {}, NEVER_ABORTED)
     )
     const secondError = await captureRejection(
-      connection.callTool("echo", {}, NEVER_ABORTED)
+      connection.sendToolCall("echo", {}, NEVER_ABORTED)
     )
 
-    expect(classifyMcpRequestFailure(firstError)).toEqual({
+    expect(calculateMcpRequestFailure(firstError)).toEqual({
       kind: "http-status",
       status: 404
     })
-    expect(classifyMcpRequestFailure(secondError)).toEqual({
+    expect(calculateMcpRequestFailure(secondError)).toEqual({
       kind: "http-status",
       status: 404
     })
@@ -482,14 +508,216 @@ describe("McpServerConnection over HTTP", () => {
     )
 
     const error = await captureRejection(
-      connection.callTool("echo", {}, NEVER_ABORTED)
+      connection.sendToolCall("echo", {}, NEVER_ABORTED)
     )
 
-    expect(classifyMcpRequestFailure(error)).toEqual({
+    expect(calculateMcpRequestFailure(error)).toEqual({
       kind: "http-status",
       status: 500
     })
     expect(events.closedCount).toBe(0)
+  })
+
+  it("returns one promise for every close and does not report it as an ended connection", async () => {
+    const server = await startFakeMcpHttpServer(answerAsMcpServer())
+    const { context, events } = createRecordingContext()
+    const connection = await McpServerConnection.open(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    const firstClose = connection.close()
+    const secondClose = connection.close()
+    await firstClose
+
+    expect(secondClose).toBe(firstClose)
+    expect(events.closedCount).toBe(0)
+  })
+
+  it("closes with a call in flight without reporting the aborted request as a connection error", async () => {
+    let receivedCallCount = 0
+    const server = await startFakeMcpHttpServer(
+      answerToolCallsWith(() => {
+        receivedCallCount += 1
+      })
+    )
+    const { context, events } = createRecordingContext()
+    const connection = await McpServerConnection.open(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+    const call = captureRejection(
+      connection.sendToolCall("echo", {}, NEVER_ABORTED)
+    )
+    await vi.waitFor(() => expect(receivedCallCount).toBe(1), EVENT_WAIT)
+
+    await connection.close()
+
+    expect(calculateMcpRequestFailure(await call)).toEqual({ kind: "closed" })
+    expect(events.errors).toEqual([])
+    expect(events.closedCount).toBe(0)
+  })
+
+  it("reports a call answered with an HTTP error only through the call's own failure", async () => {
+    const server = await startFakeMcpHttpServer(
+      answerToolCallsWith((_id, response) => {
+        response.writeHead(500)
+        response.end(SYNTHETIC_ANSWER_BODY)
+      })
+    )
+    const { context, events } = createRecordingContext()
+    const connection = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    const error = await captureRejection(
+      connection.sendToolCall("echo", {}, NEVER_ABORTED)
+    )
+
+    expect(calculateMcpRequestFailure(error)).toEqual({
+      kind: "http-status",
+      status: 500
+    })
+    expect(listErrorTexts(error)).not.toContainEqual(
+      expect.stringContaining(SYNTHETIC_ANSWER_BODY)
+    )
+    expect(events.errors).toEqual([])
+  })
+
+  it("reports a cancellation the server answers with an HTTP error once, without the answer's body", async () => {
+    const answerOther = answerToolCallsWith(() => {
+      // The call is never answered, so only its cancellation ends it.
+    })
+    const server = await startFakeMcpHttpServer((request, body, response) => {
+      if (body.includes('"notifications/cancelled"')) {
+        response.writeHead(500)
+        response.end(SYNTHETIC_ANSWER_BODY)
+        return
+      }
+      answerOther(request, body, response)
+    })
+    const { context, events } = createRecordingContext()
+    const connection = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+    const controller = new AbortController()
+    const call = captureRejection(
+      connection.sendToolCall("echo", {}, controller.signal)
+    )
+    await vi.waitFor(() => {
+      expect(
+        server.receivedRequests.map((request) => request.rpcMethod)
+      ).toContain("tools/call")
+    }, EVENT_WAIT)
+
+    controller.abort(new Error("The person stopped the reply"))
+    await call
+
+    await vi.waitFor(() => expect(events.errors).toHaveLength(1), EVENT_WAIT)
+    expect(
+      server.receivedRequests.map((request) => request.rpcMethod)
+    ).toContain("notifications/cancelled")
+    expect(events.errors.flatMap(listErrorTexts)).not.toContainEqual(
+      expect.stringContaining(SYNTHETIC_ANSWER_BODY)
+    )
+  })
+
+  it("reports an event of a call's event stream that is not JSON once, and returns the call's result", async () => {
+    const server = await startFakeMcpHttpServer(
+      answerToolCallsWith((id, response) => {
+        response.writeHead(200, EVENT_STREAM_ANSWER_HEADERS)
+        response.end(
+          `data: {no\n\ndata: ${JSON.stringify({ jsonrpc: "2.0", id, result: { content: [] } })}\n\n`
+        )
+      })
+    )
+    const { context, events } = createRecordingContext()
+    const connection = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    const result = await connection.sendToolCall("echo", {}, NEVER_ABORTED)
+    await connection.sendToolCall("echo", {}, NEVER_ABORTED)
+
+    expect(result).toEqual({ content: [] })
+    expect(events.errors.map((error) => error.constructor)).toEqual([
+      SyntaxError,
+      SyntaxError
+    ])
+  })
+
+  it("reports an event stream the server refuses to open once", async () => {
+    const answerOther = answerAsMcpServer()
+    const server = await startFakeMcpHttpServer((request, body, response) => {
+      if (request.method === "GET") {
+        response.writeHead(500).end(SYNTHETIC_ANSWER_BODY)
+        return
+      }
+      answerOther(request, body, response)
+    })
+    const { context, events } = createRecordingContext()
+    const connection = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+    await vi.waitFor(() => expect(events.errors).not.toEqual([]), EVENT_WAIT)
+
+    // The SDK reports the refusal a second time right after the first; a
+    // request answered after that shows it was passed on only once.
+    await connection.sendToolCall("echo", { text: "after" }, NEVER_ABORTED)
+
+    expect(events.errors).toHaveLength(1)
+    expect(calculateMcpRequestFailure(events.errors[0])).toEqual({
+      kind: "http-status",
+      status: 500
+    })
+  })
+
+  it("keeps a connection whose event stream sends more than the response limit in events each within it", async () => {
+    const answerOther = answerAsMcpServer()
+    const notification = JSON.stringify({
+      jsonrpc: "2.0",
+      method: "notifications/message",
+      params: { level: "info", data: "x".repeat(1024 * 1024) }
+    })
+    let eventStreamCount = 0
+    const server = await startFakeMcpHttpServer((request, body, response) => {
+      if (request.method !== "GET") {
+        answerOther(request, body, response)
+        return
+      }
+      eventStreamCount += 1
+      if (eventStreamCount > 1) {
+        response.writeHead(405).end()
+        return
+      }
+      // A short retry time makes the SDK open the stream again soon after it
+      // read this one to its end, which shows it read every event.
+      response.writeHead(200, { "content-type": "text/event-stream" })
+      response.write("retry: 10\n\n")
+      for (let index = 0; index < 17; index += 1)
+        response.write(`data: ${notification}\n\n`)
+      response.end()
+    })
+    const { context, events } = createRecordingContext()
+    const connection = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    await vi.waitFor(
+      () => expect(eventStreamCount > 1 || events.closedCount > 0).toBe(true),
+      EVENT_WAIT
+    )
+
+    expect(events.closedCount).toBe(0)
+    expect(events.errors).toEqual([])
+    await expect(
+      connection.sendToolCall("echo", { text: "after" }, NEVER_ABORTED)
+    ).resolves.toEqual(expect.objectContaining({ content: expect.any(Array) }))
   })
 
   it("refuses a redirect within the server's own origin without requesting its target", async () => {
@@ -516,7 +744,7 @@ describe("McpServerConnection over HTTP", () => {
       )
     )
 
-    expect(classifyMcpRequestFailure(error)).toEqual({
+    expect(calculateMcpRequestFailure(error)).toEqual({
       kind: "http-status",
       status: 307
     })

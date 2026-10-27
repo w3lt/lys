@@ -48,14 +48,16 @@ export type McpServerFailure = z.infer<typeof mcpServerFailureSchema>
 /**
  * Validates why the backend does not list one tool of a connected server.
  *
- * @remarks `unsupported-name`: the server's name for the tool is empty or
- * longer than {@link MAXIMUM_MCP_SERVER_TOOL_NAME_LENGTH} characters, or the
- * name the model would call it by is longer than 64 characters.
+ * @remarks `unsupported-name`: the server's name for the tool is empty,
+ * longer than {@link MAXIMUM_MCP_SERVER_TOOL_NAME_LENGTH} characters, or
+ * holds a character a person cannot see, or the name the model would call it
+ * by is longer than 64 characters.
  * `duplicate-name`: another tool of the server is called by the same name
  * once characters outside the tool-name rule are replaced.
  * `unsupported-input-schema`: its input schema is not an object schema,
- * names an argument outside the argument-name rule, nests too deep, or holds
- * a `__proto__` key. `input-schema-too-large`: its input schema is larger
+ * names an argument outside the argument-name rule, nests too deep, holds
+ * a `__proto__` key, or holds a character a person cannot see in a key or a
+ * text. `input-schema-too-large`: its input schema is larger
  * than the backend sends. Adding a reason is a compatibility change for
  * every consumer that branches on it.
  */

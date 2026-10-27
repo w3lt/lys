@@ -227,7 +227,7 @@ async function applyMcpServer(
     status: "read",
     settings: { servers: [settings] }
   })
-  await testApp.app.mcpServerRegistry.applySettings()
+  await testApp.app.mcpServerRegistry.updateServers()
   await vi.waitFor(
     () => {
       expect(

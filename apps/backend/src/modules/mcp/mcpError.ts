@@ -1,4 +1,5 @@
 import {
+  InsufficientScopeError,
   ProtocolError,
   SdkError,
   SdkErrorCode,
@@ -13,13 +14,15 @@ import { McpResponseTooLargeError } from "./mcpResponseLimit"
  * @remarks `timed-out`: the request's own time limit passed. `closed`: the
  * process exited or the connection ended. `http-status`: the server answered
  * with an HTTP status the transport refuses, such as 401, 500, or a
- * redirect. `unreachable`: no HTTP connection could be made. `start-failed`:
- * the stdio command could not be started. `refused`: the server answered
- * with a JSON-RPC error, whose message is the server's untrusted text.
- * `invalid-answer`: the server's answer is not valid MCP. `too-large`: an
- * HTTP answer was longer than `MAXIMUM_MCP_RESPONSE_BYTES`, so Lys stopped
- * reading it. `unknown`: none of these, which is logged as a possible
- * defect.
+ * redirect, or with 403 for a missing scope. `unreachable`: no HTTP
+ * connection could be made. `start-failed`: the stdio command could not be
+ * started. `refused`: the server answered with a JSON-RPC error, whose
+ * message is the server's untrusted text. `invalid-answer`: the server's
+ * answer is not valid MCP, or its tool list has more pages than the SDK was
+ * told to read. `too-large`: an HTTP answer was longer than
+ * `MAXIMUM_MCP_RESPONSE_BYTES`, so Lys stopped reading it. `unknown`: none
+ * of these, such as the stack overflow of the SDK's check of an answer
+ * nested thousands of levels deep, which is logged as a possible defect.
  */
 export type McpRequestFailure =
   | Readonly<{ kind: "timed-out" }>
@@ -40,7 +43,7 @@ export type McpRequestFailure =
   | Readonly<{ kind: "too-large" }>
   | Readonly<{ kind: "unknown" }>
 
-/** Most causes {@link classifyMcpRequestFailure} follows before it gives up. */
+/** Most causes {@link calculateMcpRequestFailure} follows before it gives up. */
 const MAXIMUM_CAUSE_DEPTH = 4
 
 /** Message of the error Node's `fetch` throws when no connection could be made. */
@@ -48,6 +51,7 @@ const FETCH_FAILED_MESSAGE = "fetch failed"
 
 /** Failure kinds that carry no detail, shared by every classification. */
 const FAILURES = Object.freeze({
+  missingScope: Object.freeze({ kind: "http-status", status: 403 }),
   timedOut: Object.freeze({ kind: "timed-out" }),
   closed: Object.freeze({ kind: "closed" }),
   unreachable: Object.freeze({ kind: "unreachable" }),
@@ -68,10 +72,10 @@ const FAILURES = Object.freeze({
  * @remarks The SDK reports a cancelled request as a timeout too, so a caller
  * that cancels must check its own signal before it calls this.
  */
-export function classifyMcpRequestFailure(error: unknown): McpRequestFailure {
+export function calculateMcpRequestFailure(error: unknown): McpRequestFailure {
   let current: unknown = error
   for (let depth = 0; depth <= MAXIMUM_CAUSE_DEPTH; depth += 1) {
-    const failure = classifyOwnFailure(current)
+    const failure = findOwnFailure(current)
     if (failure !== undefined) return failure
     if (!(current instanceof Error) || current.cause === undefined) break
     current = current.cause
@@ -84,11 +88,17 @@ export function classifyMcpRequestFailure(error: unknown): McpRequestFailure {
  *
  * @param error - One error of a chain.
  * @returns Its failure kind, or undefined when only its cause can tell.
+ * @remarks The SDK throws an `InsufficientScopeError` only for an HTTP 403
+ * answer whose `WWW-Authenticate` header names `insufficient_scope`, when no
+ * OAuth provider could ask for the scope, which Lys never sets; its other
+ * authorization error, `UnauthorizedError`, needs such a provider, so it
+ * stays unknown.
  */
-function classifyOwnFailure(error: unknown): McpRequestFailure | undefined {
+function findOwnFailure(error: unknown): McpRequestFailure | undefined {
   if (error instanceof SdkHttpError)
     return Object.freeze({ kind: "http-status", status: error.status })
-  if (error instanceof SdkError) return classifySdkFailure(error)
+  if (error instanceof InsufficientScopeError) return FAILURES.missingScope
+  if (error instanceof SdkError) return findSdkFailure(error)
   if (error instanceof ProtocolError)
     return Object.freeze({ kind: "refused", message: error.message })
   if (error instanceof SyntaxError) return FAILURES.invalidAnswer
@@ -106,7 +116,7 @@ function classifyOwnFailure(error: unknown): McpRequestFailure | undefined {
  * @returns Its failure kind, or undefined for an error that wraps the cause
  * that tells, such as a failed send or a failed protocol negotiation.
  */
-function classifySdkFailure(error: SdkError): McpRequestFailure | undefined {
+function findSdkFailure(error: SdkError): McpRequestFailure | undefined {
   switch (error.code) {
     case SdkErrorCode.RequestTimeout:
       return FAILURES.timedOut

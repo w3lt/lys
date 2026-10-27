@@ -1,6 +1,6 @@
 import type { McpServerFailure } from "@lys/protocol"
 import type { McpServerSettings } from "@lys/share"
-import { classifyMcpRequestFailure, type McpRequestFailure } from "./mcpError"
+import { calculateMcpRequestFailure, type McpRequestFailure } from "./mcpError"
 import McpServerConnection, {
   type McpServerConnectionContext
 } from "./mcpServerConnection"
@@ -78,7 +78,7 @@ export async function openMcpServer(
     if (context.abortSignal.aborted) return CANCELLED_OPENING
     if (timeoutSignal.aborted)
       return buildFailedOpening({ kind: "timed-out" }, undefined)
-    const failure = classifyMcpRequestFailure(error)
+    const failure = calculateMcpRequestFailure(error)
     return buildFailedOpening(
       failure,
       failure.kind === "unknown" ? error : undefined

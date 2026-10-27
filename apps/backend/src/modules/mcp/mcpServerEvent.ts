@@ -77,6 +77,20 @@ export type McpServerEvent =
       error: unknown
     }>
   | Readonly<{
+      /** A tool call failed before it was sent to the server. */
+      kind: "tool-call-not-sent"
+      /** Name of the server. */
+      serverName: string
+      /** Name the server calls the tool by. */
+      serverToolName: string
+      /**
+       * Why: the server is not connected when the call runs, which includes
+       * a server the settings no longer name, or the connected server no
+       * longer lists the tool under the name it was offered by.
+       */
+      reason: "server-not-connected" | "tool-no-longer-listed"
+    }>
+  | Readonly<{
       /** A tool call failed before the server returned a result. */
       kind: "tool-call-failed"
       /** Name of the server. */

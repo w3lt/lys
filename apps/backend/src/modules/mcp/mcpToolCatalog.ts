@@ -72,18 +72,23 @@ const DESCRIPTION_ELLIPSIS = "…"
  * @param tools - Every tool the server listed, in its order; untrusted.
  * @returns A frozen catalog of the first
  * {@link MAXIMUM_MCP_SERVER_TOOL_COUNT} tools. Each tool is listed, or
- * skipped with a reason: `unsupported-name` when its name is empty or longer
- * than {@link MAXIMUM_MCP_SERVER_TOOL_NAME_LENGTH} characters or the
- * model-facing name is longer than 64 characters; `duplicate-name` when an
- * earlier tool has the same model-facing name; `unsupported-input-schema`
- * when its input schema is not one Lys sends; `input-schema-too-large` when
- * that schema is larger than 64 KiB as JSON.
+ * skipped with a reason: `unsupported-name` when its name is empty, longer
+ * than {@link MAXIMUM_MCP_SERVER_TOOL_NAME_LENGTH} characters, or holds a
+ * character a person cannot see, or the model-facing name is longer than 64
+ * characters; `duplicate-name` when an earlier tool has the same
+ * model-facing name; `unsupported-input-schema` when its input schema is not
+ * one Lys sends, or holds a character a person cannot see in any key or
+ * text; `input-schema-too-large` when that schema is larger than 64 KiB as
+ * JSON.
  * @remarks The model-facing name is `mcp__<server>__` followed by the
  * server's name for the tool, each character outside `[A-Za-z0-9_-]`
  * replaced by `_`. The description is the tool's own, else its title, else
- * a sentence naming the tool and the server; it is cleaned of characters a
- * person cannot see and cut to {@link MAXIMUM_MCP_TOOL_DESCRIPTION_LENGTH}
- * characters with `…`.
+ * its annotations' title, else a sentence naming the tool and the server; it
+ * is cleaned of characters a person cannot see and cut to
+ * {@link MAXIMUM_MCP_TOOL_DESCRIPTION_LENGTH} characters with `…`. The name
+ * and the input schema are sent as the server wrote them, so a tool is
+ * listed only when both are text a person can see: what the model reads and
+ * what the approval prompt and Settings show are then the same.
  */
 export function buildMcpToolCatalog(
   serverName: McpServerName,
@@ -137,20 +142,8 @@ function buildMcpToolEntry(
       UNSUPPORTED_TOOL_NAME_CHARACTER_PATTERN,
       TOOL_NAME_REPLACEMENT
     )
-  if (
-    tool.name.length === 0 ||
-    tool.name.length > MAXIMUM_MCP_SERVER_TOOL_NAME_LENGTH ||
-    !toolNameSchema.safeParse(name).success
-  )
-    return buildSkippedEntry("unsupported-name")
-  if (listedNames.has(name)) return buildSkippedEntry("duplicate-name")
-  if (!isWithinJsonValueLimits(tool.inputSchema))
-    return buildSkippedEntry("unsupported-input-schema")
-  if (
-    Buffer.byteLength(JSON.stringify(tool.inputSchema)) >
-    MAXIMUM_INPUT_SCHEMA_BYTES
-  )
-    return buildSkippedEntry("input-schema-too-large")
+  const skippedReason = findSkippedToolReason(name, tool, listedNames)
+  if (skippedReason !== undefined) return buildSkippedEntry(skippedReason)
   const parsed = toolDefinitionSchema.safeParse({
     name,
     description: formatToolDescription(serverName, tool),
@@ -167,6 +160,83 @@ function buildMcpToolEntry(
 }
 
 /**
+ * Finds why one server tool is skipped before its definition is checked.
+ *
+ * @param name - Model-facing name of the tool.
+ * @param tool - Untrusted tool the server listed.
+ * @param listedNames - Model-facing names of the server's tools listed so
+ * far.
+ * @returns The first reason that applies, in the order the reasons are
+ * documented; undefined when none does.
+ */
+function findSkippedToolReason(
+  name: string,
+  tool: Tool,
+  listedNames: ReadonlySet<string>
+): SkippedMcpToolReason | undefined {
+  if (
+    !isSupportedServerToolName(tool.name) ||
+    !toolNameSchema.safeParse(name).success
+  )
+    return "unsupported-name"
+  if (listedNames.has(name)) return "duplicate-name"
+  if (
+    !isWithinJsonValueLimits(tool.inputSchema) ||
+    !isVisibleJsonValue(tool.inputSchema)
+  )
+    return "unsupported-input-schema"
+  if (
+    Buffer.byteLength(JSON.stringify(tool.inputSchema)) >
+    MAXIMUM_INPUT_SCHEMA_BYTES
+  )
+    return "input-schema-too-large"
+  return undefined
+}
+
+/**
+ * Answers whether the server's name for a tool is one Lys lists.
+ *
+ * @param serverToolName - Untrusted name the server gave the tool.
+ * @returns Whether it is 1 to {@link MAXIMUM_MCP_SERVER_TOOL_NAME_LENGTH}
+ * characters and holds no character a person cannot see, so the approval
+ * prompt and Settings show the name the call sends.
+ */
+function isSupportedServerToolName(serverToolName: string): boolean {
+  return (
+    serverToolName.length > 0 &&
+    serverToolName.length <= MAXIMUM_MCP_SERVER_TOOL_NAME_LENGTH &&
+    isVisibleText(serverToolName)
+  )
+}
+
+/**
+ * Answers whether a JSON value holds only text a person can see.
+ *
+ * @param value - Untrusted JSON value, already checked to nest within the
+ * JSON value limits.
+ * @returns Whether every key and every string in it, at any depth, holds no
+ * character {@link formatVisibleText} removes.
+ */
+function isVisibleJsonValue(value: unknown): boolean {
+  if (typeof value === "string") return isVisibleText(value)
+  if (Array.isArray(value)) return value.every(isVisibleJsonValue)
+  if (typeof value !== "object" || value === null) return true
+  return Object.entries(value).every(
+    ([key, item]) => isVisibleText(key) && isVisibleJsonValue(item)
+  )
+}
+
+/**
+ * Answers whether text holds only characters a person can see.
+ *
+ * @param text - Untrusted text.
+ * @returns Whether {@link formatVisibleText} leaves it unchanged.
+ */
+function isVisibleText(text: string): boolean {
+  return formatVisibleText(text) === text
+}
+
+/**
  * Builds the entry of a skipped tool.
  *
  * @param reason - Why it is skipped.
@@ -180,7 +250,8 @@ function buildSkippedEntry(reason: SkippedMcpToolReason): McpToolEntry {
  * Formats the description the model and Settings show for one tool.
  *
  * @param serverName - Name of the server.
- * @param tool - Untrusted tool the server listed.
+ * @param tool - Untrusted tool the server listed, whose name holds only
+ * characters a person can see.
  * @returns The first of the tool's description, its title, and its
  * annotations' title that is not blank once cleaned of characters a person
  * cannot see and trimmed; else a sentence naming the tool and the server. Cut to
@@ -195,7 +266,7 @@ function formatToolDescription(serverName: McpServerName, tool: Tool): string {
         candidate === undefined ? "" : formatVisibleText(candidate).trim()
       )
       .find((candidate) => candidate !== "") ??
-    `Tool ${formatSkippedToolName(tool.name)} of the MCP server ${serverName}.`
+    `Tool ${tool.name} of the MCP server ${serverName}.`
   if (description.length <= MAXIMUM_MCP_TOOL_DESCRIPTION_LENGTH)
     return description
   return (

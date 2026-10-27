@@ -6,7 +6,10 @@ import {
   openMcpServer,
   type McpServerOpening
 } from "../../../../src/modules/mcp/mcpServerOpening"
-import type { RecordedConnectionEvents } from "../../support/mcpTestServers"
+import type {
+  McpHttpRoute,
+  RecordedConnectionEvents
+} from "../../support/mcpTestServers"
 import {
   answerAsMcpServer,
   answerWithInvalidJson,
@@ -52,6 +55,59 @@ const SILENT_SERVER_SETTINGS: McpServerSettings = Object.freeze({
 })
 
 /**
+ * How long the slow-exit servers keep running after their standard input
+ * ends, in milliseconds: well within the two seconds the SDK waits for a
+ * process to exit, and long enough that a check made at once sees it run.
+ */
+const SLOW_EXIT_MILLISECONDS = 500
+
+/**
+ * Script of a stdio server that reports its process identifier, answers no
+ * request, and exits {@link SLOW_EXIT_MILLISECONDS} after its standard
+ * input ends.
+ */
+const SLOW_EXIT_SILENT_SERVER_SCRIPT = [
+  'process.stderr.write("pid " + process.pid + "\\n")',
+  "process.stdin.resume()",
+  `process.stdin.on("end", () => setTimeout(() => process.exit(0), ${SLOW_EXIT_MILLISECONDS}))`
+].join(";")
+
+/**
+ * Script of a stdio server that reports its process identifier, refuses
+ * every request with a JSON-RPC error, the handshake included, and exits
+ * {@link SLOW_EXIT_MILLISECONDS} after its standard input ends.
+ */
+const SLOW_EXIT_REFUSING_SERVER_SCRIPT = [
+  'process.stderr.write("pid " + process.pid + "\\n")',
+  'require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {',
+  "  const message = JSON.parse(line)",
+  "  if (message.id === undefined) return",
+  '  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, error: { code: -32603, message: "not today" } }) + "\\n")',
+  "})",
+  `process.stdin.on("end", () => setTimeout(() => process.exit(0), ${SLOW_EXIT_MILLISECONDS}))`
+].join("\n")
+
+/**
+ * Builds the settings of a stdio server run from an inline script.
+ *
+ * @param name - Server name.
+ * @param script - Script Node runs.
+ * @returns Validated-shape settings.
+ */
+function buildScriptServerSettings(
+  name: string,
+  script: string
+): McpServerSettings {
+  return Object.freeze({
+    name,
+    transport: "stdio",
+    command: process.execPath,
+    arguments: Object.freeze(["-e", script]),
+    environment: Object.freeze([])
+  })
+}
+
+/**
  * Script of a stdio server that reports its process identifier, answers
  * the handshake, never answers anything else, and exits once its standard
  * input ends.
@@ -82,6 +138,126 @@ const MISSING_COMMAND_SETTINGS: McpServerSettings = Object.freeze({
   arguments: Object.freeze([]),
   environment: Object.freeze([])
 })
+
+/**
+ * Nesting depth of the input schema of {@link DEEP_SCHEMA_TOOL_TEXT}, deep
+ * enough that the SDK's check of a tool list runs out of stack.
+ */
+const DEEP_SCHEMA_DEPTH = 10_000
+
+/**
+ * Pieces of {@link DEEP_SCHEMA_TOOL_TEXT}: the tool's start, the start of
+ * one nesting level, the innermost schema, the end of one level, and the
+ * tool's end.
+ */
+const DEEP_SCHEMA_TOOL_PIECES = Object.freeze({
+  start: '{"name":"deep","inputSchema":',
+  levelStart: '{"type":"object","properties":{"a":',
+  innermost: '{"type":"object"}',
+  levelEnd: "}}",
+  end: "}"
+})
+
+/**
+ * JSON text of a tool whose input schema nests an object property
+ * {@link DEEP_SCHEMA_DEPTH} levels deep, built as text because building it
+ * as an object and serializing it would itself run out of stack.
+ */
+const DEEP_SCHEMA_TOOL_TEXT =
+  DEEP_SCHEMA_TOOL_PIECES.start +
+  DEEP_SCHEMA_TOOL_PIECES.levelStart.repeat(DEEP_SCHEMA_DEPTH) +
+  DEEP_SCHEMA_TOOL_PIECES.innermost +
+  DEEP_SCHEMA_TOOL_PIECES.levelEnd.repeat(DEEP_SCHEMA_DEPTH) +
+  DEEP_SCHEMA_TOOL_PIECES.end
+
+/**
+ * Script of a stdio server that answers the handshake and lists one tool
+ * of JSON text {@link DEEP_SCHEMA_TOOL_TEXT}. The script builds the text
+ * from its pieces, since the whole text is longer than Linux allows one
+ * command-line argument to be.
+ */
+const DEEP_SCHEMA_STDIO_SERVER_SCRIPT = [
+  `const pieces = ${JSON.stringify(DEEP_SCHEMA_TOOL_PIECES)}`,
+  `const toolText = pieces.start + pieces.levelStart.repeat(${DEEP_SCHEMA_DEPTH}) + pieces.innermost + pieces.levelEnd.repeat(${DEEP_SCHEMA_DEPTH}) + pieces.end`,
+  'require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {',
+  "  const message = JSON.parse(line)",
+  "  if (message.id === undefined) return",
+  '  const head = \'{"jsonrpc":"2.0","id":\' + message.id + \',"result":\'',
+  '  if (message.method === "initialize")',
+  '    process.stdout.write(head + JSON.stringify({ protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "deep", version: "1.0.0" } }) + "}\\n")',
+  '  else if (message.method === "tools/list")',
+  '    process.stdout.write(head + \'{"tools":[\' + toolText + "]}}\\n")',
+  "})"
+].join("\n")
+
+/**
+ * Builds a route that answers as {@link answerAsMcpServer} does, except
+ * that it lists one tool of JSON text {@link DEEP_SCHEMA_TOOL_TEXT}.
+ *
+ * @returns The route.
+ */
+function answerWithDeepSchemaTool(): McpHttpRoute {
+  const answerOther = answerAsMcpServer()
+  return (request, body, response) => {
+    const message =
+      request.method === "POST"
+        ? (JSON.parse(body) as { id?: number; method?: string })
+        : {}
+    if (message.method !== "tools/list") {
+      answerOther(request, body, response)
+      return
+    }
+    response.writeHead(200, {
+      "content-type": "application/json",
+      "mcp-session-id": "test-session"
+    })
+    response.end(
+      `{"jsonrpc":"2.0","id":${String(message.id)},"result":{"tools":[${DEEP_SCHEMA_TOOL_TEXT}]}}`
+    )
+  }
+}
+
+/**
+ * Builds a route that answers as {@link answerAsMcpServer} does, except
+ * that it lists one tool per page of its tool list.
+ *
+ * @param pageCount - Pages of the list; page `n` lists the tool `tool<n>`
+ * and names page `n + 1` as its next page, except the last.
+ * @returns The route.
+ */
+function answerWithToolPages(pageCount: number): McpHttpRoute {
+  const answerOther = answerAsMcpServer()
+  return (request, body, response) => {
+    const message =
+      request.method === "POST"
+        ? (JSON.parse(body) as {
+            id?: number
+            method?: string
+            params?: { cursor?: string }
+          })
+        : {}
+    if (message.method !== "tools/list") {
+      answerOther(request, body, response)
+      return
+    }
+    const page = Number(message.params?.cursor ?? "1")
+    const nextCursor = page < pageCount ? String(page + 1) : undefined
+    response.writeHead(200, {
+      "content-type": "application/json",
+      "mcp-session-id": "test-session"
+    })
+    response.end(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          tools: [{ name: `tool${page}`, inputSchema: { type: "object" } }],
+          ...(nextCursor === undefined ? {} : { nextCursor })
+        }
+      })
+    )
+  }
+}
 
 /**
  * Opens a server and closes its connection, if it connected, when the
@@ -192,6 +368,43 @@ describe("openMcpServer", () => {
     ])
   })
 
+  it("reads a tool list of 16 pages, the most the backend reads", async () => {
+    const server = await startFakeMcpHttpServer(answerWithToolPages(16))
+    const { context } = createRecordingContext()
+
+    const opening = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    if (opening.status !== "connected")
+      throw new Error("Expected the server to connect")
+    expect(opening.catalog.definitions).toHaveLength(16)
+    expect(opening.catalog.definitions.at(-1)?.name).toBe("mcp__remote__tool16")
+  })
+
+  it("fails a tool list of 17 pages as a protocol error after reading 16", async () => {
+    const server = await startFakeMcpHttpServer(answerWithToolPages(17))
+    const { context } = createRecordingContext()
+
+    const opening = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    expect(opening).toEqual({
+      status: "failed",
+      reason: "protocol-error",
+      failure: { kind: "invalid-answer" },
+      unknownError: undefined
+    })
+    expect(
+      server.receivedRequests.filter(
+        (request) => request.rpcMethod === "tools/list"
+      )
+    ).toHaveLength(16)
+  })
+
   it.each([
     [401, "unauthorized"],
     [403, "unauthorized"],
@@ -215,6 +428,61 @@ describe("openMcpServer", () => {
       unknownError: undefined
     })
     expect(Object.isFrozen(opening)).toBe(true)
+  })
+
+  it("reports HTTP 403 for a missing scope as unauthorized", async () => {
+    const server = await startFakeMcpHttpServer(
+      answerWithStatus(403, {
+        "www-authenticate":
+          'Bearer error="insufficient_scope", scope="tools:read"'
+      })
+    )
+    const { context } = createRecordingContext()
+
+    const opening = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    expect(opening).toEqual({
+      status: "failed",
+      reason: "unauthorized",
+      failure: { kind: "http-status", status: 403 },
+      unknownError: undefined
+    })
+  })
+
+  it("fails an HTTP server whose tool list holds a schema too deep for the SDK's check as a protocol error", async () => {
+    const server = await startFakeMcpHttpServer(answerWithDeepSchemaTool())
+    const { context } = createRecordingContext()
+
+    const opening = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    expect(opening).toEqual({
+      status: "failed",
+      reason: "protocol-error",
+      failure: { kind: "unknown" },
+      unknownError: expect.any(RangeError)
+    })
+  })
+
+  it("fails a stdio server whose tool list holds a schema too deep for the SDK's check as a protocol error", async () => {
+    const { context } = createRecordingContext()
+
+    const opening = await openForTest(
+      buildScriptServerSettings("deep", DEEP_SCHEMA_STDIO_SERVER_SCRIPT),
+      context
+    )
+
+    expect(opening).toEqual({
+      status: "failed",
+      reason: "protocol-error",
+      failure: { kind: "unknown" },
+      unknownError: expect.any(RangeError)
+    })
   })
 
   it("reports a port nothing listens on as unreachable", async () => {
@@ -410,6 +678,62 @@ describe("openMcpServer", () => {
       () => expect(isProcessRunning(pid)).toBe(false),
       EVENT_WAIT
     )
+  })
+
+  it("settles a handshake cancelled by the caller only after the server's process has ended", async () => {
+    const controller = new AbortController()
+    onTestFinished(() => controller.abort())
+    const { context, events } = createRecordingContext(controller.signal)
+    const pending = openForTest(
+      buildScriptServerSettings("slow-exit", SLOW_EXIT_SILENT_SERVER_SCRIPT),
+      context
+    )
+    const pid = await waitForReportedPid(events)
+
+    controller.abort(new Error("The person pressed Restart"))
+    const opening = await pending
+
+    expect(opening).toEqual({ status: "cancelled" })
+    expect(isProcessRunning(pid)).toBe(false)
+  })
+
+  it("settles a handshake that timed out only after the server's process has ended", async () => {
+    const { context, events } = createRecordingContext()
+    const pending = openForTest(
+      buildScriptServerSettings("slow-exit", SLOW_EXIT_SILENT_SERVER_SCRIPT),
+      context,
+      300
+    )
+    const pid = await waitForReportedPid(events)
+
+    const opening = await pending
+
+    expect(opening).toEqual({
+      status: "failed",
+      reason: "timed-out",
+      failure: { kind: "timed-out" },
+      unknownError: undefined
+    })
+    expect(isProcessRunning(pid)).toBe(false)
+  })
+
+  it("settles a refused handshake only after the server's process has ended", async () => {
+    const { context, events } = createRecordingContext()
+    const pending = openForTest(
+      buildScriptServerSettings("slow-exit", SLOW_EXIT_REFUSING_SERVER_SCRIPT),
+      context
+    )
+    const pid = await waitForReportedPid(events)
+
+    const opening = await pending
+
+    expect(opening).toEqual({
+      status: "failed",
+      reason: "protocol-error",
+      failure: { kind: "refused", message: "not today" },
+      unknownError: undefined
+    })
+    expect(isProcessRunning(pid)).toBe(false)
   })
 
   it("returns cancelled for a signal aborted before the opening", async () => {

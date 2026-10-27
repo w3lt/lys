@@ -103,17 +103,18 @@ async function writeMcpSettings(
  *
  * @param settingsFilePath - Settings file the registry reads; it may not
  * exist yet.
- * @returns The application, the registry, its opener, and the events it
- * reported.
+ * @returns The application, the registry, its settings reader and opener,
+ * both spied on, and the events it reported.
  */
 async function createMcpRouteApp(settingsFilePath: string) {
   const events: McpServerEvent[] = []
+  const readSettings = vi.fn(() => readMcpSettings(settingsFilePath))
   const openServer = vi.fn(
     (settings: McpServerSettings, context: McpServerConnectionContext) =>
       openMcpServer(settings, context, OPENING_TIMEOUT_MILLISECONDS)
   )
   const registry = new McpServerRegistry({
-    readSettings: () => readMcpSettings(settingsFilePath),
+    readSettings,
     openServer,
     workingDirectory: process.cwd(),
     reportEvent: (event) => events.push(event)
@@ -125,7 +126,7 @@ async function createMcpRouteApp(settingsFilePath: string) {
   await updateFastifyWithHttpTransport(app)
   app.decorate("mcpServerRegistry", registry)
   await registerMcpRoutes(app)
-  return { app, registry, openServer, events }
+  return { app, registry, readSettings, openServer, events }
 }
 
 /**
@@ -146,17 +147,23 @@ async function waitForServerList(
 
 describe("registerMcpRoutes", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
   describe("server list", () => {
-    it("lists no server before the settings are applied", async () => {
-      const { app, openServer } = await createMcpRouteApp(
-        await createSettingsFilePath()
-      )
+    it("lists no server, and neither reads nor applies the settings file, before the settings are applied", async () => {
+      const settingsFilePath = await createSettingsFilePath()
+      await writeMcpSettings(settingsFilePath, [FILES_SERVER])
+      const { app, registry, readSettings, openServer } =
+        await createMcpRouteApp(settingsFilePath)
 
       const response = await app.inject({ method: "GET", url: SERVERS_URL })
+      // Settings reads run in call order, so once this sync answers, any
+      // read the list request started has been applied too.
+      await app.inject({ method: "POST", url: SYNC_URL, payload: {} })
+      await waitForServerList(registry, FILES_CONNECTED)
 
       expect(response.statusCode).toBe(200)
       expect(response.json()).toEqual({ settings: "applied", servers: [] })
       expect(mcpServerListSchema.safeParse(response.json()).success).toBe(true)
-      expect(openServer).not.toHaveBeenCalled()
+      expect(readSettings).toHaveBeenCalledOnce()
+      expect(openServer).toHaveBeenCalledOnce()
     })
 
     it("lists the applied servers and their states without any of their settings", async () => {

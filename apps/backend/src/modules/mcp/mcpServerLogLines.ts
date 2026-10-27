@@ -52,11 +52,11 @@ export default class McpServerLogLines {
     const lines = (this.#pendingText + text).split(LINE_BREAK_PATTERN)
     this.#pendingText = lines.pop() ?? ""
     for (const line of lines) {
-      if (!this.#isDroppingRest) this.#reportNonBlankLine(line)
+      if (!this.#isDroppingRest) this.#handleReadLine(line)
       this.#isDroppingRest = false
     }
     if (this.#pendingText.length < MAXIMUM_SERVER_LOG_LINE_LENGTH) return
-    if (!this.#isDroppingRest) this.#reportNonBlankLine(this.#pendingText)
+    if (!this.#isDroppingRest) this.#handleReadLine(this.#pendingText)
     this.#pendingText = ""
     this.#isDroppingRest = true
   }
@@ -66,7 +66,7 @@ export default class McpServerLogLines {
    *
    * @param line - Line without its line break.
    */
-  #reportNonBlankLine(line: string): void {
+  #handleReadLine(line: string): void {
     if (line.trim() === "") return
     this.#reportLine(line.slice(0, MAXIMUM_SERVER_LOG_LINE_LENGTH))
   }

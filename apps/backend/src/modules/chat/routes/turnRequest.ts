@@ -139,27 +139,81 @@ export function findRequestedBackendTools(
     builtInTools.map((entry) => [entry.definition.name, entry])
   )
   const offeredBuiltInTools: BuiltInToolEntry[] = []
-  const mcpTools: TurnMcpTool[] = []
-  const unknownNames: string[] = []
-  let notConnectedMcpToolName: string | undefined
+  const otherNames: string[] = []
   for (const name of tools?.backendToolNames ?? []) {
     const builtInTool = builtInByName.get(name)
-    if (builtInTool !== undefined) {
-      offeredBuiltInTools.push(builtInTool)
-      continue
-    }
+    if (builtInTool === undefined) otherNames.push(name)
+    else offeredBuiltInTools.push(builtInTool)
+  }
+  const offeredMcpTools = findOfferedMcpTools(otherNames, findMcpTool)
+  if (offeredMcpTools.unknownNames.length > 0)
+    throw new UnknownBackendToolError(offeredMcpTools.unknownNames)
+  return Object.freeze({
+    builtInTools: Object.freeze(offeredBuiltInTools),
+    mcpTools: offeredMcpTools.tools,
+    notConnectedMcpToolName: offeredMcpTools.notConnectedToolName
+  })
+}
+
+/** The MCP tools among a request's offered names that are not built in. */
+type OfferedMcpTools = Readonly<{
+  /** Offered tools whose server is connected, in offer order. */
+  tools: readonly TurnMcpTool[]
+  /**
+   * Name of the first offered tool whose server is applied but not
+   * connected now; undefined when there is none.
+   */
+  notConnectedToolName: string | undefined
+  /**
+   * Names, in offer order, that belong to no applied server's listed tool;
+   * a name without the `mcp__` prefix is always among them.
+   */
+  unknownNames: readonly string[]
+}>
+
+/**
+ * Finds the MCP tools among offered names that belong to no built-in tool.
+ *
+ * @param names - Offered names that belong to no built-in tool, in offer
+ * order.
+ * @param findMcpTool - Looks up one MCP tool in the servers as they are
+ * now; called only for names with the `mcp__` prefix.
+ * @returns The found tools, the first name whose server is not connected,
+ * and the names no server has, each in offer order.
+ */
+function findOfferedMcpTools(
+  names: readonly string[],
+  findMcpTool: (toolName: string) => McpTurnToolLookup
+): OfferedMcpTools {
+  const tools: TurnMcpTool[] = []
+  const unknownNames: string[] = []
+  let notConnectedToolName: string | undefined
+  for (const name of names) {
     const lookup: McpTurnToolLookup = name.startsWith(MCP_TOOL_NAME_PREFIX)
       ? findMcpTool(name)
       : { status: "unknown" }
-    if (lookup.status === "found") mcpTools.push(lookup.tool)
-    else if (lookup.status === "not-connected") notConnectedMcpToolName ??= name
-    else unknownNames.push(name)
+    switch (lookup.status) {
+      case "found":
+        tools.push(lookup.tool)
+        break
+      case "not-connected":
+        notConnectedToolName ??= name
+        break
+      case "unknown":
+        unknownNames.push(name)
+        break
+      default: {
+        const unhandledLookup: never = lookup
+        throw new TypeError(
+          `Unhandled MCP tool lookup: ${JSON.stringify(unhandledLookup)}`
+        )
+      }
+    }
   }
-  if (unknownNames.length > 0) throw new UnknownBackendToolError(unknownNames)
   return Object.freeze({
-    builtInTools: Object.freeze(offeredBuiltInTools),
-    mcpTools: Object.freeze(mcpTools),
-    notConnectedMcpToolName
+    tools: Object.freeze(tools),
+    notConnectedToolName,
+    unknownNames: Object.freeze(unknownNames)
   })
 }
 

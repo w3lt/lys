@@ -624,7 +624,7 @@ async function handleMcpToolCall(
   if (approval.status === "rejected") return approval.message
   let outcome: ToolCallRunOutcome
   try {
-    const result = await tool.mcpTool.callTool(
+    const result = await tool.mcpTool.sendToolCall(
       toolCall.checkedCall.arguments,
       handling.abortSignal
     )

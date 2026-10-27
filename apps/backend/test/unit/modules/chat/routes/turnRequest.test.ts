@@ -46,7 +46,7 @@ const ECHO_TOOL: TurnMcpTool = Object.freeze({
     serverToolName: "echo",
     inputSchema: { type: "object" }
   }),
-  callTool: () => Promise.reject(new Error("Unexpected MCP call"))
+  sendToolCall: () => Promise.reject(new Error("Unexpected MCP call"))
 })
 
 /**

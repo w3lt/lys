@@ -19,9 +19,11 @@ import {
   buildMcpServerDraft,
   isMcpServerDraftChanged,
   parseMcpServerDraft,
+  type McpDraftProblemEntries,
   type McpServerDraft,
   type McpServerDraftField,
   type McpServerDraftParse,
+  type McpServerDraftProblemReport,
   type McpServerDraftProblems
 } from "@/lib/models/mcp-server-draft"
 import { parseMcpServerJson } from "@/lib/models/mcp-server-json"
@@ -65,8 +67,17 @@ type McpEditorShortcut = "close" | "save" | "none"
 const MCP_SERVER_JSON_PLACEHOLDER =
   '{ "mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] } } }'
 
+/** No field problem. */
+const NO_FIELD_PROBLEMS: McpServerDraftProblems = Object.freeze({})
+
+/** No row problem. */
+const NO_PROBLEM_ENTRIES: McpDraftProblemEntries = Object.freeze({})
+
 /** No problem shown, before the first save attempt or for a valid draft. */
-const NO_PROBLEMS: McpServerDraftProblems = Object.freeze({})
+const NO_PROBLEMS: McpServerDraftProblemReport = Object.freeze({
+  problems: NO_FIELD_PROBLEMS,
+  problemEntries: NO_PROBLEM_ENTRIES
+})
 
 /**
  * Builds the draft the editor opens with.
@@ -76,9 +87,12 @@ const NO_PROBLEMS: McpServerDraftProblems = Object.freeze({})
  * saved server's draft.
  */
 function buildTargetDraft(target: McpEditorTarget): McpServerDraft {
-  return target.kind === "new"
-    ? buildEmptyMcpServerDraft(target.transport)
-    : buildMcpServerDraft(target.server)
+  switch (target.kind) {
+    case "new":
+      return buildEmptyMcpServerDraft(target.transport)
+    case "server":
+      return buildMcpServerDraft(target.server)
+  }
 }
 
 /**
@@ -88,34 +102,44 @@ function buildTargetDraft(target: McpEditorTarget): McpServerDraft {
  * @returns The saved server's name, or undefined for a new server.
  */
 function findMcpEditorServerName(target: McpEditorTarget): string | undefined {
-  return target.kind === "server" ? target.server.name : undefined
+  switch (target.kind) {
+    case "new":
+      return undefined
+    case "server":
+      return target.server.name
+    default: {
+      const unhandledTarget: never = target
+      return unhandledTarget
+    }
+  }
 }
 
 /**
- * Selects the problems the editor shows.
+ * Builds the problems the editor shows.
  *
  * @param parse - Draft checked against the server rules and the other names.
  * @param saveAttemptCount - Number of save attempts so far.
- * @returns Each field's first problem from the first save attempt on; none
- * before it or while the draft is valid.
+ * @returns Each field's first problem, and the row input each list's
+ * problem concerns, from the first save attempt on; none before it or while
+ * the draft is valid.
  */
-function selectShownProblems(
+function buildShownProblems(
   parse: McpServerDraftParse,
   saveAttemptCount: number
-): McpServerDraftProblems {
+): McpServerDraftProblemReport {
   if (saveAttemptCount === 0 || parse.status === "valid") return NO_PROBLEMS
-  return parse.problems
+  return parse
 }
 
 /**
- * Selects the failure of a save the editor sent.
+ * Formats the failure of a save the editor sent.
  *
  * @param saveState - Latest save of the servers.
  * @param hasSentSave - Whether this editor sent a save.
  * @returns Why the latest save failed, once this editor sent one; otherwise
  * an empty string, so an earlier editor's failure is not shown.
  */
-function selectSaveError(
+function formatSaveError(
   saveState: McpSettingsSaveState,
   hasSentSave: boolean
 ): string {
@@ -160,6 +184,33 @@ function runMcpEditorShortcut(
   event.preventDefault()
   if (shortcut === "close") onClose()
   else event.currentTarget.requestSubmit()
+}
+
+/**
+ * Finds the control focus moves to for one field's problem.
+ *
+ * @param fieldRefs - Field hosts of the editor.
+ * @param field - Field with the problem.
+ * @returns For a list, the row input its problem concerns while one is
+ * attached, otherwise the list's group; for another field, its input. Null
+ * while that host is not attached.
+ */
+function findDraftFieldFocusTarget(
+  fieldRefs: McpFieldRefs,
+  field: McpServerDraftField
+): HTMLElement | null {
+  switch (field) {
+    case "environment":
+      return fieldRefs.environmentEntry.current ?? fieldRefs.environment.current
+    case "headers":
+      return fieldRefs.headersEntry.current ?? fieldRefs.headers.current
+    case "name":
+    case "command":
+    case "arguments":
+    case "url":
+    case "token":
+      return fieldRefs[field].current
+  }
 }
 
 /**
@@ -376,7 +427,8 @@ type McpEditorTopBarProps = {
  * what the editor is open for.
  *
  * @remarks The parent owns every value; the bar owns no state. The back
- * button is named `Back to MCP servers`. The kind, `new server` or
+ * button is named by its visible text, `mcp servers`, after a chevron
+ * hidden from assistive technology. The kind, `new server` or
  * `editing · <name>`, is the editor's heading.
  * @param props - Target, change and save states, and the close action.
  * @returns The top bar.
@@ -390,7 +442,6 @@ function McpEditorTopBar({
   return (
     <div className="settings-view__mcp-editor-top">
       <button
-        aria-label="Back to MCP servers"
         className="settings-view__mcp-back"
         disabled={isSaving}
         onClick={onClose}
@@ -427,7 +478,8 @@ type McpDraftProblemSummaryProps = {
  * @remarks The parent owns the problems, the host, and moving focus; the
  * summary owns no state. It is a group named by its heading, `Fix N fields
  * to save:`, that takes focus only programmatically. Each field is a button
- * named by the field's label and its problem, in the editor's order.
+ * named by the field's label and its problem, in the editor's order, that
+ * asks the parent to move focus to the field's control.
  * @param props - Problems, the host, and the parent-owned focus move.
  * @returns The summary.
  */
@@ -506,9 +558,11 @@ type McpDraftFocusHosts = {
  * needs it.
  *
  * @remarks Focus moves to the name field when the editor appears. In the
- * layout phase after each save attempt, focus moves to the only field with
- * a problem, or to the summary when several have one; an attempt without a
- * problem leaves focus where it is.
+ * layout phase after each save attempt, focus moves to the control of the
+ * only field with a problem, which for a list is the row input its problem
+ * concerns, when there is one, or the list's group; when several fields
+ * have one, focus moves to the summary. An attempt without a problem leaves
+ * focus where it is.
  * @param saveAttemptCount - Reactive count of the editor's save attempts.
  * @param problems - Problems shown in the current render, read when focus
  * moves.
@@ -525,23 +579,27 @@ function useMcpDraftFocus(
   const commandRef = useRef<HTMLInputElement>(null)
   const argumentsRef = useRef<HTMLInputElement>(null)
   const environmentRef = useRef<HTMLFieldSetElement>(null)
+  const environmentEntryRef = useRef<HTMLInputElement>(null)
   const urlRef = useRef<HTMLInputElement>(null)
   const tokenRef = useRef<HTMLInputElement>(null)
   const headersRef = useRef<HTMLFieldSetElement>(null)
+  const headersEntryRef = useRef<HTMLInputElement>(null)
   const summaryRef = useRef<HTMLFieldSetElement>(null)
   const fieldRefs: McpFieldRefs = {
     name: nameRef,
     command: commandRef,
     arguments: argumentsRef,
     environment: environmentRef,
+    environmentEntry: environmentEntryRef,
     url: urlRef,
     token: tokenRef,
-    headers: headersRef
+    headers: headersRef,
+    headersEntry: headersEntryRef
   }
   const handleSaveAttempt = useEffectEvent((): void => {
     if (problemListings.length > 1) summaryRef.current?.focus()
     else if (problemListings.length === 1)
-      fieldRefs[problemListings[0].field].current?.focus()
+      findDraftFieldFocusTarget(fieldRefs, problemListings[0].field)?.focus()
   })
 
   useLayoutEffect(() => {
@@ -608,7 +666,7 @@ function useMcpEditorSave(
 
   return {
     saveAttemptCount,
-    saveError: selectSaveError(saveState, hasSentSave),
+    saveError: formatSaveError(saveState, hasSentSave),
     handleSubmit
   }
 }
@@ -621,6 +679,8 @@ type McpServerEditorBodyProps = {
   readonly draft: McpServerDraft
   /** First problem of each field shown, owned by the parent. */
   readonly problems: McpServerDraftProblems
+  /** Row input each shown list problem concerns, owned by the parent. */
+  readonly problemEntries: McpDraftProblemEntries
   /** Field and summary hosts, owned by the parent. */
   readonly focusHosts: McpDraftFocusHosts
   /** Whether the draft may be read but not changed. */
@@ -634,15 +694,17 @@ type McpServerEditorBodyProps = {
  * problem summary while two or more fields have a problem, and the fields.
  *
  * @remarks The parent owns the draft, the problems, and the hosts; the body
- * owns no state. A summary button moves focus to its field.
- * @param props - Whether the server is new, draft, problems, hosts,
- * read-only state, and the change action.
+ * owns no state. A summary button moves focus to its field's control: for a
+ * list, the row input its problem concerns, when there is one.
+ * @param props - Whether the server is new, draft, problems and the row
+ * inputs they concern, hosts, read-only state, and the change action.
  * @returns The editor's content between its top bar and its footer.
  */
 function McpServerEditorBody({
   isNew,
   draft,
   problems,
+  problemEntries,
   focusHosts,
   isReadOnly,
   onDraftChange
@@ -661,7 +723,7 @@ function McpServerEditorBody({
       {problemListings.length > 1 ? (
         <McpDraftProblemSummary
           onSelectField={(field) =>
-            focusHosts.fieldRefs[field].current?.focus()
+            findDraftFieldFocusTarget(focusHosts.fieldRefs, field)?.focus()
           }
           problems={problemListings}
           summaryRef={focusHosts.summaryRef}
@@ -672,6 +734,7 @@ function McpServerEditorBody({
         fieldRefs={focusHosts.fieldRefs}
         isReadOnly={isReadOnly}
         onDraftChange={onDraftChange}
+        problemEntries={problemEntries}
         problems={problems}
       />
     </>
@@ -704,10 +767,11 @@ export type McpServerEditorProps = {
  * server's fields can be filled from a pasted config. A saved server whose
  * draft changed shows `unsaved`. Save, Enter in a one-line field, or ⌘
  * Enter checks the draft: the first problem of each field is shown from then
- * on, as the person types, and focus moves to the only field with one or,
- * when several have one, to a summary that lists them, shown while two or
- * more remain, whose buttons move focus to their field; a valid draft is
- * handed to the parent. Escape, Cancel, or the back button closes the
+ * on, as the person types, the row input a list's problem concerns marked
+ * invalid, and focus moves to the only field's control with one or, when
+ * several have one, to a summary that lists them, shown while two or more
+ * remain, whose buttons move focus to their field's control; a valid draft
+ * is handed to the parent. Escape, Cancel, or the back button closes the
  * editor. While a save runs, the fields are read-only and the actions
  * disabled; a failed save is announced as an alert.
  * @param props - Target, other names, the save, and the parent's actions.
@@ -725,8 +789,11 @@ export function McpServerEditor({
   const parse = parseMcpServerDraft(draft, otherServerNames)
   const isSaving = saveState.status === "saving"
   const save = useMcpEditorSave(parse, saveState, onSaveServer)
-  const problems = selectShownProblems(parse, save.saveAttemptCount)
-  const focusHosts = useMcpDraftFocus(save.saveAttemptCount, problems)
+  const shownProblems = buildShownProblems(parse, save.saveAttemptCount)
+  const focusHosts = useMcpDraftFocus(
+    save.saveAttemptCount,
+    shownProblems.problems
+  )
 
   return (
     <form
@@ -751,7 +818,8 @@ export function McpServerEditor({
         isNew={target.kind === "new"}
         isReadOnly={isSaving}
         onDraftChange={setDraft}
-        problems={problems}
+        problemEntries={shownProblems.problemEntries}
+        problems={shownProblems.problems}
       />
       <McpServerEditorFooter
         error={save.saveError}

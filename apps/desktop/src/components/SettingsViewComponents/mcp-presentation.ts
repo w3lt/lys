@@ -137,6 +137,16 @@ export type McpConfigurationLine = {
   readonly isNone: boolean
 }
 
+/** Words a transport's server connects, reconnects, and runs by. */
+type McpConnectionWords = {
+  /** Label of the button that connects an idle server, such as `Start`. */
+  readonly connectLabel: string
+  /** Label of the button that connects a live server again, such as `Restart`. */
+  readonly reconnectLabel: string
+  /** Heading of a connected server's state, such as `Running`. */
+  readonly connectedHeading: string
+}
+
 /** Outcome of pasting a config, as the editor says it. */
 export type McpServerJsonMessage = {
   /** What happened, in lowercase. */
@@ -167,22 +177,40 @@ const MCP_TRANSPORT_PRESENTATIONS = Object.freeze({
   })
 } satisfies Readonly<Record<McpServerTransport, McpTransportPresentation>>)
 
+/** Words for a server's connection, by transport; a new transport must add one. */
+const MCP_CONNECTION_WORDS = Object.freeze({
+  stdio: Object.freeze({
+    connectLabel: "Start",
+    reconnectLabel: "Restart",
+    connectedHeading: "Running"
+  }),
+  http: Object.freeze({
+    connectLabel: "Connect",
+    reconnectLabel: "Reconnect",
+    connectedHeading: "Connected"
+  })
+} satisfies Readonly<Record<McpServerTransport, McpConnectionWords>>)
+
 /** Why a server is not connected; a new reason must add one. */
 const MCP_SERVER_FAILURE_TEXTS = Object.freeze({
   "start-failed":
     "Lys couldn't start the command. Check that it exists; use its full path.",
-  closed: "The server closed the connection.",
+  closed:
+    "The connection ended: the server stopped or closed it, or sent an answer too large to read.",
   "timed-out": "The server didn't answer within 2 minutes.",
   unauthorized:
     "The server refused the request. Check the token and the headers.",
   unreachable: "Lys couldn't reach the server.",
-  "http-error": "The server answered with an HTTP error.",
-  "protocol-error": "The server's answer isn't valid MCP."
+  "http-error":
+    "The server answered with an HTTP error or a redirect, which Lys doesn't follow.",
+  "protocol-error":
+    "The server refused to connect or to list its tools, or its answer was too large or not valid MCP."
 } satisfies Readonly<Record<McpServerFailure, string>>)
 
 /** Why a tool of a server is not listed; a new reason must add one. */
 const SKIPPED_MCP_TOOL_REASON_TEXTS = Object.freeze({
-  "unsupported-name": "Its name is empty or too long to offer to a model.",
+  "unsupported-name":
+    "Its name is empty, too long, or holds characters you can't see.",
   "duplicate-name":
     "Another tool of the server gets the same name once characters a tool name can't hold are replaced.",
   "unsupported-input-schema":
@@ -208,7 +236,7 @@ const MCP_SERVER_APPROVAL_NOTES = Object.freeze({
   run: "Its tools run the moment the model asks. Only for servers you trust.",
   mixed:
     "Some of its tools ask first and some run at once. Choose one for all of them.",
-  none: "Each of its tools asks first. You can choose here once it lists them."
+  none: "You can choose once it lists its tools. Each then follows the choice saved for it, and a tool without one asks first."
 } satisfies Readonly<Record<McpServerApproval, string>>)
 
 /** What each problem of a pasted config says; a new problem must add one. */
@@ -292,15 +320,28 @@ export function getMcpTransportPresentation(
 }
 
 /**
+ * Formats a server's URL with its query hidden, because a query can hold a
+ * key.
+ *
+ * @param url - Saved URL, which has no user name, password, or fragment.
+ * @returns The URL up to its first `?`, followed by `?…` when it has one;
+ * the URL as saved otherwise.
+ */
+function formatMcpServerUrl(url: string): string {
+  const queryStart = url.indexOf("?")
+  return queryStart === -1 ? url : `${url.slice(0, queryStart)}?…`
+}
+
+/**
  * Formats what a server's row says it runs or reaches.
  *
  * @param server - Saved server settings.
  * @returns The command followed by its arguments, quoted where needed, or
- * the URL. Environment values and headers, which can be secrets, are never
- * shown.
+ * the URL with its query hidden. Environment values, headers, and a URL's
+ * query, which can be secrets, are never shown.
  */
 export function formatMcpServerTarget(server: McpServerSettings): string {
-  if (server.transport === "http") return server.url
+  if (server.transport === "http") return formatMcpServerUrl(server.url)
   return [server.command, formatMcpCommandArguments(server.arguments)]
     .filter((part) => part !== "")
     .join(" ")
@@ -379,19 +420,21 @@ function formatIdleStatus(
 function formatConnectingStatus(
   server: McpServerSettings
 ): McpServerStatusPresentation {
-  if (server.transport === "stdio") {
-    return {
-      condition: "connecting",
-      chip: "starting",
-      heading: "Starting",
-      detail: "started · waiting for initialize"
-    }
-  }
-  return {
-    condition: "connecting",
-    chip: "connecting",
-    heading: "Connecting",
-    detail: `waiting for initialize from ${new URL(server.url).host}`
+  switch (server.transport) {
+    case "stdio":
+      return {
+        condition: "connecting",
+        chip: "starting",
+        heading: "Starting",
+        detail: "started · waiting for initialize"
+      }
+    case "http":
+      return {
+        condition: "connecting",
+        chip: "connecting",
+        heading: "Connecting",
+        detail: `waiting for initialize from ${new URL(server.url).host}`
+      }
   }
 }
 
@@ -412,7 +455,7 @@ function formatConnectedStatus(
   return {
     condition: "connected",
     chip: "",
-    heading: server.transport === "stdio" ? "Running" : "Connected",
+    heading: MCP_CONNECTION_WORDS[server.transport].connectedHeading,
     detail: skippedCount === 0 ? listed : `${listed} · ${skippedCount} skipped`
   }
 }
@@ -460,15 +503,15 @@ export function formatMcpReconnectLabel(
   transport: McpServerTransport,
   condition: McpServerCondition
 ): string {
-  const isCommand = transport === "stdio"
+  const words = MCP_CONNECTION_WORDS[transport]
   switch (condition) {
     case "failed":
       return "Retry"
     case "idle":
-      return isCommand ? "Start" : "Connect"
+      return words.connectLabel
     case "connected":
     case "connecting":
-      return isCommand ? "Restart" : "Reconnect"
+      return words.reconnectLabel
   }
 }
 
@@ -611,8 +654,8 @@ function buildNameLine(
  * @param server - Saved server settings.
  * @returns A frozen list of lines, each label once: a command server's
  * transport, command, arguments, and the names of its variables; a URL
- * server's transport, URL, sign-in, and the names of its other headers.
- * Values that can be secrets are never shown.
+ * server's transport, URL with its query hidden, sign-in, and the names of
+ * its other headers. Values that can be secrets are never shown.
  */
 export function listMcpServerConfiguration(
   server: McpServerSettings
@@ -622,7 +665,7 @@ export function listMcpServerConfiguration(
     const isSignedIn = draft.signIn === "token"
     return Object.freeze([
       { label: "transport", value: "streamable http", isNone: false },
-      { label: "url", value: server.url, isNone: false },
+      { label: "url", value: formatMcpServerUrl(server.url), isNone: false },
       {
         label: "sign-in",
         value: isSignedIn ? "bearer token" : "none",
@@ -675,7 +718,7 @@ export function formatMcpServerRemovalQuestion(
 }
 
 /**
- * Counts the saved servers the backend reports connected.
+ * Calculates how many saved servers the backend reports connected.
  *
  * @param servers - Saved servers.
  * @param list - Lifecycle of the list of applied servers.
@@ -683,7 +726,7 @@ export function formatMcpServerRemovalQuestion(
  * @returns The number, or undefined while the backend is not running or the
  * list is not loaded.
  */
-export function countConnectedMcpServers(
+export function calculateConnectedMcpServerCount(
   servers: readonly McpServerSettings[],
   list: McpServerListState,
   isBackendRunning: boolean

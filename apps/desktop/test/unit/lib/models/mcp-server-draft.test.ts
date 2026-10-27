@@ -14,8 +14,8 @@ import {
   addMcpDraftEntry,
   buildEmptyMcpServerDraft,
   buildMcpServerDraft,
-  fillMcpHttpDraft,
-  fillMcpStdioDraft,
+  buildMcpHttpDraft,
+  buildMcpStdioDraft,
   isMcpServerDraftChanged,
   parseMcpServerDraft,
   readBearerToken,
@@ -23,7 +23,8 @@ import {
   updateMcpDraftEntry,
   type McpDraftEntry,
   type McpDraftEntryList,
-  type McpServerDraft
+  type McpServerDraft,
+  type McpServerDraftProblemReport
 } from "@/lib/models/mcp-server-draft"
 import { STORED_MCP_SETTINGS } from "../../support/settingsFixtures"
 
@@ -141,9 +142,44 @@ function readProblems(
   draft: McpServerDraft,
   otherServerNames: ReadonlySet<string> = NO_OTHER_NAMES
 ) {
+  return readProblemReport(draft, otherServerNames).problems
+}
+
+/**
+ * Reads the problems of a draft expected to be invalid, with the row input
+ * each list's problem concerns.
+ *
+ * @param draft - Draft as typed.
+ * @param otherServerNames - Names of the other saved servers.
+ * @returns The problems by field and the row inputs by list.
+ * @throws When the draft is valid.
+ */
+function readProblemReport(
+  draft: McpServerDraft,
+  otherServerNames: ReadonlySet<string> = NO_OTHER_NAMES
+): McpServerDraftProblemReport {
   const parse = parseMcpServerDraft(draft, otherServerNames)
   if (parse.status === "valid") throw new Error("The draft is valid")
-  return parse.problems
+  return { problems: parse.problems, problemEntries: parse.problemEntries }
+}
+
+/**
+ * Gets the identity of one row of a draft.
+ *
+ * @param draft - Draft holding the row.
+ * @param list - List holding the row.
+ * @param position - One-based position of the row among all rows.
+ * @returns The row's identity.
+ * @throws When the list has no row there.
+ */
+function getEntryId(
+  draft: McpServerDraft,
+  list: McpDraftEntryList,
+  position: number
+): number {
+  const entry = draft[list][position - 1]
+  if (entry === undefined) throw new Error(`No row ${position} in ${list}`)
+  return entry.id
 }
 
 describe("buildEmptyMcpServerDraft", () => {
@@ -191,7 +227,7 @@ describe("readBearerToken", () => {
   })
 })
 
-describe("fillMcpHttpDraft", () => {
+describe("buildMcpHttpDraft", () => {
   it("turns a bearer header among others into the token, numbering the others from the next row identity", () => {
     const start = appendRows(COMMAND_DRAFT, "environment", [
       { name: "A", value: "1" }
@@ -199,7 +235,7 @@ describe("fillMcpHttpDraft", () => {
     const firstId = start.nextEntryId
 
     expect(
-      fillMcpHttpDraft(start, "https://mcp.example.test/notes", [
+      buildMcpHttpDraft(start, "https://mcp.example.test/notes", [
         { name: "X-A", value: "1" },
         { name: "authorization", value: "bearer fixture-0000" },
         { name: "X-B", value: "2" }
@@ -219,7 +255,7 @@ describe("fillMcpHttpDraft", () => {
   })
 
   it("turns only the first bearer header into the token", () => {
-    const draft = fillMcpHttpDraft(URL_DRAFT, URL_DRAFT.url, [
+    const draft = buildMcpHttpDraft(URL_DRAFT, URL_DRAFT.url, [
       { name: "Authorization", value: "Bearer first" },
       { name: "Authorization", value: "Bearer second" }
     ])
@@ -237,7 +273,7 @@ describe("fillMcpHttpDraft", () => {
     ])
 
     expect(
-      fillMcpHttpDraft(start, "https://mcp.example.test/other", [
+      buildMcpHttpDraft(start, "https://mcp.example.test/other", [
         { name: "Authorization", value: "Basic xyz" }
       ])
     ).toMatchObject({
@@ -249,7 +285,7 @@ describe("fillMcpHttpDraft", () => {
   })
 
   it("returns a frozen draft with frozen rows", () => {
-    const draft = fillMcpHttpDraft(URL_DRAFT, URL_DRAFT.url, [
+    const draft = buildMcpHttpDraft(URL_DRAFT, URL_DRAFT.url, [
       { name: "X-A", value: "1" }
     ])
 
@@ -259,7 +295,7 @@ describe("fillMcpHttpDraft", () => {
   })
 })
 
-describe("fillMcpStdioDraft", () => {
+describe("buildMcpStdioDraft", () => {
   it("writes the arguments on one line and numbers the variables from the next row identity, keeping the name and URL fields", () => {
     const start = appendRows(TOKEN_DRAFT, "headers", [
       { name: "X-A", value: "1" }
@@ -267,7 +303,7 @@ describe("fillMcpStdioDraft", () => {
     const firstId = start.nextEntryId
 
     expect(
-      fillMcpStdioDraft(
+      buildMcpStdioDraft(
         start,
         "npx",
         ["-y", "two words", ""],
@@ -290,7 +326,7 @@ describe("fillMcpStdioDraft", () => {
   })
 
   it("returns a frozen draft with frozen rows", () => {
-    const draft = fillMcpStdioDraft(
+    const draft = buildMcpStdioDraft(
       COMMAND_DRAFT,
       "npx",
       [],
@@ -841,23 +877,104 @@ describe("parseMcpServerDraft", () => {
     })
   })
 
-  it("refuses a variable set twice and a header sent twice ignoring case", () => {
-    expect(
-      readProblems(
-        appendRows(COMMAND_DRAFT, "environment", [
-          { name: "A", value: "1" },
-          { name: "A", value: "2" }
-        ])
+  it("refuses a variable set twice and a header sent twice ignoring case, at the name of the first row that repeats one", () => {
+    const commandDraft = appendRows(COMMAND_DRAFT, "environment", [
+      { name: "A", value: "1" },
+      { name: "B", value: "2" },
+      BLANK_ROW,
+      { name: " A ", value: "3" },
+      { name: "B", value: "4" }
+    ])
+    const urlDraft = appendRows(URL_DRAFT, "headers", [
+      { name: "X-A", value: "1" },
+      { name: "x-a", value: "2" }
+    ])
+
+    expect(readProblemReport(commandDraft)).toEqual({
+      problems: {
+        environment: "Variable 4: A server sets each environment variable once."
+      },
+      problemEntries: {
+        environment: {
+          entryId: getEntryId(commandDraft, "environment", 4),
+          part: "name"
+        }
+      }
+    })
+    expect(readProblemReport(urlDraft)).toEqual({
+      problems: { headers: "Header 2: A server is sent each header once." },
+      problemEntries: {
+        headers: { entryId: getEntryId(urlDraft, "headers", 2), part: "name" }
+      }
+    })
+  })
+
+  it.each([
+    [
+      "the name of a variable",
+      { name: "1BAD", value: "x" },
+      "name",
+      VARIABLE_NAME_PROBLEM
+    ],
+    [
+      "the value of a variable",
+      { name: "A", value: "line\nbreak" },
+      "value",
+      `A variable's value is up to ${MAXIMUM_MCP_ENVIRONMENT_VALUE_LENGTH} characters, without line breaks or other control characters.`
+    ]
+  ] as const)(
+    "points a row's problem at %s, by the row's identity",
+    (_case, row, part, rule) => {
+      const draft = appendRows(COMMAND_DRAFT, "environment", [
+        { name: "OK", value: "1" },
+        row
+      ])
+
+      expect(readProblemReport(draft)).toEqual({
+        problems: { environment: `Variable 2: ${rule}` },
+        problemEntries: {
+          environment: { entryId: getEntryId(draft, "environment", 2), part }
+        }
+      })
+    }
+  )
+
+  it("points a header row's problem at the input it names, and the token's at no row", () => {
+    const draft = appendRows(
+      { ...TOKEN_DRAFT, token: "fixture-ö" },
+      "headers",
+      [{ name: "X-A", value: "café" }]
+    )
+
+    expect(readProblemReport(draft)).toEqual({
+      problems: {
+        token: TOKEN_FORMAT_PROBLEM,
+        headers:
+          "Header 1: A header value is visible ASCII characters, spaces, and tabs, with no space or tab at either end."
+      },
+      problemEntries: {
+        headers: { entryId: getEntryId(draft, "headers", 1), part: "value" }
+      }
+    })
+  })
+
+  it("points a problem of a whole list or of the arguments at no row", () => {
+    const draft = appendRows(
+      { ...COMMAND_DRAFT, argumentText: "'open" },
+      "environment",
+      Array.from(
+        { length: MAXIMUM_MCP_ENVIRONMENT_VARIABLE_COUNT + 1 },
+        (_, index) => ({ name: `V${index}`, value: "v" })
       )
-    ).toEqual({ environment: "A server sets each environment variable once." })
-    expect(
-      readProblems(
-        appendRows(URL_DRAFT, "headers", [
-          { name: "X-A", value: "1" },
-          { name: "x-a", value: "2" }
-        ])
-      )
-    ).toEqual({ headers: "A server is sent each header once." })
+    )
+
+    expect(readProblemReport(draft)).toEqual({
+      problems: {
+        arguments: "Close the quote at character 1.",
+        environment: `A server sets at most ${MAXIMUM_MCP_ENVIRONMENT_VARIABLE_COUNT} environment variables.`
+      },
+      problemEntries: {}
+    })
   })
 
   it("says how many arguments and variables a server may have", () => {
@@ -954,13 +1071,20 @@ describe("parseMcpServerDraft", () => {
   })
 
   it.each(["Authorization", " authorization "])(
-    "refuses an Authorization header row named %j beside a token",
+    "refuses an Authorization header row named %j beside a token, at the row's name",
     (name) => {
-      expect(
-        readProblems(
-          appendRows(TOKEN_DRAFT, "headers", [{ name, value: "Basic xyz" }])
-        )
-      ).toEqual({ headers: AUTHORIZATION_HEADER_PROBLEM })
+      const draft = appendRows(TOKEN_DRAFT, "headers", [
+        { name: "X-A", value: "1" },
+        BLANK_ROW,
+        { name, value: "Basic xyz" }
+      ])
+
+      expect(readProblemReport(draft)).toEqual({
+        problems: { headers: `Header 3: ${AUTHORIZATION_HEADER_PROBLEM}` },
+        problemEntries: {
+          headers: { entryId: getEntryId(draft, "headers", 3), part: "name" }
+        }
+      })
     }
   )
 
@@ -973,7 +1097,7 @@ describe("parseMcpServerDraft", () => {
       )
     ).toEqual({
       token: EMPTY_TOKEN_PROBLEM,
-      headers: AUTHORIZATION_HEADER_PROBLEM
+      headers: `Header 1: ${AUTHORIZATION_HEADER_PROBLEM}`
     })
   })
 
@@ -1074,5 +1198,8 @@ describe("parseMcpServerDraft", () => {
     expect(parse.status === "invalid" && Object.isFrozen(parse.problems)).toBe(
       true
     )
+    expect(
+      parse.status === "invalid" && Object.isFrozen(parse.problemEntries)
+    ).toBe(true)
   })
 })

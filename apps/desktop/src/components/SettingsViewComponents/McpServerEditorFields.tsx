@@ -19,13 +19,15 @@ import {
   updateMcpDraftEntry,
   type McpDraftEntry,
   type McpDraftEntryList,
+  type McpDraftEntryPart,
+  type McpDraftProblemEntries,
+  type McpDraftProblemEntry,
   type McpServerDraft,
   type McpServerDraftField,
   type McpServerDraftProblems,
   type McpSignIn
 } from "@/lib/models/mcp-server-draft"
 
-import { handleFocusTargetAttach } from "./focus-target"
 import {
   formatMcpDraftFieldLabel,
   formatMcpSignInLabel,
@@ -47,12 +49,34 @@ export type McpFieldRefs = {
   readonly arguments: RefObject<HTMLInputElement | null>
   /** Group of variable rows, attached only for a command server. */
   readonly environment: RefObject<HTMLFieldSetElement | null>
+  /**
+   * Variable row input the environment's problem concerns, attached only
+   * while the problem is one row's.
+   */
+  readonly environmentEntry: RefObject<HTMLInputElement | null>
   /** URL input, attached only for a URL server. */
   readonly url: RefObject<HTMLInputElement | null>
   /** Token input, attached only while a URL server signs in with a token. */
   readonly token: RefObject<HTMLInputElement | null>
   /** Group of header rows, attached only for a URL server. */
   readonly headers: RefObject<HTMLFieldSetElement | null>
+  /**
+   * Header row input the headers' problem concerns, attached only while the
+   * problem is one row's.
+   */
+  readonly headersEntry: RefObject<HTMLInputElement | null>
+}
+
+/** Problem of a list that concerns one input of one of its rows. */
+type McpEntryRowProblem = {
+  /** Identity of the row. */
+  readonly entryId: number
+  /** Input of the row that breaks the rule. */
+  readonly part: McpDraftEntryPart
+  /** Identifier of the list's problem, which describes the input. */
+  readonly problemId: string
+  /** Host of the input, which the editor moves focus to. */
+  readonly inputRef: RefObject<HTMLInputElement | null>
 }
 
 /** Request that a control of a list of rows receive focus. */
@@ -90,14 +114,20 @@ type McpFieldLabelTarget =
 /** Focus request that leaves focus where it is. */
 const NO_ENTRY_FOCUS: McpEntryFocusRequest = Object.freeze({ kind: "none" })
 
+/** Visible label of the rows' name inputs, which starts each one's name. */
+const ENTRY_NAME_LABEL = "Name"
+
+/** Visible label of the rows' value inputs, which starts each one's name. */
+const ENTRY_VALUE_LABEL = "Value"
+
 /**
- * Joins the identifiers of the elements that describe a control.
+ * Formats the identifiers of the elements that describe a control.
  *
  * @param ids - Identifiers, with undefined for a description not shown.
  * @returns The shown identifiers separated by spaces, or undefined when none
  * is shown.
  */
-function joinDescriptionIds(
+function formatDescriptionIds(
   ids: readonly (string | undefined)[]
 ): string | undefined {
   const shownIds = ids.filter((id) => id !== undefined)
@@ -105,14 +135,14 @@ function joinDescriptionIds(
 }
 
 /**
- * Marks whether one row's value is shown.
+ * Builds the set of rows whose value is shown, with one row changed.
  *
  * @param shownValueIds - Identities of the rows whose values are shown.
  * @param entryId - Identity of the row.
  * @param isShown - Whether its value is shown from now on.
  * @returns A new set with the row's identity added or removed.
  */
-function markValueShown(
+function buildShownValueSet(
   shownValueIds: ReadonlySet<number>,
   entryId: number,
   isShown: boolean
@@ -260,7 +290,7 @@ function McpTextField({
         target={{ kind: "control", controlId }}
       />
       <Input
-        aria-describedby={joinDescriptionIds([
+        aria-describedby={formatDescriptionIds([
           hintId,
           note === "" ? undefined : noteId,
           problem === undefined ? undefined : problemId
@@ -378,8 +408,15 @@ type McpEntryRowProps = {
   readonly namePlaceholder: string
   /** Whether the value is shown as text, owned by the parent. */
   readonly isValueShown: boolean
-  /** Whether the person just added the row, so its name takes focus. */
-  readonly isJustAdded: boolean
+  /**
+   * Name input host the list moves focus to after the person added this
+   * row, or undefined for another row.
+   */
+  readonly addedNameRef: RefObject<HTMLInputElement | null> | undefined
+  /**
+   * The list's problem when it concerns an input of this row, or undefined.
+   */
+  readonly problem: McpEntryRowProblem | undefined
   /** Whether the row may be read but not changed. */
   readonly isReadOnly: boolean
   /** Receives the row with its name or value changed. */
@@ -393,12 +430,16 @@ type McpEntryRowProps = {
 /**
  * Edits one name and its value: a variable or a header.
  *
- * @remarks The parent owns the row, whether its value is shown, and its
- * removal; the row owns no state. Its controls are named after the row,
- * such as `Name of variable 1`, `Value of variable 1`, and `Remove variable
- * 1`. The name input takes focus when it is attached to a row the person
- * just added. While read-only, the remove button is disabled.
- * @param props - Row, its label, visibility, and the change actions.
+ * @remarks The parent owns the row, whether its value is shown, its
+ * problem, and its removal; the row owns no state. Its controls are named
+ * after the row, such as `Name of variable 1`, `Value of variable 1`, and
+ * `Remove variable 1`; the input names start with the list's visible column
+ * labels. The input a problem concerns is marked invalid, described by the
+ * problem, and attached to the problem's host; otherwise the name input of
+ * a row the person just added is attached to the list's added-row host.
+ * While read-only, the remove button is disabled.
+ * @param props - Row, its label, visibility, focus host, problem, and the
+ * change actions.
  * @returns One list item.
  */
 function McpEntryRow({
@@ -406,16 +447,22 @@ function McpEntryRow({
   itemLabel,
   namePlaceholder,
   isValueShown,
-  isJustAdded,
+  addedNameRef,
+  problem,
   isReadOnly,
   onEntryChange,
   onRemoveEntry,
   onIsValueShownChange
 }: McpEntryRowProps): ReactElement {
+  const nameProblem = problem?.part === "name" ? problem : undefined
+  const valueProblem = problem?.part === "value" ? problem : undefined
+
   return (
     <li className="settings-view__mcp-entry">
       <Input
-        aria-label={`Name of ${itemLabel}`}
+        aria-describedby={nameProblem?.problemId}
+        aria-invalid={nameProblem !== undefined}
+        aria-label={`${ENTRY_NAME_LABEL} of ${itemLabel}`}
         autoComplete="off"
         className="settings-view__mcp-mono"
         onChange={(event) =>
@@ -423,16 +470,16 @@ function McpEntryRow({
         }
         placeholder={namePlaceholder}
         readOnly={isReadOnly}
-        ref={isJustAdded ? handleFocusTargetAttach : undefined}
+        ref={nameProblem?.inputRef ?? addedNameRef}
         spellCheck={false}
         type="text"
         value={entry.name}
       />
       <McpSecretInput
-        descriptionIds={undefined}
-        inputLabel={`Value of ${itemLabel}`}
-        inputRef={undefined}
-        isInvalid={false}
+        descriptionIds={valueProblem?.problemId}
+        inputLabel={`${ENTRY_VALUE_LABEL} of ${itemLabel}`}
+        inputRef={valueProblem?.inputRef}
+        isInvalid={valueProblem !== undefined}
         isReadOnly={isReadOnly}
         isShown={isValueShown}
         onIsShownChange={onIsValueShownChange}
@@ -462,14 +509,19 @@ type McpEntryRowsEditing = {
   readonly shownValueIds: ReadonlySet<number>
   /** Identity of the row the person just added, or undefined. */
   readonly addedEntryId: number | undefined
+  /**
+   * Host of the just-added row's name input, which takes focus once the row
+   * is added; its identity lasts as long as the list.
+   */
+  readonly addedNameRef: RefObject<HTMLInputElement | null>
   /** Adds an empty row with its value shown; its name takes focus. */
   readonly addEntry: () => void
   /** Replaces one row with its changed name or value. */
-  readonly changeEntry: (entry: McpDraftEntry) => void
+  readonly updateEntry: (entry: McpDraftEntry) => void
   /** Removes one row; the add button takes focus. */
   readonly removeEntry: (entryId: number) => void
   /** Shows or hides one row's value. */
-  readonly showValue: (entryId: number, isShown: boolean) => void
+  readonly updateShownValue: (entryId: number, isShown: boolean) => void
 }
 
 /**
@@ -482,9 +534,11 @@ type McpEntryRowsEditing = {
  * `list`, and `onDraftChange` are reactive: each action uses those of the
  * render that built it. `onDraftChange` is a notification invoked during an
  * action with the proposed draft; the parent decides whether to keep it.
- * After a removal, a layout effect moves focus to the add button that the
- * caller attaches to `addButtonRef`, when it is attached. The actions are
- * rebuilt on every render; no identity is promised.
+ * In the layout phase after an addition, focus moves to the name input the
+ * caller attaches to the returned `addedNameRef`; after a removal, to the
+ * add button the caller attaches to `addButtonRef`; each only when it is
+ * attached. The actions are rebuilt on every render; no identity is
+ * promised.
  * @param draft - Draft holding the list.
  * @param list - List the rows belong to.
  * @param addButtonRef - Add button host, owned by the caller.
@@ -503,16 +557,18 @@ function useMcpEntryRows(
   )
   const [focusRequest, setFocusRequest] =
     useState<McpEntryFocusRequest>(NO_ENTRY_FOCUS)
+  const addedNameRef = useRef<HTMLInputElement>(null)
 
   useLayoutEffect(() => {
     if (focusRequest.kind === "add") addButtonRef.current?.focus()
+    else if (focusRequest.kind === "entry") addedNameRef.current?.focus()
   }, [addButtonRef, focusRequest])
 
   /** Implements {@link McpEntryRowsEditing.addEntry}. */
   function addEntry(): void {
     const addition = addMcpDraftEntry(draft, list)
     onDraftChange(addition.draft)
-    setShownValueIds((ids) => markValueShown(ids, addition.entryId, true))
+    setShownValueIds((ids) => buildShownValueSet(ids, addition.entryId, true))
     setFocusRequest({ kind: "entry", entryId: addition.entryId })
   }
 
@@ -530,12 +586,13 @@ function useMcpEntryRows(
     shownValueIds,
     addedEntryId:
       focusRequest.kind === "entry" ? focusRequest.entryId : undefined,
+    addedNameRef,
     addEntry,
-    changeEntry: (entry) =>
+    updateEntry: (entry) =>
       onDraftChange(updateMcpDraftEntry(draft, list, entry)),
     removeEntry,
-    showValue: (entryId, isShown) =>
-      setShownValueIds((ids) => markValueShown(ids, entryId, isShown))
+    updateShownValue: (entryId, isShown) =>
+      setShownValueIds((ids) => buildShownValueSet(ids, entryId, isShown))
   }
 }
 
@@ -551,44 +608,65 @@ type McpEntryRowsProps = {
   readonly isReadOnly: boolean
   /** Editing state and actions of the rows, owned by the parent. */
   readonly editing: McpEntryRowsEditing
+  /**
+   * The list's problem when it concerns an input of one row, or undefined.
+   */
+  readonly rowProblem: McpEntryRowProblem | undefined
 }
 
 /**
- * Lists the rows of one list of names and values.
+ * Lists the rows of one list of names and values under the visible labels
+ * of their two columns.
  *
- * @remarks The parent owns the rows and their editing state; the list owns
- * no state. Each row is named by its one-based position, such as `variable
- * 1`. Nothing is rendered while the list is empty.
- * @param props - Rows, their names, read-only state, and editing state.
- * @returns The list of rows, or nothing while it is empty.
+ * @remarks The parent owns the rows, their editing state, and the problem;
+ * the list owns no state. The column labels, `Name` and `Value`, start the
+ * names of the rows' inputs, so they are hidden from assistive technology,
+ * which reads those names. Each row is named by its one-based position, such
+ * as `variable 1`. Nothing is rendered while the list is empty.
+ * @param props - Rows, their names, read-only state, editing state, and the
+ * row problem.
+ * @returns The column labels and the list of rows, or nothing while it is
+ * empty.
  */
 function McpEntryRows({
   entries,
   itemName,
   namePlaceholder,
   isReadOnly,
-  editing
+  editing,
+  rowProblem
 }: McpEntryRowsProps): ReactElement | null {
   if (entries.length === 0) return null
   return (
-    <ul className="settings-view__mcp-entry-list">
-      {entries.map((entry, index) => (
-        <McpEntryRow
-          entry={entry}
-          isJustAdded={editing.addedEntryId === entry.id}
-          isReadOnly={isReadOnly}
-          isValueShown={editing.shownValueIds.has(entry.id)}
-          itemLabel={`${itemName} ${index + 1}`}
-          key={entry.id}
-          namePlaceholder={namePlaceholder}
-          onEntryChange={editing.changeEntry}
-          onIsValueShownChange={(isShown) =>
-            editing.showValue(entry.id, isShown)
-          }
-          onRemoveEntry={editing.removeEntry}
-        />
-      ))}
-    </ul>
+    <>
+      <div aria-hidden="true" className="settings-view__mcp-entry-columns">
+        <span>{ENTRY_NAME_LABEL}</span>
+        <span>{ENTRY_VALUE_LABEL}</span>
+      </div>
+      <ul className="settings-view__mcp-entry-list">
+        {entries.map((entry, index) => (
+          <McpEntryRow
+            addedNameRef={
+              editing.addedEntryId === entry.id
+                ? editing.addedNameRef
+                : undefined
+            }
+            entry={entry}
+            isReadOnly={isReadOnly}
+            isValueShown={editing.shownValueIds.has(entry.id)}
+            itemLabel={`${itemName} ${index + 1}`}
+            key={entry.id}
+            namePlaceholder={namePlaceholder}
+            onEntryChange={editing.updateEntry}
+            onIsValueShownChange={(isShown) =>
+              editing.updateShownValue(entry.id, isShown)
+            }
+            onRemoveEntry={editing.removeEntry}
+            problem={rowProblem?.entryId === entry.id ? rowProblem : undefined}
+          />
+        ))}
+      </ul>
+    </>
   )
 }
 
@@ -600,10 +678,17 @@ type McpEntryListFieldProps = {
   readonly draft: McpServerDraft
   /** Problem of the list, or undefined while it has none. */
   readonly problem: string | undefined
+  /**
+   * Row input the list's problem concerns, or undefined while the list has
+   * no problem or its problem is of the whole list.
+   */
+  readonly problemEntry: McpDraftProblemEntry | undefined
   /** Whether the rows may be read but not changed. */
   readonly isReadOnly: boolean
   /** Group host the parent moves focus to. */
   readonly fieldRef: RefObject<HTMLFieldSetElement | null>
+  /** Host of the row input the problem concerns, which the parent focuses. */
+  readonly problemEntryRef: RefObject<HTMLInputElement | null>
   /** Receives the draft with a row added, changed, or removed. */
   readonly onDraftChange: (draft: McpServerDraft) => void
 }
@@ -612,21 +697,24 @@ type McpEntryListFieldProps = {
  * Edits one list of names and values: a command server's variables or a
  * URL server's headers.
  *
- * @remarks The parent owns the draft, the problem, and the host; the field
+ * @remarks The parent owns the draft, the problem, and the hosts; the field
  * owns which rows show their values and where focus goes after the person
  * adds or removes a row, through {@link useMcpEntryRows}. The field is a
  * group named by its label and described by its hint and problem; it takes
- * focus only programmatically.
- * @param props - List, draft, problem, read-only state, host, and the change
- * action.
+ * focus only programmatically. A problem of one row's input also marks that
+ * input invalid, describes it, and attaches it to `problemEntryRef`.
+ * @param props - List, draft, problem, read-only state, hosts, and the
+ * change action.
  * @returns The group of rows and its add button.
  */
 function McpEntryListField({
   list,
   draft,
   problem,
+  problemEntry,
   isReadOnly,
   fieldRef,
+  problemEntryRef,
   onDraftChange
 }: McpEntryListFieldProps): ReactElement {
   const labelId = useId()
@@ -635,10 +723,19 @@ function McpEntryListField({
   const presentation = getMcpEntryListPresentation(list)
   const addButtonRef = useRef<HTMLButtonElement>(null)
   const editing = useMcpEntryRows(draft, list, addButtonRef, onDraftChange)
+  const rowProblem: McpEntryRowProblem | undefined =
+    problemEntry === undefined
+      ? undefined
+      : {
+          entryId: problemEntry.entryId,
+          part: problemEntry.part,
+          problemId,
+          inputRef: problemEntryRef
+        }
 
   return (
     <fieldset
-      aria-describedby={joinDescriptionIds([
+      aria-describedby={formatDescriptionIds([
         hintId,
         problem === undefined ? undefined : problemId
       ])}
@@ -660,6 +757,7 @@ function McpEntryListField({
         isReadOnly={isReadOnly}
         itemName={presentation.itemName}
         namePlaceholder={presentation.namePlaceholder}
+        rowProblem={rowProblem}
       />
       <button
         className="settings-view__mcp-entry-add"
@@ -805,7 +903,7 @@ function McpSignInChoice({
       </p>
       {signIn === "token" ? (
         <McpSecretInput
-          descriptionIds={joinDescriptionIds([
+          descriptionIds={formatDescriptionIds([
             noteId,
             problem === undefined ? undefined : problemId
           ])}
@@ -942,6 +1040,8 @@ export type McpServerDraftFieldsProps = {
   readonly draft: McpServerDraft
   /** Problems shown, by field. */
   readonly problems: McpServerDraftProblems
+  /** Row input each shown list problem concerns, by list. */
+  readonly problemEntries: McpDraftProblemEntries
   /** Whether the fields may be read but not changed. */
   readonly isReadOnly: boolean
   /** Field hosts the parent moves focus to. */
@@ -955,7 +1055,7 @@ type McpCommandFieldsProps = Omit<McpServerDraftFieldsProps, "fieldRefs"> & {
   /** Hosts of the command, arguments, and environment fields. */
   readonly fieldRefs: Pick<
     McpFieldRefs,
-    "command" | "arguments" | "environment"
+    "command" | "arguments" | "environment" | "environmentEntry"
   >
 }
 
@@ -974,6 +1074,7 @@ type McpCommandFieldsProps = Omit<McpServerDraftFieldsProps, "fieldRefs"> & {
 function McpCommandFields({
   draft,
   problems,
+  problemEntries,
   isReadOnly,
   fieldRefs,
   onDraftChange
@@ -1013,6 +1114,8 @@ function McpCommandFields({
         list="environment"
         onDraftChange={onDraftChange}
         problem={problems.environment}
+        problemEntry={problemEntries.environment}
+        problemEntryRef={fieldRefs.environmentEntry}
       />
     </>
   )
@@ -1021,7 +1124,10 @@ function McpCommandFields({
 /** Properties accepted by {@link McpUrlFields}. */
 type McpUrlFieldsProps = Omit<McpServerDraftFieldsProps, "fieldRefs"> & {
   /** Hosts of the URL, token, and header fields. */
-  readonly fieldRefs: Pick<McpFieldRefs, "url" | "token" | "headers">
+  readonly fieldRefs: Pick<
+    McpFieldRefs,
+    "url" | "token" | "headers" | "headersEntry"
+  >
 }
 
 /**
@@ -1038,6 +1144,7 @@ type McpUrlFieldsProps = Omit<McpServerDraftFieldsProps, "fieldRefs"> & {
 function McpUrlFields({
   draft,
   problems,
+  problemEntries,
   isReadOnly,
   fieldRefs,
   onDraftChange
@@ -1072,9 +1179,58 @@ function McpUrlFields({
         list="headers"
         onDraftChange={onDraftChange}
         problem={problems.headers}
+        problemEntry={problemEntries.headers}
+        problemEntryRef={fieldRefs.headersEntry}
       />
     </>
   )
+}
+
+/** Properties accepted by {@link McpTransportFields}. */
+type McpTransportFieldsProps = McpServerDraftFieldsProps
+
+/**
+ * Edits the fields of the draft's transport: a local program's or a remote
+ * server's.
+ *
+ * @remarks The parent owns every value; the component owns no state and
+ * renders exactly one transport's fields, chosen by an exhaustive switch.
+ * @param props - Draft, problems, read-only state, hosts, and the change
+ * action.
+ * @returns The command fields or the URL fields.
+ */
+function McpTransportFields({
+  draft,
+  problems,
+  problemEntries,
+  isReadOnly,
+  fieldRefs,
+  onDraftChange
+}: McpTransportFieldsProps): ReactElement {
+  switch (draft.transport) {
+    case "stdio":
+      return (
+        <McpCommandFields
+          draft={draft}
+          fieldRefs={fieldRefs}
+          isReadOnly={isReadOnly}
+          onDraftChange={onDraftChange}
+          problemEntries={problemEntries}
+          problems={problems}
+        />
+      )
+    case "http":
+      return (
+        <McpUrlFields
+          draft={draft}
+          fieldRefs={fieldRefs}
+          isReadOnly={isReadOnly}
+          onDraftChange={onDraftChange}
+          problemEntries={problemEntries}
+          problems={problems}
+        />
+      )
+  }
 }
 
 /**
@@ -1095,13 +1251,11 @@ function McpUrlFields({
 export function McpServerDraftFields({
   draft,
   problems,
+  problemEntries,
   isReadOnly,
   fieldRefs,
   onDraftChange
 }: McpServerDraftFieldsProps): ReactElement {
-  const TransportFields =
-    draft.transport === "http" ? McpUrlFields : McpCommandFields
-
   return (
     <>
       <McpTransportCards
@@ -1123,11 +1277,12 @@ export function McpServerDraftFields({
         problem={problems.name}
         text={draft.name}
       />
-      <TransportFields
+      <McpTransportFields
         draft={draft}
         fieldRefs={fieldRefs}
         isReadOnly={isReadOnly}
         onDraftChange={onDraftChange}
+        problemEntries={problemEntries}
         problems={problems}
       />
     </>

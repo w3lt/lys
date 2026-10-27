@@ -201,11 +201,11 @@ function ComposerToolCallFooter({
  * @remarks The component owns only whether the arguments are shown, which
  * starts hidden, except for an MCP call, whose summary does not describe
  * its arguments, so they start shown; the parent keys it by call, so each
- * call starts again. The
- * parent owns the call, the draft, and every answer, including Esc and Enter
- * in the composer field. Reject uses the draft as the reason. The card is a
- * named group, and the arguments toggle exposes its state through
- * `aria-expanded`.
+ * call starts again. A call without arguments has neither the toggle nor
+ * the list. The parent owns the call, the draft, and every answer,
+ * including Esc and Enter in the composer field. Reject uses the draft as
+ * the reason. The card is a named group, and the arguments toggle exposes
+ * its state through `aria-expanded`.
  * @param props - Waiting call, whether a draft exists, and the answers.
  * @returns The waiting call's card.
  */
@@ -254,7 +254,7 @@ function ComposerToolCallRequest({
         {formatToolCallSummary(answer.input)}
       </p>
 
-      {isArgumentsExpanded ? (
+      {hasArguments && isArgumentsExpanded ? (
         <ComposerToolCallArguments
           callArguments={call.arguments}
           listId={argumentsId}
@@ -320,9 +320,10 @@ function ComposerToolResultFailure({
  *
  * @remarks The parent selects the call, owns every answer, and routes Esc
  * and Enter from the composer field; it keys this component by call, so a
- * new call starts with its arguments hidden. A waiting call shows what it
- * will do and offers Reject and Allow once, or Allow anyway while the
- * composer holds text. A failed answer shows the reason and Try again.
+ * new call starts with its arguments hidden, or shown for an MCP call. A
+ * waiting call shows what it will do and offers Reject and Allow once, or
+ * Allow anyway while the composer holds text. A failed answer shows the
+ * reason and Try again.
  * @param props - Shown call, whether a draft exists, and the answers.
  * @returns The card for the call's state.
  */

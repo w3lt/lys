@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
   listMcpServers,
-  reconnectMcpServer,
-  syncMcpServers
+  sendMcpServerReconnectRequest,
+  sendMcpServerSyncRequest
 } from "@/lib/apis/http/mcp"
 import {
   buildJsonResponse,
@@ -149,8 +149,21 @@ describe("listMcpServers", () => {
     }
   )
 
+  it("rejects an answer with another status, naming only the status", async () => {
+    startBackendFake({
+      [LIST_ROUTE]: () =>
+        buildJsonResponse(500, { detail: "SERVER-PROVIDED-TEXT" })
+    })
+
+    const failure = await captureFailure(listMcpServers(CONNECTION))
+
+    expect(failure).toMatchObject({
+      message:
+        "The backend could not complete the MCP server request (HTTP 500)."
+    })
+  })
+
   it.each([
-    ["another status", () => buildJsonResponse(500, APPLIED_LIST)],
     [
       "another media type",
       () =>
@@ -176,13 +189,15 @@ describe("listMcpServers", () => {
   })
 })
 
-describe("syncMcpServers", () => {
+describe("sendMcpServerSyncRequest", () => {
   it("posts the empty JSON body and returns the list the backend applied", async () => {
     const backend = startBackendFake({
       [SYNC_ROUTE]: () => buildJsonResponse(200, RECONNECTING_LIST)
     })
 
-    await expect(syncMcpServers(CONNECTION)).resolves.toEqual(RECONNECTING_LIST)
+    await expect(sendMcpServerSyncRequest(CONNECTION)).resolves.toEqual(
+      RECONNECTING_LIST
+    )
     const request = backend.requests[0]
     expect(request?.method).toBe("POST")
     expect(request?.url).toBe(`${FIXTURE_BACKEND_URL}/api/v1/mcp/servers/sync`)
@@ -191,12 +206,23 @@ describe("syncMcpServers", () => {
     expect(request?.cache).toBe("no-store")
   })
 
-  it("rejects an answer with another status", async () => {
+  it("rejects an answer with another status, naming the status", async () => {
     startBackendFake({
       [SYNC_ROUTE]: () => new Response(null, { status: 500 })
     })
 
-    await expect(syncMcpServers(CONNECTION)).rejects.toMatchObject({
+    await expect(sendMcpServerSyncRequest(CONNECTION)).rejects.toMatchObject({
+      message:
+        "The backend could not complete the MCP server request (HTTP 500)."
+    })
+  })
+
+  it("rejects a list that does not match the shared schema", async () => {
+    startBackendFake({
+      [SYNC_ROUTE]: () => buildJsonResponse(200, { settings: "applied" })
+    })
+
+    await expect(sendMcpServerSyncRequest(CONNECTION)).rejects.toMatchObject({
       message: "The backend returned an invalid MCP server list."
     })
   })
@@ -206,19 +232,21 @@ describe("syncMcpServers", () => {
       [SYNC_ROUTE]: () => Promise.reject(createTransportFailure())
     })
 
-    await expect(syncMcpServers(CONNECTION)).rejects.toMatchObject({
+    await expect(sendMcpServerSyncRequest(CONNECTION)).rejects.toMatchObject({
       message: "The backend could not be reached."
     })
   })
 })
 
-describe("reconnectMcpServer", () => {
+describe("sendMcpServerReconnectRequest", () => {
   it("posts the empty JSON body to the server's path and returns the list", async () => {
     const backend = startBackendFake({
       [RECONNECT_NOTES_ROUTE]: () => buildJsonResponse(200, RECONNECTING_LIST)
     })
 
-    await expect(reconnectMcpServer(CONNECTION, "notes")).resolves.toEqual({
+    await expect(
+      sendMcpServerReconnectRequest(CONNECTION, "notes")
+    ).resolves.toEqual({
       status: "reconnected",
       list: RECONNECTING_LIST
     })
@@ -237,7 +265,9 @@ describe("reconnectMcpServer", () => {
         buildJsonResponse(404, buildMcpServerNotFoundProblem("notes"))
     })
 
-    await expect(reconnectMcpServer(CONNECTION, "notes")).resolves.toEqual({
+    await expect(
+      sendMcpServerReconnectRequest(CONNECTION, "notes")
+    ).resolves.toEqual({
       status: "not-found"
     })
   })
@@ -251,21 +281,25 @@ describe("reconnectMcpServer", () => {
       startBackendFake({ [RECONNECT_NOTES_ROUTE]: route })
 
       await expect(
-        reconnectMcpServer(CONNECTION, "notes")
+        sendMcpServerReconnectRequest(CONNECTION, "notes")
       ).rejects.toMatchObject({
-        message: "The backend could not reconnect the MCP server (HTTP 404)."
+        message:
+          "The backend could not complete the MCP server request (HTTP 404)."
       })
     }
   )
 
-  it("rejects an answer with another status", async () => {
+  it("rejects an answer with another status, naming the status", async () => {
     startBackendFake({
       [RECONNECT_NOTES_ROUTE]: () => new Response(null, { status: 503 })
     })
 
-    await expect(reconnectMcpServer(CONNECTION, "notes")).rejects.toMatchObject(
-      { message: "The backend returned an invalid MCP server list." }
-    )
+    await expect(
+      sendMcpServerReconnectRequest(CONNECTION, "notes")
+    ).rejects.toMatchObject({
+      message:
+        "The backend could not complete the MCP server request (HTTP 503)."
+    })
   })
 
   it("rejects without the transport's detail when the backend cannot be reached", async () => {
@@ -273,8 +307,8 @@ describe("reconnectMcpServer", () => {
       [RECONNECT_NOTES_ROUTE]: () => Promise.reject(createTransportFailure())
     })
 
-    await expect(reconnectMcpServer(CONNECTION, "notes")).rejects.toMatchObject(
-      { message: "The backend could not be reached." }
-    )
+    await expect(
+      sendMcpServerReconnectRequest(CONNECTION, "notes")
+    ).rejects.toMatchObject({ message: "The backend could not be reached." })
   })
 })

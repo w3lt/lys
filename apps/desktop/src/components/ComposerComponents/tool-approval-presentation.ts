@@ -26,7 +26,7 @@ export const DRAFT_APPROVAL_HINT = "↵ sends your message as her answer"
  * where the location comes from, because the person typed it. An MCP call
  * asks whether to run the tool, by the name its server calls it, on that
  * server: what it does depends on the server, and the card shows its
- * arguments.
+ * arguments, if it has any.
  */
 export function formatToolCallSummary(input: ToolCallInput): string {
   if (input.runner === "mcp") {

@@ -1,5 +1,11 @@
 import type { McpServerName, McpServerSettings } from "@lys/share"
-import { useEffect, useRef, useState, type ReactElement } from "react"
+import {
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+  type ReactElement
+} from "react"
 
 import { Button } from "@/components/ui/button"
 import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
@@ -17,6 +23,7 @@ import {
   McpToolOfferWarning,
   type McpServerListFocusTarget
 } from "./McpServerList"
+import { ToolApprovalSaveFeedback } from "./ToolApprovalSaveFeedback"
 import {
   findMcpPaneRetry,
   formatMcpToolOfferWarning,
@@ -40,9 +47,88 @@ const NO_FOCUS_TARGET: McpServerListFocusTarget = Object.freeze({
 function calculateEditorReturnTarget(
   editor: McpEditorTarget
 ): McpServerListFocusTarget {
-  return editor.kind === "server"
-    ? { kind: "server", serverName: editor.server.name }
-    : { kind: "add-server" }
+  switch (editor.kind) {
+    case "new":
+      return { kind: "add-server" }
+    case "server":
+      return { kind: "server", serverName: editor.server.name }
+  }
+}
+
+/** What the server list shows and which of its controls takes focus. */
+type McpListView = {
+  /** Name of the server whose details are shown, or null when none is. */
+  readonly expandedServerName: McpServerName | null
+  /** Control that takes focus when the list appears, or none. */
+  readonly focusTarget: McpServerListFocusTarget
+}
+
+/** One change to what the server list shows. */
+type McpListViewChange =
+  | {
+      /** The person showed one server's details, or none. */
+      readonly kind: "details"
+      /** Name of the server whose details to show, or null for none. */
+      readonly serverName: McpServerName | null
+    }
+  | {
+      /** An editor closed, so the list returns. */
+      readonly kind: "editor-closed"
+      /** Control that takes focus; a server's Edit button also shows its details. */
+      readonly target: McpServerListFocusTarget
+    }
+  | {
+      /** The removal of a server was saved. */
+      readonly kind: "server-removed"
+      /** Name of the removed server. */
+      readonly serverName: McpServerName
+    }
+
+/** The list before any change: no details shown, and focus left where it is. */
+const INITIAL_MCP_LIST_VIEW: McpListView = Object.freeze({
+  expandedServerName: null,
+  focusTarget: NO_FOCUS_TARGET
+})
+
+/**
+ * Calculates what the server list shows after one change.
+ *
+ * @param view - What the list shows now.
+ * @param change - What happened.
+ * @returns The details the person chose, with any focus request ended,
+ * because it applied when the list appeared; after an editor closes, its
+ * focus target and, for a server's Edit button, that server's details;
+ * after a removal is saved, the removed server's details closed if they are
+ * still shown, and a new request for Add server, which takes focus only
+ * while focus is lost.
+ */
+function calculateMcpListView(
+  view: McpListView,
+  change: McpListViewChange
+): McpListView {
+  switch (change.kind) {
+    case "details":
+      return {
+        expandedServerName: change.serverName,
+        focusTarget: NO_FOCUS_TARGET
+      }
+    case "editor-closed":
+      return {
+        expandedServerName:
+          change.target.kind === "server"
+            ? change.target.serverName
+            : view.expandedServerName,
+        focusTarget: change.target
+      }
+    case "server-removed":
+      return {
+        expandedServerName:
+          view.expandedServerName === change.serverName
+            ? null
+            : view.expandedServerName,
+        focusTarget: { kind: "add-server" }
+      }
+  }
 }
 
 /**
@@ -59,10 +145,14 @@ function buildServersWithSaved(
   server: McpServerSettings,
   editor: McpEditorTarget
 ): readonly McpServerSettings[] {
-  if (editor.kind === "new") return [...servers, server]
-  return servers.map((saved) =>
-    saved.name === editor.server.name ? server : saved
-  )
+  switch (editor.kind) {
+    case "new":
+      return [...servers, server]
+    case "server":
+      return servers.map((saved) =>
+        saved.name === editor.server.name ? server : saved
+      )
+  }
 }
 
 /**
@@ -76,10 +166,13 @@ function listOtherServerNames(
   servers: readonly McpServerSettings[],
   editor: McpEditorTarget
 ): ReadonlySet<string> {
-  const editedName = editor.kind === "server" ? editor.server.name : undefined
-  return new Set(
-    servers.map((server) => server.name).filter((name) => name !== editedName)
-  )
+  const names = servers.map((server) => server.name)
+  switch (editor.kind) {
+    case "new":
+      return new Set(names)
+    case "server":
+      return new Set(names.filter((name) => name !== editor.server.name))
+  }
 }
 
 /** Properties accepted by {@link McpPaneStatus}. */
@@ -185,7 +278,7 @@ type McpServerListViewProps = {
   /** Requests that the parent open an editor in place of the list. */
   readonly onOpenEditor: (editor: McpEditorTarget) => void
   /** Reports to the parent that the removal of a server was saved. */
-  readonly onRemoveServerComplete: () => void
+  readonly onRemoveServerComplete: (serverName: McpServerName) => void
 }
 
 /**
@@ -197,7 +290,8 @@ type McpServerListViewProps = {
  * tool store owns the list of tools. The parent owns the list's states,
  * which server's details are shown, which editor opens, and the focus
  * target. A server's approval sets every listed tool of the server. A
- * server is removed once its removal is saved, which the parent is told.
+ * server is removed once its removal is saved, which the parent is told
+ * with the server's name.
  * @param props - Backend status, the list, expansion, focus, and the
  * parent-owned changes.
  * @returns The warning, when one is due, and the section of the saved
@@ -220,8 +314,8 @@ function McpServerListView({
   const updateToolOn = useLysStore((state) => state.updateToolOn)
   const updateToolApproval = useLysStore((state) => state.updateToolApproval)
   const toolList = useToolStore((state) => state.list)
-  const reconnectMcpServer = useMcpServerStore(
-    (state) => state.reconnectMcpServer
+  const sendMcpServerReconnect = useMcpServerStore(
+    (state) => state.sendMcpServerReconnect
   )
   const saveMcpServers = useMcpServerStore((state) => state.saveMcpServers)
 
@@ -234,7 +328,7 @@ function McpServerListView({
     const outcome = await saveMcpServers(
       servers.filter((server) => server.name !== serverName)
     )
-    if (outcome === "saved") onRemoveServerComplete()
+    if (outcome === "saved") onRemoveServerComplete(serverName)
   }
 
   /**
@@ -262,7 +356,9 @@ function McpServerListView({
         onAddServer={(transport) => onOpenEditor({ kind: "new", transport })}
         onEditServer={(server) => onOpenEditor({ kind: "server", server })}
         onExpandedServerNameChange={onExpandedServerNameChange}
-        onReconnectServer={(serverName) => void reconnectMcpServer(serverName)}
+        onReconnectServer={(serverName) =>
+          void sendMcpServerReconnect(serverName)
+        }
         onRemoveServer={(serverName) => void handleRemoveServer(serverName)}
         onToolApprovalChange={handleToolApprovalChange}
         onToolOnChange={updateToolOn}
@@ -356,13 +452,15 @@ function McpPaneStatusView({
   const saveState = useLysStore((state) => state.mcpSettingsSave)
   const actionFailure = useMcpServerStore((state) => state.actionFailure)
   const loadMcpServers = useMcpServerStore((state) => state.loadMcpServers)
-  const syncMcpServers = useMcpServerStore((state) => state.syncMcpServers)
+  const sendMcpServerSync = useMcpServerStore(
+    (state) => state.sendMcpServerSync
+  )
   const facts = { isBackendRunning, list, actionFailure, saveState, isEditing }
   const retry = findMcpPaneRetry(facts)
 
   /** Sends again what failed: the sync, or else the read. */
   function handleRetry(): void {
-    if (retry === "sync") void syncMcpServers()
+    if (retry === "sync") void sendMcpServerSync()
     else void loadMcpServers()
   }
 
@@ -411,8 +509,14 @@ function useMcpPaneReads(isBackendRunning: boolean): void {
  * one, which replaces the list while open, which server's details are
  * shown, and which list control takes focus when the list returns. After a
  * save, or after closing a saved server's editor, that server's details
- * show and its Edit button takes focus; closing a new server's editor, or
- * removing a server, moves focus to Add server. The servers are listed from
+ * show and its Edit button takes focus; the request ends with the next
+ * change of the shown details, so showing them again later moves no focus.
+ * Closing a new server's editor moves focus to Add server. Once a removal is
+ * saved, the removed server's details close if they are still shown, and
+ * focus moves to Add server only if it was lost with the removed row, so a
+ * server the person turned to meanwhile keeps its details and focus. The
+ * status of the tool choices' save stays mounted below the list and the
+ * editor, because the pane changes tool choices. The servers are listed from
  * the settings whether or not the backend runs, and can be edited either
  * way. Each time the pane appears while the backend runs, or the backend
  * starts while it is shown, it reads the states, and it reads the tools
@@ -430,9 +534,10 @@ export default function McpPane(): ReactElement {
   )
   const list = useMcpServerStore((state) => state.list)
   const [editor, setEditor] = useState<McpEditorTarget | null>(null)
-  const [expandedServerName, setExpandedServerName] =
-    useState<McpServerName | null>(null)
-  const [focusTarget, setFocusTarget] = useState(NO_FOCUS_TARGET)
+  const [listView, updateListView] = useReducer(
+    calculateMcpListView,
+    INITIAL_MCP_LIST_VIEW
+  )
 
   useMcpPaneReads(isBackendRunning)
 
@@ -444,15 +549,8 @@ export default function McpPane(): ReactElement {
    * server's Edit button also shows that server's details.
    */
   function closeEditor(target: McpServerListFocusTarget): void {
-    if (target.kind === "server") setExpandedServerName(target.serverName)
-    setFocusTarget(target)
+    updateListView({ kind: "editor-closed", target })
     setEditor(null)
-  }
-
-  /** Collapses the removed server's details and moves focus to Add server. */
-  function handleRemoveServerComplete(): void {
-    setExpandedServerName(null)
-    setFocusTarget({ kind: "add-server" })
   }
 
   return (
@@ -464,13 +562,17 @@ export default function McpPane(): ReactElement {
       />
       {editor === null ? (
         <McpServerListView
-          expandedServerName={expandedServerName}
-          focusTarget={focusTarget}
+          expandedServerName={listView.expandedServerName}
+          focusTarget={listView.focusTarget}
           isBackendRunning={isBackendRunning}
           list={list}
-          onExpandedServerNameChange={setExpandedServerName}
+          onExpandedServerNameChange={(serverName) =>
+            updateListView({ kind: "details", serverName })
+          }
           onOpenEditor={setEditor}
-          onRemoveServerComplete={handleRemoveServerComplete}
+          onRemoveServerComplete={(serverName) =>
+            updateListView({ kind: "server-removed", serverName })
+          }
         />
       ) : (
         <McpServerEditorView
@@ -482,6 +584,7 @@ export default function McpPane(): ReactElement {
           }
         />
       )}
+      <ToolApprovalSaveFeedback />
     </div>
   )
 }

@@ -273,6 +273,26 @@ describe("ComposerToolApproval", () => {
       ).toEqual(["moths", '{"tags":["night","wings"]}', "5"])
     })
 
+    it("shows no arguments toggle or list for an MCP call without arguments", () => {
+      const call = buildToolCall(14, NOTES_SEARCH.name, {})
+      startToolApproval({
+        toolCall: { ...WAITING_MCP_CALL, call },
+        hasDraft: false
+      })
+
+      const card = screen.getByRole("group", {
+        name: "Tool call waiting for your answer"
+      })
+      expect(
+        within(card).getByText("Run search on the MCP server notes?")
+      ).toBeInTheDocument()
+      expect(
+        within(card).queryByRole("button", { name: "Arguments" })
+      ).toBeNull()
+      // A description list has no role, and an empty one draws an empty box.
+      expect(card.querySelector("dl")).toBeNull()
+    })
+
     it("hides the arguments again on a second press", async () => {
       const user = userEvent.setup()
       startToolApproval({ toolCall: WAITING_SEARCH, hasDraft: false })

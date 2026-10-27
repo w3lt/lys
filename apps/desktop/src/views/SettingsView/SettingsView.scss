@@ -2187,10 +2187,20 @@ legend.settings-view__mcp-field-label {
   list-style: none;
 }
 
-.settings-view__mcp-entry {
+.settings-view__mcp-entry,
+.settings-view__mcp-entry-columns {
   display: grid;
   gap: 6px;
   grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) 38px;
+}
+
+/* Column labels over the rows' name and value inputs. */
+.settings-view__mcp-entry-columns {
+  margin-bottom: -3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--app-text-faint);
 }
 
 .settings-view__mcp-field .settings-view__mcp-entry [data-slot="input"] {

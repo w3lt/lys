@@ -1,8 +1,8 @@
 import { MAXIMUM_MCP_SERVER_NAME_LENGTH } from "@lys/share"
 
 import {
-  fillMcpHttpDraft,
-  fillMcpStdioDraft,
+  buildMcpHttpDraft,
+  buildMcpStdioDraft,
   type McpServerDraft
 } from "./mcp-server-draft"
 
@@ -230,15 +230,17 @@ export function formatMcpServerNameFromKey(key: string): string {
 }
 
 /**
- * Fills a draft with a URL server's config.
+ * Builds a draft from a URL server's config.
  *
  * @param draft - Draft to fill, with the name already chosen.
  * @param url - The config's URL.
  * @param config - The server's untrusted config.
- * @returns The filled draft; `sse` for a server whose type is SSE, which
- * Lys does not speak; `unreadable-values` when its headers are not texts.
+ * @returns The filled draft; `sse` for a server whose `type` is `sse`, in
+ * any case, a transport Lys does not speak; `unreadable-values` when its
+ * headers are not texts. Only the type marks a server as SSE: a URL alone,
+ * whatever its path, fills a Streamable HTTP server.
  */
-function fillHttpConfig(
+function buildHttpConfigDraft(
   draft: McpServerDraft,
   url: string,
   config: ConfigObject
@@ -246,11 +248,11 @@ function fillHttpConfig(
   if (readConfigString(config.type)?.toLowerCase() === "sse") return "sse"
   const headers = readConfigPairs(config.headers)
   if (headers === undefined) return "unreadable-values"
-  return fillMcpHttpDraft(draft, url, headers)
+  return buildMcpHttpDraft(draft, url, headers)
 }
 
 /**
- * Fills a draft with a command server's config.
+ * Builds a draft from a command server's config.
  *
  * @param draft - Draft to fill, with the name already chosen.
  * @param command - The config's command.
@@ -258,7 +260,7 @@ function fillHttpConfig(
  * @returns The filled draft, or `unreadable-values` when its arguments or
  * variables are not texts; a working directory is not read.
  */
-function fillStdioConfig(
+function buildStdioConfigDraft(
   draft: McpServerDraft,
   command: string,
   config: ConfigObject
@@ -268,11 +270,11 @@ function fillStdioConfig(
   if (commandArguments === undefined || variables === undefined) {
     return "unreadable-values"
   }
-  return fillMcpStdioDraft(draft, command, commandArguments, variables)
+  return buildMcpStdioDraft(draft, command, commandArguments, variables)
 }
 
 /**
- * Fills a draft with one server's config.
+ * Builds a draft from one server's config.
  *
  * @param draft - Draft to fill, with the name already chosen.
  * @param config - The server's untrusted config, which has a `command`,
@@ -280,14 +282,15 @@ function fillStdioConfig(
  * @returns The filled draft: a URL server's when the config has a URL, a
  * command server's when it has a command; otherwise `unreadable-values`.
  */
-function fillDraftFromConfig(
+function buildDraftFromConfig(
   draft: McpServerDraft,
   config: ConfigObject
 ): McpServerDraft | McpServerJsonProblem {
   const url = readConfigString(config.url) ?? readConfigString(config.serverUrl)
-  if (url !== undefined) return fillHttpConfig(draft, url, config)
+  if (url !== undefined) return buildHttpConfigDraft(draft, url, config)
   const command = readConfigString(config.command)
-  if (command !== undefined) return fillStdioConfig(draft, command, config)
+  if (command !== undefined)
+    return buildStdioConfigDraft(draft, command, config)
   return "unreadable-values"
 }
 
@@ -318,7 +321,7 @@ export function parseMcpServerJson(
     ...draft,
     name: name === "" ? draft.name : name
   })
-  const filled = fillDraftFromConfig(named, server.config)
+  const filled = buildDraftFromConfig(named, server.config)
   if (typeof filled === "string") return buildJsonProblem(filled)
   return Object.freeze({
     status: "filled",

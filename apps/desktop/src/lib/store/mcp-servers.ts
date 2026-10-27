@@ -4,8 +4,8 @@ import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import {
   listMcpServers,
-  reconnectMcpServer,
-  syncMcpServers,
+  sendMcpServerReconnectRequest,
+  sendMcpServerSyncRequest,
   type ReconnectMcpServerResult
 } from "@/lib/apis/http/mcp"
 import { useLysStore } from "@/lib/store"
@@ -37,11 +37,17 @@ export type McpServerListState =
       readonly error: string
     }
 
-/** Sync or reconnect whose request the backend could not be asked. */
+/**
+ * Sync or reconnect whose request failed: it did not reach the backend, or
+ * the backend did not answer it with the server list.
+ */
 export type McpServerActionFailure = {
   /** The action: applying the saved servers, or reconnecting one server. */
   readonly action: "sync" | "reconnect"
-  /** User-presentable reason. */
+  /**
+   * User-presentable sentence naming the request and why it failed. It
+   * claims nothing about whether a backend that answered applied the change.
+   */
   readonly error: string
 }
 
@@ -77,7 +83,7 @@ type McpServerStoreActions = {
    * is committed; it never rejects.
    * @remarks A failure shown before is cleared when the sync starts.
    */
-  syncMcpServers: () => Promise<void>
+  sendMcpServerSync: () => Promise<void>
   /**
    * Asks the backend to close one server's connection and open it again.
    *
@@ -86,9 +92,10 @@ type McpServerStoreActions = {
    * is committed; it never rejects.
    * @remarks A failure shown before is cleared when the reconnect starts.
    * When the backend has not applied a server with that name, it applies the
-   * saved group instead, which opens the server if it is saved.
+   * saved group instead, which opens the server if it is saved, unless the
+   * store was reset since the reconnect started.
    */
-  reconnectMcpServer: (serverName: McpServerName) => Promise<void>
+  sendMcpServerReconnect: (serverName: McpServerName) => Promise<void>
   /**
    * Saves the whole list of MCP servers and, once it is saved while the
    * backend runs, asks the backend to apply it.
@@ -97,7 +104,7 @@ type McpServerStoreActions = {
    * server schema, each name once.
    * @returns The save outcome, once the save settled; it never rejects. The
    * request to apply the list is not awaited: its answer or failure is
-   * committed like {@link McpServerStoreActions.syncMcpServers}'s. A backend
+   * committed like {@link McpServerStoreActions.sendMcpServerSync}'s. A backend
    * that is not running is not asked; {@link registerMcpServerRefresh} asks
    * it to apply the saved servers once it runs.
    */
@@ -106,8 +113,8 @@ type McpServerStoreActions = {
   ) => Promise<McpSettingsSaveOutcome>
   /**
    * Forgets the list and any failure, as when the backend stops; an answer
-   * still in flight is discarded, and a later read joins no action started
-   * before.
+   * still in flight is discarded, so a reconnect answered later applies
+   * nothing either, and a later read joins no action started before.
    */
   resetMcpServers: () => void
 }
@@ -120,9 +127,9 @@ type McpServerStoreDependencies = {
   /** Lists the applied servers; rejects when the list cannot be read. */
   readonly listMcpServers: () => Promise<McpServerList>
   /** Applies the saved group; rejects when the backend cannot be asked. */
-  readonly syncMcpServers: () => Promise<McpServerList>
+  readonly sendMcpServerSyncRequest: () => Promise<McpServerList>
   /** Reconnects one server; rejects when the backend cannot be asked. */
-  readonly reconnectMcpServer: (
+  readonly sendMcpServerReconnectRequest: (
     serverName: McpServerName
   ) => Promise<ReconnectMcpServerResult>
   /** Saves the MCP group through the application store; never rejects. */
@@ -141,12 +148,6 @@ const IDLE_MCP_SERVER_LIST: McpServerListState = Object.freeze({
 /** List state while the first read is pending. */
 const LOADING_MCP_SERVER_LIST: McpServerListState = Object.freeze({
   status: "loading"
-})
-
-/** Failure when the backend could not be asked to apply the group. */
-const SYNC_FAILURE: McpServerActionFailure = Object.freeze({
-  action: "sync",
-  error: "Lys couldn't ask its backend to apply the MCP servers."
 })
 
 /** Time between two reads of the list while a server connects. */
@@ -181,6 +182,33 @@ function formatMcpServerListError(error: unknown): string {
 }
 
 /**
+ * Builds the failure of a sync or reconnect whose request failed.
+ *
+ * @param action - The action whose request failed.
+ * @param requestedChange - What the request asked the backend to do, as the
+ * words that follow "Lys's request to", such as `apply the MCP servers`.
+ * @param error - Value the request rejected with: the HTTP client's
+ * caller-safe error, which says whether the request did not reach the
+ * backend or what the backend answered.
+ * @returns A frozen failure whose sentence names the request and, when the
+ * rejection carries one, the reason.
+ */
+function buildMcpServerActionFailure(
+  action: McpServerActionFailure["action"],
+  requestedChange: string,
+  error: unknown
+): McpServerActionFailure {
+  const failure = `Lys's request to ${requestedChange} failed`
+  return Object.freeze({
+    action,
+    error:
+      error instanceof Error && error.message
+        ? `${failure}: ${error.message}`
+        : `${failure}.`
+  })
+}
+
+/**
  * Creates one independently owned MCP server store.
  *
  * @param dependencies - Backend requests, each bound to the backend origin
@@ -204,6 +232,8 @@ function createMcpServerStore(
   let latestStartedRequest = 0
   /** Number of the latest request whose answer was committed. */
   let latestCommittedRequest = 0
+  /** Number of the latest request started before the latest reset. */
+  let latestDiscardedRequest = 0
 
   /**
    * Numbers a request that starts now.
@@ -227,12 +257,23 @@ function createMcpServerStore(
   }
 
   /**
-   * Records a sync or reconnect as pending until it settles.
+   * Answers whether a reset happened since a request started.
+   *
+   * @param request - Number of the request.
+   * @returns True when the request started before the latest reset, so
+   * nothing it answers may be committed or acted on.
+   */
+  function isRequestDiscarded(request: number): boolean {
+    return request <= latestDiscardedRequest
+  }
+
+  /**
+   * Adds a sync or reconnect to the pending actions until it settles.
    *
    * @param action - Action that started; it never rejects.
    * @returns The same action.
    */
-  function trackAction(action: Promise<void>): Promise<void> {
+  function addPendingAction(action: Promise<void>): Promise<void> {
     pendingActions.add(action)
     void action.finally(() => pendingActions.delete(action))
     return action
@@ -243,7 +284,7 @@ function createMcpServerStore(
    *
    * @returns A promise that resolves once they all settled.
    */
-  async function joinPendingActions(): Promise<void> {
+  async function waitForPendingActions(): Promise<void> {
     await Promise.all(pendingActions)
   }
 
@@ -259,12 +300,12 @@ function createMcpServerStore(
     get: StoreApi<McpServerStore>["getState"]
   ): McpServerStore {
     /**
-     * Commits a list answered for a current request.
+     * Updates the list with an answer to a current request.
      *
      * @param request - Number of the request that answered.
      * @param list - List state to show.
      */
-    function commitList(request: number, list: McpServerListState): void {
+    function updateServerList(request: number, list: McpServerListState): void {
       if (!isRequestCurrent(request)) return
       latestCommittedRequest = request
       set({ list })
@@ -277,7 +318,7 @@ function createMcpServerStore(
      * @param request - Number of the action.
      * @param actionFailure - The action and the user-presentable reason.
      */
-    function commitActionFailure(
+    function updateActionFailure(
       request: number,
       actionFailure: McpServerActionFailure
     ): void {
@@ -305,19 +346,19 @@ function createMcpServerStore(
       if (get().list.status !== "loaded") set({ list: LOADING_MCP_SERVER_LIST })
       try {
         const list = await dependencies.listMcpServers()
-        commitList(request, buildLoadedMcpServerList(list))
+        updateServerList(request, buildLoadedMcpServerList(list))
       } catch (error) {
         const failed: McpServerListState = Object.freeze({
           status: "failed",
           error: formatMcpServerListError(error)
         })
-        commitList(request, failed)
+        updateServerList(request, failed)
       }
     }
 
     /** Implements {@link McpServerStoreActions.loadMcpServers}. */
     function loadMcpServers(): Promise<void> {
-      if (pendingActions.size > 0) return joinPendingActions()
+      if (pendingActions.size > 0) return waitForPendingActions()
       if (pendingListRead !== undefined) return pendingListRead
       const read = readMcpServerList().finally(() => {
         if (pendingListRead === read) pendingListRead = undefined
@@ -331,19 +372,24 @@ function createMcpServerStore(
      *
      * @returns A promise that resolves after the outcome is committed.
      */
-    async function applyMcpServers(): Promise<void> {
+    async function sendSyncAndUpdateList(): Promise<void> {
       const request = startAction()
       try {
-        const list = await dependencies.syncMcpServers()
-        commitList(request, buildLoadedMcpServerList(list))
-      } catch {
-        commitActionFailure(request, SYNC_FAILURE)
+        const list = await dependencies.sendMcpServerSyncRequest()
+        updateServerList(request, buildLoadedMcpServerList(list))
+      } catch (error) {
+        const failure = buildMcpServerActionFailure(
+          "sync",
+          "apply the MCP servers",
+          error
+        )
+        updateActionFailure(request, failure)
       }
     }
 
-    /** Implements {@link McpServerStoreActions.syncMcpServers}. */
+    /** Implements {@link McpServerStoreActions.sendMcpServerSync}. */
     function sendMcpServerSync(): Promise<void> {
-      return trackAction(applyMcpServers())
+      return addPendingAction(sendSyncAndUpdateList())
     }
 
     /**
@@ -351,33 +397,41 @@ function createMcpServerStore(
      * applies the saved group when the backend has not applied the server.
      *
      * @param serverName - Name of the server to reconnect.
-     * @returns A promise that resolves after the outcome is committed.
+     * @returns A promise that resolves after the outcome is committed. A
+     * not-found answer to a reconnect that started before a reset applies
+     * nothing.
      */
-    async function reopenMcpServer(serverName: McpServerName): Promise<void> {
+    async function sendReconnectAndUpdateList(
+      serverName: McpServerName
+    ): Promise<void> {
       const request = startAction()
       let result: ReconnectMcpServerResult
       try {
-        result = await dependencies.reconnectMcpServer(serverName)
-      } catch {
-        const error = `Lys couldn't ask its backend to reconnect ${serverName}.`
-        commitActionFailure(request, { action: "reconnect", error })
+        result = await dependencies.sendMcpServerReconnectRequest(serverName)
+      } catch (error) {
+        const failure = buildMcpServerActionFailure(
+          "reconnect",
+          `reconnect ${serverName}`,
+          error
+        )
+        updateActionFailure(request, failure)
         return
       }
       if (result.status === "not-found") {
-        await sendMcpServerSync()
+        if (!isRequestDiscarded(request)) await sendMcpServerSync()
         return
       }
-      commitList(request, buildLoadedMcpServerList(result.list))
+      updateServerList(request, buildLoadedMcpServerList(result.list))
     }
 
     /**
-     * Implements {@link McpServerStoreActions.reconnectMcpServer}.
+     * Implements {@link McpServerStoreActions.sendMcpServerReconnect}.
      *
      * @param serverName - Name of the server to reconnect.
      * @returns A promise that resolves after the outcome is committed.
      */
     function sendMcpServerReconnect(serverName: McpServerName): Promise<void> {
-      return trackAction(reopenMcpServer(serverName))
+      return addPendingAction(sendReconnectAndUpdateList(serverName))
     }
 
     /**
@@ -399,6 +453,7 @@ function createMcpServerStore(
     /** Implements {@link McpServerStoreActions.resetMcpServers}. */
     function resetMcpServers(): void {
       latestCommittedRequest = latestStartedRequest
+      latestDiscardedRequest = latestStartedRequest
       pendingListRead = undefined
       pendingActions.clear()
       set({ list: IDLE_MCP_SERVER_LIST, actionFailure: null })
@@ -408,8 +463,8 @@ function createMcpServerStore(
       list: IDLE_MCP_SERVER_LIST,
       actionFailure: null,
       loadMcpServers,
-      syncMcpServers: sendMcpServerSync,
-      reconnectMcpServer: sendMcpServerReconnect,
+      sendMcpServerSync,
+      sendMcpServerReconnect,
       saveMcpServers,
       resetMcpServers
     }
@@ -432,10 +487,12 @@ export const useMcpServerStore: UseBoundStore<StoreApi<McpServerStore>> =
   createMcpServerStore({
     listMcpServers: () =>
       listMcpServers({ backendUrl: useLysStore.getState().backendUrl }),
-    syncMcpServers: () =>
-      syncMcpServers({ backendUrl: useLysStore.getState().backendUrl }),
-    reconnectMcpServer: (serverName) =>
-      reconnectMcpServer(
+    sendMcpServerSyncRequest: () =>
+      sendMcpServerSyncRequest({
+        backendUrl: useLysStore.getState().backendUrl
+      }),
+    sendMcpServerReconnectRequest: (serverName) =>
+      sendMcpServerReconnectRequest(
         { backendUrl: useLysStore.getState().backendUrl },
         serverName
       ),
@@ -469,7 +526,7 @@ function handleBackendStatusChange(
   const wasRunning = previousState.backendServerInfo.status === "running"
   if (isRunning === wasRunning) return
   const serverStore = useMcpServerStore.getState()
-  if (isRunning) void serverStore.syncMcpServers()
+  if (isRunning) void serverStore.sendMcpServerSync()
   else serverStore.resetMcpServers()
 }
 

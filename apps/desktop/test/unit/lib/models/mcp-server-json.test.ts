@@ -2,8 +2,8 @@ import { MAXIMUM_MCP_SERVER_NAME_LENGTH, mcpServerNameSchema } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   buildEmptyMcpServerDraft,
-  fillMcpHttpDraft,
-  fillMcpStdioDraft,
+  buildMcpHttpDraft,
+  buildMcpStdioDraft,
   type McpServerDraft
 } from "@/lib/models/mcp-server-draft"
 import {
@@ -20,7 +20,7 @@ const EMPTY_HTTP_DRAFT = buildEmptyMcpServerDraft("http")
  * argument, and one variable row, so the rows of a pasted server must take
  * later identities.
  */
-const TYPED_STDIO_DRAFT: McpServerDraft = fillMcpStdioDraft(
+const TYPED_STDIO_DRAFT: McpServerDraft = buildMcpStdioDraft(
   { ...buildEmptyMcpServerDraft("stdio"), name: "typed" },
   "uvx",
   ["mcp-server-time"],
@@ -31,7 +31,7 @@ const TYPED_STDIO_DRAFT: McpServerDraft = fillMcpStdioDraft(
  * Draft of a URL server the person already typed: a name, a URL, a token,
  * and one header row.
  */
-const TYPED_HTTP_DRAFT: McpServerDraft = fillMcpHttpDraft(
+const TYPED_HTTP_DRAFT: McpServerDraft = buildMcpHttpDraft(
   { ...buildEmptyMcpServerDraft("http"), name: "typed" },
   "https://mcp.example.test/typed",
   [
@@ -367,6 +367,15 @@ describe("parseMcpServerJson", () => {
       )
     }
   )
+
+  it("fills a URL server without a type, even at an /sse path, since only the type says a server is SSE", () => {
+    const text = JSON.stringify({ url: "https://mcp.example.test/sse" })
+
+    expect(readFilled(text, EMPTY_HTTP_DRAFT).draft).toMatchObject({
+      transport: "http",
+      url: "https://mcp.example.test/sse"
+    })
+  })
 
   it.each<[string, string, McpServerJsonProblem]>([
     ["empty text", "", "not-json"],

@@ -304,7 +304,10 @@ export function buildChatToolOffer(
     })
   }
 
-  const { onTools, ...unoffered } = sortListedTools(list, input.toolSwitches)
+  const { onTools, ...unoffered } = buildToolOfferPartition(
+    list,
+    input.toolSwitches
+  )
   if (onTools.length === 0) {
     return Object.freeze({ status: "not-offered", ...unoffered })
   }
@@ -314,24 +317,37 @@ export function buildChatToolOffer(
 }
 
 /**
- * Sorts each listed tool by whether a request offers it or names it as
- * unoffered.
+ * The listed tools split by how one chat request treats them.
+ *
+ * @remarks Every listed tool is in at most one list, each in list order. An
+ * MCP tool is either offered or in neither named list.
+ */
+type ToolOfferPartition = {
+  /** Switched-on tools that can run now, which the request offers. */
+  readonly onTools: readonly ToolDefinition[]
+  /** Frozen names of the listed Lys tools whose switch is off. */
+  readonly switchedOffToolNames: readonly string[]
+  /**
+   * Frozen switched-on backend tools that cannot run now, each with the
+   * list's reason.
+   */
+  readonly unavailableTools: readonly UnavailableBackendTool[]
+}
+
+/**
+ * Builds the partition of the listed tools by whether a request offers
+ * each one or names it as unoffered.
  *
  * @param list - The loaded tool list.
  * @param toolSwitches - Saved switch choices, keyed by tool name.
- * @returns The switched-on tools that can run now; the names of the Lys
- * tools whose switch is off; and the switched-on backend tools that cannot
- * run now, with the list's reason. Each is in list order, and the two named
- * lists are frozen. An MCP tool is never named in either.
+ * @returns The partition of the listed tools: the switched-on tools that can
+ * run now, the names of the Lys tools whose switch is off, and the
+ * switched-on backend tools that cannot run now.
  */
-function sortListedTools(
+function buildToolOfferPartition(
   list: Extract<ToolListState, { status: "loaded" }>,
   toolSwitches: ReadonlyMap<string, boolean>
-): Readonly<{
-  onTools: readonly ToolDefinition[]
-  switchedOffToolNames: readonly string[]
-  unavailableTools: readonly UnavailableBackendTool[]
-}> {
+): ToolOfferPartition {
   const switchedOffToolNames: string[] = []
   const unavailableTools: UnavailableBackendTool[] = []
   const onTools: ToolDefinition[] = []

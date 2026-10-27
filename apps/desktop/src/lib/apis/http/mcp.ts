@@ -61,9 +61,10 @@ const MCP_SERVER_ACTION_BODY: McpServerActionBody = Object.freeze({})
  * server store owns it.
  * @returns The validated, frozen list once the backend answers. It never
  * holds a command, URL, environment value, or header.
- * @throws A caller-safe error when the backend cannot be reached, answers
- * with another status or media type, or returns a list that does not match
- * the shared schema; the decoding failure is kept as its cause.
+ * @throws A caller-safe error when the backend cannot be reached, when it
+ * answers with another status, naming only that status, or when its answer
+ * has another media type or a list that does not match the shared schema;
+ * the decoding failure is kept as its cause.
  */
 export async function listMcpServers(
   connection: McpApiConnection
@@ -84,11 +85,13 @@ export async function listMcpServers(
  * backend applies the group once it accepted the request.
  * @returns The validated list right after the backend applied the group:
  * new and changed servers are `connecting`.
- * @throws A caller-safe error when the backend cannot be reached, answers
- * with another status or media type, or returns a list that does not match
- * the shared schema; the decoding failure is kept as its cause.
+ * @throws A caller-safe error when the backend cannot be reached, when it
+ * answers with another status, naming only that status, or when its answer
+ * has another media type or a list that does not match the shared schema;
+ * the decoding failure is kept as its cause. An answer with another status
+ * does not show whether the backend applied the group.
  */
-export async function syncMcpServers(
+export async function sendMcpServerSyncRequest(
   connection: McpApiConnection
 ): Promise<McpServerList> {
   const response = await sendMcpRequest({
@@ -109,11 +112,12 @@ export async function syncMcpServers(
  * @returns `reconnected` with the list right after the server was opened
  * again, or `not-found` when the backend reports the declared
  * server-not-found problem.
- * @throws A caller-safe error when the backend cannot be reached or answers
- * with another status, a 404 without the declared problem, another media
- * type, or a list that does not match the shared schema.
+ * @throws A caller-safe error when the backend cannot be reached, when it
+ * answers with another status or with a 404 without the declared problem,
+ * naming only the status, or when its answer has another media type or a
+ * list that does not match the shared schema.
  */
-export async function reconnectMcpServer(
+export async function sendMcpServerReconnectRequest(
   connection: McpApiConnection,
   serverName: McpServerName
 ): Promise<ReconnectMcpServerResult> {
@@ -157,24 +161,37 @@ async function sendMcpRequest(request: McpHttpRequest): Promise<Response> {
 }
 
 /**
+ * Creates the caller-safe failure for an undeclared response status.
+ *
+ * @param status - HTTP status observed on the answered request.
+ * @returns An error naming only the status, never server-provided text.
+ */
+function createMcpResponseError(status: number): Error {
+  return new Error(
+    `The backend could not complete the MCP server request (HTTP ${status}).`
+  )
+}
+
+/**
  * Decodes the server list of a successful response.
  *
  * @param response - Response consumed here.
  * @returns The validated, frozen list.
- * @throws A caller-safe error when the status, media type, JSON, or schema
- * is not the declared success representation; the cause is kept.
+ * @throws A caller-safe error naming only the status when the status is not
+ * the declared success status; otherwise a caller-safe error keeping the
+ * cause when the media type, JSON, or schema is not the declared success
+ * representation.
  */
 async function parseMcpServerList(response: Response): Promise<McpServerList> {
+  if (response.status !== HTTP_OK_STATUS) {
+    await response.body?.cancel()
+    throw createMcpResponseError(response.status)
+  }
   const mediaType = response.headers.get("content-type")?.split(";")[0].trim()
   try {
-    if (
-      response.status !== HTTP_OK_STATUS ||
-      mediaType !== "application/json"
-    ) {
+    if (mediaType !== "application/json") {
       await response.body?.cancel()
-      throw new Error(
-        `Unexpected MCP server list response (HTTP ${response.status}).`
-      )
+      throw new Error("The MCP server list is not JSON.")
     }
     const payload: unknown = await response.json()
     return listMcpServersApi.responses[HTTP_OK_STATUS].parse(payload)
@@ -190,8 +207,8 @@ async function parseMcpServerList(response: Response): Promise<McpServerList> {
  *
  * @param response - Response with HTTP 404, consumed here.
  * @returns The not-found outcome for the declared server-not-found problem.
- * @throws A caller-safe error naming the status when the body is not that
- * problem, such as the answer of an unregistered route, which is not
+ * @throws A caller-safe error naming only the status when the body is not
+ * that problem, such as the answer of an unregistered route, which is not
  * evidence that the server is absent.
  */
 async function parseMcpServerNotFound(
@@ -204,9 +221,7 @@ async function parseMcpServerNotFound(
     body = undefined
   }
   if (!mcpServerNotFoundProblemSchema.safeParse(body).success) {
-    throw new Error(
-      `The backend could not reconnect the MCP server (HTTP ${response.status}).`
-    )
+    throw createMcpResponseError(response.status)
   }
   return Object.freeze({ status: "not-found" })
 }

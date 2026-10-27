@@ -316,7 +316,8 @@ type McpServerApprovalRowProps = {
  * is a single-choice toggle group named by its label and described by the
  * note. It selects the approval every listed tool has and none while they
  * differ; choosing one proposes it for every listed tool. While the server
- * lists no tool, the group is disabled and the note says each tool asks
+ * lists no tool, the group is disabled and the note says that, once listed,
+ * each tool follows the choice saved for it, a tool without one asking
  * first. Pressing the selected approval again proposes nothing.
  * @param props - Tools, the approvals, and the approval proposal.
  * @returns The approval row.

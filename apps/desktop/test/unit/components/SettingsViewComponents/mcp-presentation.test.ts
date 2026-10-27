@@ -13,7 +13,7 @@ import {
 import { describe, expect, it } from "vitest"
 import {
   canAddMcpServer,
-  countConnectedMcpServers,
+  calculateConnectedMcpServerCount,
   findMcpPaneRetry,
   findMcpServerApproval,
   findMcpServerStatus,
@@ -62,7 +62,7 @@ import {
 } from "@/components/SettingsViewComponents/tool-presentation"
 import {
   buildEmptyMcpServerDraft,
-  fillMcpStdioDraft,
+  buildMcpStdioDraft,
   MCP_SERVER_DRAFT_FIELDS,
   MCP_SIGN_INS
 } from "@/lib/models/mcp-server-draft"
@@ -154,7 +154,7 @@ function buildFilledJsonParse(
   const named = Object.freeze({ ...buildEmptyMcpServerDraft("stdio"), name })
   return {
     status: "filled",
-    draft: fillMcpStdioDraft(named, "npx", ["-y", "server-github"], []),
+    draft: buildMcpStdioDraft(named, "npx", ["-y", "server-github"], []),
     serverCount
   }
 }
@@ -287,6 +287,21 @@ describe("formatMcpServerTarget", () => {
     expect(formatMcpServerTarget(URL_SERVER)).toBe(
       "https://mcp.example.test/notes"
     )
+  })
+
+  it.each([
+    [
+      "https://mcp.example.test/mcp?api_key=fixture-query-secret&team=1",
+      "https://mcp.example.test/mcp?…"
+    ],
+    [
+      "https://mcp.example.test?key=fixture-query-secret",
+      "https://mcp.example.test?…"
+    ]
+  ])("hides the query of %s, which can hold a key", (url, target) => {
+    const server = parseMcpServer({ name: "keyed", transport: "http", url })
+
+    expect(formatMcpServerTarget(server)).toBe(target)
   })
 })
 
@@ -441,15 +456,24 @@ describe("formatMcpServerStatus", () => {
       "start-failed",
       "Lys couldn't start the command. Check that it exists; use its full path."
     ],
-    ["closed", "The server closed the connection."],
+    [
+      "closed",
+      "The connection ended: the server stopped or closed it, or sent an answer too large to read."
+    ],
     ["timed-out", "The server didn't answer within 2 minutes."],
     [
       "unauthorized",
       "The server refused the request. Check the token and the headers."
     ],
     ["unreachable", "Lys couldn't reach the server."],
-    ["http-error", "The server answered with an HTTP error."],
-    ["protocol-error", "The server's answer isn't valid MCP."]
+    [
+      "http-error",
+      "The server answered with an HTTP error or a redirect, which Lys doesn't follow."
+    ],
+    [
+      "protocol-error",
+      "The server refused to connect or to list its tools, or its answer was too large or not valid MCP."
+    ]
   ] as const)(
     "says why a server failed: %s",
     (reason: McpServerFailure, detail) => {
@@ -681,7 +705,7 @@ describe("server approval", () => {
     ],
     [
       "none",
-      "Each of its tools asks first. You can choose here once it lists them."
+      "You can choose once it lists its tools. Each then follows the choice saved for it, and a tool without one asks first."
     ]
   ] as const)("says what %s means for its calls", (approval, note) => {
     expect(formatMcpServerApprovalNote(approval)).toBe(note)
@@ -750,6 +774,22 @@ describe("listMcpServerConfiguration", () => {
     ])
   })
 
+  it("lists a remote server's URL with its query hidden, because a query can hold a key", () => {
+    const server = parseMcpServer({
+      name: "keyed",
+      transport: "http",
+      url: "https://mcp.example.test/mcp?api_key=fixture-query-secret"
+    })
+    const lines = listMcpServerConfiguration(server)
+
+    expect(lines[1]).toEqual({
+      label: "url",
+      value: "https://mcp.example.test/mcp?…",
+      isNone: false
+    })
+    expect(JSON.stringify(lines)).not.toContain("fixture-query-secret")
+  })
+
   it("lists an Authorization header that holds no bearer token as a header, never its value", () => {
     const server = parseMcpServer({
       name: "basic",
@@ -791,7 +831,7 @@ describe("formatMcpServerRemovalQuestion", () => {
   })
 })
 
-describe("countConnectedMcpServers", () => {
+describe("calculateConnectedMcpServerCount", () => {
   /** Saved servers in list order. */
   const servers = [
     COMMAND_SERVER,
@@ -809,11 +849,13 @@ describe("countConnectedMcpServers", () => {
   ])
 
   it("counts only the saved servers the backend reports connected", () => {
-    expect(countConnectedMcpServers(servers, list, true)).toBe(1)
+    expect(calculateConnectedMcpServerCount(servers, list, true)).toBe(1)
   })
 
   it("counts nothing while the backend is not running, whatever a list read before says", () => {
-    expect(countConnectedMcpServers(servers, list, false)).toBeUndefined()
+    expect(
+      calculateConnectedMcpServerCount(servers, list, false)
+    ).toBeUndefined()
   })
 
   it.each([
@@ -821,7 +863,9 @@ describe("countConnectedMcpServers", () => {
     [{ status: "loading" }],
     [{ status: "failed", error: "Unreachable." }]
   ] as const)("counts nothing while the list is %o", (unreadList) => {
-    expect(countConnectedMcpServers(servers, unreadList, true)).toBeUndefined()
+    expect(
+      calculateConnectedMcpServerCount(servers, unreadList, true)
+    ).toBeUndefined()
   })
 })
 
@@ -947,7 +991,10 @@ describe("server limit", () => {
 
 describe("skipped tools", () => {
   it.each([
-    ["unsupported-name", "Its name is empty or too long to offer to a model."],
+    [
+      "unsupported-name",
+      "Its name is empty, too long, or holds characters you can't see."
+    ],
     [
       "duplicate-name",
       "Another tool of the server gets the same name once characters a tool name can't hold are replaced."
@@ -1038,7 +1085,8 @@ describe("listMcpPaneNotes", () => {
         list: { status: "failed", error: "Unreachable." },
         actionFailure: {
           action: "sync",
-          error: "Lys couldn't ask its backend to apply the MCP servers."
+          error:
+            "Lys's request to apply the MCP servers failed: The backend could not be reached."
         }
       })
     ).toEqual([{ kind: "backend-stopped", text: MCP_BACKEND_STOPPED_NOTE }])
@@ -1054,7 +1102,8 @@ describe("listMcpPaneNotes", () => {
         list: { status: "loaded", settings: "invalid", servers: [] },
         actionFailure: {
           action: "reconnect",
-          error: "Lys couldn't ask its backend to reconnect files."
+          error:
+            "Lys's request to reconnect files failed: The backend could not be reached."
         },
         saveState: FAILED_SAVE
       })
@@ -1065,7 +1114,7 @@ describe("listMcpPaneNotes", () => {
       },
       {
         kind: "action-failed",
-        text: "Lys couldn't ask its backend to reconnect files."
+        text: "Lys's request to reconnect files failed: The backend could not be reached."
       },
       {
         kind: "save-failed",
@@ -1095,7 +1144,8 @@ describe("findMcpPaneRetry", () => {
   /** Failure of a sync the backend could not be asked. */
   const syncFailure = {
     action: "sync",
-    error: "Lys couldn't ask its backend to apply the MCP servers."
+    error:
+      "Lys's request to apply the MCP servers failed: The backend could not be reached."
   } as const
 
   it("retries applying the servers after a failed apply, even when the read failed too", () => {
@@ -1126,7 +1176,8 @@ describe("findMcpPaneRetry", () => {
         ...QUIET_FACTS,
         actionFailure: {
           action: "reconnect",
-          error: "Lys couldn't ask its backend to reconnect files."
+          error:
+            "Lys's request to reconnect files failed: The backend could not be reached."
         }
       })
     ).toBeUndefined()

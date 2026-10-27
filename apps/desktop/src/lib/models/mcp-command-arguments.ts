@@ -74,11 +74,11 @@ export function formatMcpCommandArguments(
 }
 
 /**
- * Ends the argument being read, if any.
+ * Adds the argument being read, if any, to the scanned arguments.
  *
  * @param scan - Reading in progress, updated in place.
  */
-function endArgument(scan: ArgumentScan): void {
+function addScannedArgument(scan: ArgumentScan): void {
   if (scan.hasCurrent) scan.arguments.push(scan.current)
   scan.current = ""
   scan.hasCurrent = false
@@ -141,7 +141,7 @@ function readUnquotedCharacter(
   position: number
 ): void {
   if (ARGUMENT_SEPARATORS.has(character)) {
-    endArgument(scan)
+    addScannedArgument(scan)
     return
   }
   scan.hasCurrent = true
@@ -184,7 +184,7 @@ export function parseMcpCommandArguments(
       position: scan.quotePosition
     })
   }
-  endArgument(scan)
+  addScannedArgument(scan)
   return Object.freeze({
     status: "parsed",
     arguments: Object.freeze(scan.arguments)

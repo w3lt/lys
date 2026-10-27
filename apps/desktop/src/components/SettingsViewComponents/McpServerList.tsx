@@ -23,9 +23,10 @@ import {
   McpServerDetails,
   type ConnectedMcpServerState
 } from "./McpServerDetails"
+import { isDocumentFocusLost } from "./focus-target"
 import {
   canAddMcpServer,
-  countConnectedMcpServers,
+  calculateConnectedMcpServerCount,
   findMcpServerStatus,
   formatMcpServerListMeta,
   formatMcpServerStatus,
@@ -44,8 +45,9 @@ import {
  *
  * @remarks Each request is a new object. A server's Edit button takes focus
  * when its details appear; Add server takes focus once for each request the
- * list receives, so asking again, as after a second removal, moves focus
- * again, while a rerender with the same request does not.
+ * list receives while focus is lost, so asking again, as after a second
+ * removal, moves focus again, while a rerender with the same request does
+ * not, and a control that holds focus keeps it.
  */
 export type McpServerListFocusTarget =
   | {
@@ -640,16 +642,80 @@ export type McpServerSectionProps = Omit<
   readonly onAddServer: (transport: McpServerTransport) => void
 }
 
+/** Facts the meta line of the saved servers is drawn from. */
+type McpServerSectionMetaFacts = Pick<
+  McpServerSectionProps,
+  "servers" | "list" | "toolList" | "toolSettings" | "isBackendRunning"
+>
+
+/**
+ * Formats the meta line beside the heading of the saved servers.
+ *
+ * @param facts - Servers, lists, tool choices, and backend status.
+ * @returns How many servers are saved and connected, and what their tools
+ * that are on cost per request.
+ */
+function formatMcpServerSectionMeta(facts: McpServerSectionMetaFacts): string {
+  const { servers, list, toolList, toolSettings, isBackendRunning } = facts
+  return formatMcpServerListMeta({
+    serverCount: servers.length,
+    connectedCount: calculateConnectedMcpServerCount(
+      servers,
+      list,
+      isBackendRunning
+    ),
+    connectedTools: listConnectedMcpTools(
+      servers,
+      list,
+      toolList,
+      isBackendRunning
+    ),
+    toolSwitches: toolSettings.switches
+  })
+}
+
+/**
+ * Moves focus to Add server for each new request for it while focus is
+ * lost.
+ *
+ * @remarks Runs in the layout phase after the request changes, so focus
+ * moves before the browser paints, also while the section stays mounted, as
+ * after a removal. A rerender with the same request moves nothing, a
+ * control that still holds focus keeps it, and a request while Add server
+ * is not attached moves nothing. The hook owns the ref, which React sets to
+ * the attached button.
+ * @param focusTarget - Control that takes focus; reactive, and each new
+ * request object is a new request.
+ * @returns The ref to attach to Add server, stable for the section's
+ * lifetime.
+ */
+function useAddServerFocus(
+  focusTarget: McpServerListFocusTarget
+): RefObject<HTMLButtonElement | null> {
+  const addServerRef = useRef<HTMLButtonElement>(null)
+
+  useLayoutEffect(() => {
+    if (focusTarget.kind === "add-server" && isDocumentFocusLost()) {
+      addServerRef.current?.focus()
+    }
+  }, [focusTarget])
+
+  return addServerRef
+}
+
 /**
  * Presents the saved servers and the action that adds one.
  *
  * @remarks The parent owns the servers, the lists, the tool choices, which
  * server's details are shown, the focus target, and every action; the
  * section owns no state. In the layout phase after it receives a new
- * request for Add server, it moves focus to Add server, also while it stays
- * mounted, as after a removal. The heading's meta says how many servers are
- * connected and what their tools that are on cost per request. Without
- * servers the section offers the two kinds of server instead of a list.
+ * request for Add server, it moves focus to Add server while focus is lost,
+ * as after the focused row was removed, also while it stays mounted; it
+ * never takes focus from a control that still holds it, such as another
+ * server's toggle the person moved to while a removal was saved. The
+ * heading's meta says how many servers are connected and what their tools
+ * that are on cost per request. Without servers the section offers the two
+ * kinds of server instead of a list.
  * Add server, which adds a local program, is disabled once the most servers
  * the settings allow are saved, which a note then says, and while a save
  * runs. The section is named by its heading.
@@ -658,35 +724,38 @@ export type McpServerSectionProps = Omit<
  * @returns The section of the saved servers.
  */
 export function McpServerSection({
+  servers,
+  list,
+  toolList,
+  toolSettings,
+  isBackendRunning,
+  isSaving,
+  expandedServerName,
   focusTarget,
   onAddServer,
-  ...rowsProps
+  onExpandedServerNameChange,
+  onReconnectServer,
+  onEditServer,
+  onRemoveServer,
+  onToolOnChange,
+  onToolApprovalChange
 }: McpServerSectionProps): ReactElement {
-  const { servers, list, toolList, isBackendRunning } = rowsProps
   const headingId = useId()
-  const addServerRef = useRef<HTMLButtonElement>(null)
-  const meta = formatMcpServerListMeta({
-    serverCount: servers.length,
-    connectedCount: countConnectedMcpServers(servers, list, isBackendRunning),
-    connectedTools: listConnectedMcpTools(
-      servers,
-      list,
-      toolList,
-      isBackendRunning
-    ),
-    toolSwitches: rowsProps.toolSettings.switches
+  const addServerRef = useAddServerFocus(focusTarget)
+  const meta = formatMcpServerSectionMeta({
+    servers,
+    list,
+    toolList,
+    toolSettings,
+    isBackendRunning
   })
-
-  useLayoutEffect(() => {
-    if (focusTarget.kind === "add-server") addServerRef.current?.focus()
-  }, [focusTarget])
 
   return (
     <section aria-labelledby={headingId} className="settings-view__section">
       <McpServerListHeading
         addServerRef={addServerRef}
         headingId={headingId}
-        isAddDisabled={rowsProps.isSaving || !canAddMcpServer(servers.length)}
+        isAddDisabled={isSaving || !canAddMcpServer(servers.length)}
         meta={meta}
         onAddServer={onAddServer}
       />
@@ -694,10 +763,22 @@ export function McpServerSection({
         <McpServerKindChoices onAddServer={onAddServer} />
       ) : (
         <McpServerRows
-          {...rowsProps}
+          expandedServerName={expandedServerName}
           focusedServerName={
             focusTarget.kind === "server" ? focusTarget.serverName : null
           }
+          isBackendRunning={isBackendRunning}
+          isSaving={isSaving}
+          list={list}
+          onEditServer={onEditServer}
+          onExpandedServerNameChange={onExpandedServerNameChange}
+          onReconnectServer={onReconnectServer}
+          onRemoveServer={onRemoveServer}
+          onToolApprovalChange={onToolApprovalChange}
+          onToolOnChange={onToolOnChange}
+          servers={servers}
+          toolList={toolList}
+          toolSettings={toolSettings}
         />
       )}
       {canAddMcpServer(servers.length) ? null : (

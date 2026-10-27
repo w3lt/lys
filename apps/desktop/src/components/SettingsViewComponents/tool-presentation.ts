@@ -250,13 +250,13 @@ export function calculateToolCallsTone(
 type ToolGroupIdentity = Pick<ToolGroupListing, "key" | "heading">
 
 /**
- * Identifies the group listing a tool belongs to.
+ * Builds the identity of the group listing a tool belongs to.
  *
  * @param tool - Listed tool.
  * @returns For one of Lys's tools, its group and the group's lowercase
  * label; for an MCP tool, `mcp:<server>` and `MCP · <server>`.
  */
-function identifyToolGroup(tool: ToolDefinition): ToolGroupIdentity {
+function buildToolGroupIdentity(tool: ToolDefinition): ToolGroupIdentity {
   if (tool.runner === "mcp") {
     return { key: `mcp:${tool.server}`, heading: `MCP · ${tool.server}` }
   }
@@ -279,7 +279,7 @@ export function buildToolGroups(
     ToolGroupIdentity & { tools: ToolDefinition[] }
   >()
   for (const tool of tools) {
-    const identity = identifyToolGroup(tool)
+    const identity = buildToolGroupIdentity(tool)
     const listing = listings.get(identity.key)
     if (listing === undefined)
       listings.set(identity.key, { ...identity, tools: [tool] })

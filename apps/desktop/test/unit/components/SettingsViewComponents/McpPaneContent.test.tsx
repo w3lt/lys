@@ -1,6 +1,6 @@
 import type { McpServerList } from "@lys/protocol"
 import { mcpServerSettingsSchema, type ToolDefinition } from "@lys/share"
-import { render, screen, within } from "@testing-library/react"
+import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import {
@@ -696,7 +696,7 @@ describe("McpPaneContent", () => {
     expect(within(form).queryByRole("group", { name: /^Fix / })).toBeNull()
   })
 
-  it("focuses a list of rows whose row breaks a rule, and names the row in its problem", async () => {
+  it("focuses the row input that breaks a rule, and names the row in its problem", async () => {
     startSettingsHost()
     await startMcpPane()
     const user = userEvent.setup()
@@ -715,7 +715,12 @@ describe("McpPaneContent", () => {
     await user.click(within(form).getByRole("button", { name: "Add server" }))
 
     const environment = within(form).getByRole("group", { name: "Environment" })
-    expect(environment).toHaveFocus()
+    const variableName = within(environment).getByRole("textbox", {
+      name: "Name of variable 1"
+    })
+    expect(variableName).toHaveFocus()
+    expect(variableName).toHaveAttribute("aria-invalid", "true")
+    expect(variableName).toHaveAccessibleDescription(/^Variable 1: /)
     expect(environment).toHaveAccessibleDescription(
       expect.stringMatching(
         /^NAME: letters, digits, _ · values saved in plain text Variable 1: /
@@ -1053,9 +1058,7 @@ describe("McpPaneContent", () => {
     await user.click(
       within(getServerRow("files")).getByRole("button", { name: "Edit files" })
     )
-    await user.click(
-      screen.getByRole("button", { name: "Back to MCP servers" })
-    )
+    await user.click(screen.getByRole("button", { name: "mcp servers" }))
 
     expect(screen.queryByRole("form")).toBeNull()
     expect(
@@ -1245,7 +1248,7 @@ describe("McpPaneContent", () => {
     )
     const files = await expandServer(user, "files")
     expect(within(files).getByRole("status")).toHaveTextContent(
-      "files: FailedThe server closed the connection."
+      "files: FailedThe connection ended: the server stopped or closed it, or sent an answer too large to read."
     )
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, LIST_ROUTE])
   })
@@ -1317,7 +1320,7 @@ describe("McpPaneContent", () => {
 
     expect(toggle).toHaveAttribute("aria-expanded", "true")
     expect(files).toHaveTextContent(
-      "(no name)Its name is empty or too long to offer to a model."
+      "(no name)Its name is empty, too long, or holds characters you can't see."
     )
     expect(files).toHaveTextContent(
       "deepIts input schema isn't one Lys can offer to a model."
@@ -1412,7 +1415,8 @@ describe("McpPaneContent", () => {
       }
     })
     const user = userEvent.setup()
-    const failure = "Lys couldn't ask its backend to apply the MCP servers."
+    const failure =
+      "Lys's request to apply the MCP servers failed: The backend could not be reached."
 
     await removeServer(user, "files")
     expect(getPaneStatus()).toHaveTextContent(failure)
@@ -1498,5 +1502,149 @@ describe("McpPaneContent", () => {
       host.commands.filter((invoked) => invoked.command === "list_tools")
     ).toHaveLength(1)
     expect(useToolStore.getState().list.status).toBe("loaded")
+  })
+
+  it("reports a failed save of a tool choice, keeping the choice, and saves again on Retry saving", async () => {
+    let isDiskFull = true
+    const host = startSettingsHost(() =>
+      isDiskFull ? Promise.reject("Disk full") : null
+    )
+    await startMcpPane()
+    const user = userEvent.setup()
+    const files = await expandServer(user, "files")
+    const saveStatus = screen.getByRole("status", {
+      name: "Tool choices save"
+    })
+    const approval = within(files).getByRole("group", {
+      name: "Before its tools run"
+    })
+
+    await user.click(within(approval).getByRole("button", { name: "Just run" }))
+    await waitForRenderedWork()
+
+    expect(screen.getByRole("status", { name: "Tool choices save" })).toBe(
+      saveStatus
+    )
+    expect(saveStatus).toHaveTextContent(
+      "Couldn't save your tool choices. Each switch applies until Lys quits, but Just run keeps following the choices Lys last saved until a save works."
+    )
+    expect(
+      within(approval).getByRole("button", { name: "Just run" })
+    ).toHaveAttribute("aria-pressed", "true")
+    isDiskFull = false
+    await user.click(screen.getByRole("button", { name: "Retry saving" }))
+    await waitForRenderedWork()
+
+    expect(listWrittenDocuments(host.commands).at(-1)).toEqual({
+      ...STORED_SETTINGS_DOCUMENT,
+      tools: {
+        ...STORED_SETTINGS_DOCUMENT.tools,
+        justRun: [
+          ...STORED_SETTINGS_DOCUMENT.tools.justRun,
+          ...FILES_TOOLS.map((tool) => tool.name)
+        ]
+      }
+    })
+    expect(saveStatus).toHaveTextContent(/^$/)
+    expect(screen.queryByRole("button", { name: "Retry saving" })).toBeNull()
+  })
+
+  it("moves focus to Edit once when its editor closes, not each time the row is expanded again", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+    const files = await expandServer(user, "files")
+    await user.click(within(files).getByRole("button", { name: "Edit files" }))
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    const afterClose = document.activeElement
+
+    await user.click(getServerToggle("files"))
+    await user.click(getServerToggle("files"))
+
+    expect(afterClose).toHaveAccessibleName("Edit files")
+    expect(getServerToggle("files")).toHaveAttribute("aria-expanded", "true")
+    expect(getServerToggle("files")).toHaveFocus()
+  })
+
+  it("keeps another server's details and focus when a removal is saved after the person moved on", async () => {
+    const write = createControlledPromise<unknown>()
+    startSettingsHost(() => write.promise)
+    await startMcpPane({
+      [SYNC_ROUTE]: answerList(buildMcpServerList([STORED_LIST.servers[1]]))
+    })
+    const user = userEvent.setup()
+    const files = await expandServer(user, "files")
+    await user.click(
+      within(files).getByRole("button", { name: "Remove files" })
+    )
+    await user.click(
+      within(within(files).getByRole("group", { name: /^remove / })).getByRole(
+        "button",
+        { name: "Remove files" }
+      )
+    )
+
+    await user.click(getServerToggle("notes"))
+    write.resolve(null)
+    await waitForRenderedWork()
+
+    expect(
+      within(screen.getByRole("list", { name: "MCP servers" })).queryByRole(
+        "listitem",
+        { name: "files" }
+      )
+    ).toBeNull()
+    expect(getServerToggle("notes")).toHaveAttribute("aria-expanded", "true")
+    expect(getServerToggle("notes")).toHaveFocus()
+  })
+
+  it("closes a removed server's details, so it shows collapsed when it is saved again", async () => {
+    startSettingsHost()
+    const { useLysStore } = await startMcpPane({
+      [SYNC_ROUTE]: answerList(buildMcpServerList([STORED_LIST.servers[1]]))
+    })
+    const user = userEvent.setup()
+    await expandServer(user, "files")
+
+    await removeServer(user, "files")
+    act(() => useLysStore.setState({ settings: STORED_SETTINGS }))
+
+    expect(getServerToggle("files")).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("disables the approval of a server that lists no tool, saying its tools then follow their saved choices", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+
+    const notes = await expandServer(user, "notes")
+
+    const approval = within(notes).getByRole("group", {
+      name: "Before its tools run"
+    })
+    expect(approval).toHaveAccessibleDescription(
+      "You can choose once it lists its tools. Each then follows the choice saved for it, and a tool without one asks first."
+    )
+    for (const name of ["Ask me", "Just run"]) {
+      expect(within(approval).getByRole("button", { name })).toBeDisabled()
+    }
+  })
+
+  it("changes and saves nothing when the chosen approval is pressed again", async () => {
+    const host = startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+    const files = await expandServer(user, "files")
+    const approval = within(files).getByRole("group", {
+      name: "Before its tools run"
+    })
+
+    await user.click(within(approval).getByRole("button", { name: "Ask me" }))
+    await waitForRenderedWork()
+
+    expect(
+      within(approval).getByRole("button", { name: "Ask me" })
+    ).toHaveAttribute("aria-pressed", "true")
+    expect(listWrittenDocuments(host.commands)).toEqual([])
   })
 })

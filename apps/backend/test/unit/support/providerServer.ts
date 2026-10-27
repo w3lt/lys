@@ -74,6 +74,17 @@ export async function startProviderServer(
 }
 
 /**
+ * Reads the path of a request target.
+ *
+ * @param target - Request target, a path with an optional query.
+ * @returns The target up to its first `?`, or the whole target without one.
+ */
+function readRequestPath(target: string): string {
+  const queryStart = target.indexOf("?")
+  return queryStart === -1 ? target : target.slice(0, queryStart)
+}
+
+/**
  * Reads one received request whole.
  *
  * @param incoming - Request stream.
@@ -87,7 +98,7 @@ async function readRequest(
   const text = Buffer.concat(chunks).toString("utf8")
   return Object.freeze({
     method: incoming.method ?? "",
-    path: (incoming.url ?? "/").replace(/\?.*$/s, ""),
+    path: readRequestPath(incoming.url ?? "/"),
     authorization: incoming.headers.authorization,
     body: text === "" ? undefined : (JSON.parse(text) as unknown)
   })

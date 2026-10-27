@@ -1,0 +1,121 @@
+/**
+ * Time one provider request may take, from sending it to reading its whole
+ * answer, in milliseconds.
+ *
+ * @remarks A provider that never answers would otherwise keep a model
+ * operation, and the queue behind it, waiting forever. Listing and showing
+ * models takes far less on a working provider.
+ */
+export const PROVIDER_REQUEST_TIMEOUT_MS = 15_000
+
+/**
+ * Most bytes of one provider answer read, inclusive; a longer answer is a
+ * failure. A model list with its metadata stays far below it.
+ */
+export const MAXIMUM_PROVIDER_RESPONSE_BYTES = 4 * 1024 * 1024
+
+/** Decoder that rejects bytes that are not UTF-8. */
+const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true })
+
+/** One JSON request to a provider's HTTP API. */
+export type ProviderJsonRequest = Readonly<{
+  /** Absolute URL; never holds a secret. */
+  url: string
+  /** `GET` without a body, or `POST` with a JSON body. */
+  method: "GET" | "POST"
+  /** Bearer credential sent in the `Authorization` header, if any; a secret. */
+  apiKey: string | undefined
+  /** Value sent as the JSON body of a `POST`. */
+  body?: unknown
+}>
+
+/**
+ * Sends one request to a provider and reads its JSON answer.
+ *
+ * @param request - Request to send.
+ * @returns The parsed answer, untrusted and unchecked.
+ * @throws An error naming the HTTP status when the answer is not 2xx, the
+ * time limit when {@link PROVIDER_REQUEST_TIMEOUT_MS} passes, the size limit
+ * when the answer passes {@link MAXIMUM_PROVIDER_RESPONSE_BYTES}, or that the
+ * answer is not JSON; a transport failure keeps its cause. No message holds
+ * the key or the answer's text.
+ * @remarks The deadline covers sending, waiting, and reading the body.
+ */
+export async function requestProviderJson(
+  request: ProviderJsonRequest
+): Promise<unknown> {
+  const signal = AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS)
+  const response = await fetch(request.url, {
+    method: request.method,
+    headers: buildProviderHeaders(request),
+    ...(request.method === "POST"
+      ? { body: JSON.stringify(request.body) }
+      : {}),
+    signal
+  })
+  if (!response.ok) {
+    await response.body?.cancel()
+    throw new Error(`The provider answered with HTTP ${response.status}.`)
+  }
+  return parseProviderJson(await readBoundedProviderBody(response))
+}
+
+/**
+ * Builds the headers of one provider request.
+ *
+ * @param request - Request to send.
+ * @returns JSON headers, with a bearer `Authorization` header when the
+ * request has a key.
+ */
+function buildProviderHeaders(
+  request: ProviderJsonRequest
+): Record<string, string> {
+  const headers: Record<string, string> = { accept: "application/json" }
+  if (request.method === "POST") headers["content-type"] = "application/json"
+  if (request.apiKey !== undefined) {
+    headers.authorization = `Bearer ${request.apiKey}`
+  }
+  return headers
+}
+
+/**
+ * Reads a provider answer's body up to the size limit.
+ *
+ * @param response - Answer whose headers arrived.
+ * @returns The whole body.
+ * @throws When the body passes {@link MAXIMUM_PROVIDER_RESPONSE_BYTES}, after
+ * cancelling the rest, or when reading fails.
+ */
+async function readBoundedProviderBody(
+  response: Response
+): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = []
+  let byteCount = 0
+  if (response.body === null) return new Uint8Array()
+  for await (const chunk of response.body) {
+    byteCount += chunk.byteLength
+    if (byteCount > MAXIMUM_PROVIDER_RESPONSE_BYTES) {
+      throw new Error(
+        `The provider's answer is longer than ${MAXIMUM_PROVIDER_RESPONSE_BYTES} bytes.`
+      )
+    }
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks)
+}
+
+/**
+ * Parses a provider answer's body as UTF-8 JSON.
+ *
+ * @param bytes - Whole body.
+ * @returns The parsed value, untrusted.
+ * @throws `The provider's answer is not JSON.` without the parse failure,
+ * whose message can quote the body.
+ */
+function parseProviderJson(bytes: Uint8Array): unknown {
+  try {
+    return JSON.parse(UTF8_DECODER.decode(bytes))
+  } catch {
+    throw new Error("The provider's answer is not JSON.")
+  }
+}

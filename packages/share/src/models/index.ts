@@ -81,7 +81,24 @@ export {
   type LocationSettings,
   type PlaceName
 } from "./location"
-export { tavilyApiKeySchema, type TavilyApiKey } from "./secrets"
+export {
+  llmProviderSchema,
+  llmProviderSettingsSchema,
+  ollamaModeSchema,
+  providerAddressSchema,
+  type LlmProvider,
+  type LlmProviderSettings,
+  type OllamaMode,
+  type ProviderAddress
+} from "./providers"
+export {
+  groqApiKeySchema,
+  ollamaApiKeySchema,
+  tavilyApiKeySchema,
+  type GroqApiKey,
+  type OllamaApiKey,
+  type TavilyApiKey
+} from "./secrets"
 export {
   BACKEND_INTERNAL_TOOL_NAMES,
   buildToolFunctionFormat,

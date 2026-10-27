@@ -32,23 +32,40 @@ export const BACKEND_HOST = "127.0.0.1"
  */
 export const BACKEND_PORT = 12345
 /**
- * Loopback interface used by the backend to reach LM Studio.
+ * Host of LM Studio's default address, used while the person has saved no
+ * LM Studio address in Settings.
  *
- * @remarks This host is embedded in the backend's LM Studio endpoint and is
- * not persisted. It is release-stable for the local runtime contract; changing
- * it requires coordinated runtime configuration because model operations would
- * otherwise target a different host.
+ * @remarks The backend reaches LM Studio at the saved address, or at this
+ * host and {@link LMSTUDIO_PORT}; the desktop shows the pair as the address
+ * field's placeholder. It is not persisted: the settings file stores `null`
+ * for the default. Changing it moves where Lys looks for LM Studio for every
+ * person who saved no address.
  */
 export const LMSTUDIO_HOST = "127.0.0.1"
 /**
- * TCP port used by the backend to reach LM Studio.
+ * Port of LM Studio's default address, paired with {@link LMSTUDIO_HOST}.
  *
- * @remarks This port number is transmitted in the backend's LM Studio endpoint
- * and is not persisted. It is release-stable for the local runtime contract;
- * changing it requires coordinated runtime configuration because model
- * operations would otherwise target a different listener.
+ * @remarks Same ownership and persistence as {@link LMSTUDIO_HOST}.
  */
 export const LMSTUDIO_PORT = 1234
+/**
+ * Host of a local Ollama server's default address, used while the person has
+ * saved no Ollama address in Settings.
+ *
+ * @remarks The backend reaches a local Ollama server at the saved address, or
+ * at this host and {@link OLLAMA_PORT}; the desktop shows the pair as the
+ * address field's placeholder. It is not persisted: the settings file stores
+ * `null` for the default. Changing it moves where Lys looks for Ollama for
+ * every person who saved no address.
+ */
+export const OLLAMA_HOST = "127.0.0.1"
+/**
+ * Port of a local Ollama server's default address, paired with
+ * {@link OLLAMA_HOST}.
+ *
+ * @remarks Same ownership and persistence as {@link OLLAMA_HOST}.
+ */
+export const OLLAMA_PORT = 11434
 /**
  * Loopback interface on which vmo, Lys's page reader, listens.
  *
@@ -86,4 +103,26 @@ export const VMO_PORT = 8080
  * desktop and backend release.
  */
 export const TAVILY_API_HOST = "api.tavily.com"
+/**
+ * Host of Ollama's cloud service, the only place requests go while Ollama is
+ * the active provider in cloud mode.
+ *
+ * @remarks The backend sends model listings and chat requests, with the
+ * person's Ollama API key, to `https://` followed by this host, and the
+ * desktop's Providers pane names it as where requests go. It is not
+ * persisted. Changing it changes where conversations and the key are sent
+ * and requires a coordinated desktop and backend release.
+ */
+export const OLLAMA_CLOUD_API_HOST = "ollama.com"
+/**
+ * Host of Groq's API, the only place requests go while Groq is the active
+ * provider.
+ *
+ * @remarks The backend sends model listings and chat requests, with the
+ * person's Groq API key, to `https://` followed by this host, and the
+ * desktop's Providers pane names it as where requests go. It is not
+ * persisted. Changing it changes where conversations and the key are sent
+ * and requires a coordinated desktop and backend release.
+ */
+export const GROQ_API_HOST = "api.groq.com"
 // ============== EXTERNAL SERVICES ============== //

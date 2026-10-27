@@ -437,7 +437,8 @@ function createLlmInfoSnapshot(
  * @param left - First model snapshot to compare.
  * @param right - Second model snapshot to compare.
  * @returns A negative value when `left` precedes `right`, a positive value when
- * `right` precedes `left`, and zero when their keys and paths are equal.
+ * `right` precedes `left`, and zero when their keys and paths are equal. A
+ * model without a path sorts before one with a path under the same key.
  */
 function calculateLlmInfoOrder(left: LlmInfo, right: LlmInfo): number {
   if (left.modelKey < right.modelKey) {
@@ -446,10 +447,12 @@ function calculateLlmInfoOrder(left: LlmInfo, right: LlmInfo): number {
   if (left.modelKey > right.modelKey) {
     return 1
   }
-  if (left.path < right.path) {
+  const leftPath = left.path ?? ""
+  const rightPath = right.path ?? ""
+  if (leftPath < rightPath) {
     return -1
   }
-  if (left.path > right.path) {
+  if (leftPath > rightPath) {
     return 1
   }
   return 0

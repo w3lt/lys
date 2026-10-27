@@ -202,7 +202,8 @@ export function formatModelResidencyMeta(
  *
  * @param modelRuntime - Current residency state.
  * @param model - Weights the row represents.
- * @returns The row's state when it is the one in play, otherwise its disk size.
+ * @returns The row's state when it is the one in play, otherwise its disk
+ * size, or `not loaded` when the provider reports no size.
  */
 export function formatModelRowTag(
   modelRuntime: ModelRuntimeState,
@@ -214,7 +215,7 @@ export function formatModelRowTag(
 
   if (modelRuntime.status === "unknown") return "state unavailable"
   if (model.loaded) return "loaded"
-  return `${model.sizeLabel} on disk`
+  return formatOnDiskTag(model)
 }
 
 /**
@@ -224,7 +225,8 @@ export function formatModelRowTag(
  * @param model - Weights the row represents.
  * @param selectedModelKey - Current default model identifier, when chosen.
  * @returns The row's live condition when it has one, otherwise whether it is
- * merely the chosen default, otherwise its on-disk size. A resident tag reports
+ * merely the chosen default, otherwise its on-disk size, or `not loaded`
+ * when the provider reports no size. A resident tag reports
  * loaded weights for this row, including models outside the runtime projection.
  */
 export function formatComposerModelRowTag(
@@ -240,5 +242,17 @@ export function formatComposerModelRowTag(
   if (model.loaded) return "resident"
   if (model.modelKey === selectedModelKey) return "selected"
 
-  return `${model.sizeLabel} on disk`
+  return formatOnDiskTag(model)
+}
+
+/**
+ * Formats the tag of a model that is not loaded.
+ *
+ * @param model - Weights the row represents.
+ * @returns Its disk size, or `not loaded` when the provider reports no size.
+ */
+function formatOnDiskTag(model: LocalModelDescriptor): string {
+  return model.sizeLabel === undefined
+    ? "not loaded"
+    : `${model.sizeLabel} on disk`
 }

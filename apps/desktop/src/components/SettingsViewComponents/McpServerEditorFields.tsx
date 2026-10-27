@@ -1187,7 +1187,10 @@ function McpUrlFields({
 }
 
 /** Properties accepted by {@link McpTransportFields}. */
-type McpTransportFieldsProps = McpServerDraftFieldsProps
+type McpTransportFieldsProps = Omit<McpServerDraftFieldsProps, "fieldRefs"> & {
+  /** Hosts of both transports' fields; the name's host is not one. */
+  readonly fieldRefs: Omit<McpFieldRefs, "name">
+}
 
 /**
  * Edits the fields of the draft's transport: a local program's or a remote

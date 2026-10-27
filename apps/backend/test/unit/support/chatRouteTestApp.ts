@@ -193,8 +193,8 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   const llmRuntimeService = new LlmRuntimeService({
     reportLlmRuntimeAcquisitionFailure: vi.fn(),
     reportLlmRuntimeAvailabilityCheckFailure: vi.fn(),
-    findLlmProviderAccess: async () => DEFAULT_LM_STUDIO_ACCESS,
-    acquireLlmRuntime: async () => createFakeLlmRuntime()
+    findLlmProviderAccess: () => Promise.resolve(DEFAULT_LM_STUDIO_ACCESS),
+    acquireLlmRuntime: () => Promise.resolve(createFakeLlmRuntime())
   })
   await llmRuntimeService.connectLlmRuntime()
   onTestFinished(async () => await llmRuntimeService[Symbol.asyncDispose]())

@@ -133,8 +133,9 @@ describe("ProvidersPaneContent", () => {
     ).toHaveTextContent("standby")
     const ollama = screen.getByRole("article", { name: "Ollama" })
     expect(ollama).toHaveTextContent("connected")
+    const modes = within(ollama).getByRole("group", { name: "Configure" })
     expect(
-      within(ollama).getByRole("button", { name: "Local" })
+      within(modes).getByRole("button", { name: "Local" })
     ).toHaveAttribute("aria-pressed", "true")
     expect(within(ollama).getByLabelText("Server address")).toHaveAttribute(
       "placeholder",

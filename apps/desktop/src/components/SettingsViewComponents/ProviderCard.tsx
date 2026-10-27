@@ -126,10 +126,9 @@ function OllamaModeRow({
         <h3 id={labelId}>Configure</h3>
         <p>{OLLAMA_MODE_NOTES[mode]}</p>
       </div>
-      <div
+      <fieldset
         aria-labelledby={labelId}
         className="settings-view__provider-modes"
-        role="group"
       >
         {OLLAMA_MODES.map((candidate) => (
           <Button
@@ -146,7 +145,7 @@ function OllamaModeRow({
             {OLLAMA_MODE_LABELS[candidate]}
           </Button>
         ))}
-      </div>
+      </fieldset>
     </div>
   )
 }

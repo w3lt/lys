@@ -87,7 +87,7 @@ async function readRequest(
   const text = Buffer.concat(chunks).toString("utf8")
   return Object.freeze({
     method: incoming.method ?? "",
-    path: new URL(incoming.url ?? "/", "http://fake").pathname,
+    path: (incoming.url ?? "/").replace(/\?.*$/s, ""),
     authorization: incoming.headers.authorization,
     body: text === "" ? undefined : (JSON.parse(text) as unknown)
   })

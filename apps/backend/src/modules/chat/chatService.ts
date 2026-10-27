@@ -265,8 +265,7 @@ export default class ChatService {
     if (endpoint === undefined) throw createLlmRuntimeUnavailableError([])
     const current = this.#chatEndpointClient
     if (
-      current !== undefined &&
-      current.endpoint.baseUrl === endpoint.baseUrl &&
+      current?.endpoint.baseUrl === endpoint.baseUrl &&
       current.endpoint.apiKey === endpoint.apiKey
     ) {
       return current.openaiClient

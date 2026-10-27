@@ -22,7 +22,7 @@ const MAXIMUM_HOST_NAME_LENGTH = 253
 const HOST_LABEL_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/
 
 /** Finds a decimal port without a leading zero. */
-const PORT_PATTERN = /^[1-9][0-9]{0,4}$/
+const PORT_PATTERN = /^[1-9]\d{0,4}$/
 
 /**
  * Validates which model provider every request goes to.

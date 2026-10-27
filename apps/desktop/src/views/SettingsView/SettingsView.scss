@@ -1861,8 +1861,12 @@
 
 .settings-view__provider-modes {
   display: flex;
+  min-inline-size: 0;
   flex: none;
   gap: 6px;
+  padding: 0;
+  border: 0;
+  margin: 0;
 }
 
 .settings-view__provider-hint {

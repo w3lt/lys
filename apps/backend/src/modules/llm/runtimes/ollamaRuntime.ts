@@ -215,11 +215,13 @@ export default class OllamaRuntime implements LlmRuntime {
    * could not load the model.` without contacting Ollama.
    */
   public async loadLlmModel(): Promise<LoadedLlmModelInstance> {
-    return await this.#admission.runOperation(async () => {
-      throw new Error("The LLM runtime could not load the model.", {
-        cause: new Error("Ollama loads its models when a request names them.")
-      })
-    })
+    return await this.#admission.runOperation(() =>
+      Promise.reject(
+        new Error("The LLM runtime could not load the model.", {
+          cause: new Error("Ollama loads its models when a request names them.")
+        })
+      )
+    )
   }
 
   /**
@@ -230,11 +232,13 @@ export default class OllamaRuntime implements LlmRuntime {
    * could not stop the model instance.` without contacting Ollama.
    */
   public async stopLoadedLlmModelInstance(): Promise<void> {
-    await this.#admission.runOperation(async () => {
-      throw new Error("The LLM runtime could not stop the model instance.", {
-        cause: new Error("Ollama loads its models when a request names them.")
-      })
-    })
+    await this.#admission.runOperation(() =>
+      Promise.reject(
+        new Error("The LLM runtime could not stop the model instance.", {
+          cause: new Error("Ollama loads its models when a request names them.")
+        })
+      )
+    )
   }
 
   /**
@@ -278,7 +282,7 @@ export default class OllamaRuntime implements LlmRuntime {
    * @remarks The runtime holds no connection or other resource to release.
    */
   public async [Symbol.asyncDispose](): Promise<void> {
-    await this.#admission.close(async () => undefined)
+    await this.#admission.close(() => Promise.resolve())
   }
 
   /**

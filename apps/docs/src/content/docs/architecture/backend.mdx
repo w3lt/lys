@@ -786,7 +786,7 @@ next one starts, and a session stopped while it waits opens nothing. That
 covers only the process the command started, not processes it starts
 itself: behind a launcher such as `npx`, a server that ignores both its
 input closing and `SIGTERM` still runs after the release, as `SIGKILL`
-reaches only the launcher. It runs until the desktop app stops a running
+reaches only the launcher ([#284](https://github.com/w3lt/lys/issues/284)). It runs until the desktop app stops a running
 backend, which ends the backend's whole process group. Every
 state change happens in one synchronous step, so a lookup sees one consistent
 state.
@@ -824,7 +824,8 @@ declares no client capabilities.
   process to exit. The SDK's own close at a message line past 16 MiB does not
   go through the wrapper: a close Lys makes while that one still stops the
   process returns at once, so a session opened in those few seconds can start
-  the command while the old process still runs.
+  the command while the old process still runs
+  ([#284](https://github.com/w3lt/lys/issues/284)).
 - **Streamable HTTP.** The SDK's `StreamableHTTPClientTransport` sends each
   request to the configured URL with the configured headers, and
   `redirect: "manual"`, so a redirect is an HTTP error and is never
@@ -847,7 +848,7 @@ declares no client capabilities.
   settles; and an HTTP error a send throws carries the status but never the
   answer's body. Closing the connection aborts its open requests, which fail
   without being reported as connection errors; Lys does not ask the server to
-  end its session.
+  end its session ([#287](https://github.com/w3lt/lys/issues/287)).
 
 The tool list is read past the SDK's response cache, so the SDK holds no
 tool's output schema and never checks a result against one: it would compile
@@ -887,7 +888,7 @@ thousands of levels deep: the SDK checks the `tools/list` answer against its
 own recursive schema first, runs out of stack, and the opening fails as
 `protocol-error`, losing every tool of that server. Skipping only such a tool
 would mean Lys parsing and rewriting each `tools/list` answer before the SDK
-reads it, on both transports. A listed tool's description is the server's
+reads it, on both transports ([#288](https://github.com/w3lt/lys/issues/288)). A listed tool's description is the server's
 description, else its title, else its annotations' title, cleaned of
 invisible characters and cut to 4,096 characters, or else a sentence naming
 the tool and its server. Its name and input schema are kept as the server

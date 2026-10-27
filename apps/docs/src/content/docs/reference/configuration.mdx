@@ -380,7 +380,7 @@ Streamable HTTP (`http`):
   to a Unicode host such as `bücher.example`, which the URL parser writes in
   that form. The host's URL parser and the backend's convert such
   internationalized domain names differently, so one of them could accept a
-  name the other refuses. A host whose characters map to ASCII, such as
+  name the other refuses ([#285](https://github.com/w3lt/lys/issues/285)). A host whose characters map to ASCII, such as
   fullwidth letters, is accepted as its ASCII name.
 - Lys sets these headers itself and refuses them in `headers`: `Accept`,
   `Content-Length`, `Content-Type`, `Host`, `Last-Event-ID`,

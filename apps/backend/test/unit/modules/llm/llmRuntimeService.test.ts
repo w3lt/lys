@@ -491,6 +491,37 @@ describe("LlmRuntimeService", () => {
       expect(acquireLlmRuntime).toHaveBeenCalledOnce()
     })
 
+    it("reads the saved provider again for a call that arrives after the pending attempt read it", async () => {
+      const groqRuntime = createFakeLlmRuntime()
+      const lmStudioRuntime = createFakeLlmRuntime()
+      const groqAcquisition = Promise.withResolvers<FakeLlmRuntime>()
+      const acquireLlmRuntime = vi
+        .fn<(access: LlmProviderAccess) => Promise<FakeLlmRuntime>>()
+        .mockReturnValueOnce(groqAcquisition.promise)
+        .mockResolvedValueOnce(lmStudioRuntime)
+      const findLlmProviderAccess = vi
+        .fn<() => Promise<LlmProviderAccess>>()
+        .mockResolvedValueOnce(GROQ_ACCESS)
+        .mockResolvedValueOnce(LM_STUDIO_ACCESS)
+      const { service } = createService(
+        acquireLlmRuntime,
+        findLlmProviderAccess
+      )
+
+      const first = service.connectLlmRuntime()
+      await waitForMicrotasks()
+      expect(acquireLlmRuntime).toHaveBeenCalledExactlyOnceWith(GROQ_ACCESS)
+      const second = service.connectLlmRuntime()
+      groqAcquisition.resolve(groqRuntime)
+
+      await expect(first).resolves.toBe("connected")
+      await expect(second).resolves.toBe("connected")
+      expect(findLlmProviderAccess).toHaveBeenCalledTimes(2)
+      expect(groqRuntime[Symbol.asyncDispose]).toHaveBeenCalledOnce()
+      expect(acquireLlmRuntime).toHaveBeenLastCalledWith(LM_STUDIO_ACCESS)
+      expect(service.connectedLlmProviderAccess).toBe(LM_STUDIO_ACCESS)
+    })
+
     it("is refused with the service-busy error without starting an attempt when the queue is full", async () => {
       const { service, runtime, acquireLlmRuntime } =
         await createConnectedService()

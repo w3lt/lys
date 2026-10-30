@@ -340,9 +340,15 @@ async function sendTauriCommand(
   try {
     const value = await invoke<unknown>(command, commandArgs)
 
-    return Object.freeze({ status: "resolved", value })
+    return Object.freeze({
+      status: "resolved",
+      value
+    } satisfies TauriCommandSettlement)
   } catch (reason: unknown) {
-    return Object.freeze({ status: "rejected", reason })
+    return Object.freeze({
+      status: "rejected",
+      reason
+    } satisfies TauriCommandSettlement)
   }
 }
 
@@ -369,10 +375,12 @@ async function sendArgumentFreeToolCommand<Value, Failure>(
   const settlement = await sendTauriCommand(command, {})
 
   if (settlement.status === "resolved") {
+    const value = valueSchema.parse(settlement.value)
+
     return Object.freeze({
       status: "succeeded",
-      value: valueSchema.parse(settlement.value)
-    })
+      value
+    } satisfies ArgumentFreeToolOutcome<Value, Failure>)
   }
 
   const failure = failureSchema.safeParse(settlement.reason)
@@ -381,7 +389,10 @@ async function sendArgumentFreeToolCommand<Value, Failure>(
     throw createUndeclaredRejectionError(command, settlement.reason)
   }
 
-  return Object.freeze({ status: "failed", error: failure.data })
+  return Object.freeze({
+    status: "failed",
+    error: failure.data
+  } satisfies ArgumentFreeToolOutcome<Value, Failure>)
 }
 
 /**

@@ -31,14 +31,14 @@ Cloud.
 
 ## Current stack
 
-| Concern          | Current implementation                                                                                                                                   |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Model inventory  | `LlmService.listLlmModels()` lists the provider's models, annotates which model keys have loaded instances, and the context length each is loaded with.  |
-| Model health     | `LlmService.getLlmModelHealth()` checks one fresh loaded-inventory snapshot for the requested key without generating text.                               |
-| Model loading    | `POST /api/v1/llm/load` uses the application service to load one model with the request's load settings and return its metadata.                         |
-| Model unloading  | `PATCH /api/v1/llm/unload` stops every observed loaded instance matching one key, then reconciles the loaded-instance inventory.                         |
-| Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against the connected provider's OpenAI-compatible endpoint.                                    |
-| Title generation | `ChatService.generateTitle()` calls the same endpoint with a separate prompt and a length-limited JSON-schema response format, then validates the reply. |
+| Concern          | Current implementation                                                                                                                                                                                                               |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Model inventory  | `LlmService.listLlmModels()` lists the provider's models, annotates which model keys have loaded instances, and the context length each is loaded with.                                                                              |
+| Model health     | `LlmService.getLlmModelHealth()` checks one fresh loaded-inventory snapshot for the requested key without generating text.                                                                                                           |
+| Model loading    | `POST /api/v1/llm/load` uses the application service to load one model with the request's load settings and return its metadata.                                                                                                     |
+| Model unloading  | `PATCH /api/v1/llm/unload` stops every observed loaded instance matching one key, then reconciles the loaded-instance inventory.                                                                                                     |
+| Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against the connected provider's OpenAI-compatible endpoint, sending the reply ceiling as `max_tokens` to Ollama and Ollama Cloud and as `max_completion_tokens` otherwise. |
+| Title generation | `ChatService.generateTitle()` calls the same endpoint with a separate prompt and a length-limited JSON-schema response format, then validates the reply.                                                                             |
 
 Loading and unloading apply to LM Studio only: its runtime alone implements
 `LlmModelInstanceController`. Ollama, Ollama Cloud, and Groq decide which models are in

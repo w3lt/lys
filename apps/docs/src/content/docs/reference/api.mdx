@@ -122,10 +122,10 @@ rounds are included.
 
 `generationOptions` is required and has no protocol-level default:
 
-| Field          | Accepted value                                  | Effect                                                                  |
-| -------------- | ----------------------------------------------- | ----------------------------------------------------------------------- |
-| `temperature`  | Required number from `0` through `1`, inclusive | Forwarded as the completion sampling temperature.                       |
-| `replyCeiling` | Optional non-negative integer, in tokens        | Forwarded as `max_completion_tokens`; omission becomes `null` upstream. |
+| Field          | Accepted value                                  | Effect                                                                                                                                                                    |
+| -------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `temperature`  | Required number from `0` through `1`, inclusive | Forwarded as the completion sampling temperature.                                                                                                                         |
+| `replyCeiling` | Optional non-negative integer, in tokens        | Forwarded as `max_completion_tokens`, or as `max_tokens` to Ollama and Ollama Cloud, whose OpenAI-compatible API reads only that field; omission becomes `null` upstream. |
 
 Both numeric fields use number coercion before validation. The request, its
 `conversation`, and the generation-options objects reject unknown fields, so a

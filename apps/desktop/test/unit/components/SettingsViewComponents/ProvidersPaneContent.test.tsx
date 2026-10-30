@@ -30,6 +30,15 @@ const CONNECTED_ROUTE: BackendRoutes = Object.freeze({
   [CONNECT_ROUTE]: () => buildJsonResponse(200, { status: "connected" })
 })
 
+/** Stored settings with Ollama Cloud active, the local address still saved. */
+const OLLAMA_CLOUD_ACTIVE_SETTINGS: LysSettings = Object.freeze({
+  ...STORED_SETTINGS,
+  providers: llmProviderSettingsSchema.parse({
+    ...STORED_PROVIDERS_SETTINGS,
+    active: "ollamaCloud"
+  })
+})
+
 /** Stored settings with Groq active and its key saved. */
 const GROQ_ACTIVE_SETTINGS: LysSettings = Object.freeze({
   ...STORED_SETTINGS,
@@ -202,7 +211,7 @@ describe("ProvidersPaneContent", () => {
           ...STORED_SETTINGS_DOCUMENT,
           providers: {
             ...STORED_PROVIDERS_SETTINGS,
-            ollama: { mode: "local", address: "localhost:11500" }
+            ollama: { address: "localhost:11500" }
           }
         }
       }
@@ -211,33 +220,91 @@ describe("ProvidersPaneContent", () => {
     expect(field).toHaveAttribute("placeholder", "localhost:11500")
   })
 
-  it("switches Ollama to its cloud, which asks for a key", async () => {
+  it("makes Ollama Cloud the active provider from Ollama's card, which asks for a key", async () => {
     const host = startSettingsHost()
-    await startProvidersPane(STORED_SETTINGS, CONNECTED_ROUTE)
+    const { useLysStore } = await startProvidersPane(
+      STORED_SETTINGS,
+      CONNECTED_ROUTE
+    )
     const user = userEvent.setup()
     const ollama = screen.getByRole("article", { name: "Ollama" })
 
     await user.click(within(ollama).getByRole("button", { name: "Cloud" }))
     await waitForRenderedWork()
 
+    expect(useLysStore.getState().settings.providers.active).toBe("ollamaCloud")
     expect(listSettingsWrites(host.commands)).toEqual([
       {
         newSettings: {
           ...STORED_SETTINGS_DOCUMENT,
-          providers: {
-            ...STORED_PROVIDERS_SETTINGS,
-            ollama: { mode: "cloud", address: "192.168.1.20:11434" }
-          }
+          providers: { ...STORED_PROVIDERS_SETTINGS, active: "ollamaCloud" }
         }
       }
     ])
+    expect(screen.getByRole("radio", { name: "Ollama" })).toBeChecked()
     expect(ollama).toHaveTextContent("needs key")
     expect(within(ollama).getByRole("status")).toHaveTextContent(
-      "No key yet. Lys can't reach Ollama until there is one."
+      "No key yet. Lys can't reach Ollama Cloud until there is one."
     )
+    expect(
+      within(ollama).getByLabelText("Ollama Cloud API key")
+    ).toBeInTheDocument()
     expect(
       within(ollama).getByRole("link", { name: /get a key/ })
     ).toHaveAttribute("href", "https://ollama.com/settings/keys")
+  })
+
+  it("shows Ollama Cloud on Ollama's card and switches back to the local server", async () => {
+    const host = startSettingsHost()
+    await startProvidersPane(OLLAMA_CLOUD_ACTIVE_SETTINGS, CONNECTED_ROUTE)
+    const user = userEvent.setup()
+    const ollama = screen.getByRole("article", { name: "Ollama" })
+
+    expect(screen.getByRole("radio", { name: "Ollama" })).toBeChecked()
+    expect(ollama).toHaveTextContent("cloud")
+    expect(
+      within(ollama).getByRole("button", { name: "Cloud" })
+    ).toHaveAttribute("aria-pressed", "true")
+
+    await user.click(within(ollama).getByRole("button", { name: "Local" }))
+    await waitForRenderedWork()
+
+    expect(listSettingsWrites(host.commands)).toEqual([
+      {
+        newSettings: {
+          ...STORED_SETTINGS_DOCUMENT,
+          providers: STORED_PROVIDERS_SETTINGS
+        }
+      }
+    ])
+    expect(within(ollama).getByLabelText("Server address")).toHaveAttribute(
+      "placeholder",
+      "192.168.1.20:11434"
+    )
+  })
+
+  it("makes the local Ollama server active when Ollama's card is picked", async () => {
+    const host = startSettingsHost()
+    await startProvidersPane(GROQ_ACTIVE_SETTINGS, CONNECTED_ROUTE)
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole("radio", { name: "Ollama" }))
+    await waitForRenderedWork()
+
+    expect(listSettingsWrites(host.commands)).toEqual([
+      {
+        newSettings: {
+          ...STORED_SETTINGS_DOCUMENT,
+          providers: STORED_PROVIDERS_SETTINGS
+        }
+      }
+    ])
+    expect(
+      within(screen.getByRole("article", { name: "Ollama" })).getByRole(
+        "button",
+        { name: "Local" }
+      )
+    ).toHaveAttribute("aria-pressed", "true")
   })
 
   it("saves a new key of the active provider and reconnects, then removes it", async () => {

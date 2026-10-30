@@ -1,4 +1,4 @@
-import type { LlmProvider, OllamaMode, ProviderAddress } from "@lys/share"
+import type { LlmProvider, ProviderAddress } from "@lys/share"
 import { useId, useRef, useState, type ReactElement } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -18,11 +18,16 @@ import {
   findSavedProviderApiKey,
   formatProviderMessage,
   formatProviderModeTag,
-  OLLAMA_MODE_LABELS,
-  OLLAMA_MODE_NOTES,
+  OLLAMA_PROVIDER_LABELS,
+  OLLAMA_PROVIDER_NOTES,
+  OLLAMA_PROVIDERS,
+  PROVIDER_CARD_PROVIDERS,
+  PROVIDER_CARDS,
   PROVIDER_DESCRIPTIONS,
   UNEDITED_PROVIDER_DRAFT,
+  type OllamaLlmProvider,
   type ProviderAccessKind,
+  type ProviderCardKind,
   type ProviderFieldDraft
 } from "./provider-presentation"
 
@@ -42,8 +47,8 @@ export type ProviderCardRequests = {
 
 /** Properties accepted by {@link ProviderCard}. */
 type ProviderCardProps = ProviderCardRequests & {
-  /** Provider the card presents. */
-  readonly provider: LlmProvider
+  /** Card to present. */
+  readonly card: ProviderCardKind
   /** Name shared by the pane's radio buttons. */
   readonly radioName: string
   /** Saved provider choice and addresses. */
@@ -70,14 +75,14 @@ type ProviderCardBodyProps = ProviderCardRequests & {
   readonly saveState: ProviderSettingsSaveState
 }
 
-/** Properties accepted by {@link OllamaModeRow}. */
-type OllamaModeRowProps = {
-  /** Saved mode. */
-  readonly mode: OllamaMode
+/** Properties accepted by {@link OllamaProviderRow}. */
+type OllamaProviderRowProps = {
+  /** Active Ollama provider: a local server or Ollama Cloud. */
+  readonly provider: OllamaLlmProvider
   /** Whether a provider save runs, which blocks another. */
   readonly isSaving: boolean
-  /** Requests that the card save another mode. */
-  readonly onModeChange: (mode: OllamaMode) => void
+  /** Requests that the card make the other Ollama provider active. */
+  readonly onProviderChange: (provider: OllamaLlmProvider) => void
 }
 
 /** Properties accepted by {@link ProviderCardFooter}. */
@@ -102,47 +107,44 @@ type ProviderCardFooterProps = {
   readonly onRemoveKey: () => void
 }
 
-/** Ollama's modes, in the order the mode row shows them. */
-const OLLAMA_MODES: readonly OllamaMode[] = Object.freeze(["local", "cloud"])
-
 /**
- * Presents Ollama's mode row: a note on what the saved mode means, and a
- * button per mode.
+ * Presents the Ollama card's Local and Cloud row: a note on what the active
+ * Ollama provider means, and a button per Ollama provider.
  *
- * @remarks A pure projection of its props; the pressed button is the saved
- * mode, and the buttons are disabled while a save runs.
- * @param props - Saved mode, whether a save runs, and the request.
+ * @remarks A pure projection of its props; the pressed button is the active
+ * provider, and the buttons are disabled while a save runs.
+ * @param props - Active Ollama provider, whether a save runs, and the request.
  * @returns The row.
  */
-function OllamaModeRow({
-  mode,
+function OllamaProviderRow({
+  provider,
   isSaving,
-  onModeChange
-}: OllamaModeRowProps): ReactElement {
+  onProviderChange
+}: OllamaProviderRowProps): ReactElement {
   const labelId = useId()
   return (
     <div className="settings-view__provider-mode-row">
       <div className="settings-view__identity-lines">
         <h3 id={labelId}>Configure</h3>
-        <p>{OLLAMA_MODE_NOTES[mode]}</p>
+        <p>{OLLAMA_PROVIDER_NOTES[provider]}</p>
       </div>
       <fieldset
         aria-labelledby={labelId}
         className="settings-view__provider-modes"
       >
-        {OLLAMA_MODES.map((candidate) => (
+        {OLLAMA_PROVIDERS.map((candidate) => (
           <Button
-            aria-pressed={candidate === mode}
+            aria-pressed={candidate === provider}
             disabled={isSaving}
             key={candidate}
             onClick={() => {
-              if (candidate !== mode) onModeChange(candidate)
+              if (candidate !== provider) onProviderChange(candidate)
             }}
             size="sm"
             type="button"
             variant="outline"
           >
-            {OLLAMA_MODE_LABELS[candidate]}
+            {OLLAMA_PROVIDER_LABELS[candidate]}
           </Button>
         ))}
       </fieldset>
@@ -222,8 +224,9 @@ function ProviderCardFooter({
 }
 
 /**
- * Presents the active provider's settings: Ollama's mode row, the address
- * or key form, and the status line.
+ * Presents the active provider's settings: for an Ollama provider, the row
+ * that switches between a local server and Ollama Cloud; the address or key
+ * form; and the status line.
  *
  * @remarks The application store owns the saved settings, the save, and the
  * connection; the body owns only the person's edit and whether a key is
@@ -243,7 +246,7 @@ function ProviderCardBody({
   onSaveApiKey,
   onTest
 }: ProviderCardBodyProps): ReactElement {
-  const access = findProviderAccessKind(provider, providers)
+  const access = findProviderAccessKind(provider)
   const [draft, setDraft] = useState<ProviderFieldDraft>(
     UNEDITED_PROVIDER_DRAFT
   )
@@ -302,16 +305,13 @@ function ProviderCardBody({
 
   return (
     <div className="settings-view__provider-body">
-      {provider === "ollama" ? (
-        <OllamaModeRow
+      {provider === "ollama" || provider === "ollamaCloud" ? (
+        <OllamaProviderRow
           isSaving={isSaving}
-          mode={providers.ollama.mode}
-          onModeChange={(mode) =>
-            void onSaveProviders({
-              ...providers,
-              ollama: { ...providers.ollama, mode }
-            })
+          onProviderChange={(active) =>
+            void onSaveProviders({ ...providers, active })
           }
+          provider={provider}
         />
       ) : null}
       {access.kind === "address" ? (
@@ -358,20 +358,22 @@ function ProviderCardBody({
 }
 
 /**
- * Presents one provider: a radio button that makes it the active provider,
- * its logo, name, mode, and line, its badge, and, while it is active, its
- * settings.
+ * Presents one card: a radio button that makes its provider the active one,
+ * its logo, name, mode, and line, its badge, and, while it presents the
+ * active provider, that provider's settings.
  *
- * @remarks Picking a provider saves the choice, which makes the backend
- * connect to it; the radio button is disabled while a save runs. Only the
- * active card shows its settings. The logo is a bundled file of the app,
- * decorative next to the name.
- * @param props - Provider, radio name, saved settings, connection, save, and
+ * @remarks Picking a card saves the choice of
+ * {@link PROVIDER_CARD_PROVIDERS}' provider, which makes the backend connect
+ * to it; Ollama's card then makes the local server active. The radio button
+ * is disabled while a save runs. Only the card of the active provider shows
+ * its settings. The logo is a bundled file of the app, decorative next to
+ * the name.
+ * @param props - Card, radio name, saved settings, connection, save, and
  * requests.
  * @returns The card.
  */
 export default function ProviderCard({
-  provider,
+  card,
   radioName,
   providers,
   secrets,
@@ -383,9 +385,9 @@ export default function ProviderCard({
 }: ProviderCardProps): ReactElement {
   const nameId = useId()
   const lineId = useId()
-  const description = PROVIDER_DESCRIPTIONS[provider]
-  const isActive = providers.active === provider
-  const badge = calculateProviderBadge(provider, providers, secrets, status)
+  const description = PROVIDER_DESCRIPTIONS[card]
+  const isActive = PROVIDER_CARDS[providers.active] === card
+  const badge = calculateProviderBadge(card, providers, secrets, status)
 
   return (
     <article
@@ -402,10 +404,13 @@ export default function ProviderCard({
           disabled={saveState.status === "saving"}
           name={radioName}
           onChange={() =>
-            void onSaveProviders({ ...providers, active: provider })
+            void onSaveProviders({
+              ...providers,
+              active: PROVIDER_CARD_PROVIDERS[card]
+            })
           }
           type="radio"
-          value={provider}
+          value={card}
         />
         <img
           alt=""
@@ -420,7 +425,7 @@ export default function ProviderCard({
               {description.name}
             </span>
             <span className="settings-view__provider-tag">
-              {formatProviderModeTag(provider, providers)}
+              {formatProviderModeTag(card, providers)}
             </span>
           </span>
           <span className="settings-view__provider-line" id={lineId}>
@@ -436,7 +441,7 @@ export default function ProviderCard({
           onSaveApiKey={onSaveApiKey}
           onSaveProviders={onSaveProviders}
           onTest={onTest}
-          provider={provider}
+          provider={providers.active}
           providers={providers}
           saveState={saveState}
           secrets={secrets}

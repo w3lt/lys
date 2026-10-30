@@ -10,7 +10,7 @@ export const LM_STUDIO_TARGET: LlmProviderTarget = Object.freeze(
     llmProviderSettingsSchema.parse({
       active: "lmStudio",
       lmStudio: { address: null },
-      ollama: { mode: "local", address: null }
+      ollama: { address: null }
     })
   )
 )
@@ -21,7 +21,7 @@ export const GROQ_TARGET: LlmProviderTarget = Object.freeze(
     llmProviderSettingsSchema.parse({
       active: "groq",
       lmStudio: { address: null },
-      ollama: { mode: "local", address: null }
+      ollama: { address: null }
     })
   )
 )

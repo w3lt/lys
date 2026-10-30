@@ -355,7 +355,7 @@ mod tests {
         settings["providers"] = json!({
             "active": "groq",
             "lmStudio": { "address": "studio-box.local:1234" },
-            "ollama": { "mode": "cloud", "address": null }
+            "ollama": { "address": null }
         });
 
         settings
@@ -372,7 +372,7 @@ mod tests {
         json!({
             "active": "lmStudio",
             "lmStudio": { "address": null },
-            "ollama": { "mode": "local", "address": null }
+            "ollama": { "address": null }
         })
     }
 

@@ -176,7 +176,7 @@ describe("createSettingsGroupSaves", () => {
     const providers = llmProviderSettingsSchema.parse({
       active: "groq",
       lmStudio: { address: null },
-      ollama: { mode: "local", address: null }
+      ollama: { address: null }
     })
 
     const secretsSave = saves.saveSecretsSettings({ tavilyApiKey: null })

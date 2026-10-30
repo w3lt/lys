@@ -25,29 +25,25 @@ const HOST_LABEL_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/
 const PORT_PATTERN = /^[1-9]\d{0,4}$/
 
 /**
- * Validates which model provider every request goes to.
+ * Validates which model provider every request goes to: `lmStudio`, a
+ * server the person runs; `ollama`, a local Ollama server the person runs;
+ * `ollamaCloud`, Ollama's hosted service, reached with an API key; or
+ * `groq`, Groq's hosted API, reached with an API key.
  *
  * @remarks Persisted in the settings file's `providers` group as `active`.
- * The desktop host declares the same three values. Removing or renaming one
+ * The desktop host declares the same four values. Removing or renaming one
  * changes which settings files load and requires a coordinated desktop and
  * backend release.
  */
-export const llmProviderSchema = z.enum(["lmStudio", "ollama", "groq"])
+export const llmProviderSchema = z.enum([
+  "lmStudio",
+  "ollama",
+  "ollamaCloud",
+  "groq"
+])
 
 /** Model provider every request goes to. */
 export type LlmProvider = z.infer<typeof llmProviderSchema>
-
-/**
- * Validates where Ollama runs: `local`, a server the person names, or
- * `cloud`, Ollama's hosted service, which needs an API key.
- *
- * @remarks Persisted in the settings file's `providers.ollama` group as
- * `mode`; the desktop host declares the same two values.
- */
-export const ollamaModeSchema = z.enum(["local", "cloud"])
-
-/** Where Ollama runs. */
-export type OllamaMode = z.infer<typeof ollamaModeSchema>
 
 /**
  * Answers whether a text follows the provider address rule: a host name or
@@ -134,15 +130,10 @@ export const llmProviderSettingsSchema = z
         address: providerAddressSchema.nullable()
       })
       .readonly(),
-    /** Ollama's mode and local server. */
+    /** The local Ollama server; Ollama Cloud needs no address. */
     ollama: z
       .strictObject({
-        /** Whether requests go to a local server or to Ollama's cloud. */
-        mode: ollamaModeSchema,
-        /**
-         * Address of the local Ollama server, or null for its default; kept,
-         * but unused, while the mode is `cloud`.
-         */
+        /** Address of the local Ollama server, or null for its default. */
         address: providerAddressSchema.nullable()
       })
       .readonly()

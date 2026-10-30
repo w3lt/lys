@@ -38,18 +38,20 @@ export type LlmProviderAccess =
       address: ProviderAddress
     }>
   | Readonly<{
-      /** Ollama, reached over its native and OpenAI-compatible APIs. */
+      /**
+       * A local Ollama server the person runs, reached over plain HTTP with
+       * Ollama's native and OpenAI-compatible APIs.
+       */
       provider: "ollama"
-      /** A server the person runs, reached over plain HTTP. */
-      mode: "local"
       /** The Ollama server. */
       address: ProviderAddress
     }>
   | Readonly<{
-      /** Ollama, reached over its native and OpenAI-compatible APIs. */
-      provider: "ollama"
-      /** Ollama's cloud service at {@link OLLAMA_CLOUD_API_HOST}. */
-      mode: "cloud"
+      /**
+       * Ollama Cloud at {@link OLLAMA_CLOUD_API_HOST}, reached with the same
+       * APIs as a local server.
+       */
+      provider: "ollamaCloud"
       /** Key sent as a bearer token with every request; a secret. */
       apiKey: OllamaApiKey
     }>
@@ -77,7 +79,7 @@ export type LlmChatEndpoint = Readonly<{
  *
  * @param access - How the provider is reached.
  * @returns `http://<address>/v1` for LM Studio and a local Ollama server,
- * `https://ollama.com/v1` with the key for Ollama's cloud, and
+ * `https://ollama.com/v1` with the key for Ollama Cloud, and
  * `https://api.groq.com/openai/v1` with the key for Groq.
  */
 export function buildLlmChatEndpoint(
@@ -90,15 +92,15 @@ export function buildLlmChatEndpoint(
         apiKey: undefined
       })
     case "ollama":
-      return access.mode === "local"
-        ? Object.freeze({
-            baseUrl: `http://${access.address}/v1`,
-            apiKey: undefined
-          })
-        : Object.freeze({
-            baseUrl: `https://${OLLAMA_CLOUD_API_HOST}/v1`,
-            apiKey: access.apiKey
-          })
+      return Object.freeze({
+        baseUrl: `http://${access.address}/v1`,
+        apiKey: undefined
+      })
+    case "ollamaCloud":
+      return Object.freeze({
+        baseUrl: `https://${OLLAMA_CLOUD_API_HOST}/v1`,
+        apiKey: access.apiKey
+      })
     case "groq":
       return Object.freeze({
         baseUrl: `https://${GROQ_API_HOST}/openai/v1`,
@@ -112,7 +114,7 @@ export function buildLlmChatEndpoint(
  *
  * @param left - First access.
  * @param right - Second access.
- * @returns True when the provider, mode, address, and key are all equal, so
+ * @returns True when the provider, address, and key are all equal, so
  * a runtime acquired for one serves the other.
  */
 export function isSameLlmProviderAccess(

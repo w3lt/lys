@@ -28,8 +28,8 @@ export type ProviderSettingsSaveOutcome = "saved" | "failed" | "busy"
 /** A provider key to save, or to remove with null. */
 export type ProviderApiKeyChange =
   | {
-      /** Ollama's cloud. */
-      readonly provider: "ollama"
+      /** Ollama Cloud. */
+      readonly provider: "ollamaCloud"
       /** Key that passed the shared Ollama key schema, or null. */
       readonly apiKey: OllamaApiKey | null
     }
@@ -111,15 +111,13 @@ const SAVE_FAILED: ProviderSettingsSaveState = Object.freeze({
  * changes how the backend connects.
  * @param providers - Saved provider choice.
  * @param provider - Provider whose key changed.
- * @returns True for Groq while Groq is active, and for Ollama while Ollama
- * is active in cloud mode.
+ * @returns True while that provider is the active one.
  */
 function isKeyInUse(
   providers: ProvidersSettings,
   provider: ProviderApiKeyChange["provider"]
 ): boolean {
-  if (providers.active !== provider) return false
-  return provider === "groq" || providers.ollama.mode === "cloud"
+  return providers.active === provider
 }
 
 /**
@@ -130,7 +128,7 @@ function isKeyInUse(
 function buildSecretsChange(
   change: ProviderApiKeyChange
 ): Partial<SecretsSettings> {
-  return change.provider === "ollama"
+  return change.provider === "ollamaCloud"
     ? { ollamaApiKey: change.apiKey }
     : { groqApiKey: change.apiKey }
 }

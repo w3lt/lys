@@ -258,7 +258,7 @@ describe("useLysStore", () => {
     expect(useLysStore.getState().settings.providers).toEqual({
       active: "lmStudio",
       lmStudio: { address: null },
-      ollama: { mode: "local", address: null }
+      ollama: { address: null }
     })
   })
 

@@ -168,7 +168,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "06",
     note: "Where every message is answered. One provider at a time; switching reconnects Lys.",
     footNote:
-      "Saved in settings.json in Lys's home folder, readable only by your user account; keys are kept in plain text there and go only to their own provider. LM Studio and a local Ollama server keep conversations on the machine at the address you give, over plain HTTP. Ollama's cloud and Groq receive your conversations to answer them.",
+      "Saved in settings.json in Lys's home folder, readable only by your user account; keys are kept in plain text there and go only to their own provider. LM Studio and a local Ollama server keep conversations on the machine at the address you give, over plain HTTP. Ollama Cloud and Groq receive your conversations to answer them.",
     contentComponent: ProvidersPane
   },
   {

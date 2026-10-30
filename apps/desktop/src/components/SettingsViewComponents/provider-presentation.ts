@@ -14,7 +14,8 @@ import ollamaLogoUrl from "@/assets/providers/ollama.svg"
 import {
   DEFAULT_PROVIDER_ADDRESSES,
   LLM_PROVIDER_NAMES,
-  type AddressedLlmProvider
+  type AddressedLlmProvider,
+  type KeyedLlmProvider
 } from "@/lib/models/llm-provider-target"
 import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
 import type {
@@ -25,10 +26,16 @@ import type { ProvidersSettings, SecretsSettings } from "@/lib/store/settings"
 
 import { formatMaskedApiKey, type SecretTone } from "./secrets-presentation"
 
-/** Provider reached with an API key the person saves. */
-export type KeyedLlmProvider = ProviderApiKeyChange["provider"]
+/**
+ * A card of the Providers pane. Ollama's card presents both Ollama providers,
+ * a local server and Ollama Cloud, and switches between them.
+ */
+export type ProviderCardKind = "lmStudio" | "ollama" | "groq"
 
-/** What a provider card shows of one provider. */
+/** Provider an Ollama card's Local or Cloud button makes active. */
+export type OllamaLlmProvider = "ollama" | "ollamaCloud"
+
+/** What a provider card shows of its provider. */
 export type ProviderDescription = {
   /** Provider's name. */
   readonly name: string
@@ -127,14 +134,38 @@ export const UNEDITED_PROVIDER_DRAFT: ProviderFieldDraft = Object.freeze({
   status: "unedited"
 })
 
-/** Providers in the order the pane lists them. */
-export const LLM_PROVIDER_ORDER: readonly LlmProvider[] = Object.freeze([
+/** Cards in the order the pane lists them. */
+export const PROVIDER_CARD_ORDER: readonly ProviderCardKind[] = Object.freeze([
   "lmStudio",
   "ollama",
   "groq"
 ])
 
-/** What each provider card shows, by provider. */
+/** Card that presents each provider. */
+export const PROVIDER_CARDS = Object.freeze({
+  lmStudio: "lmStudio",
+  ollama: "ollama",
+  ollamaCloud: "ollama",
+  groq: "groq"
+} satisfies Readonly<Record<LlmProvider, ProviderCardKind>>)
+
+/**
+ * Provider that picking each card makes active; picking Ollama's card makes
+ * the local server active, and its Cloud button switches to Ollama Cloud.
+ */
+export const PROVIDER_CARD_PROVIDERS = Object.freeze({
+  lmStudio: "lmStudio",
+  ollama: "ollama",
+  groq: "groq"
+} satisfies Readonly<Record<ProviderCardKind, LlmProvider>>)
+
+/** Ollama's providers, in the order the card's buttons show them. */
+export const OLLAMA_PROVIDERS: readonly OllamaLlmProvider[] = Object.freeze([
+  "ollama",
+  "ollamaCloud"
+])
+
+/** What each provider card shows, by card. */
 export const PROVIDER_DESCRIPTIONS = Object.freeze({
   lmStudio: Object.freeze({
     name: LLM_PROVIDER_NAMES.lmStudio,
@@ -145,7 +176,7 @@ export const PROVIDER_DESCRIPTIONS = Object.freeze({
   ollama: Object.freeze({
     name: LLM_PROVIDER_NAMES.ollama,
     blurb:
-      "Runs open models on your machine or in Ollama's cloud, loading each when a message names it.",
+      "Runs open models on your machine or in Ollama Cloud, loading each when a message names it.",
     logoUrl: ollamaLogoUrl
   }),
   groq: Object.freeze({
@@ -154,32 +185,33 @@ export const PROVIDER_DESCRIPTIONS = Object.freeze({
       "Hosted models on Groq's chips. Your conversations go to Groq to be answered.",
     logoUrl: groqLogoUrl
   })
-} satisfies Readonly<Record<LlmProvider, ProviderDescription>>)
+} satisfies Readonly<Record<ProviderCardKind, ProviderDescription>>)
 
 /** Page where a person creates each keyed provider's API key. */
 export const PROVIDER_KEY_PAGE_URLS = Object.freeze({
-  ollama: "https://ollama.com/settings/keys",
+  ollamaCloud: "https://ollama.com/settings/keys",
   groq: "https://console.groq.com/keys"
 } satisfies Readonly<Record<KeyedLlmProvider, string>>)
 
 /** Placeholder of each keyed provider's field while no key is saved. */
 const KEY_PLACEHOLDERS = Object.freeze({
-  ollama: "paste your Ollama key",
+  ollamaCloud: "paste your Ollama key",
   groq: "gsk_…"
 } satisfies Readonly<Record<KeyedLlmProvider, string>>)
 
-/** Text of the Ollama mode buttons, by mode. */
-export const OLLAMA_MODE_LABELS = Object.freeze({
-  local: "Local",
-  cloud: "Cloud"
-})
+/** Text of the Ollama card's buttons, by the provider each makes active. */
+export const OLLAMA_PROVIDER_LABELS = Object.freeze({
+  ollama: "Local",
+  ollamaCloud: "Cloud"
+} satisfies Readonly<Record<OllamaLlmProvider, string>>)
 
-/** Note under Ollama's mode row, by mode. */
-export const OLLAMA_MODE_NOTES = Object.freeze({
-  local:
+/** Note above the Ollama card's buttons, by active Ollama provider. */
+export const OLLAMA_PROVIDER_NOTES = Object.freeze({
+  ollama:
     "A server on this machine or your network. Conversations stay where it runs.",
-  cloud: "Ollama's hosted models. Conversations go to Ollama, with your key."
-})
+  ollamaCloud:
+    "Ollama's hosted models. Conversations go to Ollama, with your key."
+} satisfies Readonly<Record<OllamaLlmProvider, string>>)
 
 /** Line of a draft that changed and can be saved. */
 const UNSAVED_MESSAGE: ProviderMessage = Object.freeze({
@@ -194,46 +226,43 @@ const INVALID_ADDRESS_MESSAGE: ProviderMessage = Object.freeze({
 })
 
 /**
- * Formats the tag after a provider's name.
+ * Formats the tag after a card's name.
  *
- * @param provider - Provider of the card.
- * @param providers - Saved provider choice, for Ollama's mode.
- * @returns `local` for LM Studio, Ollama's mode for Ollama, and `cloud` for
- * Groq.
+ * @param card - Card the tag belongs to.
+ * @param providers - Saved provider choice, for which Ollama provider is
+ * active.
+ * @returns `local` for LM Studio, `cloud` while Ollama Cloud is active and
+ * `local` otherwise for Ollama, and `cloud` for Groq.
  */
 export function formatProviderModeTag(
-  provider: LlmProvider,
+  card: ProviderCardKind,
   providers: ProvidersSettings
 ): string {
-  switch (provider) {
+  switch (card) {
     case "lmStudio":
       return "local"
     case "ollama":
-      return providers.ollama.mode
+      return providers.active === "ollamaCloud" ? "cloud" : "local"
     case "groq":
       return "cloud"
   }
 }
 
 /**
- * Finds how a provider is reached under the saved choice.
+ * Finds how a provider is reached.
  *
- * @param provider - Provider of the card.
- * @param providers - Saved provider choice, for Ollama's mode.
- * @returns An address for LM Studio and local Ollama, a key for Ollama's
- * cloud and Groq.
+ * @param provider - Provider the card configures.
+ * @returns An address for LM Studio and a local Ollama server, a key for
+ * Ollama Cloud and Groq.
  */
 export function findProviderAccessKind(
-  provider: LlmProvider,
-  providers: ProvidersSettings
+  provider: LlmProvider
 ): ProviderAccessKind {
   switch (provider) {
     case "lmStudio":
-      return { kind: "address", provider }
     case "ollama":
-      return providers.ollama.mode === "local"
-        ? { kind: "address", provider }
-        : { kind: "key", provider }
+      return { kind: "address", provider }
+    case "ollamaCloud":
     case "groq":
       return { kind: "key", provider }
   }
@@ -266,7 +295,7 @@ export function findSavedProviderApiKey(
   provider: KeyedLlmProvider,
   secrets: SecretsSettings
 ): OllamaApiKey | GroqApiKey | null {
-  return provider === "ollama" ? secrets.ollamaApiKey : secrets.groqApiKey
+  return provider === "ollamaCloud" ? secrets.ollamaApiKey : secrets.groqApiKey
 }
 
 /**
@@ -284,7 +313,7 @@ export function buildProvidersWithAddress(
 ): ProvidersSettings {
   return provider === "lmStudio"
     ? { ...providers, lmStudio: { address } }
-    : { ...providers, ollama: { ...providers.ollama, address } }
+    : { ...providers, ollama: { address } }
 }
 
 /**
@@ -383,7 +412,7 @@ export function parseProviderKeyDraft(
   const trimmed = draft.text.trim()
   if (trimmed === "" || trimmed === findSavedProviderApiKey(provider, secrets))
     return { status: "unchanged" }
-  if (provider === "ollama") {
+  if (provider === "ollamaCloud") {
     const parsed = ollamaApiKeySchema.safeParse(trimmed)
     return parsed.success
       ? { status: "changed", change: { provider, apiKey: parsed.data } }
@@ -415,24 +444,23 @@ function isProviderKeyMissing(
 /**
  * Calculates a provider card's badge.
  *
- * @param provider - Provider of the card.
+ * @param card - Card the badge belongs to.
  * @param providers - Saved provider choice.
  * @param secrets - Saved keys.
  * @param status - Latest published connection status.
- * @returns `standby` for a provider that is not active; `needs key` for the
- * active provider without its key; otherwise the connection status, with
- * `unknown` while the backend is not running.
+ * @returns `standby` for a card that does not present the active provider;
+ * `needs key` for the active provider without its key; otherwise the
+ * connection status, with `unknown` while the backend is not running.
  */
 export function calculateProviderBadge(
-  provider: LlmProvider,
+  card: ProviderCardKind,
   providers: ProvidersSettings,
   secrets: SecretsSettings,
   status: LmStudioStatus
 ): ProviderBadge {
-  if (providers.active !== provider) return { label: "standby", tone: "muted" }
-  if (
-    isProviderKeyMissing(findProviderAccessKind(provider, providers), secrets)
-  )
+  if (PROVIDER_CARDS[providers.active] !== card)
+    return { label: "standby", tone: "muted" }
+  if (isProviderKeyMissing(findProviderAccessKind(providers.active), secrets))
     return { label: "needs key", tone: "attention" }
   switch (status) {
     case "unknown":
@@ -459,7 +487,7 @@ function formatConnectionMessage(
   providers: ProvidersSettings,
   status: LmStudioStatus
 ): ProviderMessage {
-  const { name } = PROVIDER_DESCRIPTIONS[access.provider]
+  const name = LLM_PROVIDER_NAMES[access.provider]
   const where =
     access.kind === "address"
       ? formatProviderAddressPlaceholder(access.provider, providers)
@@ -512,7 +540,7 @@ function formatDraftMessage(
   }
   const parsed = parseProviderKeyDraft(access.provider, draft, input.secrets)
   if (parsed.status === "invalid") {
-    const { name } = PROVIDER_DESCRIPTIONS[access.provider]
+    const name = LLM_PROVIDER_NAMES[access.provider]
     return {
       text: `not a valid key: paste it exactly as ${name} shows it, without spaces`,
       tone: "danger"
@@ -538,7 +566,7 @@ export function formatProviderMessage(
   if (input.saveState.status === "failed")
     return { text: input.saveState.error, tone: "danger" }
   if (isProviderKeyMissing(input.access, input.secrets)) {
-    const { name } = PROVIDER_DESCRIPTIONS[input.access.provider]
+    const name = LLM_PROVIDER_NAMES[input.access.provider]
     return {
       text: `No key yet. Lys can't reach ${name} until there is one.`,
       tone: "attention"

@@ -115,7 +115,7 @@ export type LoadConfigurationSettings = {
 export type SecretsSettings = {
   /** Saved Tavily API key, or null when none is saved; a secret. */
   readonly tavilyApiKey: TavilyApiKey | null
-  /** Saved key of Ollama's cloud, or null when none is saved; a secret. */
+  /** Saved key of Ollama Cloud, or null when none is saved; a secret. */
   readonly ollamaApiKey: OllamaApiKey | null
   /** Saved Groq API key, or null when none is saved; a secret. */
   readonly groqApiKey: GroqApiKey | null
@@ -245,7 +245,7 @@ const INITIAL_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
 const INITIAL_PROVIDERS_SETTINGS: ProvidersSettings = Object.freeze({
   active: "lmStudio",
   lmStudio: Object.freeze({ address: null }),
-  ollama: Object.freeze({ mode: "local", address: null })
+  ollama: Object.freeze({ address: null })
 })
 
 /**

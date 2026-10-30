@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   DEFAULT_PROVIDER_ADDRESSES,
-  type AddressedLlmProvider
+  LLM_PROVIDER_NAMES,
+  type AddressedLlmProvider,
+  type KeyedLlmProvider
 } from "@/lib/models/llm-provider-target"
 import type { ProviderApiKeyChange } from "@/lib/store/provider-settings"
 import type { ProvidersSettings, SecretsSettings } from "@/lib/store/settings"
@@ -19,10 +21,8 @@ import {
   formatProviderKeyPlaceholder,
   parseProviderAddressDraft,
   parseProviderKeyDraft,
-  PROVIDER_DESCRIPTIONS,
   PROVIDER_KEY_PAGE_URLS,
   UNEDITED_PROVIDER_DRAFT,
-  type KeyedLlmProvider,
   type ProviderFieldDraft
 } from "./provider-presentation"
 
@@ -212,7 +212,7 @@ export function ProviderKeyForm({
   onIsKeyShownChange,
   onSaveKey
 }: ProviderKeyFormProps): ReactElement {
-  const { name } = PROVIDER_DESCRIPTIONS[provider]
+  const name = LLM_PROVIDER_NAMES[provider]
   const parsedDraft = parseProviderKeyDraft(provider, draft, secrets)
 
   /**

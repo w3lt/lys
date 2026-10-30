@@ -15,7 +15,7 @@ import OllamaRuntime from "./ollamaRuntime"
  * @returns A ready runtime whose cleanup ownership transfers to the caller:
  * LM Studio over `ws://<address>`, whose models Lys loads; or a provider
  * that loads a model when a request names it: a local Ollama server over
- * `http://<address>`, Ollama's cloud over `https://ollama.com`, or Groq over
+ * `http://<address>`, Ollama Cloud over `https://ollama.com`, or Groq over
  * `https://api.groq.com/openai/v1`.
  * @throws The acquisition failure of the provider's runtime, such as `The
  * LLM runtime is unavailable.` with the cause when the provider cannot be
@@ -40,15 +40,19 @@ export async function acquireLlmProviderRuntime(
     case "ollama":
       return Object.freeze({
         modelLoading: "provider",
-        llmRuntime: await OllamaRuntime.create(
-          access.mode === "local"
-            ? { mode: "local", apiBaseUrl: `http://${access.address}` }
-            : {
-                mode: "cloud",
-                apiBaseUrl: `https://${OLLAMA_CLOUD_API_HOST}`,
-                apiKey: access.apiKey
-              }
-        )
+        llmRuntime: await OllamaRuntime.create({
+          mode: "local",
+          apiBaseUrl: `http://${access.address}`
+        })
+      })
+    case "ollamaCloud":
+      return Object.freeze({
+        modelLoading: "provider",
+        llmRuntime: await OllamaRuntime.create({
+          mode: "cloud",
+          apiBaseUrl: `https://${OLLAMA_CLOUD_API_HOST}`,
+          apiKey: access.apiKey
+        })
       })
     case "groq":
       return Object.freeze({

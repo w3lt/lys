@@ -98,7 +98,6 @@ describe("acquireLlmProviderRuntime", () => {
       await acquireLlmProviderRuntime(
         {
           provider: "ollama",
-          mode: "local",
           address: providerAddressSchema.parse(
             server.baseUrl.replace("http://", "")
           )
@@ -119,12 +118,12 @@ describe("acquireLlmProviderRuntime", () => {
     ])
   })
 
-  it("reaches Ollama's cloud over HTTPS with the key", async () => {
+  it("reaches Ollama Cloud over HTTPS with the key", async () => {
     const requests = stubFetch({ models: [] })
 
     const acquired = ownRuntime(
       await acquireLlmProviderRuntime(
-        { provider: "ollama", mode: "cloud", apiKey: OLLAMA_KEY },
+        { provider: "ollamaCloud", apiKey: OLLAMA_KEY },
         DISCARDING_SDK_LOGGER
       )
     )

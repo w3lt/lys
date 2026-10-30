@@ -478,9 +478,9 @@ describe("saveProviderSettings", () => {
       save_settings: () => null
     })
     const providers = llmProviderSettingsSchema.parse({
-      active: "groq",
+      active: "ollamaCloud",
       lmStudio: { address: "10.0.0.5:1234" },
-      ollama: { mode: "cloud", address: null }
+      ollama: { address: null }
     })
 
     await saveProviderSettings(providers)

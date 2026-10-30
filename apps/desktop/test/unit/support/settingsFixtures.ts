@@ -124,7 +124,7 @@ export const STORED_PROVIDERS_SETTINGS: ProvidersSettings =
   llmProviderSettingsSchema.parse({
     active: "ollama",
     lmStudio: { address: null },
-    ollama: { mode: "local", address: "192.168.1.20:11434" }
+    ollama: { address: "192.168.1.20:11434" }
   })
 
 /**

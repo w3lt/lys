@@ -84,11 +84,9 @@ export {
 export {
   llmProviderSchema,
   llmProviderSettingsSchema,
-  ollamaModeSchema,
   providerAddressSchema,
   type LlmProvider,
   type LlmProviderSettings,
-  type OllamaMode,
   type ProviderAddress
 } from "./providers"
 export {

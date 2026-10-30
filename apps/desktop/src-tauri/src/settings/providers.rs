@@ -114,21 +114,13 @@ pub enum LlmProvider {
     /// LM Studio, at its saved or default address.
     #[default]
     LmStudio,
-    /// Ollama, on a local server or in Ollama's cloud.
+    /// A local Ollama server, at its saved or default address.
     Ollama,
+    /// Ollama Cloud, Ollama's hosted service, reached with the saved Ollama
+    /// API key.
+    OllamaCloud,
     /// Groq's hosted API.
     Groq,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// Where Ollama runs. The values match `ollamaModeSchema` in `@lys/share`.
-pub enum OllamaMode {
-    /// A local Ollama server, at its saved or default address.
-    #[default]
-    Local,
-    /// Ollama's cloud service, reached with the saved Ollama API key.
-    Cloud,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -141,12 +133,10 @@ pub struct LmStudioProviderSettings {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
-/// Ollama's mode and local server, persisted under `providers.ollama`.
+/// The local Ollama server, persisted under `providers.ollama`. Ollama Cloud
+/// needs no address.
 pub struct OllamaProviderSettings {
-    /// Whether requests go to a local server or to Ollama's cloud.
-    mode: OllamaMode,
     /// Local server's address; `None`, JSON `null`, for its default address.
-    /// Kept, but unused, while the mode is `cloud`.
     address: Option<ProviderAddress>,
 }
 
@@ -155,15 +145,14 @@ pub struct OllamaProviderSettings {
 /// Provider choice and server addresses persisted under the `providers` JSON
 /// object.
 ///
-/// A missing field takes its default: LM Studio active, both addresses
-/// `null`, and Ollama in local mode. The group may not be `null`, and unknown
-/// fields are rejected.
+/// A missing field takes its default: LM Studio active and both addresses
+/// `null`. The group may not be `null`, and unknown fields are rejected.
 pub struct ProvidersSettings {
     /// Provider every request goes to.
     active: LlmProvider,
     /// LM Studio's server.
     lm_studio: LmStudioProviderSettings,
-    /// Ollama's mode and local server.
+    /// The local Ollama server.
     ollama: OllamaProviderSettings,
 }
 
@@ -226,33 +215,35 @@ mod tests {
             json!({
                 "active": "lmStudio",
                 "lmStudio": { "address": null },
-                "ollama": { "mode": "local", "address": null }
+                "ollama": { "address": null }
             })
         );
     }
 
     #[test]
-    fn round_trips_a_saved_choice_and_addresses() {
-        let stored = json!({
-            "active": "ollama",
-            "lmStudio": { "address": "studio-box.local:1234" },
-            "ollama": { "mode": "cloud", "address": "127.0.0.1:11500" }
-        });
+    fn round_trips_each_saved_choice_and_the_addresses() {
+        for active in ["lmStudio", "ollama", "ollamaCloud", "groq"] {
+            let stored = json!({
+                "active": active,
+                "lmStudio": { "address": "studio-box.local:1234" },
+                "ollama": { "address": "127.0.0.1:11500" }
+            });
 
-        let settings = parse_providers_settings(stored.clone()).expect("a saved group");
+            let settings = parse_providers_settings(stored.clone()).expect("a saved group");
 
-        assert_eq!(
-            serde_json::to_value(&settings).expect("settings that serialize"),
-            stored
-        );
+            assert_eq!(
+                serde_json::to_value(&settings).expect("settings that serialize"),
+                stored
+            );
+        }
     }
 
     #[test]
-    fn rejects_unknown_providers_modes_fields_and_invalid_addresses() {
+    fn rejects_unknown_providers_fields_and_invalid_addresses() {
         for stored in [
             json!(null),
             json!({ "active": "openai" }),
-            json!({ "ollama": { "mode": "remote" } }),
+            json!({ "ollama": { "mode": "cloud" } }),
             json!({ "lmStudio": { "address": "http://127.0.0.1:1234" } }),
             json!({ "groq": {} }),
         ] {

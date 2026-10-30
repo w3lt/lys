@@ -44,7 +44,7 @@ type SettingsDocumentLoadConfiguration = {
 type SettingsDocumentSecrets = {
   /** Saved Tavily key, or null. */
   readonly tavilyApiKey: string | null
-  /** Saved key of Ollama's cloud, or null. */
+  /** Saved key of Ollama Cloud, or null. */
   readonly ollamaApiKey: string | null
   /** Saved Groq key, or null. */
   readonly groqApiKey: string | null
@@ -53,7 +53,7 @@ type SettingsDocumentSecrets = {
 /**
  * The `providers` group as the settings document holds it.
  *
- * @remarks Matches Rust's `ProvidersSettings`; the provider, the mode, and
+ * @remarks Matches Rust's `ProvidersSettings`; the provider and
  * the addresses are plain text here and checked and branded only after
  * {@link buildProvidersSettings} parses them.
  */
@@ -62,8 +62,8 @@ type SettingsDocumentProviders = {
   readonly active: string
   /** LM Studio's server. */
   readonly lmStudio: { readonly address: string | null }
-  /** Ollama's mode and local server. */
-  readonly ollama: { readonly mode: string; readonly address: string | null }
+  /** The local Ollama server. */
+  readonly ollama: { readonly address: string | null }
 }
 
 /**

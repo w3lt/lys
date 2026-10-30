@@ -71,7 +71,7 @@ pub struct SecretsSettings {
     /// Key of the Tavily search service; `None`, JSON `null`, when no key is
     /// saved.
     pub tavily_api_key: Option<ApiKey>,
-    /// Key of Ollama's cloud service, sent while Ollama runs in cloud mode;
+    /// Key of Ollama Cloud, sent while Ollama Cloud is the active provider;
     /// `None`, JSON `null`, when no key is saved.
     pub ollama_api_key: Option<ApiKey>,
     /// Key of Groq's API, sent while Groq is the active provider; `None`, JSON

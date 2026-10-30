@@ -12,6 +12,9 @@ import type { ProvidersSettings } from "@/lib/store/settings"
 /** Provider reached at a server address the person may set. */
 export type AddressedLlmProvider = "lmStudio" | "ollama"
 
+/** Provider reached at a hosted API with a key the person saves. */
+export type KeyedLlmProvider = "ollamaCloud" | "groq"
+
 /** The provider the saved choice makes the backend connect to. */
 export type LlmProviderTarget = {
   /** Active provider. */
@@ -31,6 +34,7 @@ export type LlmProviderTarget = {
 export const LLM_PROVIDER_NAMES = Object.freeze({
   lmStudio: "LM Studio",
   ollama: "Ollama",
+  ollamaCloud: "Ollama Cloud",
   groq: "Groq"
 } satisfies Readonly<Record<LlmProvider, string>>)
 
@@ -63,11 +67,15 @@ export function describeLlmProviderTarget(
       return {
         provider: "ollama",
         name: LLM_PROVIDER_NAMES.ollama,
-        access: providers.ollama.mode === "local" ? "address" : "key",
-        location:
-          providers.ollama.mode === "local"
-            ? (providers.ollama.address ?? DEFAULT_PROVIDER_ADDRESSES.ollama)
-            : OLLAMA_CLOUD_API_HOST
+        access: "address",
+        location: providers.ollama.address ?? DEFAULT_PROVIDER_ADDRESSES.ollama
+      }
+    case "ollamaCloud":
+      return {
+        provider: "ollamaCloud",
+        name: LLM_PROVIDER_NAMES.ollamaCloud,
+        access: "key",
+        location: OLLAMA_CLOUD_API_HOST
       }
     case "groq":
       return {

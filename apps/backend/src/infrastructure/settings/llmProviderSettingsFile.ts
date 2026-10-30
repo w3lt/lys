@@ -2,7 +2,6 @@ import {
   groqApiKeySchema,
   llmProviderSchema,
   ollamaApiKeySchema,
-  ollamaModeSchema,
   providerAddressSchema
 } from "@lys/share"
 import * as z from "zod"
@@ -35,7 +34,7 @@ export type LlmProviderAccessRead =
       /** The active provider needs a key that is not saved. */
       status: "missing-key"
       /** Provider whose key is missing. */
-      provider: "ollama" | "groq"
+      provider: "ollamaCloud" | "groq"
     }>
   | Readonly<{
       /** The file could not be read as a settings document. */
@@ -59,10 +58,7 @@ const providerSettingsDocumentSchema = z.object({
         .object({ address: providerAddressSchema.nullable().optional() })
         .optional(),
       ollama: z
-        .object({
-          mode: ollamaModeSchema.optional(),
-          address: providerAddressSchema.nullable().optional()
-        })
+        .object({ address: providerAddressSchema.nullable().optional() })
         .optional()
     })
     .optional(),
@@ -159,20 +155,19 @@ function parseLlmProviderAccess(text: string): LlmProviderAccessRead {
         address: providers?.lmStudio?.address ?? DEFAULT_LM_STUDIO_ADDRESS
       })
     case "ollama":
-      return providers?.ollama?.mode === "cloud"
-        ? parseOllamaCloudAccess(document.secrets?.ollamaApiKey)
-        : buildConfiguredRead({
-            provider: "ollama",
-            mode: "local",
-            address: providers?.ollama?.address ?? DEFAULT_OLLAMA_ADDRESS
-          })
+      return buildConfiguredRead({
+        provider: "ollama",
+        address: providers?.ollama?.address ?? DEFAULT_OLLAMA_ADDRESS
+      })
+    case "ollamaCloud":
+      return parseOllamaCloudAccess(document.secrets?.ollamaApiKey)
     case "groq":
       return parseGroqAccess(document.secrets?.groqApiKey)
   }
 }
 
 /**
- * Builds the access of Ollama's cloud from the saved key.
+ * Builds the access of Ollama Cloud from the saved key.
  *
  * @param value - Saved `ollamaApiKey` value, unchecked.
  * @returns The access, `missing-key` for no key or `null`, or `unreadable`
@@ -180,15 +175,11 @@ function parseLlmProviderAccess(text: string): LlmProviderAccessRead {
  */
 function parseOllamaCloudAccess(value: unknown): LlmProviderAccessRead {
   if (value === undefined || value === null) {
-    return Object.freeze({ status: "missing-key", provider: "ollama" })
+    return Object.freeze({ status: "missing-key", provider: "ollamaCloud" })
   }
   const parsed = ollamaApiKeySchema.safeParse(value)
   if (!parsed.success) return UNREADABLE_SETTINGS
-  return buildConfiguredRead({
-    provider: "ollama",
-    mode: "cloud",
-    apiKey: parsed.data
-  })
+  return buildConfiguredRead({ provider: "ollamaCloud", apiKey: parsed.data })
 }
 
 /**

@@ -32,10 +32,10 @@ const GROQ_ACTIVE = llmProviderSettingsSchema.parse({
   active: "groq"
 })
 
-/** Ollama active in cloud mode. */
+/** Ollama Cloud active. */
 const OLLAMA_CLOUD_ACTIVE = llmProviderSettingsSchema.parse({
   ...STORED_PROVIDERS_SETTINGS,
-  ollama: { ...STORED_PROVIDERS_SETTINGS.ollama, mode: "cloud" }
+  active: "ollamaCloud"
 })
 
 /** Ollama key a case saves: a made-up value of a key's shape. */
@@ -199,7 +199,7 @@ describe("createProviderSettingsSlice", () => {
       expect(connectLlmProvider).toHaveBeenCalledOnce()
     })
 
-    it("reconnects for Ollama's key only while Ollama runs in cloud mode", async () => {
+    it("reconnects for Ollama Cloud's key only while Ollama Cloud is active, not a local Ollama server", async () => {
       const { writes } = startControlledSettingsHost()
       const local = createProviderStore()
       const cloud = createProviderStore({
@@ -207,15 +207,17 @@ describe("createProviderSettingsSlice", () => {
         providers: OLLAMA_CLOUD_ACTIVE
       })
 
-      const localSave = local.store
-        .getState()
-        .saveProviderApiKey({ provider: "ollama", apiKey: NEW_OLLAMA_API_KEY })
+      const localSave = local.store.getState().saveProviderApiKey({
+        provider: "ollamaCloud",
+        apiKey: NEW_OLLAMA_API_KEY
+      })
       await waitForMicrotasks()
       writes[0]?.resolve(null)
       await localSave
-      const cloudSave = cloud.store
-        .getState()
-        .saveProviderApiKey({ provider: "ollama", apiKey: NEW_OLLAMA_API_KEY })
+      const cloudSave = cloud.store.getState().saveProviderApiKey({
+        provider: "ollamaCloud",
+        apiKey: NEW_OLLAMA_API_KEY
+      })
       await waitForMicrotasks()
       writes[1]?.resolve(null)
       await cloudSave

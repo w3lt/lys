@@ -79,7 +79,7 @@ describe("readLlmProviderAccess", () => {
   it("reads local Ollama at its saved or default address", async () => {
     const saved = await writeSettingsFile(
       buildSettingsText(
-        { active: "ollama", ollama: { mode: "local", address: "gpu:11500" } },
+        { active: "ollama", ollama: { address: "gpu:11500" } },
         {}
       )
     )
@@ -89,29 +89,25 @@ describe("readLlmProviderAccess", () => {
 
     expect(await readLlmProviderAccess(saved)).toEqual({
       status: "configured",
-      access: { provider: "ollama", mode: "local", address: "gpu:11500" }
+      access: { provider: "ollama", address: "gpu:11500" }
     })
     expect(await readLlmProviderAccess(unsaved)).toEqual({
       status: "configured",
-      access: { provider: "ollama", mode: "local", address: "127.0.0.1:11434" }
+      access: { provider: "ollama", address: "127.0.0.1:11434" }
     })
   })
 
-  it("reads Ollama's cloud with its saved key", async () => {
+  it("reads Ollama Cloud with its saved key, without the local server's address", async () => {
     const path = await writeSettingsFile(
       buildSettingsText(
-        { active: "ollama", ollama: { mode: "cloud", address: null } },
+        { active: "ollamaCloud", ollama: { address: "gpu:11500" } },
         { ollamaApiKey: SYNTHETIC_OLLAMA_KEY, groqApiKey: "not a key" }
       )
     )
 
     expect(await readLlmProviderAccess(path)).toEqual({
       status: "configured",
-      access: {
-        provider: "ollama",
-        mode: "cloud",
-        apiKey: SYNTHETIC_OLLAMA_KEY
-      }
+      access: { provider: "ollamaCloud", apiKey: SYNTHETIC_OLLAMA_KEY }
     })
   })
 
@@ -127,11 +123,7 @@ describe("readLlmProviderAccess", () => {
   })
 
   it.each([
-    [
-      "Ollama's cloud",
-      { active: "ollama", ollama: { mode: "cloud" } },
-      "ollama"
-    ],
+    ["Ollama Cloud", { active: "ollamaCloud" }, "ollamaCloud"],
     ["Groq", { active: "groq" }, "groq"]
   ])(
     "reads %s without a key as a missing key",

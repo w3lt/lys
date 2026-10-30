@@ -12,7 +12,7 @@ function buildProviders(changes: Record<string, unknown>) {
   return llmProviderSettingsSchema.parse({
     active: "lmStudio",
     lmStudio: { address: null },
-    ollama: { mode: "local", address: null },
+    ollama: { address: null },
     ...changes
   })
 }
@@ -46,15 +46,20 @@ describe("describeLlmProviderTarget", () => {
     })
   })
 
-  it("reaches Ollama's cloud and Groq at their hosts with a key", () => {
+  it("reaches Ollama Cloud and Groq at their hosts with a key", () => {
     expect(
       describeLlmProviderTarget(
         buildProviders({
-          active: "ollama",
-          ollama: { mode: "cloud", address: "192.168.1.20:11434" }
+          active: "ollamaCloud",
+          ollama: { address: "192.168.1.20:11434" }
         })
       )
-    ).toMatchObject({ access: "key", location: "ollama.com" })
+    ).toEqual({
+      provider: "ollamaCloud",
+      name: "Ollama Cloud",
+      access: "key",
+      location: "ollama.com"
+    })
     expect(
       describeLlmProviderTarget(buildProviders({ active: "groq" }))
     ).toEqual({

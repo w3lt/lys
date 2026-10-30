@@ -28,10 +28,11 @@ const SECRETS: SecretsSettings = STORED_SETTINGS.secrets
 /** Saved address of the stored local Ollama. */
 const OLLAMA_ADDRESS = providerAddressSchema.parse("192.168.1.20:11434")
 
-/** Provider choice with Ollama's cloud active. */
+/** Provider choice with Ollama Cloud active, the local address still saved. */
 const OLLAMA_CLOUD: ProvidersSettings = llmProviderSettingsSchema.parse({
   ...STORED_PROVIDERS_SETTINGS,
-  ollama: { mode: "cloud", address: OLLAMA_ADDRESS }
+  active: "ollamaCloud",
+  ollama: { address: OLLAMA_ADDRESS }
 })
 
 /** Provider choice with Groq active. */
@@ -84,18 +85,20 @@ describe("provider-presentation", () => {
     )
   })
 
-  it("reaches LM Studio and local Ollama at an address, Ollama's cloud and Groq with a key", () => {
-    expect(
-      findProviderAccessKind("lmStudio", STORED_PROVIDERS_SETTINGS)
-    ).toEqual({ kind: "address", provider: "lmStudio" })
-    expect(findProviderAccessKind("ollama", STORED_PROVIDERS_SETTINGS)).toEqual(
-      { kind: "address", provider: "ollama" }
-    )
-    expect(findProviderAccessKind("ollama", OLLAMA_CLOUD)).toEqual({
-      kind: "key",
+  it("reaches LM Studio and local Ollama at an address, Ollama Cloud and Groq with a key", () => {
+    expect(findProviderAccessKind("lmStudio")).toEqual({
+      kind: "address",
+      provider: "lmStudio"
+    })
+    expect(findProviderAccessKind("ollama")).toEqual({
+      kind: "address",
       provider: "ollama"
     })
-    expect(findProviderAccessKind("groq", STORED_PROVIDERS_SETTINGS)).toEqual({
+    expect(findProviderAccessKind("ollamaCloud")).toEqual({
+      kind: "key",
+      provider: "ollamaCloud"
+    })
+    expect(findProviderAccessKind("groq")).toEqual({
       kind: "key",
       provider: "groq"
     })
@@ -106,7 +109,7 @@ describe("provider-presentation", () => {
       buildProvidersWithAddress(STORED_PROVIDERS_SETTINGS, "ollama", null)
     ).toEqual({
       ...STORED_PROVIDERS_SETTINGS,
-      ollama: { mode: "local", address: null }
+      ollama: { address: null }
     })
     expect(
       buildProvidersWithAddress(
@@ -169,7 +172,7 @@ describe("provider-presentation", () => {
       expect(formatProviderKeyPlaceholder("groq", SECRETS)).toBe(
         "gsk_f••••••••0000"
       )
-      expect(formatProviderKeyPlaceholder("ollama", SECRETS)).toBe(
+      expect(formatProviderKeyPlaceholder("ollamaCloud", SECRETS)).toBe(
         "paste your Ollama key"
       )
     })
@@ -217,13 +220,17 @@ describe("provider-presentation", () => {
         )
       ).toEqual({ status: "unchanged" })
       expect(
-        parseProviderKeyDraft("ollama", UNEDITED_PROVIDER_DRAFT, SECRETS)
+        parseProviderKeyDraft("ollamaCloud", UNEDITED_PROVIDER_DRAFT, SECRETS)
       ).toEqual({ status: "unchanged" })
     })
 
     it("refuses a key with spaces inside it", () => {
       expect(
-        parseProviderKeyDraft("ollama", buildEditedDraft("abc def"), SECRETS)
+        parseProviderKeyDraft(
+          "ollamaCloud",
+          buildEditedDraft("abc def"),
+          SECRETS
+        )
       ).toEqual({ status: "invalid" })
     })
   })
@@ -328,13 +335,13 @@ describe("provider-presentation", () => {
       expect(
         formatProviderMessage(
           buildStatusInput({
-            access: { kind: "key", provider: "ollama" },
+            access: { kind: "key", provider: "ollamaCloud" },
             providers: OLLAMA_CLOUD,
             status: "unreachable"
           })
         )
       ).toEqual({
-        text: "No key yet. Lys can't reach Ollama until there is one.",
+        text: "No key yet. Lys can't reach Ollama Cloud until there is one.",
         tone: "attention"
       })
     })

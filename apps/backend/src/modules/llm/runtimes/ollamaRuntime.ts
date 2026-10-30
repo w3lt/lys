@@ -93,11 +93,13 @@ type OllamaApiRequest =
 const CONTEXT_LENGTH_KEY_SUFFIX = ".context_length"
 
 /**
- * Where an Ollama runtime sends its requests.
+ * Where an Ollama runtime sends its requests: a local server, for the
+ * `ollama` provider, or Ollama Cloud, for the `ollamaCloud` provider.
  *
  * @remarks A local server is reached over plain HTTP without a key and
- * reports the models it is running; Ollama's cloud is reached over HTTPS
- * with the person's key.
+ * reports the models it is running; Ollama Cloud is reached over HTTPS with
+ * the person's key. Both answer the same native API, so one runtime serves
+ * both providers.
  */
 export type OllamaRuntimeTarget =
   | Readonly<{
@@ -107,7 +109,7 @@ export type OllamaRuntimeTarget =
       apiBaseUrl: string
     }>
   | Readonly<{
-      /** Ollama's cloud service. */
+      /** Ollama Cloud. */
       mode: "cloud"
       /** Base URL of its native API, such as `https://ollama.com`. */
       apiBaseUrl: string
@@ -117,7 +119,7 @@ export type OllamaRuntimeTarget =
 
 /**
  * Implements {@link LlmRuntime} over Ollama's native API, on a local server
- * or in Ollama's cloud.
+ * or in Ollama Cloud.
  *
  * @remarks Only chat models are listed: a model whose `/api/show`
  * capabilities lack `completion`, such as an embedding model, is left out of

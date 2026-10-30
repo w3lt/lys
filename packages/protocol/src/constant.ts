@@ -104,8 +104,8 @@ export const VMO_PORT = 8080
  */
 export const TAVILY_API_HOST = "api.tavily.com"
 /**
- * Host of Ollama's cloud service, the only place requests go while Ollama is
- * the active provider in cloud mode.
+ * Host of Ollama Cloud, the only place requests go while Ollama Cloud is the
+ * active provider.
  *
  * @remarks The backend sends model listings and chat requests, with the
  * person's Ollama API key, to `https://` followed by this host, and the

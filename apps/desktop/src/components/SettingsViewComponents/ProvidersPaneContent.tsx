@@ -3,11 +3,12 @@ import { useId, type ReactElement } from "react"
 import { useLysStore } from "@/lib/store"
 
 import ProviderCard from "./ProviderCard"
-import { LLM_PROVIDER_ORDER } from "./provider-presentation"
+import { PROVIDER_CARD_ORDER } from "./provider-presentation"
 
 /**
- * Presents the Providers pane: one card per model provider, of which one is
- * active and shows where Lys finds it.
+ * Presents the Providers pane: one card per model provider, Ollama's card
+ * covering both a local server and Ollama Cloud. The card of the active
+ * provider shows where Lys finds it.
  *
  * @remarks The application store owns the saved provider choice, the keys,
  * their saves, and the connection status. Saving a choice, an address, or a
@@ -34,7 +35,7 @@ export default function ProvidersPane(): ReactElement {
     <section aria-labelledby={headingId} className="settings-view__section">
       <div className="settings-view__section-heading">
         <h2 id={headingId}>provider</h2>
-        <span>{LLM_PROVIDER_ORDER.length} providers</span>
+        <span>{PROVIDER_CARD_ORDER.length} providers</span>
       </div>
       <p className="settings-view__note">
         Every request goes to one provider. Pick it here and tell Lys where to
@@ -45,13 +46,13 @@ export default function ProvidersPane(): ReactElement {
         className="settings-view__provider-list"
         role="radiogroup"
       >
-        {LLM_PROVIDER_ORDER.map((provider) => (
+        {PROVIDER_CARD_ORDER.map((card) => (
           <ProviderCard
-            key={provider}
+            card={card}
+            key={card}
             onSaveApiKey={saveProviderApiKey}
             onSaveProviders={saveProviderSettings}
             onTest={() => void connectLmStudio()}
-            provider={provider}
             providers={providers}
             radioName={radioName}
             saveState={saveState}

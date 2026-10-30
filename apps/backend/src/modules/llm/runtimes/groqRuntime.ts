@@ -131,7 +131,8 @@ export default class GroqRuntime implements LlmRuntime {
    * Implements {@link LlmRuntime.listLoadedLlmModelInstances}: every model
    * Groq serves, because it serves them on demand.
    *
-   * @returns One frozen instance per listed model, whose identifier is its key.
+   * @returns One frozen instance per listed model, whose identifier is its
+   * key and whose context length is its window.
    * @throws The interface-defined admission failure, or `The LLM runtime
    * could not list loaded model instances.` with the failed listing as its
    * cause.
@@ -148,7 +149,11 @@ export default class GroqRuntime implements LlmRuntime {
       })
       return Object.freeze(
         models.map((model) =>
-          Object.freeze({ modelKey: model.id, modelIdentifier: model.id })
+          Object.freeze({
+            modelKey: model.id,
+            modelIdentifier: model.id,
+            contextLength: model.context_window
+          })
         )
       )
     })

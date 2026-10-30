@@ -225,7 +225,8 @@ export default class OllamaRuntime implements LlmRuntime {
    * models a local server is running, or every chat model of Ollama Cloud.
    *
    * @returns One frozen instance per loaded chat model, whose identifier is
-   * its name.
+   * its name, with the context length a local server reports for it, or the
+   * model's own window in Ollama Cloud, when known.
    * @throws The interface-defined admission failure, or `The LLM runtime
    * could not list loaded model instances.` with the failed request as its
    * cause.
@@ -234,7 +235,7 @@ export default class OllamaRuntime implements LlmRuntime {
     readonly LoadedLlmModelInstance[]
   > {
     return await this.#admission.runOperation(async () => {
-      const chatModels = await this.#listLoadedOllamaChatModels().catch(
+      const instances = await this.#listLoadedOllamaInstances().catch(
         (cause: unknown) => {
           throw new Error(
             "The LLM runtime could not list loaded model instances.",
@@ -242,11 +243,7 @@ export default class OllamaRuntime implements LlmRuntime {
           )
         }
       )
-      return Object.freeze(
-        chatModels.map(({ tag }) =>
-          Object.freeze({ modelKey: tag.name, modelIdentifier: tag.name })
-        )
-      )
+      return Object.freeze(instances)
     })
   }
 
@@ -340,19 +337,32 @@ export default class OllamaRuntime implements LlmRuntime {
   }
 
   /**
-   * Lists the chat models Ollama serves now.
+   * Lists the chat models Ollama serves now, as loaded instances.
    *
-   * @returns The chat models a local server is running, or every chat model
-   * of Ollama Cloud, in Ollama's order.
+   * @returns One frozen instance per chat model a local server is running,
+   * with the context length it reports, or per chat model of Ollama Cloud,
+   * with the model's own window; in Ollama's order.
    * @throws When a request fails or an answer does not match its shape.
    */
-  async #listLoadedOllamaChatModels(): Promise<readonly OllamaChatModel[]> {
+  async #listLoadedOllamaInstances(): Promise<LoadedLlmModelInstance[]> {
     const chatModels = await this.#listOllamaChatModels()
-    if (this.#target.mode === "cloud") return chatModels
+    if (this.#target.mode === "cloud") {
+      return chatModels.map(({ tag, description }) =>
+        buildOllamaInstance(
+          tag.name,
+          findModelInfoContextLength(description.model_info)
+        )
+      )
+    }
     const runningModels = await this.#listRunningOllamaModels()
-    return chatModels.filter(({ tag }) =>
-      runningModels.some((running) => isRunningOllamaModel(running, tag.name))
-    )
+    return chatModels.flatMap(({ tag }) => {
+      const running = runningModels.find((candidate) =>
+        isRunningOllamaModel(candidate, tag.name)
+      )
+      return running === undefined
+        ? []
+        : [buildOllamaInstance(tag.name, running.context_length)]
+    })
   }
 
   /**
@@ -436,6 +446,24 @@ export default class OllamaRuntime implements LlmRuntime {
       apiKey: this.#target.mode === "cloud" ? this.#target.apiKey : undefined
     })
   }
+}
+
+/**
+ * Builds the loaded instance of one Ollama model.
+ *
+ * @param model - Model name, its key and identifier.
+ * @param contextLength - Window it is served with, when known.
+ * @returns The frozen instance, without a context length when none is known.
+ */
+function buildOllamaInstance(
+  model: string,
+  contextLength: number | undefined
+): LoadedLlmModelInstance {
+  return Object.freeze(
+    contextLength === undefined
+      ? { modelKey: model, modelIdentifier: model }
+      : { modelKey: model, modelIdentifier: model, contextLength }
+  )
 }
 
 /**

@@ -94,15 +94,20 @@ describe("GroqRuntime", () => {
     expect(Object.isFrozen(models[0])).toBe(true)
   })
 
-  it("reports every served model as loaded", async () => {
+  it("reports every served model as loaded, with its window", async () => {
     const { runtime } = await createOwnedRuntime()
 
     expect(await runtime.listLoadedLlmModelInstances()).toEqual([
       {
         modelKey: "llama-3.3-70b-versatile",
-        modelIdentifier: "llama-3.3-70b-versatile"
+        modelIdentifier: "llama-3.3-70b-versatile",
+        contextLength: 131_072
       },
-      { modelKey: "openai/gpt-oss-20b", modelIdentifier: "openai/gpt-oss-20b" }
+      {
+        modelKey: "openai/gpt-oss-20b",
+        modelIdentifier: "openai/gpt-oss-20b",
+        contextLength: 65_536
+      }
     ])
   })
 

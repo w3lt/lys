@@ -197,6 +197,47 @@ describe("LlmService", () => {
       )
     })
 
+    it("takes the smallest context length the listing reports for a model's instances without measuring it, and measures a model whose instances report none", async () => {
+      const { service, engine } = createServiceWithEngine()
+      engine.listDownloadedLlmModels.mockResolvedValue([
+        createDownloadedLlmModel({ modelKey: "a/model" }),
+        createDownloadedLlmModel({ modelKey: "b/model" })
+      ])
+      engine.listLoadedLlmModelInstances.mockResolvedValue([
+        {
+          modelKey: "a/model",
+          modelIdentifier: "a/model:1",
+          contextLength: 8192
+        },
+        {
+          modelKey: "a/model",
+          modelIdentifier: "a/model:2",
+          contextLength: 4096
+        },
+        createLoadedInstance("b/model")
+      ])
+      engine.findLlmContextMeasurement.mockResolvedValue({
+        contextLength: 2048,
+        textTokenCounts: []
+      })
+
+      const { llms: models } = await service.listLlmModels()
+
+      expect(
+        models.map(({ modelKey, loadedContextLength }) => ({
+          modelKey,
+          loadedContextLength
+        }))
+      ).toEqual([
+        { modelKey: "a/model", loadedContextLength: 4096 },
+        { modelKey: "b/model", loadedContextLength: 2048 }
+      ])
+      expect(engine.findLlmContextMeasurement).toHaveBeenCalledExactlyOnceWith(
+        "b/model",
+        []
+      )
+    })
+
     it("leaves the context length out of a loaded model whose instances were gone when it was measured", async () => {
       const { service, engine } = createServiceWithEngine()
       engine.listDownloadedLlmModels.mockResolvedValue([

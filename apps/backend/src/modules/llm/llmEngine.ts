@@ -39,7 +39,9 @@ export interface LlmEngine {
    * Lys loads models in reports the instances it has loaded. An engine whose
    * provider decides which models are in memory reports the models it serves
    * now: the ones a local server reports running, or every model a hosted
-   * provider lists, because it serves each on demand.
+   * provider lists, because it serves each on demand. An instance carries
+   * the context length it is served with when the engine's listing reports
+   * it, so the caller need not measure it.
    * @throws The shared closed/busy failures, or
    * `The LLM runtime could not list loaded model instances.` for query failure,
    * or `The LLM runtime returned an invalid model instance.` for malformed identity.

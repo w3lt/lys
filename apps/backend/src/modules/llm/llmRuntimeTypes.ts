@@ -25,6 +25,12 @@ export type LoadedLlmModelInstance = Readonly<{
    * accepts when the runtime offers one.
    */
   modelIdentifier: string
+  /**
+   * Context length the instance is served with, in tokens, when the listing
+   * reports it, as for a provider that decides which models are in memory;
+   * absent when only measuring the instance finds it.
+   */
+  contextLength?: number
 }>
 
 /**

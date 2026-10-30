@@ -121,7 +121,7 @@ describe("OllamaRuntime", () => {
     ).toEqual(Array(4).fill(`Bearer ${API_KEY}`))
   })
 
-  it("reports the chat models a local server is running as loaded", async () => {
+  it("reports the chat models a local server is running as loaded, with the window each runs with", async () => {
     const { runtime } = await createOwnedRuntime("local", {
       "GET /api/ps": answerWith({
         models: [{ name: "qwen3:8b", model: "qwen3:8b", context_length: 4096 }]
@@ -129,16 +129,24 @@ describe("OllamaRuntime", () => {
     })
 
     expect(await runtime.listLoadedLlmModelInstances()).toEqual([
-      { modelKey: "qwen3:8b", modelIdentifier: "qwen3:8b" }
+      { modelKey: "qwen3:8b", modelIdentifier: "qwen3:8b", contextLength: 4096 }
     ])
   })
 
-  it("reports every chat model of Ollama Cloud as loaded", async () => {
+  it("reports every chat model of Ollama Cloud as loaded, with its own window", async () => {
     const { runtime, server } = await createOwnedRuntime("cloud")
 
     expect(await runtime.listLoadedLlmModelInstances()).toEqual([
-      { modelKey: "qwen3:8b", modelIdentifier: "qwen3:8b" },
-      { modelKey: "gpt-oss:120b", modelIdentifier: "gpt-oss:120b" }
+      {
+        modelKey: "qwen3:8b",
+        modelIdentifier: "qwen3:8b",
+        contextLength: 40_960
+      },
+      {
+        modelKey: "gpt-oss:120b",
+        modelIdentifier: "gpt-oss:120b",
+        contextLength: 131_072
+      }
     ])
     expect(server.requests.map((request) => request.path)).not.toContain(
       "/api/ps"

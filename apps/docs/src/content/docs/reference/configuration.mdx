@@ -362,7 +362,7 @@ Streamable HTTP (`http`):
 | `command`     | `stdio` | 1 to 1,024 characters, no control character or tab, no white space at either end. A bare name such as `npx` is found through the backend's `PATH`; see [Configuration](/operate/configuration/#mcp-servers)                                             |
 | `arguments`   | `stdio` | Up to 64 arguments in order, each 1 to 1,024 characters without a line break or another control character but a tab; omitted means none. Passed as they are, without a shell                                                                            |
 | `environment` | `stdio` | Up to 32 `{ name, value }` variables, each name once: a name is an ASCII letter or underscore, then up to 127 letters, digits, or underscores; a value is up to 4,096 characters without a control character but a tab, and may be empty                |
-| `url`         | `http`  | Up to 2,048 characters without spaces: `https://`, or `http://` only for `localhost`, `127.0.0.1`, or `[::1]`; no user name, password, or `#`; no internationalized domain name, see below                                                              |
+| `url`         | `http`  | Up to 2,048 characters without spaces: `https://`, or `http://` only for `localhost`, `127.0.0.1`, or `[::1]`; no user name, password, or `#`; a plain ASCII host or an internationalized domain name, see below                                        |
 | `headers`     | `http`  | Up to 32 `{ name, value }` headers, each name once ignoring case: a name is an HTTP token of up to 128 characters, and not one Lys sets itself; a value is up to 8,192 visible ASCII characters, spaces, and tabs, without a space or tab at either end |
 
 - The group holds at most 16 servers, which take at most 512 KiB together:
@@ -376,12 +376,8 @@ Streamable HTTP (`http`):
   loading the settings fail; an error about a server names the broken rule
   and never quotes a value. An error about the group itself, such as a
   `servers` value that is not a list, can quote that value.
-- A URL whose host has a part starting with `xn--` is refused, and so is one
-  to a Unicode host such as `bücher.example`, which the URL parser writes in
-  that form. The host's URL parser and the backend's convert such
-  internationalized domain names differently, so one of them could accept a
-  name the other refuses ([#285](https://github.com/w3lt/lys/issues/285)). A host whose characters map to ASCII, such as
-  fullwidth letters, is accepted as its ASCII name.
+- A URL's host is plain ASCII or an internationalized domain name that
+  follows the rule below.
 - Lys sets these headers itself and refuses them in `headers`: `Accept`,
   `Content-Length`, `Content-Type`, `Host`, `Last-Event-ID`,
   `MCP-Protocol-Version`, and `Mcp-Session-Id`. It also refuses `Expect`,
@@ -407,6 +403,36 @@ Streamable HTTP (`http`):
   cannot be read, or the group fails its rules, the backend keeps the servers
   it applied before and reports why; see
   [MCP servers](/reference/api/#mcp-servers).
+
+An internationalized domain name, such as `bücher.example`, `пример.рф`, or
+`サーバー.例え.テスト`, is accepted when every part of it is lowercase letters
+of one script, digits, and hyphens. A part is typed as those letters or as its
+punycode, such as `xn--bcher-kva`, with its ASCII letters in either case. The
+letters of each script:
+
+- Latin: `a` to `z`, `à` to `ö`, `ø` to `ÿ`, and the lowercase letters of
+  Latin Extended-A (U+0100 to U+017F) but `ĳ`, `ŀ`, `ŉ`, and `ſ`.
+- Greek: `ά` to `ώ` (U+03AC to U+03CE) but the final `ς`.
+- Cyrillic: `а` to `џ` (U+0430 to U+045F).
+- Chinese, Japanese, and Korean, which one part may mix: hiragana `ぁ` to `ん`
+  (U+3041 to U+3093), katakana `ァ` to `ヶ` (U+30A1 to U+30F6) and `ー`, the
+  CJK unified ideographs U+4E00 to U+9FA5, and the Hangul syllables U+AC00 to
+  U+D7A3.
+
+A part that mixes scripts, such as `pаypal` with a Cyrillic `а` or `jリーグ`,
+is refused; digits and hyphens fit any script. A hyphen may not start or end a
+part or stand as its third and fourth characters, and a part's punycode is at
+most 59 characters, so the part fits a 63-character DNS label. Such a name is
+also refused with uppercase letters beyond ASCII, such as `BÜCHER.example`;
+with letters URL parsers change, such as `ĳ`, which becomes `ij`, a letter
+followed by a combining accent, or fullwidth letters; with `ß` or the final
+`ς`, which parsers that follow the older transitional rules of UTS #46 change
+to `ss` and `σ` while others keep them; with `。` in place of a dot; when
+percent-encoded; with a trailing dot; and with any other character, such as
+`_`, a right-to-left letter, or an emoji. The host's URL parser and the
+JavaScript ones in the renderer and the backend convert other names
+differently, so one of them could accept a name another refuses or reach
+another host; every accepted name is one they all write alike.
 
 An older Lys build does not know the group. It ignores it and removes it the
 next time it saves settings, so the servers must be added again after going

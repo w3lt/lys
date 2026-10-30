@@ -39,6 +39,7 @@ import {
 import type { PageRenderingFailureReporters } from "../modules/tool/builtIn/web/pageRendering"
 import WebSearchToolProvider from "../modules/tool/builtIn/web/webSearchToolProvider"
 import type { McpServerEvent } from "../modules/mcp/mcpServerEvent"
+import McpServerProcessGroups from "../modules/mcp/mcpServerProcessGroups"
 import McpServerRegistry from "../modules/mcp/mcpServerRegistry"
 import { MCP_SERVER_OPENING_TIMEOUT_MILLISECONDS } from "../modules/mcp/mcpServerConnection"
 import { openMcpServer } from "../modules/mcp/mcpServerOpening"
@@ -157,6 +158,12 @@ export type SingletonServices = Readonly<{
    */
   mcpServerRegistry: McpServerRegistry
   /**
+   * The process groups the registry's stdio servers run in, which the
+   * backend ends at once when it exits; it owns no process, only their
+   * identifiers.
+   */
+  mcpServerProcessGroups: McpServerProcessGroups
+  /**
    * Attachment files of every conversation, under the attachments
    * directory; it owns nothing to release.
    */
@@ -175,6 +182,7 @@ type ToolServices = Pick<
   | "webSearchToolProvider"
   | "toolApprovalService"
   | "mcpServerRegistry"
+  | "mcpServerProcessGroups"
 >
 
 /** Services that keep their data in the shared database and own nothing. */
@@ -370,8 +378,10 @@ function createAgentServices(
  * @param logReporters - Receive the causes of read failures the model
  * learns only by kind, and the MCP servers' events.
  * @returns The web search tool provider, every built-in tool, the tool
- * approval service, and the MCP server registry, whose stdio servers start
- * in the person's home folder; they read and contact nothing at creation.
+ * approval service, the MCP server registry, whose stdio servers start in
+ * the person's home folder, and the holder of those servers' process
+ * groups, which the registry borrows; they read and contact nothing at
+ * creation.
  */
 function createToolServices(
   config: BackendConfig,
@@ -392,18 +402,21 @@ function createToolServices(
   const toolApprovalService = new ToolApprovalService(() =>
     readJustRunToolNames(config.settingsFilePath)
   )
+  const mcpServerProcessGroups = new McpServerProcessGroups()
   const mcpServerRegistry = new McpServerRegistry({
     readSettings: () => readMcpSettings(config.settingsFilePath),
     openServer: (settings, context) =>
       openMcpServer(settings, context, MCP_SERVER_OPENING_TIMEOUT_MILLISECONDS),
     workingDirectory: homedir(),
+    processGroups: mcpServerProcessGroups,
     reportEvent: logReporters.reportMcpServerEvent
   })
   return {
     builtInTools,
     webSearchToolProvider,
     toolApprovalService,
-    mcpServerRegistry
+    mcpServerRegistry,
+    mcpServerProcessGroups
   }
 }
 

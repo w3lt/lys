@@ -13,6 +13,7 @@ import {
 import { fileURLToPath } from "node:url"
 import { onTestFinished } from "vitest"
 import type { McpServerConnectionContext } from "../../../src/modules/mcp/mcpServerConnection"
+import McpServerProcessGroups from "../../../src/modules/mcp/mcpServerProcessGroups"
 
 /** Options the fake stdio server reads from its first argument. */
 export type FakeStdioServerOptions = Readonly<{
@@ -34,6 +35,21 @@ export type FakeStdioServerOptions = Readonly<{
   holdLock?: boolean
   /** Wait this long after standard input closes before exiting. */
   shutdownDelayMilliseconds?: number
+  /** Keep running after standard input closes, until a signal ends it. */
+  ignoreClosedInput?: boolean
+  /** Keep running when `SIGTERM` arrives. */
+  ignoreSigterm?: boolean
+  /**
+   * Listen on this loopback port while running, as a server that runs one
+   * copy at a time, or exit with code 3 when another process listens on it.
+   */
+  holdPort?: number
+  /**
+   * Start a helper process that keeps none of the server's standard streams,
+   * ignores `SIGTERM`, and runs until killed; write `helper pid <id>` to
+   * standard error.
+   */
+  startHelper?: boolean
 }>
 
 /** One request the fake HTTP server received. */
@@ -69,11 +85,18 @@ export type RecordedConnectionEvents = {
   closedCount: number
   /** Errors the SDK reported outside any request. */
   readonly errors: Error[]
+  /** Why HTTP servers did not end their sessions as connections closed. */
+  readonly sessionEndFailures: unknown[]
 }
 
 /** Path of the fake stdio server script. */
 const FAKE_STDIO_SERVER_PATH = fileURLToPath(
   new URL("./fakeMcpStdioServer.ts", import.meta.url)
+)
+
+/** Path of the fake launcher script, which runs the fake stdio server. */
+const FAKE_LAUNCHER_PATH = fileURLToPath(
+  new URL("./fakeMcpLauncher.ts", import.meta.url)
 )
 
 /** Tool the fake servers list by default. */
@@ -114,6 +137,73 @@ export function buildFakeStdioServerSettings(
 }
 
 /**
+ * Builds the settings of a server whose command is a launcher, like `npx`,
+ * that runs the fake stdio server as its child and does not pass `SIGTERM`
+ * on; the launcher writes `launcher pid <id>` to standard error.
+ *
+ * @param name - Server name.
+ * @param options - What the fake server does, passed in the
+ * `LYS_FAKE_MCP_OPTIONS` variable, which the launcher hands on unread.
+ * @returns Validated-shape settings.
+ */
+export function buildFakeLauncherServerSettings(
+  name: string,
+  options: FakeStdioServerOptions
+): McpServerSettings {
+  return Object.freeze({
+    name,
+    transport: "stdio",
+    command: process.execPath,
+    arguments: Object.freeze(["--no-warnings", FAKE_LAUNCHER_PATH]),
+    environment: Object.freeze([
+      Object.freeze({
+        name: "LYS_FAKE_MCP_OPTIONS",
+        value: JSON.stringify(options)
+      })
+    ])
+  })
+}
+
+/**
+ * Finds the process identifier a fake server or launcher wrote to its
+ * standard error.
+ *
+ * @param logLines - Lines the server's standard error held.
+ * @param prefix - Text before the identifier, such as `pid` or `launcher
+ * pid`.
+ * @returns The identifier.
+ * @throws When no line reports one.
+ */
+export function findReportedProcessId(
+  logLines: readonly string[],
+  prefix: string
+): number {
+  const line = logLines.find((logLine) => logLine.startsWith(`${prefix} `))
+  if (line === undefined) throw new Error(`No line reports the ${prefix}`)
+  return Number(line.slice(prefix.length + 1))
+}
+
+/**
+ * Answers whether a process still runs or waits to be reaped.
+ *
+ * @param processId - Its identifier.
+ * @returns False once no process has the identifier; true when one does,
+ * even one the test may not signal.
+ */
+export function isProcessRunning(processId: number): boolean {
+  try {
+    process.kill(processId, 0)
+    return true
+  } catch (error) {
+    return !(
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ESRCH"
+    )
+  }
+}
+
+/**
  * Builds the settings of a server reached over HTTP.
  *
  * @param name - Server name.
@@ -149,18 +239,21 @@ export function createRecordingContext(
   const events: RecordedConnectionEvents = {
     logLines: [],
     closedCount: 0,
-    errors: []
+    errors: [],
+    sessionEndFailures: []
   }
   return {
     events,
     context: {
       workingDirectory: process.cwd(),
+      processGroups: new McpServerProcessGroups(),
       abortSignal,
       reportServerLogLine: (line) => events.logLines.push(line),
       reportConnectionClosed: () => {
         events.closedCount += 1
       },
-      reportConnectionError: (error) => events.errors.push(error)
+      reportConnectionError: (error) => events.errors.push(error),
+      reportSessionEndFailure: (error) => events.sessionEndFailures.push(error)
     }
   }
 }
@@ -324,6 +417,77 @@ export function answerAsMcpServer(
       default:
         reply({ error: { code: -32601, message: "unknown method" } })
     }
+  }
+}
+
+/** Capabilities of a server that lists tools and offers nothing else. */
+const TOOLS_ONLY_CAPABILITIES = Object.freeze({ tools: Object.freeze({}) })
+
+/** A request the paged route reads, as a client sent it. */
+type PagedRouteRequest = {
+  /** Identifier of the request; absent for a notification. */
+  id?: number
+  /** Method the request names. */
+  method?: string
+  /** Parameters of a handshake or a `tools/list` request. */
+  params?: { cursor?: string; protocolVersion?: string }
+}
+
+/**
+ * Finds the result a paged route answers one request with.
+ *
+ * @param message - The request.
+ * @param pages - Result of each `tools/list` request, by the cursor it
+ * names; the empty key for the first page.
+ * @param capabilities - Capabilities the handshake offers.
+ * @returns The handshake's result for `initialize`, the page the cursor
+ * names for `tools/list`, or undefined for another request or a cursor
+ * without a page.
+ */
+function findPagedRouteResult(
+  message: PagedRouteRequest,
+  pages: Readonly<Record<string, unknown>>,
+  capabilities: Readonly<Record<string, unknown>>
+): unknown {
+  if (message.method === "initialize")
+    return {
+      protocolVersion: message.params?.protocolVersion,
+      capabilities,
+      serverInfo: { name: "paged", version: "1.0.0" }
+    }
+  if (message.method === "tools/list")
+    return pages[message.params?.cursor ?? ""]
+  return undefined
+}
+
+/**
+ * Builds a route that answers as {@link answerAsMcpServer} does, except for
+ * the handshake's capabilities and the pages of its tool list.
+ *
+ * @param pages - Result of each `tools/list` request, by the cursor it
+ * names; the empty key for the first page.
+ * @param capabilities - Capabilities the handshake offers; tools only when
+ * left out.
+ * @returns The route.
+ */
+export function answerWithToolListPages(
+  pages: Readonly<Record<string, unknown>>,
+  capabilities: Readonly<Record<string, unknown>> = TOOLS_ONLY_CAPABILITIES
+): McpHttpRoute {
+  const answerOther = answerAsMcpServer()
+  return (request, body, response) => {
+    const message: PagedRouteRequest =
+      request.method === "POST" ? (JSON.parse(body) as PagedRouteRequest) : {}
+    const result = findPagedRouteResult(message, pages, capabilities)
+    if (result === undefined) {
+      answerOther(request, body, response)
+      return
+    }
+    response.writeHead(200, {
+      "content-type": "application/json",
+      "mcp-session-id": "test-session"
+    })
+    response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }))
   }
 }
 

@@ -393,7 +393,15 @@ describe("formatMcpServerStatus", () => {
 
   it.each([
     [URL_SERVER, "waiting for initialize from mcp.example.test"],
-    [OPEN_URL_SERVER, "waiting for initialize from localhost:3845"]
+    [OPEN_URL_SERVER, "waiting for initialize from localhost:3845"],
+    [
+      parseMcpServer({
+        name: "books",
+        transport: "http",
+        url: "https://bücher.example/mcp?team=lys"
+      }),
+      "waiting for initialize from bücher.example"
+    ]
   ])(
     "says a remote server is connecting, naming its host and port",
     (server, detail) => {

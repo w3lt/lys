@@ -35,6 +35,7 @@ import {
   findClosedVmoOrigin,
   startVmoServer
 } from "../../../support/vmoServer"
+import McpServerProcessGroups from "../../../../../src/modules/mcp/mcpServerProcessGroups"
 
 /** Path of the key check. */
 const KEY_CHECK_URL = "/api/v1/tools/web_search/key-check"
@@ -107,6 +108,7 @@ function createMcpServerRegistry(
     openServer: (settings, context) =>
       openMcpServer(settings, context, MCP_OPENING_TIMEOUT_MILLISECONDS),
     workingDirectory: process.cwd(),
+    processGroups: new McpServerProcessGroups(),
     reportEvent: (event) => events.push(event)
   })
   onTestFinished(async () => {

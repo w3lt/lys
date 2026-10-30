@@ -18,11 +18,12 @@ import { McpResponseTooLargeError } from "./mcpResponseLimit"
  * connection could be made. `start-failed`: the stdio command could not be
  * started. `refused`: the server answered with a JSON-RPC error, whose
  * message is the server's untrusted text. `invalid-answer`: the server's
- * answer is not valid MCP, or its tool list has more pages than the SDK was
- * told to read. `too-large`: an HTTP answer was longer than
+ * answer is not valid MCP, or its tool list names a page after the last one
+ * the backend reads. `too-large`: an answer, an HTTP body, an event of an
+ * event stream, or a stdio message line, was longer than
  * `MAXIMUM_MCP_RESPONSE_BYTES`, so Lys stopped reading it. `unknown`: none
- * of these, such as the stack overflow of the SDK's check of an answer
- * nested thousands of levels deep, which is logged as a possible defect.
+ * of these, such as a failure the SDK does not type, which is logged as a
+ * possible defect.
  */
 export type McpRequestFailure =
   | Readonly<{ kind: "timed-out" }>

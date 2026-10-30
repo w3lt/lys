@@ -29,6 +29,7 @@ import {
   type McpServerOpening
 } from "../../../../src/modules/mcp/mcpServerOpening"
 import type { McpServerEvent } from "../../../../src/modules/mcp/mcpServerEvent"
+import McpServerProcessGroups from "../../../../src/modules/mcp/mcpServerProcessGroups"
 import McpServerRegistry, {
   type TurnMcpTool
 } from "../../../../src/modules/mcp/mcpServerRegistry"
@@ -36,9 +37,11 @@ import {
   answerAsMcpServer,
   answerToolCallsWith,
   answerWithStatus,
+  buildFakeLauncherServerSettings,
   buildFakeStdioServerSettings,
   buildHttpServerSettings,
   ECHO_TOOL,
+  findClosedMcpUrl,
   startFakeMcpHttpServer,
   type McpHttpRoute
 } from "../../support/mcpTestServers"
@@ -50,6 +53,12 @@ const OPENING_TIMEOUT_MILLISECONDS = 10_000
 
 /** Bound of every wait for the servers to reach a state. */
 const STATE_WAIT = Object.freeze({ timeout: 10_000, interval: 10 })
+
+/**
+ * Longest a test waits for a server whose old process group ends only at
+ * `SIGKILL`, six seconds after its stop started, to connect again.
+ */
+const LAUNCHER_STATE_WAIT = Object.freeze({ timeout: 20_000, interval: 10 })
 
 /** Longest one case may run; a case starts several server processes. */
 const CASE_TIMEOUT_MILLISECONDS = 30_000
@@ -327,6 +336,7 @@ function createRegistryHarness(
     readSettings,
     openServer,
     workingDirectory: options.workingDirectory ?? WORKING_DIRECTORY,
+    processGroups: new McpServerProcessGroups(),
     reportEvent: (event) => events.push(event)
   })
   onTestFinished(async () => {
@@ -430,14 +440,17 @@ function buildList(
  *
  * @param registry - Registry under test.
  * @param expected - Expected list.
+ * @param wait - How long and how often to look; {@link STATE_WAIT} when
+ * omitted.
  */
 async function waitForServerList(
   registry: McpServerRegistry,
-  expected: McpServerList
+  expected: McpServerList,
+  wait: Readonly<{ timeout: number; interval: number }> = STATE_WAIT
 ): Promise<void> {
   await vi.waitFor(() => {
     expect(registry.listServers()).toEqual(expected)
-  }, STATE_WAIT)
+  }, wait)
 }
 
 /**
@@ -1069,6 +1082,37 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       )
     })
 
+    it("reports a session an HTTP server does not end as its removed entry closes", async () => {
+      const answer = answerAsMcpServer()
+      const server = await startFakeMcpHttpServer((request, body, response) => {
+        if (request.method === "DELETE")
+          answerWithStatus(500)(request, body, response)
+        else answer(request, body, response)
+      })
+      const harness = createRegistryHarness()
+      harness.setServers([buildHttpServerSettings("remote", server.url)])
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildHttpStatus("remote", buildConnectedState(1))])
+      )
+
+      harness.setServers([])
+      await harness.registry.updateServers()
+      await waitForRegistryClose(
+        findOpenedConnection(harness.openedConnections, "remote")
+      )
+
+      expect(filterEvents(harness.events, "session-end-failed")).toEqual([
+        {
+          kind: "session-end-failed",
+          serverName: "remote",
+          error: expect.objectContaining({ data: { status: 500 } })
+        }
+      ])
+      expect(harness.registry.listServers()).toEqual(buildList([]))
+    })
+
     it("fails a server as closed when its connection ends before its opening is recorded", async () => {
       const exitCalls: Promise<unknown>[] = []
       const harness = createRegistryHarness({
@@ -1169,6 +1213,32 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       await waitForServerList(
         harness.registry,
         buildList([buildStdioStatus("alpha", buildConnectedState(1))])
+      )
+      expect(harness.openServer).toHaveBeenCalledTimes(2)
+      expect(filterEvents(harness.events, "opening-failed")).toEqual([])
+    })
+
+    it("opens a server a launcher runs again only once every process of its old group ended, even one that ignores its closed input and SIGTERM", async () => {
+      const port = Number(new URL(await findClosedMcpUrl()).port)
+      const harness = createRegistryHarness()
+      harness.setServers([
+        buildFakeLauncherServerSettings("alpha", {
+          holdPort: port,
+          ignoreSigterm: true
+        })
+      ])
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("alpha", buildConnectedState(1))])
+      )
+
+      expect(harness.registry.openServerAgain("alpha")).toBe("reconnecting")
+
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("alpha", buildConnectedState(1))]),
+        LAUNCHER_STATE_WAIT
       )
       expect(harness.openServer).toHaveBeenCalledTimes(2)
       expect(filterEvents(harness.events, "opening-failed")).toEqual([])

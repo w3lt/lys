@@ -1,4 +1,5 @@
 import * as z from "zod"
+import { isAcceptedHost } from "./internationalizedHost"
 import { MAXIMUM_SETTINGS_FILE_BYTES } from "./settingsFile"
 import { calculateUtf8ByteLength, hasDistinctValues } from "./values"
 
@@ -102,9 +103,6 @@ const LONE_SURROGATE_PATTERN = /\p{Cs}/u
 /** Rule of a text that holds a lone surrogate. */
 const LONE_SURROGATE_MESSAGE =
   "A setting holds only complete Unicode characters."
-
-/** Start of a label of an internationalized domain name, in ASCII form. */
-const PUNYCODE_LABEL_PREFIX = "xn--"
 
 /**
  * Header names the HTTP transport sets itself, in lowercase; a server is
@@ -342,30 +340,27 @@ function isMcpServerUrl(value: string): boolean {
 }
 
 /**
- * Answers whether a URL text names an internationalized domain name.
+ * Answers whether a URL text names a host that the internationalized domain
+ * name rule refuses.
  *
  * @param value - URL text.
- * @returns True when the text parses as an absolute URL whose host, as the
- * URL parser writes it in lowercase ASCII, has a label starting with
- * `xn--`, which a Unicode host such as `bücher.example` also gets; false
- * for every other text, including one that does not parse.
- * @remarks URL parsers do not convert such names alike: the desktop host's
- * and Node's accept different ones, so a name one accepts can be refused by
- * the other. Refusing them all keeps one judgement of every server URL.
+ * @returns True when the text parses as an absolute `http:` or `https:` URL
+ * whose host {@link isAcceptedHost} refuses; false for every other text,
+ * including one that does not parse or has another scheme, which the URL
+ * rule refuses.
  */
-function hasInternationalizedHost(value: string): boolean {
+function hasRefusedInternationalizedHost(value: string): boolean {
   const url = parseAbsoluteUrl(value)
-  if (url === undefined) return false
-  return url.hostname
-    .split(".")
-    .some((label) => label.startsWith(PUNYCODE_LABEL_PREFIX))
+  if (url?.protocol !== "https:" && url?.protocol !== "http:") return false
+  return !isAcceptedHost(value, url.hostname)
 }
 
 /**
  * Validates the URL of a remote MCP server: at most
  * {@link MAXIMUM_MCP_SERVER_URL_LENGTH} code points, no white space, control
  * character, or lone surrogate, `https:` or loopback `http:`, without
- * credentials, a fragment, or an internationalized domain name.
+ * credentials or a fragment, and with a plain ASCII host or an
+ * internationalized domain name that {@link isAcceptedHost} accepts.
  */
 const mcpServerUrlSchema = z
   .string()
@@ -381,8 +376,8 @@ const mcpServerUrlSchema = z
     "A URL starts with https://, or http:// for localhost, 127.0.0.1, or [::1], and has no user name, password, or #."
   )
   .refine(
-    (value) => !hasInternationalizedHost(value),
-    "A URL's host is not an internationalized domain name: no part of it starts with xn--."
+    (value) => !hasRefusedInternationalizedHost(value),
+    "A URL's host is plain ASCII or an internationalized domain name whose every part is lowercase letters of one of the Latin, Greek, Cyrillic, Chinese, Japanese, or Korean scripts, digits, and hyphens."
   )
 
 /**

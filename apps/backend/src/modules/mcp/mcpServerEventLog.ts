@@ -19,6 +19,7 @@ type McpConnectionEvent = Extract<
       | "connection-closed"
       | "connection-error"
       | "server-log-line"
+      | "session-end-failed"
       | "close-failed"
   }
 >
@@ -70,7 +71,8 @@ const MCP_LOG_OPTIONS = Object.freeze({
  * @param logger - Backend logger, borrowed for the call.
  * @param event - Event the registry reported.
  * @remarks Each entry names the server as `mcpServer`. Failures Lys can tell
- * apart and ended connections are warnings; a failure Lys cannot tell
+ * apart, ended connections, and sessions a server did not end are
+ * warnings; a failure Lys cannot tell
  * apart, and a failed close, are errors with what was thrown; a server's
  * own log lines and a connection are information. No entry holds a
  * setting. An entry's `err` describes what was thrown: its type, message,
@@ -94,6 +96,7 @@ export function handleMcpServerEvent(
     case "connection-closed":
     case "connection-error":
     case "server-log-line":
+    case "session-end-failed":
     case "close-failed":
       handleConnectionEvent(logger, event)
       return
@@ -164,6 +167,12 @@ function handleConnectionEvent(
       return
     case "server-log-line":
       logger.info({ ...fields, line: event.line }, "MCP server log line")
+      return
+    case "session-end-failed":
+      logger.warn(
+        { ...fields, err: event.error },
+        "An MCP server did not end its session as its connection closed; it ends it at its own time limit"
+      )
       return
     case "close-failed":
       logger.error(

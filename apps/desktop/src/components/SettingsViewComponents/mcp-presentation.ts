@@ -333,6 +333,20 @@ function formatMcpServerUrl(url: string): string {
 }
 
 /**
+ * Formats the host and port of a saved server URL as its text holds them.
+ *
+ * @param url - Saved URL: its scheme and `//`, then a host without a user
+ * name or password.
+ * @returns The text after `//` up to the path, query, or fragment, such as
+ * `localhost:3845`; an internationalized host keeps the letters it was saved
+ * in, as the server's row shows it.
+ */
+function formatMcpServerHost(url: string): string {
+  const authority = url.slice(url.indexOf("//") + 2)
+  return authority.split(/[/\\?#]/u, 1)[0] ?? authority
+}
+
+/**
  * Formats what a server's row says it runs or reaches.
  *
  * @param server - Saved server settings.
@@ -433,7 +447,7 @@ function formatConnectingStatus(
         condition: "connecting",
         chip: "connecting",
         heading: "Connecting",
-        detail: `waiting for initialize from ${new URL(server.url).host}`
+        detail: `waiting for initialize from ${formatMcpServerHost(server.url)}`
       }
   }
 }

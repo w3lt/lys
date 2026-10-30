@@ -55,6 +55,7 @@ import {
   LEADER_STATE_TOOL_FORMATS,
   READ_TEXT_FILE_TOOL
 } from "../../../support/toolFixtures"
+import McpServerProcessGroups from "../../../../../src/modules/mcp/mcpServerProcessGroups"
 
 /** Built-in agent that answers the cases' conversations. */
 const CALIGINIA: BuiltInAgent = Object.freeze({
@@ -151,6 +152,7 @@ async function createChatContextRouteApp() {
     readSettings: readMcpSettings,
     openServer: (settings, context) => openMcpServer(settings, context, 10_000),
     workingDirectory: process.cwd(),
+    processGroups: new McpServerProcessGroups(),
     reportEvent: () => undefined
   })
   onTestFinished(async () => {

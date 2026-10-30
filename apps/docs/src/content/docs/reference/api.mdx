@@ -643,18 +643,19 @@ an argument, an environment variable, a URL, or a header.
 | `connected`    | `toolCount`, `skippedTools`, `isToolListCut` | Its tools are listed; `isToolListCut` says it has more than the 128 tools Lys reads |
 | `failed`       | `reason`                                     | It is not connected; Reconnect or a changed setting tries again                     |
 
-| `reason`         | Meaning                                                                                                                                                                                                                                                    |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `start-failed`   | The command could not be started, such as a command not found on `PATH`                                                                                                                                                                                    |
-| `closed`         | The process exited, or the connection ended, while connecting or later, such as a URL server that answered a call with HTTP `404`, which ends its session, or a server that sent an answer larger than 16 MiB, unless it was a URL server still connecting |
-| `timed-out`      | Connecting and reading the tools took longer than two minutes                                                                                                                                                                                              |
-| `unauthorized`   | The server answered HTTP `401` or `403`; Lys does not sign in with OAuth ([#253](https://github.com/w3lt/lys/issues/253))                                                                                                                                  |
-| `unreachable`    | No connection could be made, such as a refused connection or an unknown host                                                                                                                                                                               |
-| `http-error`     | The server answered another HTTP error, or a redirect, which Lys does not follow                                                                                                                                                                           |
-| `protocol-error` | The server's answers are not valid MCP, a URL server's answer while connecting was larger than 16 MiB, or it answered the connection or the tool list with an error                                                                                        |
+| `reason`         | Meaning                                                                                                                                                                                                                             |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start-failed`   | The command could not be started, such as a command not found on `PATH`                                                                                                                                                             |
+| `closed`         | The process exited, or the connection ended, while connecting or later, such as a URL server that answered a call with HTTP `404`, which ends its session, or a server that sent an answer larger than 16 MiB once it was connected |
+| `timed-out`      | Connecting and reading the tools took longer than two minutes                                                                                                                                                                       |
+| `unauthorized`   | The server answered HTTP `401` or `403`; Lys does not sign in with OAuth ([#253](https://github.com/w3lt/lys/issues/253))                                                                                                           |
+| `unreachable`    | No connection could be made, such as a refused connection or an unknown host                                                                                                                                                        |
+| `http-error`     | The server answered another HTTP error, or a redirect, which Lys does not follow                                                                                                                                                    |
+| `protocol-error` | The server's answers are not valid MCP, an answer while connecting was larger than 16 MiB, or it answered the connection or the tool list with an error                                                                             |
 
 A connected server's tools are read once, when it connects, across at most 16
-pages of its tool list; a list with more pages fails the opening. Lys reads
+pages of its tool list; a 16th page that names a next one fails the opening,
+unless the list passed 128 tools before it, where reading stops. Lys reads
 the first 128 tools and lists each one it can offer; `skippedTools` names the
 others it read, each with why: `unsupported-name` (its name is empty, longer
 than 128 characters, or holds a character a person cannot see, or its
@@ -666,10 +667,9 @@ an argument outside the argument name rule, nests deeper than 32 levels,
 holds a `__proto__` key, or holds a character a person cannot see in any key
 or text), or `input-schema-too-large` (its schema is larger than 64 KiB as
 JSON). A skipped name is cleaned of invisible characters and cut to 128
-characters. A schema nested thousands of levels deep fails the whole opening
-as `protocol-error` instead of being skipped: the SDK checks the tool list
-before Lys reads it and runs out of stack on such a schema
-([#288](https://github.com/w3lt/lys/issues/288)).
+characters. A schema nested thousands of levels deep is skipped as
+`unsupported-input-schema` too; only a tool that does not match the MCP tool
+schema at all fails the opening, as `protocol-error`.
 
 `POST /api/v1/mcp/servers/sync` reads the `mcp` group again and applies it,
 then answers `200` with the list as it is right after applying. A server

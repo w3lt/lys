@@ -13,15 +13,16 @@ import type {
  * take, like the limit on vmo's answers. An answer that passes it ends the
  * connection, over either transport: over HTTP, {@link sendMcpHttpRequest}
  * reports it and fails the body with {@link McpResponseTooLargeError}; over
- * stdio, the SDK ends the connection itself.
+ * stdio, `McpServerMessageLines` reports the line and drops the rest of it.
+ * The connection then fails its requests with that error.
  */
 export const MAXIMUM_MCP_RESPONSE_BYTES = 16 * 1024 * 1024
 
 /**
- * Failure of an HTTP answer of an MCP server whose body, or one event of
- * whose event stream, is longer than {@link MAXIMUM_MCP_RESPONSE_BYTES}, the
- * rest of which is not read, and of every request of the connection that
- * answer ended.
+ * Failure of an answer of an MCP server longer than
+ * {@link MAXIMUM_MCP_RESPONSE_BYTES}: an HTTP body, one event of an event
+ * stream, or a stdio message line, the rest of which is not read; and of
+ * every request of the connection that answer ended.
  *
  * @remarks The subclass preserves the native `Error` contract; its message
  * names the limit, never the answer. A request's failure carries the SDK's

@@ -92,11 +92,15 @@ not find a runtime that `build.sh` installed under another directory.
 | Title-generation prompt        | `src/utils/prompts/title-generation.txt`, as `titleGenerationPrompt`                                                                                                                                              |
 | Title-generation attempt limit | `3`, from `titleGenerationMaxAttempts` in `src/config.ts`; must be a positive integer                                                                                                                             |
 | Generated title length limit   | `100`, from `generatedTitleMaxLength` in `src/config.ts`; must be a positive integer                                                                                                                              |
+| Agent request slots            | `2`, from `agentRequestSlotCount` in `src/config.ts`; replies each live agent works on at once; must be a positive integer                                                                                        |
+| Agent waiting request limit    | `8`, from `agentWaitingRequestLimit` in `src/config.ts`; replies that may wait per live agent for a free request slot; must be a non-negative integer, `0` meaning no reply waits                                 |
 
 `loadBackendConfig()` builds these values once when the backend starts, so a
 changed `LYS_HOME`, prompt file, or limit takes effect after a restart. The
 attempt limit applies to each chat turn. The title length limit counts Unicode
-code points before surrounding whitespace is trimmed.
+code points before surrounding whitespace is trimmed. Every live agent gets
+the same request slots and waiting limit, each agent its own; see
+[request slots](/architecture/backend/#request-slots).
 
 ### Backend configuration validation
 
@@ -106,15 +110,16 @@ The backend validates the complete configuration with `backendConfigSchema` in
 application or any service. Every key is required, unknown keys are rejected,
 and no defaults are applied.
 
-| Key                                                                       | Accepted values                                                                               |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `backendHost`                                                             | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers |
-| `backendPort`, `lmstudioPort`, `vmoPort`                                  | An integer from 1 to 65535                                                                    |
-| `lmstudioHost`                                                            | A host name or IPv4 address, used unbracketed in the `http://` and `ws://` URLs               |
-| `vmoHost`                                                                 | An IPv4 loopback address (`127.x.x.x`); vmo does not authenticate its callers                 |
-| `databaseFilePath`, `settingsFilePath`, `attachmentsDirectoryPath`        | An absolute path                                                                              |
-| `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `titleGenerationPrompt` | Non-empty text without leading or trailing whitespace                                         |
-| `titleGenerationMaxAttempts`, `generatedTitleMaxLength`                   | A positive integer                                                                            |
+| Key                                                                              | Accepted values                                                                               |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `backendHost`                                                                    | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers |
+| `backendPort`, `lmstudioPort`, `vmoPort`                                         | An integer from 1 to 65535                                                                    |
+| `lmstudioHost`                                                                   | A host name or IPv4 address, used unbracketed in the `http://` and `ws://` URLs               |
+| `vmoHost`                                                                        | An IPv4 loopback address (`127.x.x.x`); vmo does not authenticate its callers                 |
+| `databaseFilePath`, `settingsFilePath`, `attachmentsDirectoryPath`               | An absolute path                                                                              |
+| `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `titleGenerationPrompt`        | Non-empty text without leading or trailing whitespace                                         |
+| `titleGenerationMaxAttempts`, `generatedTitleMaxLength`, `agentRequestSlotCount` | A positive integer                                                                            |
+| `agentWaitingRequestLimit`                                                       | A non-negative integer                                                                        |
 
 A value outside these rules stops the backend at startup with a `ZodError`
 whose issues name each failing key. The shared constants, the `LYS_HOME`

@@ -318,6 +318,14 @@ starts, and nothing is stored or written: no message, no file, and no failed
 reply. Each event payload must match one of
 the eleven variants documented in [SSE events](/reference/sse-events/).
 
+An accepted turn's reply starts once its agent has a free
+[request slot](/architecture/backend/#request-slots): while the agent is
+working on as many replies as it has slots, the stream sends the turn-start
+event and then nothing until a slot frees, and Stop ends the waiting reply
+as `interrupted`. When the agent's line of waiting replies is full too, the
+turn is still stored and its reply fails at once with an `error` event; no
+Problem Details is returned.
+
 Closing a chat stream stops only that client's observation. The backend keeps
 generating and storing the reply and its title. To stop a reply, send
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/stop`; it
@@ -339,7 +347,8 @@ with `urn:lys:problem:chat:reply-not-found`.
 
 `POST /api/v1/chat/context` reports how much of the loaded model's context
 window a conversation takes before its next message. The composer's context
-meter calls it; nothing is stored and the model generates nothing.
+meter calls it; nothing is stored, the model generates nothing, and the
+measurement takes no request slot, so it answers while the agent is busy.
 
 ```json
 {

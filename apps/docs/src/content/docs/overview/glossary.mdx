@@ -48,6 +48,10 @@ Terms that mean something specific inside Lys.
   agent's state; stored agents are members, which can read only their own.
 - **Live agent**: the one instance of an agent that answers all of its
   turns while the backend runs and knows the requests it is working on.
+- **Request slot**: one of the replies a live agent works on at once, two
+  by default. A reply holds its slot from its start to its end; a reply
+  that finds every slot held waits in line for one, and one that also finds
+  the line full fails with an `error` event.
 - **Agent state tools**: `read_my_state`, `find_agents`, and
   `read_agent_state`, which the backend adds to a turn of a model trained
   for tool use so an agent can tell what it and the other agents are

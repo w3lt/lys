@@ -229,7 +229,7 @@ Carries a non-empty `message` string that reports a chat generation failure.
 The desktop presents it inline and may also mark the current assistant message
 as failed locally. Title-generation failures never produce `error` events.
 
-The message is one of three sentences, never upstream text:
+The message is one of four sentences, never upstream text:
 
 - When a round of the reply would not fit the model's context window, it
   names the tokens the request needs, including the reply ceiling, and the
@@ -238,6 +238,13 @@ The message is one of three sentences, never upstream text:
   sent.
 - When the model is not loaded, so the round could not be measured, it asks
   to load the model in Settings → Model and try again. The round was not sent.
+- When the agent's [request slots](/architecture/backend/#request-slots) are
+  all held and its line of waiting replies is full, it says how many
+  requests the agent is working on and how many wait, and asks to send the
+  message again once it finishes one, for example `This agent is already
+working on 2 requests, and 8 more are waiting for it, so it did not take
+this message. Send it again once it finishes one.` Nothing was sent to the
+  model.
 - For any other failure: `Chat completion failed. Please try again.`
 
 ## What is not on the current stream
@@ -253,7 +260,10 @@ Every valid chat stream begins with one turn-start event. After that:
 
 1. `start-new-conversation-turn` or `start-existing-conversation-turn`
 2. for a titled existing conversation, its stored `title` event arrives next
-3. zero or more rounds: each round's reasoning and text as `reply-part` and
+3. zero or more rounds, the first one only once the agent has a free
+   [request slot](/architecture/backend/#request-slots) for the reply, so a
+   reply that waits in line sends nothing until then: each round's reasoning
+   and text as `reply-part` and
    `reply-part-delta` events in the order the model writes them, then, when
    the round calls tools, each call's `reply-part` with its `tool-approval` or
    `tool-call` event in the model's order, the `tool-call` event of each

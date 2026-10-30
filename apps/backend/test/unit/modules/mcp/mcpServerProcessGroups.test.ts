@@ -88,7 +88,12 @@ describe("McpServerProcessGroups", () => {
       {
         command: settings.command,
         arguments: settings.arguments,
-        environment: {},
+        environment: Object.fromEntries(
+          settings.environment.map((variable) => [
+            variable.name,
+            variable.value
+          ])
+        ),
         workingDirectory: process.cwd()
       },
       {

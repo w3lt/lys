@@ -1,6 +1,8 @@
 // A minimal MCP server over stdio for tests, run directly by Node, which
-// strips its types: `node fakeMcpStdioServer.ts '<options JSON>'`. It speaks
-// newline-delimited JSON-RPC and imports only Node's own modules.
+// strips its types: `node fakeMcpStdioServer.ts '<options JSON>'`, or with
+// the options JSON in `LYS_FAKE_MCP_OPTIONS` when started by the fake
+// launcher. It speaks newline-delimited JSON-RPC and imports only Node's own
+// modules.
 import { rmSync, writeFileSync } from "node:fs"
 import { spawn } from "node:child_process"
 import { createServer } from "node:net"
@@ -56,7 +58,9 @@ type ReceivedMessage = {
 /** Identifier of the request being answered; absent for a notification. */
 type RequestId = number | string | undefined
 
-const options = JSON.parse(process.argv[2] ?? "{}") as FakeServerOptions
+const options = JSON.parse(
+  process.argv[2] ?? process.env.LYS_FAKE_MCP_OPTIONS ?? "{}"
+) as FakeServerOptions
 
 /**
  * Sends one JSON-RPC message.

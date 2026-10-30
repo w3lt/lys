@@ -142,7 +142,8 @@ export function buildFakeStdioServerSettings(
  * on; the launcher writes `launcher pid <id>` to standard error.
  *
  * @param name - Server name.
- * @param options - What the fake server does.
+ * @param options - What the fake server does, passed in the
+ * `LYS_FAKE_MCP_OPTIONS` variable, which the launcher hands on unread.
  * @returns Validated-shape settings.
  */
 export function buildFakeLauncherServerSettings(
@@ -153,12 +154,13 @@ export function buildFakeLauncherServerSettings(
     name,
     transport: "stdio",
     command: process.execPath,
-    arguments: Object.freeze([
-      "--no-warnings",
-      FAKE_LAUNCHER_PATH,
-      JSON.stringify(options)
-    ]),
-    environment: Object.freeze([])
+    arguments: Object.freeze(["--no-warnings", FAKE_LAUNCHER_PATH]),
+    environment: Object.freeze([
+      Object.freeze({
+        name: "LYS_FAKE_MCP_OPTIONS",
+        value: JSON.stringify(options)
+      })
+    ])
   })
 }
 
@@ -418,39 +420,65 @@ export function answerAsMcpServer(
   }
 }
 
+/** Capabilities of a server that lists tools and offers nothing else. */
+const TOOLS_ONLY_CAPABILITIES = Object.freeze({ tools: Object.freeze({}) })
+
+/** A request the paged route reads, as a client sent it. */
+type PagedRouteRequest = {
+  /** Identifier of the request; absent for a notification. */
+  id?: number
+  /** Method the request names. */
+  method?: string
+  /** Parameters of a handshake or a `tools/list` request. */
+  params?: { cursor?: string; protocolVersion?: string }
+}
+
+/**
+ * Finds the result a paged route answers one request with.
+ *
+ * @param message - The request.
+ * @param pages - Result of each `tools/list` request, by the cursor it
+ * names; the empty key for the first page.
+ * @param capabilities - Capabilities the handshake offers.
+ * @returns The handshake's result for `initialize`, the page the cursor
+ * names for `tools/list`, or undefined for another request or a cursor
+ * without a page.
+ */
+function findPagedRouteResult(
+  message: PagedRouteRequest,
+  pages: Readonly<Record<string, unknown>>,
+  capabilities: Readonly<Record<string, unknown>>
+): unknown {
+  if (message.method === "initialize")
+    return {
+      protocolVersion: message.params?.protocolVersion,
+      capabilities,
+      serverInfo: { name: "paged", version: "1.0.0" }
+    }
+  if (message.method === "tools/list")
+    return pages[message.params?.cursor ?? ""]
+  return undefined
+}
+
 /**
  * Builds a route that answers as {@link answerAsMcpServer} does, except for
  * the handshake's capabilities and the pages of its tool list.
  *
  * @param pages - Result of each `tools/list` request, by the cursor it
  * names; the empty key for the first page.
- * @param capabilities - Capabilities the handshake offers.
+ * @param capabilities - Capabilities the handshake offers; tools only when
+ * left out.
  * @returns The route.
  */
 export function answerWithToolListPages(
   pages: Readonly<Record<string, unknown>>,
-  capabilities: Readonly<Record<string, unknown>> = { tools: {} }
+  capabilities: Readonly<Record<string, unknown>> = TOOLS_ONLY_CAPABILITIES
 ): McpHttpRoute {
   const answerOther = answerAsMcpServer()
   return (request, body, response) => {
-    const message =
-      request.method === "POST"
-        ? (JSON.parse(body) as {
-            id?: number
-            method?: string
-            params?: { cursor?: string; protocolVersion?: string }
-          })
-        : {}
-    const result =
-      message.method === "initialize"
-        ? {
-            protocolVersion: message.params?.protocolVersion,
-            capabilities,
-            serverInfo: { name: "paged", version: "1.0.0" }
-          }
-        : message.method === "tools/list"
-          ? pages[message.params?.cursor ?? ""]
-          : undefined
+    const message: PagedRouteRequest =
+      request.method === "POST" ? (JSON.parse(body) as PagedRouteRequest) : {}
+    const result = findPagedRouteResult(message, pages, capabilities)
     if (result === undefined) {
       answerOther(request, body, response)
       return

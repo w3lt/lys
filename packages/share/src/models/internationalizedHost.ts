@@ -106,10 +106,10 @@ const PUNYCODE_DIGITS = "abcdefghijklmnopqrstuvwxyz0123456789"
  * Largest integer RFC 3492's decoder and encoder hold, inclusive: the
  * largest unsigned 32-bit integer. A larger one fails on overflow.
  */
-const MAXIMUM_PUNYCODE_INTEGER = 0xffff_ffff
+const MAXIMUM_PUNYCODE_INTEGER = 0xffffffff
 
 /** Largest Unicode code point. */
-const MAXIMUM_CODE_POINT = 0x10_ffff
+const MAXIMUM_CODE_POINT = 0x10ffff
 
 /** First UTF-16 surrogate, which is not a character. */
 const FIRST_SURROGATE = 0xd800
@@ -329,9 +329,10 @@ function parsePunycode(punycode: string): string | undefined {
   if (punycode.length > MAXIMUM_PUNYCODE_LENGTH) return undefined
   if (NON_ASCII_PATTERN.test(punycode)) return undefined
   const delimiterIndex = punycode.lastIndexOf(PUNYCODE_DELIMITER)
-  const basicCodePoints = [
-    ...punycode.slice(0, Math.max(delimiterIndex, 0))
-  ].map((character) => character.codePointAt(0) ?? 0)
+  const basicCodePoints = Array.from(
+    punycode.slice(0, Math.max(delimiterIndex, 0)),
+    (character) => character.codePointAt(0) ?? 0
+  )
   let decoding: PunycodeDecoding = {
     codePoints: basicCodePoints,
     codePoint: PUNYCODE_INITIAL_CODE_POINT,

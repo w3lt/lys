@@ -135,12 +135,27 @@ export async function waitForProcessGroupEnd(
   groupId: number,
   milliseconds: number
 ): Promise<boolean> {
-  const deadline = performance.now() + milliseconds
-  while (hasProcessGroup(groupId)) {
-    if (performance.now() >= deadline) return false
-    await waitFor(PROCESS_GROUP_POLL_MILLISECONDS)
-  }
-  return true
+  return waitForProcessGroupEndBefore(groupId, performance.now() + milliseconds)
+}
+
+/**
+ * Waits until no process of a group is left, or a moment passes.
+ *
+ * @param groupId - Identifier of the group.
+ * @param deadline - Moment on the monotonic clock, as `performance.now()`
+ * reads it, after which the wait gives up.
+ * @returns True once {@link hasProcessGroup} finds no process of the group;
+ * false when the deadline passed first.
+ * @throws What {@link hasProcessGroup} throws.
+ */
+async function waitForProcessGroupEndBefore(
+  groupId: number,
+  deadline: number
+): Promise<boolean> {
+  if (!hasProcessGroup(groupId)) return true
+  if (performance.now() >= deadline) return false
+  await waitFor(PROCESS_GROUP_POLL_MILLISECONDS)
+  return waitForProcessGroupEndBefore(groupId, deadline)
 }
 
 /**

@@ -11,17 +11,18 @@ import {
   formatToolApprovalNote,
   formatToolArgumentCounts,
   formatToolArgumentRequirement,
-  formatToolArgumentType,
   formatToolCallsStatus,
   formatToolGroupCount,
-  formatToolGroupLabel,
   formatToolSettingsSaveStatus,
   formatToolTokenEstimate,
   formatToolUnavailableNote,
-  isFixedInSecretsPane
+  getToolRunnerPresentation,
+  isFixedInSecretsPane,
+  listToolArguments
 } from "@/components/SettingsViewComponents/tool-presentation"
 import {
   buildBackendToolDefinition,
+  buildMcpToolDefinition,
   buildToolDefinition
 } from "../../support/toolFixtures"
 
@@ -32,16 +33,22 @@ const FIND_FILES = buildToolDefinition("find_files")
 /** Backend tool that can lack what it needs to run. */
 const WEB_SEARCH = buildBackendToolDefinition("web_search")
 
+/** Tools of two MCP servers, listed after Lys's own. */
+const NOTES_SEARCH = buildMcpToolDefinition("notes", "search")
+const NOTES_READ = buildMcpToolDefinition("notes", "read")
+const FILES_FIND = buildMcpToolDefinition("files", "find")
+
 /**
- * Lists the arguments of a tool the shared schema accepted.
+ * Lists the arguments of a tool the shared schema accepted, as Settings
+ * shows them.
  *
  * @param candidates - Arguments as a tool declares them.
- * @returns The validated arguments.
+ * @returns The listed arguments.
  */
 function buildArguments(
   candidates: readonly ToolArgumentDefinitionCandidate[]
 ) {
-  return buildToolDefinition("probe", candidates).arguments
+  return listToolArguments(buildToolDefinition("probe", candidates))
 }
 
 describe("calculateToolTokenEstimate", () => {
@@ -205,10 +212,35 @@ describe("buildToolGroups", () => {
     const groups = buildToolGroups([READ_TEXT_FILE, FIND_FILES])
 
     expect(groups).toEqual([
-      { group: "files", tools: [READ_TEXT_FILE, FIND_FILES] }
+      { key: "files", heading: "files", tools: [READ_TEXT_FILE, FIND_FILES] }
     ])
     expect(Object.isFrozen(groups)).toBe(true)
     expect(Object.isFrozen(groups[0].tools)).toBe(true)
+  })
+
+  it("heads each group of Lys's tools with its lowercase label", () => {
+    const groups = buildToolGroups([WEB_SEARCH, READ_TEXT_FILE])
+
+    expect(groups.map((listing) => listing.heading)).toEqual(["web", "files"])
+  })
+
+  it("lists the tools of each MCP server under the server, after Lys's own", () => {
+    const groups = buildToolGroups([
+      READ_TEXT_FILE,
+      NOTES_SEARCH,
+      FILES_FIND,
+      NOTES_READ
+    ])
+
+    expect(groups).toEqual([
+      { key: "files", heading: "files", tools: [READ_TEXT_FILE] },
+      {
+        key: "mcp:notes",
+        heading: "MCP · notes",
+        tools: [NOTES_SEARCH, NOTES_READ]
+      },
+      { key: "mcp:files", heading: "MCP · files", tools: [FILES_FIND] }
+    ])
   })
 
   it("lists no group without tools", () => {
@@ -217,12 +249,20 @@ describe("buildToolGroups", () => {
 })
 
 describe("tool labels", () => {
-  it("names the group, its count, and the access level in lowercase", () => {
-    expect(formatToolGroupLabel("files")).toBe("files")
-    expect(formatToolGroupLabel("timeAndPlace")).toBe("time & place")
-    expect(formatToolGroupLabel("agents")).toBe("agents")
+  it("names the group's count and the access level in lowercase", () => {
     expect(formatToolGroupCount(1, 2)).toBe("1 of 2 on")
     expect(formatToolAccessLabel("reads")).toBe("reads")
+    expect(formatToolAccessLabel("network")).toBe("network")
+    expect(formatToolAccessLabel("unknown")).toBe("depends on server")
+  })
+
+  it("says an MCP tool runs on its MCP server", () => {
+    expect(getToolRunnerPresentation("mcp")).toEqual({
+      label: "on MCP server",
+      title: "Runs on an MCP server",
+      heading: "Runs on an MCP server",
+      note: "Lys’s backend sends each call to the tool’s MCP server, which does the work. Works while the backend runs and the server is connected."
+    })
   })
 
   it("names each argument type, counting an enum's values", () => {
@@ -240,8 +280,83 @@ describe("tool labels", () => {
     ])
 
     expect(
-      [text, count, whole, flag, mode].map(formatToolArgumentType)
+      [text, count, whole, flag, mode].map((argument) => argument.type)
     ).toEqual(["string", "number", "integer", "boolean", "enum · 3"])
+    expect(mode).toEqual({
+      name: "mode",
+      type: "enum · 3",
+      isRequired: true,
+      description: "Mode.",
+      values: ["fast", "exact", "fuzzy"]
+    })
+    expect(text.values).toBeUndefined()
+  })
+
+  it("lists an MCP tool's arguments from its input schema, in order", () => {
+    const toolArguments = listToolArguments(NOTES_SEARCH)
+
+    expect(toolArguments).toEqual([
+      {
+        name: "query",
+        type: "string",
+        isRequired: true,
+        description: "Text to look for.",
+        values: undefined
+      },
+      {
+        name: "limit",
+        type: "integer",
+        isRequired: false,
+        description: undefined,
+        values: undefined
+      }
+    ])
+    expect(Object.isFrozen(toolArguments)).toBe(true)
+    expect(formatToolArgumentCounts(toolArguments)).toBe(
+      "1 required · 1 optional"
+    )
+  })
+
+  it("shows JSON for an MCP argument whose schema names no single type", () => {
+    const tool = buildMcpToolDefinition("notes", "tag", {
+      type: "object",
+      properties: {
+        tags: { type: ["string", "array"], description: 3 },
+        mode: { enum: ["a", "b"] },
+        raw: true
+      }
+    })
+
+    expect(listToolArguments(tool)).toEqual([
+      {
+        name: "tags",
+        type: "JSON",
+        isRequired: false,
+        description: undefined,
+        values: undefined
+      },
+      {
+        name: "mode",
+        type: "JSON",
+        isRequired: false,
+        description: undefined,
+        values: undefined
+      },
+      {
+        name: "raw",
+        type: "JSON",
+        isRequired: false,
+        description: undefined,
+        values: undefined
+      }
+    ])
+  })
+
+  it("lists no argument for an MCP tool whose schema has no properties", () => {
+    const tool = buildMcpToolDefinition("notes", "ping", { type: "object" })
+
+    expect(listToolArguments(tool)).toEqual([])
+    expect(formatToolArgumentCounts(listToolArguments(tool))).toBe("none")
   })
 
   it("says whether an argument is required", () => {
@@ -295,6 +410,11 @@ describe("tool labels", () => {
       "run",
       "network",
       "Sends its request off this machine the moment the model asks, without showing you what it sends."
+    ],
+    [
+      "run",
+      "unknown",
+      "Runs on its MCP server the moment the model asks, without showing you what it sends. What it does depends on the MCP server."
     ]
   ] as const)(
     "explains %s for a tool with %s access",

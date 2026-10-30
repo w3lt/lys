@@ -42,6 +42,10 @@ import {
 import { writeSettingsFile } from "../support/settingsFile"
 import { answerWithBody, startVmoServer } from "../support/vmoServer"
 
+// The bundle imports the LM Studio SDK through its runtime adapter. No case
+// connects the runtime, so no case arranges the fake engine.
+vi.mock("@lmstudio/sdk", () => import("../support/lmStudioSdkFake"))
+
 /** Name of each acquisition whose release the bundle owns. */
 type AcquisitionName = "chat" | "database" | "llm-runtime"
 
@@ -65,7 +69,8 @@ function createLogReporters() {
   return {
     llmRuntime,
     pageRendering,
-    lmStudioSdk
+    lmStudioSdk,
+    reportMcpServerEvent: vi.fn()
   } satisfies SingletonLogReporters
 }
 
@@ -113,6 +118,7 @@ function buildHelloAgentTurn(): AgentTurn {
     generationOptions: { temperature: 0.4 },
     clientTools: [],
     builtInTools: [],
+    mcpTools: [],
     unofferedTools: NO_UNOFFERED_TOOLS,
     abortSignal: new AbortController().signal,
     updateAssistantMessageState: () => true,
@@ -401,7 +407,8 @@ describe("createSingletonServices", () => {
     })
 
     expect(services.agentService.findAgent("researcher")).toMatchObject({
-      name: "Researcher"
+      agent: { kind: "custom", name: "Researcher" },
+      deletedAt: null
     })
     acquisitions.database.service[Symbol.dispose]()
     expect(() => services.agentService.findAgent("researcher")).toThrow(

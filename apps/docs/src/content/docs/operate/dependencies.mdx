@@ -85,8 +85,9 @@ The backend itself depends on:
   with a saved key; startup does not require it
 - a working name resolver for the `read_page` and `web_search` tools, and
   outbound HTTPS access for `web_search`; vmo's micro VM fetches the pages
-  `read_page` reads. Nothing else needs the network, and a read or search that
-  cannot connect becomes the tool call's result
+  `read_page` reads. Apart from the MCP servers below, nothing else needs the
+  network, and a read or search that cannot connect becomes the tool call's
+  result
 - for `read_page`, [vmo](#vmo) answering `GET /health` at
   `127.0.0.1:8080`. The backend asks it on every tool lookup, so while vmo is
   not ready `read_page` is unavailable and never offered; nothing else needs
@@ -95,6 +96,14 @@ The backend itself depends on:
   credits a month; a basic search costs one, and a key check two), saved in
   Settings → Secrets;
   without it `web_search` is unavailable and never offered
+- for MCP servers, the official MCP TypeScript SDK,
+  `@modelcontextprotocol/client` 2.3.1 or a later 2.x release (Apache-2.0),
+  which brings `@modelcontextprotocol/core`, `cross-spawn`, `eventsource`,
+  `eventsource-parser`, `jose`, and `pkce-challenge`, and needs `zod` 4,
+  which the backend already uses. A command server needs its command on the machine, such as Node for
+  an `npx` server, and a URL server needs network access to its address.
+  Nothing is started or reached while no server is saved in Settings → MCP;
+  see [MCP servers](/operate/configuration/#mcp-servers)
 
 The backend's chat and model services both reach the connected provider. The
 backend opens its HTTP listener at `127.0.0.1:12345` without waiting for the

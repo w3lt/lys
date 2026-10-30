@@ -38,12 +38,14 @@ const UNSTRUCTURED_ARGUMENTS_VIEW: ToolCallArgumentsView = Object.freeze({
 })
 
 /**
- * Formats one argument value for display.
+ * Formats one argument value of a tool call for display.
  *
- * @param value - Value parsed from the call's argument text.
- * @returns Text as it is; any other value as compact JSON.
+ * @param value - Value parsed from the call's argument text, or sent in a
+ * call's arguments.
+ * @returns Text as it is; any other value, an object or an array included,
+ * as compact JSON.
  */
-function formatArgumentValue(value: unknown): string {
+export function formatToolCallArgumentValue(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value)
 }
 
@@ -87,7 +89,7 @@ export function parseToolCallArgumentsView(
     target: target?.[1] ?? "",
     entries: Object.freeze(
       entries.map(([name, value]) =>
-        Object.freeze([name, formatArgumentValue(value)] as const)
+        Object.freeze([name, formatToolCallArgumentValue(value)] as const)
       )
     )
   })

@@ -9,13 +9,20 @@ import { unavailableBackendToolSchema } from "./backendToolAvailability"
 import { apiToolsRoute } from "./routes"
 
 /**
- * Answers whether every listed tool runs in the backend.
+ * Answers whether the backend runs every listed tool: its own, then those
+ * of its MCP servers.
  *
  * @param tools - Validated tool definitions in list order.
- * @returns True when every tool's runner is `backend`.
+ * @returns True when every tool's runner is `backend` or `mcp`, and no
+ * backend tool follows an MCP tool.
  */
 function hasOnlyBackendTools(tools: readonly ToolDefinition[]): boolean {
-  return isEveryToolRunBy(tools, "backend")
+  const firstMcpTool = tools.findIndex((tool) => tool.runner === "mcp")
+  if (firstMcpTool === -1) return isEveryToolRunBy(tools, "backend")
+  return (
+    isEveryToolRunBy(tools.slice(0, firstMcpTool), "backend") &&
+    isEveryToolRunBy(tools.slice(firstMcpTool), "mcp")
+  )
 }
 
 /** Validates the two lists of the response before their combined checks. */
@@ -24,7 +31,10 @@ const listedBackendToolsSchema = z.strictObject({
   tools: z
     .array(toolDefinitionSchema)
     .refine(hasDistinctToolNames, "The backend lists each tool name once.")
-    .refine(hasOnlyBackendTools, "The backend lists only backend tools.")
+    .refine(
+      hasOnlyBackendTools,
+      "The backend lists its own tools, then MCP tools, and no others."
+    )
     .readonly(),
   /** Listed tools that cannot run now, each once, in list order. */
   unavailableTools: z.array(unavailableBackendToolSchema).readonly()
@@ -57,9 +67,10 @@ function hasOnlyListedUnavailableTools(list: ListedBackendTools): boolean {
 }
 
 /**
- * Validates the list of tools the backend runs: each name once, every runner
- * `backend`, in the order Settings lists them, with the listed tools that
- * cannot run now and why. The output is frozen.
+ * Validates the list of tools the backend runs: each name once, its own
+ * tools (runner `backend`) and then the tools of its connected MCP servers
+ * (runner `mcp`), in the order Settings lists them, with the listed tools
+ * that cannot run now and why. The output is frozen.
  */
 export const listBackendToolsApiResponseSchema = listedBackendToolsSchema
   .refine(
@@ -80,12 +91,15 @@ const listBackendToolsApiResponseSchemas = Object.freeze({
 /**
  * Describes the GET endpoint that lists the tools the backend runs.
  *
- * @remarks The definitions are fixed for one backend build. Availability is
- * read again on every request, so saving or removing the Tavily API key shows
- * on the next read. The desktop shows these tools in Settings beside its own
- * client tools and offers the switched-on, available ones by name with each
- * chat request. Changing the method, path, or response schema changes the
- * transmitted compatibility contract and requires coordinated consumers.
+ * @remarks The backend's own definitions are fixed for one backend build;
+ * MCP tools are those of the servers connected when the list is read, in
+ * the order of the `mcp` settings group and then of each server's list.
+ * Availability is read again on every request, so saving or removing the
+ * Tavily API key shows on the next read. The desktop shows these tools in
+ * Settings beside its own client tools and offers the switched-on, available
+ * ones by name with each chat request. Changing the method, path, or
+ * response schema changes the transmitted compatibility contract and
+ * requires coordinated consumers.
  */
 export const listBackendToolsApi = Object.freeze({
   method: "GET",

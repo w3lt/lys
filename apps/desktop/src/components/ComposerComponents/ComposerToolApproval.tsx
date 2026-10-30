@@ -8,6 +8,7 @@ import {
   getToolRunnerPresentation
 } from "@/components/SettingsViewComponents/tool-presentation"
 import { Button } from "@/components/ui/button"
+import { formatToolCallArgumentValue } from "@/lib/store/chat-view/reply-parts"
 import type { HeldToolCallAnswer, ShownToolCall } from "@/lib/store/tool-calls"
 
 import {
@@ -118,7 +119,8 @@ function ComposerCalledTool({
 /**
  * Presents a waiting call's arguments as a name and value list.
  *
- * @remarks Values are shown as text in the order the call lists them. The
+ * @remarks Values are shown in the order the call lists them: text as it
+ * is, any other value, an object or an array included, as compact JSON. The
  * component owns no state.
  * @param props - List identifier and the call's arguments.
  * @returns The argument list.
@@ -132,7 +134,7 @@ function ComposerToolCallArguments({
       {Object.entries(callArguments).map(([argumentName, argumentValue]) => (
         <div key={argumentName}>
           <dt>{argumentName}</dt>
-          <dd>{String(argumentValue)}</dd>
+          <dd>{formatToolCallArgumentValue(argumentValue)}</dd>
         </div>
       ))}
     </dl>
@@ -197,11 +199,13 @@ function ComposerToolCallFooter({
  * arguments on request, and the Reject and Allow buttons.
  *
  * @remarks The component owns only whether the arguments are shown, which
- * starts hidden; the parent keys it by call, so each call starts hidden. The
- * parent owns the call, the draft, and every answer, including Esc and Enter
- * in the composer field. Reject uses the draft as the reason. The card is a
- * named group, and the arguments toggle exposes its state through
- * `aria-expanded`.
+ * starts hidden, except for an MCP call, whose summary does not describe
+ * its arguments, so they start shown; the parent keys it by call, so each
+ * call starts again. A call without arguments has neither the toggle nor
+ * the list. The parent owns the call, the draft, and every answer,
+ * including Esc and Enter in the composer field. Reject uses the draft as
+ * the reason. The card is a named group, and the arguments toggle exposes
+ * its state through `aria-expanded`.
  * @param props - Waiting call, whether a draft exists, and the answers.
  * @returns The waiting call's card.
  */
@@ -212,7 +216,9 @@ function ComposerToolCallRequest({
   onAllowToolCall,
   onRejectToolCall
 }: ComposerToolCallRequestProps): ReactElement {
-  const [isArgumentsExpanded, setIsArgumentsExpanded] = useState(false)
+  const [isArgumentsExpanded, setIsArgumentsExpanded] = useState(
+    answer.input.runner === "mcp"
+  )
   const argumentsId = useId()
   const hasArguments = Object.keys(call.arguments).length > 0
 
@@ -248,7 +254,7 @@ function ComposerToolCallRequest({
         {formatToolCallSummary(answer.input)}
       </p>
 
-      {isArgumentsExpanded ? (
+      {hasArguments && isArgumentsExpanded ? (
         <ComposerToolCallArguments
           callArguments={call.arguments}
           listId={argumentsId}
@@ -314,9 +320,10 @@ function ComposerToolResultFailure({
  *
  * @remarks The parent selects the call, owns every answer, and routes Esc
  * and Enter from the composer field; it keys this component by call, so a
- * new call starts with its arguments hidden. A waiting call shows what it
- * will do and offers Reject and Allow once, or Allow anyway while the
- * composer holds text. A failed answer shows the reason and Try again.
+ * new call starts with its arguments hidden, or shown for an MCP call. A
+ * waiting call shows what it will do and offers Reject and Allow once, or
+ * Allow anyway while the composer holds text. A failed answer shows the
+ * reason and Try again.
  * @param props - Shown call, whether a draft exists, and the answers.
  * @returns The card for the call's state.
  */

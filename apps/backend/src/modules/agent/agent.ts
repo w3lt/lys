@@ -12,6 +12,7 @@ import type {
   ToolCallReplyPart,
   ToolDefinition
 } from "@lys/share"
+import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
 import { waitForSettlementOrAbort } from "../../utils/abort"
 import { ChatCompletionCancelledError } from "../../utils/errors"
@@ -146,7 +147,8 @@ export type AgentTurn = Readonly<{
   model: string
   /**
    * Whether the model is trained for tool use: true offers the agent's state
-   * tools after the turn's backend tools, also while tool calls are off.
+   * tools after the turn's built-in and MCP tools, also while tool calls are
+   * off.
    */
   trainedForToolUse: boolean
   /** Caller-provided sampling and reply length controls. */
@@ -158,6 +160,12 @@ export type AgentTurn = Readonly<{
    * client tool; empty when none are offered.
    */
   builtInTools: readonly TurnBuiltInTool[]
+  /**
+   * MCP tools found for the turn, each name once and none named like
+   * another offered tool; empty when none are offered. Each call asks the
+   * person first, unless they saved the tool as Just run.
+   */
+  mcpTools: readonly TurnMcpTool[]
   /**
    * What the request names about the tools the turn does not offer: that
    * tool calls are off, or the switched-off tools and the switched-on
@@ -258,6 +266,9 @@ const ENDED_REPLY_ROUND = Object.freeze({
   status: "ended"
 } satisfies ReplyRound)
 
+/** State tools of a turn whose model is not trained for tool use. */
+const NO_AGENT_STATE_TOOLS: readonly TurnBuiltInTool[] = Object.freeze([])
+
 /** The next message as a context measurement sends it: without text or files. */
 const EMPTY_USER_MESSAGE = Object.freeze({
   content: "",
@@ -280,7 +291,7 @@ export type AgentContextInput = Readonly<{
   getAttachmentImageFileStatus: GetAttachmentImageFileStatus
   /**
    * Definitions of the offered tools, each name once: client tools first,
-   * then backend tools; empty when none would be offered.
+   * then built-in tools, then MCP tools; empty when none would be offered.
    */
   tools: readonly ToolDefinition[]
   /**
@@ -523,15 +534,16 @@ export default class Agent {
    * parts earlier rounds stored, and its `error` event says why. The turn uses
    * the system prompt the agent holds when the call starts. When the model is
    * trained for tool use, the agent's state tools are offered after the
-   * turn's backend tools, also while tool calls are off, and their calls run
-   * at once. The request is listed in the agent's activity from the call's
-   * start, preparing round 0, until the returned promise settles, whatever
-   * the outcome: each round's start shows it preparing that round, and each
-   * part or tool call change the reply stores shows the step it puts the
-   * request at. A reply that a newer turn of its conversation supersedes, or
-   * whose conversation is deleted, settles only once its next write is
-   * refused, so one waiting on an approval or a tool result stays listed
-   * until the call is answered, the reply is stopped, or the backend stops.
+   * turn's built-in and MCP tools, also while tool calls are off, and their
+   * calls run at once. The request is listed in the agent's activity from
+   * the call's start, preparing round 0, until the returned promise settles,
+   * whatever the outcome: each round's start shows it preparing that round,
+   * and each part or tool call change the reply stores shows the step it
+   * puts the request at. A reply that a newer turn of its conversation
+   * supersedes, or whose conversation is deleted, settles only once its next
+   * write is refused, so one waiting on an approval or a tool result stays
+   * listed until the call is answered, the reply is stopped, or the backend
+   * stops.
    */
   public async createReply(turn: AgentTurn): Promise<void> {
     const systemPrompt = this.#systemPrompt
@@ -582,17 +594,18 @@ export default class Agent {
     turn: AgentTurn,
     systemPrompt: string
   ): Promise<ConversationAssistantMessageFinishReason | undefined> {
-    const builtInTools = turn.trainedForToolUse
-      ? [
-          ...turn.builtInTools,
-          ...buildAgentStateTools({
+    const tools = buildAgentToolset({
+      clientTools: turn.clientTools,
+      builtInTools: turn.builtInTools,
+      mcpTools: turn.mcpTools,
+      agentStateTools: turn.trainedForToolUse
+        ? buildAgentStateTools({
             self: this.#identity,
             requestId: turn.requestId,
             reader: this.#stateReader
           })
-        ]
-      : turn.builtInTools
-    const tools = buildAgentToolset(turn.clientTools, builtInTools)
+        : NO_AGENT_STATE_TOOLS
+    })
     const state: ReplyRoundState = Object.freeze({
       turn,
       tools,

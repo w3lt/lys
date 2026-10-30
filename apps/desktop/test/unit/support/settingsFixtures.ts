@@ -2,8 +2,10 @@ import {
   groqApiKeySchema,
   llmProviderSettingsSchema,
   locationSettingsSchema,
+  mcpSettingsSchema,
   modelLoadConfigurationSchema,
   tavilyApiKeySchema,
+  type McpSettings,
   type ModelLoadConfiguration
 } from "@lys/share"
 import type {
@@ -20,12 +22,12 @@ import type {
  * Settings document as the Tauri settings commands exchange it: the JSON form
  * of Rust's `LysSettings`.
  *
- * @remarks The runtime, generation, secrets, providers, and location groups
- * are the renderer's groups field for field; the saved keys, addresses, and
- * place names are plain text in JSON and branded only in the renderer. JSON has no map or set, so the per-model load
- * settings are one object whose keys are model keys, where the renderer holds
- * a map, and the tools on Just run are an array, where the renderer holds a
- * set.
+ * @remarks The runtime, generation, secrets, providers, location, and MCP
+ * groups are the renderer's groups field for field; the saved keys,
+ * addresses, and place names are plain text in JSON and branded only in the
+ * renderer. JSON has no map or set, so the per-model load settings are one
+ * object whose keys are model keys, where the renderer holds a map, and the
+ * tools on Just run are an array, where the renderer holds a set.
  */
 export type SettingsDocument = Readonly<
   Omit<LysSettings, "loadConfiguration" | "tools"> & {
@@ -148,10 +150,35 @@ export const STORED_LOCATION_SETTINGS: LocationSettings =
   })
 
 /**
+ * MCP group on disk: a command server with arguments and an environment
+ * variable, then a URL server with a header, distinct from the first-run
+ * group, which saves no server. The header value is a made-up token, never
+ * one a server issued.
+ */
+export const STORED_MCP_SETTINGS: McpSettings = mcpSettingsSchema.parse({
+  servers: [
+    {
+      name: "files",
+      transport: "stdio",
+      command: "/opt/homebrew/bin/npx",
+      arguments: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+      environment: [{ name: "LOG_LEVEL", value: "debug" }]
+    },
+    {
+      name: "notes",
+      transport: "http",
+      url: "https://mcp.example.test/notes",
+      headers: [{ name: "Authorization", value: "Bearer fixture-0000" }]
+    }
+  ]
+})
+
+/**
  * Settings document `load_settings` resolves with: every group is set, one
  * model has load settings of its own, a Tavily and a Groq API key are saved,
  * local Ollama is the active provider at a saved address, one tool is on Just
- * run, one tool is switched off, and a location is saved.
+ * run, one tool is switched off, a location is saved, and two MCP servers are
+ * saved.
  */
 export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   runtime: STORED_RUNTIME_SETTINGS,
@@ -166,7 +193,8 @@ export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
     justRun: Object.freeze(["read_page"]),
     switches: Object.freeze({ search_files: false })
   }),
-  location: STORED_LOCATION_SETTINGS
+  location: STORED_LOCATION_SETTINGS,
+  mcp: STORED_MCP_SETTINGS
 })
 
 /**
@@ -189,5 +217,6 @@ export const STORED_SETTINGS: LysSettings = Object.freeze({
   secrets: STORED_SECRETS_SETTINGS,
   providers: STORED_PROVIDERS_SETTINGS,
   tools: STORED_TOOL_SETTINGS,
-  location: STORED_LOCATION_SETTINGS
+  location: STORED_LOCATION_SETTINGS,
+  mcp: STORED_MCP_SETTINGS
 })

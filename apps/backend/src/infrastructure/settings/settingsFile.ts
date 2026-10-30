@@ -1,10 +1,5 @@
+import { MAXIMUM_SETTINGS_FILE_BYTES } from "@lys/share"
 import { open, type FileHandle } from "node:fs/promises"
-
-/**
- * Most bytes of the settings file the backend reads, inclusive; a larger
- * file is unreadable here. The desktop's own settings stay far below it.
- */
-export const MAXIMUM_SETTINGS_FILE_BYTES = 1024 * 1024
 
 /**
  * Outcome of reading the settings file's text.

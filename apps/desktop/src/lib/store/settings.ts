@@ -1,6 +1,7 @@
 import type {
   GroqApiKey,
   LlmProviderSettings,
+  McpSettings,
   ModelLoadConfiguration,
   OllamaApiKey,
   PlaceName,
@@ -205,6 +206,19 @@ export type LysSettings = {
   tools: ToolSettings
   /** Location the person saved for the `get_location` tool. */
   location: LocationSettings
+  /**
+   * MCP servers the backend connects to, as the shared `mcp` group schema
+   * validates them.
+   *
+   * @remarks Rust validates the group on load with the same rules, and the
+   * Tauri settings adapter parses it again with the shared schema. The group
+   * is saved only by an explicit Save or Remove in the MCP pane; the backend
+   * reads it from the settings file when it starts and when the desktop asks
+   * it to apply the group again. Environment values and header values can be
+   * secrets: the renderer never logs them or sends them anywhere but to the
+   * Tauri settings commands.
+   */
+  mcp: McpSettings
 }
 
 /**
@@ -269,6 +283,14 @@ const INITIAL_LOCATION_SETTINGS: LocationSettings = Object.freeze({
 })
 
 /**
+ * MCP servers shown before Tauri initialization completes: none, as in a
+ * first-run settings file.
+ */
+const INITIAL_MCP_SETTINGS: McpSettings = Object.freeze({
+  servers: Object.freeze([])
+})
+
+/**
  * Renderer-side fallback settings used before Tauri initialization completes.
  *
  * @remarks Values match the Rust `Default` implementations so the pre-load
@@ -289,5 +311,6 @@ export const initialSettingsState: LysSettings = {
   secrets: INITIAL_SECRETS_SETTINGS,
   providers: INITIAL_PROVIDERS_SETTINGS,
   tools: INITIAL_TOOL_SETTINGS,
-  location: INITIAL_LOCATION_SETTINGS
+  location: INITIAL_LOCATION_SETTINGS,
+  mcp: INITIAL_MCP_SETTINGS
 }

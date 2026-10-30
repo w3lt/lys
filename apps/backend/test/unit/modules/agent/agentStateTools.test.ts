@@ -180,10 +180,14 @@ describe("buildAgentStateDefinitions", () => {
       "find_agents",
       "read_agent_state"
     ])
-    expect(definitions.map((definition) => definition.arguments)).toEqual([
-      [],
-      [expect.objectContaining({ type: "string", name: "query" })],
-      [expect.objectContaining({ type: "string", name: "code" })]
+    expect(definitions).toEqual([
+      expect.objectContaining({ arguments: [] }),
+      expect.objectContaining({
+        arguments: [expect.objectContaining({ type: "string", name: "query" })]
+      }),
+      expect.objectContaining({
+        arguments: [expect.objectContaining({ type: "string", name: "code" })]
+      })
     ])
   })
 

@@ -1,5 +1,5 @@
 import type {
-  BackendToolUnavailableReason,
+  ListedBackendToolUnavailableReason,
   UnavailableBackendTool
 } from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
@@ -30,6 +30,7 @@ import {
 } from "../../support/settlement"
 import {
   buildBackendToolDefinition,
+  buildMcpToolDefinition,
   buildToolDefinition
 } from "../../support/toolFixtures"
 
@@ -45,9 +46,15 @@ const READ_PAGE = buildBackendToolDefinition("read_page")
 /** Second tool the backend lists, which can lack what it needs to run. */
 const WEB_SEARCH = buildBackendToolDefinition("web_search")
 
+/** Tools of a connected MCP server, listed after the backend's own. */
+const NOTES_SEARCH = buildMcpToolDefinition("notes", "search")
+const NOTES_READ = buildMcpToolDefinition("notes", "read")
+
 /** Availability of a list in which every tool can run now. */
-const ALL_TOOLS_AVAILABLE: ReadonlyMap<string, BackendToolUnavailableReason> =
-  new Map()
+const ALL_TOOLS_AVAILABLE: ReadonlyMap<
+  string,
+  ListedBackendToolUnavailableReason
+> = new Map()
 
 /** Route key of the backend's tool list. */
 const BACKEND_TOOLS_ROUTE = "GET /api/v1/tools"
@@ -130,6 +137,13 @@ describe("isToolOn", () => {
   it("returns on for an unchanged tool that only reads this machine and off for one that sends requests off it", () => {
     expect(isToolOn(new Map(), buildToolDefinition("find_files"))).toBe(true)
     expect(isToolOn(new Map(), READ_PAGE)).toBe(false)
+  })
+
+  it("returns on for an unchanged MCP tool, and the switch once changed", () => {
+    expect(isToolOn(new Map(), NOTES_SEARCH)).toBe(true)
+    expect(isToolOn(new Map([[NOTES_SEARCH.name, false]]), NOTES_SEARCH)).toBe(
+      false
+    )
   })
 })
 
@@ -214,6 +228,51 @@ describe("buildChatToolOffer", () => {
     })
   })
 
+  it("offers switched-on MCP tools by name after the backend's own, and never names an MCP tool as off or unavailable", () => {
+    const notesTag = buildMcpToolDefinition("notes", "tag")
+
+    expect(
+      buildChatToolOffer({
+        list: {
+          status: "loaded",
+          tools: [READ_PAGE, NOTES_SEARCH, NOTES_READ, notesTag],
+          unavailableTools: new Map([[notesTag.name, "settings-unreadable"]])
+        },
+        areToolCallsOn: true,
+        toolSwitches: new Map([
+          ["read_page", true],
+          [NOTES_READ.name, false]
+        ])
+      })
+    ).toEqual({
+      status: "offered",
+      offer: {
+        definitions: [],
+        backendToolNames: ["read_page", NOTES_SEARCH.name]
+      },
+      switchedOffToolNames: [],
+      unavailableTools: []
+    })
+  })
+
+  it("offers nothing when every MCP tool is off, without naming them", () => {
+    expect(
+      buildChatToolOffer({
+        list: {
+          status: "loaded",
+          tools: [NOTES_SEARCH],
+          unavailableTools: ALL_TOOLS_AVAILABLE
+        },
+        areToolCallsOn: true,
+        toolSwitches: new Map([[NOTES_SEARCH.name, false]])
+      })
+    ).toEqual({
+      status: "not-offered",
+      switchedOffToolNames: [],
+      unavailableTools: []
+    })
+  })
+
   it("leaves out a switched-on backend tool that cannot run now and names it with the list's reason, not as off", () => {
     expect(
       buildChatToolOffer({
@@ -260,10 +319,12 @@ describe("buildChatToolOffer", () => {
         list: {
           status: "loaded",
           tools: [READ_PAGE, WEB_SEARCH],
-          unavailableTools: new Map<string, BackendToolUnavailableReason>([
-            ["web_search", "settings-unreadable"],
-            ["read_page", "page-reader-not-ready"]
-          ])
+          unavailableTools: new Map<string, ListedBackendToolUnavailableReason>(
+            [
+              ["web_search", "settings-unreadable"],
+              ["read_page", "page-reader-not-ready"]
+            ]
+          )
         },
         areToolCallsOn: true,
         toolSwitches: new Map([
@@ -316,7 +377,7 @@ describe("buildChatToolOffer", () => {
     Object.freeze({
       status: "loaded",
       tools: [buildToolDefinition("find_files"), READ_PAGE, WEB_SEARCH],
-      unavailableTools: new Map<string, BackendToolUnavailableReason>([
+      unavailableTools: new Map<string, ListedBackendToolUnavailableReason>([
         ["web_search", "api-key-missing"]
       ])
     })

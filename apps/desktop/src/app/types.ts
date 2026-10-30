@@ -7,6 +7,7 @@ export type SettingsPane =
   | "generation"
   | "agents"
   | "tools"
+  | "mcp"
   | "providers"
   | "secrets"
 /** Backend process lifecycle states represented by the demonstration reducer. */

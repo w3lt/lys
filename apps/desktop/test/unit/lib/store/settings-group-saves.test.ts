@@ -245,6 +245,29 @@ describe("createSettingsGroupSaves", () => {
     })
   })
 
+  it("applies an MCP save after a location save sent before it, keeping both groups", async () => {
+    const { writes, readStoredDocument } = startSettingsFileHost()
+    const saves = createSettingsGroupSaves()
+    const noLocation = { city: null, region: null, country: null }
+
+    const locationSave = saves.saveLocationSettings(noLocation)
+    const mcpSave = saves.saveMcpSettings({ servers: [] })
+    await waitForMicrotasks()
+    const writesDuringFirst = writes.length
+    writes[0]?.resolve(null)
+    await locationSave
+    await waitForMicrotasks()
+    writes[1]?.resolve(null)
+    await mcpSave
+
+    expect(writesDuringFirst).toBe(1)
+    expect(readStoredDocument()).toEqual({
+      ...STORED_SETTINGS_DOCUMENT,
+      location: noLocation,
+      mcp: { servers: [] }
+    })
+  })
+
   it("applies a runtime startup save after a tools save sent before it, keeping both groups", async () => {
     const { writes, readStoredDocument } = startSettingsFileHost()
     const saves = createSettingsGroupSaves()

@@ -72,6 +72,19 @@ Terms that mean something specific inside Lys.
   (`caliginia.txt`, `lysiptera.txt`) and a stored agent's from its record; it
   is not stored with conversations.
 
+## MCP terms
+
+- **MCP**: the Model Context Protocol, an open protocol through which a
+  separate program offers tools to an AI application. Lys uses the tools part
+  of it.
+- **MCP server**: a program that offers tools over MCP, listed in the `mcp`
+  group of `settings.json`. Lys either starts it as a command and talks to it
+  over its standard input and output (stdio), or reaches it at a URL over
+  Streamable HTTP. The backend owns every connection.
+- **MCP tool**: a tool of a connected MCP server. The model calls it as
+  `mcp__<server>__<tool>`; the backend asks the person first, unless the tool
+  is on Just run, and runs the call on the server. Its output is untrusted.
+
 ## Streaming terms
 
 - **SSE**: Server-Sent Events. The chat endpoint responds as `text/event-stream`

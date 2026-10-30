@@ -1,10 +1,31 @@
 import { chatReplyEventSchema, type ChatToolCall } from "@lys/protocol"
 import {
+  buildMcpToolNamePrefix,
   toolDefinitionSchema,
+  type LysToolDefinition,
+  type McpToolDefinition,
   type ToolArgumentDefinitionCandidate,
-  type ToolDefinition
+  type ToolDefinitionCandidate
 } from "@lys/share"
 import { createFixtureUuidV7 } from "./conversationFixtures"
+
+/**
+ * Validates a definition of one of Lys's own tools.
+ *
+ * @param candidate - Definition whose runner is `client` or `backend`.
+ * @returns The frozen definition the shared schema returns.
+ * @throws {Error} When the candidate describes an MCP tool, which is a
+ * mistake in the fixture.
+ */
+function parseLysToolDefinition(
+  candidate: ToolDefinitionCandidate
+): LysToolDefinition {
+  const definition = toolDefinitionSchema.parse(candidate)
+  if (definition.runner === "mcp") {
+    throw new Error("The fixture describes an MCP tool, not one of Lys's own.")
+  }
+  return definition
+}
 
 /**
  * Builds one client tool definition as the desktop lists it: a tool that
@@ -20,8 +41,8 @@ export function buildToolDefinition(
   toolArguments: readonly ToolArgumentDefinitionCandidate[] = [
     { type: "string", name: "path", description: "Absolute file path." }
   ]
-): ToolDefinition {
-  return toolDefinitionSchema.parse({
+): LysToolDefinition {
+  return parseLysToolDefinition({
     name,
     description: `Runs ${name}.`,
     group: "files",
@@ -39,8 +60,8 @@ export function buildToolDefinition(
  * @returns A frozen definition validated by the shared schema, with one
  * required string `url` argument.
  */
-export function buildBackendToolDefinition(name: string): ToolDefinition {
-  return toolDefinitionSchema.parse({
+export function buildBackendToolDefinition(name: string): LysToolDefinition {
+  return parseLysToolDefinition({
     name,
     description: `Runs ${name} in the backend.`,
     group: "network",
@@ -50,6 +71,52 @@ export function buildBackendToolDefinition(name: string): ToolDefinition {
       { type: "string", name: "url", description: "Address of the page." }
     ]
   })
+}
+
+/**
+ * Input schema an MCP tool has by default: a required string `query` with a
+ * description and an optional integer `limit` without one.
+ */
+const SEARCH_INPUT_SCHEMA = Object.freeze({
+  type: "object",
+  properties: {
+    query: { type: "string", description: "Text to look for." },
+    limit: { type: "integer" }
+  },
+  required: ["query"]
+})
+
+/**
+ * Builds one MCP tool definition as the backend lists it for a connected
+ * server.
+ *
+ * @param serverName - Name of the server that runs the tool.
+ * @param serverToolName - Name the server calls the tool by; it must also
+ * be a valid tool name, since it is used unchanged after the prefix.
+ * @param inputSchema - Schema of the tool's arguments object; defaults to
+ * {@link SEARCH_INPUT_SCHEMA}.
+ * @returns A frozen definition validated by the shared schema, named
+ * `mcp__<server>__<tool>`.
+ */
+export function buildMcpToolDefinition(
+  serverName: string,
+  serverToolName: string,
+  inputSchema: unknown = SEARCH_INPUT_SCHEMA
+): McpToolDefinition {
+  const definition = toolDefinitionSchema.parse({
+    name: `${buildMcpToolNamePrefix(serverName)}${serverToolName}`,
+    description: `Runs ${serverToolName} on ${serverName}.`,
+    group: "mcp",
+    access: "unknown",
+    runner: "mcp",
+    server: serverName,
+    serverToolName,
+    inputSchema
+  })
+  if (definition.runner !== "mcp") {
+    throw new Error("The fixture describes one of Lys's own tools.")
+  }
+  return definition
 }
 
 /**

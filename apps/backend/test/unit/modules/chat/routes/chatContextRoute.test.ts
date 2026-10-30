@@ -1,11 +1,12 @@
 import { chatContextApi } from "@lys/protocol"
-import type { BuiltInAgent } from "@lys/share"
+import type { BuiltInAgent, McpServerSettings } from "@lys/share"
 import { serializerCompiler } from "fastify-type-provider-zod"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
+import type { McpSettingsRead } from "../../../../../src/infrastructure/settings/mcpSettingsFile"
 import SqliteAgentRecordStore from "../../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
 import AgentRuntimeService, {
   buildConversationTitleLookup
@@ -22,6 +23,8 @@ import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import LlmService from "../../../../../src/modules/llm/llmService"
 import type { DownloadedLlmModel } from "../../../../../src/modules/llm/llmRuntimeTypes"
+import { openMcpServer } from "../../../../../src/modules/mcp/mcpServerOpening"
+import McpServerRegistry from "../../../../../src/modules/mcp/mcpServerRegistry"
 import AgentTool from "../../../../../src/modules/tool/tool"
 import {
   createImageAttachment,
@@ -43,6 +46,7 @@ import {
   createDownloadedLlmModel,
   DEFAULT_LM_STUDIO_ACCESS
 } from "../../../support/llmFixtures"
+import { buildFakeStdioServerSettings } from "../../../support/mcpTestServers"
 import { createRoomyReplyContextMeter } from "../../../support/replyContextMeterFakes"
 import {
   CHECK_SPELLING_TOOL,
@@ -112,8 +116,11 @@ const VISION_MODEL_INFO: DownloadedLlmModel = Object.freeze({
  * @returns The application, the database for seeding rows, the context
  * meter spy every agent measures with, which every context fits by default,
  * the downloaded-model spy behind the route's capability lookup, which lists
- * no model until a case configures it, and the
- * attachment file store, over a directory removed when the test finishes.
+ * no model until a case configures it, the attachment file store, over a
+ * directory removed when the test finishes, and the settings reader of the
+ * real MCP server registry, which reads no server until a case configures
+ * it; the registry opens servers with a 10-second limit, logs nothing, and
+ * is closed when the test finishes.
  */
 async function createChatContextRouteApp() {
   const { app } = createTestFastify()
@@ -135,8 +142,26 @@ async function createChatContextRouteApp() {
   const listDownloadedLlmModels = vi
     .spyOn(llmService, "listDownloadedLlmModels")
     .mockResolvedValue([])
+  const readMcpSettings = vi.fn<() => Promise<McpSettingsRead>>(() =>
+    Promise.resolve(
+      Object.freeze({
+        status: "read",
+        settings: Object.freeze({ servers: Object.freeze([]) })
+      })
+    )
+  )
+  const mcpServerRegistry = new McpServerRegistry({
+    readSettings: readMcpSettings,
+    openServer: (settings, context) => openMcpServer(settings, context, 10_000),
+    workingDirectory: process.cwd(),
+    reportEvent: () => undefined
+  })
+  onTestFinished(async () => {
+    await mcpServerRegistry.close()
+  })
   await updateFastifyWithHttpTransport(app)
   app.decorate("llmService", llmService)
+  app.decorate("mcpServerRegistry", mcpServerRegistry)
   app.decorate("attachmentFileStore", attachmentFileStore)
   app.decorate(
     "agentRuntimeService",
@@ -186,8 +211,37 @@ async function createChatContextRouteApp() {
     database,
     replyContextMeter,
     listDownloadedLlmModels,
-    attachmentFileStore
+    attachmentFileStore,
+    readMcpSettings
   }
+}
+
+/**
+ * Applies one MCP server to a case's registry and waits until its opening
+ * ended.
+ *
+ * @param testApp - The case's application.
+ * @param settings - Settings of the only applied server.
+ * @param status - State the opening is expected to end in.
+ */
+async function applyMcpServer(
+  testApp: Awaited<ReturnType<typeof createChatContextRouteApp>>,
+  settings: McpServerSettings,
+  status: "connected" | "failed"
+): Promise<void> {
+  testApp.readMcpSettings.mockResolvedValue({
+    status: "read",
+    settings: { servers: [settings] }
+  })
+  await testApp.app.mcpServerRegistry.updateServers()
+  await vi.waitFor(
+    () => {
+      expect(
+        testApp.app.mcpServerRegistry.listServers().servers[0]?.state.status
+      ).toBe(status)
+    },
+    { timeout: 10_000 }
+  )
 }
 
 /**
@@ -721,6 +775,126 @@ describe("registerChatContextRoute", () => {
     expect(
       replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0].tools
     ).toEqual([new AgentTool(CHECK_SPELLING_TOOL).buildAgentFormat()])
+  })
+
+  it("measures a connected MCP server's offered tool after the client and built-in tools, as a turn offers it", async () => {
+    const testApp = await createChatContextRouteApp()
+    await applyMcpServer(
+      testApp,
+      buildFakeStdioServerSettings("files"),
+      "connected"
+    )
+    const [echoDefinition] = testApp.app.mcpServerRegistry.listToolDefinitions()
+    if (echoDefinition === undefined) throw new Error("No MCP tool is listed.")
+
+    const response = await sendChatContextRequest(testApp.app, {
+      conversation: { kind: "new", agentCode: "caliginia" },
+      model: MODEL,
+      tools: {
+        definitions: [READ_TEXT_FILE_TOOL],
+        backendToolNames: ["mcp__files__echo", "look_up_word"]
+      }
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(
+      testApp.replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
+        .tools
+    ).toEqual([
+      new AgentTool(READ_TEXT_FILE_TOOL).buildAgentFormat(),
+      new AgentTool(LOOK_UP_WORD_TOOL).buildAgentFormat(),
+      new AgentTool(echoDefinition).buildAgentFormat()
+    ])
+  })
+
+  it("measures the attachment reader after the built-in tools and before a connected MCP server's tool, then the agent state tools, as a turn offers them", async () => {
+    const testApp = await createChatContextRouteApp()
+    saveConversationWithAttachment(
+      testApp.database,
+      createTextAttachment(1, "notes.md", 18)
+    )
+    testApp.listDownloadedLlmModels.mockResolvedValue([
+      { ...VISION_MODEL_INFO, vision: false }
+    ])
+    await applyMcpServer(
+      testApp,
+      buildFakeStdioServerSettings("files"),
+      "connected"
+    )
+    const [echoDefinition] = testApp.app.mcpServerRegistry.listToolDefinitions()
+    if (echoDefinition === undefined) throw new Error("No MCP tool is listed.")
+
+    const response = await sendChatContextRequest(testApp.app, {
+      conversation: { kind: "existing", id: STORED_CONVERSATION_ID },
+      model: MODEL,
+      tools: {
+        definitions: [READ_TEXT_FILE_TOOL],
+        backendToolNames: ["mcp__files__echo", "look_up_word"]
+      }
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(
+      testApp.replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
+        .tools
+    ).toEqual([
+      new AgentTool(READ_TEXT_FILE_TOOL).buildAgentFormat(),
+      new AgentTool(LOOK_UP_WORD_TOOL).buildAgentFormat(),
+      new AgentTool(buildReadAttachmentDefinition()).buildAgentFormat(),
+      new AgentTool(echoDefinition).buildAgentFormat(),
+      ...LEADER_STATE_TOOL_FORMATS
+    ])
+  })
+
+  it("leaves out an offered MCP tool whose server is not connected", async () => {
+    const testApp = await createChatContextRouteApp()
+    await applyMcpServer(
+      testApp,
+      buildFakeStdioServerSettings("files", { exitOnStart: 1 }),
+      "failed"
+    )
+
+    const response = await sendChatContextRequest(testApp.app, {
+      conversation: { kind: "new", agentCode: "caliginia" },
+      model: MODEL,
+      tools: {
+        definitions: [],
+        backendToolNames: ["look_up_word", "mcp__files__echo"]
+      }
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(
+      testApp.replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
+        .tools
+    ).toEqual([new AgentTool(LOOK_UP_WORD_TOOL).buildAgentFormat()])
+  })
+
+  it("rejects an MCP tool no applied server lists without measuring", async () => {
+    const testApp = await createChatContextRouteApp()
+    await applyMcpServer(
+      testApp,
+      buildFakeStdioServerSettings("files"),
+      "connected"
+    )
+
+    const response = await sendChatContextRequest(testApp.app, {
+      conversation: { kind: "new", agentCode: "caliginia" },
+      model: MODEL,
+      tools: {
+        definitions: [],
+        backendToolNames: ["mcp__files__delete", "mcp__notes__echo"]
+      }
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toMatchObject({
+      message:
+        "The request names backend tools the backend does not run: mcp__files__delete, mcp__notes__echo"
+    })
+    expect(
+      testApp.replyContextMeter.findReplyContextMeasurement
+    ).not.toHaveBeenCalled()
   })
 
   it("responds with the model-not-loaded problem when no loaded instance matches the model", async () => {

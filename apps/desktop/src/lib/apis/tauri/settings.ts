@@ -2,8 +2,11 @@ import {
   groqApiKeySchema,
   llmProviderSettingsSchema,
   locationSettingsSchema,
+  mcpSettingsSchema,
   ollamaApiKeySchema,
   tavilyApiKeySchema,
+  type McpServerSettingsCandidate,
+  type McpSettings,
   type ModelLoadConfiguration
 } from "@lys/share"
 
@@ -98,6 +101,18 @@ type SettingsDocumentLocation = {
 }
 
 /**
+ * The `mcp` group as the settings document holds it.
+ *
+ * @remarks Matches Rust's `McpSettings`; the servers are plain JSON here and
+ * become the shared, frozen form only after {@link buildMcpSettings} parses
+ * them.
+ */
+type SettingsDocumentMcp = {
+  /** MCP servers in list order. */
+  readonly servers: readonly McpServerSettingsCandidate[]
+}
+
+/**
  * Complete settings document as the Tauri settings commands exchange it.
  *
  * @remarks Matches Rust's `LysSettings` field for field: `load_settings`
@@ -119,6 +134,8 @@ type SettingsDocument = {
   readonly tools: SettingsDocumentTools
   /** Saved location, with the names as plain text. */
   readonly location: SettingsDocumentLocation
+  /** MCP servers, as plain JSON. */
+  readonly mcp: SettingsDocumentMcp
 }
 
 /**
@@ -225,6 +242,24 @@ function buildLocationSettings(
 }
 
 /**
+ * Builds the renderer's MCP servers from the document group.
+ *
+ * @param mcp - Group Rust validated.
+ * @returns The servers as the shared `mcp` group schema returns them,
+ * frozen.
+ * @throws If the group fails the shared schema, which Rust's validation
+ * rules out; the error never contains a command, URL, environment value, or
+ * header.
+ */
+function buildMcpSettings(mcp: SettingsDocumentMcp): McpSettings {
+  const parsed = mcpSettingsSchema.safeParse(mcp)
+  if (!parsed.success) {
+    throw new Error("The settings file holds invalid MCP server settings.")
+  }
+  return parsed.data
+}
+
+/**
  * Builds the document group that stores the renderer's tool choices.
  *
  * @param tools - Tool choices owned by the desktop store.
@@ -264,8 +299,11 @@ function buildToolSettings(tools: SettingsDocumentTools): ToolSettings {
  * already validated by Rust.
  * @returns Settings holding the document's groups. The per-model load
  * settings are a newly owned map with one entry per key of the document's
- * object, whatever the text of the key, and the tool choices are newly
- * owned, as {@link buildToolSettings} builds them.
+ * object, whatever the text of the key, the tool choices are newly owned, as
+ * {@link buildToolSettings} builds them, and the MCP servers are parsed by
+ * {@link buildMcpSettings}.
+ * @throws If a key, the provider choice, the location, or the MCP servers
+ * fail their shared schema, which Rust's validation rules out.
  */
 function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
   const models = new Map(
@@ -282,7 +320,8 @@ function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
     secrets: buildSecretsSettings(settingsDocument.secrets),
     providers: buildProvidersSettings(settingsDocument.providers),
     tools: buildToolSettings(settingsDocument.tools),
-    location: buildLocationSettings(settingsDocument.location)
+    location: buildLocationSettings(settingsDocument.location),
+    mcp: buildMcpSettings(settingsDocument.mcp)
   }
 }
 
@@ -309,7 +348,8 @@ function buildSettingsDocument(settings: LysSettings): SettingsDocument {
     secrets: settings.secrets,
     providers: settings.providers,
     tools: buildSettingsDocumentTools(settings.tools),
-    location: settings.location
+    location: settings.location,
+    mcp: settings.mcp
   }
 }
 
@@ -318,9 +358,11 @@ function buildSettingsDocument(settings: LysSettings): SettingsDocument {
  *
  * @returns The settings of the complete document after Rust validation and
  * defaulting, with the per-model load settings as a map keyed by model key,
- * the tools on Just run as a set, and the tool switches as a map keyed by
- * tool name.
+ * the tools on Just run as a set, the tool switches as a map keyed by tool
+ * name, and the MCP servers parsed by the shared `mcp` group schema.
  * @throws The Tauri invoke rejection when the settings path cannot be read or parsed.
+ * @throws An `Error` when a group fails its shared schema after Rust
+ * accepted it; the message holds no setting value.
  */
 export async function loadSettings(): Promise<LysSettings> {
   const settingsDocument = await invoke<SettingsDocument>("load_settings")
@@ -490,4 +532,24 @@ export async function saveRuntimeAutoStartSettings(
     backendAddress: persistedSettings.runtime.backendAddress
   }
   await saveSettings({ ...persistedSettings, runtime })
+}
+
+/**
+ * Persists the MCP servers while preserving everything else already on disk.
+ * @param mcp - MCP servers to save, in list order; an empty list removes
+ * every server.
+ * @returns Resolves after the merged settings document is written by Tauri,
+ * which validates the group and replaces the file atomically and
+ * owner-only.
+ * @throws The native load or save rejection, including Rust's refusal of a
+ * group that breaks its rules; no replacement is written if loading fails.
+ * @remarks The backend applies the saved group only when it starts or when
+ * the desktop asks it to apply the group again. The application store
+ * serializes this read-modify-write operation with the other settings-group
+ * saves, so that overlapping saves cannot write back each other's stale
+ * group.
+ */
+export async function saveMcpSettings(mcp: McpSettings): Promise<void> {
+  const persistedSettings = await loadSettings()
+  await saveSettings({ ...persistedSettings, mcp })
 }

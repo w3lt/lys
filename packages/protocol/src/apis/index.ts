@@ -2,11 +2,13 @@ export * from "./health"
 export * from "./llm"
 export * from "./chat"
 export * from "./agent"
+export * from "./mcp"
 export {
   backendToolUnavailableReasonSchema,
   checkWebSearchKeyApi,
   checkWebSearchKeyApiResponseSchema,
   hasHiddenWebSearchQueryCharacter,
+  listedBackendToolUnavailableReasonSchema,
   listBackendToolsApi,
   listBackendToolsApiResponseSchema,
   unavailableBackendToolSchema,
@@ -19,6 +21,7 @@ export {
   type ListBackendToolsApiReply,
   type ListBackendToolsApiResponse,
   type ListBackendToolsApiRoute,
+  type ListedBackendToolUnavailableReason,
   type TavilyCreditUsage,
   type UnavailableBackendTool,
   type WebSearchKeyCheckFailure,

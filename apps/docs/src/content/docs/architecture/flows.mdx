@@ -1,6 +1,6 @@
 ---
 title: End-to-end flows
-description: "The concrete runtime flows that exist today: backend and vmo startup, chat streaming, user-initiated stop, and opening a past conversation."
+description: "The concrete runtime flows that exist today: backend and vmo startup, MCP server connections, chat streaming, user-initiated stop, and opening a past conversation."
 docType: architecture
 sidebar:
   order: 9
@@ -20,8 +20,11 @@ This page documents only the flows implemented in the current codebase.
    The Tauri host starts the backend with `LYS_HOME` set to the Lys home it
    resolved at startup: `pnpm run dev` in `apps/backend` for development builds,
    or the installed runtime under `$LYS_HOME/runtime` for release builds.
-5. The backend opens its HTTP listener without contacting LM Studio, then makes
-   one LM Studio connection attempt.
+5. Before it listens, the backend reads the `mcp` group of `settings.json`
+   and starts connecting to each server it names in the background; see
+   [Connect MCP servers](#connect-mcp-servers). It then opens its HTTP
+   listener without contacting LM Studio or waiting for an MCP server, and
+   makes one LM Studio connection attempt.
 6. The store checks `GET /api/v1/heath` until it answers (`running`), the
    process exits (`stopped`), or 30 seconds pass (`unresponsive`).
 7. Once running, the store reads the LM Studio status, joining the startup
@@ -63,6 +66,31 @@ A manual Start follows steps 4–8.
 A manual Start follows steps 2–5. A stop sends vmo `SIGTERM` through
 `stop_vmo`, shows `stopping` while vmo deletes its VMs, and kills it after 60
 seconds. Quitting Lys stops vmo and the backend together.
+
+## Connect MCP servers
+
+1. The backend applies the `mcp` group of `settings.json` when it starts and
+   on each `POST /api/v1/mcp/servers/sync`, which the desktop sends to apply
+   servers saved in Settings → MCP. A group that fails its rules, or a file
+   that cannot be read, keeps the servers applied before.
+2. Each new or changed server gets a new session, which is `connecting`; an
+   unchanged server keeps its connection or its failure, and a removed one is
+   closed. A changed server's new session goes on to step 3 only once its old
+   connection closed, so a command server's old process has ended first. The
+   sync answers with the list right away, without waiting for a server.
+3. In the background, the session starts a stdio server's command in the
+   person's home folder, or sends a remote server its first request with the
+   configured headers, then finishes the MCP handshake and reads the tool
+   list, all within two minutes.
+4. The server becomes `connected` with its tools, or `failed` with why. The
+   desktop reads the state from `GET /api/v1/mcp/servers`, and the tools of
+   connected servers appear in `GET /api/v1/tools` after the built-in tools.
+5. When a connected server's process exits or its connection ends, the server
+   becomes `failed` with `closed` and its tools are no longer listed.
+   Nothing reconnects by itself:
+   `POST /api/v1/mcp/servers/:serverName/reconnect` closes the server's
+   connection, or cancels its opening, and opens it again from step 3 once
+   that close or cancellation ended.
 
 ## Reconnect to LM Studio
 
@@ -190,15 +218,19 @@ calls it stored are part of the new turn's context.
    prompt.
 2. Before it stores the turn, the backend looks up every offered backend tool;
    `web_search` reads the Tavily API key from the settings file and keeps it
-   for the turn. When an offered tool cannot run, the backend answers `409`
-   with the `backend-tool-unavailable` problem and stores nothing; the desktop
-   shows the error and reads the tool list again.
+   for the turn, and a tool whose name starts with `mcp__` is looked up in
+   the applied MCP servers. When an offered tool cannot run, including an MCP
+   tool whose server is not connected, the backend answers `409` with the
+   `backend-tool-unavailable` problem and stores nothing; the desktop shows
+   the error and reads the tool list again. A name the backend does not know
+   answers `400`.
 3. The backend offers the tools to the model in every round. Each round's
    reasoning and text are stored as parts of that round and streamed. When a
    round ends with tool calls,
    the backend checks each call's arguments against its definition, and a
    backend tool also checks them by its own rules, such as `read_page`'s URL
-   rules. A call to an unknown tool, such as one the request names as
+   rules; for an MCP tool it checks only the arguments' shape, and the server
+   checks the values. A call to an unknown tool, such as one the request names as
    switched off or unable to run, or any call while tool calls are off, or
    with invalid arguments is answered by the backend itself and stored as a
    `failed` call. Every other call is
@@ -233,7 +265,12 @@ calls it stored are part of the new turn's context.
    micro VM, which follows its redirects. An allowed `web_search` call sends one query to
    `https://api.tavily.com` and gives the model the results framed as
    untrusted text; the model may then call `read_page` for a result's URL,
-   which is shown again on Ask me. A rejected call runs nothing; the model
+   which is shown again on Ask me. An allowed MCP tool's call goes to its
+   server as it is connected then, with five minutes to answer; the server's
+   result reaches the model framed as untrusted text and cleaned of invisible
+   characters, and a server that is no longer connected, an error, or a time
+   limit becomes a failed call the model reads. Stop tells the server the call
+   was cancelled. A rejected call runs nothing; the model
    reads the rejection, which is stored as the call's result. Once every call of the round has an answer, the
    backend asks the model again with the results. The loop ends with the
    first round that makes no tool calls, even one that writes no text, then

@@ -3,6 +3,7 @@ import {
   buildChatViewReplyPart,
   buildReplyAnswer,
   buildReplyPartRounds,
+  formatToolCallArgumentValue,
   listAnswerCitationNumbers,
   parseToolCallArgumentsView
 } from "@/lib/store/chat-view/reply-parts"
@@ -66,6 +67,19 @@ describe("parseToolCallArgumentsView", () => {
     expect(Object.isFrozen(view)).toBe(true)
     expect(Object.isFrozen(view.entries)).toBe(true)
     expect(view.entries?.every((entry) => Object.isFrozen(entry))).toBe(true)
+  })
+})
+
+describe("formatToolCallArgumentValue", () => {
+  it.each([
+    ["text as it is", "two words", "two words"],
+    ["a number as JSON", 5, "5"],
+    ["a flag as JSON", true, "true"],
+    ["null as JSON", null, "null"],
+    ["an object as compact JSON", { tags: ["a", "b"] }, '{"tags":["a","b"]}'],
+    ["an array as compact JSON", [1, "x"], '[1,"x"]']
+  ])("shows %s", (_label, value, text) => {
+    expect(formatToolCallArgumentValue(value)).toBe(text)
   })
 })
 

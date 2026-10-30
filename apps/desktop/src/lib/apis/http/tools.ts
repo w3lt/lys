@@ -1,7 +1,7 @@
 import {
   checkWebSearchKeyApi,
   listBackendToolsApi,
-  type BackendToolUnavailableReason,
+  type ListedBackendToolUnavailableReason,
   type CheckWebSearchKeyApiRequestBody,
   type CheckWebSearchKeyApiResponse
 } from "@lys/protocol"
@@ -15,10 +15,17 @@ export type ToolApiConnection = {
 
 /** Every tool the backend runs and which of them cannot run now. */
 export type BackendToolList = {
-  /** Definitions in the order Settings shows them; every runner is `backend`. */
+  /**
+   * Definitions in the order Settings shows them: the backend's own tools,
+   * whose runner is `backend`, then the tools of its connected MCP servers,
+   * whose runner is `mcp`.
+   */
   readonly tools: readonly ToolDefinition[]
   /** Why each listed tool that cannot run now cannot, keyed by tool name. */
-  readonly unavailableTools: ReadonlyMap<string, BackendToolUnavailableReason>
+  readonly unavailableTools: ReadonlyMap<
+    string,
+    ListedBackendToolUnavailableReason
+  >
 }
 
 /** HTTP status of a successful list or key check. */
@@ -35,8 +42,8 @@ const KEY_CHECK_REQUEST_BODY: CheckWebSearchKeyApiRequestBody = Object.freeze(
  * @param connection - Backend origin. The read cannot be cancelled; the
  * tool store owns it.
  * @returns A promise that resolves with the validated, frozen definitions,
- * every one run in the backend, and which of them cannot run now, once the
- * backend answers.
+ * every one run by the backend or on one of its MCP servers, and which of
+ * them cannot run now, once the backend answers.
  * @throws A caller-safe error when the backend cannot be reached, answers
  * with another status or media type, or returns a list that does not match
  * the shared schema; the decoding failure is kept as its cause.

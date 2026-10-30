@@ -265,6 +265,9 @@ importers:
       "@lys/share":
         specifier: workspace:*
         version: link:../../packages/share
+      "@modelcontextprotocol/client":
+        specifier: ^2.3.1
+        version: 2.3.1
       "@mozilla/readability":
         specifier: ^0.6.0
         version: 0.6.0
@@ -2037,6 +2040,20 @@ packages:
       {
         integrity: sha512-+SiuksZWTnSoZT8f7Mfdn19lLj1SXxHj9s1eLsDHsGHO4XKkSQKUf/bPdEXSym+9Ns4uK+rQh1yaA33Rt0ZteA==
       }
+
+  "@modelcontextprotocol/client@2.3.1":
+    resolution:
+      {
+        integrity: sha512-mIGZXpHsjnZ6lD+gD/WCMpR5k8yVQQ8nNFH1N0Srf7AvnwTUMYD6pvTY8ng2+He5FfV7YMZLmrjL7cLa/cc3dQ==
+      }
+    engines: { node: ">=20" }
+
+  "@modelcontextprotocol/core@2.3.1":
+    resolution:
+      {
+        integrity: sha512-laVmIhPGpWi7rG9q+0UigblRN0Hws/Yjlb6qLFtVqryXVLkc4h+yN8z731POD2LnAGQlFe7/tXhUm7Bi0YB91g==
+      }
+    engines: { node: ">=20" }
 
   "@mozilla/readability@0.6.0":
     resolution:
@@ -4243,12 +4260,26 @@ packages:
         integrity: sha512-mlsTRyGaPBjPedk6Bvw+aqbsXDtoAyAzm5MO7JgU+yVRyMQ5O8bD4Kcci7BS85f93veegeCPkL8R4GLClnjLFw==
       }
 
+  eventsource-parser@3.1.1:
+    resolution:
+      {
+        integrity: sha512-EKN1vKAMcZ8MlYMpaNuxN6R9yakzH6uajHcHVTqWJzvu5pWw9DyhbP35HH8MVBQ+dZjAfDxk+A8NiR9KWaXiyQ==
+      }
+    engines: { node: ">=18.0.0" }
+
   eventsource-parser@4.1.2:
     resolution:
       {
         integrity: sha512-N9b0EvATDJfZj+Szg3m8WwqseQhei/mtTd6V0rCciGbI/yG24o3yBk0YVyfOZZsLVMZHWs++Zk3Aqd2y2EztnQ==
       }
     engines: { node: ">=22.12" }
+
+  eventsource@3.0.7:
+    resolution:
+      {
+        integrity: sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==
+      }
+    engines: { node: ">=18.0.0" }
 
   expect-type@1.4.0:
     resolution:
@@ -4858,6 +4889,12 @@ packages:
         integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==
       }
     hasBin: true
+
+  jose@6.2.13:
+    resolution:
+      {
+        integrity: sha512-7TIg10ZE1x82YediN+lcrPNvGMKge9yFHQD+Qho/b8y2adfugU3AsvvHfxV0fzyFllT6l9xCjf4RWY9g/Z9PJQ==
+      }
 
   joycon@3.1.1:
     resolution:
@@ -5946,6 +5983,13 @@ packages:
         integrity: sha512-bk1ZMTwG/Vymx+zPoa28MhNzucFvXJWp3csrSuxuHPSMeUettaCoQ5Jvg07mtC4JGNpcfTwz41oVCnNgBK9+vA==
       }
     hasBin: true
+
+  pkce-challenge@5.0.1:
+    resolution:
+      {
+        integrity: sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ==
+      }
+    engines: { node: ">=16.20.0" }
 
   postcss-nested@7.0.2:
     resolution:
@@ -8345,6 +8389,20 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
+  "@modelcontextprotocol/client@2.3.1":
+    dependencies:
+      "@modelcontextprotocol/core": 2.3.1
+      cross-spawn: 7.0.6
+      eventsource: 3.0.7
+      eventsource-parser: 3.1.1
+      jose: 6.2.13
+      pkce-challenge: 5.0.1
+      zod: 4.6.7
+
+  "@modelcontextprotocol/core@2.3.1":
+    dependencies:
+      zod: 4.6.7
+
   "@mozilla/readability@0.6.0": {}
 
   "@napi-rs/wasm-runtime@1.2.4(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)":
@@ -9641,7 +9699,13 @@ snapshots:
 
   eventemitter3@5.0.4: {}
 
+  eventsource-parser@3.1.1: {}
+
   eventsource-parser@4.1.2: {}
+
+  eventsource@3.0.7:
+    dependencies:
+      eventsource-parser: 3.1.1
 
   expect-type@1.4.0: {}
 
@@ -10043,6 +10107,8 @@ snapshots:
   isexe@2.0.0: {}
 
   jiti@2.7.0: {}
+
+  jose@6.2.13: {}
 
   joycon@3.1.1: {}
 
@@ -10867,6 +10933,8 @@ snapshots:
       safe-stable-stringify: 2.5.0
       sonic-boom: 4.2.1
       thread-stream: 4.2.0
+
+  pkce-challenge@5.0.1: {}
 
   postcss-nested@7.0.2(postcss@8.5.31):
     dependencies:

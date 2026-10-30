@@ -1,7 +1,7 @@
 import {
   conversationSourceSchema,
   replyPartSchema,
-  toolArgumentNameSchema,
+  toolCallArgumentsSchema,
   toolNameSchema
 } from "@lys/share"
 import * as z from "zod"
@@ -141,11 +141,12 @@ export const chatErrorEventSchema = z.strictObject({
  *
  * @remarks The backend creates the identifier and has already checked the
  * arguments against the definition of the tool it offered, so an optional
- * argument the model left out is an absent key. The request to answer it
- * lives only until it is answered or its reply ends; the call itself is
- * stored as a tool-call part under the same identifier. A call's approval
- * prompt and, for a client tool, its later run request carry the same
- * identifier.
+ * argument the model left out is an absent key. For an MCP tool it checked
+ * only their shape; the server checks them against its schema. The request
+ * to answer it lives only until it is answered or its reply ends; the call
+ * itself is stored as a tool-call part under the same identifier. A call's
+ * approval prompt and, for a client tool, its later run request carry the
+ * same identifier.
  */
 export const chatToolCallSchema = z
   .strictObject({
@@ -153,13 +154,12 @@ export const chatToolCallSchema = z
     id: z.uuidv7(),
     /** Name of the offered tool the model called. */
     toolName: toolNameSchema,
-    /** Argument values by declared argument name, as the model sent them. */
-    arguments: z
-      .record(
-        toolArgumentNameSchema,
-        z.union([z.string(), z.number(), z.boolean()])
-      )
-      .readonly()
+    /**
+     * Argument values by argument name, as the model sent them. A value is
+     * any JSON value; Lys's own tools take strings, numbers, and Booleans,
+     * and an MCP tool may take arrays and objects too.
+     */
+    arguments: toolCallArgumentsSchema
   })
   .readonly()
 

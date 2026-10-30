@@ -1,4 +1,5 @@
 import type { LoggerInterface } from "@lmstudio/sdk"
+import { homedir } from "node:os"
 import type { BackendConfig } from "../config"
 import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgentRecordStore"
 import AttachmentFileStore from "../modules/attachment/attachmentFileStore"
@@ -30,6 +31,7 @@ import { buildLlmChatEndpoint } from "../modules/llm/llmProviderAccess"
 import { findLlmProviderAccess } from "../infrastructure/settings/llmProviderSettingsFile"
 import ToolApprovalService from "../modules/toolApproval/toolApprovalService"
 import { readJustRunToolNames } from "../infrastructure/settings/justRunToolsFile"
+import { readMcpSettings } from "../infrastructure/settings/mcpSettingsFile"
 import { readTavilyApiKey } from "../infrastructure/settings/tavilyApiKeyFile"
 import type { BuiltInToolEntry } from "../modules/tool/builtIn/builtInTool"
 import {
@@ -38,6 +40,10 @@ import {
 } from "../modules/tool/builtIn/builtInTools"
 import type { PageRenderingFailureReporters } from "../modules/tool/builtIn/web/pageRendering"
 import WebSearchToolProvider from "../modules/tool/builtIn/web/webSearchToolProvider"
+import type { McpServerEvent } from "../modules/mcp/mcpServerEvent"
+import McpServerRegistry from "../modules/mcp/mcpServerRegistry"
+import { MCP_SERVER_OPENING_TIMEOUT_MILLISECONDS } from "../modules/mcp/mcpServerConnection"
+import { openMcpServer } from "../modules/mcp/mcpServerOpening"
 
 /** Private close operation owned by one returned singleton-service bundle. */
 const CLOSE_SINGLETON_SERVICES = Symbol("close-singleton-services")
@@ -91,6 +97,11 @@ export type SingletonLogReporters = Readonly<{
    * could not connect.
    */
   lmStudioSdk: LoggerInterface
+  /**
+   * Receives what the MCP servers do that no caller observes, such as a
+   * failed connection or a server's own log lines.
+   */
+  reportMcpServerEvent: (event: McpServerEvent) => void
 }>
 
 /** Production factories used when the composition root supplies no substitutes. */
@@ -146,6 +157,11 @@ export type SingletonServices = Readonly<{
    */
   toolApprovalService: ToolApprovalService
   /**
+   * Connections to the MCP servers the settings file names, and their
+   * tools; the bundle's cleanup closes it first.
+   */
+  mcpServerRegistry: McpServerRegistry
+  /**
    * Attachment files of every conversation, under the attachments
    * directory; it owns nothing to release.
    */
@@ -154,10 +170,16 @@ export type SingletonServices = Readonly<{
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
 
-/** Services that run, find, and approve tools; they own nothing to release. */
+/**
+ * Services that run, find, and approve tools; only the MCP server registry
+ * owns resources.
+ */
 type ToolServices = Pick<
   SingletonServices,
-  "builtInTools" | "webSearchToolProvider" | "toolApprovalService"
+  | "builtInTools"
+  | "webSearchToolProvider"
+  | "toolApprovalService"
+  | "mcpServerRegistry"
 >
 
 /** Services that keep their data in the shared database and own nothing. */
@@ -179,7 +201,7 @@ type DatabaseServices = Pick<
  * directory given to the attachment file store.
  * @param logReporters - Receive, for logging, the LLM runtime failures that
  * no caller observes, the causes of read failures the model learns only by
- * kind, and the LM Studio SDK's messages.
+ * kind, the LM Studio SDK's messages, and the MCP servers' events.
  * @param factories - Service factories owned by the composition root.
  * @returns A promise resolving to the frozen bundle of owned services. No
  * service reads the active provider or contacts it during creation; the
@@ -200,8 +222,10 @@ type DatabaseServices = Pick<
  * service, the LLM service, and the history reader; they read nothing at
  * creation and own nothing to release.
  * The web search tool provider, the built-in tools, the tool approval
- * service, and the attachment file store are created last; they read and
- * contact nothing at creation and own nothing to release.
+ * service, the MCP server registry, and the attachment file store are
+ * created last; they read and contact nothing at creation. Only the MCP
+ * server registry owns resources, the connections it opens later; the
+ * bundle's cleanup closes it first.
  * Creation stops at the first failure. The database is not part of the
  * returned bundle: the bundle's cleanup closes it last, after the chat
  * service and the LLM runtime service.
@@ -245,14 +269,8 @@ export async function createSingletonServices(
         historyReader: databaseServices.conversationHistoryReader
       }
     )
-    const toolServices = createToolServices(config, logReporters.pageRendering)
-    let closeCompletion: Promise<void> | undefined = undefined
-
-    /** Joins every close request to one complete service-lifetime disposal. */
-    const closeOwnedSingletonServices = (): Promise<void> => {
-      closeCompletion ??= serviceLifetime.disposeAsync()
-      return closeCompletion
-    }
+    const toolServices = createToolServices(config, logReporters)
+    serviceLifetime.defer(() => toolServices.mcpServerRegistry.close())
 
     return Object.freeze({
       chatService,
@@ -264,7 +282,7 @@ export async function createSingletonServices(
       attachmentFileStore: new AttachmentFileStore(
         config.attachmentsDirectoryPath
       ),
-      [CLOSE_SINGLETON_SERVICES]: closeOwnedSingletonServices
+      [CLOSE_SINGLETON_SERVICES]: buildCloseSingletonServices(serviceLifetime)
     })
   } catch (creationError) {
     return await throwCreationFailureAfterClosingResources(
@@ -359,17 +377,21 @@ function createAgentServices(
 /**
  * Creates the services that run, find, and approve tools.
  *
- * @param config - Settings file the web search key and the Just run choices
- * are read from, and vmo's host and port given to the read-page tool.
- * @param pageRenderingFailureReporters - Receive the causes of read failures
- * the model learns only by kind.
- * @returns The web search tool provider, every built-in tool, and the tool
- * approval service; they read and contact nothing at creation and own
- * nothing to release.
+ * @param config - Settings file the web search key, the Just run choices,
+ * and the MCP servers are read from, and vmo's host and port given to the
+ * read-page tool.
+ * @param logReporters - Receive the causes of read failures the model
+ * learns only by kind, and the MCP servers' events.
+ * @returns The web search tool provider, every built-in tool, the tool
+ * approval service, and the MCP server registry, whose stdio servers start
+ * in the person's home folder; they read and contact nothing at creation.
  */
 function createToolServices(
   config: BackendConfig,
-  pageRenderingFailureReporters: PageRenderingFailureReporters
+  logReporters: Pick<
+    SingletonLogReporters,
+    "pageRendering" | "reportMcpServerEvent"
+  >
 ): ToolServices {
   const webSearchToolProvider = new WebSearchToolProvider(
     () => readTavilyApiKey(config.settingsFilePath),
@@ -378,12 +400,24 @@ function createToolServices(
   const builtInTools = createBuiltInTools(
     webSearchToolProvider,
     `http://${config.vmoHost}:${config.vmoPort}`,
-    pageRenderingFailureReporters.reportPageReaderFailure
+    logReporters.pageRendering.reportPageReaderFailure
   )
   const toolApprovalService = new ToolApprovalService(() =>
     readJustRunToolNames(config.settingsFilePath)
   )
-  return { builtInTools, webSearchToolProvider, toolApprovalService }
+  const mcpServerRegistry = new McpServerRegistry({
+    readSettings: () => readMcpSettings(config.settingsFilePath),
+    openServer: (settings, context) =>
+      openMcpServer(settings, context, MCP_SERVER_OPENING_TIMEOUT_MILLISECONDS),
+    workingDirectory: homedir(),
+    reportEvent: logReporters.reportMcpServerEvent
+  })
+  return {
+    builtInTools,
+    webSearchToolProvider,
+    toolApprovalService,
+    mcpServerRegistry
+  }
 }
 
 /**
@@ -499,6 +533,23 @@ export async function closeSingletonServices(
   services: SingletonServices
 ): Promise<void> {
   await services[CLOSE_SINGLETON_SERVICES]()
+}
+
+/**
+ * Builds the close operation of one singleton-service bundle.
+ *
+ * @param serviceLifetime - Owner of every service the bundle acquired.
+ * @returns An operation that joins every close request to one complete
+ * disposal of the owner; each call returns the same settlement.
+ */
+function buildCloseSingletonServices(
+  serviceLifetime: AsyncDisposableStack
+): CloseSingletonServices {
+  let closeCompletion: Promise<void> | undefined = undefined
+  return () => {
+    closeCompletion ??= serviceLifetime.disposeAsync()
+    return closeCompletion
+  }
 }
 
 /**

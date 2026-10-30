@@ -1,6 +1,7 @@
 export {
   MAXIMUM_CHAT_BODY_BYTES,
   MAXIMUM_GENERATION_TEMPERATURE,
+  MAXIMUM_OFFERED_BACKEND_TOOL_COUNT,
   chatApi,
   chatApiRequestBodySchema,
   chatApiStreamEventSchema,

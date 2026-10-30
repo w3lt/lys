@@ -1,6 +1,6 @@
 ---
 title: Security and trust boundaries
-description: "The current trust boundary: loopback services, a chosen model provider that may be remote, schema validation, approved web reads in a micro VM and searches, plain-text keys, and file-backed settings without credential management."
+description: "The current trust boundary: loopback services, a chosen model provider that may be remote, schema validation, approved web reads in a micro VM and searches, MCP servers the person adds, plain-text keys and server secrets, and file-backed settings without credential management."
 docType: architecture
 sidebar:
   order: 8
@@ -25,6 +25,14 @@ location tools, `get_current_time` and `get_location`, reach no network: their
 results go to the backend and on to the model provider with the rest of the
 conversation.
 
+The MCP servers the person adds in Settings → MCP go further. The backend
+starts each stdio server's command as the person's OS account, or connects to
+each remote server's URL with the configured headers, and a call of one of
+their tools runs on that server, which decides what the call reaches. Their
+tools start switched on, because adding a server is the person's choice, and
+each call still asks first unless the person set the tool to Just run; see
+[MCP servers](#mcp-servers).
+
 ## Current trust boundaries
 
 | Boundary                     | Current state                                                                                                                                                                                                                          |
@@ -43,34 +51,40 @@ conversation.
 | Backend -> vmo               | Each tool lookup sends `GET /health` to vmo, and each `read_page` call sends the page's URL, over loopback HTTP on `127.0.0.1:8080`, without authentication.                                                                           |
 | vmo -> micro VM -> web       | vmo reads the page in headless Chromium in a fresh micro VM, which loads the page, its redirects, and what it loads.                                                                                                                   |
 | Backend -> Tavily            | `web_search` sends one query and the saved API key to `api.tavily.com` per allowed call.                                                                                                                                               |
-| Backend -> settings file     | Reads the model provider, its address and key, the Tavily API key, and the saved Just run choices from `$LYS_HOME/settings.json`; the Tauri host is the only writer.                                                                   |
+| Backend -> settings file     | Reads the model provider, its address and key, the Tavily API key, the saved Just run choices, and the MCP servers from `$LYS_HOME/settings.json`; the Tauri host is the only writer.                                                  |
+| Backend -> stdio MCP server  | The backend starts each configured command as the OS user running Lys, without a shell, in the person's home folder, and speaks MCP over its standard input and output; the process can do whatever that account can.                  |
+| Backend -> remote MCP server | Streamable HTTP to the configured URL, `https`, or `http` only for `localhost`, `127.0.0.1`, or `[::1]`, with the configured headers; redirects are not followed.                                                                      |
 
 ## Current controls
 
-| Control                     | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Loopback host constants     | The backend address is `127.0.0.1`; LM Studio and Ollama addresses default to it, and the person may set another.                                                                                                                                                                                                                                                                                                                                                                   |
-| Provider key handling       | A provider key goes only to its own provider, in the `Authorization` header over HTTPS; it never appears in the model's context, events, API answers, logs, or errors, and a failed provider request never quotes the provider's answer.                                                                                                                                                                                                                                            |
-| CORS policy                 | Fastify admits only the `http://localhost:1420` and `http://127.0.0.1:1420` development origins and the `tauri://localhost` app origin.                                                                                                                                                                                                                                                                                                                                             |
-| Zod validation              | Backend validates route bodies, parameters, and query strings; desktop validates SSE payloads and HTTP responses.                                                                                                                                                                                                                                                                                                                                                                   |
-| Attachment name rule        | An attachment name is non-empty, neither `.` nor `..`, holds no `/` and no control character (NUL included), and has at most 255 UTF-8 bytes, so it names one entry of its message's folder; the shared schema refuses any other name with `400`. The file store builds every path only from a validated UUIDv7 and such a name, under the attachments directory, and creates each message folder and each file exclusively.                                                        |
-| Attachment content check    | What a file is comes from its bytes, never from its name: a PNG, JPEG, or WebP header, or UTF-8 text without a NUL character. Anything else is refused with `400`, and an image is refused with `409` for a model without vision.                                                                                                                                                                                                                                                   |
-| Attachment reader scope     | `read_attachment` reads only the text files the conversation's stored rows name, by attachment number, never a path the model supplies. It runs without asking, since the person attached the files.                                                                                                                                                                                                                                                                                |
-| Agent state scope           | The agent state tools only read: who an agent is, its role, and what its live instance is working on. Roles are fixed in code from the agent's kind: a built-in agent may find every agent and read any agent's state; a stored agent may read only its own. The backend checks the asking agent's role before it reads anything.                                                                                                                                                   |
-| Route-local abort handling  | Closing the SSE connection aborts the backend chat task.                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Approval gateway            | The backend's tool approval service decides every tool call, client and backend tools alike, except `read_attachment`, which runs without approval because it reads only what the person attached, and the agent state tools, which only read what agents are doing: a tool asks first unless it is saved as Just run in `settings.json`, and every call asks when that file cannot be read. The desktop shows the prompts and runs only the client tools' calls the backend sends. |
-| Approval of web reads       | `read_page` runs only once the person allows the call on the card (full URL), or at once on Just run. Allowing a read lets the page load what it needs from public hosts. It starts off.                                                                                                                                                                                                                                                                                            |
-| Address rule                | A read whose URL names, or whose host name resolves to, a loopback, private, link-local, shared, documentation, benchmarking, multicast, or reserved address is refused before vmo is asked. Only that URL is checked; see [Web reads](#web-reads).                                                                                                                                                                                                                                 |
-| VM isolation                | Each read runs in a fresh micro VM that vmo deletes before it answers; nothing is kept between reads.                                                                                                                                                                                                                                                                                                                                                                               |
-| Invisible character removal | Every network tool's result loses Unicode format and control characters, such as zero-width, direction, and tag characters, and every variation selector but one emoji- or text-style selector after a visible character, and says how many it lost.                                                                                                                                                                                                                                |
-| Untrusted page framing      | Page text and the page's title, site, and date reach the model between delimiters it cannot forge, with a notice never to obey them.                                                                                                                                                                                                                                                                                                                                                |
-| Approval of searches        | `web_search` runs only once the person allows the call on the card (full query and "Sends the query to Tavily (api.tavily.com)"), or at once on Just run. It starts off.                                                                                                                                                                                                                                                                                                            |
-| Fixed search destination    | Every search goes to `https://api.tavily.com` with certificate verification forced on, TLS 1.2 or later, no redirects, and the address rule on every resolved address and the connected socket.                                                                                                                                                                                                                                                                                     |
-| Search key handling         | The key goes only into the `authorization` header sent to Tavily; it never appears in results, the model's context, events, API answers, logs, or errors.                                                                                                                                                                                                                                                                                                                           |
-| Typed location only         | `get_location` returns only the city, region, and country the person saved in Settings → Tools, and fails with `locationNotSet` when none is saved. Lys never asks Location Services, an IP lookup, or the time zone where the person is. Like every client tool, a call asks first unless the tool is on Just run.                                                                                                                                                                 |
-| Owner-only settings file    | `settings.json` is replaced atomically and is readable only by its owner on Unix.                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Owner-only backend log      | Each of the backend's log files in `logs/` is created readable and writable only by its owner.                                                                                                                                                                                                                                                                                                                                                                                      |
-| Untrusted result framing    | Result titles, URLs, and snippets reach the model between delimiters it cannot forge, with a notice never to obey them.                                                                                                                                                                                                                                                                                                                                                             |
+| Control                     | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Loopback host constants     | The backend address is `127.0.0.1`; LM Studio and Ollama addresses default to it, and the person may set another.                                                                                                                                                                                                                                                                                                                                                                         |
+| Provider key handling       | A provider key goes only to its own provider, in the `Authorization` header over HTTPS; it never appears in the model's context, events, API answers, logs, or errors, and a failed provider request never quotes the provider's answer.                                                                                                                                                                                                                                                  |
+| CORS policy                 | Fastify admits only the `http://localhost:1420` and `http://127.0.0.1:1420` development origins and the `tauri://localhost` app origin.                                                                                                                                                                                                                                                                                                                                                   |
+| Zod validation              | Backend validates route bodies, parameters, and query strings; desktop validates SSE payloads and HTTP responses.                                                                                                                                                                                                                                                                                                                                                                         |
+| Attachment name rule        | An attachment name is non-empty, neither `.` nor `..`, holds no `/` and no control character (NUL included), and has at most 255 UTF-8 bytes, so it names one entry of its message's folder; the shared schema refuses any other name with `400`. The file store builds every path only from a validated UUIDv7 and such a name, under the attachments directory, and creates each message folder and each file exclusively.                                                              |
+| Attachment content check    | What a file is comes from its bytes, never from its name: a PNG, JPEG, or WebP header, or UTF-8 text without a NUL character. Anything else is refused with `400`, and an image is refused with `409` for a model without vision.                                                                                                                                                                                                                                                         |
+| Attachment reader scope     | `read_attachment` reads only the text files the conversation's stored rows name, by attachment number, never a path the model supplies. It runs without asking, since the person attached the files.                                                                                                                                                                                                                                                                                      |
+| Agent state scope           | The agent state tools only read: who an agent is, its role, and what its live instance is working on. Roles are fixed in code from the agent's kind: a built-in agent may find every agent and read any agent's state; a stored agent may read only its own. The backend checks the asking agent's role before it reads anything.                                                                                                                                                         |
+| Route-local abort handling  | Closing the SSE connection aborts the backend chat task.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Approval gateway            | The backend's tool approval service decides every tool call, client, backend, and MCP tools alike, except `read_attachment`, which runs without approval because it reads only what the person attached, and the agent state tools, which only read what agents are doing: a tool asks first unless it is saved as Just run in `settings.json`, and every call asks when that file cannot be read. The desktop shows the prompts and runs only the client tools' calls the backend sends. |
+| Approval of web reads       | `read_page` runs only once the person allows the call on the card (full URL), or at once on Just run. Allowing a read lets the page load what it needs from public hosts. It starts off.                                                                                                                                                                                                                                                                                                  |
+| Address rule                | A read whose URL names, or whose host name resolves to, a loopback, private, link-local, shared, documentation, benchmarking, multicast, or reserved address is refused before vmo is asked. Only that URL is checked; see [Web reads](#web-reads).                                                                                                                                                                                                                                       |
+| VM isolation                | Each read runs in a fresh micro VM that vmo deletes before it answers; nothing is kept between reads.                                                                                                                                                                                                                                                                                                                                                                                     |
+| Invisible character removal | Every network or MCP tool's result loses Unicode format and control characters, such as zero-width, direction, and tag characters, and every variation selector but one emoji- or text-style selector after a visible character, and says how many it lost.                                                                                                                                                                                                                               |
+| Untrusted page framing      | Page text and the page's title, site, and date reach the model between delimiters it cannot forge, with a notice never to obey them.                                                                                                                                                                                                                                                                                                                                                      |
+| Approval of searches        | `web_search` runs only once the person allows the call on the card (full query and "Sends the query to Tavily (api.tavily.com)"), or at once on Just run. It starts off.                                                                                                                                                                                                                                                                                                                  |
+| Fixed search destination    | Every search goes to `https://api.tavily.com` with certificate verification forced on, TLS 1.2 or later, no redirects, and the address rule on every resolved address and the connected socket.                                                                                                                                                                                                                                                                                           |
+| Search key handling         | The key goes only into the `authorization` header sent to Tavily; it never appears in results, the model's context, events, API answers, logs, or errors.                                                                                                                                                                                                                                                                                                                                 |
+| Typed location only         | `get_location` returns only the city, region, and country the person saved in Settings → Tools, and fails with `locationNotSet` when none is saved. Lys never asks Location Services, an IP lookup, or the time zone where the person is. Like every client tool, a call asks first unless the tool is on Just run.                                                                                                                                                                       |
+| Owner-only settings file    | `settings.json` is replaced atomically and is readable only by its owner on Unix.                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Owner-only backend log      | Each of the backend's log files in `logs/` is created readable and writable only by its owner.                                                                                                                                                                                                                                                                                                                                                                                            |
+| Untrusted result framing    | Result titles, URLs, and snippets reach the model between delimiters it cannot forge, with a notice never to obey them.                                                                                                                                                                                                                                                                                                                                                                   |
+| MCP server rules            | A server's name, command, arguments, variables, URL, and headers follow the shared rules, which the host checks before it writes the file and the backend checks before it applies the group: no control characters, a URL with no user name, password, or `#`, and no header the transport sets itself. A group that breaks them is not applied.                                                                                                                                         |
+| Connected MCP tools only    | A server's tools are listed and can be offered only while it is connected, and a call runs on the server as it is connected when the call runs; a chat request that offers a tool whose server is not connected is refused.                                                                                                                                                                                                                                                               |
+| Untrusted MCP framing       | An MCP tool's result reaches the model between delimiters it cannot forge, after a notice never to follow it, cut at 20,000 characters; images, audio, and binary resources are named, not passed on.                                                                                                                                                                                                                                                                                     |
+| MCP settings stay out       | The server list the backend answers names each server, its transport, and its state, never a command, argument, variable, URL, or header. The host's `Debug` output shows a command's argument count and a URL without its query, never an argument, a variable's or a header's value; a validation error about a server never quotes a value.                                                                                                                                            |
 
 ## Candid limits
 
@@ -116,6 +130,38 @@ conversation.
   seeing the call. The location is then part of that reply's stored result
   until the conversation is deleted, also after the person changes or removes
   it in Settings.
+- A stdio MCP server runs as the person's OS account with the command the
+  person configured: it can read, change, and send anything that account can,
+  and Lys does not confine it. A command such as `npx -y <package>` runs
+  whatever the package registry serves at each start. Closing a server
+  signals only the process Lys started, not the processes it started in turn.
+- An MCP server writes its tools' descriptions, input schemas, and results,
+  and all reach the model. A description is offered as the tool's
+  description, cleaned of invisible characters and cut to 4,096 characters,
+  and an input schema as the server wrote it, both without framing, so a
+  server can put instructions in either; a tool whose name or schema holds a
+  character a person cannot see is not listed, so Settings shows the text
+  the model reads. Results are framed as untrusted, which
+  lowers the risk but cannot remove it. On Just run, an MCP tool's calls run
+  with no card shown.
+- The environment variables and headers of the MCP servers are stored as
+  plain text in `settings.json`, like the Tavily API key, readable by the
+  person's OS account and by any process running as it. A stdio server
+  receives its variables, and a remote server its headers, with every
+  request. A key in a URL's query is stored the same way; Settings → MCP
+  shows the URL with its query hidden as `?…` in the list and the details,
+  but the editor's URL field shows it whole.
+- A stdio MCP server's standard error lines reach the backend log as the
+  server wrote them, each cut to 2,000 characters. An error is logged with its
+  message and stack, each cut to 2,000 characters, which can carry part of
+  what the server answered; an HTTP error answer is logged only by its status.
+  Whatever a server prints there, such as a token it echoes, stays in the log
+  files.
+- Any caller that reaches the backend, a local process or a page that uses DNS
+  rebinding, can list the MCP servers' names and states, make the backend
+  start the configured commands again or reach the configured URLs through
+  sync and reconnect, and answer an MCP call's approval prompt with
+  `allowed` ([#171](https://github.com/w3lt/lys/issues/171)).
 - Attachment files are stored as sent, unencrypted, under
   `$LYS_HOME/attachments`, readable by the person's OS account and any process
   running as it. The folders and files are created with the process's default
@@ -310,6 +356,65 @@ key is saved in Settings → Secrets.
   own name, needs no preflight, and can do what a local process can
   ([#171](https://github.com/w3lt/lys/issues/171)).
 
+## MCP servers
+
+The person adds MCP servers in Settings → MCP; the host saves them in the
+`mcp` group of `settings.json`, and the backend applies the group when it
+starts and when the desktop asks it to sync. A server is either a command the
+backend starts (stdio) or a URL it sends requests to (Streamable HTTP). See
+the [configuration reference](/reference/configuration/#mcp-servers) for the
+rules and the [API reference](/reference/api/#mcp-servers) for the routes.
+
+- **What a stdio server gets.** The command runs without a shell, in the
+  person's home folder, as the person's OS account. Its environment is `HOME`,
+  `LOGNAME`, `PATH`, `SHELL`, `TERM`, and `USER` from the backend's, plus the
+  configured variables, which win; nothing else of the backend's environment
+  is passed on. It receives each call's arguments and can do anything the
+  account can.
+- **What a remote server gets.** Each request goes to the configured URL with
+  the configured headers. Plain `http` is accepted only for `localhost`,
+  `127.0.0.1`, and `[::1]`; no address rule applies otherwise, so a URL on a
+  private network is reached as written. A redirect is not followed. Lys does
+  not sign in with OAuth ([#253](https://github.com/w3lt/lys/issues/253)).
+- **What reaches the model.** Each listed tool's name, description, and input
+  schema, at most 128 tools per server, and the result of each call that ran.
+  A result sits between `<<<mcp result>>>` delimiters the server cannot write,
+  after a notice never to follow it, and loses invisible characters like a
+  network tool's result. A tool whose schema Lys cannot check, or larger than
+  64 KiB, is not listed, and neither is one whose name or schema holds a
+  character a person cannot see, since Lys sends both unchanged.
+- **Approval.** Every call of an MCP tool asks the person first unless the
+  tool is on Just run; MCP tools start switched on, because adding the server
+  is the person's opt-in, and none starts on Just run. Before asking, the backend
+  checks only the arguments' shape: a JSON object of at most 256 KiB whose
+  keys follow the argument name rule. The server checks the values.
+- **Choices kept by name.** A tool's switch and Just run choice are saved
+  under the name the model calls it by, `mcp__<server>__<tool>`, and stay
+  when the server is removed or renamed. A server saved later under an
+  earlier server's name therefore keeps that server's Just run choices for
+  tools of the same name, without asking again. Renaming a server resets
+  its tools to their defaults, switched on and Ask me, so a tool switched
+  off comes back on; the choices under the old name apply again to a server
+  saved under it.
+- **Prompt injection.** A server, or a page or file one of its tools reads,
+  can try to steer the model, and a description is not framed as untrusted.
+  On Ask me each further call still needs the person's approval; on Just run
+  it does not, so an MCP tool and a file tool both on Just run can move a
+  file's text to the server with no card shown.
+- **Time and size.** Connecting and reading the tool list take at most two
+  minutes, and a call at most five; Stop tells the server a call was
+  cancelled. The backend reads at most 16 MiB of one answer: an HTTP body,
+  one event of an event stream the SDK reads one event at a time, or a stdio
+  message line; a longer answer ends the connection and fails every request
+  in flight at once. A result is cut at 20,000 characters.
+- **Output schemas.** A tool's output schema is never compiled or checked, so
+  a server cannot make the backend run a regular expression it chose; a
+  result's structured content is read as untrusted JSON within Lys's limits.
+- **Local callers and web pages.** Sync and reconnect are `POST`s with a JSON
+  body, which a page on another site cannot send without a CORS preflight
+  that the backend refuses. A local process, or a page that uses DNS
+  rebinding, can call them; see [Candid limits](#candid-limits).
+
 ## Practical implication
 
 Loopback binding limits network exposure, but this development architecture
@@ -323,7 +428,7 @@ does not yet implement those guarantees.
   [file tool path exception](/reference/standard-application/#file-tool-path-exception)
   ([issue #122](https://github.com/w3lt/lys/issues/122))
 - Credential storage and retrieval, which would replace the plain-text Tavily
-  and provider API keys
+  and provider API keys, and the MCP server secrets
 - Provider authentication flows
 - More explicit diagnostics and log-redaction policy
 - Security review of release-mode desktop and backend packaging

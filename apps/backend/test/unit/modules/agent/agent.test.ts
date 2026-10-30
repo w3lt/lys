@@ -54,12 +54,14 @@ import type {
   ReplyStreamEvent
 } from "../../../../src/modules/agent/replyModel"
 import LlmReplyContextMeter from "../../../../src/modules/chat/llmReplyContextMeter"
+import type { TurnMcpTool } from "../../../../src/modules/mcp/mcpServerRegistry"
 import type { TurnBuiltInTool } from "../../../../src/modules/tool/builtIn/builtInTool"
 import ToolCallGate, {
   type SendToolApprovalPrompt
 } from "../../../../src/modules/toolApproval/toolCallGate"
 import { ChatCompletionCancelledError } from "../../../../src/utils/errors"
 import { createImageAttachment } from "../../support/attachmentFixtures"
+import { parseMcpToolDefinition } from "../../support/mcpToolFixtures"
 import {
   openConversationTestServices,
   saveSourceRow,
@@ -238,6 +240,8 @@ type AgentTurnScenario = Readonly<{
   clientTools?: readonly ToolDefinition[]
   /** Offered backend tools; none by default. */
   builtInTools?: readonly TurnBuiltInTool[]
+  /** Offered MCP tools; none by default. */
+  mcpTools?: readonly TurnMcpTool[]
   /**
    * What the request names about the tools the turn does not offer; tool
    * calls on and no tool named when omitted.
@@ -538,6 +542,52 @@ function createAllowingPromptSender() {
   return vi.fn<SendToolApprovalPrompt>(async () => ({ status: "allowed" }))
 }
 
+/** Definition of the echo tool of the MCP server `files`. */
+const MCP_ECHO_DEFINITION = parseMcpToolDefinition({
+  name: "mcp__files__echo",
+  description: "Echoes its text.",
+  group: "mcp",
+  access: "unknown",
+  runner: "mcp",
+  server: "files",
+  serverToolName: "echo",
+  inputSchema: {
+    type: "object",
+    properties: { text: { type: "string" } },
+    required: ["text"]
+  }
+})
+
+/** Round in which the model calls the MCP echo tool with `moth`. */
+const ECHO_MOTH_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
+  {
+    type: "tool-calls",
+    toolCalls: [
+      { toolName: "mcp__files__echo", argumentText: '{"text":"moth"}' }
+    ]
+  }
+])
+
+/**
+ * Builds the MCP echo tool offered for one case.
+ *
+ * @param sendToolCall - Runs each call; answers `echo: <text>` by default.
+ * @returns The tool and a spy over its calls.
+ */
+function createMcpEchoTool(
+  sendToolCall: TurnMcpTool["sendToolCall"] = async (callArguments) => ({
+    status: "succeeded",
+    content: `echo: ${JSON.stringify(callArguments)}`
+  })
+) {
+  const call = vi.fn<TurnMcpTool["sendToolCall"]>(sendToolCall)
+  const tool: TurnMcpTool = Object.freeze({
+    definition: MCP_ECHO_DEFINITION,
+    sendToolCall: call
+  })
+  return { tool, call }
+}
+
 /** Round that ends the reply without text. */
 const FINISH_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
   { type: "finish", finishReason: "stop" }
@@ -595,7 +645,8 @@ function buildCreateToolCallGate(
 ): AgentTurn["createToolCallGate"] {
   const justRunToolNames = scenario.justRunToolNames ?? [
     ...(scenario.clientTools ?? []).map((tool) => tool.name),
-    ...(scenario.builtInTools ?? []).map((entry) => entry.definition.name)
+    ...(scenario.builtInTools ?? []).map((entry) => entry.definition.name),
+    ...(scenario.mcpTools ?? []).map((tool) => tool.definition.name)
   ]
   const sendToolApprovalPrompt =
     scenario.sendToolApprovalPrompt ?? handleUnexpectedToolCall
@@ -708,6 +759,7 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
       sources: getStoredReply(store).sources,
       clientTools: scenario.clientTools ?? [],
       builtInTools: scenario.builtInTools ?? [],
+      mcpTools: scenario.mcpTools ?? [],
       unofferedTools: scenario.unofferedTools ?? NO_UNOFFERED_TOOLS,
       sendClientToolCall:
         scenario.sendClientToolCall ?? handleUnexpectedToolCall,
@@ -1374,6 +1426,7 @@ describe("Agent", () => {
       sources: [],
       clientTools: [],
       builtInTools: [],
+      mcpTools: [],
       unofferedTools: NO_UNOFFERED_TOOLS,
       sendClientToolCall: handleUnexpectedToolCall,
       createToolCallGate: handleUnexpectedToolCall,
@@ -2891,6 +2944,191 @@ describe("Agent", () => {
     })
   })
 
+  describe("MCP tool calls", () => {
+    it("offers MCP tools after client and backend tools, asks the person, and runs an allowed call on its server under the turn's signal", async () => {
+      const cancellation = new AbortController()
+      const { tool, call } = createMcpEchoTool()
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+      const openReplyStream = createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        abortSignal: cancellation.signal,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        builtInTools: [createLookUpWordTool().entry],
+        mcpTools: [tool],
+        justRunToolNames: [],
+        sendToolApprovalPrompt
+      })
+
+      expect(
+        openReplyStream.mock.calls[0]?.[0].tools.map(
+          (format) => format.function.name
+        )
+      ).toEqual(["read_text_file", "look_up_word", "mcp__files__echo"])
+      expect(sendToolApprovalPrompt.mock.calls).toEqual([
+        [
+          {
+            id: expect.stringMatching(UUID_V7_PATTERN),
+            toolName: "mcp__files__echo",
+            arguments: { text: "moth" }
+          }
+        ]
+      ])
+      expect(call.mock.calls).toEqual([[{ text: "moth" }, cancellation.signal]])
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
+        role: "tool",
+        content: 'echo: {"text":"moth"}'
+      })
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          status: "succeeded",
+          result: 'echo: {"text":"moth"}'
+        })
+      ])
+    })
+
+    it("runs an MCP tool's call saved as Just run without prompting the person", async () => {
+      const { tool, call } = createMcpEchoTool()
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+
+      await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND),
+        mcpTools: [tool],
+        justRunToolNames: ["mcp__files__echo"],
+        sendToolApprovalPrompt
+      })
+
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+      expect(call).toHaveBeenCalledOnce()
+    })
+
+    it("stores a call the server failed as failed and hands its text to the model", async () => {
+      const { tool } = createMcpEchoTool(async () => ({
+        status: "failed",
+        content: "The server said it broke."
+      }))
+      const openReplyStream = createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        mcpTools: [tool]
+      })
+
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
+        role: "tool",
+        content: "The server said it broke."
+      })
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          status: "failed",
+          result: "The server said it broke."
+        })
+      ])
+    })
+
+    it("removes invisible characters from an MCP tool's result, since Lys cannot tell what it reached", async () => {
+      const { tool } = createMcpEchoTool(async () => ({
+        status: "succeeded",
+        content: "moth\u200B fly"
+      }))
+      const openReplyStream = createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND)
+
+      await getAgentReplyOutcome({ openReplyStream, mcpTools: [tool] })
+
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
+        role: "tool",
+        content:
+          "moth fly\n\nLys removed 1 invisible character from this result."
+      })
+    })
+
+    it("stores the person's rejection and hands it to the model without calling the server", async () => {
+      const { tool, call } = createMcpEchoTool()
+      const openReplyStream = createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        mcpTools: [tool],
+        justRunToolNames: [],
+        sendToolApprovalPrompt: async () => DECLINED_APPROVAL
+      })
+
+      expect(call).not.toHaveBeenCalled()
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          status: "rejected",
+          result: DECLINED_APPROVAL.content
+        })
+      ])
+    })
+
+    it("answers arguments without a name the tool requires without prompting the person or calling the server", async () => {
+      const { tool, call } = createMcpEchoTool()
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+      const openReplyStream = createRoundStreams(
+        [
+          {
+            type: "tool-calls",
+            toolCalls: [
+              { toolName: "mcp__files__echo", argumentText: '{"other":1}' }
+            ]
+          }
+        ],
+        FINISH_ROUND
+      )
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        mcpTools: [tool],
+        justRunToolNames: [],
+        sendToolApprovalPrompt
+      })
+
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+      expect(call).not.toHaveBeenCalled()
+      expect(run.parts).toEqual([expect.objectContaining({ status: "failed" })])
+    })
+
+    it("interrupts without another round when the reply is stopped while the server runs the call", async () => {
+      const cancellation = new AbortController()
+      const { tool } = createMcpEchoTool(async (_arguments, abortSignal) => {
+        cancellation.abort()
+        abortSignal.throwIfAborted()
+        return { status: "succeeded", content: "too late" }
+      })
+      const openReplyStream = createRoundStreams(ECHO_MOTH_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        abortSignal: cancellation.signal,
+        mcpTools: [tool]
+      })
+
+      expect(openReplyStream).toHaveBeenCalledOnce()
+      expect(run.persistedStates).toEqual([{ status: "interrupted" }])
+      expect(run.parts).toEqual([
+        expect.objectContaining({ status: "interrupted" })
+      ])
+      expect(run.reportedFailures).toEqual([])
+    })
+
+    it("fails the reply when an MCP call rejects although the reply was not stopped", async () => {
+      const defect = new Error("registry defect")
+      const { tool } = createMcpEchoTool(async () => {
+        throw defect
+      })
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(ECHO_MOTH_ROUND),
+        mcpTools: [tool]
+      })
+
+      expect(run.persistedStates).toEqual([{ status: "failed" }])
+      expect(run.reportedFailures).toEqual([defect])
+    })
+  })
+
   describe("sources", () => {
     it("numbers the sources a backend tool shows after the conversation's, stores them, and sends them before the call that shows them", async () => {
       const earlierSource = {
@@ -3522,19 +3760,21 @@ describe("Agent", () => {
       )
     }
 
-    it("offers a leader's state tools after the turn's tools when the model is trained for tool use", async () => {
+    it("offers a leader's state tools after the turn's tools, MCP tools included, when the model is trained for tool use", async () => {
       const openReplyStream = createRoundStreams(FINISH_ROUND)
 
       await getAgentReplyOutcome({
         openReplyStream,
         trainedForToolUse: true,
         clientTools: [READ_TEXT_FILE_TOOL],
-        builtInTools: [createLookUpWordTool().entry]
+        builtInTools: [createLookUpWordTool().entry],
+        mcpTools: [createMcpEchoTool().tool]
       })
 
       expect(listOfferedToolNames(openReplyStream)).toEqual([
         "read_text_file",
         "look_up_word",
+        "mcp__files__echo",
         ...LEADER_STATE_TOOL_NAMES
       ])
     })

@@ -15,7 +15,11 @@ import {
   buildUserMessage,
   FIXTURE_CONVERSATION_ID
 } from "./support/conversationFixtures"
-import { buildJsonResponse, startBackendFake } from "./support/backendFake"
+import {
+  buildJsonResponse,
+  startBackendFake,
+  type ObservedBackendRequest
+} from "./support/backendFake"
 import { startNativeHostFake } from "./support/nativeHostFake"
 import {
   createControlledPromise,
@@ -34,6 +38,26 @@ const MANUAL_START_SETTINGS: LysSettings = Object.freeze({
   ...initialSettingsState,
   runtime: MANUAL_START_RUNTIME_SETTINGS
 })
+
+/** Route key of the backend's tool list. */
+const TOOL_LIST_ROUTE = "GET /api/v1/tools"
+
+/** Route key of the request that asks the backend to apply the MCP servers. */
+const MCP_SERVER_SYNC_ROUTE = "POST /api/v1/mcp/servers/sync"
+
+/**
+ * Lists the requests a backend double received for one route.
+ *
+ * @param requests - Every request the double received, in arrival order.
+ * @param routeKey - Route whose requests are kept.
+ * @returns The route's requests, in arrival order.
+ */
+function filterRouteRequests(
+  requests: readonly ObservedBackendRequest[],
+  routeKey: string
+): readonly ObservedBackendRequest[] {
+  return requests.filter((request) => request.routeKey === routeKey)
+}
 
 /**
  * Starts a native host whose backend process and vmo are stopped and stay
@@ -104,8 +128,11 @@ describe("App", () => {
       list_tools: () => []
     })
     const backend = startBackendFake({
-      "GET /api/v1/tools": () =>
-        buildJsonResponse(200, { tools: [], unavailableTools: [] })
+      [TOOL_LIST_ROUTE]: () =>
+        buildJsonResponse(200, { tools: [], unavailableTools: [] }),
+      // The shell asks the backend to apply the MCP servers once it runs.
+      [MCP_SERVER_SYNC_ROUTE]: () =>
+        buildJsonResponse(200, { settings: "applied", servers: [] })
     })
     const { useLysStore, App } = await loadFreshApp()
     const { useToolStore } = await import("@/lib/store/tools")
@@ -122,17 +149,53 @@ describe("App", () => {
       useLysStore.setState({ vmoServerInfo: runningVmo })
     })
     await vi.waitFor(() => {
-      expect(backend.requests).toHaveLength(2)
+      expect(
+        filterRouteRequests(backend.requests, TOOL_LIST_ROUTE)
+      ).toHaveLength(2)
     })
     unmount()
     const stoppedVmo: VmoServerInfo = { status: "stopped", problem: null }
     useLysStore.setState({ vmoServerInfo: stoppedVmo })
     await waitForMicrotasks()
 
-    expect(backend.requests).toHaveLength(2)
+    expect(filterRouteRequests(backend.requests, TOOL_LIST_ROUTE)).toHaveLength(
+      2
+    )
     expect(
       host.commands.filter((invoked) => invoked.command === "list_tools")
     ).toHaveLength(2)
+  })
+
+  it("asks the backend to apply the MCP servers when it starts running while mounted, and stops after unmount", async () => {
+    startStoppedDesktopHost()
+    const backend = startBackendFake({
+      [MCP_SERVER_SYNC_ROUTE]: () =>
+        buildJsonResponse(200, { settings: "applied", servers: [] })
+    })
+    const { useLysStore, App } = await loadFreshApp()
+    const { useMcpServerStore } = await import("@/lib/store/mcp-servers")
+    // Settings shows no view that reads the backend on its own.
+    useLysStore.setState({ activeView: "settings" })
+    const { unmount } = render(<App />)
+    await screen.findByRole("main", { name: "Settings" })
+    const runningBackend: BackendServerInfo = { status: "running" }
+    const stoppedBackend: BackendServerInfo = { status: "stopped" }
+
+    act(() => {
+      useLysStore.setState({ backendServerInfo: runningBackend })
+    })
+    await vi.waitFor(() => {
+      expect(useMcpServerStore.getState().list.status).toBe("loaded")
+    })
+    unmount()
+    useLysStore.setState({ backendServerInfo: stoppedBackend })
+    useLysStore.setState({ backendServerInfo: runningBackend })
+    await waitForMicrotasks()
+
+    expect(
+      filterRouteRequests(backend.requests, MCP_SERVER_SYNC_ROUTE)
+    ).toHaveLength(1)
+    expect(useMcpServerStore.getState().list.status).toBe("loaded")
   })
 
   it("switches to Settings and back to the chat on Done", async () => {

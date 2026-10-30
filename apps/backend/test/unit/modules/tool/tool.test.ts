@@ -84,7 +84,7 @@ describe("AgentTool", () => {
         }
       }
     })
-    expect(Object.keys(format.function.parameters.properties)).toEqual([
+    expect(Object.keys(format.function.parameters.properties ?? {})).toEqual([
       "root",
       "target",
       "maxResults"
@@ -147,10 +147,16 @@ describe("AgentTool", () => {
     expect(Object.isFrozen(format)).toBe(true)
     expect(Object.isFrozen(format.function)).toBe(true)
     expect(Object.isFrozen(parameters)).toBe(true)
+    const target = parameters.properties?.["target"]
     expect(Object.isFrozen(parameters.properties)).toBe(true)
     expect(Object.isFrozen(parameters.required)).toBe(true)
-    expect(Object.isFrozen(parameters.properties.target)).toBe(true)
-    expect(Object.isFrozen(parameters.properties.target?.enum)).toBe(true)
+    expect(Object.isFrozen(target)).toBe(true)
+    expect(
+      typeof target === "object" &&
+        target !== null &&
+        "enum" in target &&
+        Object.isFrozen(target.enum)
+    ).toBe(true)
   })
 
   it.each<{
@@ -365,6 +371,305 @@ describe("AgentTool", () => {
   })
 })
 
+describe("AgentTool for an MCP tool", () => {
+  /** Input schema with a nested argument and a keyword Lys does not read. */
+  const inputSchema = {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "File to read." },
+      options: {
+        type: "object",
+        properties: { lines: { type: "array", items: { type: "integer" } } }
+      }
+    },
+    required: ["path"],
+    additionalProperties: false
+  }
+  const readFile = new AgentTool({
+    name: "mcp__files__read_file",
+    description: "Read one file.",
+    group: "mcp",
+    access: "unknown",
+    runner: "mcp",
+    server: "files",
+    serverToolName: "read_file",
+    inputSchema
+  })
+
+  /**
+   * Builds argument text of an exact UTF-8 length.
+   *
+   * @param byteLength - Bytes of the whole text; at least 13.
+   * @param filler - One-byte or two-byte character repeated in the path.
+   * @returns `{"path":"…"}` of that many bytes.
+   */
+  function buildArgumentTextOfBytes(
+    byteLength: number,
+    filler: "a" | "é"
+  ): string {
+    const envelopeBytes = Buffer.byteLength('{"path":""}')
+    const fillerBytes = Buffer.byteLength(filler)
+    const path = filler.repeat((byteLength - envelopeBytes) / fillerBytes)
+    return JSON.stringify({ path })
+  }
+
+  it("reports that what the tool reaches is unknown", () => {
+    expect(readFile.access).toBe("unknown")
+  })
+
+  it("offers the model the server's input schema unchanged, frozen all the way down", () => {
+    const format = readFile.buildAgentFormat()
+
+    expect(format).toEqual({
+      type: "function",
+      function: {
+        name: "mcp__files__read_file",
+        description: "Read one file.",
+        parameters: inputSchema
+      }
+    })
+    const parameters = format.function.parameters
+    const options = parameters.properties?.["options"]
+    expect(Object.isFrozen(parameters)).toBe(true)
+    expect(Object.isFrozen(parameters.properties)).toBe(true)
+    expect(Object.isFrozen(options)).toBe(true)
+  })
+
+  it("returns arrays and objects the model sent, frozen all the way down", () => {
+    const result = readFile.parseCallArguments(
+      '{"path":"/notes/a.md","options":{"lines":[1,2]}}'
+    )
+
+    expect(result).toEqual({
+      status: "valid",
+      arguments: { path: "/notes/a.md", options: { lines: [1, 2] } }
+    })
+    const options =
+      result.status === "valid" ? result.arguments["options"] : undefined
+    expect(result.status === "valid" && Object.isFrozen(result.arguments)).toBe(
+      true
+    )
+    expect(Object.isFrozen(options)).toBe(true)
+    expect(
+      typeof options === "object" &&
+        options !== null &&
+        "lines" in options &&
+        Object.isFrozen(options.lines)
+    ).toBe(true)
+  })
+
+  it("leaves the values to the server, which checks them against its schema", () => {
+    expect(readFile.parseCallArguments('{"path":7,"extra":true}')).toEqual({
+      status: "valid",
+      arguments: { path: 7, extra: true }
+    })
+  })
+
+  it("reads blank text as no arguments for a tool that requires none", () => {
+    const listFiles = new AgentTool({
+      name: "mcp__files__list",
+      description: "List files.",
+      group: "mcp",
+      access: "unknown",
+      runner: "mcp",
+      server: "files",
+      serverToolName: "list",
+      inputSchema: { type: "object" }
+    })
+
+    expect(listFiles.parseCallArguments("  ")).toEqual({
+      status: "valid",
+      arguments: {}
+    })
+  })
+
+  it("accepts argument text of exactly 256 KiB", () => {
+    const argumentText = buildArgumentTextOfBytes(256 * 1024, "a")
+
+    expect(Buffer.byteLength(argumentText)).toBe(256 * 1024)
+    expect(readFile.parseCallArguments(argumentText).status).toBe("valid")
+  })
+
+  it.each([
+    ["one-byte", "a", 256 * 1024 + 1],
+    ["two-byte", "é", 256 * 1024 + 1]
+  ] as const)(
+    "refuses argument text one byte longer than 256 KiB of %s characters",
+    (_label, filler, byteLength) => {
+      const argumentText = buildArgumentTextOfBytes(byteLength, filler)
+
+      expect(Buffer.byteLength(argumentText)).toBe(byteLength)
+
+      expect(readFile.parseCallArguments(argumentText)).toEqual({
+        status: "invalid",
+        message:
+          "The arguments for mcp__files__read_file are longer than 256 KiB."
+      })
+    }
+  )
+
+  it("names a required argument the model left out", () => {
+    const result = readFile.parseCallArguments('{"options":{}}')
+
+    expect(result.status).toBe("invalid")
+    expect(result.status === "invalid" && result.message).toContain(
+      "mcp__files__read_file"
+    )
+    expect(result.status === "invalid" && result.message).toContain("path")
+  })
+
+  it.each([
+    ["text that is not JSON", '{"path":'],
+    ["a JSON value that is not an object", '["/notes"]'],
+    ["blank text while an argument is required", ""],
+    ["a key outside the argument-name rule", '{"path":"/a","my-key":1}'],
+    ["a __proto__ key at the top", '{"path":"/a","__proto__":{"x":1}}'],
+    ["a __proto__ key deep inside", '{"path":"/a","o":{"__proto__":{}}}'],
+    [
+      "values nested deeper than 32 arrays and objects",
+      `{"path":"/a","deep":${"[".repeat(32)}${"]".repeat(32)}}`
+    ]
+  ])("explains %s to the model, naming the tool", (_label, argumentText) => {
+    expect(readFile.parseCallArguments(argumentText)).toEqual({
+      status: "invalid",
+      message: expect.stringContaining("mcp__files__read_file")
+    })
+  })
+
+  it("accepts values nested exactly 32 arrays and objects deep, the arguments object included", () => {
+    const argumentText = `{"path":"/a","deep":${"[".repeat(31)}${"]".repeat(31)}}`
+
+    expect(readFile.parseCallArguments(argumentText).status).toBe("valid")
+  })
+})
+
+describe("toolDefinitionSchema for an MCP tool", () => {
+  const mcpDefinition = {
+    name: "mcp__files__read_file",
+    description: "Read one file.",
+    group: "mcp",
+    access: "unknown",
+    runner: "mcp",
+    server: "files",
+    serverToolName: "read_file",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+      $schema: "https://json-schema.org/draft/2020-12/schema"
+    }
+  }
+
+  it("keeps every keyword of the input schema", () => {
+    expect(toolDefinitionSchema.parse(mcpDefinition)).toEqual(mcpDefinition)
+  })
+
+  it.each<{
+    readonly problem: string
+    readonly input: unknown
+    readonly path: readonly (string | number)[]
+  }>([
+    {
+      problem: "a name without the server's prefix",
+      input: { ...mcpDefinition, name: "mcp__notes__read_file" },
+      path: []
+    },
+    {
+      problem: "a server name outside the server-name rule",
+      input: {
+        ...mcpDefinition,
+        server: "My_Files",
+        name: "mcp__My_Files__read_file"
+      },
+      path: ["server"]
+    },
+    {
+      problem: "an empty server tool name",
+      input: { ...mcpDefinition, serverToolName: "" },
+      path: ["serverToolName"]
+    },
+    {
+      problem: "a server tool name longer than 128 characters",
+      input: { ...mcpDefinition, serverToolName: "a".repeat(129) },
+      path: ["serverToolName"]
+    },
+    {
+      problem: "an empty description",
+      input: { ...mcpDefinition, description: "" },
+      path: ["description"]
+    },
+    {
+      problem: "a description longer than 4096 characters",
+      input: { ...mcpDefinition, description: "a".repeat(4097) },
+      path: ["description"]
+    },
+    {
+      problem: "an input schema that is not an object schema",
+      input: { ...mcpDefinition, inputSchema: { type: "string" } },
+      path: ["inputSchema", "type"]
+    },
+    {
+      problem: "a property name outside the argument-name rule",
+      input: {
+        ...mcpDefinition,
+        inputSchema: { type: "object", properties: { "my-path": {} } }
+      },
+      path: ["inputSchema", "properties", "my-path"]
+    },
+    {
+      problem: "a required name outside the argument-name rule",
+      input: {
+        ...mcpDefinition,
+        inputSchema: { type: "object", required: ["1path"] }
+      },
+      path: ["inputSchema", "required", 0]
+    },
+    {
+      problem: "an input schema nested deeper than 32 arrays and objects",
+      input: {
+        ...mcpDefinition,
+        inputSchema: JSON.parse(
+          `{"type":"object","x":${"[".repeat(32)}${"]".repeat(32)}}`
+        ) as unknown
+      },
+      path: ["inputSchema"]
+    },
+    {
+      problem: "an input schema with a __proto__ key",
+      input: {
+        ...mcpDefinition,
+        inputSchema: JSON.parse(
+          '{"type":"object","properties":{"__proto__":{"type":"string"}}}'
+        ) as unknown
+      },
+      path: ["inputSchema"]
+    },
+    {
+      problem: "a field the MCP variant lacks",
+      input: { ...mcpDefinition, arguments: [] },
+      path: []
+    }
+  ])("rejects $problem", ({ input, path }) => {
+    const result = toolDefinitionSchema.safeParse(input)
+
+    expect(result.success).toBe(false)
+    expect(result.error?.issues.map((issue) => issue.path)).toContainEqual(path)
+  })
+
+  it("rejects one of Lys's own tools whose name starts with mcp__", () => {
+    const result = toolDefinitionSchema.safeParse({
+      name: "mcp__files__read_file",
+      description: "Read one file.",
+      group: "files",
+      access: "reads",
+      runner: "client",
+      arguments: []
+    })
+
+    expect(result.error?.issues.map((issue) => issue.path)).toEqual([["name"]])
+  })
+})
+
 describe("toolDefinitionSchema", () => {
   /** Valid string argument that a case may change in one field. */
   const rootArgument = {
@@ -396,6 +701,7 @@ describe("toolDefinitionSchema", () => {
       ...searchFilesDefinition,
       arguments: [rootArgument, targetArgument]
     })
+    if (definition.runner === "mcp") throw new Error("Expected a Lys tool")
     const [root, target] = definition.arguments
 
     expect(Object.isFrozen(definition)).toBe(true)
@@ -414,6 +720,7 @@ describe("toolDefinitionSchema", () => {
       arguments: [{ ...rootArgument, name }]
     })
 
+    if (definition.runner === "mcp") throw new Error("Expected a Lys tool")
     expect(definition.name).toBe(name)
     expect(definition.arguments[0]?.name).toBe(name)
   })
@@ -445,14 +752,14 @@ describe("toolDefinitionSchema", () => {
       issue: { code: "invalid_value", path: ["group"] }
     },
     {
-      problem: "a runner that is neither the client nor the backend",
+      problem: "a runner that is neither the client, the backend, nor MCP",
       input: { ...searchFilesDefinition, runner: "desktop" },
-      issue: { code: "invalid_value", path: ["runner"] }
+      issue: { code: "invalid_union", path: ["runner"] }
     },
     {
       problem: "a definition without a runner",
       input: { ...searchFilesDefinition, runner: undefined },
-      issue: { code: "invalid_value", path: ["runner"] }
+      issue: { code: "invalid_union", path: ["runner"] }
     },
     {
       problem: "an access level no tool has",

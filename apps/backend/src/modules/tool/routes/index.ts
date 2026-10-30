@@ -6,6 +6,7 @@ import {
   type ListBackendToolsApiRoute,
   type UnavailableBackendTool
 } from "@lys/protocol"
+import type { McpToolDefinition } from "@lys/share"
 import type { FastifyInstance } from "fastify"
 import * as z from "zod"
 import type { BuiltInToolEntry, TurnToolLookup } from "../builtIn/builtInTool"
@@ -14,9 +15,9 @@ import type { BuiltInToolEntry, TurnToolLookup } from "../builtIn/builtInTool"
  * Registers the endpoints that list the tools the backend runs and check the
  * web search tool's saved key.
  *
- * @param app - Application whose singleton services hold the built-in tools
- * and the web search tool provider, with the zod validator compiler
- * installed.
+ * @param app - Application whose singleton services hold the built-in tools,
+ * the web search tool provider, and the MCP server registry, with the zod
+ * validator compiler installed.
  * @returns A promise that resolves after route registration completes.
  * @throws If Fastify cannot register a route. The failure rejects the
  * promise, so `app.register` reports it rather than an uncaught exception.
@@ -32,15 +33,19 @@ export default function registerToolRoutes(
 }
 
 /**
- * Registers the endpoint that lists the built-in tools.
+ * Registers the endpoint that lists the built-in tools and the tools of the
+ * connected MCP servers.
  *
- * @param app - Application whose singleton services hold the built-in tools.
+ * @param app - Application whose singleton services hold the built-in tools
+ * and the MCP server registry.
  * @throws If Fastify cannot register the route.
- * @remarks The definitions are fixed for the backend's lifetime; each request
- * looks up every tool again to report which cannot run now.
+ * @remarks The built-in definitions are fixed for the backend's lifetime;
+ * each request looks up every built-in tool again to report which cannot
+ * run now, and lists the MCP tools of the servers connected at that moment.
  */
 function registerListBackendToolsRoute(app: FastifyInstance): void {
   const entries = app.builtInTools
+  const registry = app.mcpServerRegistry
   app.route<ListBackendToolsApiRoute>({
     method: listBackendToolsApi.method,
     url: listBackendToolsApi.path,
@@ -51,7 +56,7 @@ function registerListBackendToolsRoute(app: FastifyInstance): void {
         })
       }
     },
-    handler: () => buildBackendToolList(entries)
+    handler: () => buildBackendToolList(entries, registry.listToolDefinitions())
   })
 }
 
@@ -86,12 +91,15 @@ function registerCheckWebSearchKeyRoute(app: FastifyInstance): void {
  * Builds the tool list with every tool's availability now.
  *
  * @param entries - Every built-in tool, in Settings order.
- * @returns Every definition in order, and each tool that cannot run now with
- * why, in the same order.
+ * @param mcpTools - Tools of the connected MCP servers, in settings order;
+ * each can run.
+ * @returns Every built-in definition in order, then the MCP tools, and each
+ * built-in tool that cannot run now with why, in the same order.
  * @throws A provider's defect.
  */
 async function buildBackendToolList(
-  entries: readonly BuiltInToolEntry[]
+  entries: readonly BuiltInToolEntry[],
+  mcpTools: readonly McpToolDefinition[]
 ): Promise<ListBackendToolsApiResponse> {
   const lookups = await Promise.all(
     entries.map((entry) => entry.provider.findTurnTool())
@@ -99,7 +107,10 @@ async function buildBackendToolList(
   const unavailableTools = entries.flatMap((entry, index) =>
     findUnavailableTool(entry, lookups[index])
   )
-  const tools = Object.freeze(entries.map((entry) => entry.definition))
+  const tools = Object.freeze([
+    ...entries.map((entry) => entry.definition),
+    ...mcpTools
+  ])
   return Object.freeze({
     tools,
     unavailableTools: Object.freeze(unavailableTools)

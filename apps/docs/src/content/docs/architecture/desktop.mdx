@@ -22,6 +22,7 @@ presentation state, not durable conversation storage.
 | Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of every tool, the app's and the backend's, the session-only Tool calls switch, and the offer each request makes from them.                                                                    |
 | Tool calls          | `src/lib/store/tool-calls` follows each running reply, shows the backend's approval prompts, runs the client tools' calls the backend sends, and sends every answer.                                                                               |
 | Tool approvals      | `src/lib/store/tool-settings.ts` owns each tool's switch and its Ask me or Just run, saved as the `tools` group of `settings.json`, and their automatic save.                                                                                      |
+| MCP servers         | `src/lib/store/mcp-servers.ts` owns the backend's states of the MCP servers, their sync and reconnect, and the polling while one connects; the application store's `mcp-settings.ts` slice saves the `mcp` group.                                  |
 | Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend and vmo run, and settings loaded from Tauri; `vmo-runtime.ts` owns vmo's state and its start and stop, and `runtime-autostart-settings.ts` saves the two startup switches. |
 | Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer.                                                                                                                       |
 | SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops, approval answers, and tool results.                                                                                         |
@@ -29,16 +30,17 @@ presentation state, not durable conversation storage.
 
 ## Chat state split
 
-The desktop currently has six separate state systems:
+The desktop currently has seven separate state systems:
 
-| Store                   | Owns                                                                                                                                                                                                                |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat Zustand store      | Active conversation, the agent selected for a new conversation, request and open tokens, local abort controllers, streamed reply parts and sources, the staged files and the last refusal of one, inline error text |
-| History Zustand store   | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes                                                                                      |
-| Agent Zustand store     | Every listed built-in and stored agent, the open editor or read-only view and its draft, the save attempt, the pending save or delete, the most recently saved agent                                                |
-| Tool Zustand store      | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch                                                                                                                       |
-| Tool-call Zustand store | Every approval prompt and tool call held until the backend takes its answer, and the reply follows that deliver them                                                                                                |
-| Shell Zustand store     | Active top-level view, loaded settings (each tool's saved approval included), backend process status, startup progress                                                                                              |
+| Store                    | Owns                                                                                                                                                                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat Zustand store       | Active conversation, the agent selected for a new conversation, request and open tokens, local abort controllers, streamed reply parts and sources, the staged files and the last refusal of one, inline error text |
+| History Zustand store    | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes                                                                                      |
+| Agent Zustand store      | Every listed built-in and stored agent, the open editor or read-only view and its draft, the save attempt, the pending save or delete, the most recently saved agent                                                |
+| Tool Zustand store       | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch                                                                                                                       |
+| Tool-call Zustand store  | Every approval prompt and tool call held until the backend takes its answer, and the reply follows that deliver them                                                                                                |
+| MCP server Zustand store | The backend's list of applied MCP servers and their states, and why the latest sync or reconnect failed                                                                                                             |
+| Shell Zustand store      | Active top-level view, loaded settings (each tool's saved approval and the saved MCP servers included) and the latest save of the servers, backend process status, startup progress                                 |
 
 The transcript shown in the window is built from backend events for the current
 request, or from the stored transcript read when a past conversation is opened.
@@ -545,24 +547,31 @@ stored under its code.
 
 ## Tool settings
 
-The Tools pane lists Lys's tools. Client tools run in the desktop app and work
+The Tools pane lists Lys's tools and the tools of the connected MCP servers.
+Client tools run in the desktop app and work
 with files, the clock, and the saved location on the user's machine; the tool store reads them from the
 [`list_tools` command](/architecture/host/#client-tool-list). Backend tools run
 in the backend and reach the web; the store reads them from
-[`GET /api/v1/tools`](/reference/api/#tool-list). Both lists are read when the pane
+[`GET /api/v1/tools`](/reference/api/#tool-list), which also lists the tools
+of every connected MCP server, after the backend's own. Both lists are read when the pane
 first appears, client tools first; a failed read of either list, or a name both
-lists share, shows the failure above the pane with Retry. Tools are grouped by
-their `group` (`files`, `web`, `time & place`), and each group says how many of
-its tools are on.
+lists share, shows the failure above the pane with Retry. Lys's tools are grouped by
+their `group` (`files`, `web`, `time & place`); each MCP server's tools form a
+group of their own, headed `MCP · <server>`, after Lys's groups. Each group
+says how many of its tools are on.
 
-Each row shows the tool's name, what it does with the machine (`reads` or
-`network`), where it runs (`in Lys` for a client tool, `in backend` for a
-backend tool), its description, an estimate of the tokens it adds to each
+Each row shows the tool's name, what it does with the machine (`reads`,
+`network`, or `depends on server` for an MCP tool), where it runs (`in Lys`
+for a client tool, `in backend` for a backend tool, `on MCP server` for an MCP
+tool), its description, an estimate of the tokens it adds to each
 request, and a switch. The estimate measures the function tool a model receives, built
 by `buildToolFunctionFormat` from `@lys/share`, with the composer's text
 estimator, so it varies with the model's tokenizer. Expanding a row, one at a
 time, shows the tool's arguments with their type and whether they are required;
-an enum argument shows `enum · N` and its accepted values. It also shows where
+an enum argument shows `enum · N` and its accepted values. An MCP tool's
+arguments are the properties of its input schema, in the schema's order, each
+with its type when the property names one type and `JSON` otherwise; their
+accepted values are not listed. It also shows where
 the tool runs and whether Lys asks before it runs.
 
 The tool-calls card holds the master switch and a status line. The status line
@@ -576,7 +585,9 @@ Tool calls on or off and each tool's switch apply to the next chat request,
 because they decide only which tools a request offers; switching a tool off
 while a reply runs does not stop that reply's calls. A tool that only reads
 this machine starts on; a tool that sends requests off the machine (`network`)
-starts off. Switching a tool saves its choice in the `tools.switches` object
+starts off. An MCP tool starts on, though what it does depends on its server:
+the person added the server for its tools, and each of its calls still asks
+first unless they choose Just run. Switching a tool saves its choice in the `tools.switches` object
 of `settings.json`, alongside its approval, so it holds after a restart; a
 tool the person never switched has no entry and stays at its default, also
 when a later build adds it. The Tool calls switch lasts for the session
@@ -586,8 +597,10 @@ Every tool, network tools included, offers both approvals and starts on Ask
 me. The note under "Before it runs" says what each does: on Ask me, "Each call
 waits for you with its arguments. Nothing runs until you allow it."; on Just
 run, a tool that only reads this machine "Runs the moment the model asks,
-without showing you the call.", and a `network` tool "Sends its request off
-this machine the moment the model asks, without showing you what it sends."
+without showing you the call.", a `network` tool "Sends its request off
+this machine the moment the model asks, without showing you what it sends.",
+and an MCP tool "Runs on its MCP server the moment the model asks, without
+showing you what it sends. What it does depends on the MCP server."
 Choosing Just run saves the tool's name in the `tools.justRun` list of
 `settings.json`, and choosing Ask me removes it, so the approval holds after a
 restart. The application store owns that list and the switches: a change
@@ -618,6 +631,12 @@ from the pane would replace the file with the settings loaded earlier. The
 person's choice is kept and applies again once the tool can run; group counts
 and the offered totals count only tools that are on and can run.
 
+An MCP tool never shows as unable to run. The backend lists a server's tools
+only while the server is connected, so a server that is connecting or failed
+has no rows, and its tools come back once it connects; see
+[MCP servers](#mcp-servers). A switch or approval saved for a tool its server
+no longer lists is kept and has no effect.
+
 Below the tools, a "your location" section holds the location `get_location`
 returns: City, Region, and Country fields, each labelled, described by the
 hint "Each field is optional and holds up to 100 characters.", and filled
@@ -633,6 +652,183 @@ edit; otherwise that the edit is invalid or unsaved; otherwise whether a
 location is saved. The application store's location slice owns the save,
 serialized with the other group saves, and changes its location only once the
 file holds the new one, because the tool reads the file.
+
+## MCP servers
+
+The MCP pane, sixth in the settings rail and before Providers, lists the MCP
+servers saved in the `mcp` group of `settings.json`, in their saved order, and
+the state the backend reports for each. The servers are listed from the
+settings whether or not the backend runs, and can be edited either way; their
+states need the backend. The
+[configuration reference](/reference/configuration/#mcp-servers) gives the
+rules a server follows, and the [API reference](/reference/api/#mcp-servers)
+the states and their reasons.
+
+A heading line, `servers`, says how many servers are saved and, while the
+backend runs and its list is read, how many are connected, how many of their
+tools are on, and what those tools add to each request in tokens. Add server
+opens an empty editor for a local program; it is disabled while a save runs
+and once 16 servers are saved, which a note then says. Without servers, the
+pane says what a server is for and offers two cards, Local program (`stdio`)
+and Remote server (`http`), each opening the editor for that transport.
+While servers are saved, a warning above the list says when nothing from
+them is offered, because tool calls are off or the loaded model is not
+trained for tool calls, with Open Tools, which opens the Tools pane.
+
+Each server is a row whose summary is a button that shows or hides its
+details; at most one row shows them. The summary shows a dot coloured by the
+state, the server's name, its transport tag, a tag for a state other than
+connected (`starting`, `connecting`, `failed`, or `not applied`), the command
+with its arguments or the URL with any query hidden as `?…`, and, for a
+connected server, how many of its tools are on, as `N tools` or
+`N of M tools`. The button is named by the server's name and described by
+the transport, the state, the target, and the count. A row never shows an
+environment value, a token, a header value, or a URL's query, which can hold
+a key.
+
+The details hold four parts:
+
+- A state line with a heading and a detail: `Running` or `Connected` with how
+  many tools the server lists and how many the backend skipped; `Starting`
+  or `Connecting`, naming the host of a URL; `Failed` with a sentence for the
+  reason; `Not applied` for a saved server the backend does not list; or why
+  the state is unknown. It is a polite status that names the server, so a
+  change is announced once. Its button reads `Retry` after a failure,
+  `Restart` or `Reconnect` while the server is connected or connecting, and
+  `Start` or `Connect` otherwise; it is named by its text and the server and
+  disabled while the backend is not running.
+- The tools, each a chip that switches the tool on or off: a toggle button
+  named by the server's name for the tool, with its description as a tooltip.
+  A switched-off tool is crossed out. The switch is the one the Tools pane
+  shows, saved in the `tools` group. A meta line counts the tools that are on
+  and their token estimate. Without tools, a note says why: the server is
+  not connected, its tools are being listed, it failed before listing them,
+  the tool list could not be read, or it lists none Lys can offer. A connected
+  server whose tools the backend skipped, or that lists more tools than the
+  128 Lys reads, has a Skipped tools toggle that lists each skipped tool's
+  name, or `(no name)`, with why, and says when Lys read only the first 128.
+- Before its tools run, a choice of Ask me or Just run that sets every listed
+  tool of the server at once. It selects neither while the tools differ, and
+  pressing the selected choice again changes nothing. While the server lists
+  no tool, it is disabled, and its note says each tool will follow the
+  choice saved for it, a tool without one asking first.
+- The configuration as saved in `settings.json`: the transport, the command,
+  arguments, and the names of the environment variables, or the URL with its
+  query hidden, the sign-in (`none` or `bearer token`), and the names of the
+  other headers.
+
+A status line below the list and the editor, named `Tool choices save`, says
+"Saving tool choices…" while a change of a tool's switch or approval is
+saved, and after a failed save says what the Tools pane says and offers
+Retry saving; the failed choice stays selected.
+
+Remove and Edit are named after the server and disabled while a save of the
+servers runs. Remove asks `remove <server>?`, or
+`remove <server> and its secrets?` for a server with variables or headers,
+with Keep, which takes focus, and Remove; Escape keeps the server. Once a
+removal is saved, the removed server's details close, and focus moves to Add
+server, after each removal, unless the person moved focus to another control
+while the save ran: that control keeps focus, and another server's details
+stay shown.
+
+The editor replaces the list while it is open, for one server at a time, and
+focus starts in its name field. A top bar holds the way back, named by its
+visible text, `mcp servers`, an `unsaved` tag while a saved server's draft differs
+from it, and the heading, `new server` or `editing · <name>`. A new server's
+editor offers to fill the fields from a pasted config: Paste JSON reads the
+text on each edit and fills the draft from the first server of an
+`mcpServers`, `servers`, or `mcp_servers` map, a bare map of servers, or a
+single server object, taking its name from the key. A URL (or `serverUrl`)
+wins over a command; `args`, `env`, and `headers` fill their fields, and a
+bearer `Authorization` header becomes the token. A polite status describes
+the field and says which server filled it, or why the text cannot: not JSON,
+no server, no command or URL, values that are not text, or a server whose
+`type` is `sse`, in any case, which Lys cannot use. Only the type marks a
+server as SSE: a URL alone, whatever its path, fills a remote server.
+
+How it runs is a choice of two cards, Local program and Remote server, that
+keeps what was typed for the other. A local program has Command, Arguments
+on one line, separated by spaces, with double or single quotes around an
+argument that holds a space and backslash escapes, and Environment, rows of a
+name and a value. A remote server has URL, Sign-in, a choice of None or
+Token, and Headers, rows of a name and a value. The token is sent as
+`Authorization: Bearer <token>` and saved as that header; an `Authorization`
+row beside a token is a problem. A list's rows sit under two visible column
+labels, Name and Value, which start each input's name, such as
+`Name of variable 1`. Values are password fields with a show
+toggle: saved and pasted values start hidden, and a row the person adds
+starts shown, with focus in its name. Removing a row moves focus to its add
+button. Name, and Command or URL, say `required` beside their labels and are
+marked required; each field's hint gives its rule or format before anything
+is typed, the name's being up to 20 characters, lowercase letters and digits
+joined by single hyphens, and a note under the name shows the prefix its
+tools arrive with, `mcp__<name>__`. The hints say that variable and header
+values are saved in plain text.
+
+Save, Enter in a one-line field, or ⌘ Enter (Ctrl Enter) from any field
+checks the draft with the shared server rules and the other servers' names:
+from then on each field shows its first problem as the person types. A
+problem in a row names the row by its position and marks the input it
+concerns invalid, described by the problem: the name or value that breaks a
+rule, the name of the first row that repeats an earlier row's name, or the
+name of an `Authorization` row beside a token. A problem of a whole list,
+such as too many rows, marks no row. When one field has a problem, focus
+moves to its control, which for a row's problem is that row's input; when
+several have, focus moves to a summary above the fields, headed
+`Fix N fields to save:`, that lists each one's label and problem in field
+order as a button that moves focus to the field's control. The summary
+stays while two or more fields have a problem. A valid draft is saved: an
+edited server keeps its place, and a new one is added at the end. Save reads
+Add server for a new server. Escape, Cancel, or the back button closes the
+editor. While a save runs, the fields are read-only and the actions
+disabled; a failed save is shown in the editor as an alert. A list that
+breaks a rule of the whole group, such as the 512 KiB the servers may take
+together, is not written, and the alert names that rule. After a save, or
+after closing a saved server's editor, that server's details show and its
+Edit button takes focus once: showing the details again later moves no
+focus. Closing a new server's editor moves focus to Add server.
+
+A save replaces the `mcp` group through the host, serialized with the other
+group saves, and the application store's servers change only once the file
+holds them, because the backend reads the file. When the save worked and the
+backend runs, the MCP server store asks the backend to apply the group with
+[`POST /api/v1/mcp/servers/sync`](/reference/api/#mcp-servers) and shows the
+list it answers, with new and changed servers connecting. The state line's
+button sends `POST /api/v1/mcp/servers/:serverName/reconnect`; when the backend answers
+that no applied server has the name, as for a saved server the backend has
+not applied yet, the store applies the saved group instead, unless the
+backend stopped since the reconnect started. A read of the
+states asked while a sync or reconnect runs, including the sync a reconnect
+falls back to, waits for it and shows the list it answers. The HTTP client,
+`src/lib/apis/http/mcp.ts`, validates every answer with the schemas of
+`@lys/protocol`; none of them holds a command, URL, environment value, or
+header. When a request fails, the client says whether it did not reach the
+backend, which HTTP status the backend answered, naming nothing else from the
+answer, or that the answer was not a valid server list.
+
+A polite status line above the list, named MCP status, says what the
+backend's answers mean for the servers as a whole: that the backend must be
+started in Settings → Runtime; that the states could not be read, with Retry,
+which reads them again; that the backend keeps the servers it applied last,
+because the `mcp` group isn't valid or `settings.json` can't be read; that
+the request of a sync or reconnect failed, with the client's reason, with
+Retry after a sync, which asks the backend to apply the saved servers again;
+and, while the editor is closed,
+that a save failed. Retry shows only while the backend runs. A sync or
+reconnect clears the failure shown when it starts, so a failure that repeats
+is announced again.
+
+While the app shell is mounted, the MCP server refresh asks the backend to
+apply the saved servers when it starts running, which also answers their
+states, so servers saved while it was starting are applied, and it forgets
+the states when the backend stops. While
+any server is connecting, it reads them again once a second, and it stops
+once none is. When the set of connected servers or their tool counts changes,
+it reads the tool list again, if it was read before, so the Tools pane and the
+next request follow. A read joins one already running, and an answer older
+than one already shown is dropped. The pane reads the states each time it
+appears while the backend runs, and when the backend starts while it is shown,
+and it reads the tool list once when it was never read.
 
 ## Providers
 
@@ -697,24 +893,29 @@ a polite live region that describes the field.
 
 A chat request offers the switched-on tools when tool calls are on and the
 loaded model's `trainedForToolUse` is true: client tools by their definitions,
-backend tools by name in `backendToolNames`, leaving out every backend tool
-that cannot run now. For such a model it also names, in
-`switchedOffToolNames`, every listed tool whose switch is off, and, in
+backend tools and MCP tools by name in `backendToolNames`, leaving out every
+backend tool that cannot run now. For such a model it also names, in
+`switchedOffToolNames`, every listed Lys tool whose switch is off, and, in
 `unavailableTools`, every switched-on backend tool that cannot run now with
 the list's reason, so the backend can tell the model why a tool it needs
-cannot be used instead of letting it guess. While tool calls are off, the
+cannot be used instead of letting it guess. MCP tools are never named in
+either list: one server may list more tools than a request may name, and the
+list never says that one cannot run. While tool calls are off, the
 request names no tool and sends `areToolCallsSwitchedOff` instead, without
 reading the tool list, so the backend tells the model tool calls are off. If
 the tool list cannot be read while tool calls are on, the request fails with
 an inline error and nothing is sent. A model that is not trained for tool use
 gets none of these fields. The composer's context meter measures the same fields. When the backend still refuses an offered
-tool that cannot run (its key was removed since the list was read), the request
-fails with an inline error that says which tool and what to do, and the tool
+tool that cannot run (its key was removed, or its MCP server stopped being
+connected, since the list was read), the request
+fails with an inline error that says which tool and what to do, such as
+"`mcp__files__read` is unavailable: its MCP server isn't connected. See
+Settings → MCP, or switch `mcp__files__read` off.", and the tool
 list is read again so the next request leaves the tool out.
 
 The backend's tool approval service decides which calls need the person: every
-call of a tool that is not saved as Just run, client and backend tools alike,
-except `read_attachment` and the agent state tools, which run without
+call of a tool that is not saved as Just run, client, backend, and MCP tools
+alike, except `read_attachment` and the agent state tools, which run without
 approval (see the
 [backend's tool approval](/architecture/backend/#tool-approval)). The
 desktop does not decide; it reads neither the switches nor the saved Just run
@@ -733,7 +934,9 @@ so a snapshot built before the answer arrived does not bring it back:
    cannot describe) is answered `showFailed` at once. A backend tool's call is
    checked too, so the card never describes a URL or a query the backend would
    not send; a query holding a character hidden on screen is refused by the
-   same rule the backend applies.
+   same rule the backend applies. An MCP call is always shown: the backend
+   checked that its arguments are a JSON object, and the card shows every
+   argument as it is.
 2. Every other prompt waits for the person.
 3. A call to run is run at once and its result sent; a call the desktop
    cannot run is answered `runFailed`. Nothing is shown. The desktop does not
@@ -748,7 +951,11 @@ with the machine, where it runs, a plain sentence such as "Read
 Settings → Tools. Nothing is changed.", "Read
 https://example.com/page.", with the full URL,
 or "Search the web for “latest Node.js release”. Sends the query to Tavily
-(api.tavily.com).", with the full query, and its arguments on request. Reject sends the composer's text as the reason;
+(api.tavily.com).", with the full query, and its arguments on request. An
+MCP call asks "Run read_file on the MCP server files?", by the name the
+server calls the tool, and shows its arguments from the start, because what
+the tool does depends on the server. The arguments show text as it is and
+any other value, an object or an array included, as compact JSON. Reject sends the composer's text as the reason;
 Allow once answers `allowed`, after which the backend runs its tool or sends a
 client tool's call back to run; Allow anyway does the same while keeping the
 text. In the field, Escape rejects,
@@ -756,8 +963,8 @@ Enter with an empty draft allows, and Enter with text rejects with that text.
 Several calls wait in the model's order, one card at a time.
 
 A read sends the file's text, a search sends its report as JSON, and a
-declared tool failure sends the failure as JSON. A backend tool's result goes
-from the backend to the model; the desktop receives it only as part of the
+declared tool failure sends the failure as JSON. A backend or MCP tool's
+result goes from the backend to the model; the desktop receives it only as part of the
 stored call, in a `reply-part` event while the reply streams and in the
 reply's parts of a `reply-snapshot` or of the stored conversation, and shows
 it in the reply's steps.
@@ -803,7 +1010,14 @@ are gone and the reply is marked interrupted when the backend next starts.
   way to open it.
 - The Tavily, Ollama, and Groq API keys are stored as plain text in
   `settings.json`, protected only by the file's owner-only permissions; there
-  is no keychain storage.
+  is no keychain storage. So are MCP environment values, tokens, and headers;
+  the MCP editor hides them until the person shows them.
+- The servers' states are read when the backend starts, each time the MCP
+  pane appears, after a save or a reconnect, and once a second only while a
+  server connects. When the states first appear while the pane is open, as
+  when the backend starts, each row announces its state once. A server whose connection ends while the pane stays open
+  still shows as connected until one of those; a request that offers its tools
+  is refused and reads the tool list again, which leaves the tools out.
 - The Tool calls switch lasts for the session only; after a restart it is on
   again. Each tool's switch and approval are saved.
 - There is no "Allow for this chat": each call on Ask me is asked about.

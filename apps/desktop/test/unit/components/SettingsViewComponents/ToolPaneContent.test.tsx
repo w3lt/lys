@@ -102,7 +102,7 @@ async function startToolPane(
   )
   render(<SettingsView onDone={vi.fn()} />)
   // The closing note is withheld until the lazily loaded pane body is shown.
-  await screen.findByText(/^Tools come from Lys itself/)
+  await screen.findByText(/^Lys's own tools cannot be added or removed here/)
   await waitForRenderedWork()
   return useLysStore
 }

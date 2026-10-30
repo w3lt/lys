@@ -481,7 +481,13 @@ async function mapWithConcurrencyLimit<Item, Result>(
   const results: Result[] = []
   const failures: unknown[] = []
   const entries = items.entries()
-  /** Maps the next untaken item until none is left or a call failed. */
+  /**
+   * Maps the next untaken item, one at a time, until none is left or a call
+   * failed.
+   *
+   * @returns Resolves once no item is left, or after its call settles once
+   * any call has failed; never rejects, because failures are collected.
+   */
   async function runWorker(): Promise<void> {
     for (const [index, item] of entries) {
       try {

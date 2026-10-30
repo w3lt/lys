@@ -120,8 +120,10 @@ each call still asks first unless the person set the tool to Just run; see
 - A stdio MCP server runs as the person's OS account with the command the
   person configured: it can read, change, and send anything that account can,
   and Lys does not confine it. A command such as `npx -y <package>` runs
-  whatever the package registry serves at each start. Closing a server
-  signals only the process Lys started, not the processes it started in turn.
+  whatever the package registry serves at each start. Closing a server ends
+  every process of the process group its command runs in, a server a
+  launcher such as `npx` runs included, but not a process that leaves that
+  group, such as one that starts a session of its own.
 - An MCP server writes its tools' descriptions, input schemas, and results,
   and all reach the model. A description is offered as the tool's
   description, cleaned of invisible characters and cut to 4,096 characters,

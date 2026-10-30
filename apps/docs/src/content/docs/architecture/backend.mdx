@@ -775,21 +775,30 @@ Stopping a session cancels its opening or closes its connection, and a
 connection an opening returns after the stop is closed at once. Closes run in
 the background, and the registry keeps each until it settles. Stopping also
 returns the session's release, which settles once its opening ended and every
-connection it led to closed, a command server's process included; for a
-process that does not exit when its input closes, that takes up to about four
-seconds. The registry keeps the release of every session it stopped until it
+connection it led to closed, a command server's whole process group
+included; for a group that does not end when its input closes, that takes
+up to about four seconds. The registry keeps the release of every session it stopped until it
 settles, and every new session, after Reconnect or a new, changed, renamed,
 or re-added server, opens only once all of them settled, whatever names
 their servers had; applying the group stops every session it does not keep
-before it starts any. So the process a command started has ended before the
-next one starts, and a session stopped while it waits opens nothing. That
-covers only the process the command started, not processes it starts
-itself: behind a launcher such as `npx`, a server that ignores both its
-input closing and `SIGTERM` still runs after the release, as `SIGKILL`
-reaches only the launcher ([#284](https://github.com/w3lt/lys/issues/284)). It runs until the desktop app stops a running
-backend, which ends the backend's whole process group. Every
-state change happens in one synchronous step, so a lookup sees one consistent
-state.
+before it starts any. So every process of a command's process group has
+ended before the next one starts, a server a launcher such as `npx` or `uvx`
+runs included, and a session stopped while it waits opens nothing. A process
+that leaves the group, such as one that starts a session of its own, is not
+covered. Every state change happens in one synchronous step, so a lookup sees
+one consistent state.
+
+When the backend's own process ends, its stdio servers' process groups end
+with it, because the desktop host's stop of the backend's group does not
+reach them. `McpServerProcessGroups` (`mcpServerProcessGroups.ts`) holds each
+group from the start of its command until no process of it is left, and
+`registerBackendStopHandlers` (`processStop.ts`) sends `SIGKILL` at once to
+every group it still holds: on `SIGTERM`, which the desktop host sends first,
+and on `SIGINT` and `SIGHUP`, after which the backend exits with 128 plus the
+signal's number, and on any other exit Node runs `exit` listeners for. A
+backend killed with `SIGKILL` runs nothing; its servers then see their
+standard input close. A URL server's session is not ended then; the server
+ends it at its own time limit.
 
 ### Opening a server
 
@@ -804,8 +813,10 @@ room for a command such as `npx` that downloads the server before it starts.
 its transport. Lys introduces itself as `lys` with the backend's version and
 declares no client capabilities.
 
-- **stdio.** The SDK's `StdioClientTransport` starts the command with its
-  arguments, without a shell, in the person's home folder. The process gets
+- **stdio.** `McpServerProcess` (`mcpServerProcess.ts`) starts the command
+  with its arguments, without a shell, in the person's home folder, in a new
+  session and process group of its own, which every process it starts joins
+  unless it leaves it. The process gets
   `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, and `USER` from the backend's
   own environment, plus the configured variables, which win over them; it
   inherits nothing else. A command is looked up on that `PATH`, which for an
@@ -813,19 +824,23 @@ declares no client capabilities.
   ([#258](https://github.com/w3lt/lys/issues/258)). The server's standard
   error is read line by line by `McpServerLogLines` (`mcpServerLogLines.ts`):
   each line without its line break, cut to 2,000 characters, blank lines left
-  out, goes to the backend log. A message line on its standard output longer
-  than 16 MiB ends the connection. Closing the connection ends the process: the
-  SDK closes its standard input, and sends `SIGTERM` when the process has not
-  exited two seconds later, then `SIGKILL` after two more.
-  `McpStdioTransport` (`mcpStdioTransport.ts`) wraps the SDK's transport so
-  that every close, the SDK's own after a failed or cancelled handshake
-  included, waits for that one end of the process. A close settles once the
-  process exited, or once `SIGKILL` was sent, without waiting for the killed
-  process to exit. The SDK's own close at a message line past 16 MiB does not
-  go through the wrapper: a close Lys makes while that one still stops the
-  process returns at once, so a session opened in those few seconds can start
-  the command while the old process still runs
-  ([#284](https://github.com/w3lt/lys/issues/284)).
+  out, goes to the backend log. `McpServerMessageLines`
+  (`mcpServerMessageLines.ts`) reads its standard output as one JSON-RPC
+  message per line, as the SDK's own stdio transport does. A line longer than
+  16 MiB is reported as soon as its bytes show it, and the rest of it is
+  dropped; it fails the request it answers as too large and ends the
+  connection. Closing the connection ends the whole process group: Lys closes
+  the command's standard input, sends `SIGTERM` to the group when a process of
+  it is still left two seconds later, then `SIGKILL` after two more. A close
+  settles once no process of the group is left, reaped included; the
+  command's own exit does not count, because the processes it started may
+  still run. A group still left two seconds after `SIGKILL` fails the close
+  and stays held for the backend's exit. `McpStdioTransport`
+  (`mcpStdioTransport.ts`) makes every close share that one stop, whoever
+  starts it: the SDK client, the connection at a message line past 16 MiB, or
+  the transport itself once the command's process exited by itself, which
+  ends the rest of its group too. It tells the client that the transport
+  closed only once the group ended.
 - **Streamable HTTP.** The SDK's `StreamableHTTPClientTransport` sends each
   request to the configured URL with the configured headers, and
   `redirect: "manual"`, so a redirect is an HTTP error and is never
@@ -847,8 +862,19 @@ declares no client capabilities.
   failure it reports while a send is pending is passed on once the send
   settles; and an HTTP error a send throws carries the status but never the
   answer's body. Closing the connection aborts its open requests, which fail
-  without being reported as connection errors; Lys does not ask the server to
-  end its session ([#287](https://github.com/w3lt/lys/issues/287)).
+  without being reported as connection errors, and then asks the server to
+  end its session, as the MCP specification asks of a client:
+  `endMcpHttpSession` (`mcpHttpSessionEnd.ts`) sends `DELETE` to the URL with
+  the configured headers, `Mcp-Session-Id`, and `Mcp-Protocol-Version`,
+  following no redirect, and gives up after two seconds. An answer of `2xx`,
+  `404`, which says the server no longer knows the session, or `405`, which
+  says it does not let clients end sessions, is fine. Any other answer, a
+  request that fails, or the time limit passing is logged as a warning, with
+  only the status of an answer, and the close still succeeds. An opening
+  whose handshake fails after the server gave a session ends that session
+  too. The SDK's own `terminateSession` is not used: after the close, it
+  would send under the transport's aborted signal and report its failure as
+  a connection error.
 
 The tool list is read past the SDK's response cache, so the SDK holds no
 tool's output schema and never checks a result against one: it would compile
@@ -856,8 +882,15 @@ the schema and run a `pattern` the server chose on the backend's event loop.
 A result's structured content is read as untrusted JSON within Lys's own
 limits instead.
 
-The tool list is read across at most 16 pages; a longer one fails the
-opening as an answer that is not valid MCP. `calculateMcpRequestFailure`
+`readMcpToolCatalog` (`mcpToolList.ts`) reads the tool list one page at a
+time and turns each page's tools into catalog entries before it asks for the
+next page, so the read holds one page, at most 16 MiB, and the catalog, never
+the server's whole list or its objects. Reading stops at the end of the list;
+at the 129th tool, which marks the list as cut, so later pages are never asked
+for; or at a page whose next cursor is the cursor it was asked with, whose
+tools are left out as the server repeating itself. A 16th page that names a
+next one fails the opening as an answer that is not valid MCP.
+`calculateMcpRequestFailure`
 (`mcpError.ts`) tells failures apart by the SDK's error types and their
 causes: a time limit that passed, a process that exited or a connection that
 ended, an HTTP status (403 also when the SDK reports a missing scope), no
@@ -871,8 +904,11 @@ that is not MCP or is too long, or a failure Lys cannot tell apart).
 
 ### Tools of a server
 
-`buildMcpToolCatalog` (`mcpToolCatalog.ts`) reads the first 128 tools a
-server lists and says when there are more. Each tool is offered to the model
+`McpToolCatalogBuilder` (`mcpToolCatalog.ts`) takes a server's tools one at a
+time, keeps the first 128, and marks the list as cut at the next one. It
+checks each tool against the SDK's MCP tool schema first, as the SDK checks
+every tool of a list it reads itself; a tool that schema refuses fails the
+opening as an answer that is not valid MCP. Each tool is offered to the model
 as `mcp__<server>__<tool>`, with every character of the server's name for it
 other than an ASCII letter, a digit, `_`, or `-` replaced by `_`. A tool is
 skipped, with its reason, when the server's name for it is empty, longer
@@ -883,12 +919,13 @@ input schema is not an object schema, names an argument outside the argument
 name rule, nests deeper than 32 levels, holds a `__proto__` key, or holds a
 character a person cannot see in any key or text
 (`unsupported-input-schema`); or when that schema is larger than 64 KiB as
-JSON (`input-schema-too-large`). The catalog never sees a schema nested
-thousands of levels deep: the SDK checks the `tools/list` answer against its
-own recursive schema first, runs out of stack, and the opening fails as
-`protocol-error`, losing every tool of that server. Skipping only such a tool
-would mean Lys parsing and rewriting each `tools/list` answer before the SDK
-reads it, on both transports ([#288](https://github.com/w3lt/lys/issues/288)). A listed tool's description is the server's
+JSON (`input-schema-too-large`). The SDK's tool schema checks the properties
+of an input schema recursively, so an input schema nested deeper than 32
+levels, or holding a `__proto__` key, is checked as an empty object schema
+instead, and its tool is then skipped as `unsupported-input-schema`: a schema
+nested thousands of levels deep costs only its own tool. The SDK's tool
+schema checks no other part of a tool recursively. A listed tool's
+description is the server's
 description, else its title, else its annotations' title, cleaned of
 invisible characters and cut to 4,096 characters, or else a sentence naming
 the tool and its server. Its name and input schema are kept as the server
@@ -951,8 +988,8 @@ logged at `error` with what was thrown, and the reply goes on.
 caller observes to the backend log, through the reporter the composition root
 passes; each entry names the server as `mcpServer`. A settings group that
 fails its rules or cannot be read, a connection that ended, a connection error
-the SDK reports outside a request, and an opening or call failure Lys can tell
-apart are warnings. A connection, with its tool and skipped-tool counts, and
+the SDK reports outside a request, a URL server's session that its close did
+not end, and an opening or call failure Lys can tell apart are warnings. A connection, with its tool and skipped-tool counts, and
 each standard-error line of a stdio server are information. A failure Lys
 cannot tell apart and a failed close are errors, with what was thrown. Lys
 builds no entry from a command, an argument, an environment variable, a URL,

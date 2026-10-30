@@ -12,22 +12,22 @@ exposes a few native commands to the React UI.
 
 ## Registered commands
 
-| Command              | Purpose                                                                                       |
-| -------------------- | --------------------------------------------------------------------------------------------- |
-| `start_backend`      | Starts the backend for the current build mode with the Lys home and stores the child handle.  |
-| `stop_backend`       | Kills the backend process group and waits for shutdown.                                       |
-| `get_backend_status` | Reports whether the stored child process is still running.                                    |
-| `start_vmo`          | Starts vmo for the current build mode unless the owned vmo runs, and reports its status.      |
-| `stop_vmo`           | Sends vmo `SIGTERM`, waits up to 60 seconds for it to exit, then kills it, and reports which. |
-| `get_vmo_status`     | Reports whether the owned vmo is stopped, running, or stopping.                               |
-| `get_vmo_health`     | Asks vmo's `GET /health` at `127.0.0.1:8080` whether it can read pages, within one second.    |
-| `load_settings`      | Reads `$LYS_HOME/settings.json`, creating a default file if needed.                           |
-| `save_settings`      | Replaces `$LYS_HOME/settings.json` atomically, owner-only, with a new settings JSON document. |
-| `read_text_file`     | Returns the complete text of one UTF-8 file of at most 1 MiB.                                 |
-| `find_files`         | Searches a directory tree for regular files by name or by text content.                       |
-| `get_current_time`   | Returns the machine's local date and time, UTC offset, weekday, and time zone.                |
-| `get_location`       | Returns the location the person saved in Settings → Tools, read from the settings file.       |
-| `list_tools`         | Returns the definition of every client tool, for the Tools settings pane.                     |
+| Command              | Purpose                                                                                                    |
+| -------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `start_backend`      | Starts the backend for the current build mode with the Lys home and stores the child handle.               |
+| `stop_backend`       | Sends the backend process group `SIGTERM`, then `SIGKILL` after at most 2 seconds, and waits for shutdown. |
+| `get_backend_status` | Reports whether the stored child process is still running.                                                 |
+| `start_vmo`          | Starts vmo for the current build mode unless the owned vmo runs, and reports its status.                   |
+| `stop_vmo`           | Sends vmo `SIGTERM`, waits up to 60 seconds for it to exit, then kills it, and reports which.              |
+| `get_vmo_status`     | Reports whether the owned vmo is stopped, running, or stopping.                                            |
+| `get_vmo_health`     | Asks vmo's `GET /health` at `127.0.0.1:8080` whether it can read pages, within one second.                 |
+| `load_settings`      | Reads `$LYS_HOME/settings.json`, creating a default file if needed.                                        |
+| `save_settings`      | Replaces `$LYS_HOME/settings.json` atomically, owner-only, with a new settings JSON document.              |
+| `read_text_file`     | Returns the complete text of one UTF-8 file of at most 1 MiB.                                              |
+| `find_files`         | Searches a directory tree for regular files by name or by text content.                                    |
+| `get_current_time`   | Returns the machine's local date and time, UTC offset, weekday, and time zone.                             |
+| `get_location`       | Returns the location the person saved in Settings → Tools, read from the settings file.                    |
+| `list_tools`         | Returns the definition of every client tool, for the Tools settings pane.                                  |
 
 ## File tools
 
@@ -155,10 +155,19 @@ standard error are the app's own. The backend keeps its own log files under
 `$LYS_HOME/logs/`; see
 [the backend log files](/operate/logging/#the-backend-log-files).
 
-When the direct child is still running, stopping the backend sends `SIGKILL`
-to its whole process group and waits for that child. If the direct child has
-already exited, the host clears its handle without killing any surviving
-descendants. On app exit, the host stops the backend while it stops vmo; see
+When the direct child is still running, stopping the backend sends `SIGTERM`
+to its whole process group and waits up to 2 seconds for that child to exit.
+On `SIGTERM`, the backend ends the process groups of its stdio MCP servers,
+which its own group does not hold, and exits; see
+[the MCP server lifecycle](/architecture/backend/#mcp-servers). The host then
+sends `SIGKILL` to the group in every case, because processes the child
+started can still be in it after the child exited, and waits for the child.
+`SIGKILL` follows the check that found the child exited without a pause, and
+the group's identifier cannot name another group while a process of it is
+left. A group that is already gone, or whose processes all exited but were not
+yet reaped, which macOS reports as `EPERM`, counts as signalled. If the direct
+child has already exited when the stop starts, the host clears its handle
+without killing any surviving descendants. On app exit, the host stops the backend while it stops vmo; see
 [vmo process ownership](#vmo-process-ownership).
 
 The checked-in process supervisor currently uses Unix process-group APIs and

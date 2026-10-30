@@ -133,8 +133,13 @@ you trust. A server is reached in one of two ways:
   Add any other headers under Headers. Lys does not follow redirects, cannot sign
   in with OAuth yet ([#253](https://github.com/w3lt/lys/issues/253)), does
   not speak the older HTTP+SSE transport
-  ([#254](https://github.com/w3lt/lys/issues/254)), and refuses a URL to an
-  internationalized domain name, such as `https://bücher.example/mcp`.
+  ([#254](https://github.com/w3lt/lys/issues/254)). A URL to an
+  internationalized domain name, such as `https://bücher.example/mcp`, is
+  accepted when each part of the name is lowercase letters of one of the
+  Latin, Greek, Cyrillic, Chinese, Japanese, or Korean scripts, digits, and
+  hyphens; the
+  [configuration reference](/reference/configuration/#mcp-servers) lists the
+  letters.
 
 A new server's editor can fill its fields from a config pasted from another
 app: press **paste json** and paste the `mcpServers` object of

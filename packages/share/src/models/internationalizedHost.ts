@@ -514,10 +514,10 @@ function isAcceptedLabelText(text: string): boolean {
  * punycode, or any other label as it is; undefined when the punycode does
  * not decode, decodes to ASCII only, or is not exactly what the text
  * encodes to.
- * @remarks The last check, like the decoder's own refusals, is a guard:
- * the URL parsers Lys uses refuse punycode that does not decode and write
- * only punycode that is exactly what its text encodes to, so it does not
- * refuse a host they wrote.
+ * @remarks The decoder's refusals do refuse hosts: some URL parsers write a
+ * label starting with `xn--` as it was typed even when its punycode does not
+ * decode. The last check is a guard: no punycode is known that decodes but
+ * is not exactly what its text encodes to.
  */
 function parseLabelText(label: string): string | undefined {
   if (!label.startsWith(PUNYCODE_LABEL_PREFIX)) return label

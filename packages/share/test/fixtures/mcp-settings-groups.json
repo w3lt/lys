@@ -3648,7 +3648,7 @@
     "accepted": false
   },
   {
-    "case": "an https URL to the punycode of Arabic letters, which only the host's URL parser accepts",
+    "case": "an https URL to the punycode of Arabic letters",
     "group": {
       "servers": [
         {
@@ -3661,7 +3661,7 @@
     "accepted": false
   },
   {
-    "case": "an https URL to a punycode host that only the host's URL parser accepts",
+    "case": "an https URL whose punycode label starts with xn-- again",
     "group": {
       "servers": [
         {
@@ -3674,7 +3674,7 @@
     "accepted": false
   },
   {
-    "case": "an https URL to a Unicode host that only the share package's URL parser accepts",
+    "case": "an https URL to a Unicode host whose part has a digit before a right-to-left letter",
     "group": {
       "servers": [
         {
@@ -3733,6 +3733,84 @@
           "name": "docs",
           "transport": "http",
           "url": "https://xn--bcher--kva.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL whose punycode label decodes to ASCII only",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn--abc-.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL whose punycode label starts with its delimiter",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn---tda.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL whose punycode label holds a number larger than 32 bits hold",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn--99999999999.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL whose punycode label decodes to a surrogate",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn--ib9b.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL whose punycode label decodes past the last code point",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn--en32g.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL whose punycode label is longer than a DNS label holds",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-tda.example/mcp"
         }
       ]
     },

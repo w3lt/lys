@@ -528,9 +528,9 @@ fn is_accepted_label_text(text: &str) -> bool {
 /// from its punycode, or any other label as it is.
 ///
 /// Returns `None` when the punycode does not decode, decodes to ASCII only,
-/// or is not exactly what the text encodes to. The last check is a guard:
-/// the URL parsers Lys uses write only punycode that is exactly what its
-/// text encodes to, so it does not refuse a host they wrote.
+/// or is not exactly what the text encodes to. The last check is a guard: no
+/// punycode is known that decodes but is not exactly what its text encodes
+/// to.
 fn parse_label_text(label: &str) -> Option<String> {
     let Some(punycode) = label.strip_prefix(PUNYCODE_LABEL_PREFIX) else {
         return Some(label.to_owned());

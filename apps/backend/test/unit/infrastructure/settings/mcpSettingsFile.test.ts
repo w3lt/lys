@@ -233,13 +233,19 @@ const LISTED_LETTER_RANGES: readonly ListedLetterRange[] = [
 ]
 
 /**
- * Characters off that list: an ASCII symbol; Latin letters beside listed
- * ones, uppercase or lowercase, and ones URL parsers map; Greek, Cyrillic,
- * kana, ideographs, and Hangul past the listed ranges; then an emoji, Arabic
- * and Hebrew letters, a combining mark, and a middle dot.
+ * Parts of a domain name that each hold one character off that list. An
+ * ASCII symbol; Latin letters beside listed ones, uppercase or lowercase,
+ * and ones URL parsers map; Greek, Cyrillic, kana, ideographs, and Hangul
+ * past the listed ranges; an emoji, a combining mark, and a middle dot stand
+ * between digits. Arabic and Hebrew letters stand first, before a digit, as
+ * the right-to-left rule of RFC 5893 asks, which some URL parsers enforce.
  */
-const UNLISTED_CHARACTERS =
-  "_À×ß÷ĀİĲĳĴŀŁŉŊŸŹſΆΐςϐЯѠゔゝヷ・ヽ\u3400\u9fa6\ud7b0\u{20000}\u{1f600}\u0628\u05d0\u0301\u00b7"
+const UNLISTED_CHARACTER_LABELS = [
+  ...[
+    ..."_À×ß÷ĀİĲĳĴŀŁŉŊŸŹſΆΐςϐЯѠゔゝヷ・ヽ\u3400\u9fa6\ud7b0\u{20000}\u{1f600}\u0301\u00b7"
+  ].map((character) => `1${character}2`),
+  ...["\u0628", "\u05d0"].map((letter) => `${letter}2`)
+]
 
 /** One sample of RFC 3492, section 7.1. */
 type PunycodeSample = {
@@ -917,8 +923,8 @@ describe("readMcpSettings on internationalized domain names", () => {
   it("reports each unlisted character in a part of an internationalized domain name as a break of its rule", async () => {
     const path = await createSettingsFilePath()
 
-    for (const character of UNLISTED_CHARACTERS) {
-      const url = `https://1${character}2.bücher.example/mcp`
+    for (const label of UNLISTED_CHARACTER_LABELS) {
+      const url = `https://${label}.bücher.example/mcp`
       const servers = [{ name: "docs", transport: "http", url }]
       await writeFile(path, buildSettingsText({ servers }))
 

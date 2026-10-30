@@ -40,7 +40,9 @@ const VALID_RAW_CONFIG = Object.freeze({
   lysipteraSystemPrompt: "Fixture Lysiptera prompt",
   titleGenerationPrompt: "Fixture title prompt",
   titleGenerationMaxAttempts: 3,
-  generatedTitleMaxLength: 100
+  generatedTitleMaxLength: 100,
+  agentRequestSlotCount: 2,
+  agentWaitingRequestLimit: 8
 })
 
 /**
@@ -112,7 +114,7 @@ describe("loadBackendConfig", () => {
     vi.mocked(readPrompt).mockImplementation((type) => FIXTURE_PROMPTS[type])
   })
 
-  it("resolves the shared endpoints, the Lys home paths, vmo's endpoint, every prompt, and the fixed title limits", () => {
+  it("resolves the shared endpoints, the Lys home paths, vmo's endpoint, every prompt, the fixed title limits, and the fixed agent request limits", () => {
     expect(loadBackendConfig()).toEqual({
       backendHost: BACKEND_HOST,
       backendPort: BACKEND_PORT,
@@ -127,7 +129,9 @@ describe("loadBackendConfig", () => {
       lysipteraSystemPrompt: "Fixture Lysiptera prompt",
       titleGenerationPrompt: "Fixture title prompt",
       titleGenerationMaxAttempts: 3,
-      generatedTitleMaxLength: 100
+      generatedTitleMaxLength: 100,
+      agentRequestSlotCount: 2,
+      agentWaitingRequestLimit: 8
     })
   })
 
@@ -240,8 +244,13 @@ describe("backendConfigSchema", () => {
       {
         ...VALID_RAW_CONFIG,
         titleGenerationMaxAttempts: 1,
-        generatedTitleMaxLength: 1
+        generatedTitleMaxLength: 1,
+        agentRequestSlotCount: 1
       }
+    ],
+    [
+      "no waiting line for agent requests",
+      { ...VALID_RAW_CONFIG, agentWaitingRequestLimit: 0 }
     ]
   ])("accepts %s unchanged as a frozen snapshot", (_label, input) => {
     const config = backendConfigSchema.parse(input)
@@ -387,6 +396,26 @@ describe("backendConfigSchema", () => {
       "a generated-title length limit of 0",
       { ...VALID_RAW_CONFIG, generatedTitleMaxLength: 0 },
       "generatedTitleMaxLength"
+    ],
+    [
+      "zero agent request slots",
+      { ...VALID_RAW_CONFIG, agentRequestSlotCount: 0 },
+      "agentRequestSlotCount"
+    ],
+    [
+      "a fractional number of agent request slots",
+      { ...VALID_RAW_CONFIG, agentRequestSlotCount: 1.5 },
+      "agentRequestSlotCount"
+    ],
+    [
+      "a negative agent waiting request limit",
+      { ...VALID_RAW_CONFIG, agentWaitingRequestLimit: -1 },
+      "agentWaitingRequestLimit"
+    ],
+    [
+      "a fractional agent waiting request limit",
+      { ...VALID_RAW_CONFIG, agentWaitingRequestLimit: 0.5 },
+      "agentWaitingRequestLimit"
     ]
   ])("rejects %s and names only that key", (_label, input, key) => {
     expect(listIssueKeys(listConfigIssues(input))).toEqual(new Set([key]))

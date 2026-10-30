@@ -56,14 +56,20 @@ export type ConversationTitleLookup =
       title: string | null
     }>
 
-/** One request an agent is working on, with the title of its conversation. */
+/**
+ * One request an agent is working on or that waits for its request slot,
+ * with the title of its conversation.
+ */
 export type AgentRequestView = AgentRequestState &
   Readonly<{
     /** Title of the request's conversation, looked up when it was read. */
     conversationTitle: ConversationTitleLookup
   }>
 
-/** State of one agent: who it is and the requests it is working on. */
+/**
+ * State of one agent: who it is, its request slots, and the requests it is
+ * working on or that wait for a slot.
+ */
 export type AgentStateView = Readonly<{
   /** Code of the agent. */
   code: string
@@ -73,7 +79,12 @@ export type AgentStateView = Readonly<{
   role: AgentRole
   /** Time a stored agent was deleted; null while it is not deleted. */
   deletedAt: string | null
-  /** Requests the agent is working on, in the order they started. */
+  /** Requests the agent works on at once; a positive integer. */
+  requestSlotCount: number
+  /**
+   * Requests the agent is working on, then the ones that wait for a slot, in
+   * the order they started, which is the waiting ones' order in line.
+   */
   requests: readonly AgentRequestView[]
 }>
 
@@ -211,7 +222,7 @@ function buildReadMyStateDefinition(role: AgentRole): ToolDefinition {
     : "You can see only your own state."
   return toolDefinitionSchema.parse({
     name: READ_MY_STATE_TOOL_NAME,
-    description: `Read your own state: who you are, your role, and each request you are working on right now, the reply you are writing included, with its conversation, model, start time, and step. ${scope}`,
+    description: `Read your own state: who you are, your role, how many of your request slots are in use, and each request you are working on right now, the reply you are writing included, or that waits for a free slot, with its conversation, model, start time, and step. ${scope}`,
     group: "agents",
     access: "reads",
     runner: "backend",
@@ -238,7 +249,7 @@ const FIND_AGENTS_DEFINITION = toolDefinitionSchema.parse({
 /** Definition of the tool that reads another agent's state. */
 const READ_AGENT_STATE_DEFINITION = toolDefinitionSchema.parse({
   name: READ_AGENT_STATE_TOOL_NAME,
-  description: `Read the state of an agent by its code: who it is, its role, and each request it is working on right now, with its conversation, model, start time, and step. Find a code with ${FIND_AGENTS_TOOL_NAME}.`,
+  description: `Read the state of an agent by its code: who it is, its role, how many of its request slots are in use, and each request it is working on right now or that waits for a free slot, with its conversation, model, start time, and step. Find a code with ${FIND_AGENTS_TOOL_NAME}.`,
   group: "agents",
   access: "reads",
   runner: "backend",
@@ -325,10 +336,13 @@ function formatToolCall(call: AgentToolCallState): string {
  * Formats the step a request is at.
  *
  * @param step - The request's step.
+ * @param linePlace - One-based place in line of a waiting request.
  * @returns Words for it; a later round's preparation reads the tool results.
  */
-function formatRequestStep(step: AgentRequestStep): string {
+function formatRequestStep(step: AgentRequestStep, linePlace: number): string {
   switch (step.kind) {
+    case "waiting":
+      return `waiting for a free request slot, number ${linePlace} in line`
     case "preparing":
       return step.round === 0
         ? "getting ready to answer"
@@ -361,52 +375,81 @@ function formatRequestPlace(
 }
 
 /**
- * Formats one request an agent is working on.
+ * Formats one request an agent is working on or that waits for a slot.
  *
  * @param request - The request.
  * @param requestId - Reply id of the turn that calls the tool.
+ * @param linePlace - One-based place in line of a waiting request.
  * @param now - Time of the run.
  * @returns Where it is, when it started, its model, and its step.
  */
 function formatRequest(
   request: AgentRequestView,
   requestId: string,
+  linePlace: number,
   now: Date
 ): string {
   const place = formatRequestPlace(request, requestId)
   const elapsed = formatElapsedTime(request.startedAt, now)
-  return `${place}: started ${request.startedAt} (${elapsed}) with ${request.model}; ${formatRequestStep(request.step)}.`
+  return `${place}: started ${request.startedAt} (${elapsed}) with ${request.model}; ${formatRequestStep(request.step, linePlace)}.`
 }
 
 /**
- * Formats the requests an agent is working on.
+ * Formats how many of an agent's request slots are in use.
  *
- * @param requests - The agent's requests, in start order.
+ * @param slotCount - The agent's request slots.
+ * @param waitingCount - How many of its requests wait for a slot.
+ * @param heldCount - How many of its requests hold a slot.
+ * @returns The slots in use, and how many requests wait when any does.
+ */
+function formatRequestSlots(
+  slotCount: number,
+  waitingCount: number,
+  heldCount: number
+): string {
+  const slots = `Request slots: ${heldCount} of ${slotCount} in use`
+  if (waitingCount === 0) return `${slots}.`
+  return waitingCount === 1
+    ? `${slots}; 1 request waits for a free slot.`
+    : `${slots}; ${waitingCount} requests wait for a free slot.`
+}
+
+/**
+ * Formats the request slots and the requests of an agent.
+ *
+ * @param state - The agent's state.
  * @param requestId - Reply id of the turn that calls the tool.
  * @param now - Time of the run.
- * @returns The time of the run, then the numbered requests, ending with a
- * note when the calling reply is the only one.
+ * @returns The time of the run, the slots in use, then the numbered
+ * requests, each waiting one with its place in line, ending with a note when
+ * the calling reply is the only one.
  */
 function formatRequests(
-  requests: readonly AgentRequestView[],
+  state: AgentStateView,
   requestId: string,
   now: Date
 ): readonly string[] {
+  const { requests } = state
   const clock = `Now: ${now.toISOString()}.`
-  if (requests.length === 0) return [clock, "No requests in progress."]
-  const count =
-    requests.length === 1
-      ? "Working on 1 request:"
-      : `Working on ${requests.length} requests:`
-  const lines = requests.map(
-    (request, index) =>
-      `${index + 1}. ${formatRequest(request, requestId, now)}`
+  const lines: string[] = []
+  let waitingCount = 0
+  for (const [index, request] of requests.entries()) {
+    if (request.step.kind === "waiting") waitingCount += 1
+    lines.push(
+      `${index + 1}. ${formatRequest(request, requestId, waitingCount, now)}`
+    )
+  }
+  const slots = formatRequestSlots(
+    state.requestSlotCount,
+    waitingCount,
+    requests.length - waitingCount
   )
+  if (requests.length === 0) return [clock, slots, "No requests in progress."]
   const isOnlyCallingReply =
     requests.length === 1 && requests[0]?.requestId === requestId
   return isOnlyCallingReply
-    ? [clock, count, ...lines, "Nothing else is in progress."]
-    : [clock, count, ...lines]
+    ? [clock, slots, ...lines, "Nothing else is in progress."]
+    : [clock, slots, ...lines]
 }
 
 /**
@@ -470,7 +513,7 @@ function runReadMyState(
     return buildRefusedStateResult(outcome, context.self.code)
   return buildSucceededResult([
     formatOwnHeader(outcome.state),
-    ...formatRequests(outcome.state.requests, context.requestId, now)
+    ...formatRequests(outcome.state, context.requestId, now)
   ])
 }
 
@@ -491,7 +534,7 @@ function runReadAgentState(
   if (outcome.status !== "found") return buildRefusedStateResult(outcome, code)
   return buildSucceededResult([
     formatOtherHeader(outcome.state),
-    ...formatRequests(outcome.state.requests, context.requestId, now)
+    ...formatRequests(outcome.state, context.requestId, now)
   ])
 }
 

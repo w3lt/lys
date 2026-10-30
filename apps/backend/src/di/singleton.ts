@@ -323,7 +323,8 @@ type AgentServices = Pick<
  * Creates the agent service over the shared database, and the agent runtime
  * service over it and the services the live agents borrow.
  *
- * @param config - System prompts of the built-in agents.
+ * @param config - System prompts of the built-in agents, and the request
+ * slots and waiting limit every live agent gets.
  * @param database - Shared database lent to the agent records; the caller
  * keeps ownership and closes it.
  * @param dependencies - Chat and LLM services the agents answer and measure
@@ -356,7 +357,11 @@ function createAgentServices(
       findConversationTitle: (conversationId) =>
         buildConversationTitleLookup(
           historyReader.getConversation(conversationId)
-        )
+        ),
+      requestLimits: Object.freeze({
+        slotCount: config.agentRequestSlotCount,
+        waitingLimit: config.agentWaitingRequestLimit
+      })
     })
   }
 }

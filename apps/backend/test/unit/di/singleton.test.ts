@@ -94,15 +94,18 @@ function createAcquisition<Service>(
  * Builds a turn that says `Hello` to `qwen/qwen3-8b` without history,
  * sources, or tools.
  *
+ * @param requestId - Reply the turn writes; a fixed reply by default.
  * @returns The turn: it accepts the reply's final state, its part writes
  * are spies that store nothing, which the turn contract reads as a refused
  * write, and its senders and reporters are spies. The cases that use it read
- * only what the model was sent.
+ * only what the model was sent, or how the reply was reported.
  */
-function buildHelloAgentTurn(): AgentTurn {
+function buildHelloAgentTurn(
+  requestId: string = createFixtureUuidV7(2)
+): AgentTurn {
   return {
     conversationId: createFixtureUuidV7(1),
-    requestId: createFixtureUuidV7(2),
+    requestId,
     trainedForToolUse: false,
     history: [],
     sources: [],
@@ -421,6 +424,72 @@ describe("createSingletonServices", () => {
       )
     }
   )
+
+  it("gives every live agent the configured request slots and waiting line", async () => {
+    const { factories, acquisitions } = createRecordedFactories()
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createLogReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    const engine = createFakeLlmRuntime()
+    engine.findLlmContextMeasurement.mockImplementation(
+      async (_model, texts) => ({
+        contextLength: 1_000_000,
+        textTokenCounts: texts.map(() => 1)
+      })
+    )
+    vi.spyOn(
+      acquisitions.llmRuntime.service,
+      "handleLlmEngineOperationRequest"
+    ).mockImplementation(async (operation) => await operation(engine))
+    const release = Promise.withResolvers<void>()
+    vi.spyOn(
+      acquisitions.chat.service,
+      "completeChatStream"
+    ).mockImplementation(async () => {
+      await release.promise
+      throw new Error("model not loaded")
+    })
+    const agent = services.agentRuntimeService.loadChatAgent("caliginia")
+    if (agent === undefined) throw new Error("Caliginia is not live")
+    const { agentRequestSlotCount, agentWaitingRequestLimit } =
+      TEST_BACKEND_CONFIG
+    const accepted = Array.from(
+      { length: agentRequestSlotCount + agentWaitingRequestLimit },
+      (_unused, index) =>
+        agent.createReply(buildHelloAgentTurn(createFixtureUuidV7(20 + index)))
+    )
+    const refusedTurn = buildHelloAgentTurn(createFixtureUuidV7(30))
+
+    await agent.createReply(refusedTurn)
+    const outcome = services.agentRuntimeService.findAgentState(
+      { code: "caliginia", role: "leader" },
+      "caliginia"
+    )
+    release.resolve()
+    await Promise.all(accepted)
+
+    expect(outcome).toMatchObject({
+      status: "found",
+      state: { requestSlotCount: agentRequestSlotCount }
+    })
+    expect(
+      outcome.status === "found" &&
+        outcome.state.requests.filter(
+          (request) => request.step.kind === "waiting"
+        ).length
+    ).toBe(agentWaitingRequestLimit)
+    expect(refusedTurn.reportReplyRefusal).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        limits: {
+          slotCount: agentRequestSlotCount,
+          waitingLimit: agentWaitingRequestLimit
+        }
+      })
+    )
+  })
 
   it("serves the LLM service through the runtime service's operation queue", async () => {
     const { factories, acquisitions } = createRecordedFactories()

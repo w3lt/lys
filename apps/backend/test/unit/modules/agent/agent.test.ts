@@ -29,7 +29,11 @@ import Agent, {
   type AgentTurn,
   type AssistantMessageCompletion
 } from "../../../../src/modules/agent/agent"
-import type { AgentRequestState } from "../../../../src/modules/agent/agentActivity"
+import {
+  AgentRequestLimitError,
+  type AgentRequestLimits,
+  type AgentRequestState
+} from "../../../../src/modules/agent/agentActivity"
 import {
   formatSystemPrompt,
   type GetAttachmentImageFileStatus
@@ -75,6 +79,7 @@ import {
   createTurnUserMessage,
   createUserMessage
 } from "../../support/conversationFixtures"
+import { waitForMicrotasks } from "../../support/microtasks"
 import {
   createRoomyReplyContextMeter,
   createUnloadedReplyContextMeter,
@@ -111,11 +116,18 @@ const CHAT_FAILURE_EVENT = Object.freeze({
 /** Event sent to followers when the reply ended before it completed. */
 const INTERRUPTED_EVENT = Object.freeze({ type: "interrupted" })
 
+/** Request limits of the agent under test: two replies at once, one waiting. */
+const REQUEST_LIMITS: AgentRequestLimits = Object.freeze({
+  slotCount: 2,
+  waitingLimit: 1
+})
+
 /** Profile of the agent under test. */
 const AGENT_PROFILE: AgentProfile = Object.freeze({
   code: "lys",
   role: "leader",
-  systemPrompt: "You are Lys."
+  systemPrompt: "You are Lys.",
+  requestLimits: REQUEST_LIMITS
 })
 
 /** Unoffered tools of a request that switched off both network tools. */
@@ -3741,6 +3753,251 @@ describe("Agent", () => {
     })
   })
 
+  describe("request slots", () => {
+    /** Step of a reply that holds a slot before anything of it is stored. */
+    const FIRST_ROUND_STEP = Object.freeze({ kind: "preparing", round: 0 })
+
+    /** Step of a reply that waits for a free request slot. */
+    const WAITING_STEP = Object.freeze({ kind: "waiting" })
+
+    /**
+     * Creates an agent whose model keeps each reply's first round open until
+     * the case ends it.
+     *
+     * @param requestLimits - Request limits of the agent;
+     * {@link REQUEST_LIMITS} by default.
+     * @returns The agent, its stream opener and meter, the end of each round
+     * opened so far in opening order (resolving it finishes the reply,
+     * rejecting it fails the model), and the release of every round, which
+     * also ends each later round at once.
+     */
+    function createHoldingAgent(
+      requestLimits: AgentRequestLimits = REQUEST_LIMITS
+    ) {
+      const roundEnds: PromiseWithResolvers<void>[] = []
+      let isReleased = false
+      const openReplyStream = vi.fn<OpenReplyStream>(async () => {
+        const end = Promise.withResolvers<void>()
+        if (isReleased) end.resolve()
+        roundEnds.push(end)
+        return (async function* (): AsyncGenerator<ReplyStreamEvent> {
+          await end.promise
+          yield* FINISH_ROUND
+        })()
+      })
+      const replyContextMeter = createRoomyReplyContextMeter()
+      const agent = new Agent(
+        { ...AGENT_PROFILE, requestLimits },
+        {
+          replyModel: { openReplyStream },
+          replyContextMeter,
+          stateReader: UNEXPECTED_STATE_READER
+        }
+      )
+      return {
+        agent,
+        openReplyStream,
+        replyContextMeter,
+        roundEnds,
+        releaseRounds: () => {
+          isReleased = true
+          for (const end of roundEnds) end.resolve()
+        }
+      }
+    }
+
+    it.each<
+      readonly [
+        string,
+        (end: PromiseWithResolvers<void>, stop: AbortController) => void
+      ]
+    >([
+      [
+        "completes",
+        (end) => {
+          end.resolve()
+        }
+      ],
+      [
+        "fails",
+        (end) => {
+          end.reject(new Error("model crashed"))
+        }
+      ],
+      [
+        "is stopped",
+        (end, stop) => {
+          stop.abort()
+          end.resolve()
+        }
+      ]
+    ])(
+      "makes a reply that finds every slot held wait, untouched, and starts it once a running reply %s",
+      async (_label, endFirstReply) => {
+        const { agent, openReplyStream, replyContextMeter, roundEnds } =
+          createHoldingAgent()
+        const firstStop = new AbortController()
+        const first = getAgentReplyOutcome({
+          agent,
+          abortSignal: firstStop.signal
+        })
+        const second = getAgentReplyOutcome({ agent })
+        const third = getAgentReplyOutcome({ agent })
+        await waitForMicrotasks()
+        const stepsWhileWaiting = agent
+          .listRequests()
+          .map((request) => request.step)
+        const measuredWhileWaiting =
+          replyContextMeter.findReplyContextMeasurement.mock.calls.length
+        const openedWhileWaiting = openReplyStream.mock.calls.length
+
+        const [firstEnd, secondEnd] = roundEnds
+        if (firstEnd === undefined || secondEnd === undefined)
+          throw new Error("The running replies did not open their rounds")
+        endFirstReply(firstEnd, firstStop)
+        await first
+        await waitForMicrotasks()
+        const stepsAfterFirst = agent
+          .listRequests()
+          .map((request) => request.step)
+        const openedAfterFirst = openReplyStream.mock.calls.length
+        secondEnd.resolve()
+        roundEnds[2]?.resolve()
+        const thirdOutcome = await third
+        await second
+
+        expect(stepsWhileWaiting).toEqual([
+          FIRST_ROUND_STEP,
+          FIRST_ROUND_STEP,
+          WAITING_STEP
+        ])
+        expect(measuredWhileWaiting).toBe(2)
+        expect(openedWhileWaiting).toBe(2)
+        expect(stepsAfterFirst).toEqual([FIRST_ROUND_STEP, FIRST_ROUND_STEP])
+        expect(openedAfterFirst).toBe(3)
+        expect(thirdOutcome.persistedStates).toEqual([
+          { status: "completed", finishReason: "stop" }
+        ])
+        expect(thirdOutcome.events).toEqual([
+          { type: "done", finishReason: "stop" }
+        ])
+        expect(agent.listRequests()).toEqual([])
+      }
+    )
+
+    it("ends a reply stopped while it waits for a slot as interrupted, without measuring or sending it, and frees its place in line", async () => {
+      const { agent, openReplyStream, replyContextMeter, releaseRounds } =
+        createHoldingAgent()
+      const running = [
+        getAgentReplyOutcome({ agent }),
+        getAgentReplyOutcome({ agent })
+      ]
+      const stop = new AbortController()
+      const waiting = getAgentReplyOutcome({ agent, abortSignal: stop.signal })
+      await waitForMicrotasks()
+
+      stop.abort()
+      const stopped = await waiting
+      const next = getAgentReplyOutcome({ agent })
+      const stepsAfterStop = agent.listRequests().map((request) => request.step)
+      releaseRounds()
+      await Promise.all([...running, next])
+
+      expect(stopped.persistedStates).toEqual([{ status: "interrupted" }])
+      expect(stopped.events).toEqual([INTERRUPTED_EVENT])
+      expect(stopped.reportedCancellations).toHaveLength(1)
+      expect(stopped.reportedRefusals).toEqual([])
+      expect(stopped.reportedFailures).toEqual([])
+      expect(stopped.parts).toEqual([])
+      expect(stepsAfterStop).toEqual([
+        FIRST_ROUND_STEP,
+        FIRST_ROUND_STEP,
+        WAITING_STEP
+      ])
+      expect(
+        replyContextMeter.findReplyContextMeasurement
+      ).toHaveBeenCalledTimes(3)
+      expect(openReplyStream).toHaveBeenCalledTimes(3)
+    })
+
+    it.each<readonly [AgentRequestLimits, string]>([
+      [
+        REQUEST_LIMITS,
+        "This agent is already working on 2 requests, and 1 more is waiting for it, so it did not take this message. Send it again once it finishes one."
+      ],
+      [
+        { slotCount: 1, waitingLimit: 0 },
+        "This agent is already working on 1 request, so it did not take this message. Send it again once it finishes one."
+      ],
+      [
+        { slotCount: 1, waitingLimit: 2 },
+        "This agent is already working on 1 request, and 2 more are waiting for it, so it did not take this message. Send it again once it finishes one."
+      ]
+    ])(
+      "refuses a reply when the agent's slots and line are full (%o), storing it as failed with an error event that says why",
+      async (requestLimits, message) => {
+        const { agent, openReplyStream, releaseRounds } =
+          createHoldingAgent(requestLimits)
+        const accepted = Array.from(
+          { length: requestLimits.slotCount + requestLimits.waitingLimit },
+          () => getAgentReplyOutcome({ agent })
+        )
+        await waitForMicrotasks()
+
+        const refused = await getAgentReplyOutcome({ agent })
+        const listedCount = agent.listRequests().length
+        const openedCount = openReplyStream.mock.calls.length
+        releaseRounds()
+        await Promise.all(accepted)
+
+        expect(refused.persistedStates).toEqual([{ status: "failed" }])
+        expect(refused.events).toEqual([{ type: "error", message }])
+        expect(refused.reportedRefusals).toEqual([
+          expect.any(AgentRequestLimitError)
+        ])
+        expect(refused.reportedRefusals[0]).toHaveProperty(
+          "limits",
+          requestLimits
+        )
+        expect(refused.reportedCancellations).toEqual([])
+        expect(refused.reportedFailures).toEqual([])
+        expect(refused.parts).toEqual([])
+        expect(listedCount).toBe(
+          requestLimits.slotCount + requestLimits.waitingLimit
+        )
+        expect(openedCount).toBe(requestLimits.slotCount)
+      }
+    )
+
+    it("measures a conversation's context while every slot is held and the line is full", async () => {
+      const { agent, replyContextMeter, releaseRounds } = createHoldingAgent({
+        slotCount: 1,
+        waitingLimit: 0
+      })
+      const running = getAgentReplyOutcome({ agent })
+      await waitForMicrotasks()
+
+      const measurement = await agent.findContextMeasurement({
+        trainedForToolUse: false,
+        history: [],
+        model: TURN_REQUEST.model,
+        canSeeImages: false,
+        getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
+        tools: [],
+        unofferedTools: NO_UNOFFERED_TOOLS
+      })
+      const listedCount = agent.listRequests().length
+      releaseRounds()
+      await running
+
+      expect(measurement).toMatchObject({ contextLength: ROOMY_CONTEXT_LENGTH })
+      expect(
+        replyContextMeter.findReplyContextMeasurement
+      ).toHaveBeenCalledTimes(2)
+      expect(listedCount).toBe(1)
+    })
+  })
+
   describe("state tools", () => {
     /**
      * Lists the names of the tools one model request offered.
@@ -3835,6 +4092,7 @@ describe("Agent", () => {
               name: "Lys",
               role: "leader",
               deletedAt: null,
+              requestSlotCount: REQUEST_LIMITS.slotCount,
               requests: agent.listRequests().map((request) => ({
                 ...request,
                 conversationTitle: { status: "found", title: null }
@@ -3869,7 +4127,7 @@ describe("Agent", () => {
         const result = [
           "You are Lys (code lys), a leader. As a leader you can find other agents with find_agents and read their state with read_agent_state.",
           `Now: ${NOW}.`,
-          "Working on 1 request:",
+          "Request slots: 1 of 2 in use.",
           `1. This reply, in this conversation: started ${NOW} (less than a minute ago) with ${TURN_REQUEST.model}; using tools: read_my_state running.`,
           "Nothing else is in progress."
         ].join("\n")

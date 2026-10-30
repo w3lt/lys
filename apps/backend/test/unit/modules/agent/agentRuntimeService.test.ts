@@ -41,6 +41,12 @@ const BUILT_IN_AGENTS = buildBuiltInAgents({
   lysiptera: "You are Lysiptera."
 })
 
+/**
+ * Request limits every live agent of a case's runtime gets: two replies at
+ * once, one more waiting.
+ */
+const REQUEST_LIMITS = Object.freeze({ slotCount: 2, waitingLimit: 1 })
+
 /** Caliginia, a built-in agent and so a leader. */
 const LEADER: AgentIdentity = Object.freeze({
   code: CALIGINIA_AGENT_CODE,
@@ -92,7 +98,7 @@ function createWaitingReplyModel() {
 
 /**
  * Creates the runtime service over an agent service on an in-memory database
- * owned by the current test.
+ * owned by the current test, every live agent with {@link REQUEST_LIMITS}.
  *
  * @param options - Model access and stored conversations.
  * @returns The runtime, the agent service it reads, and how many agent
@@ -115,7 +121,8 @@ function createRuntime(options: RuntimeOptions = {}) {
     replyModel: options.replyModel ?? createFinishingReplyModel(),
     replyContextMeter: createRoomyReplyContextMeter(),
     findConversationTitle: (conversationId) =>
-      buildConversationTitleLookup(conversations.get(conversationId))
+      buildConversationTitleLookup(conversations.get(conversationId)),
+    requestLimits: REQUEST_LIMITS
   })
   return {
     runtime,
@@ -353,6 +360,7 @@ describe("AgentRuntimeService", () => {
       vi.setSystemTime(new Date(NOW))
       return {
         reader: runtime,
+        requestSlotCount: REQUEST_LIMITS.slotCount,
         countAgentReads,
         saveAgent: (definition) => {
           saveLaterAgent(agentService, definition)
@@ -360,7 +368,7 @@ describe("AgentRuntimeService", () => {
       }
     })
 
-    it("lists a live agent's requests in start order, each with its conversation's title as it is now", async () => {
+    it("lists a live agent's requests in start order, the one waiting for a request slot last, each with its conversation's title as it is now", async () => {
       const titled = createFixtureUuidV7(11)
       const untitled = createFixtureUuidV7(12)
       const deleted = createFixtureUuidV7(13)
@@ -387,21 +395,25 @@ describe("AgentRuntimeService", () => {
       expect(outcome).toMatchObject({
         status: "found",
         state: {
+          requestSlotCount: REQUEST_LIMITS.slotCount,
           requests: [
             {
               requestId: createFixtureUuidV7(21),
               conversationId: titled,
               conversationTitle: { status: "found", title: "Trip to Kyoto" },
               model: "qwen/qwen3-8b",
-              startedAt: NOW
+              startedAt: NOW,
+              step: { kind: "preparing", round: 0 }
             },
             {
               requestId: createFixtureUuidV7(22),
-              conversationTitle: { status: "found", title: null }
+              conversationTitle: { status: "found", title: null },
+              step: { kind: "preparing", round: 0 }
             },
             {
               requestId: createFixtureUuidV7(23),
-              conversationTitle: { status: "missing" }
+              conversationTitle: { status: "missing" },
+              step: { kind: "waiting" }
             }
           ]
         }
@@ -412,6 +424,39 @@ describe("AgentRuntimeService", () => {
       expect(
         runtime.findAgentState(LEADER, CALIGINIA_AGENT_CODE)
       ).toMatchObject({ state: { requests: [] } })
+    })
+
+    it("gives each live agent its own request slots, so one agent's held slots never hold back another's reply", async () => {
+      const { replyModel, releaseReplies } = createWaitingReplyModel()
+      const { runtime } = createRuntime({ replyModel })
+      const caliginia = findLiveAgent(runtime, CALIGINIA_AGENT_CODE)
+      const lysiptera = findLiveAgent(runtime, LYSIPTERA_AGENT_CODE)
+      const replies = [21, 22].map((sequence) =>
+        createHelloReply(caliginia, {
+          conversationId: createFixtureUuidV7(sequence + 10),
+          requestId: createFixtureUuidV7(sequence)
+        })
+      )
+
+      replies.push(
+        createHelloReply(lysiptera, { requestId: createFixtureUuidV7(23) })
+      )
+      const outcome = runtime.findAgentState(LEADER, LYSIPTERA_AGENT_CODE)
+      releaseReplies()
+      await Promise.all(replies)
+
+      expect(outcome).toMatchObject({
+        status: "found",
+        state: {
+          requestSlotCount: REQUEST_LIMITS.slotCount,
+          requests: [
+            {
+              requestId: createFixtureUuidV7(23),
+              step: { kind: "preparing", round: 0 }
+            }
+          ]
+        }
+      })
     })
 
     it("keeps listing the reply of an agent deleted while it writes, showing the deletion", async () => {

@@ -24,6 +24,19 @@ const TITLE_GENERATION_MAX_ATTEMPTS = 3
  */
 const GENERATED_TITLE_MAX_LENGTH = 100
 
+/**
+ * Replies each live agent writes at once, applied as `agentRequestSlotCount`
+ * by {@link loadBackendConfig}. No other source overrides it.
+ */
+const AGENT_REQUEST_SLOT_COUNT = 2
+
+/**
+ * Replies that may wait for a free request slot of one agent, applied as
+ * `agentWaitingRequestLimit` by {@link loadBackendConfig}. No other source
+ * overrides it.
+ */
+const AGENT_WAITING_REQUEST_LIMIT = 8
+
 /** Validates a TCP port that names one fixed endpoint, from 1 to 65535 inclusive. */
 const tcpPortSchema = z.int().min(1).max(65_535)
 
@@ -142,7 +155,27 @@ export const backendConfigSchema = z
      * the title's JSON-schema `maxLength`, and a reply whose title is longer is
      * unusable output.
      */
-    generatedTitleMaxLength: z.int().min(1)
+    generatedTitleMaxLength: z.int().min(1),
+    /**
+     * Number of request slots of every live agent: how many of its replies
+     * it writes at once.
+     *
+     * @remarks A positive safe integer, the same for every agent; each agent
+     * has its own slots. A reply holds its slot from its start to its end,
+     * also while it waits for the person. A reply that finds every slot held
+     * waits for one, first come first served. Read once at startup.
+     */
+    agentRequestSlotCount: z.int().min(1),
+    /**
+     * Inclusive maximum number of replies that may wait for a free request
+     * slot of one agent at a time.
+     *
+     * @remarks A non-negative safe integer; 0 means a reply never waits. A
+     * reply that finds every slot held and this many replies waiting is not
+     * started: it is stored as failed, and its `error` event says why. Read
+     * once at startup.
+     */
+    agentWaitingRequestLimit: z.int().min(0)
   })
   .readonly()
 
@@ -184,7 +217,9 @@ export function loadBackendConfig(): BackendConfig {
     lysipteraSystemPrompt: readPrompt("lysiptera-system"),
     titleGenerationPrompt: readPrompt("title-generation"),
     titleGenerationMaxAttempts: TITLE_GENERATION_MAX_ATTEMPTS,
-    generatedTitleMaxLength: GENERATED_TITLE_MAX_LENGTH
+    generatedTitleMaxLength: GENERATED_TITLE_MAX_LENGTH,
+    agentRequestSlotCount: AGENT_REQUEST_SLOT_COUNT,
+    agentWaitingRequestLimit: AGENT_WAITING_REQUEST_LIMIT
   } satisfies z.input<typeof backendConfigSchema>)
 }
 

@@ -1028,11 +1028,22 @@ function formatReplyFailureMessage(failure: unknown): string {
 function formatRequestLimitMessage(limits: AgentRequestLimits): string {
   const working =
     limits.slotCount === 1 ? "1 request" : `${limits.slotCount} requests`
-  const waiting =
-    limits.waitingLimit === 0
-      ? ""
-      : `, and ${limits.waitingLimit} more ${limits.waitingLimit === 1 ? "is" : "are"} waiting for it`
-  return `This agent is already working on ${working}${waiting}, so it did not take this message. Send it again once it finishes one.`
+  return `This agent is already working on ${working}${formatWaitingRequests(limits.waitingLimit)}, so it did not take this message. Send it again once it finishes one.`
+}
+
+/**
+ * Formats the clause of the refusal sentence that tells how many requests
+ * wait for the agent.
+ *
+ * @param waitingLimit - The agent's waiting limit, all of it reached.
+ * @returns Nothing when no request may wait; otherwise the clause, starting
+ * with a comma.
+ */
+function formatWaitingRequests(waitingLimit: number): string {
+  if (waitingLimit === 0) return ""
+  return waitingLimit === 1
+    ? ", and 1 more is waiting for it"
+    : `, and ${waitingLimit} more are waiting for it`
 }
 
 /**

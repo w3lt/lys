@@ -3056,7 +3056,599 @@
     "accepted": false
   },
   {
-    "case": "an https URL to a punycode host",
+    "case": "an https URL to a Unicode host of Latin letters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://bücher.example/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://bücher.example/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL to the punycode of a Unicode host",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn--bcher-kva.example/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn--bcher-kva.example/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL to the punycode of a Unicode host in uppercase",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://XN--BCHER-KVA.example/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://XN--BCHER-KVA.example/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL with a punycode label in uppercase",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://MCP.XN--9CA.COM/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://MCP.XN--9CA.COM/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL to a Unicode host whose ASCII letters are uppercase",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://Bücher.EXAMPLE/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://Bücher.EXAMPLE/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL to a Unicode host with digits and hyphens",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp-2.bü-3cher.example/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp-2.bü-3cher.example/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL to a Unicode host of Polish letters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://zażółć.gęślą.example/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://zażółć.gęślą.example/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL to a Unicode host of Greek letters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://παράδειγμα.δοκιμή/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://παράδειγμα.δοκιμή/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL to a Unicode host of Cyrillic letters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://пример.рф/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://пример.рф/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL to a Unicode host of Chinese letters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://例子.测试/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://例子.测试/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL to a Unicode host of Japanese letters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://サーバー.例え.テスト/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://サーバー.例え.テスト/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL to a Unicode host of Korean letters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://실례.테스트/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://실례.테스트/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL to a Unicode host with a port and a query",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://bücher.example:8443/mcp?region=eu"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://bücher.example:8443/mcp?region=eu"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL with a third slash before a Unicode host",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https:///bücher.example/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https:///bücher.example/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL to a Unicode host whose punycode label has 63 characters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaü.example/mcp"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "headers": [],
+          "name": "docs",
+          "transport": "http",
+          "url": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaü.example/mcp"
+        }
+      ]
+    }
+  },
+  {
+    "case": "an https URL to a Unicode host whose punycode label has 64 characters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaü.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a Unicode host in uppercase, which URL parsers lowercase",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://BÜCHER.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a Unicode host with a combining mark, which URL parsers compose",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://bücher.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a Unicode host with ß, which URL parsers convert differently",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://straße.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a Unicode host with a final sigma, which URL parsers convert differently",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://λόγος.δοκιμή/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a Unicode host with ĳ, which URL parsers map to ij",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://ĳssel.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL whose fullwidth host maps to ASCII",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://ｅｘａｍｐｌｅ.com/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a Unicode host with an ideographic full stop, which URL parsers read as a dot",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://bücher。example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a Unicode host of Arabic letters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://مثال.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a Unicode host of Hebrew letters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://דוגמה.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a Unicode host with an emoji",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp😀.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a host that mixes Latin and Cyrillic letters in one part",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://pаypal.com/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a host that mixes Latin letters and kana in one part",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://jリーグ.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a Unicode host with an underscore in another part",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://bücher.my_host.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a Unicode host with a trailing dot",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://bücher.example./mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a Unicode host with hyphens as its third and fourth characters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://ab--cü.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a percent-encoded Unicode host of Latin letters",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://b%C3%BCcher.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to a percent-encoded Unicode host",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://%E0%A1%B0%D8%A8.com/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to the punycode of ß",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn--zca.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL to the punycode of Arabic letters, which only the host's URL parser accepts",
     "group": {
       "servers": [
         {
@@ -3082,32 +3674,6 @@
     "accepted": false
   },
   {
-    "case": "an https URL with a punycode label in uppercase",
-    "group": {
-      "servers": [
-        {
-          "name": "docs",
-          "transport": "http",
-          "url": "https://MCP.XN--9CA.COM/mcp"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
-    "case": "an https URL to a Unicode host",
-    "group": {
-      "servers": [
-        {
-          "name": "docs",
-          "transport": "http",
-          "url": "https://bücher.example/mcp"
-        }
-      ]
-    },
-    "accepted": false
-  },
-  {
     "case": "an https URL to a Unicode host that only the share package's URL parser accepts",
     "group": {
       "servers": [
@@ -3121,13 +3687,52 @@
     "accepted": false
   },
   {
-    "case": "an https URL to a percent-encoded Unicode host",
+    "case": "an https URL whose punycode label is empty",
     "group": {
       "servers": [
         {
           "name": "docs",
           "transport": "http",
-          "url": "https://%E0%A1%B0%D8%A8.com/mcp"
+          "url": "https://xn--.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL whose punycode label decodes to a control character",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn--a.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL whose punycode label ends inside a number",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn--b.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL whose punycode label decodes to text ending in a hyphen",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn--bcher--kva.example/mcp"
         }
       ]
     },
@@ -3152,29 +3757,6 @@
           "name": "docs",
           "transport": "http",
           "url": "https://mcp.axn--b.com/mcp"
-        }
-      ]
-    }
-  },
-  {
-    "case": "an https URL whose fullwidth host maps to ASCII",
-    "group": {
-      "servers": [
-        {
-          "name": "docs",
-          "transport": "http",
-          "url": "https://ｅｘａｍｐｌｅ.com/mcp"
-        }
-      ]
-    },
-    "accepted": true,
-    "written": {
-      "servers": [
-        {
-          "headers": [],
-          "name": "docs",
-          "transport": "http",
-          "url": "https://ｅｘａｍｐｌｅ.com/mcp"
         }
       ]
     }

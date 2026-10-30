@@ -9,6 +9,7 @@ import {
 } from "@lys/share"
 import { readFileSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
+import { domainToASCII } from "node:url"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import { readMcpSettings } from "../../../../src/infrastructure/settings/mcpSettingsFile"
@@ -191,6 +192,233 @@ const GROUP_SIZE_PROBLEM =
 /** Problem of a text that holds a lone surrogate. */
 const LONE_SURROGATE_PROBLEM =
   "A setting holds only complete Unicode characters."
+
+/** Problem of a URL whose internationalized domain name breaks its rule. */
+const INTERNATIONALIZED_HOST_PROBLEM =
+  "A URL's host is plain ASCII or an internationalized domain name whose every part is lowercase letters of one of the Latin, Greek, Cyrillic, Chinese, Japanese, or Korean scripts, digits, and hyphens."
+
+/** One range of {@link LISTED_LETTER_RANGES}. */
+type ListedLetterRange = {
+  /** The range as the configuration reference names it. */
+  letters: string
+  /** First code point of the range. */
+  first: number
+  /** Last code point of the range, inclusive. */
+  last: number
+  /** 2 when only every other code point of the range is listed. */
+  step: 1 | 2
+}
+
+/**
+ * Letters beyond ASCII that a part of an internationalized domain name may
+ * hold, as the configuration reference lists them.
+ */
+const LISTED_LETTER_RANGES: readonly ListedLetterRange[] = [
+  { letters: "à to ö", first: 0xe0, last: 0xf6, step: 1 },
+  { letters: "ø to ÿ", first: 0xf8, last: 0xff, step: 1 },
+  { letters: "ā to ı", first: 0x101, last: 0x131, step: 2 },
+  { letters: "ĵ and ķ", first: 0x135, last: 0x137, step: 2 },
+  { letters: "ĸ to ľ", first: 0x138, last: 0x13e, step: 2 },
+  { letters: "ł to ň", first: 0x142, last: 0x148, step: 2 },
+  { letters: "ŋ to ŷ", first: 0x14b, last: 0x177, step: 2 },
+  { letters: "ź to ž", first: 0x17a, last: 0x17e, step: 2 },
+  { letters: "ά to ρ", first: 0x3ac, last: 0x3c1, step: 1 },
+  { letters: "σ to ώ", first: 0x3c3, last: 0x3ce, step: 1 },
+  { letters: "а to џ", first: 0x430, last: 0x45f, step: 1 },
+  { letters: "ぁ to ん", first: 0x3041, last: 0x3093, step: 1 },
+  { letters: "ァ to ヶ", first: 0x30a1, last: 0x30f6, step: 1 },
+  { letters: "ー", first: 0x30fc, last: 0x30fc, step: 1 },
+  { letters: "一 to 龥", first: 0x4e00, last: 0x9fa5, step: 1 },
+  { letters: "가 to 힣", first: 0xac00, last: 0xd7a3, step: 1 }
+]
+
+/**
+ * Characters off that list: an ASCII symbol; Latin letters beside listed
+ * ones, uppercase or lowercase, and ones URL parsers map; Greek, Cyrillic,
+ * kana, ideographs, and Hangul past the listed ranges; then an emoji, Arabic
+ * and Hebrew letters, a combining mark, and a middle dot.
+ */
+const UNLISTED_CHARACTERS =
+  "_À×ß÷ĀİĲĳĴŀŁŉŊŸŹſΆΐςϐЯѠゔゝヷ・ヽ\u3400\u9fa6\ud7b0\u{20000}\u{1f600}\u0628\u05d0\u0301\u00b7"
+
+/** One sample of RFC 3492, section 7.1. */
+type PunycodeSample = {
+  /** Letter of the sample in the RFC. */
+  sample: string
+  /** Text of the sample. */
+  text: string
+  /** Punycode of the text, as the RFC writes it. */
+  punycode: string
+}
+
+/**
+ * The samples of RFC 3492, section 7.1, whose text is lowercase letters of
+ * one listed script, digits, and hyphens, apart from ASCII letters in
+ * uppercase, which URL parsers lowercase.
+ */
+const ACCEPTED_PUNYCODE_SAMPLES: readonly PunycodeSample[] = [
+  {
+    sample: "B",
+    text: "他们为什么不说中文",
+    punycode: "ihqwcrb4cv8a8dqg056pqjye"
+  },
+  {
+    sample: "C",
+    text: "他們爲什麽不說中文",
+    punycode: "ihqwctvzc91f659drss3x8bo0yb"
+  },
+  {
+    sample: "D",
+    text: "Pročprostěnemluvíčesky",
+    punycode: "Proprostnemluvesky-uyb24dma41a"
+  },
+  {
+    sample: "G",
+    text: "なぜみんな日本語を話してくれないのか",
+    punycode: "n8jok5ay5dzabd5bym9f0cm5685rrjetr6pdxa"
+  },
+  {
+    sample: "I",
+    text: "почемужеонинеговорятпорусски",
+    punycode: "b1abfaaepdrnnbgefbaDotcwatmq2g4l"
+  },
+  {
+    sample: "J",
+    text: "PorquénopuedensimplementehablarenEspañol",
+    punycode: "PorqunopuedensimplementehablarenEspaol-fmd56a"
+  },
+  { sample: "O", text: "ひとつ屋根の下2", punycode: "2-u9tlzr9756bt3uc0v" },
+  { sample: "R", text: "そのスピードで", punycode: "d9juau41awczczp" }
+]
+
+/**
+ * The samples of RFC 3492, section 7.1, that the host rule refuses: other
+ * scripts, scripts mixed in one part, letters off the list, or punycode
+ * longer than a label holds. Sample S, which holds spaces, is no host.
+ */
+const REFUSED_PUNYCODE_SAMPLES: readonly PunycodeSample[] = [
+  {
+    sample: "A",
+    text: "ليهمابتكلموشعربي؟",
+    punycode: "egbpdaj6bu4bxfgehfvwxn"
+  },
+  {
+    sample: "E",
+    text: "למההםפשוטלאמדבריםעברית",
+    punycode: "4dbcagdahymbxekheh6e0a7fei0b"
+  },
+  {
+    sample: "F",
+    text: "यहलोगहिन्दीक्योंनहींबोलसकतेहैं",
+    punycode: "i1baa7eci9glrd9b2ae1bj0hfcgg6iyaf8o0a1dig0cd"
+  },
+  {
+    sample: "H",
+    text: "세계의모든사람들이한국어를이해한다면얼마나좋을까",
+    punycode:
+      "989aomsvi5e83db1d2a355cv1e0vak1dwrv93d5xbh15a0dt30a5jpsd879ccm6fea98c"
+  },
+  {
+    sample: "K",
+    text: "TạisaohọkhôngthểchỉnóitiếngViệt",
+    punycode: "TisaohkhngthchnitingVit-kjcr8268qyxafd2f1b9g"
+  },
+  { sample: "L", text: "3年B組金八先生", punycode: "3B-ww4c5e180e575a65lsy2b" },
+  {
+    sample: "M",
+    text: "安室奈美恵-with-SUPER-MONKEYS",
+    punycode: "-with-SUPER-MONKEYS-pc58ag80a8qai00g7n9n"
+  },
+  {
+    sample: "N",
+    text: "Hello-Another-Way-それぞれの場所",
+    punycode: "Hello-Another-Way--fc4qua05auwb3674vfr0b"
+  },
+  {
+    sample: "P",
+    text: "MajiでKoiする5秒前",
+    punycode: "MajiKoi5-783gue6qz075azm5e"
+  },
+  { sample: "Q", text: "パフィーdeルンバ", punycode: "de-jg4avhby1noc0d" }
+]
+
+/** One URL server as a settings file holds it, without headers. */
+type UrlServerEntry = {
+  /** Server name. */
+  name: string
+  /** Always a URL server. */
+  transport: "http"
+  /** URL text. */
+  url: string
+}
+
+/**
+ * Builds the two URLs of one RFC 3492 sample: to the sample's text as a
+ * host part, and to its punycode.
+ *
+ * @param sample - The sample.
+ * @returns A group of two servers, one per URL.
+ */
+function buildPunycodeSampleGroup(sample: PunycodeSample): {
+  servers: UrlServerEntry[]
+} {
+  const textServer: UrlServerEntry = {
+    name: "text",
+    transport: "http",
+    url: `https://${sample.text}.example/mcp`
+  }
+  const punycodeServer: UrlServerEntry = {
+    name: "punycode",
+    transport: "http",
+    url: `https://xn--${sample.punycode}.example/mcp`
+  }
+  const servers = [textServer, punycodeServer]
+  return { servers }
+}
+
+/**
+ * Lists the letters of one listed range.
+ *
+ * @param range - The range.
+ * @returns Its letters, in code point order.
+ */
+function listLetters(range: ListedLetterRange): string[] {
+  return Array.from(
+    { length: Math.floor((range.last - range.first) / range.step) + 1 },
+    (_, index) => String.fromCodePoint(range.first + index * range.step)
+  )
+}
+
+/**
+ * Builds the servers of letters, each in a host part between two digits,
+ * typed as itself and as the punycode Node writes for it, in uppercase.
+ *
+ * @param letters - The letters, at most eight, so the servers fit a group.
+ * @returns Two servers per letter, with distinct names, as the reader
+ * returns them.
+ */
+function buildLetterServers(
+  letters: readonly string[]
+): { name: string; transport: "http"; url: string; headers: [] }[] {
+  return letters.flatMap((letter, index) => {
+    const host = `1${letter}2.example`
+    const punycodeHost = domainToASCII(host).toUpperCase()
+    return [
+      {
+        name: `text-${index}`,
+        transport: "http",
+        url: `https://${host}/mcp`,
+        headers: []
+      },
+      {
+        name: `punycode-${index}`,
+        transport: "http",
+        url: `https://${punycodeHost}/mcp`,
+        headers: []
+      }
+    ]
+  })
+}
 
 describe("readMcpSettings", () => {
   it("reads a valid group, ignoring every other group", async () => {
@@ -516,14 +744,14 @@ describe("readMcpSettings", () => {
     }
   )
 
-  it("reports a URL to an internationalized domain name with its rule", async () => {
+  it("reports a URL to a refused internationalized domain name with its rule", async () => {
     const path = await writeSettingsFile(
       buildSettingsText({
         servers: [
           {
             name: "remote",
             transport: "http",
-            url: "https://bücher.example/mcp"
+            url: "https://BÜCHER.example/mcp"
           }
         ]
       })
@@ -531,9 +759,7 @@ describe("readMcpSettings", () => {
 
     expect(await readMcpSettings(path)).toEqual({
       status: "invalid",
-      problems: [
-        "servers.0.url: A URL's host is not an internationalized domain name: no part of it starts with xn--."
-      ]
+      problems: [`servers.0.url: ${INTERNATIONALIZED_HOST_PROBLEM}`]
     })
   })
 
@@ -663,6 +889,80 @@ describe("readMcpSettings on the groups shared with the desktop host", () => {
       )
 
       expect(read).toMatchObject({ status: "invalid" })
+    }
+  )
+})
+
+describe("readMcpSettings on internationalized domain names", () => {
+  it.each(LISTED_LETTER_RANGES)(
+    "reads the listed letters $letters, typed as themselves and as punycode",
+    async (range) => {
+      const path = await createSettingsFilePath()
+      const letters = listLetters(range)
+
+      for (let index = 0; index < letters.length; index += 8) {
+        const batch = letters.slice(index, index + 8)
+        const servers = buildLetterServers(batch)
+        const settings = { servers }
+        await writeFile(path, buildSettingsText(settings))
+
+        expect(await readMcpSettings(path), batch.join(" ")).toEqual({
+          status: "read",
+          settings
+        })
+      }
+    }
+  )
+
+  it("reports each unlisted character in a part of an internationalized domain name as a break of its rule", async () => {
+    const path = await createSettingsFilePath()
+
+    for (const character of UNLISTED_CHARACTERS) {
+      const url = `https://1${character}2.bücher.example/mcp`
+      const servers = [{ name: "docs", transport: "http", url }]
+      await writeFile(path, buildSettingsText({ servers }))
+
+      expect(await readMcpSettings(path), url).toEqual({
+        status: "invalid",
+        problems: [`servers.0.url: ${INTERNATIONALIZED_HOST_PROBLEM}`]
+      })
+    }
+  })
+
+  it.each(ACCEPTED_PUNYCODE_SAMPLES)(
+    "reads RFC 3492 sample $sample, typed as its text and as its punycode",
+    async (sample) => {
+      const group = buildPunycodeSampleGroup(sample)
+      const writtenServers = group.servers.map((server) => ({
+        ...server,
+        headers: []
+      }))
+      const settings = { servers: writtenServers }
+
+      const read = await readMcpSettings(
+        await writeSettingsFile(buildSettingsText(group))
+      )
+
+      expect(read).toEqual({ status: "read", settings })
+    }
+  )
+
+  it.each(REFUSED_PUNYCODE_SAMPLES)(
+    "reports RFC 3492 sample $sample, typed as its text and as its punycode, as invalid",
+    async (sample) => {
+      const read = await readMcpSettings(
+        await writeSettingsFile(
+          buildSettingsText(buildPunycodeSampleGroup(sample))
+        )
+      )
+
+      expect(read).toEqual({
+        status: "invalid",
+        problems: [
+          `servers.0.url: ${INTERNATIONALIZED_HOST_PROBLEM}`,
+          `servers.1.url: ${INTERNATIONALIZED_HOST_PROBLEM}`
+        ]
+      })
     }
   )
 })

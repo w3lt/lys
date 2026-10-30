@@ -17,6 +17,7 @@ import {
   type AddressedLlmProvider,
   type KeyedLlmProvider
 } from "@/lib/models/llm-provider-target"
+import type { BackendServerStatus } from "@/lib/store"
 import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
 import type {
   ProviderApiKeyChange,
@@ -115,6 +116,8 @@ export type ProviderStatusInput = {
   readonly secrets: SecretsSettings
   /** Latest published connection status of the backend's provider. */
   readonly status: LmStudioStatus
+  /** Backend lifecycle state, which explains an `unknown` status. */
+  readonly backendStatus: BackendServerStatus
   /** Latest provider save. */
   readonly saveState: ProviderSettingsSaveState
   /** The person's edit of the card's field. */
@@ -450,7 +453,7 @@ function isProviderKeyMissing(
  * @param status - Latest published connection status.
  * @returns `standby` for a card that does not present the active provider;
  * `needs key` for the active provider without its key; otherwise the
- * connection status, with `unknown` while the backend is not running.
+ * connection status, `unknown` while it is not known.
  */
 export function calculateProviderBadge(
   card: ProviderCardKind,
@@ -475,18 +478,47 @@ export function calculateProviderBadge(
 }
 
 /**
+ * Formats why the connection to a provider is not known.
+ *
+ * @param name - Provider's name.
+ * @param backendStatus - Backend lifecycle state.
+ * @returns For a running backend, that the status could not be read and
+ * Test checks again; otherwise what the backend is doing.
+ */
+function formatUnknownConnectionText(
+  name: string,
+  backendStatus: BackendServerStatus
+): string {
+  switch (backendStatus) {
+    case "running":
+      return `Lys couldn't read the connection to ${name} · press Test to check again`
+    case "stopped":
+      return `the backend isn't running, so Lys can't reach ${name} yet`
+    case "starting":
+      return `waiting for the backend to start before reaching ${name}`
+    case "stopping":
+      return "the backend is stopping"
+    case "unresponsive":
+      return `the backend is not responding, so Lys can't reach ${name}`
+  }
+}
+
+/**
  * Formats what the active connection status means for one provider.
  *
- * @param access - How the active provider is reached.
- * @param providers - Saved provider choice, for the address.
- * @param status - Latest published connection status.
+ * @param input - How the active provider is reached, the saved choice for
+ * its address, the connection status, and the backend's state.
  * @returns The line for that status.
  */
-function formatConnectionMessage(
-  access: ProviderAccessKind,
-  providers: ProvidersSettings,
-  status: LmStudioStatus
-): ProviderMessage {
+function formatConnectionMessage({
+  access,
+  providers,
+  status,
+  backendStatus
+}: Pick<
+  ProviderStatusInput,
+  "access" | "providers" | "status" | "backendStatus"
+>): ProviderMessage {
   const name = LLM_PROVIDER_NAMES[access.provider]
   const where =
     access.kind === "address"
@@ -495,7 +527,7 @@ function formatConnectionMessage(
   switch (status) {
     case "unknown":
       return {
-        text: `the backend isn't running, so Lys can't reach ${name} yet`,
+        text: formatUnknownConnectionText(name, backendStatus),
         tone: "muted"
       }
     case "connecting":
@@ -572,5 +604,5 @@ export function formatProviderMessage(
       tone: "attention"
     }
   }
-  return formatConnectionMessage(input.access, input.providers, input.status)
+  return formatConnectionMessage(input)
 }

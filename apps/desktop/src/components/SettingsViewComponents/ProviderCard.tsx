@@ -2,6 +2,7 @@ import type { LlmProvider, ProviderAddress } from "@lys/share"
 import { useId, useRef, useState, type ReactElement } from "react"
 
 import { Button } from "@/components/ui/button"
+import type { BackendServerStatus } from "@/lib/store"
 import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
 import type {
   ProviderApiKeyChange,
@@ -57,6 +58,8 @@ type ProviderCardProps = ProviderCardRequests & {
   readonly secrets: SecretsSettings
   /** Latest published connection status of the backend's provider. */
   readonly status: LmStudioStatus
+  /** Backend lifecycle state, which explains an `unknown` status. */
+  readonly backendStatus: BackendServerStatus
   /** Latest provider save, owned by the application store. */
   readonly saveState: ProviderSettingsSaveState
 }
@@ -71,6 +74,8 @@ type ProviderCardBodyProps = ProviderCardRequests & {
   readonly secrets: SecretsSettings
   /** Latest published connection status. */
   readonly status: LmStudioStatus
+  /** Backend lifecycle state, which explains an `unknown` status. */
+  readonly backendStatus: BackendServerStatus
   /** Latest provider save. */
   readonly saveState: ProviderSettingsSaveState
 }
@@ -97,6 +102,8 @@ type ProviderCardFooterProps = {
   readonly secrets: SecretsSettings
   /** Latest published connection status. */
   readonly status: LmStudioStatus
+  /** Backend lifecycle state, which explains an `unknown` status. */
+  readonly backendStatus: BackendServerStatus
   /** Latest provider save. */
   readonly saveState: ProviderSettingsSaveState
   /** The person's edit of the form's field. */
@@ -169,6 +176,7 @@ function ProviderCardFooter({
   providers,
   secrets,
   status,
+  backendStatus,
   saveState,
   draft,
   onTest,
@@ -179,6 +187,7 @@ function ProviderCardFooter({
     providers,
     secrets,
     status,
+    backendStatus,
     saveState,
     draft
   })
@@ -241,6 +250,7 @@ function ProviderCardBody({
   providers,
   secrets,
   status,
+  backendStatus,
   saveState,
   onSaveProviders,
   onSaveApiKey,
@@ -350,6 +360,7 @@ function ProviderCardBody({
         providers={providers}
         saveState={saveState}
         secrets={secrets}
+        backendStatus={backendStatus}
         status={status}
         statusId={statusId}
       />
@@ -378,6 +389,7 @@ export default function ProviderCard({
   providers,
   secrets,
   status,
+  backendStatus,
   saveState,
   onSaveProviders,
   onSaveApiKey,
@@ -445,6 +457,7 @@ export default function ProviderCard({
           providers={providers}
           saveState={saveState}
           secrets={secrets}
+          backendStatus={backendStatus}
           status={status}
         />
       ) : null}

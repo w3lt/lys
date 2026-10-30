@@ -65,6 +65,7 @@ function buildStatusInput(
     providers: STORED_PROVIDERS_SETTINGS,
     secrets: SECRETS,
     status: "connected",
+    backendStatus: "running",
     saveState: { status: "idle" },
     draft: UNEDITED_PROVIDER_DRAFT,
     ...overrides
@@ -372,12 +373,25 @@ describe("provider-presentation", () => {
       expect(
         formatProviderMessage(buildStatusInput({ status: "connecting" }))
       ).toEqual({ text: "connecting to Ollama…", tone: "pending" })
-      expect(
-        formatProviderMessage(buildStatusInput({ status: "unknown" }))
-      ).toEqual({
-        text: "the backend isn't running, so Lys can't reach Ollama yet",
-        tone: "muted"
-      })
+    })
+
+    it("words an unknown connection by what the backend is doing", () => {
+      const lines = (
+        ["running", "stopped", "starting", "stopping", "unresponsive"] as const
+      ).map(
+        (backendStatus) =>
+          formatProviderMessage(
+            buildStatusInput({ status: "unknown", backendStatus })
+          ).text
+      )
+
+      expect(lines).toEqual([
+        "Lys couldn't read the connection to Ollama · press Test to check again",
+        "the backend isn't running, so Lys can't reach Ollama yet",
+        "waiting for the backend to start before reaching Ollama",
+        "the backend is stopping",
+        "the backend is not responding, so Lys can't reach Ollama"
+      ])
     })
   })
 })

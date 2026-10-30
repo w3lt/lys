@@ -24,6 +24,7 @@ export default function ProvidersPane(): ReactElement {
   const providers = useLysStore((state) => state.settings.providers)
   const secrets = useLysStore((state) => state.settings.secrets)
   const status = useLysStore((state) => state.lmStudioStatus)
+  const backendStatus = useLysStore((state) => state.backendServerInfo.status)
   const saveState = useLysStore((state) => state.providerSettingsSave)
   const saveProviderSettings = useLysStore(
     (state) => state.saveProviderSettings
@@ -48,6 +49,7 @@ export default function ProvidersPane(): ReactElement {
       >
         {PROVIDER_CARD_ORDER.map((card) => (
           <ProviderCard
+            backendStatus={backendStatus}
             card={card}
             key={card}
             onSaveApiKey={saveProviderApiKey}

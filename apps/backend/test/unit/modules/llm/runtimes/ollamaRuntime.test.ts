@@ -194,6 +194,61 @@ describe("OllamaRuntime", () => {
     expect(measurement).toBeUndefined()
   })
 
+  it("asks for at most four model descriptions at once, however many models Ollama lists", async () => {
+    const names = Array.from({ length: 10 }, (_, index) => `model-${index}:8b`)
+    let inFlight = 0
+    let mostInFlight = 0
+    const { runtime } = await createOwnedRuntime("cloud", {
+      "GET /api/tags": answerWith({ models: names.map((name) => ({ name })) }),
+      "POST /api/show": async () => {
+        inFlight += 1
+        mostInFlight = Math.max(mostInFlight, inFlight)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        inFlight -= 1
+        return {
+          status: 200,
+          body: {
+            capabilities: ["completion"],
+            model_info: { "llama.context_length": 8192 }
+          }
+        }
+      }
+    })
+    mostInFlight = 0
+
+    const models = await runtime.listDownloadedLlmModels()
+
+    expect(models.map(({ modelKey }) => modelKey)).toEqual(names)
+    expect(mostInFlight).toBe(4)
+  })
+
+  it("fails the listing when a description fails, asking for no description after it", async () => {
+    const names = Array.from({ length: 10 }, (_, index) => `model-${index}:8b`)
+    const { runtime, server } = await createOwnedRuntime("cloud", {
+      "GET /api/tags": answerWith({ models: names.map((name) => ({ name })) }),
+      "POST /api/show": async (request) => {
+        if ((request.body as { model: string }).model === "model-1:8b") {
+          return { status: 500, body: { error: "boom" } }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        return {
+          status: 200,
+          body: {
+            capabilities: ["completion"],
+            model_info: { "llama.context_length": 8192 }
+          }
+        }
+      }
+    })
+
+    await expect(runtime.listDownloadedLlmModels()).rejects.toThrow(
+      "The LLM runtime could not list downloaded models."
+    )
+    expect(
+      server.requests.filter((request) => request.path === "/api/show")
+    ).toHaveLength(4)
+  })
+
   it("keeps a model when Ollama reports no capabilities for it", async () => {
     const { runtime } = await createOwnedRuntime("local", {
       "POST /api/show": answerWith({

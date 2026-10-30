@@ -75,6 +75,13 @@ type OllamaRunningModel = z.infer<typeof ollamaRunningModelSchema>
 /** Validates a context length found in a model's metadata. */
 const contextLengthSchema = z.int().positive()
 
+/**
+ * Most `/api/show` requests one listing has in flight at once, so a server
+ * with many models, or Ollama Cloud's catalog, is not asked for every
+ * description at the same moment.
+ */
+const MAXIMUM_CONCURRENT_OLLAMA_DESCRIPTIONS = 4
+
 /** One request to Ollama's native API: a `GET`, or a `POST` with a body. */
 type OllamaApiRequest =
   | Readonly<{
@@ -318,20 +325,23 @@ export default class OllamaRuntime implements LlmRuntime {
 
   /**
    * Lists the models Ollama has that can chat, each with its description,
-   * asking for every description at once.
+   * with at most {@link MAXIMUM_CONCURRENT_OLLAMA_DESCRIPTIONS} descriptions
+   * asked for at once.
    *
    * @returns The chat models, in Ollama's order.
-   * @throws When a request fails or an answer does not match its shape.
+   * @throws When a request fails or an answer does not match its shape,
+   * once the descriptions already asked for have settled.
    */
   async #listOllamaChatModels(): Promise<readonly OllamaChatModel[]> {
     const tags = await this.#listOllamaTags()
-    const models = await Promise.all(
-      tags.map(async (tag) =>
+    const models = await mapWithConcurrencyLimit(
+      tags,
+      MAXIMUM_CONCURRENT_OLLAMA_DESCRIPTIONS,
+      async (tag) =>
         Object.freeze({
           tag,
           description: await this.#showOllamaModel(tag.name)
         })
-      )
     )
     return models.filter(({ description }) => isOllamaChatModel(description))
   }
@@ -446,6 +456,47 @@ export default class OllamaRuntime implements LlmRuntime {
       apiKey: this.#target.mode === "cloud" ? this.#target.apiKey : undefined
     })
   }
+}
+
+/**
+ * Maps items through an asynchronous call with a bounded number of calls in
+ * flight.
+ *
+ * @typeParam Item - Item type.
+ * @typeParam Result - Result type.
+ * @param items - Items to map.
+ * @param limit - Most calls in flight at once; a positive integer.
+ * @param map - Call for one item.
+ * @returns The results, in item order, once every call has settled.
+ * @throws The first failure to settle, once every started call has settled;
+ * no call starts after a failure.
+ * @remarks Workers share one iterator over the items, so each item is taken
+ * by exactly one worker.
+ */
+async function mapWithConcurrencyLimit<Item, Result>(
+  items: readonly Item[],
+  limit: number,
+  map: (item: Item) => Promise<Result>
+): Promise<Result[]> {
+  const results: Result[] = []
+  const failures: unknown[] = []
+  const entries = items.entries()
+  /** Maps the next untaken item until none is left or a call failed. */
+  async function runWorker(): Promise<void> {
+    for (const [index, item] of entries) {
+      try {
+        results[index] = await map(item)
+      } catch (failure) {
+        failures.push(failure)
+      }
+      if (failures.length > 0) return
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, runWorker)
+  )
+  if (failures.length > 0) throw failures[0]
+  return results
 }
 
 /**

@@ -26,11 +26,12 @@ export type ProviderServerAnswer = Readonly<{
  * Answers one request; keyed by `<METHOD> <path>` in a route table.
  *
  * @param request - The received request.
- * @returns The answer to send.
+ * @returns The answer to send, or a promise of it, which holds the request
+ * open until it settles.
  */
 export type ProviderServerRoute = (
   request: ProviderServerRequest
-) => ProviderServerAnswer
+) => ProviderServerAnswer | Promise<ProviderServerAnswer>
 
 /** A fake provider listening on loopback for the current test. */
 export type ProviderServer = Readonly<{
@@ -53,10 +54,13 @@ export async function startProviderServer(
 ): Promise<ProviderServer> {
   const requests: ProviderServerRequest[] = []
   const server = createServer((incoming, outgoing) => {
-    void readRequest(incoming).then((request) => {
+    void readRequest(incoming).then(async (request) => {
       requests.push(request)
       const route = routes[`${request.method} ${request.path}`]
-      const answer = route?.(request) ?? { status: 404, body: { error: "no" } }
+      const answer = (await route?.(request)) ?? {
+        status: 404,
+        body: { error: "no" }
+      }
       outgoing.writeHead(answer.status, { "content-type": "application/json" })
       outgoing.end(JSON.stringify(answer.body))
     })

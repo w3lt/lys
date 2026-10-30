@@ -60,13 +60,13 @@ export async function requestProviderJson(
   const signal = AbortSignal.timeout(timeoutMs)
   try {
     return await exchangeProviderJson(request, signal)
-  } catch (failure) {
+  } catch (exchangeError) {
     if (signal.aborted) {
       throw new Error(`The provider did not answer within ${timeoutMs} ms.`, {
-        cause: failure
+        cause: exchangeError
       })
     }
-    throw failure
+    throw exchangeError
   }
 }
 

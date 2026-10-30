@@ -303,10 +303,9 @@ function buildReplyCeilingParameter(
   field: LlmChatEndpoint["replyCeilingField"],
   replyCeiling: number | undefined
 ): ReplyCeilingParameter {
-  const ceiling = replyCeiling ?? null
   return field === "max_tokens"
-    ? { max_tokens: ceiling }
-    : { max_completion_tokens: ceiling }
+    ? { max_tokens: replyCeiling ?? null }
+    : { max_completion_tokens: replyCeiling ?? null }
 }
 
 /**

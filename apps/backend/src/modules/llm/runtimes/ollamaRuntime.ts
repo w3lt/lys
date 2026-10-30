@@ -492,8 +492,8 @@ async function mapWithConcurrencyLimit<Item, Result>(
     for (const [index, item] of entries) {
       try {
         results[index] = await map(item)
-      } catch (failure) {
-        failures.push(failure)
+      } catch (callError) {
+        failures.push(callError)
       }
       if (failures.length > 0) return
     }

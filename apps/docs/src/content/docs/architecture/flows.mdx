@@ -71,7 +71,7 @@ seconds. Quitting Lys stops vmo and the backend together.
 2. The store shows `connecting` and sends `POST /api/v1/llm/runtime/connect`.
 3. The backend queues one attempt behind accepted model work. It keeps a held
    runtime that still answers and otherwise acquires a new one. Requests that
-   arrive before the attempt reads the saved provider share it; a later one
+   arrive before the attempt starts reading the saved provider share it; a later one
    queues another attempt, which reads the provider again.
 4. The response carries `connected` or `unreachable`, and the store publishes
    it.

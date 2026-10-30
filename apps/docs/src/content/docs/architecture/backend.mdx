@@ -835,8 +835,8 @@ or after a held runtime stops answering. Model operations are refused with
 `connected`. When a runtime call fails during a model operation, the service
 probes the runtime before the queue moves on and releases it if the provider
 no longer answers. Refresh keeps a runtime that still answers and otherwise
-acquires a new one. Refreshes share an attempt until it reads the saved
-provider; a later refresh queues one of its own, so a provider picked while
+acquires a new one. Refreshes share an attempt until it starts reading the
+saved provider; a later refresh queues one of its own, so a provider picked while
 an attempt runs is the one connected.
 
 `LmStudioRuntime.create()` still waits for LM Studio to answer its version

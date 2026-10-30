@@ -47,7 +47,7 @@ with `urn:lys:problem:llm:runtime-unavailable` while the backend has no
 connected model provider. The runtime-status route never contacts the
 provider; the runtime-connect route waits for a connection attempt, which
 reads the provider saved in `settings.json` again. Requests share an attempt
-until it has read the file; a later request waits for an attempt of its own.
+until it starts reading the file; a later request waits for an attempt of its own.
 
 Every request body is limited to 1 MiB (1,048,576 bytes), Fastify's default,
 except a tool result, which is limited to 8 MiB (8,388,608 bytes) so that a

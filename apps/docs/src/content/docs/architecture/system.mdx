@@ -11,15 +11,15 @@ external model runtime, and two shared TypeScript contract packages.
 
 ## Runtime parts
 
-| Part                      | Implementation                        | Responsibility                                                                                                                                         |
-| ------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Desktop UI                | React in `apps/desktop/src`           | Renders chat, conversation history, and settings views, opens backend HTTP streams, and applies typed chat events to local UI state.                   |
-| Host                      | Tauri in `apps/desktop/src-tauri/src` | Starts and stops the backend and vmo processes, checks vmo's health, exposes native commands to the UI, and reads or writes `$LYS_HOME/settings.json`. |
-| Backend                   | Fastify in `apps/backend/src`         | Serves HTTP and SSE endpoints, persists conversations in SQLite, and talks to the chosen model provider for model inventory and generation.            |
-| Page reader               | vmo, Swift in `apps/vmo`              | Listens on `127.0.0.1:8080` and reads each page `read_page` asks for in headless Chromium inside a micro VM, which it deletes.                         |
-| Model provider            | LM Studio, Ollama, or Groq            | Supplies the model inventory, chat completions, and title generation, and, for LM Studio, model loading; chosen in Settings → Providers.               |
-| Shared API contract       | `@lys/protocol`                       | Defines route paths, request and response schemas, chat SSE event variants, and file tool command schemas with Zod.                                    |
-| Shared domain model types | `@lys/share`                          | Defines the conversation, message, metadata, and agent shapes shared between backend and desktop.                                                      |
+| Part                      | Implementation                           | Responsibility                                                                                                                                         |
+| ------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Desktop UI                | React in `apps/desktop/src`              | Renders chat, conversation history, and settings views, opens backend HTTP streams, and applies typed chat events to local UI state.                   |
+| Host                      | Tauri in `apps/desktop/src-tauri/src`    | Starts and stops the backend and vmo processes, checks vmo's health, exposes native commands to the UI, and reads or writes `$LYS_HOME/settings.json`. |
+| Backend                   | Fastify in `apps/backend/src`            | Serves HTTP and SSE endpoints, persists conversations in SQLite, and talks to the chosen model provider for model inventory and generation.            |
+| Page reader               | vmo, Swift in `apps/vmo`                 | Listens on `127.0.0.1:8080` and reads each page `read_page` asks for in headless Chromium inside a micro VM, which it deletes.                         |
+| Model provider            | LM Studio, Ollama, Ollama Cloud, or Groq | Supplies the model inventory, chat completions, and title generation, and, for LM Studio, model loading; chosen in Settings → Providers.               |
+| Shared API contract       | `@lys/protocol`                          | Defines route paths, request and response schemas, chat SSE event variants, and file tool command schemas with Zod.                                    |
+| Shared domain model types | `@lys/share`                             | Defines the conversation, message, metadata, and agent shapes shared between backend and desktop.                                                      |
 
 ## Process boundary
 

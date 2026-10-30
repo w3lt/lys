@@ -11,8 +11,8 @@ loopback, request and event payloads are validated with Zod, and there is no
 credential-management subsystem yet. Every conversation goes to the model
 provider the person chose in Settings → Providers: LM Studio or a local
 Ollama server at an address the person sets, `127.0.0.1` by default and
-reached over plain HTTP, or Ollama's cloud or Groq over HTTPS with the
-person's key. A remote address, Ollama's cloud, and Groq receive the
+reached over plain HTTP, or Ollama Cloud or Groq over HTTPS with the
+person's key. A remote address, Ollama Cloud, and Groq receive the
 conversations they answer. Besides the provider, there are two outbound
 connections, and both start off: the `read_page` tool asks vmo, a
 page reader on the same machine, to read a public web page in a headless

@@ -786,7 +786,7 @@ Chat generation and model management use separate integration boundaries:
 | `LlmService`        | `LlmEngineOperationQueue` | Runs inventory, health, load, stop-by-key, and context measurement through the serialized queue.                             |
 | `LlmRuntimeService` | `LlmRuntime`              | Owns the runtime of the saved provider, its connection status, and the serialized model-operation queue; connects on demand. |
 | `LmStudioRuntime`   | `@lmstudio/sdk`           | Verifies engine availability, lists, loads, stops, and measures models, and owns SDK client cleanup.                         |
-| `OllamaRuntime`     | `fetch`                   | Lists, describes, and measures Ollama's chat models over its native API, on a local server or in Ollama's cloud.             |
+| `OllamaRuntime`     | `fetch`                   | Lists, describes, and measures Ollama's chat models over its native API, on a local server or in Ollama Cloud.               |
 | `GroqRuntime`       | `fetch`                   | Lists and measures Groq's models over its OpenAI-compatible API.                                                             |
 
 The [provider integration](/architecture/providers/) describes each provider.

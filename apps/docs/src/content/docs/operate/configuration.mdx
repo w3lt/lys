@@ -43,9 +43,9 @@ configuration can set for LM Studio. Files saved by earlier versions also hold a
 context-size estimate; Lys ignores it, and the next save leaves it out.
 
 The `providers` group holds the model provider every request goes to,
-chosen in Settings → Providers: LM Studio, Ollama on a local server or in its
-cloud, or Groq, with the address of LM Studio's and the local Ollama
-server, `null` for the default. Ollama's cloud and Groq need their keys,
+chosen in Settings → Providers: LM Studio, a local Ollama server, Ollama
+Cloud, or Groq, with the address of LM Studio's and the local Ollama
+server, `null` for the default. Ollama Cloud and Groq need their keys,
 `ollamaApiKey` and `groqApiKey` in the `secrets` group, beside the Tavily
 key. The backend reads both groups at each connection attempt; Refresh on the
 Runtime pane's provider card makes one after a hand edit. See

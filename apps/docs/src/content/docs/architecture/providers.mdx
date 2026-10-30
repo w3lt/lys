@@ -1,6 +1,6 @@
 ---
 title: LLM provider integration
-description: How the backend reaches LM Studio, Ollama, or Groq for model inventory, lifecycle operations, and streamed chat generation.
+description: How the backend reaches LM Studio, Ollama, Ollama Cloud, or Groq for model inventory, lifecycle operations, and streamed chat generation.
 docType: architecture
 sidebar:
   order: 7
@@ -9,17 +9,25 @@ sidebar:
 Lys answers every request through one model provider at a time, chosen in
 the desktop's Providers pane:
 
-| Provider  | Where it runs                                                       | How Lys reaches it                                        |
-| --------- | ------------------------------------------------------------------- | --------------------------------------------------------- |
-| LM Studio | A server at an address the person sets, `127.0.0.1:1234` by default | The LM Studio SDK, and its OpenAI-compatible `/v1`        |
-| Ollama    | A local server, `127.0.0.1:11434` by default, or Ollama's cloud     | Ollama's native `/api/*`, and its OpenAI-compatible `/v1` |
-| Groq      | Groq's hosted API at `api.groq.com`                                 | Groq's OpenAI-compatible `/openai/v1`                     |
+| Provider     | Where it runs                                                       | How Lys reaches it                                        |
+| ------------ | ------------------------------------------------------------------- | --------------------------------------------------------- |
+| LM Studio    | A server at an address the person sets, `127.0.0.1:1234` by default | The LM Studio SDK, and its OpenAI-compatible `/v1`        |
+| Ollama       | A local server, `127.0.0.1:11434` by default                        | Ollama's native `/api/*`, and its OpenAI-compatible `/v1` |
+| Ollama Cloud | Ollama's hosted service at `ollama.com`                             | The same APIs as a local Ollama server                    |
+| Groq         | Groq's hosted API at `api.groq.com`                                 | Groq's OpenAI-compatible `/openai/v1`                     |
 
 LM Studio and a local Ollama server are reached over plain HTTP, without a
-key. Ollama's cloud and Groq are reached over HTTPS with the API key the
+key. Ollama Cloud and Groq are reached over HTTPS with the API key the
 person saved for them, and receive the conversations they answer. The
 choice, the addresses, and the keys live in the
 [settings file](/reference/configuration/#persisted-settings-json).
+
+A local Ollama server and Ollama Cloud are two providers, `ollama` and
+`ollamaCloud`, each with only what reaching it needs: an address, or a key.
+The Providers pane shows them on one Ollama card, whose Local and Cloud
+buttons switch between them. Both answer Ollama's native API, so one
+`OllamaRuntime` serves either, aimed at the local server or at Ollama
+Cloud.
 
 ## Current stack
 
@@ -33,7 +41,7 @@ choice, the addresses, and the keys live in the
 | Title generation | `ChatService.generateTitle()` calls the same endpoint with a separate prompt and a length-limited JSON-schema response format, then validates the reply. |
 
 Loading and unloading apply to LM Studio only: its runtime alone implements
-`LlmModelInstanceController`. Ollama and Groq decide which models are in
+`LlmModelInstanceController`. Ollama, Ollama Cloud, and Groq decide which models are in
 memory, so the model list reports `modelLoading: "provider"` for them, and
 the load and unload routes refuse with `409` before any runtime call. A load
 request may carry a `configuration`: context length, eval batch size,
@@ -140,7 +148,7 @@ neither the answer's body nor the key. Acquisition succeeds once the
 provider lists its models, and the availability probe lists them again.
 Groq reports no capabilities: every Groq model is treated as accepting
 tools and not images. These runtimes have not been checked against a
-running Ollama server, Ollama's cloud, or Groq.
+running Ollama server, Ollama Cloud, or Groq.
 
 ## Runtime readiness and inspection
 
@@ -233,12 +241,12 @@ policy.
   address; the backend starts without it.
 - Chat requests can be satisfied by an OpenAI-compatible HTTP endpoint.
 - Load and unload are available through the LM Studio SDK only.
-- Ollama's cloud and Groq accept the saved key as a bearer token; no other
+- Ollama Cloud and Groq accept the saved key as a bearer token; no other
   credential exchange is required.
 
 ## Limitations
 
-- There is no provider registry or adapter plugin system; the three
+- There is no provider registry or adapter plugin system; the four
   providers are fixed.
 - One provider answers at a time; switching reconnects the backend.
 - There is no retry or request-time fallback after a provider and model are

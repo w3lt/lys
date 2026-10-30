@@ -21,7 +21,7 @@ preference.
 | `LMSTUDIO_PORT`         | `1234`         | LM Studio's default address, while `providers.lmStudio.address` is null |
 | `OLLAMA_HOST`           | `127.0.0.1`    | Ollama's default address, while `providers.ollama.address` is null      |
 | `OLLAMA_PORT`           | `11434`        | Ollama's default address, while `providers.ollama.address` is null      |
-| `OLLAMA_CLOUD_API_HOST` | `ollama.com`   | Host of Ollama's cloud API, reached over HTTPS                          |
+| `OLLAMA_CLOUD_API_HOST` | `ollama.com`   | Host of Ollama Cloud's API, reached over HTTPS                          |
 | `GROQ_API_HOST`         | `api.groq.com` | Host of Groq's API, reached over HTTPS                                  |
 | `VMO_HOST`              | `127.0.0.1`    | Backend page reads and health checks, desktop vmo card                  |
 | `VMO_PORT`              | `8080`         | Backend page reads and health checks, desktop vmo card                  |
@@ -154,7 +154,7 @@ defaults:
   "providers": {
     "active": "lmStudio",
     "lmStudio": { "address": null },
-    "ollama": { "mode": "local", "address": null }
+    "ollama": { "address": null }
   },
   "tools": {
     "justRun": [],
@@ -178,7 +178,7 @@ defaults:
 | `generation.replyCeiling`  | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                                           |
 | `loadConfiguration`        | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                                    |
 | `secrets.tavilyApiKey`     | `string \| null`        | Tavily API key of `web_search`, 1 to 256 visible ASCII characters, stored as plain text; see [Secrets](#secrets)     |
-| `secrets.ollamaApiKey`     | `string \| null`        | API key of Ollama's cloud, under the same rule; see [Secrets](#secrets)                                              |
+| `secrets.ollamaApiKey`     | `string \| null`        | API key of Ollama Cloud, under the same rule; see [Secrets](#secrets)                                                |
 | `secrets.groqApiKey`       | `string \| null`        | Groq API key, under the same rule; see [Secrets](#secrets)                                                           |
 | `providers`                | object                  | The model provider every request goes to, and where to find it; see [Providers](#providers)                          |
 | `tools.justRun`            | array of tool names     | Tools that run without asking when a model calls them; every other tool asks; see [Tools](#tools)                    |
@@ -253,7 +253,7 @@ load configurations.
 
 The `secrets` group holds the keys of the services Lys calls on the person's
 behalf: `tavilyApiKey`, the key `web_search` sends to Tavily; `ollamaApiKey`,
-sent to Ollama's cloud; and `groqApiKey`, sent to Groq. Each key is opaque:
+sent to Ollama Cloud; and `groqApiKey`, sent to Groq. Each key is opaque:
 Lys never changes it, and Rust and the backend accept 1 to 256 visible ASCII
 characters (`!` through `~`), so it cannot hold a space or a line break. An
 invalid key makes the file fail to load, like an out-of-range temperature.
@@ -274,12 +274,11 @@ provider key at each connection attempt; see [Providers](#providers).
 The `providers` group holds the model provider every request goes to, chosen
 in Settings → Providers, and where to find it.
 
-| Key                          | Type                               | Meaning                                                                                  |
-| ---------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------- |
-| `providers.active`           | `"lmStudio" \| "ollama" \| "groq"` | Provider every request goes to                                                           |
-| `providers.lmStudio.address` | `string \| null`                   | LM Studio's server, or `null` for `LMSTUDIO_HOST:LMSTUDIO_PORT`                          |
-| `providers.ollama.mode`      | `"local" \| "cloud"`               | A local Ollama server, or Ollama's cloud, which needs `secrets.ollamaApiKey`             |
-| `providers.ollama.address`   | `string \| null`                   | The local server, or `null` for `OLLAMA_HOST:OLLAMA_PORT`; kept, unused, in `cloud` mode |
+| Key                          | Type                                                | Meaning                                                                                  |
+| ---------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `providers.active`           | `"lmStudio" \| "ollama" \| "ollamaCloud" \| "groq"` | Provider every request goes to: LM Studio, a local Ollama server, Ollama Cloud, or Groq  |
+| `providers.lmStudio.address` | `string \| null`                                    | LM Studio's server, or `null` for `LMSTUDIO_HOST:LMSTUDIO_PORT`                          |
+| `providers.ollama.address`   | `string \| null`                                    | The local Ollama server, or `null` for `OLLAMA_HOST:OLLAMA_PORT`; unused by Ollama Cloud |
 
 - An address is a host name or IPv4 address, a colon, and a port from 1 to
   65535, such as `127.0.0.1:1234`. A scheme, a path, a user name, or an IPv6
@@ -287,11 +286,11 @@ in Settings → Providers, and where to find it.
   plain HTTP, without a key.
 - A `null` address means the default, which only `@lys/protocol` declares, so
   changing a default moves every file that saved none.
-- Groq, and Ollama in `cloud` mode, need their key in the `secrets` group.
+- Ollama Cloud and Groq need their key in the `secrets` group.
   Without it the backend does not connect, and reports the provider as not
   reachable.
 - A missing group or field means LM Studio at its default address, as before
-  providers could be chosen. An unknown provider, mode, or field, or an
+  providers could be chosen. An unknown provider or field, or an
   invalid address, makes loading the settings fail.
 - The backend reads the group, and the key it needs, at each connection
   attempt: when it starts, and each time the desktop asks it to reconnect.
@@ -398,7 +397,8 @@ The Secrets pane saves the Tavily API key only when the person presses Save or
 Enter, replacing only that key of the `secrets` group in the same serialized
 way; Remove saves `null`.
 
-The Providers pane saves a picked provider, an Ollama mode, or an address at
+The Providers pane saves a picked provider, including Local or Cloud on the
+Ollama card, or an address at
 once, replacing only the `providers` group in the same serialized way; an
 address is saved when the person presses Save or Enter, and an emptied field
 saves `null`. A provider key is saved like the Tavily key, replacing only that

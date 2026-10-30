@@ -281,7 +281,7 @@ joining the backend's startup attempt through
 The Runtime pane's provider card names the provider chosen in Settings →
 Providers and shows `unknown`, `connecting`, `connected`, or `unreachable`
 with where it is reached: the saved or default address of LM Studio or a
-local Ollama server, or the host of Ollama's cloud or Groq. Its **Refresh**
+local Ollama server, or the host of Ollama Cloud or Groq. Its **Refresh**
 button, and Test on the active provider's card in the Providers pane, ask the
 backend to reconnect; saving a provider choice does too. A failed model
 request re-reads the status, so a lost provider appears as not reachable
@@ -634,18 +634,21 @@ file holds the new one, because the tool reads the file.
 
 ## Providers
 
-The Providers pane lists the three model providers as native radio buttons
-in one group: LM Studio, Ollama, and Groq, each with its bundled logo, its
-name, a `local` or `cloud` tag, a line on where requests go, and a badge:
-`standby` for the providers not chosen, `needs key` for the chosen one
-without its key, and otherwise the connection status. Picking a provider
-saves it as active at once; the radio buttons are disabled while a save runs.
+The Providers pane lists three cards as native radio buttons in one group:
+LM Studio, Ollama, and Groq, each with its bundled logo, its name, a `local`
+or `cloud` tag, a line on where requests go, and a badge: `standby` for the
+cards not chosen, `needs key` for the chosen provider without its key, and
+otherwise the connection status. The Ollama card stands for two providers, a
+local Ollama server and Ollama Cloud, and is chosen while either is active.
+Picking a card saves its provider as active at once, the local server for
+the Ollama card; the radio buttons are disabled while a save runs.
 
-Only the active card opens. For Ollama, a mode row switches between Local
-and Cloud. LM Studio and a local Ollama server show a Server address form:
+Only the active card opens. On the Ollama card, Local and Cloud buttons make
+the local server or Ollama Cloud the active provider, and the tag follows.
+LM Studio and a local Ollama server show a Server address form:
 an `http://` prefix, a field that starts empty with the saved or default
 address as its placeholder, and one button that reads Save while the field
-holds a new valid address and Test otherwise. Ollama's cloud and Groq show a
+holds a new valid address and Test otherwise. Ollama Cloud and Groq show a
 key form like the Tavily card: a password field with the masked key as its
 placeholder, a show button, a link to the provider's key page, Save, and,
 once a key is saved, Test and Remove. Enter saves a valid new draft, Escape
@@ -654,7 +657,7 @@ under the form describes the field: what an edit means, a running or failed
 save, a missing key, or the connection with its address.
 
 The application store's provider slice owns the saves, serialized with the
-other group saves. A choice, mode, or address replaces only the `providers`
+other group saves. A choice or address replaces only the `providers`
 group; a key replaces only its own key of the `secrets` group. After a
 save that changes where requests go, including a key the active provider
 uses, the store asks the backend to reconnect, and the model inventory

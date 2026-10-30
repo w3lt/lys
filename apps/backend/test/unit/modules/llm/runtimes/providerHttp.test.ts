@@ -3,7 +3,8 @@ import type { AddressInfo } from "node:net"
 import { describe, expect, it, onTestFinished } from "vitest"
 import {
   MAXIMUM_PROVIDER_RESPONSE_BYTES,
-  requestProviderJson
+  requestProviderJson,
+  type ProviderJsonRequest
 } from "../../../../../src/modules/llm/runtimes/providerHttp"
 import {
   answerWith,
@@ -31,6 +32,26 @@ async function startRawServer(body: string | Buffer): Promise<string> {
   )
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 }
+
+describe("ProviderJsonRequest", () => {
+  it("accepts a GET without a body and a POST with one, and nothing else", () => {
+    const requests: readonly ProviderJsonRequest[] = [
+      { url: "http://127.0.0.1", method: "GET", apiKey: undefined },
+      { url: "http://127.0.0.1", method: "POST", apiKey: undefined, body: {} },
+      // @ts-expect-error -- A GET carries no body.
+      { url: "http://127.0.0.1", method: "GET", apiKey: undefined, body: {} },
+      // @ts-expect-error -- A POST carries a body.
+      { url: "http://127.0.0.1", method: "POST", apiKey: undefined }
+    ]
+
+    expect(requests.map(({ method }) => method)).toEqual([
+      "GET",
+      "POST",
+      "GET",
+      "POST"
+    ])
+  })
+})
 
 describe("requestProviderJson", () => {
   it("sends a JSON body with the bearer key and parses the answer", async () => {

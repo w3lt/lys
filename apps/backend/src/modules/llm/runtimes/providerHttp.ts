@@ -17,17 +17,26 @@ export const MAXIMUM_PROVIDER_RESPONSE_BYTES = 4 * 1024 * 1024
 /** Decoder that rejects bytes that are not UTF-8. */
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true })
 
-/** One JSON request to a provider's HTTP API. */
-export type ProviderJsonRequest = Readonly<{
-  /** Absolute URL; never holds a secret. */
-  url: string
-  /** `GET` without a body, or `POST` with a JSON body. */
-  method: "GET" | "POST"
-  /** Bearer credential sent in the `Authorization` header, if any; a secret. */
-  apiKey: string | undefined
-  /** Value sent as the JSON body of a `POST`. */
-  body?: unknown
-}>
+/** One JSON request to a provider's HTTP API: a `GET`, or a `POST` with a body. */
+export type ProviderJsonRequest =
+  | Readonly<{
+      /** Absolute URL; never holds a secret. */
+      url: string
+      /** Reads a resource; the request has no body. */
+      method: "GET"
+      /** Bearer credential sent in the `Authorization` header, if any; a secret. */
+      apiKey: string | undefined
+    }>
+  | Readonly<{
+      /** Absolute URL; never holds a secret. */
+      url: string
+      /** Sends {@link body} as JSON. */
+      method: "POST"
+      /** Bearer credential sent in the `Authorization` header, if any; a secret. */
+      apiKey: string | undefined
+      /** Value sent as the JSON body. */
+      body: unknown
+    }>
 
 /**
  * Sends one request to a provider and reads its JSON answer.

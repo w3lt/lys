@@ -58,6 +58,23 @@ const ollamaRunningModelListSchema = z.object({
 /** Validates a context length found in a model's metadata. */
 const contextLengthSchema = z.int().positive()
 
+/** One request to Ollama's native API: a `GET`, or a `POST` with a body. */
+type OllamaApiRequest =
+  | Readonly<{
+      /** Reads a resource; the request has no body. */
+      method: "GET"
+      /** API path, starting with `/api/`. */
+      path: string
+    }>
+  | Readonly<{
+      /** Sends {@link body} as JSON. */
+      method: "POST"
+      /** API path, starting with `/api/`. */
+      path: string
+      /** Value sent as the JSON body. */
+      body: unknown
+    }>
+
 /** Suffix of the `model_info` key that holds a model's context window. */
 const CONTEXT_LENGTH_KEY_SUFFIX = ".context_length"
 
@@ -293,7 +310,7 @@ export default class OllamaRuntime implements LlmRuntime {
    */
   async #listOllamaTags(): Promise<readonly OllamaTag[]> {
     const parsed = ollamaTagListSchema.safeParse(
-      await this.#requestOllamaJson("GET", "/api/tags")
+      await this.#requestOllamaJson({ method: "GET", path: "/api/tags" })
     )
     if (!parsed.success) {
       throw new Error("Ollama returned an invalid model list.")
@@ -374,7 +391,7 @@ export default class OllamaRuntime implements LlmRuntime {
    */
   async #findRunningContextLength(model: string): Promise<number | undefined> {
     const parsed = ollamaRunningModelListSchema.safeParse(
-      await this.#requestOllamaJson("GET", "/api/ps")
+      await this.#requestOllamaJson({ method: "GET", path: "/api/ps" })
     )
     if (!parsed.success) {
       throw new Error("Ollama returned an invalid running-model list.")
@@ -395,7 +412,11 @@ export default class OllamaRuntime implements LlmRuntime {
     model: string
   ): Promise<z.infer<typeof ollamaShowSchema>> {
     const parsed = ollamaShowSchema.safeParse(
-      await this.#requestOllamaJson("POST", "/api/show", { model })
+      await this.#requestOllamaJson({
+        method: "POST",
+        path: "/api/show",
+        body: { model }
+      })
     )
     if (!parsed.success) {
       throw new Error("Ollama returned an invalid model description.")
@@ -406,22 +427,16 @@ export default class OllamaRuntime implements LlmRuntime {
   /**
    * Sends one request to Ollama's native API.
    *
-   * @param method - `GET`, or `POST` with a body.
-   * @param path - API path, starting with `/api/`.
-   * @param body - JSON body of a `POST`.
+   * @param request - A `GET`, or a `POST` with its body, to one API path.
    * @returns The parsed answer, unchecked.
    * @throws The failure {@link requestProviderJson} describes.
    */
-  async #requestOllamaJson(
-    method: "GET" | "POST",
-    path: string,
-    body?: unknown
-  ): Promise<unknown> {
+  async #requestOllamaJson(request: OllamaApiRequest): Promise<unknown> {
+    const { path, ...exchange } = request
     return await requestProviderJson({
+      ...exchange,
       url: `${this.#target.apiBaseUrl}${path}`,
-      method,
-      apiKey: this.#target.mode === "cloud" ? this.#target.apiKey : undefined,
-      body
+      apiKey: this.#target.mode === "cloud" ? this.#target.apiKey : undefined
     })
   }
 }

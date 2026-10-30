@@ -8,7 +8,7 @@ import {
 import { z } from "zod"
 import { version as LYS_VERSION } from "../../../package.json"
 import { calculateMcpRequestFailure, isSpawnFailure } from "./mcpError"
-import { endMcpHttpSession } from "./mcpHttpSessionEnd"
+import { closeMcpHttpSession } from "./mcpHttpSessionEnd"
 import {
   sendMcpHttpRequest,
   McpResponseTooLargeError
@@ -72,7 +72,7 @@ type McpConnectionTransport = Readonly<{
    * Asks an HTTP server to end its session, never rejecting; undefined over
    * stdio, which has no session.
    */
-  endSession: (() => Promise<void>) | undefined
+  closeSession: (() => Promise<void>) | undefined
 }>
 
 /** One page of a server's tool list, as the backend reads it. */
@@ -154,7 +154,7 @@ export default class McpServerConnection {
    * Asks an HTTP server to end its session after the client closed; set
    * once the transport exists, and undefined over stdio.
    */
-  #endSession: (() => Promise<void>) | undefined
+  #closeSession: (() => Promise<void>) | undefined
 
   /**
    * Keeps a client before its handshake.
@@ -170,7 +170,7 @@ export default class McpServerConnection {
     this.#closing = undefined
     this.#hasReportedEnd = false
     this.#hasPassedResponseLimit = false
-    this.#endSession = undefined
+    this.#closeSession = undefined
   }
 
   /**
@@ -186,12 +186,13 @@ export default class McpServerConnection {
    * cancelled request. Once an answer passed
    * `MAXIMUM_MCP_RESPONSE_BYTES`, a {@link McpResponseTooLargeError}
    * with the SDK's failure as its cause. Whatever was started is closed
-   * first.
+   * first; when that close fails, what it throws instead, such as a stdio
+   * server's process group still running two seconds after `SIGKILL`.
    * @remarks The client negotiates the protocol version through
    * `initialize`, the SDK's `legacy` mode and its default today, named here
    * so a new SDK default cannot change it unseen: in the 2026-07-28 era the
    * SDK would read the tool list again after a header mismatch and check
-   * results against output schemas, which {@link readToolListPage} avoids.
+   * results against output schemas, which {@link getToolListPage} avoids.
    */
   public static async open(
     settings: McpServerSettings,
@@ -205,10 +206,14 @@ export default class McpServerConnection {
     client.onerror = (error) => {
       connection.#handleClientError(error)
     }
-    const { transport, endSession } = createTransport(settings, context, () => {
-      connection.#handleTooLargeAnswer()
-    })
-    connection.#endSession = endSession
+    const { transport, closeSession } = createTransport(
+      settings,
+      context,
+      () => {
+        connection.#handleTooLargeAnswer()
+      }
+    )
+    connection.#closeSession = closeSession
     try {
       await client.connect(transport, {
         signal: context.abortSignal,
@@ -225,11 +230,11 @@ export default class McpServerConnection {
   }
 
   /**
-   * Reads one page of the server's tool list.
+   * Gets one page of the server's tool list.
    *
    * @param cursor - Cursor of the page, from the page before; undefined for
    * the first page.
-   * @param abortSignal - Stops the read; borrowed for it.
+   * @param abortSignal - Cancels the request; borrowed for it.
    * @returns The page's tools, unchecked, and the next page's cursor. A
    * server that did not offer tools in the handshake has one empty page,
    * as the SDK's own list reads it.
@@ -250,7 +255,7 @@ export default class McpServerConnection {
    * for minutes. Lys treats a result's structured content as untrusted JSON
    * under its own limits instead.
    */
-  public async readToolListPage(
+  public async getToolListPage(
     cursor: string | undefined,
     abortSignal: AbortSignal
   ): Promise<McpToolListPage> {
@@ -283,7 +288,7 @@ export default class McpServerConnection {
    * cancelled. Borrowed for the call.
    * @returns The server's result, which may report a failure of the tool
    * through `isError`. Its structured content is not checked against the
-   * tool's output schema; see {@link readToolListPage}.
+   * tool's output schema; see {@link getToolListPage}.
    * @throws The SDK's failure, such as a timeout after
    * {@link MCP_TOOL_CALL_TIMEOUT_MILLISECONDS}, a closed connection, an HTTP
    * error, or a JSON-RPC error. Once the signal aborts, the SDK's
@@ -342,7 +347,7 @@ export default class McpServerConnection {
    */
   async #closeClient(): Promise<void> {
     await this.#client.close()
-    await this.#endSession?.()
+    await this.#closeSession?.()
   }
 
   /**
@@ -449,7 +454,7 @@ function createTransport(
       const transport = new McpStdioTransport((handlers) =>
         McpServerProcess.start(command, { ...handlers, ...processContext })
       )
-      return Object.freeze({ transport, endSession: undefined })
+      return Object.freeze({ transport, closeSession: undefined })
     }
     case "http":
       return createHttpTransport(settings, context, reportLimitPassed)
@@ -485,14 +490,14 @@ function createHttpTransport(
       sendMcpHttpRequest(requestUrl, init, reportLimitPassed),
     requestInit: { headers, redirect: "manual" }
   })
-  const endSession = (): Promise<void> => {
+  const closeSession = (): Promise<void> => {
     const { sessionId, protocolVersion } = sdkTransport
     const session = { url, headers, sessionId, protocolVersion }
-    return endMcpHttpSession(session, context.reportSessionEndFailure)
+    return closeMcpHttpSession(session, context.reportSessionEndFailure)
   }
   return Object.freeze({
     transport: new McpHttpTransport(sdkTransport),
-    endSession
+    closeSession
   })
 }
 

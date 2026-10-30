@@ -32,9 +32,9 @@ export type McpServerProcessStarter = (
  * message line passed the response limit, or the transport itself once the
  * command's process closed by itself, which ends the rest of its group too.
  * It settles once no process of the group is left, as
- * {@link McpServerProcess.stop} describes, and only then tells the client
- * that the transport closed, so the client never forgets a transport whose
- * processes still run. The callbacks the client installs are told what the
+ * {@link McpServerProcess.stop} describes, or once that stop gave up, and
+ * only then tells the client that the transport closed, so the client never
+ * forgets a transport whose processes it still stops. The callbacks the client installs are told what the
  * process reports, from {@link start} on. Resource ownership: owns the
  * process it starts. Concurrency model: single-owner; the SDK client that
  * connects it is its only user, while the process reports on the backend's
@@ -194,7 +194,8 @@ export default class McpStdioTransport implements Transport {
    * {@link start}.
    *
    * @returns A promise that settles once the group ended.
-   * @throws What stopping the group threw.
+   * @throws What stopping the group threw; the client is told the transport
+   * closed then too.
    */
   async #closeProcess(): Promise<void> {
     try {

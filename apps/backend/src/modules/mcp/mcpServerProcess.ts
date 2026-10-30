@@ -71,7 +71,7 @@ export const MCP_SERVER_STOP_STEP_MILLISECONDS = 2000
  * @remarks Created by {@link McpServerProcess.start}, which returns once
  * the command's process started in a new session and process group of its
  * own, held by the {@link McpServerProcessGroups} until no process of it is
- * left. Standard output is read as message lines, standard error as log
+ * left or its stop gave up after `SIGKILL`. Standard output is read as message lines, standard error as log
  * lines, and messages are written to standard input. {@link stop} ends the
  * whole group: it closes standard input, sends `SIGTERM` to the group after
  * {@link MCP_SERVER_STOP_STEP_MILLISECONDS} and `SIGKILL` after as long
@@ -132,17 +132,35 @@ export default class McpServerProcess {
       detached: true,
       shell: false
     })
-    return new Promise((resolve, reject) => {
-      child.once("error", reject)
-      child.once("spawn", () => {
-        child.off("error", reject)
-        if (child.pid === undefined) {
-          child.kill("SIGKILL")
-          reject(new Error("The MCP server's process has no identifier."))
-        } else
-          resolve(McpServerProcess.#createStarted(child, child.pid, context))
-      })
+    const starting = Promise.withResolvers<McpServerProcess>()
+    child.once("error", starting.reject)
+    child.once("spawn", () => {
+      child.off("error", starting.reject)
+      McpServerProcess.#handleSpawn(child, context, starting)
     })
+    return starting.promise
+  }
+
+  /**
+   * Settles a start once its process spawned.
+   *
+   * @param child - The process that spawned.
+   * @param context - Holder of the group and the receivers.
+   * @param starting - The start to settle: resolved with the owner of the
+   * process, or rejected, after the process was killed, in the case Node
+   * gives a spawned process no pid.
+   */
+  static #handleSpawn(
+    child: PipedChildProcess,
+    context: McpServerProcessContext,
+    starting: Pick<PromiseWithResolvers<McpServerProcess>, "resolve" | "reject">
+  ): void {
+    if (child.pid === undefined) {
+      child.kill("SIGKILL")
+      starting.reject(new Error("The MCP server's process has no identifier."))
+      return
+    }
+    starting.resolve(McpServerProcess.#createStarted(child, child.pid, context))
   }
 
   /**
@@ -194,9 +212,12 @@ export default class McpServerProcess {
    * too; it settles once no process of the group is left.
    * @throws When a process of the group is still left
    * {@link MCP_SERVER_STOP_STEP_MILLISECONDS} after `SIGKILL`, such as one
-   * the backend may not signal, or `kill` fails for another reason; the
-   * group stays held then, so the backend's exit sends `SIGKILL` to it
-   * again.
+   * the backend may not signal, or `kill` fails for another reason. A group
+   * that outlived `SIGKILL` is no longer held: every process of it the
+   * backend may signal already received `SIGKILL`, and sending it again at
+   * the backend's exit could reach another group that took the identifier
+   * once this one ended. A group `kill` failed for stays held, so the
+   * backend's exit sends `SIGKILL` to it.
    */
   public stop(): Promise<void> {
     this.#stopping ??= this.#stopGroup()
@@ -208,7 +229,8 @@ export default class McpServerProcess {
    * until no process of it is left.
    *
    * @returns A promise that settles once the group ended.
-   * @throws When the group outlived every step, or `kill` failed.
+   * @throws When the group outlived every step, which also stops holding
+   * it, or `kill` failed.
    */
   async #stopGroup(): Promise<void> {
     if (this.#child.stdin.writable) this.#child.stdin.end()
@@ -223,6 +245,7 @@ export default class McpServerProcess {
         return
       }
     }
+    this.#processGroups.remove(this.#groupId)
     throw new Error(
       `The MCP server's process group was still running ${MCP_SERVER_STOP_STEP_MILLISECONDS} ms after SIGKILL.`
     )
@@ -248,16 +271,16 @@ function createNotConnectedError(): SdkError {
  * as when the process exited.
  */
 function waitForDrain(input: Writable): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const handleDrain = (): void => {
-      input.off("close", handleClose)
-      resolve()
-    }
-    const handleClose = (): void => {
-      input.off("drain", handleDrain)
-      reject(createNotConnectedError())
-    }
-    input.once("drain", handleDrain)
-    input.once("close", handleClose)
-  })
+  const draining = Promise.withResolvers<void>()
+  const handleDrain = (): void => {
+    input.off("close", handleClose)
+    draining.resolve()
+  }
+  const handleClose = (): void => {
+    input.off("drain", handleDrain)
+    draining.reject(createNotConnectedError())
+  }
+  input.once("drain", handleDrain)
+  input.once("close", handleClose)
+  return draining.promise
 }

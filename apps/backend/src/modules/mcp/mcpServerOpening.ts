@@ -5,7 +5,7 @@ import McpServerConnection, {
   type McpServerConnectionContext
 } from "./mcpServerConnection"
 import type { McpToolCatalog } from "./mcpToolCatalog"
-import { readMcpToolCatalog } from "./mcpToolList"
+import { getMcpToolCatalog } from "./mcpToolList"
 
 /** What opening one server led to. */
 export type McpServerOpening =
@@ -49,9 +49,11 @@ const CANCELLED_OPENING: McpServerOpening = Object.freeze({
  * its requests has that limit too.
  * @returns `connected` with the connection and its catalog; `failed` with
  * the reason; or `cancelled` once the context's signal aborted. A failure
- * Lys cannot tell apart is `protocol-error`, with what was thrown.
- * @throws Only when closing what it started fails: a stdio server's
- * process group still running two seconds after `SIGKILL`.
+ * Lys cannot tell apart is `protocol-error`, with what was thrown; so is a
+ * failed handshake whose close failed, with the close's failure.
+ * @throws Only when closing a connection it opened fails, after a failure
+ * reading its tools: a stdio server's process group still running two
+ * seconds after `SIGKILL`.
  * @remarks Whatever the opening started is closed before it returns
  * anything but `connected`.
  */
@@ -69,8 +71,8 @@ export async function openMcpServer(
       abortSignal
     })
     connection = openConnection
-    const catalog = await readMcpToolCatalog(settings.name, (cursor) =>
-      openConnection.readToolListPage(cursor, abortSignal)
+    const catalog = await getMcpToolCatalog(settings.name, (cursor) =>
+      openConnection.getToolListPage(cursor, abortSignal)
     )
     return Object.freeze({ status: "connected", connection, catalog })
   } catch (error) {

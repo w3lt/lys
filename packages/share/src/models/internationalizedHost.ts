@@ -226,13 +226,13 @@ function calculatePunycodeBias(
 }
 
 /**
- * Gets the value of one punycode digit.
+ * Finds the value of one punycode digit.
  *
  * @param character - One ASCII character.
  * @returns 0 to 25 for a letter, either case, 26 to 35 for a digit, or
  * undefined for any other character.
  */
-function getPunycodeDigitValue(character: string): number | undefined {
+function findPunycodeDigitValue(character: string): number | undefined {
   const value = PUNYCODE_DIGITS.indexOf(character.toLowerCase())
   return character.length === 1 && value !== -1 ? value : undefined
 }
@@ -255,7 +255,7 @@ function parsePunycodeInteger(
   let value = 0
   let weight = 1
   for (let index = start; index < punycode.length; index += 1) {
-    const digit = getPunycodeDigitValue(punycode.charAt(index))
+    const digit = findPunycodeDigitValue(punycode.charAt(index))
     if (digit === undefined) return undefined
     value += digit * weight
     if (value > MAXIMUM_PUNYCODE_INTEGER) return undefined
@@ -282,7 +282,8 @@ function isScalarValue(codePoint: number): boolean {
 }
 
 /**
- * Inserts the code point of one decoded delta (RFC 3492, section 6.2).
+ * Calculates the decoder state after the code point of one decoded delta
+ * is inserted (RFC 3492, section 6.2).
  *
  * @param decoding - Decoder state before the delta.
  * @param delta - Value of the delta's integer.
@@ -290,7 +291,7 @@ function isScalarValue(codePoint: number): boolean {
  * position overflows {@link MAXIMUM_PUNYCODE_INTEGER} or the code point is
  * not a Unicode scalar value.
  */
-function insertPunycodeCodePoint(
+function calculateNextPunycodeDecoding(
   decoding: PunycodeDecoding,
   delta: number
 ): PunycodeDecoding | undefined {
@@ -341,7 +342,7 @@ function parsePunycode(punycode: string): string | undefined {
   while (index < punycode.length) {
     const delta = parsePunycodeInteger(punycode, index, decoding.bias)
     if (delta === undefined) return undefined
-    const next = insertPunycodeCodePoint(decoding, delta.value)
+    const next = calculateNextPunycodeDecoding(decoding, delta.value)
     if (next === undefined) return undefined
     decoding = next
     index = delta.end
@@ -513,6 +514,10 @@ function isAcceptedLabelText(text: string): boolean {
  * punycode, or any other label as it is; undefined when the punycode does
  * not decode, decodes to ASCII only, or is not exactly what the text
  * encodes to.
+ * @remarks The last check, like the decoder's own refusals, is a guard:
+ * the URL parsers Lys uses refuse punycode that does not decode and write
+ * only punycode that is exactly what its text encodes to, so it does not
+ * refuse a host they wrote.
  */
 function parseLabelText(label: string): string | undefined {
   if (!label.startsWith(PUNYCODE_LABEL_PREFIX)) return label

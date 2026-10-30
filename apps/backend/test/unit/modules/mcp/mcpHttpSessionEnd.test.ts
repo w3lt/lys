@@ -1,7 +1,7 @@
 import { SdkErrorCode, SdkHttpError } from "@modelcontextprotocol/client"
 import { describe, expect, it } from "vitest"
 import {
-  endMcpHttpSession,
+  closeMcpHttpSession,
   MCP_SESSION_END_TIMEOUT_MILLISECONDS,
   type McpHttpSession
 } from "../../../../src/modules/mcp/mcpHttpSessionEnd"
@@ -37,17 +37,17 @@ function buildSession(url: string): McpHttpSession {
  * @param session - Session to end.
  * @returns The reported failures.
  */
-async function endSession(session: McpHttpSession): Promise<unknown[]> {
+async function closeSession(session: McpHttpSession): Promise<unknown[]> {
   const failures: unknown[] = []
-  await endMcpHttpSession(session, (error) => failures.push(error))
+  await closeMcpHttpSession(session, (error) => failures.push(error))
   return failures
 }
 
-describe("endMcpHttpSession", () => {
+describe("closeMcpHttpSession", () => {
   it("sends DELETE with the configured headers, the session, and the protocol version", async () => {
     const server = await startFakeMcpHttpServer(answerWithStatus(200))
 
-    const failures = await endSession(buildSession(server.url))
+    const failures = await closeSession(buildSession(server.url))
 
     expect(failures).toEqual([])
     expect(server.receivedRequests).toHaveLength(1)
@@ -64,7 +64,7 @@ describe("endMcpHttpSession", () => {
   it("sends nothing without a session", async () => {
     const server = await startFakeMcpHttpServer(answerWithStatus(200))
 
-    const failures = await endSession({
+    const failures = await closeSession({
       ...buildSession(server.url),
       sessionId: undefined
     })
@@ -79,13 +79,13 @@ describe("endMcpHttpSession", () => {
   ])("does not report status %i, as %s", async (status) => {
     const server = await startFakeMcpHttpServer(answerWithStatus(status))
 
-    expect(await endSession(buildSession(server.url))).toEqual([])
+    expect(await closeSession(buildSession(server.url))).toEqual([])
   })
 
   it("reports another status without the answer's text", async () => {
     const server = await startFakeMcpHttpServer(answerWithStatus(500))
 
-    const failures = await endSession(buildSession(server.url))
+    const failures = await closeSession(buildSession(server.url))
 
     expect(failures).toHaveLength(1)
     const failure = failures[0]
@@ -106,7 +106,7 @@ describe("endMcpHttpSession", () => {
       answerWithStatus(307, { location: target.url })
     )
 
-    const failures = await endSession(buildSession(server.url))
+    const failures = await closeSession(buildSession(server.url))
 
     expect(failures).toEqual([
       expect.objectContaining({ data: { status: 307 } })
@@ -121,7 +121,7 @@ describe("endMcpHttpSession", () => {
       const server = await startFakeMcpHttpServer(() => undefined)
       const startedAt = performance.now()
 
-      const failures = await endSession(buildSession(server.url))
+      const failures = await closeSession(buildSession(server.url))
 
       const elapsed = performance.now() - startedAt
       expect(elapsed).toBeGreaterThanOrEqual(
@@ -135,7 +135,7 @@ describe("endMcpHttpSession", () => {
   )
 
   it("reports a server it cannot reach", async () => {
-    const failures = await endSession(buildSession(await findClosedMcpUrl()))
+    const failures = await closeSession(buildSession(await findClosedMcpUrl()))
 
     expect(failures).toEqual([expect.any(TypeError)])
   })

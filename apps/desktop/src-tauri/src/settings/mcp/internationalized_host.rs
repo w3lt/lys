@@ -57,29 +57,114 @@ struct ScriptLetterRange {
 /// settings files load and requires a coordinated desktop and backend release.
 const ACCEPTED_LETTER_RANGES: [ScriptLetterRange; 17] = [
     // Basic Latin: a to z.
-    letter_range(HostScript::Latin, 0x61, 0x7a, 1),
+    ScriptLetterRange {
+        script: HostScript::Latin,
+        first: 0x61,
+        last: 0x7a,
+        step: 1,
+    },
     // Latin-1 Supplement: à to ö, and ø to ÿ.
-    letter_range(HostScript::Latin, 0xe0, 0xf6, 1),
-    letter_range(HostScript::Latin, 0xf8, 0xff, 1),
+    ScriptLetterRange {
+        script: HostScript::Latin,
+        first: 0xe0,
+        last: 0xf6,
+        step: 1,
+    },
+    ScriptLetterRange {
+        script: HostScript::Latin,
+        first: 0xf8,
+        last: 0xff,
+        step: 1,
+    },
     // Latin Extended-A: ā to ı, ĵ, ķ, ĸ to ľ, ł to ň, ŋ to ŷ, and ź to ž.
-    letter_range(HostScript::Latin, 0x101, 0x131, 2),
-    letter_range(HostScript::Latin, 0x135, 0x137, 2),
-    letter_range(HostScript::Latin, 0x138, 0x13e, 2),
-    letter_range(HostScript::Latin, 0x142, 0x148, 2),
-    letter_range(HostScript::Latin, 0x14b, 0x177, 2),
-    letter_range(HostScript::Latin, 0x17a, 0x17e, 2),
+    ScriptLetterRange {
+        script: HostScript::Latin,
+        first: 0x101,
+        last: 0x131,
+        step: 2,
+    },
+    ScriptLetterRange {
+        script: HostScript::Latin,
+        first: 0x135,
+        last: 0x137,
+        step: 2,
+    },
+    ScriptLetterRange {
+        script: HostScript::Latin,
+        first: 0x138,
+        last: 0x13e,
+        step: 2,
+    },
+    ScriptLetterRange {
+        script: HostScript::Latin,
+        first: 0x142,
+        last: 0x148,
+        step: 2,
+    },
+    ScriptLetterRange {
+        script: HostScript::Latin,
+        first: 0x14b,
+        last: 0x177,
+        step: 2,
+    },
+    ScriptLetterRange {
+        script: HostScript::Latin,
+        first: 0x17a,
+        last: 0x17e,
+        step: 2,
+    },
     // Greek: ά to ώ, without final ς.
-    letter_range(HostScript::Greek, 0x3ac, 0x3c1, 1),
-    letter_range(HostScript::Greek, 0x3c3, 0x3ce, 1),
+    ScriptLetterRange {
+        script: HostScript::Greek,
+        first: 0x3ac,
+        last: 0x3c1,
+        step: 1,
+    },
+    ScriptLetterRange {
+        script: HostScript::Greek,
+        first: 0x3c3,
+        last: 0x3ce,
+        step: 1,
+    },
     // Cyrillic: а to џ.
-    letter_range(HostScript::Cyrillic, 0x430, 0x45f, 1),
+    ScriptLetterRange {
+        script: HostScript::Cyrillic,
+        first: 0x430,
+        last: 0x45f,
+        step: 1,
+    },
     // Hiragana, Katakana with the prolonged sound mark, the CJK Unified
     // Ideographs of Unicode 1.1, and Hangul syllables.
-    letter_range(HostScript::Cjk, 0x3041, 0x3093, 1),
-    letter_range(HostScript::Cjk, 0x30a1, 0x30f6, 1),
-    letter_range(HostScript::Cjk, 0x30fc, 0x30fc, 1),
-    letter_range(HostScript::Cjk, 0x4e00, 0x9fa5, 1),
-    letter_range(HostScript::Cjk, 0xac00, 0xd7a3, 1),
+    ScriptLetterRange {
+        script: HostScript::Cjk,
+        first: 0x3041,
+        last: 0x3093,
+        step: 1,
+    },
+    ScriptLetterRange {
+        script: HostScript::Cjk,
+        first: 0x30a1,
+        last: 0x30f6,
+        step: 1,
+    },
+    ScriptLetterRange {
+        script: HostScript::Cjk,
+        first: 0x30fc,
+        last: 0x30fc,
+        step: 1,
+    },
+    ScriptLetterRange {
+        script: HostScript::Cjk,
+        first: 0x4e00,
+        last: 0x9fa5,
+        step: 1,
+    },
+    ScriptLetterRange {
+        script: HostScript::Cjk,
+        first: 0xac00,
+        last: 0xd7a3,
+        step: 1,
+    },
 ];
 
 /// Start of a label of an internationalized domain name in ASCII form.
@@ -151,16 +236,6 @@ struct PunycodeEncoding {
     handled_count: u32,
 }
 
-/// Builds one range of [`ACCEPTED_LETTER_RANGES`].
-const fn letter_range(script: HostScript, first: u32, last: u32, step: u32) -> ScriptLetterRange {
-    ScriptLetterRange {
-        script,
-        first,
-        last,
-        step,
-    }
-}
-
 /// Calculates the threshold of one digit of a punycode integer (RFC 3492,
 /// section 6.2): from [`PUNYCODE_MINIMUM_THRESHOLD`] to
 /// [`PUNYCODE_MAXIMUM_THRESHOLD`]; a digit below it is the integer's last.
@@ -195,9 +270,9 @@ fn calculate_punycode_bias(delta: u32, code_point_count: u32, is_first_delta: bo
     base_multiple + (digit_range + 1) * scaled_delta / (scaled_delta + PUNYCODE_SKEW)
 }
 
-/// Gets the value of one punycode digit: 0 to 25 for an ASCII letter, either
+/// Finds the value of one punycode digit: 0 to 25 for an ASCII letter, either
 /// case, 26 to 35 for an ASCII digit, or `None` for any other byte.
-fn get_punycode_digit_value(byte: u8) -> Option<u32> {
+fn find_punycode_digit_value(byte: u8) -> Option<u32> {
     let lowercase_byte = byte.to_ascii_lowercase();
 
     PUNYCODE_DIGITS
@@ -227,7 +302,7 @@ fn parse_punycode_integer(punycode: &[u8], start: usize, bias: u32) -> Option<Pu
     let mut weight: u32 = 1;
     let mut base_multiple = PUNYCODE_BASE;
     for (index, byte) in punycode.iter().enumerate().skip(start) {
-        let digit = get_punycode_digit_value(*byte)?;
+        let digit = find_punycode_digit_value(*byte)?;
         value = value.checked_add(digit.checked_mul(weight)?)?;
         let threshold = calculate_punycode_threshold(base_multiple, bias);
         if digit < threshold {
@@ -243,12 +318,16 @@ fn parse_punycode_integer(punycode: &[u8], start: usize, bias: u32) -> Option<Pu
     None
 }
 
-/// Inserts the code point of one decoded delta (RFC 3492, section 6.2).
+/// Calculates the decoder state after the code point of one decoded delta is
+/// inserted (RFC 3492, section 6.2).
 ///
 /// Returns the decoder state after the insertion, or `None` when the position
 /// or the code point overflows a `u32` or the code point is not a Unicode
 /// scalar value.
-fn insert_punycode_code_point(decoding: PunycodeDecoding, delta: u32) -> Option<PunycodeDecoding> {
+fn calculate_next_punycode_decoding(
+    decoding: PunycodeDecoding,
+    delta: u32,
+) -> Option<PunycodeDecoding> {
     let is_first_delta = decoding.position == 0;
     let position = decoding.position.checked_add(delta)?;
     let code_point_count = u32::try_from(decoding.characters.len() + 1).ok()?;
@@ -294,7 +373,7 @@ fn parse_punycode(punycode: &str) -> Option<String> {
         .map_or(0, |delimiter| delimiter + 1);
     while index < punycode.len() {
         let delta = parse_punycode_integer(punycode.as_bytes(), index, decoding.bias)?;
-        decoding = insert_punycode_code_point(decoding, delta.value)?;
+        decoding = calculate_next_punycode_decoding(decoding, delta.value)?;
         index = delta.end;
     }
 
@@ -449,7 +528,9 @@ fn is_accepted_label_text(text: &str) -> bool {
 /// from its punycode, or any other label as it is.
 ///
 /// Returns `None` when the punycode does not decode, decodes to ASCII only,
-/// or is not exactly what the text encodes to.
+/// or is not exactly what the text encodes to. The last check is a guard:
+/// the URL parsers Lys uses write only punycode that is exactly what its
+/// text encodes to, so it does not refuse a host they wrote.
 fn parse_label_text(label: &str) -> Option<String> {
     let Some(punycode) = label.strip_prefix(PUNYCODE_LABEL_PREFIX) else {
         return Some(label.to_owned());

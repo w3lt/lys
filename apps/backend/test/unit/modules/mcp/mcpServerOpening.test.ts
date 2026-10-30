@@ -526,7 +526,7 @@ describe("openMcpServer", () => {
     ).toHaveLength(2)
   })
 
-  it("ends a tool list at a page that names the cursor it was asked with, without that page's tools", async () => {
+  it("keeps the tools of a page that names the cursor it was asked with, and ends the list once that page comes back the same", async () => {
     const server = await startFakeMcpHttpServer(
       answerWithToolListPages({
         "": {
@@ -549,9 +549,15 @@ describe("openMcpServer", () => {
     if (opening.status !== "connected")
       throw new Error("Expected the server to connect")
     expect(opening.catalog.definitions.map((tool) => tool.name)).toEqual([
-      "mcp__remote__first"
+      "mcp__remote__first",
+      "mcp__remote__repeated"
     ])
     expect(opening.catalog.isToolListCut).toBe(false)
+    expect(
+      server.receivedRequests.filter(
+        (request) => request.rpcMethod === "tools/list"
+      )
+    ).toHaveLength(3)
   })
 
   it("fails a tool list holding a tool the MCP tool schema refuses as a protocol error", async () => {

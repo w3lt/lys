@@ -18,11 +18,9 @@ const EMPTY_INPUT_SCHEMA = Object.freeze({ type: "object" })
  * @returns The catalog.
  * @throws What adding a tool throws.
  */
-async function buildCatalog(
-  tools: readonly unknown[]
-): Promise<McpToolCatalog> {
+function buildCatalog(tools: readonly unknown[]): McpToolCatalog {
   const builder = new McpToolCatalogBuilder(SERVER_NAME)
-  for (const tool of tools) await builder.addTool(tool)
+  for (const tool of tools) builder.addTool(tool)
   return builder.build()
 }
 
@@ -69,14 +67,14 @@ function buildNestedObject(depth: number): Record<string, unknown> {
 async function readListedDescription(
   tool: Readonly<Record<string, unknown>>
 ): Promise<string> {
-  const [definition] = (await buildCatalog([tool])).definitions
+  const [definition] = buildCatalog([tool]).definitions
   if (definition === undefined)
     throw new Error("Expected the tool to be listed")
   return definition.description
 }
 
 describe("McpToolCatalogBuilder", async () => {
-  it("lists a tool under the server's prefix, with its schema and the MCP fields", async () => {
+  it("lists a tool under the server's prefix, with its schema and the MCP fields", () => {
     const inputSchema = {
       type: "object",
       properties: { path: { type: "string", description: "File path." } },
@@ -84,7 +82,7 @@ describe("McpToolCatalogBuilder", async () => {
       additionalProperties: false
     }
 
-    const catalog = await buildCatalog([
+    const catalog = buildCatalog([
       { name: "read_note", description: "Reads one note.", inputSchema }
     ])
 
@@ -106,8 +104,8 @@ describe("McpToolCatalogBuilder", async () => {
     })
   })
 
-  it("keeps the server's order", async () => {
-    const catalog = await buildCatalog([
+  it("keeps the server's order", () => {
+    const catalog = buildCatalog([
       buildTool("zeta"),
       buildTool("alpha"),
       buildTool("mid")
@@ -128,29 +126,28 @@ describe("McpToolCatalogBuilder", async () => {
     ["hyphens and digits", "read-note-2", "mcp__notes__read-note-2"]
   ])(
     "replaces each character outside the name rule in %s",
-    async (_label, serverToolName, modelName) => {
-      const [definition] = (await buildCatalog([buildTool(serverToolName)]))
-        .definitions
+    (_label, serverToolName, modelName) => {
+      const [definition] = buildCatalog([buildTool(serverToolName)]).definitions
 
       expect(definition?.name).toBe(modelName)
       expect(definition?.serverToolName).toBe(serverToolName)
     }
   )
 
-  it("lists a tool whose model-facing name is exactly 64 characters", async () => {
+  it("lists a tool whose model-facing name is exactly 64 characters", () => {
     const serverToolName = "t".repeat(64 - "mcp__notes__".length)
 
-    const catalog = await buildCatalog([buildTool(serverToolName)])
+    const catalog = buildCatalog([buildTool(serverToolName)])
 
     expect(catalog.definitions.map((definition) => definition.name)).toEqual([
       `mcp__notes__${serverToolName}`
     ])
   })
 
-  it("skips a tool whose model-facing name is 65 characters", async () => {
+  it("skips a tool whose model-facing name is 65 characters", () => {
     const serverToolName = "t".repeat(65 - "mcp__notes__".length)
 
-    const catalog = await buildCatalog([buildTool(serverToolName)])
+    const catalog = buildCatalog([buildTool(serverToolName)])
 
     expect(catalog.definitions).toEqual([])
     expect(catalog.skippedTools).toEqual([
@@ -158,8 +155,8 @@ describe("McpToolCatalogBuilder", async () => {
     ])
   })
 
-  it("skips a tool with an empty name, listing it with an empty name", async () => {
-    const catalog = await buildCatalog([buildTool("")])
+  it("skips a tool with an empty name, listing it with an empty name", () => {
+    const catalog = buildCatalog([buildTool("")])
 
     expect(catalog.definitions).toEqual([])
     expect(catalog.skippedTools).toEqual([
@@ -167,18 +164,18 @@ describe("McpToolCatalogBuilder", async () => {
     ])
   })
 
-  it("skips a tool whose name is 129 characters, listing its first 128", async () => {
+  it("skips a tool whose name is 129 characters, listing its first 128", () => {
     const serverToolName = "n".repeat(129)
 
-    const catalog = await buildCatalog([buildTool(serverToolName)])
+    const catalog = buildCatalog([buildTool(serverToolName)])
 
     expect(catalog.skippedTools).toEqual([
       { name: "n".repeat(128), reason: "unsupported-name" }
     ])
   })
 
-  it("skips a tool whose name holds characters a person cannot see, naming it without them", async () => {
-    const catalog = await buildCatalog([
+  it("skips a tool whose name holds characters a person cannot see, naming it without them", () => {
+    const catalog = buildCatalog([
       buildTool("read\u202Efile"),
       buildTool("fi\u200Bnd"),
       buildTool("list\u{E0041}"),
@@ -194,11 +191,8 @@ describe("McpToolCatalogBuilder", async () => {
     ])
   })
 
-  it("skips a later tool with the same name as a listed one", async () => {
-    const catalog = await buildCatalog([
-      buildTool("search"),
-      buildTool("search")
-    ])
+  it("skips a later tool with the same name as a listed one", () => {
+    const catalog = buildCatalog([buildTool("search"), buildTool("search")])
 
     expect(catalog.definitions.map((definition) => definition.name)).toEqual([
       "mcp__notes__search"
@@ -208,8 +202,8 @@ describe("McpToolCatalogBuilder", async () => {
     ])
   })
 
-  it("skips a later tool whose name matches a listed one once replaced", async () => {
-    const catalog = await buildCatalog([
+  it("skips a later tool whose name matches a listed one once replaced", () => {
+    const catalog = buildCatalog([
       buildTool("read_note"),
       buildTool("read.note")
     ])
@@ -222,10 +216,10 @@ describe("McpToolCatalogBuilder", async () => {
     ])
   })
 
-  it("lists an input schema nested exactly 32 objects deep", async () => {
+  it("lists an input schema nested exactly 32 objects deep", () => {
     const inputSchema = { type: "object", $defs: buildNestedObject(31) }
 
-    const catalog = await buildCatalog([{ name: "deep", inputSchema }])
+    const catalog = buildCatalog([{ name: "deep", inputSchema }])
 
     expect(catalog.definitions.map((definition) => definition.name)).toEqual([
       "mcp__notes__deep"
@@ -270,8 +264,8 @@ describe("McpToolCatalogBuilder", async () => {
       "requires an argument whose name breaks the rule",
       [{ name: "bad", inputSchema: { type: "object", required: ["$path"] } }]
     ]
-  ])("skips a tool whose input schema %s", async (_label, tools) => {
-    const catalog = await buildCatalog(tools)
+  ])("skips a tool whose input schema %s", (_label, tools) => {
+    const catalog = buildCatalog(tools)
 
     expect(catalog.definitions).toEqual([])
     expect(catalog.skippedTools).toEqual([
@@ -279,12 +273,12 @@ describe("McpToolCatalogBuilder", async () => {
     ])
   })
 
-  it("skips a tool whose input schema holds a __proto__ key", async () => {
+  it("skips a tool whose input schema holds a __proto__ key", () => {
     const tools = parseToolsText(
       '[{"name":"bad","inputSchema":{"type":"object","$defs":{"__proto__":{"type":"string"}}}}]'
     )
 
-    const catalog = await buildCatalog(tools)
+    const catalog = buildCatalog(tools)
 
     expect(catalog.definitions).toEqual([])
     expect(catalog.skippedTools).toEqual([
@@ -332,8 +326,8 @@ describe("McpToolCatalogBuilder", async () => {
     }
   ])(
     "skips a tool whose input schema holds a character a person cannot see in $where",
-    async ({ inputSchema }) => {
-      const catalog = await buildCatalog([{ name: "write", inputSchema }])
+    ({ inputSchema }) => {
+      const catalog = buildCatalog([{ name: "write", inputSchema }])
 
       expect(catalog.definitions).toEqual([])
       expect(catalog.skippedTools).toEqual([
@@ -342,7 +336,7 @@ describe("McpToolCatalogBuilder", async () => {
     }
   )
 
-  it("lists an input schema whose text holds joined and styled emoji, tabs, and line breaks", async () => {
+  it("lists an input schema whose text holds joined and styled emoji, tabs, and line breaks", () => {
     const inputSchema = {
       type: "object",
       properties: {
@@ -354,7 +348,7 @@ describe("McpToolCatalogBuilder", async () => {
       }
     }
 
-    const catalog = await buildCatalog([{ name: "write", inputSchema }])
+    const catalog = buildCatalog([{ name: "write", inputSchema }])
 
     expect(catalog.skippedTools).toEqual([])
     expect(catalog.definitions.map((tool) => tool.inputSchema)).toEqual([
@@ -362,7 +356,7 @@ describe("McpToolCatalogBuilder", async () => {
     ])
   })
 
-  it("lists an input schema of exactly 64 KiB as JSON", async () => {
+  it("lists an input schema of exactly 64 KiB as JSON", () => {
     const emptySchemaText =
       '{"type":"object","properties":{"a":{"type":"string","description":""}}}'
     const padding = "x".repeat(64 * 1024 - emptySchemaText.length)
@@ -371,13 +365,13 @@ describe("McpToolCatalogBuilder", async () => {
       properties: { a: { type: "string", description: padding } }
     }
 
-    const catalog = await buildCatalog([{ name: "large", inputSchema }])
+    const catalog = buildCatalog([{ name: "large", inputSchema }])
 
     expect(catalog.skippedTools).toEqual([])
     expect(catalog.definitions).toHaveLength(1)
   })
 
-  it("skips an input schema one byte over 64 KiB as JSON", async () => {
+  it("skips an input schema one byte over 64 KiB as JSON", () => {
     const emptySchemaText =
       '{"type":"object","properties":{"a":{"type":"string","description":""}}}'
     const padding = "x".repeat(64 * 1024 + 1 - emptySchemaText.length)
@@ -386,7 +380,7 @@ describe("McpToolCatalogBuilder", async () => {
       properties: { a: { type: "string", description: padding } }
     }
 
-    const catalog = await buildCatalog([{ name: "large", inputSchema }])
+    const catalog = buildCatalog([{ name: "large", inputSchema }])
 
     expect(catalog.definitions).toEqual([])
     expect(catalog.skippedTools).toEqual([
@@ -394,21 +388,21 @@ describe("McpToolCatalogBuilder", async () => {
     ])
   })
 
-  it("measures the input schema in UTF-8 bytes, not characters", async () => {
+  it("measures the input schema in UTF-8 bytes, not characters", () => {
     const inputSchema = {
       type: "object",
       properties: { a: { type: "string", description: "é".repeat(33_000) } }
     }
 
-    const catalog = await buildCatalog([{ name: "large", inputSchema }])
+    const catalog = buildCatalog([{ name: "large", inputSchema }])
 
     expect(catalog.skippedTools).toEqual([
       { name: "large", reason: "input-schema-too-large" }
     ])
   })
 
-  it("lists every tool but the skipped ones", async () => {
-    const catalog = await buildCatalog([
+  it("lists every tool but the skipped ones", () => {
+    const catalog = buildCatalog([
       buildTool("first"),
       buildTool(""),
       buildTool("second"),
@@ -424,24 +418,24 @@ describe("McpToolCatalogBuilder", async () => {
     ])
   })
 
-  it("reads 128 tools and says the list is not cut", async () => {
+  it("reads 128 tools and says the list is not cut", () => {
     const tools = Array.from({ length: 128 }, (_, index) =>
       buildTool(`tool${index}`)
     )
 
-    const catalog = await buildCatalog(tools)
+    const catalog = buildCatalog(tools)
 
     expect(catalog.definitions).toHaveLength(128)
     expect(catalog.isToolListCut).toBe(false)
   })
 
-  it("reads only the first 128 of 129 tools and says the list is cut", async () => {
+  it("reads only the first 128 of 129 tools and says the list is cut", () => {
     const tools = [
       ...Array.from({ length: 128 }, (_, index) => buildTool(`tool${index}`)),
       buildTool("")
     ]
 
-    const catalog = await buildCatalog(tools)
+    const catalog = buildCatalog(tools)
 
     expect(catalog.definitions).toHaveLength(128)
     expect(catalog.definitions.at(-1)?.serverToolName).toBe("tool127")
@@ -535,16 +529,16 @@ describe("McpToolCatalogBuilder", async () => {
     ).toBe(`${"d".repeat(4094)}…`)
   })
 
-  it("lists a skipped tool's long name cut to 128 characters without splitting a character", async () => {
-    const catalog = await buildCatalog([buildTool(`${"n".repeat(127)}😀n`)])
+  it("lists a skipped tool's long name cut to 128 characters without splitting a character", () => {
+    const catalog = buildCatalog([buildTool(`${"n".repeat(127)}😀n`)])
 
     expect(catalog.skippedTools).toEqual([
       { name: "n".repeat(127), reason: "unsupported-name" }
     ])
   })
 
-  it("returns a catalog frozen all the way down", async () => {
-    const catalog = await buildCatalog([
+  it("returns a catalog frozen all the way down", () => {
+    const catalog = buildCatalog([
       {
         name: "read",
         inputSchema: {
@@ -570,12 +564,12 @@ describe("McpToolCatalogBuilder", async () => {
     expect(Object.isFrozen(definition?.inputSchema.required)).toBe(true)
   })
 
-  it("skips a tool whose input schema nests 10,000 objects deep without exhausting the stack, listing the others", async () => {
+  it("skips a tool whose input schema nests 10,000 objects deep without exhausting the stack, listing the others", () => {
     const deepSchema = parseToolsText(
       `[${'{"type":"object","properties":{"a":'.repeat(10_000)}{"type":"object"}${"}}".repeat(10_000)}]`
     )[0]
 
-    const catalog = await buildCatalog([
+    const catalog = buildCatalog([
       { name: "deep", inputSchema: deepSchema },
       buildTool("shallow")
     ])
@@ -588,8 +582,8 @@ describe("McpToolCatalogBuilder", async () => {
     ])
   })
 
-  it("checks a tool with an input schema too deep for its name first", async () => {
-    const catalog = await buildCatalog([
+  it("checks a tool with an input schema too deep for its name first", () => {
+    const catalog = buildCatalog([
       {
         name: "",
         inputSchema: { type: "object", $defs: buildNestedObject(40) }
@@ -601,8 +595,8 @@ describe("McpToolCatalogBuilder", async () => {
     ])
   })
 
-  it("lists a tool whose output schema nests 10,000 objects deep", async () => {
-    const catalog = await buildCatalog([
+  it("lists a tool whose output schema nests 10,000 objects deep", () => {
+    const catalog = buildCatalog([
       {
         ...buildTool("report"),
         outputSchema: {
@@ -622,40 +616,40 @@ describe("McpToolCatalogBuilder", async () => {
     ["whose name is not text", { name: 7, inputSchema: EMPTY_INPUT_SCHEMA }],
     ["that is not an object", "tool"]
   ])(
-    "refuses a tool %s as an invalid result, as the SDK's own list read would",
-    async (_label, tool) => {
-      await expect(buildCatalog([tool])).rejects.toMatchObject({
-        code: SdkErrorCode.InvalidResult
-      })
+    "refuses a tool %s as an invalid result, as the SDK's MCP tool schema does",
+    (_label, tool) => {
+      expect(() => buildCatalog([tool])).toThrow(
+        expect.objectContaining({ code: SdkErrorCode.InvalidResult })
+      )
     }
   )
 
-  it("marks the list as cut at a tool past the 128 it holds, without checking that tool", async () => {
+  it("marks the list as cut at a tool past the 128 it holds, without checking that tool", () => {
     const builder = new McpToolCatalogBuilder(SERVER_NAME)
     for (let index = 0; index < 128; index += 1)
-      await builder.addTool(buildTool(`tool${String(index)}`))
+      builder.addTool(buildTool(`tool${String(index)}`))
     expect(builder.isToolListCut).toBe(false)
 
-    await builder.addTool("not a tool")
+    builder.addTool("not a tool")
 
     expect(builder.isToolListCut).toBe(true)
     expect(builder.build().definitions).toHaveLength(128)
   })
 
-  it("builds a catalog that later additions do not change", async () => {
+  it("builds a catalog that later additions do not change", () => {
     const builder = new McpToolCatalogBuilder(SERVER_NAME)
-    await builder.addTool(buildTool("first"))
+    builder.addTool(buildTool("first"))
     const catalog = builder.build()
 
-    await builder.addTool(buildTool("second"))
+    builder.addTool(buildTool("second"))
 
     expect(catalog.definitions.map((definition) => definition.name)).toEqual([
       "mcp__notes__first"
     ])
   })
 
-  it("lists nothing for a server without tools", async () => {
-    expect(await buildCatalog([])).toEqual({
+  it("lists nothing for a server without tools", () => {
+    expect(buildCatalog([])).toEqual({
       definitions: [],
       skippedTools: [],
       isToolListCut: false

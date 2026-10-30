@@ -45,7 +45,7 @@ export type McpHttpSession = Readonly<{
  * after the transport closed, it would send under the transport's aborted
  * signal, and it reports its failure as a failure of the connection.
  */
-export async function endMcpHttpSession(
+export async function closeMcpHttpSession(
   session: McpHttpSession,
   reportFailure: (error: unknown) => void
 ): Promise<void> {

@@ -209,9 +209,10 @@ describe("McpServerConnection over stdio", () => {
       context
     )
 
-    expect(await connection.readToolListPage(undefined, NEVER_ABORTED)).toEqual(
-      { tools: [ECHO_TOOL], nextCursor: undefined }
-    )
+    expect(await connection.getToolListPage(undefined, NEVER_ABORTED)).toEqual({
+      tools: [ECHO_TOOL],
+      nextCursor: undefined
+    })
   })
 
   it("reads the page a cursor names and passes on its tools unchecked", async () => {
@@ -227,10 +228,11 @@ describe("McpServerConnection over stdio", () => {
       context
     )
 
-    expect(await connection.readToolListPage(undefined, NEVER_ABORTED)).toEqual(
-      { tools: [ECHO_TOOL], nextCursor: "page-2" }
-    )
-    expect(await connection.readToolListPage("page-2", NEVER_ABORTED)).toEqual({
+    expect(await connection.getToolListPage(undefined, NEVER_ABORTED)).toEqual({
+      tools: [ECHO_TOOL],
+      nextCursor: "page-2"
+    })
+    expect(await connection.getToolListPage("page-2", NEVER_ABORTED)).toEqual({
       tools: [{ name: 7 }],
       nextCursor: undefined
     })
@@ -246,9 +248,10 @@ describe("McpServerConnection over stdio", () => {
       context
     )
 
-    expect(await connection.readToolListPage(undefined, NEVER_ABORTED)).toEqual(
-      { tools: [], nextCursor: undefined }
-    )
+    expect(await connection.getToolListPage(undefined, NEVER_ABORTED)).toEqual({
+      tools: [],
+      nextCursor: undefined
+    })
     expect(
       server.receivedRequests.map((request) => request.rpcMethod)
     ).not.toContain("tools/list")
@@ -268,7 +271,7 @@ describe("McpServerConnection over stdio", () => {
     )
 
     await expect(
-      connection.readToolListPage(undefined, NEVER_ABORTED)
+      connection.getToolListPage(undefined, NEVER_ABORTED)
     ).rejects.toMatchObject({ code: SdkErrorCode.InvalidResult })
   })
 
@@ -309,7 +312,7 @@ describe("McpServerConnection over stdio", () => {
       }),
       context
     )
-    await connection.readToolListPage(undefined, NEVER_ABORTED)
+    await connection.getToolListPage(undefined, NEVER_ABORTED)
 
     const result = await connection.sendToolCall(
       "structured",
@@ -509,7 +512,7 @@ describe("McpServerConnection over HTTP", () => {
       context
     )
 
-    await connection.readToolListPage(undefined, NEVER_ABORTED)
+    await connection.getToolListPage(undefined, NEVER_ABORTED)
     await connection.sendToolCall("echo", { text: "hi" }, NEVER_ABORTED)
     await connection.close()
 

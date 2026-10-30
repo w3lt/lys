@@ -18,9 +18,10 @@ const NOT_PERMITTED = "EPERM"
  * which the backend's own process group, the one the desktop host ends,
  * does not hold; the processes the command starts join that group unless
  * they leave it themselves. A group is added once its command started and
- * removed once no process of it is left. {@link stopEveryGroup} is the
- * backend's last resort when it exits: it sends `SIGKILL` to every group
- * still held, without waiting, because an exiting process cannot wait.
+ * removed once no process of it is left, or once its stop gave up after
+ * `SIGKILL`. {@link stopEveryGroup} is the backend's last resort when it
+ * exits: it sends `SIGKILL` to every group still held, without waiting,
+ * because an exiting process cannot wait.
  * Resource ownership: owns the identifiers, not the processes; each group's
  * {@link McpServerProcess} ends its own group normally. Concurrency model:
  * single-threaded on the backend's event loop.

@@ -97,8 +97,8 @@ const DESCRIPTION_ELLIPSIS = "…"
  * not kept. The catalog holds the first {@link MAXIMUM_MCP_SERVER_TOOL_COUNT}
  * tools; adding one more marks the list as cut and is otherwise ignored.
  * Resource ownership: owns the definitions and skipped entries until
- * {@link build} copies them. Concurrency model: single caller, which awaits
- * each {@link addTool} before the next.
+ * {@link build} copies them. Concurrency model: single caller; each
+ * {@link addTool} runs synchronously.
  */
 export default class McpToolCatalogBuilder {
   /** Name of the server. */
@@ -140,8 +140,7 @@ export default class McpToolCatalogBuilder {
   /**
    * Checks one tool the server listed and adds it, listed or skipped.
    *
-   * @param rawTool - Untrusted tool, in the server's order.
-   * @returns A promise that settles once the tool was added. Each tool is
+   * @param rawTool - Untrusted tool, in the server's order. Each tool is
    * listed, or skipped with a reason: `unsupported-name` when its name is
    * empty, longer than {@link MAXIMUM_MCP_SERVER_TOOL_NAME_LENGTH}
    * characters, or holds a character a person cannot see, or the
@@ -153,8 +152,7 @@ export default class McpToolCatalogBuilder {
    * schema is larger than 64 KiB as JSON. A tool added to a full catalog is
    * not checked; it marks the list as cut.
    * @throws The SDK's invalid-result error when the tool is not one the
-   * MCP tool schema allows, as the SDK's own list read would throw; see
-   * {@link checkListedTool}.
+   * SDK's MCP tool schema allows; see {@link parseListedTool}.
    * @remarks The model-facing name is `mcp__<server>__` followed by the
    * server's name for the tool, each character outside `[A-Za-z0-9_-]`
    * replaced by `_`. The description is the tool's own, else its title,
@@ -165,13 +163,13 @@ export default class McpToolCatalogBuilder {
    * is listed only when both are text a person can see: what the model
    * reads and what the approval prompt and Settings show are then the same.
    */
-  public async addTool(rawTool: unknown): Promise<void> {
+  public addTool(rawTool: unknown): void {
     const toolCount = this.#definitions.length + this.#skippedTools.length
     if (toolCount >= MAXIMUM_MCP_SERVER_TOOL_COUNT) {
       this.#isToolListCut = true
       return
     }
-    const checkedTool = await checkListedTool(rawTool)
+    const checkedTool = parseListedTool(rawTool)
     const entry = buildMcpToolEntry(
       this.#serverName,
       this.#prefix,
@@ -206,9 +204,8 @@ export default class McpToolCatalogBuilder {
 }
 
 /**
- * Checks one listed tool against the SDK's tool schema, as the SDK checks
- * every tool of a list it reads itself, after bounding what that schema
- * checks recursively.
+ * Parses one listed tool with the SDK's MCP tool schema, after bounding
+ * what that schema checks recursively.
  *
  * @param rawTool - Untrusted tool the server listed.
  * @returns The tool as the schema reads it, and whether the server's input
@@ -220,13 +217,13 @@ export default class McpToolCatalogBuilder {
  * {@link PLACEHOLDER_INPUT_SCHEMA} instead, and the tool is then skipped.
  * The schema checks no other part of a tool recursively.
  */
-async function checkListedTool(rawTool: unknown): Promise<CheckedMcpTool> {
+function parseListedTool(rawTool: unknown): CheckedMcpTool {
   const isInputSchemaWithinLimits =
     typeof rawTool !== "object" ||
     rawTool === null ||
     !("inputSchema" in rawTool) ||
     isWithinJsonValueLimits(rawTool.inputSchema)
-  const outcome = await specTypeSchemas.Tool["~standard"].validate(
+  const outcome = specTypeSchemas.Tool["~standard"].validate(
     isInputSchemaWithinLimits
       ? rawTool
       : { ...rawTool, inputSchema: PLACEHOLDER_INPUT_SCHEMA }
@@ -393,8 +390,8 @@ function formatToolDescription(serverName: McpServerName, tool: Tool): string {
       .find((candidate) => candidate !== "") ??
     `Tool ${tool.name} of the MCP server ${serverName}.`
   if (description.length <= MAXIMUM_MCP_TOOL_DESCRIPTION_LENGTH)
-    return copyText(description)
-  return copyText(
+    return buildTextCopy(description)
+  return buildTextCopy(
     formatCutText(description, MAXIMUM_MCP_TOOL_DESCRIPTION_LENGTH - 1) +
       DESCRIPTION_ELLIPSIS
   )
@@ -409,7 +406,7 @@ function formatToolDescription(serverName: McpServerName, tool: Tool): string {
  * character, in a string of its own; may be empty.
  */
 function formatSkippedToolName(serverToolName: string): string {
-  return copyText(
+  return buildTextCopy(
     formatCutText(
       formatVisibleText(serverToolName),
       MAXIMUM_MCP_SERVER_TOOL_NAME_LENGTH
@@ -429,6 +426,6 @@ function formatSkippedToolName(serverToolName: string): string {
  * code units and decoding them again makes a string that refers to
  * nothing else.
  */
-function copyText(text: string): string {
+function buildTextCopy(text: string): string {
   return Buffer.from(text, "utf16le").toString("utf16le")
 }

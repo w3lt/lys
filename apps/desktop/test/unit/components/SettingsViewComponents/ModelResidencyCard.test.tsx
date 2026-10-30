@@ -4,12 +4,17 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import ModelResidencyCard from "@/components/SettingsViewComponents/ModelResidencyCard"
 import type { ModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
+import type { LlmProviderTarget } from "@/lib/models/llm-provider-target"
 import type {
   ModelInventoryState,
   ModelRequestState,
   ModelRuntimeState
 } from "@/lib/store/model-runtime"
 import { buildLlmInfo } from "../../support/modelFixtures"
+import {
+  GROQ_TARGET,
+  LM_STUDIO_TARGET
+} from "../../support/providerTargetFixtures"
 
 /** What the card shows and whether its commands can be sent. */
 type ModelResidencyArrangement = {
@@ -103,19 +108,29 @@ const DEFAULT_MISSING_MODELS: readonly LlmInfo[] = Object.freeze([
 /** Read inventory with the default model on disk. */
 const DEFAULT_LISTED: ModelInventoryState = Object.freeze({
   status: "ready",
+  modelLoading: "lys",
   models: DEFAULT_LISTED_MODELS
 })
 
 /** Read inventory with the default model in memory. */
 const DEFAULT_LISTED_RESIDENT: ModelInventoryState = Object.freeze({
   status: "ready",
+  modelLoading: "lys",
   models: DEFAULT_RESIDENT_MODELS
 })
 
 /** Read inventory without the default model. */
 const DEFAULT_NOT_LISTED: ModelInventoryState = Object.freeze({
   status: "ready",
+  modelLoading: "lys",
   models: DEFAULT_MISSING_MODELS
+})
+
+/** Read inventory with the default in memory in a provider that loads its own models. */
+const PROVIDER_LOADED_RESIDENT: ModelInventoryState = Object.freeze({
+  status: "ready",
+  modelLoading: "provider",
+  models: DEFAULT_RESIDENT_MODELS
 })
 
 /** Inventory that cannot be read yet. */
@@ -181,15 +196,21 @@ const INVENTORY_READ_FAILED: ModelResidencyArrangement = Object.freeze({
  * request feedback.
  *
  * @param arrangement - What the card shows.
+ * @param provider - Active provider, which the card names; LM Studio when
+ * omitted.
  * @returns The spies and the render result's rerender function.
  */
-function startModelResidencyCard(arrangement: ModelResidencyArrangement) {
+function startModelResidencyCard(
+  arrangement: ModelResidencyArrangement,
+  provider: LlmProviderTarget = LM_STUDIO_TARGET
+) {
   const spies: ModelResidencyCardSpies = {
     onLoadModel: vi.fn(),
     onUnloadModel: vi.fn()
   }
   const { rerender } = render(
     <ModelResidencyCard
+      provider={provider}
       availability={arrangement.availability}
       defaultModel={arrangement.defaultModel}
       modelInventory={arrangement.modelInventory}
@@ -266,8 +287,8 @@ describe("ModelResidencyCard", () => {
         screen.getByRole("heading", { name: "Model state unavailable" })
       ).toBeInTheDocument()
       expect(screen.getByText(meta)).toBeInTheDocument()
-      expect(screen.getByRole("button", { name: "Load" })).toBeDisabled()
-      expect(screen.getByRole("button", { name: "Unload" })).toBeDisabled()
+      expect(screen.queryByRole("button", { name: "Load" })).toBeNull()
+      expect(screen.queryByRole("button", { name: "Unload" })).toBeNull()
     }
   )
 
@@ -299,18 +320,6 @@ describe("ModelResidencyCard", () => {
     {
       name: "the default is not listed",
       arrangement: DEFAULT_NOT_IN_INVENTORY,
-      canLoad: false,
-      canUnload: false
-    },
-    {
-      name: "the inventory cannot be read yet",
-      arrangement: INVENTORY_NOT_READ,
-      canLoad: false,
-      canUnload: false
-    },
-    {
-      name: "the inventory read failed",
-      arrangement: INVENTORY_READ_FAILED,
       canLoad: false,
       canUnload: false
     }
@@ -382,6 +391,7 @@ describe("ModelResidencyCard", () => {
 
     rerender(
       <ModelResidencyCard
+        provider={LM_STUDIO_TARGET}
         availability="available"
         defaultModel={DEFAULT_MODEL}
         modelInventory={DEFAULT_LISTED_RESIDENT}
@@ -415,5 +425,51 @@ describe("ModelResidencyCard", () => {
         .getByRole("button", { name: "Unload" })
         .compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+  })
+
+  it.each([
+    {
+      name: "the inventory cannot be read yet",
+      arrangement: INVENTORY_NOT_READ
+    },
+    { name: "the inventory read failed", arrangement: INVENTORY_READ_FAILED }
+  ])(
+    "offers no Load or Unload, and says nothing about who loads the models, while $name",
+    ({ arrangement }) => {
+      startModelResidencyCard(arrangement)
+
+      expect(screen.queryByRole("button", { name: "Load" })).toBeNull()
+      expect(screen.queryByRole("button", { name: "Unload" })).toBeNull()
+      expect(
+        screen.getByText(
+          "This summary prefers the loaded default; see every model in Model settings."
+        )
+      ).toBeInTheDocument()
+    }
+  )
+
+  it("offers Load and Unload when the inventory reports that Lys loads the models, whatever the provider", () => {
+    startModelResidencyCard(READY_TO_UNLOAD, GROQ_TARGET)
+
+    expect(screen.getByRole("button", { name: "Load" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Unload" })).toBeEnabled()
+  })
+
+  it("offers no Load or Unload when the inventory reports that the provider loads its own models", () => {
+    startModelResidencyCard(
+      { ...READY_TO_UNLOAD, modelInventory: PROVIDER_LOADED_RESIDENT },
+      GROQ_TARGET
+    )
+
+    expect(
+      screen.getByText(`${DEFAULT_MODEL} · loaded in Groq`)
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Load" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Unload" })).toBeNull()
+    expect(
+      screen.getByText(
+        "Groq decides which models are in memory, so Lys does not load or unload them. This summary prefers the default; see every model in Model settings."
+      )
+    ).toBeInTheDocument()
   })
 })

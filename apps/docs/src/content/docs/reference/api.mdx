@@ -14,7 +14,7 @@ route definitions.
 | Method   | Path                                                                              | Request body                                                                                         | Response                                                               |
 | -------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | `GET`    | `/api/v1/heath`                                                                   | none                                                                                                 | `{ ok: true }`                                                         |
-| `GET`    | `/api/v1/llm/list`                                                                | none                                                                                                 | `{ llms: LlmInfo[] }`                                                  |
+| `GET`    | `/api/v1/llm/list`                                                                | none                                                                                                 | `{ llms: LlmInfo[], modelLoading: "lys" \| "provider" }`               |
 | `GET`    | `/api/v1/llm/:modelId/health`                                                     | none                                                                                                 | Loaded-state health observation                                        |
 | `POST`   | `/api/v1/llm/load`                                                                | `{ modelId: string, configuration?: ModelLoadConfiguration }`                                        | `LlmInfo`                                                              |
 | `PATCH`  | `/api/v1/llm/unload`                                                              | `{ modelId: string }`                                                                                | `204` or typed Problem Details                                         |
@@ -47,8 +47,10 @@ the Fastify route registration.
 List, load, health, unload, and chat-context requests, and a chat request
 for a model whose capabilities the backend has not read yet, answer `503`
 with `urn:lys:problem:llm:runtime-unavailable` while the backend has no
-connected LM Studio runtime. The runtime-status route never contacts LM Studio; the
-runtime-connect route waits for one shared connection attempt.
+connected model provider. The runtime-status route never contacts the
+provider; the runtime-connect route waits for a connection attempt, which
+reads the provider saved in `settings.json` again. Requests share an attempt
+until it starts reading the file; a later request waits for an attempt of its own.
 
 Every request body is limited to 1 MiB (1,048,576 bytes), Fastify's default,
 except a tool result, which is limited to 8 MiB (8,388,608 bytes) so that a
@@ -98,11 +100,12 @@ stored, after its attachment files are written, so a conversation or agent
 deleted in between gets the same `404` or `409` problem, and the written
 files are deleted again.
 
-Once the agent is found, the route reads from LM Studio's inventory whether
+Once the agent is found, the route reads from the provider's inventory whether
 `model` has `vision` and `trainedForToolUse`, which decide the images the
 model sees and the tools the backend adds to the turn. It remembers what a
-listed model can do until the backend stops, so requests for a model read the
-inventory only until a listing has it: while LM Studio is not connected, such
+listed model can do while the backend stays connected to the same provider,
+and forgets all of it when another provider connects, so requests for a model read the
+inventory only until a listing has it: while the provider is not connected, such
 a request answers `503` with `urn:lys:problem:llm:runtime-unavailable`, and a
 full model-operation queue `503` with `urn:lys:problem:llm:service-busy`,
 nothing stored. A failed listing is not remembered, and neither is a model
@@ -124,10 +127,10 @@ rounds are included.
 
 `generationOptions` is required and has no protocol-level default:
 
-| Field          | Accepted value                                  | Effect                                                                  |
-| -------------- | ----------------------------------------------- | ----------------------------------------------------------------------- |
-| `temperature`  | Required number from `0` through `1`, inclusive | Forwarded as the completion sampling temperature.                       |
-| `replyCeiling` | Optional non-negative integer, in tokens        | Forwarded as `max_completion_tokens`; omission becomes `null` upstream. |
+| Field          | Accepted value                                  | Effect                                                                                                                                                                    |
+| -------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `temperature`  | Required number from `0` through `1`, inclusive | Forwarded as the completion sampling temperature.                                                                                                                         |
+| `replyCeiling` | Optional non-negative integer, in tokens        | Forwarded as `max_completion_tokens`, or as `max_tokens` to Ollama and Ollama Cloud, whose OpenAI-compatible API reads only that field; omission becomes `null` upstream. |
 
 Both numeric fields use number coercion before validation. The request, its
 `conversation`, and the generation-options objects reject unknown fields, so a
@@ -313,7 +316,7 @@ Accepted chat turns respond as SSE. A missing conversation, a new
 conversation naming a code no agent has, a stored conversation whose agent no
 longer exists, an offered backend tool that cannot run now, an attachment Lys
 cannot send, an image for a model without vision, or a model-capability read
-LM Studio cannot answer returns JSON Problem Details before the stream
+the provider cannot answer returns JSON Problem Details before the stream
 starts, and nothing is stored or written: no message, no file, and no failed
 reply. Each event payload must match one of
 the eleven variants documented in [SSE events](/reference/sse-events/).
@@ -1022,10 +1025,10 @@ it then shows the sentence and keeps the files staged.
 `LlmInfo` currently includes:
 
 - `modelKey`
-- `format`
+- optional `format`
 - `displayName`
-- `path`
-- `sizeBytes`
+- optional `path`
+- optional `sizeBytes`
 - optional `paramsString`, `architecture`, and `quantization`
 - `vision`
 - `trainedForToolUse`
@@ -1033,7 +1036,23 @@ it then shows the sentence and keeps the files staged.
 - `loaded`
 - optional `loadedContextLength`
 
-`GET /api/v1/llm/list` returns `llms` ordered by `modelKey`, then by `path`.
+`format`, `path`, and `sizeBytes` are present for LM Studio's models. Ollama
+reports a model's format and size but no path, and Groq reports none of the
+three. Groq reports no capabilities either: its models have `vision` false
+and `trainedForToolUse` true. Ollama Cloud and Groq report every listed model
+as `loaded`; a local Ollama server reports the models its `/api/ps` lists as
+running. Ollama's list leaves out a model that cannot chat, such as an
+embedding model.
+
+`GET /api/v1/llm/list` returns `llms` ordered by `modelKey`, then by `path`,
+an absent path sorting first, and `modelLoading`, who loads the listed
+models:
+
+| `modelLoading` | Meaning                                                                                                                                                                                                                     |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lys`          | A model answers only once loaded; load and unload go through the routes below. LM Studio reports this.                                                                                                                      |
+| `provider`     | The provider decides which models are in memory, and load and unload answer `409`. A model is `loaded` while the provider serves it: every model of Ollama Cloud and Groq, and the models a local Ollama server is running. |
+
 On a loaded model, `loadedContextLength` is the context length it is loaded
 with, in tokens: the smallest among its loaded instances, the window a chat
 request to it is measured against. It is absent on a model that is not loaded,
@@ -1087,6 +1106,19 @@ LM Studio loads it with:
 
 The backend passes the settings to the LM Studio SDK's load call, which sends
 each of them to LM Studio.
+
+When the list reports `modelLoading: "provider"`, a load request returns
+`409 Conflict` with `Content-Type: application/problem+json` before any
+runtime call, and the unload route answers the same way:
+
+```json
+{
+  "type": "urn:lys:problem:llm:provider-loads-models",
+  "title": "Provider loads its own models",
+  "status": 409,
+  "detail": "The connected model provider loads a model when a request names it, so Lys does not load or unload its models."
+}
+```
 
 ## Model operation admission
 
@@ -1187,12 +1219,13 @@ new matching instance afterward. Expected failures use
 Operation failures include an occurrence-specific `detail`; admission refusal
 uses the fixed four-field service-busy body shown above:
 
-| Status | Problem type                              | Meaning                                                      |
-| ------ | ----------------------------------------- | ------------------------------------------------------------ |
-| `404`  | `urn:lys:problem:llm:model-not-found`     | No matching instance was initially loaded.                   |
-| `503`  | `urn:lys:problem:llm:runtime-unavailable` | No LLM runtime is connected, or the backend cannot query it. |
-| `503`  | `urn:lys:problem:llm:unload-failed`       | Reconciliation still found matching instances.               |
-| `503`  | `urn:lys:problem:llm:service-busy`        | The shared queue is full; no unload was accepted.            |
+| Status | Problem type                                | Meaning                                                           |
+| ------ | ------------------------------------------- | ----------------------------------------------------------------- |
+| `404`  | `urn:lys:problem:llm:model-not-found`       | No matching instance was initially loaded.                        |
+| `409`  | `urn:lys:problem:llm:provider-loads-models` | The connected provider loads its own models; nothing was stopped. |
+| `503`  | `urn:lys:problem:llm:runtime-unavailable`   | No LLM runtime is connected, or the backend cannot query it.      |
+| `503`  | `urn:lys:problem:llm:unload-failed`         | Reconciliation still found matching instances.                    |
+| `503`  | `urn:lys:problem:llm:service-busy`          | The shared queue is full; no unload was accepted.                 |
 
 Operation-failure bodies may also include an `instance` identifier for one
 occurrence. The service-busy body has fixed `type`, `title`, `status`, and `detail`

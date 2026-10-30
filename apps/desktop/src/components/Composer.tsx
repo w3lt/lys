@@ -42,6 +42,8 @@ import {
   calculateLocalRuntimeConnection
 } from "./ComposerComponents/composer-presentation"
 import { calculateModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
+import { describeLlmProviderTarget } from "@/lib/models/llm-provider-target"
+import { readObservedModelLoading } from "@/lib/store/model-runtime"
 
 import "./Composer.scss"
 
@@ -147,6 +149,9 @@ export function Composer({
 }: ComposerProps): ReactElement {
   const backendServerInfo = useLysStore((state) => state.backendServerInfo)
   const modelRuntime = useLysStore((state) => state.modelRuntime)
+  const modelLoading = useLysStore((state) =>
+    readObservedModelLoading(state.modelInventory)
+  )
   const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
   const settings = useLysStore((state) => state.settings)
   const setActiveView = useLysStore((state) => state.setActiveView)
@@ -196,6 +201,7 @@ export function Composer({
   const isModelRuntimeAvailable =
     calculateModelRuntimeAvailability(backendStatus, lmStudioStatus) ===
     "available"
+  const provider = describeLlmProviderTarget(settings.providers)
   const isUnavailable = connection !== "ready"
   const activity = calculateComposerActivity(request, conversationOpen)
   const activityLabel = formatComposerActivity(activity)
@@ -374,7 +380,7 @@ export function Composer({
       return
     }
 
-    // Runtime owns backend and LM Studio recovery; Model owns inventory and loading.
+    // Runtime owns backend and provider recovery; Model owns inventory and loading.
     setSettingsPane(isModelRuntimeAvailable ? "model" : "runtime")
     setActiveView("settings")
   }
@@ -395,15 +401,18 @@ export function Composer({
     <footer className="composer">
       {isUnavailable ? (
         <ComposerOfflineBanner
-          action={formatReconnectAction(
+          action={formatReconnectAction({
             backendStatus,
             lmStudioStatus,
-            modelRuntime
-          )}
+            modelRuntime,
+            modelLoading,
+            provider
+          })}
           message={formatUnavailableRuntimeMessage({
             backendStatus,
             backendAddress: settings.runtime.backendAddress,
             lmStudioStatus,
+            provider,
             modelRuntime
           })}
           onReconnect={handleReconnect}
@@ -472,7 +481,8 @@ export function Composer({
               placeholder={formatComposerPlaceholder(
                 connection,
                 activity,
-                answeringAgent
+                answeringAgent,
+                provider.name
               )}
               ref={messageFieldRef}
               rows={1}

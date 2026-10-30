@@ -25,7 +25,8 @@ const RAIL_TABS = [
   "Agents04",
   "Tools05",
   "MCP06",
-  "Secrets07"
+  "Providers07",
+  "Secrets08"
 ]
 
 /**
@@ -195,7 +196,11 @@ describe("SettingsView", () => {
       "no loaded weights",
       "running",
       "connected",
-      { status: "ready", models: [buildLlmInfo("qwen3-8b")] },
+      {
+        status: "ready",
+        modelLoading: "lys",
+        models: [buildLlmInfo("qwen3-8b")]
+      },
       "backend up · no model"
     ],
     [

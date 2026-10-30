@@ -80,7 +80,8 @@ const TRAINED_RUNTIME: RuntimeArrangement = {
     status: "ready",
     models: [
       buildLlmInfo("qwen3-8b", { loaded: true, trainedForToolUse: true })
-    ]
+    ],
+    modelLoading: "lys"
   }
 }
 

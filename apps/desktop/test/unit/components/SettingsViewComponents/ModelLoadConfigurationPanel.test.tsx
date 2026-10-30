@@ -15,7 +15,6 @@ import { buildLlmInfo } from "../../support/modelFixtures"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import { waitForRenderedWork } from "../../support/rendering"
 import {
-  buildUnreachableRuntime,
   READY_RUNTIME,
   type RuntimeArrangement
 } from "../../support/runtimeFixtures"
@@ -41,6 +40,7 @@ const TWO_MODELS: RuntimeArrangement = {
   ...READY_RUNTIME,
   modelInventory: {
     status: "ready",
+    modelLoading: "lys",
     models: [
       buildLlmInfo("qwen3-8b", { loaded: true }),
       buildLlmInfo("gemma-3", { maxContextLength: 32_768 })
@@ -214,11 +214,6 @@ describe("ModelLoadConfigurationPanel", () => {
         "the inventory does not list the default model",
         { ...TWO_MODELS, defaultModel: "phi-4" },
         "Choose a default model above to edit its load configuration."
-      ],
-      [
-        "the backend is stopped",
-        buildUnreachableRuntime("stopped"),
-        "Load configurations can be edited once the models are listed."
       ]
     ] as const)(
       "offers no setting and says why when %s",
@@ -232,27 +227,6 @@ describe("ModelLoadConfigurationPanel", () => {
         ).not.toBeInTheDocument()
       }
     )
-  })
-
-  it("offers no setting and says the model list is needed when the inventory could not be read", async () => {
-    await startLoadConfigurationPanel({
-      routes: {
-        [INVENTORY_ROUTE]: () => new Response(null, { status: 500 }),
-        // A failed model request makes the store read the LM Studio status.
-        "GET /api/v1/llm/runtime": () =>
-          buildJsonResponse(200, { status: "connected" })
-      }
-    })
-
-    const section = getLoadConfigurationSection()
-    expect(
-      within(section).getByText(
-        "Load configurations can be edited once the models are listed."
-      )
-    ).toBeInTheDocument()
-    expect(
-      within(section).queryByRole("heading", { level: 3 })
-    ).not.toBeInTheDocument()
   })
 
   describe("an edit", () => {

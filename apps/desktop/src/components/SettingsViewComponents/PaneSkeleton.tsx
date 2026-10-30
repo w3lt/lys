@@ -205,6 +205,32 @@ const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
     list: [],
     block: false
   },
+  providers: {
+    cards: [],
+    heading: true,
+    rows: [
+      {
+        id: "lm-studio",
+        label: "84px",
+        description: "280px",
+        control: { width: "72px", height: "18px" }
+      },
+      {
+        id: "ollama",
+        label: "64px",
+        description: "300px",
+        control: { width: "64px", height: "18px" }
+      },
+      {
+        id: "groq",
+        label: "48px",
+        description: "260px",
+        control: { width: "64px", height: "18px" }
+      }
+    ],
+    list: [],
+    block: false
+  },
   secrets: {
     cards: [],
     heading: true,

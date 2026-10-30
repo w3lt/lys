@@ -1,7 +1,6 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
-import { LM_STUDIO_ADDRESS } from "@/lib/models/lm-studio-connection"
 import type { BackendServerStatus } from "@/lib/store"
 import { initialSettingsState } from "@/lib/store/settings"
 import {
@@ -42,7 +41,11 @@ const FAILED_SAVE_LINE =
 /** LM Studio connected, the chosen default on disk and nothing loaded. */
 const NOTHING_LOADED: RuntimeArrangement = {
   ...READY_RUNTIME,
-  modelInventory: { status: "ready", models: [buildLlmInfo("qwen3-8b")] }
+  modelInventory: {
+    status: "ready",
+    modelLoading: "lys",
+    models: [buildLlmInfo("qwen3-8b")]
+  }
 }
 
 /**
@@ -56,6 +59,7 @@ const FIRST_RUN_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   generation: initialSettingsState.generation,
   loadConfiguration: Object.freeze({ default: {}, models: {} }),
   secrets: initialSettingsState.secrets,
+  providers: initialSettingsState.providers,
   tools: Object.freeze({
     justRun: Object.freeze([]),
     switches: Object.freeze({})
@@ -402,7 +406,7 @@ describe("RuntimePaneContent", () => {
       expect(
         screen.getByRole("heading", { name: "LM Studio connected" })
       ).toBeInTheDocument()
-      expect(screen.getByText(LM_STUDIO_ADDRESS)).toBeInTheDocument()
+      expect(screen.getByText("127.0.0.1:1234")).toBeInTheDocument()
       expect(listRouteKeys(backend)).toContain(
         "POST /api/v1/llm/runtime/connect"
       )
@@ -499,8 +503,8 @@ describe("RuntimePaneContent", () => {
     it("offers no model command while LM Studio is not reachable", async () => {
       await startRuntimePane(buildUnreachableRuntime("running", "unreachable"))
 
-      expect(screen.getByRole("button", { name: "Load" })).toBeDisabled()
-      expect(screen.getByRole("button", { name: "Unload" })).toBeDisabled()
+      expect(screen.queryByRole("button", { name: "Load" })).toBeNull()
+      expect(screen.queryByRole("button", { name: "Unload" })).toBeNull()
     })
   })
 })

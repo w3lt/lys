@@ -15,10 +15,11 @@ import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
  * @returns A promise that resolves after the route is added.
  * @throws If Fastify cannot register the route. The failure rejects the
  * promise rather than escaping the call synchronously.
- * @remarks Refused queue admission returns service-busy Problem Details, and a
+ * @remarks Refused queue admission returns service-busy Problem Details, a
  * missing or lost LLM runtime connection returns runtime-unavailable Problem
- * Details. Other service rejections remain owned by Fastify's parent error
- * boundary.
+ * Details, and a connected provider that loads its own models returns
+ * provider-loads-models Problem Details. Other service rejections remain
+ * owned by Fastify's parent error boundary.
  */
 export default function updateFastifyWithLlmModelUnloadRoute(
   app: FastifyInstance
@@ -45,6 +46,9 @@ function registerLlmModelUnloadRoute(app: FastifyInstance): void {
       body: llmUnloadModelApi.body,
       response: {
         404: z.toJSONSchema(llmUnloadModelApi.responses[404], {
+          target: "draft-7"
+        }),
+        409: z.toJSONSchema(llmUnloadModelApi.responses[409], {
           target: "draft-7"
         }),
         503: z.toJSONSchema(llmUnloadModelApi.responses[503], {

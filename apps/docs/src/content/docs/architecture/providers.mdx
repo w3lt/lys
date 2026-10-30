@@ -1,25 +1,50 @@
 ---
 title: LLM provider integration
-description: The current LM Studio-only integration used for model inventory, lifecycle operations, and streamed chat generation.
+description: How the backend reaches LM Studio, Ollama, Ollama Cloud, or Groq for model inventory, lifecycle operations, and streamed chat generation.
 docType: architecture
 sidebar:
   order: 7
 ---
 
-Lys currently integrates with one local model runtime: LM Studio.
+Lys answers every request through one model provider at a time, chosen in
+the desktop's Providers pane:
+
+| Provider     | Where it runs                                                       | How Lys reaches it                                        |
+| ------------ | ------------------------------------------------------------------- | --------------------------------------------------------- |
+| LM Studio    | A server at an address the person sets, `127.0.0.1:1234` by default | The LM Studio SDK, and its OpenAI-compatible `/v1`        |
+| Ollama       | A local server, `127.0.0.1:11434` by default                        | Ollama's native `/api/*`, and its OpenAI-compatible `/v1` |
+| Ollama Cloud | Ollama's hosted service at `ollama.com`                             | The same APIs as a local Ollama server                    |
+| Groq         | Groq's hosted API at `api.groq.com`                                 | Groq's OpenAI-compatible `/openai/v1`                     |
+
+LM Studio and a local Ollama server are reached over plain HTTP, without a
+key. Ollama Cloud and Groq are reached over HTTPS with the API key the
+person saved for them, and receive the conversations they answer. The
+choice, the addresses, and the keys live in the
+[settings file](/reference/configuration/#persisted-settings-json).
+
+A local Ollama server and Ollama Cloud are two providers, `ollama` and
+`ollamaCloud`, each with only what reaching it needs: an address, or a key.
+The Providers pane shows them on one Ollama card, whose Local and Cloud
+buttons switch between them. Both answer Ollama's native API, so one
+`OllamaRuntime` serves either, aimed at the local server or at Ollama
+Cloud.
 
 ## Current stack
 
-| Concern          | Current implementation                                                                                                                                   |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Model inventory  | `LlmService.listLlmModels()` lists downloaded models, annotates which model keys have loaded instances, and the context length each is loaded with.      |
-| Model health     | `LlmService.getLlmModelHealth()` checks one fresh loaded-inventory snapshot for the requested key without generating text.                               |
-| Model loading    | `POST /api/v1/llm/load` uses the application service to load one model with the request's load settings and return its metadata.                         |
-| Model unloading  | `PATCH /api/v1/llm/unload` stops every observed loaded instance matching one key, then reconciles the loaded-instance inventory.                         |
-| Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against LM Studio's OpenAI-compatible `/v1` HTTP endpoint.                                      |
-| Title generation | `ChatService.generateTitle()` calls the same endpoint with a separate prompt and a length-limited JSON-schema response format, then validates the reply. |
+| Concern          | Current implementation                                                                                                                                                                                                               |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Model inventory  | `LlmService.listLlmModels()` lists the provider's models, annotates which model keys have loaded instances, and the context length each is loaded with.                                                                              |
+| Model health     | `LlmService.getLlmModelHealth()` checks one fresh loaded-inventory snapshot for the requested key without generating text.                                                                                                           |
+| Model loading    | `POST /api/v1/llm/load` uses the application service to load one model with the request's load settings and return its metadata.                                                                                                     |
+| Model unloading  | `PATCH /api/v1/llm/unload` stops every observed loaded instance matching one key, then reconciles the loaded-instance inventory.                                                                                                     |
+| Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against the connected provider's OpenAI-compatible endpoint, sending the reply ceiling as `max_tokens` to Ollama and Ollama Cloud and as `max_completion_tokens` otherwise. |
+| Title generation | `ChatService.generateTitle()` calls the same endpoint with a separate prompt and a length-limited JSON-schema response format, then validates the reply.                                                                             |
 
-A load request may carry a `configuration`: context length, eval batch size,
+Loading and unloading apply to LM Studio only: its runtime alone implements
+`LlmModelInstanceController`. Ollama, Ollama Cloud, and Groq decide which models are in
+memory, so the model list reports `modelLoading: "provider"` for them, and
+the load and unload routes refuse with `409` before any runtime call. A load
+request may carry a `configuration`: context length, eval batch size,
 flash attention, KV cache placement, and active experts. The service hands it to
 the runtime adapter unchanged, and `LmStudioRuntime` gives the SDK's load call a
 `config` that holds only the settings the request set, so LM Studio decides the
@@ -46,6 +71,19 @@ key after another because the runtime refuses overlapping operations, to
 report the context length as `loadedContextLength`. This has not been checked
 against a running LM Studio.
 
+Ollama and Groq offer no tokenizer, so their runtimes estimate each count
+as the text's UTF-8 length divided by three, rounded up. Most English text
+counts higher than a real tokenizer would, so a context that fits by the
+estimate rarely overflows the window. The window is the context length a
+local Ollama server reports in `/api/ps` for a model it is running, the
+model's own window from `/api/show` for Ollama Cloud, or Groq's
+`context_window`. A local model that is not running has no measurement,
+because Ollama would load it with a window of its own choosing, often
+smaller than the model's: its round is refused as not loaded, as for LM
+Studio, until the model is started in Ollama. These runtimes report the
+window with each loaded instance, so the model list measures only LM
+Studio's models one by one.
+
 Generation temperature and reply-ceiling edits are saved automatically and
 applied to future chat requests. The [API reference](/reference/api/#chat-request-body)
 defines how those controls reach chat completion; title generation uses its own
@@ -54,32 +92,70 @@ request.
 ## Request path
 
 ```text
-Desktop chat store -> Fastify /api/v1/chat -> ChatService -> LM Studio /v1
-Fastify /api/v1/llm/* -> LlmService -> LlmRuntimeService -> LlmRuntime -> LmStudioRuntime -> LM Studio SDK
-Agent (each round), Fastify /api/v1/chat/context -> LlmReplyContextMeter -> LlmService -> ... -> LM Studio SDK
+Desktop chat store -> Fastify /api/v1/chat -> ChatService -> connected provider's OpenAI-compatible endpoint
+Fastify /api/v1/llm/* -> LlmService -> LlmRuntimeService -> LlmRuntime -> LmStudioRuntime | OllamaRuntime | GroqRuntime
+Agent (each round), Fastify /api/v1/chat/context -> LlmReplyContextMeter -> LlmService -> ... -> LlmRuntime
 ```
 
 The desktop settings view supplies the shared context for its Runtime, Model,
 and Generation panes; the Agents pane reads the agent store instead. Model controls call the inventory, health, load, and
-unload routes through the application store only while LM Studio is connected;
-the Runtime pane's LM Studio card reads and refreshes the connection. The model
-routes use the application-scoped `llmService` through provider-neutral
-capabilities, and `LlmService` sends each operation through the queue owned by
-`llmRuntimeService`. `LlmRuntimeService` acquires `LmStudioRuntime` for one
-configured LM Studio server when it connects and owns it until it releases it.
-It consumes the full `LlmRuntime`: the five engine operations, the availability
-probe, and disposal. Concrete runtime selection belongs in composition.
+unload routes through the application store only while the provider is
+connected; the Runtime pane's provider card reads and refreshes the
+connection. The model routes use the application-scoped `llmService` through
+provider-neutral capabilities, and `LlmService` sends each operation through
+the queue owned by `llmRuntimeService`.
+
+Each connection attempt reads the saved provider from the settings file
+again. `LlmRuntimeService` keeps a held runtime while the saved provider,
+address, and key are unchanged; otherwise it releases it before acquiring a
+runtime for the saved provider through `acquireLlmProviderRuntime()`. A
+saved provider that needs a key without one, or a settings file that cannot
+be read, fails the attempt, and the status becomes `unreachable`. The
+service owns the runtime until it releases it, and consumes the full
+`LlmRuntime`: the three engine queries, the availability probe, and
+disposal, with the model-loading capability of a runtime whose models Lys
+loads. Concrete runtime selection belongs in composition.
+
+`ChatService` sends chat and title requests to the provider the runtime
+service is connected to, keeping one `openai` client per endpoint, so chat
+reaches the same provider as the model operations. While no provider is
+connected, a chat request fails as runtime-unavailable.
 
 `LmStudioRuntime` owns SDK calls, vendor-data validation, immutable runtime
 snapshots, and client cleanup. `LlmService` owns canonical metadata lookup after
 loading, loaded-state annotation and sorting, loaded-model health, and stop-by-key reconciliation.
 Runtime snapshots contain no SDK handles or application `loaded` flag.
 
-The runtime allows one active call and rejects overlapping operational calls
-before accessing the SDK. It adds no waiting queue. Disposal closes runtime
+Every runtime allows one active call and rejects overlapping operational
+calls before reaching the provider, through the shared
+`LlmRuntimeAdmission`. It adds no waiting queue. Disposal closes runtime
 admission, waits for its active call, and releases the SDK client once. Repeated
 disposal observes the same outcome, including failure. Client cleanup neither
 unloads every model nor terminates the external LM Studio engine.
+
+## Ollama and Groq runtimes
+
+`OllamaRuntime` uses Ollama's native API: `/api/tags` lists the models,
+`/api/show` describes each, at most four at once and none after one fails,
+and `/api/ps` reports a local server's running models. A model whose
+capabilities lack `completion`, such as an embedding model, is left out of
+every listing and measurement; a model is kept when Ollama reports no
+capabilities for it. `GroqRuntime` lists Groq's models from
+`/openai/v1/models` and hides one Groq marks inactive. Groq and Ollama Cloud
+report every listed model as one loaded instance, and a local Ollama server
+every model it is running, each with its key as its identifier and the window
+it is served with. Neither runtime offers model loading.
+Neither caches an answer nor holds a connection, so disposal only closes
+admission.
+
+Their HTTP requests share `requestProviderJson()`: each has a 15-second
+deadline, after which it fails with `The provider did not answer within 15000
+ms.`, and a 4 MiB limit on the answer, and a failure message names
+neither the answer's body nor the key. Acquisition succeeds once the
+provider lists its models, and the availability probe lists them again.
+Groq reports no capabilities: every Groq model is treated as accepting
+tools and not images. These runtimes have not been checked against a
+running Ollama server, Ollama Cloud, or Groq.
 
 ## Runtime readiness and inspection
 
@@ -104,7 +180,7 @@ availability query releases admission so a later check can succeed. Its result
 is an observation, not a guarantee that the next model operation will succeed.
 The runtime service uses it to verify a held runtime on refresh and after a
 failed runtime call. The resulting connection status, not the raw observation,
-is exposed through `GET /api/v1/llm/runtime` and the desktop's LM Studio card.
+is exposed through `GET /api/v1/llm/runtime` and the desktop's provider card.
 
 The model-specific `GET /api/v1/llm/:modelId/health` endpoint uses the existing
 `listLoadedLlmModelInstances()` operation. A successful query establishes that
@@ -168,16 +244,18 @@ policy.
 
 ## What the backend assumes today
 
-- LM Studio, when running, listens on `127.0.0.1:1234`; the backend starts
-  without it.
+- The saved provider, when running, answers at its saved or default
+  address; the backend starts without it.
 - Chat requests can be satisfied by an OpenAI-compatible HTTP endpoint.
-- Inventory, load, and unload operations are available through the LM Studio
-  SDK.
-- No external credential exchange is required to reach the local runtime.
+- Load and unload are available through the LM Studio SDK only.
+- Ollama Cloud and Groq accept the saved key as a bearer token; no other
+  credential exchange is required.
 
 ## Limitations
 
-- There is no provider registry or adapter plugin system.
+- There is no provider registry or adapter plugin system; the four
+  providers are fixed.
+- One provider answers at a time; switching reconnects the backend.
 - There is no retry or request-time fallback after a provider and model are
   sampled for an admitted request.
 - There is no request budgeting, quota tracking, or provider-specific telemetry.
@@ -191,7 +269,8 @@ policy.
 
 ## Coming soon
 
-- Additional runtime implementations
+- Load and unload for Ollama, with per-model load settings
+- Exact token counts for providers without a tokenizer endpoint
 - Fallback and retry policy across model runtimes
 - Persistent default-model selection across application relaunches
 - Provider-specific configuration and health reporting

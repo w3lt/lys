@@ -1,4 +1,6 @@
 import {
+  groqApiKeySchema,
+  llmProviderSettingsSchema,
   locationSettingsSchema,
   mcpSettingsSchema,
   modelLoadConfigurationSchema,
@@ -10,6 +12,7 @@ import type {
   GenerationSettings,
   LocationSettings,
   LysSettings,
+  ProvidersSettings,
   RuntimeSettings,
   SecretsSettings,
   ToolSettings
@@ -19,12 +22,12 @@ import type {
  * Settings document as the Tauri settings commands exchange it: the JSON form
  * of Rust's `LysSettings`.
  *
- * @remarks The runtime, generation, secrets, location, and MCP groups are
- * the renderer's groups field for field; the saved key and place names are
- * plain text in JSON and branded only in the renderer. JSON has no map or
- * set, so the per-model load settings are one object whose keys are model
- * keys, where the renderer holds a map, and the tools on Just run are an
- * array, where the renderer holds a set.
+ * @remarks The runtime, generation, secrets, providers, location, and MCP
+ * groups are the renderer's groups field for field; the saved keys,
+ * addresses, and place names are plain text in JSON and branded only in the
+ * renderer. JSON has no map or set, so the per-model load settings are one
+ * object whose keys are model keys, where the renderer holds a map, and the
+ * tools on Just run are an array, where the renderer holds a set.
  */
 export type SettingsDocument = Readonly<
   Omit<LysSettings, "loadConfiguration" | "tools"> & {
@@ -97,10 +100,34 @@ export const STORED_TAVILY_API_KEY = tavilyApiKeySchema.parse(
   "tvly-dev-fixture-0000000000000000"
 )
 
-/** Secrets group on disk, distinct from the first-run group, which has no key. */
+/**
+ * Groq API key saved on disk: a made-up value of a key's shape, never a key
+ * Groq issued.
+ */
+export const STORED_GROQ_API_KEY = groqApiKeySchema.parse(
+  "gsk_fixture_0000000000000000"
+)
+
+/**
+ * Secrets group on disk, distinct from the first-run group, which has no key:
+ * a Tavily key and a Groq key, and no Ollama key.
+ */
 const STORED_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
-  tavilyApiKey: STORED_TAVILY_API_KEY
+  tavilyApiKey: STORED_TAVILY_API_KEY,
+  ollamaApiKey: null,
+  groqApiKey: STORED_GROQ_API_KEY
 })
+
+/**
+ * Providers group on disk, distinct from the first-run group: local Ollama is
+ * active at a saved address, and LM Studio keeps its default.
+ */
+export const STORED_PROVIDERS_SETTINGS: ProvidersSettings =
+  llmProviderSettingsSchema.parse({
+    active: "ollama",
+    lmStudio: { address: null },
+    ollama: { address: "192.168.1.20:11434" }
+  })
 
 /**
  * Tools group on disk: `read_page` is on Just run and `search_files` is
@@ -148,9 +175,10 @@ export const STORED_MCP_SETTINGS: McpSettings = mcpSettingsSchema.parse({
 
 /**
  * Settings document `load_settings` resolves with: every group is set, one
- * model has load settings of its own, a Tavily API key is saved, one tool is
- * on Just run, one tool is switched off, a location is saved, and two MCP
- * servers are saved.
+ * model has load settings of its own, a Tavily and a Groq API key are saved,
+ * local Ollama is the active provider at a saved address, one tool is on Just
+ * run, one tool is switched off, a location is saved, and two MCP servers are
+ * saved.
  */
 export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   runtime: STORED_RUNTIME_SETTINGS,
@@ -160,6 +188,7 @@ export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
     models: Object.freeze({ "qwen3-8b": STORED_MODEL_LOAD_CONFIGURATION })
   }),
   secrets: STORED_SECRETS_SETTINGS,
+  providers: STORED_PROVIDERS_SETTINGS,
   tools: Object.freeze({
     justRun: Object.freeze(["read_page"]),
     switches: Object.freeze({ search_files: false })
@@ -186,6 +215,7 @@ export const STORED_SETTINGS: LysSettings = Object.freeze({
     models: new Map([["qwen3-8b", STORED_MODEL_LOAD_CONFIGURATION]])
   }),
   secrets: STORED_SECRETS_SETTINGS,
+  providers: STORED_PROVIDERS_SETTINGS,
   tools: STORED_TOOL_SETTINGS,
   location: STORED_LOCATION_SETTINGS,
   mcp: STORED_MCP_SETTINGS

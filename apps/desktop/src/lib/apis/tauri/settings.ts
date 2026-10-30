@@ -1,6 +1,9 @@
 import {
+  groqApiKeySchema,
+  llmProviderSettingsSchema,
   locationSettingsSchema,
   mcpSettingsSchema,
+  ollamaApiKeySchema,
   tavilyApiKeySchema,
   type McpServerSettingsCandidate,
   type McpSettings,
@@ -12,6 +15,7 @@ import type {
   LoadConfigurationSettings,
   LocationSettings,
   LysSettings,
+  ProvidersSettings,
   RuntimeAutoStartSettings,
   RuntimeSettings,
   SecretsSettings,
@@ -37,12 +41,32 @@ type SettingsDocumentLoadConfiguration = {
 /**
  * The `secrets` group as the settings document holds it.
  *
- * @remarks Matches Rust's `SecretsSettings`; the key is plain text here and
- * branded only after {@link buildSecretsSettings} parses it.
+ * @remarks Matches Rust's `SecretsSettings`; the keys are plain text here and
+ * branded only after {@link buildSecretsSettings} parses them.
  */
 type SettingsDocumentSecrets = {
-  /** Saved key, or null. */
+  /** Saved Tavily key, or null. */
   readonly tavilyApiKey: string | null
+  /** Saved key of Ollama Cloud, or null. */
+  readonly ollamaApiKey: string | null
+  /** Saved Groq key, or null. */
+  readonly groqApiKey: string | null
+}
+
+/**
+ * The `providers` group as the settings document holds it.
+ *
+ * @remarks Matches Rust's `ProvidersSettings`; the provider and
+ * the addresses are plain text here and checked and branded only after
+ * {@link buildProvidersSettings} parses them.
+ */
+type SettingsDocumentProviders = {
+  /** Provider every request goes to. */
+  readonly active: string
+  /** LM Studio's server. */
+  readonly lmStudio: { readonly address: string | null }
+  /** The local Ollama server. */
+  readonly ollama: { readonly address: string | null }
 }
 
 /**
@@ -102,8 +126,10 @@ type SettingsDocument = {
   readonly generation: GenerationSettings
   /** Default and per-model load settings, the latter as one object. */
   readonly loadConfiguration: SettingsDocumentLoadConfiguration
-  /** Secrets, with the key as plain text. */
+  /** Secrets, with the keys as plain text. */
   readonly secrets: SettingsDocumentSecrets
+  /** Provider choice, with the addresses as plain text. */
+  readonly providers: SettingsDocumentProviders
   /** Tool choices, with the names on Just run as one array. */
   readonly tools: SettingsDocumentTools
   /** Saved location, with the names as plain text. */
@@ -113,22 +139,88 @@ type SettingsDocument = {
 }
 
 /**
+ * The part of a shared key schema the adapter uses: it checks saved text and
+ * brands it as one service's key.
+ *
+ * @typeParam TApiKey - Branded key of the service.
+ */
+type ApiKeySchema<TApiKey> = {
+  /** Checks text, never throwing; a failure holds no key. */
+  readonly safeParse: (
+    value: string
+  ) =>
+    | { readonly success: true; readonly data: TApiKey }
+    | { readonly success: false }
+}
+
+/**
+ * Brands one saved key with its service's key schema.
+ *
+ * @typeParam TApiKey - Branded key of the service.
+ * @param schema - Shared key schema of the service.
+ * @param apiKey - Saved key, or null.
+ * @param serviceName - Service named in the error.
+ * @returns The branded key, or null when none is saved.
+ * @throws If the key fails the schema, which Rust's validation rules out; the
+ * error never contains the key.
+ */
+function buildApiKey<TApiKey>(
+  schema: ApiKeySchema<TApiKey>,
+  apiKey: string | null,
+  serviceName: string
+): TApiKey | null {
+  if (apiKey === null) return null
+  const parsed = schema.safeParse(apiKey)
+  if (!parsed.success) {
+    throw new Error(
+      `The settings file holds an invalid ${serviceName} API key.`
+    )
+  }
+  return parsed.data
+}
+
+/**
  * Builds the renderer's secrets from the document group.
  *
  * @param secrets - Group Rust validated.
- * @returns The secrets with the key branded.
- * @throws If the key fails the shared key schema, which Rust's validation
+ * @returns The secrets with each key branded.
+ * @throws If a key fails its shared key schema, which Rust's validation
  * rules out; the error never contains the key.
  */
 function buildSecretsSettings(
   secrets: SettingsDocumentSecrets
 ): SecretsSettings {
-  if (secrets.tavilyApiKey === null) return { tavilyApiKey: null }
-  const parsed = tavilyApiKeySchema.safeParse(secrets.tavilyApiKey)
-  if (!parsed.success) {
-    throw new Error("The settings file holds an invalid Tavily API key.")
+  return {
+    tavilyApiKey: buildApiKey(
+      tavilyApiKeySchema,
+      secrets.tavilyApiKey,
+      "Tavily"
+    ),
+    ollamaApiKey: buildApiKey(
+      ollamaApiKeySchema,
+      secrets.ollamaApiKey,
+      "Ollama"
+    ),
+    groqApiKey: buildApiKey(groqApiKeySchema, secrets.groqApiKey, "Groq")
   }
-  return { tavilyApiKey: parsed.data }
+}
+
+/**
+ * Builds the renderer's provider choice from the document group.
+ *
+ * @param providers - Group Rust validated.
+ * @returns The provider choice with its addresses branded.
+ * @throws If the group fails the shared provider settings schema, which
+ * Rust's validation rules out.
+ */
+function buildProvidersSettings(
+  providers: SettingsDocumentProviders
+): ProvidersSettings {
+  const parsed = llmProviderSettingsSchema.safeParse(providers)
+  if (!parsed.success) {
+    throw new Error("The settings file holds an invalid provider choice.")
+  }
+  return parsed.data
 }
 
 /**
@@ -210,8 +302,8 @@ function buildToolSettings(tools: SettingsDocumentTools): ToolSettings {
  * object, whatever the text of the key, the tool choices are newly owned, as
  * {@link buildToolSettings} builds them, and the MCP servers are parsed by
  * {@link buildMcpSettings}.
- * @throws If the key, the location, or the MCP servers fail their shared
- * schema, which Rust's validation rules out.
+ * @throws If a key, the provider choice, the location, or the MCP servers
+ * fail their shared schema, which Rust's validation rules out.
  */
 function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
   const models = new Map(
@@ -226,6 +318,7 @@ function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
     generation: settingsDocument.generation,
     loadConfiguration,
     secrets: buildSecretsSettings(settingsDocument.secrets),
+    providers: buildProvidersSettings(settingsDocument.providers),
     tools: buildToolSettings(settingsDocument.tools),
     location: buildLocationSettings(settingsDocument.location),
     mcp: buildMcpSettings(settingsDocument.mcp)
@@ -252,7 +345,8 @@ function buildSettingsDocument(settings: LysSettings): SettingsDocument {
     runtime: settings.runtime,
     generation: settings.generation,
     loadConfiguration,
-    secrets: { tavilyApiKey: settings.secrets.tavilyApiKey },
+    secrets: settings.secrets,
+    providers: settings.providers,
     tools: buildSettingsDocumentTools(settings.tools),
     location: settings.location,
     mcp: settings.mcp
@@ -337,21 +431,45 @@ export async function saveLoadConfigurationSettings(
 }
 
 /**
- * Persists the secrets while preserving everything else already on disk.
- * @param secrets - Secrets to save; a null key removes the saved one.
+ * Persists some secrets while preserving the other secrets and everything
+ * else already on disk.
+ * @param changedSecrets - Secrets to save; a null key removes the saved one,
+ * and a key not given keeps the value on disk.
  * @returns Resolves after the merged settings document is written by Tauri,
  * which replaces the file atomically and owner-only.
  * @throws The native load or save rejection; no replacement is written if
  * loading fails.
  * @remarks The application store serializes this read-modify-write operation
  * with the other settings-group saves, so that overlapping saves cannot write
- * back each other's stale group.
+ * back each other's stale group or each other's stale key.
  */
 export async function saveSecretsSettings(
-  secrets: SecretsSettings
+  changedSecrets: Partial<SecretsSettings>
 ): Promise<void> {
   const persistedSettings = await loadSettings()
+  const secrets: SecretsSettings = {
+    ...persistedSettings.secrets,
+    ...changedSecrets
+  }
   await saveSettings({ ...persistedSettings, secrets })
+}
+
+/**
+ * Persists the provider choice while preserving everything else already on
+ * disk.
+ * @param providers - Provider choice and addresses to save.
+ * @returns Resolves after the merged settings document is written by Tauri.
+ * @throws The native load or save rejection; no replacement is written if
+ * loading fails.
+ * @remarks The application store serializes this read-modify-write operation
+ * with the other settings-group saves, so that overlapping saves cannot write
+ * back each other's stale group.
+ */
+export async function saveProviderSettings(
+  providers: ProvidersSettings
+): Promise<void> {
+  const persistedSettings = await loadSettings()
+  await saveSettings({ ...persistedSettings, providers })
 }
 
 /**

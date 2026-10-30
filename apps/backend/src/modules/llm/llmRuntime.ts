@@ -1,4 +1,5 @@
 import type { LlmEngine } from "./llmEngine"
+import type { LlmModelInstanceController } from "./llmModelInstanceController"
 import type { LlmRuntimeLifecycle } from "./llmRuntimeLifecycle"
 
 /**
@@ -16,3 +17,29 @@ import type { LlmRuntimeLifecycle } from "./llmRuntimeLifecycle"
  * disposal.
  */
 export interface LlmRuntime extends LlmEngine, LlmRuntimeLifecycle {}
+
+/**
+ * A runtime acquired for one provider, with who loads that provider's models.
+ *
+ * @remarks Cleanup ownership of the runtime transfers to the acquirer. The
+ * model-loading capability belongs to the same runtime: it shares its
+ * admission and is released with it.
+ */
+export type AcquiredLlmRuntime =
+  | Readonly<{
+      /**
+       * The provider decides which models are in memory; Lys neither loads
+       * nor unloads them.
+       */
+      modelLoading: "provider"
+      /** Acquired runtime. */
+      llmRuntime: LlmRuntime
+    }>
+  | Readonly<{
+      /** A model answers only once Lys loads it. */
+      modelLoading: "lys"
+      /** Acquired runtime. */
+      llmRuntime: LlmRuntime
+      /** Loads the runtime's models and stops their instances. */
+      llmModelInstanceController: LlmModelInstanceController
+    }>

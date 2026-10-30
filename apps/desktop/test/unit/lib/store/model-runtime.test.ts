@@ -17,6 +17,7 @@ import { FIRST_RUN_LOAD_CONFIGURATION } from "../../support/settingsFixtures"
 /** Inventory listing two resident models and one on disk, in that order. */
 const TWO_RESIDENT: ModelInventoryState = {
   status: "ready",
+  modelLoading: "lys",
   models: [
     buildLlmInfo("first", { loaded: true }),
     buildLlmInfo("on-disk"),
@@ -59,6 +60,7 @@ describe("buildModelRuntime", () => {
   it("reports no resident weights when the inventory has none loaded", () => {
     const inventory: ModelInventoryState = {
       status: "ready",
+      modelLoading: "lys",
       models: [buildLlmInfo("on-disk")]
     }
 
@@ -186,6 +188,7 @@ describe("buildLoadedModelConfigurations", () => {
   it("assumes a newly seen model runs with what is stored for it now, within its own maximum", () => {
     const inventory: ModelInventoryState = {
       status: "ready",
+      modelLoading: "lys",
       models: [buildLlmInfo("small", { loaded: true, maxContextLength: 4096 })]
     }
     const settings: LoadConfigurationSettings = {

@@ -1,7 +1,8 @@
 import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
-import { LM_STUDIO_UNREACHABLE_MESSAGE } from "@/lib/models/lm-studio-connection"
+import { formatProviderUnreachableMessage } from "@/lib/models/lm-studio-connection"
+import { LM_STUDIO_TARGET } from "../../support/providerTargetFixtures"
 import {
   buildJsonResponse,
   startBackendFake,
@@ -23,11 +24,15 @@ import { createControlledPromise } from "../../support/settlement"
 import { startHover, waitForRenderedWork } from "../../support/rendering"
 import { FIRST_RUN_LOAD_CONFIGURATION } from "../../support/settingsFixtures"
 
+/** Explanation shown while the first-run provider, LM Studio, is not reachable. */
+const UNREACHABLE_MESSAGE = formatProviderUnreachableMessage(LM_STUDIO_TARGET)
+
 /** One resident model chosen as default, and one on disk. */
 const TWO_MODELS: RuntimeArrangement = {
   ...READY_RUNTIME,
   modelInventory: {
     status: "ready",
+    modelLoading: "lys",
     models: [
       buildLlmInfo("qwen3-8b", { loaded: true }),
       buildLlmInfo("gemma-3")
@@ -36,7 +41,8 @@ const TWO_MODELS: RuntimeArrangement = {
 }
 
 /**
- * Renders the settings view on the Model pane and waits for the pane.
+ * Renders the settings view on the Model pane and waits for its model list
+ * heading.
  *
  * @param runtime - Backend, LM Studio, and model facts.
  * @param routes - Backend routes replacing or adding to the inventory read.
@@ -55,7 +61,7 @@ async function startModelPane(
     runtime
   )
   render(<SettingsView onDone={vi.fn()} />)
-  await screen.findByRole("heading", { name: "load configuration" })
+  await screen.findByRole("heading", { name: "models · LM Studio" })
   await waitForRenderedWork()
   return { useLysStore, backend }
 }
@@ -70,6 +76,85 @@ function getRefreshButton(): HTMLElement {
 }
 
 describe("ModelPaneContent", () => {
+  it("names the active provider in the heading of its models", async () => {
+    await startModelPane()
+
+    expect(
+      screen.getByRole("heading", { level: 2, name: "models · LM Studio" })
+    ).toBeInTheDocument()
+  })
+
+  it("offers Load, Unload, and the load configuration when the inventory reports that Lys loads the models", async () => {
+    await startModelPane()
+
+    expect(
+      screen.getByRole("button", { name: "Load gemma-3" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { name: "load configuration" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Choosing a row sets the default for this session. Load and Unload update LM Studio. Test checks loaded state; it does not generate a response."
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("offers Test but no Load, Unload, or load configuration when the inventory reports that the provider loads its own models", async () => {
+    await startModelPane({
+      ...TWO_MODELS,
+      modelInventory: {
+        status: "ready",
+        modelLoading: "provider",
+        models: [
+          buildLlmInfo("qwen3-8b", { loaded: true }),
+          buildLlmInfo("gemma-3", { loaded: true })
+        ]
+      }
+    })
+
+    expect(
+      screen.getByRole("button", { name: "Test gemma-3" })
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Unload gemma-3" })).toBeNull()
+    expect(
+      screen.queryByRole("heading", { name: "load configuration" })
+    ).toBeNull()
+    expect(
+      screen.getByText(
+        "Choosing a row sets the default for this session. LM Studio decides which models are in memory. Test checks loaded state; it does not generate a response."
+      )
+    ).toBeInTheDocument()
+  })
+
+  it.each<[string, RuntimeArrangement, BackendRoutes]>([
+    ["the backend is stopped", buildUnreachableRuntime("stopped"), {}],
+    [
+      "the inventory read failed",
+      TWO_MODELS,
+      {
+        [INVENTORY_ROUTE]: () => new Response(null, { status: 500 }),
+        // A failed model request makes the store read the LM Studio status.
+        "GET /api/v1/llm/runtime": () =>
+          buildJsonResponse(200, { status: "connected" })
+      }
+    ]
+  ])(
+    "offers no load configuration, and says nothing about who loads the models, while %s",
+    async (_case, runtime, routes) => {
+      await startModelPane(runtime, routes)
+
+      expect(
+        screen.queryByRole("heading", { name: "load configuration" })
+      ).toBeNull()
+      expect(
+        screen.getByText(
+          "Choosing a row sets the default for this session. Test checks loaded state; it does not generate a response."
+        )
+      ).toBeInTheDocument()
+    }
+  )
+
   it("lists the downloaded models, marking the default", async () => {
     await startModelPane()
 
@@ -153,7 +238,8 @@ describe("ModelPaneContent", () => {
         llms:
           TWO_MODELS.modelInventory.status === "ready"
             ? TWO_MODELS.modelInventory.models
-            : []
+            : [],
+        modelLoading: "lys"
       })
     )
     await waitForRenderedWork()
@@ -170,7 +256,10 @@ describe("ModelPaneContent", () => {
     expect(backend.requests).toHaveLength(2)
 
     reads[1]?.resolve(
-      buildJsonResponse(200, { llms: [buildLlmInfo("llama-4")] })
+      buildJsonResponse(200, {
+        llms: [buildLlmInfo("llama-4")],
+        modelLoading: "lys"
+      })
     )
     await waitForRenderedWork()
 
@@ -195,7 +284,10 @@ describe("ModelPaneContent", () => {
     ],
     [
       "LM Studio has no downloaded language models",
-      { ...TWO_MODELS, modelInventory: { status: "ready", models: [] } },
+      {
+        ...TWO_MODELS,
+        modelInventory: { status: "ready", modelLoading: "lys", models: [] }
+      },
       "No downloaded language models found in LM Studio."
     ]
   ])("explains an empty list when %s", async (_case, runtime, message) => {
@@ -222,10 +314,8 @@ describe("ModelPaneContent", () => {
     await startModelPane(buildUnreachableRuntime("running", "unreachable"))
 
     expect(getRefreshButton()).toBeDisabled()
-    expect(getRefreshButton()).toHaveAccessibleDescription(
-      LM_STUDIO_UNREACHABLE_MESSAGE
-    )
-    expect(screen.getByText(LM_STUDIO_UNREACHABLE_MESSAGE)).toBeInTheDocument()
+    expect(getRefreshButton()).toHaveAccessibleDescription(UNREACHABLE_MESSAGE)
+    expect(screen.getByText(UNREACHABLE_MESSAGE)).toBeInTheDocument()
   })
 
   it("repeats why Refresh is disabled in a tooltip after 600 ms of hover", async () => {
@@ -241,13 +331,13 @@ describe("ModelPaneContent", () => {
     act(() => {
       vi.advanceTimersByTime(599)
     })
-    const beforeDelay = screen.getAllByText(LM_STUDIO_UNREACHABLE_MESSAGE)
+    const beforeDelay = screen.getAllByText(UNREACHABLE_MESSAGE)
     act(() => {
       vi.advanceTimersByTime(1)
     })
 
     expect(beforeDelay).toHaveLength(1)
-    expect(screen.getAllByText(LM_STUDIO_UNREACHABLE_MESSAGE)).toHaveLength(2)
+    expect(screen.getAllByText(UNREACHABLE_MESSAGE)).toHaveLength(2)
   })
 
   it("describes Refresh only while LM Studio is not reachable", async () => {

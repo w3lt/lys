@@ -1,11 +1,4 @@
-import {
-  BACKEND_HOST,
-  BACKEND_PORT,
-  LMSTUDIO_HOST,
-  LMSTUDIO_PORT,
-  VMO_HOST,
-  VMO_PORT
-} from "@lys/protocol"
+import { BACKEND_HOST, BACKEND_PORT, VMO_HOST, VMO_PORT } from "@lys/protocol"
 import { isAbsolute, join } from "node:path"
 import { readPrompt } from "./utils/prompts"
 import * as z from "zod"
@@ -55,14 +48,6 @@ export const backendConfigSchema = z
     /** TCP port on which Fastify accepts connections. */
     backendPort: tcpPortSchema,
     /**
-     * Host name or IPv4 address used by backend LM Studio clients.
-     *
-     * @remarks Embedded unbracketed in the `http://` and `ws://` endpoint URLs.
-     */
-    lmstudioHost: z.hostname(),
-    /** TCP port used by backend LM Studio clients. */
-    lmstudioPort: tcpPortSchema,
-    /**
      * Absolute filesystem path of the backend's SQLite database, opened once by
      * the composition root and shared by its stores.
      */
@@ -71,7 +56,8 @@ export const backendConfigSchema = z
       .refine(isAbsolute, "Database file path must be absolute."),
     /**
      * Absolute filesystem path of the desktop's settings file, which the
-     * backend reads for the Tavily API key of `web_search`.
+     * backend reads for the active model provider, its address or API key,
+     * and the Tavily API key of `web_search`.
      *
      * @remarks The desktop host is the file's only writer; the backend only
      * reads it, on demand, and never caches what it read.
@@ -146,7 +132,7 @@ export const backendConfigSchema = z
   })
   .readonly()
 
-/** Runtime locations, prompts, and limits used by the backend and its LM Studio clients. */
+/** Runtime locations, prompts, and limits used by the backend. */
 export type BackendConfig = z.infer<typeof backendConfigSchema>
 
 /**
@@ -173,8 +159,6 @@ export function loadBackendConfig(): BackendConfig {
   return backendConfigSchema.parse({
     backendHost: BACKEND_HOST,
     backendPort: BACKEND_PORT,
-    lmstudioHost: LMSTUDIO_HOST,
-    lmstudioPort: LMSTUDIO_PORT,
     databaseFilePath: join(lysHome, "lys_db.sqlite"),
     settingsFilePath: join(lysHome, "settings.json"),
     attachmentsDirectoryPath: join(lysHome, "attachments"),

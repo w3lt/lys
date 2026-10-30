@@ -1,8 +1,10 @@
 import {
+  createLlmProviderLoadsModelsProblem,
   createLlmServiceBusyProblem,
   llmRuntimeUnavailableProblemSchema
 } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
+import { createLlmProviderLoadsModelsError } from "../../../../../src/modules/llm/llmProviderLoadsModelsError"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import handleLlmServiceRequestFailure from "../../../../../src/modules/llm/routes/handleLlmServiceRequestFailure"
@@ -37,6 +39,22 @@ describe("handleLlmServiceRequestFailure", () => {
       /^application\/problem\+json/
     )
     expect(response.json()).toEqual(createLlmServiceBusyProblem())
+  })
+
+  it("answers a load or unload refused by a provider that loads its own models with the provider-loads-models problem", async () => {
+    const { app } = createFailingRouteApp(createLlmProviderLoadsModelsError())
+
+    const response = await app.inject({ method: "GET", url: "/failing" })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.headers["content-type"]).toMatch(
+      /^application\/problem\+json/
+    )
+    expect(response.json()).toEqual(
+      createLlmProviderLoadsModelsProblem(
+        "The connected model provider loads a model when a request names it, so Lys does not load or unload its models."
+      )
+    )
   })
 
   it("delegates any other failure to the application error handler", async () => {

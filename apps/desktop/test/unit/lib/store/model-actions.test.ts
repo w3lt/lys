@@ -140,7 +140,7 @@ function createModelStore(defaultModel: string | null = null) {
  * @returns The route.
  */
 function buildInventoryRoute(models: readonly unknown[]): BackendRoute {
-  return () => buildJsonResponse(200, { llms: models })
+  return () => buildJsonResponse(200, { llms: models, modelLoading: "lys" })
 }
 
 /**
@@ -200,7 +200,11 @@ describe("createModelSlice", () => {
 
       expect(whileListing).toEqual({ status: "listing" })
       expect(store.getState()).toMatchObject({
-        modelInventory: { status: "ready", models: INVENTORY },
+        modelInventory: {
+          status: "ready",
+          modelLoading: "lys",
+          models: INVENTORY
+        },
         modelRequest: { status: "idle" },
         modelRuntime: { status: "loaded", modelKey: "resident" },
         modelError: null
@@ -242,7 +246,9 @@ describe("createModelSlice", () => {
       await waitForMicrotasks()
 
       connection.isModelRuntimeAvailable = false
-      inventory.resolve(buildJsonResponse(200, { llms: INVENTORY }))
+      inventory.resolve(
+        buildJsonResponse(200, { llms: INVENTORY, modelLoading: "lys" })
+      )
       await update
 
       expect(store.getState()).toMatchObject({
@@ -260,7 +266,9 @@ describe("createModelSlice", () => {
       const first = store.getState().updateModelInventory()
 
       await store.getState().loadModel("on-disk")
-      inventory.resolve(buildJsonResponse(200, { llms: INVENTORY }))
+      inventory.resolve(
+        buildJsonResponse(200, { llms: INVENTORY, modelLoading: "lys" })
+      )
       await first
 
       expect(requests()).toEqual([LIST_ROUTE])
@@ -319,7 +327,11 @@ describe("createModelSlice", () => {
       expect(whileLoading).toEqual({ status: "loading", modelKey: "on-disk" })
       expect(requests()).toEqual([LOAD_ROUTE, LIST_ROUTE])
       expect(store.getState()).toMatchObject({
-        modelInventory: { status: "ready", models: INVENTORY_AFTER_LOAD },
+        modelInventory: {
+          status: "ready",
+          modelLoading: "lys",
+          models: INVENTORY_AFTER_LOAD
+        },
         modelRuntime: { status: "loaded", modelKey: "on-disk" },
         modelRequest: { status: "idle" },
         modelError: null
@@ -339,7 +351,11 @@ describe("createModelSlice", () => {
 
       expect(requests()).toEqual([LOAD_ROUTE, LIST_ROUTE])
       expect(store.getState()).toMatchObject({
-        modelInventory: { status: "ready", models: INVENTORY },
+        modelInventory: {
+          status: "ready",
+          modelLoading: "lys",
+          models: INVENTORY
+        },
         modelError: busy.detail
       })
       expect(getFailureReactionCount()).toBe(1)
@@ -696,7 +712,9 @@ describe("createModelSlice", () => {
       await waitForMicrotasks()
 
       store.getState().releaseModelRuntime()
-      inventory.resolve(buildJsonResponse(200, { llms: INVENTORY }))
+      inventory.resolve(
+        buildJsonResponse(200, { llms: INVENTORY, modelLoading: "lys" })
+      )
       await update
 
       expect(backend.requests[0]?.signal?.aborted).toBe(true)
@@ -752,7 +770,7 @@ describe("createModelSlice", () => {
           listCount += 1
           return listCount === 1
             ? first.promise
-            : buildJsonResponse(200, { llms: INVENTORY })
+            : buildJsonResponse(200, { llms: INVENTORY, modelLoading: "lys" })
         }
       })
       const { store } = createModelStore()
@@ -764,6 +782,7 @@ describe("createModelSlice", () => {
 
       expect(store.getState().modelInventory).toEqual({
         status: "ready",
+        modelLoading: "lys",
         models: INVENTORY
       })
     })

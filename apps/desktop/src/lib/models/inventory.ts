@@ -4,8 +4,11 @@ import type { LlmInfo } from "@lys/protocol"
 export type LocalModelDescriptor = LlmInfo & {
   /** Available parameter, quantization, and on-disk size metadata. */
   readonly detail: string
-  /** Decimal gigabytes on disk, not runtime memory consumption. */
-  readonly sizeLabel: string
+  /**
+   * Decimal gigabytes on disk, not runtime memory consumption; undefined when
+   * the provider reports no size, as for a hosted model.
+   */
+  readonly sizeLabel: string | undefined
 }
 
 /**
@@ -14,7 +17,10 @@ export type LocalModelDescriptor = LlmInfo & {
  * @returns Metadata and labels used by the settings and composer selectors.
  */
 export function buildModelDescriptor(model: LlmInfo): LocalModelDescriptor {
-  const sizeLabel = `${(model.sizeBytes / 1_000_000_000).toFixed(1)} GB`
+  const sizeLabel =
+    model.sizeBytes === undefined
+      ? undefined
+      : `${(model.sizeBytes / 1_000_000_000).toFixed(1)} GB`
   const detail = [model.paramsString, model.quantization?.name, sizeLabel]
     .filter((label) => label !== undefined)
     .join(" · ")

@@ -1,6 +1,6 @@
 import * as z from "zod"
 
-/** Model formats understood by the shared LM Studio inventory contract. */
+/** Model file formats a provider can report for a model it runs locally. */
 export const modelCompatibilityTypeSchema = z.enum([
   "gguf",
   "safetensors",
@@ -42,21 +42,24 @@ export const llmInfoSchema = z
      */
     modelKey: z.string(),
     /**
-     * The format of the model.
+     * The format of the model's files. Absent when the provider does not
+     * report one, as for a hosted model.
      */
-    format: modelCompatibilityTypeSchema,
+    format: modelCompatibilityTypeSchema.optional(),
     /**
      * Machine generated name of the model.
      */
     displayName: z.string(),
     /**
-     * The relative path of the model.
+     * The relative path of the model's files. Absent when the provider does
+     * not report one, as for a hosted model.
      */
-    path: z.string(),
+    path: z.string().optional(),
     /**
-     * The size of the model in bytes.
+     * The size of the model's files in bytes. Absent when the provider does
+     * not report one, as for a hosted model.
      */
-    sizeBytes: z.number(),
+    sizeBytes: z.number().optional(),
     /**
      * A string that represents the number of params in the model. May not always be available.
      */
@@ -82,7 +85,9 @@ export const llmInfoSchema = z
      */
     maxContextLength: z.number(),
     /**
-     * Whether the model is loaded or not (into lmstudio)
+     * Whether the model can answer a chat request now: loaded, for a
+     * provider whose models Lys loads, or always, for a provider that loads
+     * a model when a request names it.
      */
     loaded: z.boolean(),
     /**

@@ -60,11 +60,13 @@ launch path.
 - The desktop app talks to the backend over HTTP at `http://127.0.0.1:12345`.
 - The chat transport is a `POST /api/v1/chat` request that returns an SSE
   stream.
-- The backend uses LM Studio for model inventory and load operations and an
+- The backend uses the provider chosen in Settings → Providers for the model
+  inventory, LM Studio also for load operations, and the provider's
   OpenAI-compatible endpoint for chat completions.
-- The backend starts listening without LM Studio and then tries once to
-  connect to `127.0.0.1:1234`. If LM Studio starts later, press **Refresh** on
-  the LM Studio card in Settings → Runtime, or send
+- The backend starts listening without the provider and then tries once to
+  connect to it, by default LM Studio on `127.0.0.1:1234`. If the provider
+  starts later, press **Refresh** on the provider card in Settings → Runtime,
+  or send
   `POST /api/v1/llm/runtime/connect`. `GET /api/v1/llm/runtime` reports
   `connecting`, `connected`, or `unreachable`.
 

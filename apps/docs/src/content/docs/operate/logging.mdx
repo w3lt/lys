@@ -120,8 +120,9 @@ an app started from a terminal shows.
   Studio, is logged at the level the SDK gave it, with the text the SDK would
   have printed in `msg`, its `[LMStudioClient]…` prefix first, an error with
   its stack, and no terminal colors. Its `debug` messages are left out like
-  the backend's own. When LM Studio cannot be reached, the backend also logs
-  its own `LM Studio runtime acquisition failed` line.
+  the backend's own. When the model provider cannot be reached, the backend
+  also logs its own `Model provider runtime acquisition failed` line, for
+  every provider. Its error names neither the provider's answer nor a key.
 - Some output never reaches the files, only the backend's standard error:
   a failure before the backend has created its logger, which only `LYS_HOME`
   not set or not an absolute path causes; Node's messages before the

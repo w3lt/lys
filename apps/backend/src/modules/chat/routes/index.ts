@@ -16,7 +16,8 @@ import updateFastifyWithChatReplyRoutes from "./replyRoutes"
  * so `app.register` reports it rather than an uncaught exception.
  * @remarks The group's JSON responses are serialized with their Zod schemas.
  * The chat and chat-context routes share one model capability lookup, so a
- * model's capabilities are listed from LM Studio once for both.
+ * model's capabilities are listed from the connected provider once for both,
+ * and listed again after another provider connects.
  * The registry is disposed in `preClose`, while SSE streams are still open:
  * every generation stores its final state and its followers end before the
  * server waits for requests and before services close SQLite.
@@ -31,8 +32,9 @@ export default function registerChatRoutes(
       await generations[Symbol.asyncDispose]()
     })
     app.setSerializerCompiler(serializerCompiler)
-    const findModelCapabilities = createModelCapabilitiesLookup(() =>
-      app.llmService.listDownloadedLlmModels()
+    const findModelCapabilities = createModelCapabilitiesLookup(
+      () => app.llmService.listDownloadedLlmModels(),
+      () => app.llmRuntimeService.connectedLlmProviderAccess
     )
     registerChatRoute(app, { ...options, generations, findModelCapabilities })
     registerChatContextRoute(app, findModelCapabilities)

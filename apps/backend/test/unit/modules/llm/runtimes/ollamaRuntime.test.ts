@@ -1,0 +1,364 @@
+import { ollamaApiKeySchema } from "@lys/share"
+import { describe, expect, it, onTestFinished } from "vitest"
+import OllamaRuntime, {
+  type OllamaRuntimeTarget
+} from "../../../../../src/modules/llm/runtimes/ollamaRuntime"
+import {
+  answerWith,
+  startProviderServer,
+  type ProviderServerRoute
+} from "../../../support/providerServer"
+
+/** Synthetic Ollama key; not a real credential. */
+const API_KEY = ollamaApiKeySchema.parse("ollama-synthetic-0123456789")
+
+/** `/api/tags` answer of a server with one local and one hosted model. */
+const TAG_LIST = {
+  models: [
+    {
+      name: "qwen3:8b",
+      model: "qwen3:8b",
+      size: 5_225_388_164,
+      details: {
+        format: "gguf",
+        family: "qwen3",
+        parameter_size: "8.2B",
+        quantization_level: "Q4_K_M"
+      }
+    },
+    { name: "gpt-oss:120b", size: 0, details: { format: "" } }
+  ]
+}
+
+/** `/api/show` answers by model name. */
+const SHOW_ANSWERS: Readonly<Record<string, unknown>> = {
+  "qwen3:8b": {
+    capabilities: ["completion", "tools", "thinking"],
+    model_info: {
+      "general.architecture": "qwen3",
+      "qwen3.context_length": 40_960
+    }
+  },
+  "gpt-oss:120b": {
+    capabilities: ["completion", "vision"],
+    model_info: { "gptoss.context_length": 131_072 }
+  }
+}
+
+/** Answers `/api/show` from {@link SHOW_ANSWERS}. */
+const showModel: ProviderServerRoute = (request) => {
+  const model = (request.body as { model: string }).model
+  return { status: 200, body: SHOW_ANSWERS[model] }
+}
+
+/**
+ * Starts a fake Ollama and acquires a runtime for it, owned by the test.
+ *
+ * @param mode - Local server or cloud.
+ * @param routes - Routes that replace the defaults.
+ * @returns The runtime and the server's request log.
+ */
+async function createOwnedRuntime(
+  mode: OllamaRuntimeTarget["mode"],
+  routes: Readonly<Record<string, ProviderServerRoute>> = {}
+) {
+  const server = await startProviderServer({
+    "GET /api/tags": answerWith(TAG_LIST),
+    "POST /api/show": showModel,
+    "GET /api/ps": answerWith({ models: [] }),
+    ...routes
+  })
+  const target: OllamaRuntimeTarget =
+    mode === "local"
+      ? { mode, apiBaseUrl: server.baseUrl }
+      : { mode, apiBaseUrl: server.baseUrl, apiKey: API_KEY }
+  const runtime = await OllamaRuntime.create(target)
+  onTestFinished(async () => await runtime[Symbol.asyncDispose]())
+  return { runtime, server }
+}
+
+describe("OllamaRuntime", () => {
+  it("lists models with their files, capabilities, and windows", async () => {
+    const { runtime } = await createOwnedRuntime("local")
+
+    const models = await runtime.listDownloadedLlmModels()
+
+    expect(models).toEqual([
+      {
+        modelKey: "qwen3:8b",
+        displayName: "qwen3:8b",
+        format: "gguf",
+        sizeBytes: 5_225_388_164,
+        paramsString: "8.2B",
+        architecture: "qwen3",
+        vision: false,
+        trainedForToolUse: true,
+        maxContextLength: 40_960
+      },
+      {
+        modelKey: "gpt-oss:120b",
+        displayName: "gpt-oss:120b",
+        vision: true,
+        trainedForToolUse: false,
+        maxContextLength: 131_072
+      }
+    ])
+    expect(Object.isFrozen(models)).toBe(true)
+  })
+
+  it("sends no key to a local server and the key to Ollama's cloud", async () => {
+    const local = await createOwnedRuntime("local")
+    const cloud = await createOwnedRuntime("cloud")
+
+    await local.runtime.listDownloadedLlmModels()
+    await cloud.runtime.listDownloadedLlmModels()
+
+    expect(
+      local.server.requests.map((request) => request.authorization)
+    ).toEqual([undefined, undefined, undefined, undefined])
+    expect(
+      cloud.server.requests.map((request) => request.authorization)
+    ).toEqual(Array(4).fill(`Bearer ${API_KEY}`))
+  })
+
+  it("reports the chat models a local server is running as loaded, with the window each runs with", async () => {
+    const { runtime } = await createOwnedRuntime("local", {
+      "GET /api/ps": answerWith({
+        models: [{ name: "qwen3:8b", model: "qwen3:8b", context_length: 4096 }]
+      })
+    })
+
+    expect(await runtime.listLoadedLlmModelInstances()).toEqual([
+      { modelKey: "qwen3:8b", modelIdentifier: "qwen3:8b", contextLength: 4096 }
+    ])
+  })
+
+  it("reports every chat model of Ollama Cloud as loaded, with its own window", async () => {
+    const { runtime, server } = await createOwnedRuntime("cloud")
+
+    expect(await runtime.listLoadedLlmModelInstances()).toEqual([
+      {
+        modelKey: "qwen3:8b",
+        modelIdentifier: "qwen3:8b",
+        contextLength: 40_960
+      },
+      {
+        modelKey: "gpt-oss:120b",
+        modelIdentifier: "gpt-oss:120b",
+        contextLength: 131_072
+      }
+    ])
+    expect(server.requests.map((request) => request.path)).not.toContain(
+      "/api/ps"
+    )
+  })
+
+  it("leaves a model that cannot chat out of every listing and measurement", async () => {
+    const { runtime } = await createOwnedRuntime("local", {
+      "GET /api/tags": answerWith({
+        models: [...TAG_LIST.models, { name: "bge-m3:latest", size: 1_157 }]
+      }),
+      "POST /api/show": (request) =>
+        (request.body as { model: string }).model === "bge-m3:latest"
+          ? {
+              status: 200,
+              body: {
+                capabilities: ["embedding"],
+                model_info: { "bert.context_length": 8192 }
+              }
+            }
+          : showModel(request),
+      "GET /api/ps": answerWith({
+        models: ["qwen3:8b", "gpt-oss:120b", "bge-m3:latest"].map((name) => ({
+          name,
+          context_length: 8192
+        }))
+      })
+    })
+
+    const models = await runtime.listDownloadedLlmModels()
+    const instances = await runtime.listLoadedLlmModelInstances()
+    const measurement = await runtime.findLlmContextMeasurement(
+      "bge-m3:latest",
+      []
+    )
+
+    expect(models.map(({ modelKey }) => modelKey)).toEqual([
+      "qwen3:8b",
+      "gpt-oss:120b"
+    ])
+    expect(instances.map(({ modelKey }) => modelKey)).toEqual([
+      "qwen3:8b",
+      "gpt-oss:120b"
+    ])
+    expect(measurement).toBeUndefined()
+  })
+
+  it("asks for at most four model descriptions at once, however many models Ollama lists", async () => {
+    const names = Array.from({ length: 10 }, (_, index) => `model-${index}:8b`)
+    let inFlight = 0
+    let mostInFlight = 0
+    const { runtime } = await createOwnedRuntime("cloud", {
+      "GET /api/tags": answerWith({ models: names.map((name) => ({ name })) }),
+      "POST /api/show": async () => {
+        inFlight += 1
+        mostInFlight = Math.max(mostInFlight, inFlight)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        inFlight -= 1
+        return {
+          status: 200,
+          body: {
+            capabilities: ["completion"],
+            model_info: { "llama.context_length": 8192 }
+          }
+        }
+      }
+    })
+    mostInFlight = 0
+
+    const models = await runtime.listDownloadedLlmModels()
+
+    expect(models.map(({ modelKey }) => modelKey)).toEqual(names)
+    expect(mostInFlight).toBe(4)
+  })
+
+  it("fails the listing when a description fails, asking for no description after it", async () => {
+    const names = Array.from({ length: 10 }, (_, index) => `model-${index}:8b`)
+    const { runtime, server } = await createOwnedRuntime("cloud", {
+      "GET /api/tags": answerWith({ models: names.map((name) => ({ name })) }),
+      "POST /api/show": async (request) => {
+        if ((request.body as { model: string }).model === "model-1:8b") {
+          return { status: 500, body: { error: "boom" } }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        return {
+          status: 200,
+          body: {
+            capabilities: ["completion"],
+            model_info: { "llama.context_length": 8192 }
+          }
+        }
+      }
+    })
+
+    await expect(runtime.listDownloadedLlmModels()).rejects.toThrow(
+      "The LLM runtime could not list downloaded models."
+    )
+    expect(
+      server.requests.filter((request) => request.path === "/api/show")
+    ).toHaveLength(4)
+  })
+
+  it("keeps a model when Ollama reports no capabilities for it", async () => {
+    const { runtime } = await createOwnedRuntime("local", {
+      "POST /api/show": answerWith({
+        model_info: { "llama.context_length": 8192 }
+      })
+    })
+
+    const models = await runtime.listDownloadedLlmModels()
+
+    expect(
+      models.map(({ modelKey, vision, trainedForToolUse }) => ({
+        modelKey,
+        vision,
+        trainedForToolUse
+      }))
+    ).toEqual([
+      { modelKey: "qwen3:8b", vision: false, trainedForToolUse: false },
+      { modelKey: "gpt-oss:120b", vision: false, trainedForToolUse: false }
+    ])
+  })
+
+  it("rejects a model whose metadata holds no context length", async () => {
+    const { runtime } = await createOwnedRuntime("local", {
+      "POST /api/show": answerWith({ capabilities: ["completion"] })
+    })
+
+    await expect(runtime.listDownloadedLlmModels()).rejects.toThrow(
+      "The LLM runtime returned invalid model metadata."
+    )
+  })
+
+  it("measures a running local model with the window it runs with", async () => {
+    const { runtime, server } = await createOwnedRuntime("local", {
+      "GET /api/ps": answerWith({
+        models: [{ name: "qwen3:8b", model: "qwen3:8b", context_length: 4096 }]
+      })
+    })
+
+    const measurement = await runtime.findLlmContextMeasurement("qwen3:8b", [
+      "abcdef"
+    ])
+
+    expect(measurement).toEqual({ contextLength: 4096, textTokenCounts: [2] })
+    expect(
+      server.requests
+        .filter((request) => request.path === "/api/show")
+        .map((request) => request.body)
+    ).toEqual([{ model: "qwen3:8b" }])
+  })
+
+  it("finds no measurement for a local model that is not running, whose window Ollama has not chosen yet", async () => {
+    const { runtime } = await createOwnedRuntime("local")
+
+    expect(
+      await runtime.findLlmContextMeasurement("gpt-oss:120b", [])
+    ).toBeUndefined()
+  })
+
+  it("finds no measurement for a running local model whose window the server does not report", async () => {
+    const { runtime } = await createOwnedRuntime("local", {
+      "GET /api/ps": answerWith({ models: [{ name: "qwen3:8b" }] })
+    })
+
+    expect(
+      await runtime.findLlmContextMeasurement("qwen3:8b", ["a"])
+    ).toBeUndefined()
+  })
+
+  it("measures a cloud model with its own window, without asking for running models", async () => {
+    const { runtime, server } = await createOwnedRuntime("cloud")
+
+    expect(await runtime.findLlmContextMeasurement("qwen3:8b", ["a"])).toEqual({
+      contextLength: 40_960,
+      textTokenCounts: [1]
+    })
+    expect(server.requests.map((request) => request.path)).not.toContain(
+      "/api/ps"
+    )
+  })
+
+  it("finds no measurement for a model Ollama does not list", async () => {
+    const { runtime } = await createOwnedRuntime("local")
+
+    expect(
+      await runtime.findLlmContextMeasurement("llama3:8b", ["a"])
+    ).toBeUndefined()
+  })
+
+  it("is not acquired when the server does not answer its model list", async () => {
+    const server = await startProviderServer({
+      "GET /api/tags": answerWith({ error: "unauthorized" }, 401)
+    })
+
+    await expect(
+      OllamaRuntime.create({
+        mode: "cloud",
+        apiBaseUrl: server.baseUrl,
+        apiKey: API_KEY
+      })
+    ).rejects.toThrow("The LLM runtime is unavailable.")
+  })
+
+  it("reports Ollama unavailable once it stops answering", async () => {
+    let status = 200
+    const { runtime } = await createOwnedRuntime("local", {
+      "GET /api/tags": () => ({ status, body: TAG_LIST })
+    })
+
+    expect(await runtime.getRuntimeAvailability()).toBe("available")
+    status = 500
+    expect(await runtime.getRuntimeAvailability()).toBe("unavailable")
+  })
+})

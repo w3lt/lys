@@ -33,7 +33,7 @@ type LlmProblemDefinition = {
   /** Stable human-readable summary of the problem category. */
   readonly title: string
   /** HTTP status associated with the problem category. */
-  readonly status: 404 | 503 | 504
+  readonly status: 404 | 409 | 503 | 504
 }
 
 /** Fixed fields for an unknown requested model. */
@@ -76,6 +76,13 @@ const UNLOAD_FAILED_PROBLEM_DEFINITION = Object.freeze({
   type: "urn:lys:problem:llm:unload-failed",
   title: "Model unload failed",
   status: 503
+} as const satisfies LlmProblemDefinition)
+
+/** Fixed fields for a load or unload the connected provider does not take. */
+const PROVIDER_LOADS_MODELS_PROBLEM_DEFINITION = Object.freeze({
+  type: "urn:lys:problem:llm:provider-loads-models",
+  title: "Provider loads its own models",
+  status: 409
 } as const satisfies LlmProblemDefinition)
 
 /** Complete fixed-field lookup for every supported LLM health failure. */
@@ -154,6 +161,15 @@ const llmUnloadFailedProblemObjectSchema = z.strictObject({
   instance: llmProblemInstanceSchema
 })
 
+/** Validates a provider-loads-models Problem Details body. */
+const llmProviderLoadsModelsProblemObjectSchema = z.strictObject({
+  type: z.literal(PROVIDER_LOADS_MODELS_PROBLEM_DEFINITION.type),
+  title: z.literal(PROVIDER_LOADS_MODELS_PROBLEM_DEFINITION.title),
+  status: z.literal(PROVIDER_LOADS_MODELS_PROBLEM_DEFINITION.status),
+  detail: llmProblemDetailSchema,
+  instance: llmProblemInstanceSchema
+})
+
 /** Immutable schema for an unknown-model Problem Details body. */
 export const llmModelNotFoundProblemSchema =
   llmModelNotFoundProblemObjectSchema.readonly()
@@ -177,6 +193,13 @@ export const llmProbeTimeoutProblemSchema =
 /** Immutable schema for an unsuccessful model-unload Problem Details body. */
 export const llmUnloadFailedProblemSchema =
   llmUnloadFailedProblemObjectSchema.readonly()
+
+/**
+ * Immutable schema for the Problem Details body of a load or unload refused
+ * because the connected provider loads its own models.
+ */
+export const llmProviderLoadsModelsProblemSchema =
+  llmProviderLoadsModelsProblemObjectSchema.readonly()
 
 /** Validates every documented Problem Details body from LLM health checks. */
 export const llmHealthProblemSchema = z
@@ -310,6 +333,35 @@ export function createLlmUnloadProblem(
     ...(verifiedInput.instance === undefined
       ? {}
       : { instance: verifiedInput.instance })
+  })
+}
+
+/**
+ * Immutable Problem Details body returned for a load or unload refused
+ * because the connected provider loads its own models.
+ */
+export type LlmProviderLoadsModelsProblem = z.infer<
+  typeof llmProviderLoadsModelsProblemSchema
+>
+
+/**
+ * Creates Problem Details for a load or unload refused because the connected
+ * provider loads a model when a request names it, so Lys neither loads nor
+ * stops its models.
+ *
+ * @param detail - Client-safe explanation naming what the person can do.
+ * @returns A validated immutable body with the provider-loads-models type,
+ * title, and status 409.
+ * @throws If `detail` is empty.
+ */
+export function createLlmProviderLoadsModelsProblem(
+  detail: string
+): LlmProviderLoadsModelsProblem {
+  return llmProviderLoadsModelsProblemSchema.parse({
+    type: PROVIDER_LOADS_MODELS_PROBLEM_DEFINITION.type,
+    title: PROVIDER_LOADS_MODELS_PROBLEM_DEFINITION.title,
+    status: PROVIDER_LOADS_MODELS_PROBLEM_DEFINITION.status,
+    detail
   })
 }
 

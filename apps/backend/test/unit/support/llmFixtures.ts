@@ -1,5 +1,15 @@
 import type { LLMInfo } from "@lmstudio/sdk"
+import {
+  DEFAULT_LM_STUDIO_ADDRESS,
+  type LlmProviderAccess
+} from "../../../src/modules/llm/llmProviderAccess"
 import type { DownloadedLlmModel } from "../../../src/modules/llm/llmRuntimeTypes"
+
+/** LM Studio at its default address, the provider most cases connect to. */
+export const DEFAULT_LM_STUDIO_ACCESS: LlmProviderAccess = Object.freeze({
+  provider: "lmStudio",
+  address: DEFAULT_LM_STUDIO_ADDRESS
+})
 
 /** Identity fields that distinguish one fixture model from another. */
 export type LlmModelFixtureIdentity = Readonly<{
@@ -19,7 +29,18 @@ export type LlmModelFixtureIdentity = Readonly<{
 export function createDownloadedLlmModel(
   identity: LlmModelFixtureIdentity
 ): DownloadedLlmModel {
-  return Object.freeze({
+  return Object.freeze(createLocalLlmModelFields(identity))
+}
+
+/**
+ * Creates the metadata fields of one model whose files are on this machine,
+ * where the format, path, and size are always known.
+ *
+ * @param identity - Key and optional path distinguishing the model.
+ * @returns The fields, with no optional metadata.
+ */
+function createLocalLlmModelFields(identity: LlmModelFixtureIdentity) {
+  return {
     modelKey: identity.modelKey,
     format: "gguf",
     displayName: `Display ${identity.modelKey}`,
@@ -28,7 +49,7 @@ export function createDownloadedLlmModel(
     vision: false,
     trainedForToolUse: false,
     maxContextLength: 8192
-  })
+  } as const
 }
 
 /**
@@ -44,7 +65,7 @@ export function createLmStudioLlmRecord(
   identity: LlmModelFixtureIdentity
 ): LLMInfo {
   return {
-    ...createDownloadedLlmModel(identity),
+    ...createLocalLlmModelFields(identity),
     type: "llm",
     publisher: "fixture-publisher",
     indexedModelIdentifier: `fixture-publisher/${identity.modelKey}`,

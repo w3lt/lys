@@ -22,16 +22,20 @@ export interface LlmRuntimeConnectionObserver {
  * @remarks Implementations are ready when injected. An attempt occupies one
  * position in the shared model-operation queue and runs after earlier accepted
  * work, so it never overlaps a model operation. Concurrent calls share one
- * pending attempt. The application-scoped provider owns an accepted attempt
- * until it settles, independently of the requesting client. No completion
- * deadline is guaranteed.
+ * pending attempt until it starts reading the saved provider; a call made
+ * after that queues an attempt of its own, which reads the saved provider
+ * again. The application-scoped provider owns an accepted attempt until it
+ * settles, independently of the requesting client. No completion deadline is
+ * guaranteed.
  */
 export interface LlmRuntimeConnector {
   /**
-   * Keeps a held runtime that still answers, or acquires a new one.
+   * Keeps a held runtime that still answers for the saved provider, or
+   * acquires a new one for it.
    *
    * @returns A promise resolving to the settled status, `connected` or
-   * `unreachable`. An acquisition failure resolves to `unreachable`.
+   * `unreachable`. An acquisition failure, or no usable saved provider,
+   * resolves to `unreachable`.
    * @throws `The LLM runtime is closed.` after cleanup begins.
    * @throws A service-busy error recognized by
    * [isLlmServiceBusyError](./llmServiceBusyError.ts) when the queue is full;

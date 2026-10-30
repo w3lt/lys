@@ -1,4 +1,7 @@
-import type { LlmInfo, LlmLoadModelApiResponse } from "@lys/protocol"
+import type {
+  LlmListModelsApiResponse,
+  LlmLoadModelApiResponse
+} from "@lys/protocol"
 import type { ModelLoadConfiguration } from "@lys/share"
 import type { LlmModelHealthOutcome } from "./getLlmModelHealth"
 import type { StopLlmModelsByKeyOutcome } from "./stopLlmModelsByKey"
@@ -56,13 +59,15 @@ export interface LlmModelHealthReader {
  */
 export interface LlmModelInventory {
   /**
-   * Lists the latest known models, their loaded state, and the context length
-   * each loaded model is loaded with.
+   * Lists the latest known models, their loaded state, the context length
+   * each loaded model is loaded with, and who loads them.
    *
    * @returns A promise resolving to immutable snapshots ordered by ascending
    * canonical model key, then by ascending path. A loaded model's snapshots
    * carry the smallest context length among its loaded instances, unless its
-   * instances were gone by the time they were measured.
+   * instances were gone by the time they were measured. `modelLoading` is
+   * `provider` when the connected provider decides which models are in
+   * memory, and `lys` otherwise.
    * @throws If the provider cannot query or validate its model inventory, or
    * its application lifetime has begun cleanup.
    * @throws A service-busy error if the shared model-operation queue is full;
@@ -72,7 +77,7 @@ export interface LlmModelInventory {
    * LLM runtime is connected, or when a failed runtime call revealed that it
    * stopped answering; the operation had no further runtime effects.
    */
-  listLlmModels(): Promise<readonly LlmInfo[]>
+  listLlmModels(): Promise<LlmListModelsApiResponse>
 }
 
 /**
@@ -100,6 +105,9 @@ export interface LlmModelLoader {
    * immutable canonical metadata has been validated.
    * @throws If the provider cannot load or describe the model, the model is
    * absent from inventory, metadata is invalid, or application cleanup has begun.
+   * @throws A refusal recognized by
+   * [isLlmProviderLoadsModelsError](./llmProviderLoadsModelsError.ts) when
+   * the connected provider loads its own models; no runtime call was made.
    * @throws A service-busy error recognized by
    * [isLlmServiceBusyError](./llmServiceBusyError.ts) if the shared queue is full;
    * the load is not accepted and has no runtime effects.
@@ -140,6 +148,9 @@ export interface LlmModelStopper {
    * or reconciled loaded-instance snapshot.
    * @throws If the application lifetime has begun cleanup; provider operation
    * failures are represented by the returned outcome.
+   * @throws A refusal recognized by
+   * [isLlmProviderLoadsModelsError](./llmProviderLoadsModelsError.ts) when
+   * the connected provider loads its own models; no runtime call was made.
    * @throws A service-busy error recognized by
    * [isLlmServiceBusyError](./llmServiceBusyError.ts) if the shared queue is full;
    * the unload is not accepted and has no runtime effects.

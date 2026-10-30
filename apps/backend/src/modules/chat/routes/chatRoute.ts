@@ -93,9 +93,9 @@ export type ChatRouteRegistration = ChatRouteOptions &
     /** Registry owning every generation this route starts; not disposed here. */
     generations: ReplyGenerationRegistry
     /**
-     * Capabilities of the model a request names, read from LM Studio's
-     * inventory and remembered by the lookup; shared with the chat-context
-     * route.
+     * Capabilities of the model a request names, read from the connected
+     * provider's inventory and remembered by the lookup while that provider
+     * stays connected; shared with the chat-context route.
      */
     findModelCapabilities: FindModelCapabilities
   }>
@@ -127,8 +127,8 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      */
     findConversation: (conversationId: string) => Conversation | undefined
     /**
-     * Capabilities of the model a request names, read from LM Studio's
-     * inventory.
+     * Capabilities of the model a request names, read from the connected
+     * provider's inventory.
      */
     findModelCapabilities: FindModelCapabilities
     /**
@@ -412,9 +412,9 @@ async function handleChatRequest(
  * before the inventory is read; the conversation's stored attachments come
  * from that read. The model's capabilities are then read for every turn,
  * because they decide the images the model sees and the tools the backend
- * offers it; the lookup lists LM Studio's inventory only until it has seen
- * the model, so only a model's first turn waits for the model-operation
- * queue. The agent found here is not kept: the lookup that decides who
+ * offers it; the lookup lists the connected provider's inventory only until
+ * it has seen the model, so only a model's first turn with that provider
+ * waits for the model-operation queue. The agent found here is not kept: the lookup that decides who
  * answers runs again when the turn is stored.
  */
 async function parseTurnRequest(

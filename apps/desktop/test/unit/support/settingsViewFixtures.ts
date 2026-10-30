@@ -26,6 +26,8 @@ const SETTINGS_PANE_BODY_IMPORTS = Object.freeze({
   agents: () => import("@/components/SettingsViewComponents/AgentPaneContent"),
   tools: () => import("@/components/SettingsViewComponents/ToolPaneContent"),
   mcp: () => import("@/components/SettingsViewComponents/McpPaneContent"),
+  providers: () =>
+    import("@/components/SettingsViewComponents/ProvidersPaneContent"),
   secrets: () =>
     import("@/components/SettingsViewComponents/SecretsPaneContent")
 } satisfies Readonly<Record<SettingsPane, () => Promise<unknown>>>)
@@ -45,7 +47,11 @@ export function buildInventoryRoute(
   const inventory = runtime.modelInventory
   switch (inventory.status) {
     case "ready":
-      return () => buildJsonResponse(200, { llms: inventory.models })
+      return () =>
+        buildJsonResponse(200, {
+          llms: inventory.models,
+          modelLoading: inventory.modelLoading
+        })
     case "failed":
       return () => new Response(null, { status: 500 })
     case "unavailable":

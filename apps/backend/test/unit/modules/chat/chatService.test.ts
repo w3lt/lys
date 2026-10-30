@@ -4,6 +4,7 @@ import * as z from "zod"
 import ChatService, {
   type ChatServiceCreationOptions
 } from "../../../../src/modules/chat/chatService"
+import { isLlmRuntimeUnavailableError } from "../../../../src/modules/llm/llmRuntimeUnavailableError"
 import {
   ChatCompletionCancelledError,
   TitleGenerationOutputError
@@ -23,7 +24,11 @@ const OPENAI_BASE_URL = "http://lmstudio.test/v1"
 
 /** Creation options shared by the cases; each case varies only what it tests. */
 const SERVICE_OPTIONS = Object.freeze({
-  openAiBaseUrl: OPENAI_BASE_URL,
+  findChatEndpoint: () => ({
+    baseUrl: OPENAI_BASE_URL,
+    apiKey: undefined,
+    replyCeilingField: "max_completion_tokens"
+  }),
   titleGenerationPrompt: "Summarize the message as a short title.",
   generatedTitleMaxLength: 12
 } satisfies ChatServiceCreationOptions)
@@ -132,6 +137,32 @@ describe("ChatService", () => {
       })
     })
 
+    it("sends the reply ceiling as max_tokens to an endpoint that reads only that field, such as Ollama's", async () => {
+      const { service, endpoint } = createServiceWithEndpoint(
+        () => createChatCompletionStreamResponse([]),
+        {
+          findChatEndpoint: () => ({
+            baseUrl: OPENAI_BASE_URL,
+            apiKey: undefined,
+            replyCeilingField: "max_tokens"
+          })
+        }
+      )
+
+      await listChunks(
+        await service.completeChatStream({
+          messages: [{ role: "user", content: "Hello" }],
+          tools: [],
+          model: "llama3.2",
+          generationOptions: { temperature: 0.4, replyCeiling: 256 }
+        })
+      )
+
+      const body = endpoint.requests[0]?.body
+      expect(body).toMatchObject({ max_tokens: 256 })
+      expect(body).not.toHaveProperty("max_completion_tokens")
+    })
+
     it("sends the offered tools as function tools", async () => {
       const { service, endpoint } = createServiceWithEndpoint(() =>
         createChatCompletionStreamResponse([])
@@ -202,7 +233,14 @@ describe("ChatService", () => {
       const { service, endpoint } = createServiceWithEndpoint(() =>
         createChatCompletionStreamResponse([])
       )
-      const keyed = new ChatService({ ...SERVICE_OPTIONS, apiKey: "local-key" })
+      const keyed = new ChatService({
+        ...SERVICE_OPTIONS,
+        findChatEndpoint: () => ({
+          baseUrl: OPENAI_BASE_URL,
+          apiKey: "local-key",
+          replyCeilingField: "max_completion_tokens"
+        })
+      })
 
       for (const client of [service, keyed]) {
         await listChunks(
@@ -220,6 +258,63 @@ describe("ChatService", () => {
       )
       expect(placeholder).toMatch(/^Bearer \S+$/)
       expect(configured).toBe("Bearer local-key")
+    })
+
+    it("sends each request to the provider connected when it starts", async () => {
+      let endpoint: ReturnType<ChatServiceCreationOptions["findChatEndpoint"]> =
+        {
+          baseUrl: OPENAI_BASE_URL,
+          apiKey: undefined,
+          replyCeilingField: "max_completion_tokens"
+        }
+      const { service, endpoint: fake } = createServiceWithEndpoint(
+        () => createChatCompletionStreamResponse([]),
+        { findChatEndpoint: () => endpoint }
+      )
+      const request = {
+        messages: [{ role: "user" as const, content: "Hello" }],
+        tools: [],
+        model: "llama-3.3-70b-versatile",
+        generationOptions: { temperature: 0.4 }
+      }
+
+      await listChunks(await service.completeChatStream(request))
+      endpoint = {
+        baseUrl: "https://api.groq.test/openai/v1",
+        apiKey: "gsk_synthetic_0123456789",
+        replyCeilingField: "max_completion_tokens"
+      }
+      await listChunks(await service.completeChatStream(request))
+
+      expect(fake.requests.map(({ url }) => url)).toEqual([
+        `${OPENAI_BASE_URL}/chat/completions`,
+        "https://api.groq.test/openai/v1/chat/completions"
+      ])
+      expect(fake.requests[1]?.headers.get("authorization")).toBe(
+        "Bearer gsk_synthetic_0123456789"
+      )
+    })
+
+    it("refuses a request while no provider is connected, sending nothing", async () => {
+      const { service, endpoint } = createServiceWithEndpoint(
+        () => createChatCompletionStreamResponse([]),
+        { findChatEndpoint: () => undefined }
+      )
+
+      const failure = await service
+        .completeChatStream({
+          messages: [{ role: "user", content: "Hello" }],
+          tools: [],
+          model: "qwen/qwen3-8b",
+          generationOptions: { temperature: 0.4 }
+        })
+        .catch((error: unknown) => error)
+
+      expect(isLlmRuntimeUnavailableError(failure)).toBe(true)
+      await expect(
+        service.generateTitle({ message: "Hello", model: "qwen/qwen3-8b" })
+      ).rejects.toSatisfy(isLlmRuntimeUnavailableError)
+      expect(endpoint.requests).toEqual([])
     })
 
     it("reports cancellation of a pending request as a cancelled completion", async () => {

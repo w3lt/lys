@@ -780,16 +780,29 @@ inserts and `content` updates.
 
 Chat generation and model management use separate integration boundaries:
 
-| Service             | Backend dependency        | Current use                                                                                                                        |
-| ------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `ChatService`       | `openai` SDK              | Streams chat completions and generates titles through the connected provider's OpenAI-compatible HTTP interface.                   |
-| `LlmService`        | `LlmEngineOperationQueue` | Runs inventory, health, load, stop-by-key, and context measurement through the serialized queue.                                   |
-| `LlmRuntimeService` | `LlmRuntime`              | Owns the runtime of the saved provider, its connection status, and the serialized model-operation queue; connects on demand.       |
-| `LmStudioRuntime`   | `@lmstudio/sdk`           | Verifies engine availability, implements model operations and lifecycle inspection, and owns SDK client cleanup.                   |
-| `OllamaRuntime`     | `fetch`                   | Lists, describes, and measures Ollama's models over its native API, on a local server or in Ollama's cloud; refuses load and stop. |
-| `GroqRuntime`       | `fetch`                   | Lists and measures Groq's models over its OpenAI-compatible API; refuses load and stop.                                            |
+| Service             | Backend dependency        | Current use                                                                                                                  |
+| ------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `ChatService`       | `openai` SDK              | Streams chat completions and generates titles through the connected provider's OpenAI-compatible HTTP interface.             |
+| `LlmService`        | `LlmEngineOperationQueue` | Runs inventory, health, load, stop-by-key, and context measurement through the serialized queue.                             |
+| `LlmRuntimeService` | `LlmRuntime`              | Owns the runtime of the saved provider, its connection status, and the serialized model-operation queue; connects on demand. |
+| `LmStudioRuntime`   | `@lmstudio/sdk`           | Verifies engine availability, lists, loads, stops, and measures models, and owns SDK client cleanup.                         |
+| `OllamaRuntime`     | `fetch`                   | Lists, describes, and measures Ollama's chat models over its native API, on a local server or in Ollama's cloud.             |
+| `GroqRuntime`       | `fetch`                   | Lists and measures Groq's models over its OpenAI-compatible API.                                                             |
 
 The [provider integration](/architecture/providers/) describes each provider.
+
+Every runtime implements `LlmRuntime`: the `LlmEngine` queries, which list the
+downloaded models and the instances that answer a request now and measure a
+context, and the `LlmRuntimeLifecycle` probe and disposal. Loading a model and
+stopping an instance is the separate `LlmModelInstanceController` capability,
+which only `LmStudioRuntime` implements. Acquiring a runtime reports who loads
+the provider's models: `lys` for LM Studio, with the runtime as its controller,
+and `provider` for Ollama and Groq, which load a model when a request names
+it, so every model they list counts as loaded. Each queued operation receives
+the connected engine with that report, and the controller only when Lys loads
+the models. `LlmService` refuses a load or an unload for a provider that loads
+its own models without a runtime call, and the list response carries the
+report as `modelLoading`.
 
 Fastify exposes the application-scoped `llmService` and `llmRuntimeService`.
 Model routes use provider-neutral capabilities of `LlmService`; the runtime
@@ -848,7 +861,7 @@ See the [health response contract](/reference/api/#model-health-responses).
 | The provider is not connected                                                                                                        | List, load, unload, and health requests receive `503` with `urn:lys:problem:llm:runtime-unavailable` before acceptance.                  |
 | A runtime call fails and the provider stopped answering                                                                              | The runtime is released, the status becomes `unreachable`, and a rejected request receives the runtime-unavailable `503`.                |
 | The saved provider needs a key and none is saved, or `settings.json` cannot be read                                                  | The connection attempt fails without contacting a provider, the status becomes `unreachable`, and the backend logs why without a key.    |
-| Load or unload is asked of Ollama or Groq                                                                                            | The runtime refuses it: a load fails with `500`, an unload with `503` and reason `unload-failed`. The desktop offers neither for them.   |
+| Load or unload is asked of a provider that loads its own models (Ollama, Groq)                                                       | `409` with `urn:lys:problem:llm:provider-loads-models` before any runtime call. The desktop offers neither when the list says so.        |
 | A request resolves after a failed runtime call; the probe or release then fails                                                      | The response keeps its result; the backend logs the probe or release failure at `error`.                                                 |
 | A reply round does not fit the loaded model, or its model is not loaded                                                              | The round is not sent; the reply is stored failed and followers receive an `error` that says why.                                        |
 | A reply round cannot be measured (provider not connected, queue full)                                                                | The round is not sent; the reply is stored failed and followers receive the general `error`.                                             |

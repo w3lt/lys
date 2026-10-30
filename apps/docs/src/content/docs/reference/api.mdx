@@ -14,7 +14,7 @@ route definitions.
 | Method   | Path                                                                              | Request body                                                                                         | Response                                                               |
 | -------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | `GET`    | `/api/v1/heath`                                                                   | none                                                                                                 | `{ ok: true }`                                                         |
-| `GET`    | `/api/v1/llm/list`                                                                | none                                                                                                 | `{ llms: LlmInfo[] }`                                                  |
+| `GET`    | `/api/v1/llm/list`                                                                | none                                                                                                 | `{ llms: LlmInfo[], modelLoading: "lys" \| "provider" }`               |
 | `GET`    | `/api/v1/llm/:modelId/health`                                                     | none                                                                                                 | Loaded-state health observation                                        |
 | `POST`   | `/api/v1/llm/load`                                                                | `{ modelId: string, configuration?: ModelLoadConfiguration }`                                        | `LlmInfo`                                                              |
 | `PATCH`  | `/api/v1/llm/unload`                                                              | `{ modelId: string }`                                                                                | `204` or typed Problem Details                                         |
@@ -840,10 +840,18 @@ it then shows the sentence and keeps the files staged.
 reports a model's format and size but no path, and Groq reports none of the
 three. Groq reports no capabilities either: its models have `vision` false
 and `trainedForToolUse` true. Ollama and Groq report every listed model as
-`loaded`.
+`loaded`. Ollama's list leaves out a model that cannot chat, such as an
+embedding model.
 
 `GET /api/v1/llm/list` returns `llms` ordered by `modelKey`, then by `path`,
-an absent path sorting first.
+an absent path sorting first, and `modelLoading`, who loads the listed
+models:
+
+| `modelLoading` | Meaning                                                                                                                                   |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `lys`          | A model answers only once loaded; load and unload go through the routes below. LM Studio reports this.                                    |
+| `provider`     | The provider loads a model when a request names it, so every listed model is `loaded`, and load and unload answer `409`. Ollama and Groq. |
+
 On a loaded model, `loadedContextLength` is the context length it is loaded
 with, in tokens: the smallest among its loaded instances, the window a chat
 request to it is measured against. It is absent on a model that is not loaded,
@@ -897,6 +905,19 @@ LM Studio loads it with:
 
 The backend passes the settings to the LM Studio SDK's load call, which sends
 each of them to LM Studio.
+
+When the list reports `modelLoading: "provider"`, a load request returns
+`409 Conflict` with `Content-Type: application/problem+json` before any
+runtime call, and the unload route answers the same way:
+
+```json
+{
+  "type": "urn:lys:problem:llm:provider-loads-models",
+  "title": "Provider loads its own models",
+  "status": 409,
+  "detail": "The connected model provider loads a model when a request names it, so Lys does not load or unload its models."
+}
+```
 
 ## Model operation admission
 
@@ -997,12 +1018,13 @@ new matching instance afterward. Expected failures use
 Operation failures include an occurrence-specific `detail`; admission refusal
 uses the fixed four-field service-busy body shown above:
 
-| Status | Problem type                              | Meaning                                                      |
-| ------ | ----------------------------------------- | ------------------------------------------------------------ |
-| `404`  | `urn:lys:problem:llm:model-not-found`     | No matching instance was initially loaded.                   |
-| `503`  | `urn:lys:problem:llm:runtime-unavailable` | No LLM runtime is connected, or the backend cannot query it. |
-| `503`  | `urn:lys:problem:llm:unload-failed`       | Reconciliation still found matching instances.               |
-| `503`  | `urn:lys:problem:llm:service-busy`        | The shared queue is full; no unload was accepted.            |
+| Status | Problem type                                | Meaning                                                           |
+| ------ | ------------------------------------------- | ----------------------------------------------------------------- |
+| `404`  | `urn:lys:problem:llm:model-not-found`       | No matching instance was initially loaded.                        |
+| `409`  | `urn:lys:problem:llm:provider-loads-models` | The connected provider loads its own models; nothing was stopped. |
+| `503`  | `urn:lys:problem:llm:runtime-unavailable`   | No LLM runtime is connected, or the backend cannot query it.      |
+| `503`  | `urn:lys:problem:llm:unload-failed`         | Reconciliation still found matching instances.                    |
+| `503`  | `urn:lys:problem:llm:service-busy`          | The shared queue is full; no unload was accepted.                 |
 
 Operation-failure bodies may also include an `instance` identifier for one
 occurrence. The service-busy body has fixed `type`, `title`, `status`, and `detail`

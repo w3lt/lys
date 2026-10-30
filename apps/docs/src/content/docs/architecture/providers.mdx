@@ -32,8 +32,10 @@ choice, the addresses, and the keys live in the
 | Chat generation  | `ChatService.completeChatStream()` uses the `openai` SDK against the connected provider's OpenAI-compatible endpoint.                                    |
 | Title generation | `ChatService.generateTitle()` calls the same endpoint with a separate prompt and a length-limited JSON-schema response format, then validates the reply. |
 
-Loading and unloading apply to LM Studio only; Ollama and Groq decide which
-models are in memory, and their runtimes refuse both operations. A load
+Loading and unloading apply to LM Studio only: its runtime alone implements
+`LlmModelInstanceController`. Ollama and Groq decide which models are in
+memory, so the model list reports `modelLoading: "provider"` for them, and
+the load and unload routes refuse with `409` before any runtime call. A load
 request may carry a `configuration`: context length, eval batch size,
 flash attention, KV cache placement, and active experts. The service hands it to
 the runtime adapter unchanged, and `LmStudioRuntime` gives the SDK's load call a
@@ -97,8 +99,9 @@ runtime for the saved provider through `acquireLlmProviderRuntime()`. A
 saved provider that needs a key without one, or a settings file that cannot
 be read, fails the attempt, and the status becomes `unreachable`. The
 service owns the runtime until it releases it, and consumes the full
-`LlmRuntime`: the five engine operations, the availability probe, and
-disposal. Concrete runtime selection belongs in composition.
+`LlmRuntime`: the three engine queries, the availability probe, and
+disposal, with the model-loading capability of a runtime whose models Lys
+loads. Concrete runtime selection belongs in composition.
 
 `ChatService` sends chat and title requests to the provider the runtime
 service is connected to, keeping one `openai` client per endpoint, so chat
@@ -121,10 +124,13 @@ unloads every model nor terminates the external LM Studio engine.
 
 `OllamaRuntime` uses Ollama's native API: `/api/tags` lists the models,
 `/api/show` describes each, and `/api/ps` reports a local server's running
-models. `GroqRuntime` lists Groq's models from `/openai/v1/models` and
-hides one Groq marks inactive. Both report every listed model as one loaded
-instance whose identifier is its key, because the provider loads a model
-when a request names it, and both refuse loading and stopping a model.
+models. A model whose capabilities lack `completion`, such as an embedding
+model, is left out of every listing and measurement; a model is kept when
+Ollama reports no capabilities for it. `GroqRuntime` lists Groq's models
+from `/openai/v1/models` and hides one Groq marks inactive. Both report every
+listed model as one loaded instance whose identifier is its key, because the
+provider loads a model when a request names it, and neither offers model
+loading.
 Neither caches an answer nor holds a connection, so disposal only closes
 admission.
 

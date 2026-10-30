@@ -349,10 +349,18 @@ provider is not connected, the model list is empty, model actions are
 disabled, and the pane explains how to recover. A manual Refresh action picks
 up changes made in the provider. Inventory metadata and each model's `loaded`
 flag drive the model rows and composer menu; several models may be loaded at
-once. Ollama and Groq report every model they list as loaded, so the Model
-pane and the Runtime pane's model card show neither Load nor Unload, nor the
-load configuration, for them, and the composer's banner offers Choose model
-instead of Load model.
+once. The Model pane's heading names the active provider, as in
+"models · LM Studio".
+
+The list also says who loads the models, as `modelLoading`, and the store
+keeps it with the inventory. Load, Unload, and the load configuration appear
+in the Model pane and the Runtime pane's model card only while the inventory
+read says `lys`, and the composer's banner then offers Load model. For
+`provider`, as Ollama and Groq report, every listed model counts as loaded,
+none of them appears, and the banner offers Choose model. Before an inventory
+is read, as while the backend is stopped, none of them appears either, and
+the notes leave out who loads the models. The desktop never decides this from
+the provider's name.
 
 Load sends `{ modelId, configuration }` to `POST /api/v1/llm/load`. Unload sends
 `{ modelId }` to `PATCH /api/v1/llm/unload` and accepts its bodyless `204`

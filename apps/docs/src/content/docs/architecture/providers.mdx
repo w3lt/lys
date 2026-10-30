@@ -75,9 +75,14 @@ Ollama and Groq offer no tokenizer, so their runtimes estimate each count
 as the text's UTF-8 length divided by three, rounded up. Most English text
 counts higher than a real tokenizer would, so a context that fits by the
 estimate rarely overflows the window. The window is the context length a
-local Ollama server reports for a running model, otherwise the model's own
-window from Ollama's `/api/show`, or Groq's `context_window`. A local Ollama
-server that has not loaded the model yet can load it with a smaller window.
+local Ollama server reports in `/api/ps` for a model it is running, the
+model's own window from `/api/show` for Ollama Cloud, or Groq's
+`context_window`. A local model that is not running has no measurement,
+because Ollama would load it with a window of its own choosing, often
+smaller than the model's: its round is refused as not loaded, as for LM
+Studio, until the model is started in Ollama. These runtimes report the
+window with each loaded instance, so the model list measures only LM
+Studio's models one by one.
 
 Generation temperature and reply-ceiling edits are saved automatically and
 applied to future chat requests. The [API reference](/reference/api/#chat-request-body)
@@ -143,7 +148,8 @@ Neither caches an answer nor holds a connection, so disposal only closes
 admission.
 
 Their HTTP requests share `requestProviderJson()`: each has a 15-second
-deadline and a 4 MiB limit on the answer, and a failure message names
+deadline, after which it fails with `The provider did not answer within 15000
+ms.`, and a 4 MiB limit on the answer, and a failure message names
 neither the answer's body nor the key. Acquisition succeeds once the
 provider lists its models, and the availability probe lists them again.
 Groq reports no capabilities: every Groq model is treated as accepting

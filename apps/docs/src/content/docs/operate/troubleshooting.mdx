@@ -66,7 +66,10 @@ If model listing, loading, or chat requests fail after HTTP readiness was
 established, verify that the provider is still reachable. When it stops
 answering while connected, the next failing model request marks it not
 reachable; press **Refresh** after restarting it. Load and Unload exist only
-for LM Studio; Ollama and Groq load a model when a message names it. The
+for LM Studio. Ollama Cloud and Groq serve every model they list. A local
+Ollama server answers only with a model it is running: a message to another
+model fails as not loaded, because Lys cannot know the window Ollama would
+load it with. Start the model in Ollama, for example with `ollama run` and the model's name, then press **Refresh**. The
 [model health endpoint](/operate/logging/#model-health-observation) can report
 loaded state; it does not test inference success.
 

@@ -57,10 +57,11 @@ the services together.
    of those cases nothing is stored.
    The route then reads whether the model sees images and is trained for
    tool use through the capability lookup the chat and chat-context routes
-   share (`createModelCapabilitiesLookup`), which lists LM Studio's inventory
-   until it has seen the model and then remembers what the model can do
-   until the backend stops, because a model's capabilities come from its
-   downloaded files. A model the inventory does not list is not remembered,
+   share (`createModelCapabilitiesLookup`), which lists the connected
+   provider's inventory until it has seen the model and then remembers what
+   the model can do while the backend stays connected to that provider,
+   because a model's capabilities come from its files; it forgets all of it
+   when another provider connects. A model the inventory does not list is not remembered,
    and its turn sees no image and is offered none of the tools the backend
    adds. While the lookup lists, a full model-operation queue or a missing
    runtime answers its `503` problem, and an image attached for a model
@@ -340,11 +341,12 @@ model reads the file in parts when it needs it. The reader's results stay in
 the reply's stored parts, so later turns resend them like every other tool
 result.
 
-Whether the model sees images and is trained for tool use is read from LM
-Studio's inventory (`src/modules/chat/routes/modelCapabilities.ts`) for
+Whether the model sees images and is trained for tool use is read from the
+connected provider's inventory (`src/modules/chat/routes/modelCapabilities.ts`) for
 every turn and every context measurement, as it decides the images the model
 sees and the tools the backend offers it. A listed model's capabilities are
-remembered until the backend stops, so only requests made before a listing
+remembered while the backend stays connected to that provider, and forgotten
+when another one connects, so only requests made before a listing
 had the model wait for the model-operation queue; a failed listing and a
 model it does not list are not remembered. The read lists the downloaded
 models only (`LlmService.listDownloadedLlmModels()`), without the loaded
@@ -797,8 +799,9 @@ context, and the `LlmRuntimeLifecycle` probe and disposal. Loading a model and
 stopping an instance is the separate `LlmModelInstanceController` capability,
 which only `LmStudioRuntime` implements. Acquiring a runtime reports who loads
 the provider's models: `lys` for LM Studio, with the runtime as its controller,
-and `provider` for Ollama and Groq, which load a model when a request names
-it, so every model they list counts as loaded. Each queued operation receives
+and `provider` for Ollama, Ollama Cloud, and Groq, which decide which models
+are in memory: every model of Ollama Cloud and Groq counts as loaded, and so
+does every model a local Ollama server is running. Each queued operation receives
 the connected engine with that report, and the controller only when Lys loads
 the models. `LlmService` refuses a load or an unload for a provider that loads
 its own models without a runtime call, and the list response carries the
@@ -832,7 +835,9 @@ or after a held runtime stops answering. Model operations are refused with
 `connected`. When a runtime call fails during a model operation, the service
 probes the runtime before the queue moves on and releases it if the provider
 no longer answers. Refresh keeps a runtime that still answers and otherwise
-acquires a new one; concurrent refreshes share one attempt.
+acquires a new one. Refreshes share an attempt until it reads the saved
+provider; a later refresh queues one of its own, so a provider picked while
+an attempt runs is the one connected.
 
 `LmStudioRuntime.create()` still waits for LM Studio to answer its version
 query, so a held runtime was always available when acquired. The installed SDK

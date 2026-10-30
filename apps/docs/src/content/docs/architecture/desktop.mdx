@@ -356,8 +356,10 @@ The list also says who loads the models, as `modelLoading`, and the store
 keeps it with the inventory. Load, Unload, and the load configuration appear
 in the Model pane and the Runtime pane's model card only while the inventory
 read says `lys`, and the composer's banner then offers Load model. For
-`provider`, as Ollama and Groq report, every listed model counts as loaded,
-none of them appears, and the banner offers Choose model. Before an inventory
+`provider`, as Ollama, Ollama Cloud, and Groq report, none of them appears,
+the banner offers Choose model, and a model is loaded while the provider
+serves it: every model of Ollama Cloud and Groq, and the models a local
+Ollama server is running. Before an inventory
 is read, as while the backend is stopped, none of them appears either, and
 the notes leave out who loads the models. The desktop never decides this from
 the provider's name.
@@ -654,7 +656,10 @@ placeholder, a show button, a link to the provider's key page, Save, and,
 once a key is saved, Test and Remove. Enter saves a valid new draft, Escape
 discards it, and an emptied address saves the default. A polite status line
 under the form describes the field: what an edit means, a running or failed
-save, a missing key, or the connection with its address.
+save, a missing key, or the connection with its address. While the
+connection is unknown, it says what the backend is doing, as the Runtime
+pane's provider card does: not running, starting, stopping, or not
+responding, and, while it runs, that Test checks again.
 
 The application store's provider slice owns the saves, serialized with the
 other group saves. A choice or address replaces only the `providers`

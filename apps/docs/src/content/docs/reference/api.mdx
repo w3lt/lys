@@ -45,8 +45,9 @@ List, load, health, unload, and chat-context requests, and a chat request
 for a model whose capabilities the backend has not read yet, answer `503`
 with `urn:lys:problem:llm:runtime-unavailable` while the backend has no
 connected model provider. The runtime-status route never contacts the
-provider; the runtime-connect route waits for one shared connection attempt,
-which reads the provider saved in `settings.json` again.
+provider; the runtime-connect route waits for a connection attempt, which
+reads the provider saved in `settings.json` again. Requests share an attempt
+until it has read the file; a later request waits for an attempt of its own.
 
 Every request body is limited to 1 MiB (1,048,576 bytes), Fastify's default,
 except a tool result, which is limited to 8 MiB (8,388,608 bytes) so that a
@@ -99,7 +100,8 @@ files are deleted again.
 Once the agent is found, the route reads from the provider's inventory whether
 `model` has `vision` and `trainedForToolUse`, which decide the images the
 model sees and the tools the backend adds to the turn. It remembers what a
-listed model can do until the backend stops, so requests for a model read the
+listed model can do while the backend stays connected to the same provider,
+and forgets all of it when another provider connects, so requests for a model read the
 inventory only until a listing has it: while the provider is not connected, such
 a request answers `503` with `urn:lys:problem:llm:runtime-unavailable`, and a
 full model-operation queue `503` with `urn:lys:problem:llm:service-busy`,
@@ -839,18 +841,19 @@ it then shows the sentence and keeps the files staged.
 `format`, `path`, and `sizeBytes` are present for LM Studio's models. Ollama
 reports a model's format and size but no path, and Groq reports none of the
 three. Groq reports no capabilities either: its models have `vision` false
-and `trainedForToolUse` true. Ollama and Groq report every listed model as
-`loaded`. Ollama's list leaves out a model that cannot chat, such as an
+and `trainedForToolUse` true. Ollama Cloud and Groq report every listed model
+as `loaded`; a local Ollama server reports the models its `/api/ps` lists as
+running. Ollama's list leaves out a model that cannot chat, such as an
 embedding model.
 
 `GET /api/v1/llm/list` returns `llms` ordered by `modelKey`, then by `path`,
 an absent path sorting first, and `modelLoading`, who loads the listed
 models:
 
-| `modelLoading` | Meaning                                                                                                                                   |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `lys`          | A model answers only once loaded; load and unload go through the routes below. LM Studio reports this.                                    |
-| `provider`     | The provider loads a model when a request names it, so every listed model is `loaded`, and load and unload answer `409`. Ollama and Groq. |
+| `modelLoading` | Meaning                                                                                                                                                                                                                     |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lys`          | A model answers only once loaded; load and unload go through the routes below. LM Studio reports this.                                                                                                                      |
+| `provider`     | The provider decides which models are in memory, and load and unload answer `409`. A model is `loaded` while the provider serves it: every model of Ollama Cloud and Groq, and the models a local Ollama server is running. |
 
 On a loaded model, `loadedContextLength` is the context length it is loaded
 with, in tokens: the smallest among its loaded instances, the window a chat

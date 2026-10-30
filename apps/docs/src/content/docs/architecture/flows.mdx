@@ -70,8 +70,9 @@ seconds. Quitting Lys stops vmo and the backend together.
    Studio card.
 2. The store shows `connecting` and sends `POST /api/v1/llm/runtime/connect`.
 3. The backend queues one attempt behind accepted model work. It keeps a held
-   runtime that still answers and otherwise acquires a new one. Concurrent
-   requests share the attempt.
+   runtime that still answers and otherwise acquires a new one. Requests that
+   arrive before the attempt reads the saved provider share it; a later one
+   queues another attempt, which reads the provider again.
 4. The response carries `connected` or `unreachable`, and the store publishes
    it.
 5. On `connected`, the store requests model inventory.
@@ -90,8 +91,9 @@ seconds. Quitting Lys stops vmo and the backend together.
    the current temperature and an optional reply ceiling; a local zero ceiling
    is omitted from the request.
 4. The backend reads what each attachment is from its bytes and finds the
-   agent that answers. It reads from LM Studio whether the model sees images
-   and is trained for tool use, once per model until the backend stops. It
+   agent that answers. It reads from the connected provider whether the model
+   sees images and is trained for tool use, once per model while the backend
+   stays connected to that provider. It
    then writes the attachment files under
    `$LYS_HOME/attachments/<conversation id>/<message id>/`, creates or reuses
    the conversation, inserts the user message with its numbered attachments,

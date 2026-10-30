@@ -10,6 +10,7 @@ describe("PaneSkeleton", () => {
     "generation",
     "agents",
     "tools",
+    "mcp",
     "secrets"
   ])(
     "announces once, politely, that the %s settings are being read",

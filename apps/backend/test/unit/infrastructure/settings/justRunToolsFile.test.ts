@@ -1,7 +1,7 @@
+import { MAXIMUM_SETTINGS_FILE_BYTES } from "@lys/share"
 import { mkdir } from "node:fs/promises"
 import { describe, expect, it } from "vitest"
 import { readJustRunToolNames } from "../../../../src/infrastructure/settings/justRunToolsFile"
-import { MAXIMUM_SETTINGS_FILE_BYTES } from "../../../../src/infrastructure/settings/settingsFile"
 import {
   createSettingsFilePath,
   writeSettingsFile

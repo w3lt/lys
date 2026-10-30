@@ -26,17 +26,18 @@ The desktop host owns a JSON settings file at `$LYS_HOME/settings.json`.
 
 - created automatically when the file is missing
 - stores the `runtime`, `model`, `generation`, `loadConfiguration`,
-  `secrets`, `tools`, and `location` groups described in
+  `secrets`, `tools`, `location`, and `mcp` groups described in
   [Configuration](/operate/configuration/)
 - parsed as JSON on load and rewritten as pretty-printed JSON when the Tauri
   `save_settings` command is called
-- read, never written, by the backend for the Tavily API key and the Just run
-  list
+- read, never written, by the backend for the Tavily API key, the Just run
+  list, and the MCP servers
 - read, never created or written, by the host's `get_location` tool for the
   location the person saved
 
 The desktop loads this file at initialization and autosaves generation, load
-configuration, tool approval, and runtime startup switch edits. Each save
+configuration, tool approval, and runtime startup switch edits; it saves the
+Tavily API key, the location, and the MCP servers when the person saves them. Each save
 replaces only its own part and preserves the rest already on disk, including a
 `loadConfiguration.default` written by hand; the other runtime edits in the
 UI remain session-only.
@@ -49,6 +50,15 @@ call's result, which goes to the model and is stored with the reply (below).
 Saving with every field empty removes it from the file; results stored
 earlier keep it.
 
+The `mcp` group holds the MCP servers the person saved in Settings → MCP: each
+one's name and either its command, arguments, and environment variables, or
+its URL and headers. Environment values and headers often hold secrets, such
+as API keys or bearer tokens, and URLs and arguments can too; all are kept as
+plain text in this owner-only file. They leave the file only when the backend
+starts a command server or sends a URL server its requests. A call of an MCP
+tool sends its arguments to the server, and its result is stored with the
+reply (below).
+
 ## `$LYS_HOME/lys_db.sqlite`
 
 The backend stores conversations and agent definitions in a SQLite database at
@@ -57,8 +67,8 @@ each file sent with a message (the file itself is under `attachments/`,
 below), each reply's reasoning, text, and tool calls, and every web source a succeeded
 `web_search` or `read_page` call showed, whether a reply cites it or not.
 Each tool call is stored with its arguments and its full result, such as the
-text of a file `read_text_file` read or the location `get_location`
-returned. All of it is kept until the
+text of a file `read_text_file` read, the location `get_location`
+returned, or an MCP server's answer as the model read it. All of it is kept until the
 conversation is deleted.
 
 An agent definition holds the agent's code, name, short description, and

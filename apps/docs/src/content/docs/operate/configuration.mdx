@@ -31,7 +31,7 @@ The Tauri desktop host reads and writes one JSON settings file at
 `$LYS_HOME/settings.json`.
 
 The current schema contains `runtime`, `generation`, `loadConfiguration`,
-`secrets`, `tools`, and `location` groups. Rust
+`secrets`, `tools`, `location`, and `mcp` groups. Rust
 and the TypeScript settings projection use the same camelCase field names. See
 the [configuration reference](/reference/configuration/) for the complete field
 list, defaults, and accepted values.
@@ -65,12 +65,13 @@ The desktop reads the file when Lys starts, so a hand edit of `runtime`,
 `model`, `generation`, or `loadConfiguration` takes effect the next time Lys
 starts. The backend reads `tools.justRun` and the Tavily API key from the file
 itself, so a hand edit of either applies without a restart, as the `tools`
-paragraph above and [Tavily API key](#tavily-api-key) describe. A save from a
+paragraph above and [Tavily API key](#tavily-api-key) describe. It reads `mcp`
+when it starts and when the MCP pane saves; see [MCP servers](#mcp-servers). A save from a
 settings pane writes the values Lys holds over a hand edit of its group made
 while Lys runs: the Generation pane replaces `generation`, the Model pane
 replaces `loadConfiguration.models` and leaves `default` as it is in the file,
 the Secrets pane replaces `secrets`, the Tools pane replaces `tools` and, on
-Save, `location`, and the
+Save, `location`, the MCP pane replaces `mcp`, and the
 Runtime pane replaces `runtime.autoStartBackend` and `runtime.autoStartVmo`
 and leaves the rest of `runtime` as it is in the file.
 
@@ -107,6 +108,92 @@ Lys's backend reads it when it lists the tools, when a message offers
 message without restarting. A hand-edited key must be 1 to 256 visible ASCII
 characters, or the settings file fails to load.
 
+## MCP servers
+
+Settings → MCP adds MCP servers, whose tools the agents can then use. Each
+server runs as you or receives the headers you give it, so add only servers
+you trust. A server is reached in one of two ways:
+
+- **Local program** (`stdio`): Lys's backend starts the command and talks to
+  it over its standard input and output. Enter the command's full path, such
+  as `/opt/homebrew/bin/npx`, and its arguments on one line, separated by
+  spaces; put quotes around an argument that holds a space, such as a path.
+  The quotes only group an argument: the command starts in your home folder
+  without a shell, so `~`, `$VARIABLE`, and pipes are not expanded. It gets
+  `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, and `USER` from the backend,
+  then the variables you add under Environment, which win over those. An app
+  opened from Finder or the Dock has a short `PATH`, so a bare `npx` is often
+  not found; see
+  [troubleshooting](/operate/troubleshooting/#an-mcp-command-works-in-a-terminal-but-not-in-lys).
+  Its error output goes to the backend log.
+- **Remote server** (`http`): the backend sends MCP requests to the server's
+  Streamable HTTP endpoint. Use `https://`; plain `http://` is accepted only
+  for `localhost`, `127.0.0.1`, and `[::1]`. A server that needs a token:
+  choose Token under Sign-in, and Lys sends `Authorization: Bearer <token>`.
+  Add any other headers under Headers. Lys does not follow redirects, cannot sign
+  in with OAuth yet ([#253](https://github.com/w3lt/lys/issues/253)), does
+  not speak the older HTTP+SSE transport
+  ([#254](https://github.com/w3lt/lys/issues/254)), and refuses a URL to an
+  internationalized domain name, such as `https://bücher.example/mcp`.
+
+A new server's editor can fill its fields from a config pasted from another
+app: press **paste json** and paste the `mcpServers` object of
+`claude_desktop_config.json` or `.cursor/mcp.json`, a `servers` map, or a
+single server. Lys takes the first server, its name from its key, and says
+when the config holds more; add the others the same way. A server whose
+`type` is `sse` is refused. A server given only by its URL is taken as a
+Streamable HTTP server, so check that an older server's URL is not its SSE
+endpoint.
+
+Saving a server in the editor, or removing one, writes the `mcp` group of
+`settings.json`. While the backend runs, the pane then asks it to apply the
+group: it closes removed servers, opens new and changed ones in the
+background, and keeps an unchanged server's connection, or its failure. A
+server has two minutes to start or answer and list its tools, and each tool
+call five minutes. Each row shows the server's state, and its details say
+more:
+
+| State                      | Meaning                                                                                                                                  |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `Starting` or `Connecting` | The backend is starting the program or reaching the URL, and reading its tools.                                                          |
+| `Running` or `Connected`   | Its tools are listed; `· N skipped` counts the tools Lys cannot offer, which **Skipped tools** lists.                                    |
+| `Failed`                   | It is not connected; the details say why. See [troubleshooting](/operate/troubleshooting/#an-mcp-server-shows-failed).                   |
+| `Not applied`              | The backend does not list the saved server, such as after a save it could not apply. **Start** or **Connect** applies the saved servers. |
+
+Nothing reconnects by itself. The button beside the state, **Restart** or
+**Reconnect**, or **Retry** after a failure, closes the server's connection
+and opens it again with the settings the backend applied, and restarting the
+backend opens every server again. The backend reads a server's tools once,
+when it connects.
+
+**Restart**, **Retry**, and saving a changed server start a command server's
+new process only after its old one ended, so a server that runs one copy at a
+time, such as one that holds a lock file or a port, connects again. A server
+that does not exit when Lys closes its input is ended within about four
+seconds, and the row shows `Starting` until then.
+
+Each MCP tool appears in Settings → Tools under `MCP · <server>` and starts
+switched on, but asks before each call until you choose Just run for it. A
+server's details in the MCP pane show the same switches as chips, with what
+the tools that are on cost per request, and set Ask me or Just run for all of
+its tools at once. Every tool that is on is described to the model with each
+request, so switch off the ones you do not need.
+
+Environment values, the token, header values, URLs, and arguments are saved as
+plain text in `settings.json`, readable only by your user account; the editor
+hides values and the token until you show them. The backend never sends them back to the desktop, and Lys
+writes none of them into its log entries, though it logs a server's own error
+output as the server wrote it. A server's name appears in its tools' names,
+which the model reads, so a name should not hold a secret.
+
+The backend reads the `mcp` group when it starts and each time the MCP pane
+saves; a hand edit applies when the backend next starts. The MCP pane shows a
+hand edit the next time Lys starts, and a save from the pane before then
+writes back the servers it holds. The
+[configuration reference](/reference/configuration/#mcp-servers) lists every
+rule a server follows, and the [API reference](/reference/api/#mcp-servers)
+the states and failure reasons.
+
 ## Current UI wiring
 
 The desktop loads settings through Tauri during initialization. Generation
@@ -121,7 +208,11 @@ only the `loadConfiguration` group, and the Model pane offers the same retry
 action. The Secrets pane saves the Tavily API key only on Save or Enter,
 replacing only the `secrets` group. Choosing Ask me or Just run in the Tools
 pane autosaves the same way, replacing only the `tools` group, and the Tools
-pane offers the same retry action. Changing either startup switch in the
+pane offers the same retry action. Switching an MCP tool's chip or choosing
+Ask me or Just run for a server in the MCP pane saves the `tools` group the
+same way. The MCP pane saves the servers only on Save in its editor or on
+Remove, replacing only the `mcp` group, and then asks the running backend to
+apply them. Changing either startup switch in the
 Runtime pane, for the backend or for vmo, autosaves both switches and keeps
 the rest of the `runtime` group as it is on disk; after a failed save, the
 pane says that the next launch follows the switches last saved, and changing a

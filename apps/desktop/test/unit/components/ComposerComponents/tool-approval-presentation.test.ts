@@ -93,6 +93,17 @@ describe("formatToolCallSummary", () => {
       "Search the web for “thời tiết Hà Nội”. Sends the query to Tavily (api.tavily.com)."
     )
   })
+
+  it("asks whether to run an MCP tool, by its server's name for it, on its server", () => {
+    expect(
+      formatToolCallSummary({
+        runner: "mcp",
+        toolName: "mcp__notes__search_notes",
+        server: "notes",
+        serverToolName: "search-notes"
+      })
+    ).toBe("Run search-notes on the MCP server notes?")
+  })
 })
 
 describe("formatToolCallAnnouncement", () => {

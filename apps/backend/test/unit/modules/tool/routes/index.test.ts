@@ -2,7 +2,11 @@ import {
   checkWebSearchKeyApiResponseSchema,
   listBackendToolsApiResponseSchema
 } from "@lys/protocol"
-import { describe, expect, it } from "vitest"
+import type { McpServerSettings } from "@lys/share"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
+import { openMcpServer } from "../../../../../src/modules/mcp/mcpServerOpening"
+import type { McpServerEvent } from "../../../../../src/modules/mcp/mcpServerEvent"
+import McpServerRegistry from "../../../../../src/modules/mcp/mcpServerRegistry"
 import { createBuiltInTools } from "../../../../../src/modules/tool/builtIn/builtInTools"
 import { buildReadPageDefinition } from "../../../../../src/modules/tool/builtIn/web/readPageTool"
 import WebSearchToolProvider from "../../../../../src/modules/tool/builtIn/web/webSearchToolProvider"
@@ -11,6 +15,11 @@ import registerToolRoutes from "../../../../../src/modules/tool/routes"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import type { TavilyApiKeyRead } from "../../../../../src/infrastructure/settings/tavilyApiKeyFile"
 import { createTestFastify } from "../../../support/fastifyTestApp"
+import {
+  answerAsMcpServer,
+  buildHttpServerSettings,
+  startFakeMcpHttpServer
+} from "../../../support/mcpTestServers"
 import {
   LOOK_UP_WORD_TOOL,
   ScriptedBuiltInTool
@@ -33,6 +42,41 @@ const KEY_CHECK_URL = "/api/v1/tools/web_search/key-check"
 /** Origin of a web page open in the person's browser. */
 const WEB_PAGE_ORIGIN = "https://attacker.example"
 
+/** Longest one test opening of an MCP server may take. */
+const MCP_OPENING_TIMEOUT_MILLISECONDS = 10_000
+
+/** Bound of the wait for an MCP server to connect. */
+const MCP_STATE_WAIT = Object.freeze({ timeout: 10_000, interval: 10 })
+
+/**
+ * Tool a fake MCP server lists, whose input schema uses keywords beyond
+ * `type`, `properties`, and `required`, nested.
+ */
+const FIND_NOTES_TOOL = Object.freeze({
+  name: "find.notes",
+  description: "Finds notes.",
+  inputSchema: Object.freeze({
+    type: "object",
+    properties: Object.freeze({
+      query: Object.freeze({ type: "string", description: "Words to find." }),
+      limit: Object.freeze({ type: "integer", minimum: 1, maximum: 10 }),
+      tags: Object.freeze({
+        type: "array",
+        items: Object.freeze({ type: "string" })
+      }),
+      filter: Object.freeze({
+        type: "object",
+        properties: Object.freeze({
+          after: Object.freeze({ type: "string", format: "date" })
+        }),
+        additionalProperties: false
+      })
+    }),
+    required: Object.freeze(["query"]),
+    additionalProperties: false
+  })
+})
+
 /**
  * Starts a fake vmo that answers its health route, so it can read pages.
  *
@@ -46,18 +90,48 @@ async function startHealthyVmo(): Promise<string> {
 }
 
 /**
+ * Creates an MCP server registry whose settings name these servers and
+ * whose openings reach them as production does, closed when the case
+ * finishes.
+ *
+ * @param servers - Servers in settings order; none when omitted.
+ * @returns The registry, which has not read its settings yet.
+ */
+function createMcpServerRegistry(
+  servers: readonly McpServerSettings[] = []
+): McpServerRegistry {
+  const events: McpServerEvent[] = []
+  const registry = new McpServerRegistry({
+    readSettings: () =>
+      Promise.resolve({ status: "read", settings: { servers } }),
+    openServer: (settings, context) =>
+      openMcpServer(settings, context, MCP_OPENING_TIMEOUT_MILLISECONDS),
+    workingDirectory: process.cwd(),
+    reportEvent: (event) => events.push(event)
+  })
+  onTestFinished(async () => {
+    await registry.close()
+  })
+  return registry
+}
+
+/**
  * Registers the tool routes, behind the backend's HTTP transport, over a web
  * search provider whose key reads give one result and whose requests would
- * reach a fake Tavily server, and a read-page tool that reads through vmo.
+ * reach a fake Tavily server, a read-page tool that reads through vmo, and
+ * an MCP server registry.
  *
  * @param keyRead - What every key read gives.
  * @param vmoOrigin - Origin of vmo; a fake vmo that answers its health route
  * when omitted.
+ * @param mcpServerRegistry - Registry of the MCP servers; one with no
+ * server when omitted.
  * @returns The application, and the server that records any request sent.
  */
 async function createToolRouteApp(
   keyRead: TavilyApiKeyRead,
-  vmoOrigin?: string
+  vmoOrigin?: string,
+  mcpServerRegistry: McpServerRegistry = createMcpServerRegistry()
 ) {
   const server = await startTavilyServer(answerWithJson({}))
   const webSearchToolProvider = new WebSearchToolProvider(
@@ -67,6 +141,7 @@ async function createToolRouteApp(
   const { app } = createTestFastify()
   await updateFastifyWithHttpTransport(app)
   app.decorate("webSearchToolProvider", webSearchToolProvider)
+  app.decorate("mcpServerRegistry", mcpServerRegistry)
   app.decorate("builtInTools", [
     ...createBuiltInTools(
       webSearchToolProvider,
@@ -130,6 +205,49 @@ describe("registerToolRoutes", () => {
         unavailableTools: [
           { name: "read_page", reason: "page-reader-not-ready" }
         ]
+      })
+      expect(
+        listBackendToolsApiResponseSchema.safeParse(response.json()).success
+      ).toBe(true)
+    })
+
+    it("lists the tools of the connected MCP servers after the built-in tools, with their input schemas whole", async () => {
+      const mcpServer = await startFakeMcpHttpServer(
+        answerAsMcpServer([FIND_NOTES_TOOL])
+      )
+      const registry = createMcpServerRegistry([
+        buildHttpServerSettings("notes", mcpServer.url)
+      ])
+      await registry.updateServers()
+      await vi.waitFor(() => {
+        expect(registry.listToolDefinitions()).toHaveLength(1)
+      }, MCP_STATE_WAIT)
+      const { app } = await createToolRouteApp(
+        { status: "missing" },
+        undefined,
+        registry
+      )
+
+      const response = await app.inject({ method: "GET", url: "/api/v1/tools" })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual({
+        tools: [
+          buildReadPageDefinition(),
+          buildWebSearchDefinition(),
+          LOOK_UP_WORD_TOOL,
+          {
+            name: "mcp__notes__find_notes",
+            description: "Finds notes.",
+            group: "mcp",
+            access: "unknown",
+            runner: "mcp",
+            server: "notes",
+            serverToolName: "find.notes",
+            inputSchema: FIND_NOTES_TOOL.inputSchema
+          }
+        ],
+        unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
       })
       expect(
         listBackendToolsApiResponseSchema.safeParse(response.json()).success

@@ -10,10 +10,10 @@ Lys currently shares contracts through two TypeScript workspace packages.
 
 ## Shared packages
 
-| Package         | Owns                                                                                                                                                                               |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@lys/protocol` | API prefix constants, loopback host and port constants, route paths, request bodies, response schemas, Problem Details bodies, and chat SSE event variants                         |
-| `@lys/share`    | Conversation, conversation metadata, conversation message, reply part, and conversation source schemas shared between backend and desktop, the agent schemas, and tool definitions |
+| Package         | Owns                                                                                                                                                                                                                                           |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@lys/protocol` | API prefix constants, loopback host and port constants, route paths, request bodies, response schemas, Problem Details bodies, and chat SSE event variants                                                                                     |
+| `@lys/share`    | Conversation, conversation metadata, conversation message, reply part, and conversation source schemas shared between backend and desktop, the agent schemas, tool definitions (Lys's own and MCP tools), MCP server settings, and JSON values |
 
 ## Current protocol surface
 
@@ -28,10 +28,15 @@ The public backend surface is small and explicit:
 | LM Studio connection status and reconnect routes                                         | `packages/protocol/src/apis/llm/*.ts`          |
 | Conversation list, get, rename, and delete routes                                        | `packages/protocol/src/apis/conversation/*.ts` |
 | Agent list, create, get, update, and delete routes                                       | `packages/protocol/src/apis/agent/*.ts`        |
+| MCP server list, sync, and reconnect routes, and server states                           | `packages/protocol/src/apis/mcp/*.ts`          |
 | Problem Details error bodies                                                             | `packages/protocol/src/http/errors/*.ts`       |
 | Health route path                                                                        | `packages/protocol/src/apis/health/routes.ts`  |
 | Shared conversation shapes                                                               | `packages/share/src/models/conversation.ts`    |
 | Shared agent shapes                                                                      | `packages/share/src/models/agent.ts`           |
+| Shared tool definitions, Lys's own and those of MCP servers                              | `packages/share/src/models/tool.ts`            |
+| Shared MCP server settings and the `mcp__` tool name prefix                              | `packages/share/src/models/mcp.ts`             |
+| Shared JSON values and their nesting bound                                               | `packages/share/src/models/json.ts`            |
+| Distinct-value check shared by those rules                                               | `packages/share/src/models/values.ts`          |
 
 ## Why the packages are split
 
@@ -47,6 +52,9 @@ the same schemas when reading backend event payloads.
 - Contracts are source-level TypeScript and Zod definitions inside the monorepo.
 - The desktop and backend are built from the same workspace source; there is no
   negotiated protocol version or feature-capability handshake.
+- A tool call's argument values are any JSON value, since MCP tools can take
+  arrays and objects; a desktop built before that change rejects an event
+  that carries such a value.
 - The only current chat event variants are the eleven chat-route variants and
   the reply-events `reply-snapshot` documented in
   [SSE events](/reference/sse-events/).

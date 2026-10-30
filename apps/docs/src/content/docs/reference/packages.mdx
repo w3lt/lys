@@ -11,14 +11,14 @@ package.
 
 ## Workspace map
 
-| Project         | Kind    | Current role                                                                         |
-| --------------- | ------- | ------------------------------------------------------------------------------------ |
-| `@lys/desktop`  | app     | React UI plus Tauri frontend bindings                                                |
-| `@lys/backend`  | app     | Fastify backend serving health, LLM, chat, conversation history, and agent endpoints |
-| `@lys/docs`     | app     | Astro/Starlight engineering handbook                                                 |
-| `@lys/protocol` | package | Shared route constants, request and response schemas, and chat event contracts       |
-| `@lys/share`    | package | Shared conversation, message, and agent schemas                                      |
-| `@lys/scripts`  | tooling | Release-version synchronization from the root `VERSION` file                         |
+| Project         | Kind    | Current role                                                                                    |
+| --------------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `@lys/desktop`  | app     | React UI plus Tauri frontend bindings                                                           |
+| `@lys/backend`  | app     | Fastify backend serving health, LLM, chat, conversation history, agent, tool, and MCP endpoints |
+| `@lys/docs`     | app     | Astro/Starlight engineering handbook                                                            |
+| `@lys/protocol` | package | Shared route constants, request and response schemas, and chat event contracts                  |
+| `@lys/share`    | package | Shared conversation, message, and agent schemas                                                 |
+| `@lys/scripts`  | tooling | Release-version synchronization from the root `VERSION` file                                    |
 
 ## Project notes
 
@@ -39,15 +39,20 @@ package.
   conversation.
 - The Secrets settings pane saves the Tavily API key of `web_search` through
   Tauri and checks it through the backend.
+- The MCP settings pane saves the MCP servers through Tauri, asks the backend
+  to apply them, and shows each server's state, tools, and skipped tools,
+  with a button that reconnects it.
 
 ### `@lys/backend`
 
 - Entry point: `src/index.ts`
 - Framework: Fastify
 - Important runtime dependencies: `@fastify/sse`, `@lmstudio/sdk`, `openai`,
-  `fastify-type-provider-zod`, and `@mozilla/readability` with `linkedom`,
-  which extract a page's main text. `read_page` asks vmo through Node's
-  `node:http`, and `web_search` uses Node's `node:https` and no search SDK
+  `fastify-type-provider-zod`, `@modelcontextprotocol/client`, which connects
+  to MCP servers over stdio and Streamable HTTP, and `@mozilla/readability`
+  with `linkedom`, which extract a page's main text. `read_page` asks vmo
+  through Node's `node:http`, and `web_search` uses Node's `node:https` and
+  no search SDK
 - `build` (root `pnpm backend:build`) bundles `src/index.ts` with esbuild into
   `dist/backend.mjs` and copies the two prompt files beside it; `build.sh`
   installs that output as the release backend.
@@ -70,13 +75,16 @@ package.
   approval card names
 - Describes the backend tool list with each tool's availability, the
   `web_search` key check, and the backend-tool-unavailable chat problem
+- Describes the MCP server list, sync, and reconnect routes, each server's
+  state and skipped tools, and the server-not-found problem
 - Holds the rule, applied by both the backend and the desktop, that refuses a
   `web_search` query holding a character a person cannot reliably see
 
 ### `@lys/share`
 
 - Exports Zod schemas and inferred TypeScript types for conversations,
-  messages, agents, tools, and the Tavily API key format
+  messages, agents, tools, MCP tool definitions, the MCP server settings, JSON
+  values, and the Tavily API key format
 - Used by both backend persistence code and desktop chat state; the agent
   schemas and limits are used by the backend, `@lys/protocol`, and the desktop
   agent store and editor

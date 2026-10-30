@@ -1,4 +1,5 @@
 import * as z from "zod"
+import { calculateUtf8ByteLength } from "./values"
 
 /** Bytes in one mebibyte. */
 const BYTES_PER_MEBIBYTE = 1024 * 1024
@@ -55,16 +56,6 @@ export const attachmentImageMediaTypeSchema = z.enum([
 export type AttachmentImageMediaType = z.infer<
   typeof attachmentImageMediaTypeSchema
 >
-
-/**
- * Counts the UTF-8 bytes of a text.
- *
- * @param text - Any text.
- * @returns How many bytes its UTF-8 encoding has.
- */
-function calculateUtf8ByteLength(text: string): number {
-  return new TextEncoder().encode(text).length
-}
 
 /**
  * Matches a C0 or C1 control character, which a file name never shows and a

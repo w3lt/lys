@@ -127,10 +127,11 @@ const chatContextApiResponseSchemas = Object.freeze({
  * model's tokenizer and reports the context length the model is loaded with.
  * Nothing is stored and the model is never loaded or asked to generate. The
  * measurement shares the model-operation queue, so it waits behind a load in
- * progress. An offered backend tool is measured whether or not it can run
- * now. The descriptor is imported by backend and desktop transport code;
- * changing its method, path, or schemas is a compatibility change requiring
- * coordinated consumers.
+ * progress. An offered built-in backend tool is measured whether or not it
+ * can run now; an offered MCP tool is measured only while its server is
+ * connected, because its definition is known only then. The descriptor is
+ * imported by backend and desktop transport code; changing its method, path,
+ * or schemas is a compatibility change requiring coordinated consumers.
  */
 export const chatContextApi = Object.freeze({
   method: "POST",

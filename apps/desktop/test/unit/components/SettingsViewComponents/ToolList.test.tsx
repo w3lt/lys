@@ -1,4 +1,4 @@
-import type { BackendToolUnavailableReason } from "@lys/protocol"
+import type { ListedBackendToolUnavailableReason } from "@lys/protocol"
 import type { ComponentProps } from "react"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -11,6 +11,7 @@ import {
 import type { ToolSettings } from "@/lib/store/settings"
 import {
   buildBackendToolDefinition,
+  buildMcpToolDefinition,
   buildToolDefinition
 } from "../../support/toolFixtures"
 
@@ -44,6 +45,12 @@ const WEB_SEARCH = buildBackendToolDefinition("web_search")
 /** The web group listing both backend tools. */
 const [SEARCH_GROUP] = buildToolGroups([READ_PAGE, WEB_SEARCH])
 
+/** Tool of the `notes` MCP server. */
+const NOTES_SEARCH = buildMcpToolDefinition("notes", "search")
+
+/** The `notes` server's group listing its tool. */
+const [NOTES_GROUP] = buildToolGroups([NOTES_SEARCH])
+
 /**
  * Builds the choices the rows are drawn with.
  *
@@ -68,8 +75,10 @@ const BACKEND_TOOLS_ON = buildToolChoices(
 )
 
 /** `read_page` unavailable while vmo, Lys's page reader, isn't ready. */
-const PAGE_READER_NOT_READY: ReadonlyMap<string, BackendToolUnavailableReason> =
-  new Map([["read_page", "page-reader-not-ready"]])
+const PAGE_READER_NOT_READY: ReadonlyMap<
+  string,
+  ListedBackendToolUnavailableReason
+> = new Map([["read_page", "page-reader-not-ready"]])
 
 /**
  * Renders the group with spies for every proposal.
@@ -307,6 +316,57 @@ describe("ToolGroupSection", () => {
     expect(
       within(approval).getByRole("button", { name: "Just run" })
     ).toHaveAttribute("aria-pressed", "true")
+  })
+
+  it("lists an MCP server's tools under the server, on until switched off, with its arguments from the input schema", () => {
+    startToolGroup({
+      listing: NOTES_GROUP,
+      expandedToolName: NOTES_SEARCH.name
+    })
+
+    const section = screen.getByRole("region", { name: "MCP · notes" })
+    expect(section).toHaveTextContent(/^MCP · notes1 of 1 on/)
+    const toggle = getToolToggle(NOTES_SEARCH.name)
+    expect(toggle).toHaveAccessibleDescription(
+      "depends on server on MCP server Runs search on notes. asks before it runs"
+    )
+    expect(
+      screen.getByRole("switch", { name: `Use ${NOTES_SEARCH.name}` })
+    ).toBeChecked()
+    const details = document.getElementById(
+      toggle.getAttribute("aria-controls") ?? ""
+    )
+    if (details === null) throw new Error("The tool details are not shown")
+    const argumentsSection = within(details).getByRole("region", {
+      name: "arguments"
+    })
+    expect(argumentsSection).toHaveTextContent(
+      "arguments1 required · 1 optional"
+    )
+    expect(getArgumentItem(argumentsSection, "query")).toHaveTextContent(
+      /^querystringrequiredText to look for\.$/
+    )
+    expect(getArgumentItem(argumentsSection, "limit")).toHaveTextContent(
+      /^limitintegeroptional$/
+    )
+    expect(details).toHaveTextContent("Runs on an MCP server")
+    expect(details).toHaveTextContent(
+      "Lys’s backend sends each call to the tool’s MCP server, which does the work."
+    )
+  })
+
+  it("says what Just run means for an MCP tool", () => {
+    startToolGroup({
+      listing: NOTES_GROUP,
+      expandedToolName: NOTES_SEARCH.name,
+      toolChoices: buildToolChoices({}, [NOTES_SEARCH.name])
+    })
+
+    expect(
+      screen.getByRole("group", { name: "Before it runs" })
+    ).toHaveAccessibleDescription(
+      "Runs on its MCP server the moment the model asks, without showing you what it sends. What it does depends on the MCP server."
+    )
   })
 
   it("says when an expanded tool takes no arguments", () => {

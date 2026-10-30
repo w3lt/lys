@@ -24,7 +24,8 @@ const RAIL_TABS = [
   "Generation03",
   "Agents04",
   "Tools05",
-  "Secrets06"
+  "MCP06",
+  "Secrets07"
 ]
 
 /**

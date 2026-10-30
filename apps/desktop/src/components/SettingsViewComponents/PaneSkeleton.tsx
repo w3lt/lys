@@ -185,6 +185,26 @@ const PANE_SKELETONS: Record<SettingsPane, PaneSkeletonShape> = {
     list: [],
     block: false
   },
+  mcp: {
+    cards: [],
+    heading: true,
+    rows: [
+      {
+        id: "first-server",
+        label: "112px",
+        description: "248px",
+        control: { width: "88px", height: "28px" }
+      },
+      {
+        id: "second-server",
+        label: "96px",
+        description: "220px",
+        control: { width: "88px", height: "28px" }
+      }
+    ],
+    list: [],
+    block: false
+  },
   secrets: {
     cards: [],
     heading: true,

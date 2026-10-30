@@ -3,7 +3,7 @@ import { validatorCompiler } from "fastify-type-provider-zod"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { onTestFinished, vi, type MockInstance } from "vitest"
+import { onTestFinished, vi, type Mock, type MockInstance } from "vitest"
 import SqliteAgentRecordStore from "../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
 import AgentRuntimeService, {
   buildConversationTitleLookup
@@ -21,6 +21,9 @@ import {
   type FindModelCapabilities
 } from "../../../src/modules/chat/routes/modelCapabilities"
 import LlmService from "../../../src/modules/llm/llmService"
+import McpServerRegistry from "../../../src/modules/mcp/mcpServerRegistry"
+import { openMcpServer } from "../../../src/modules/mcp/mcpServerOpening"
+import type { McpSettingsRead } from "../../../src/infrastructure/settings/mcpSettingsFile"
 import ToolApprovalService, {
   type ReadJustRunToolNames
 } from "../../../src/modules/toolApproval/toolApprovalService"
@@ -38,6 +41,9 @@ import { ScriptedBuiltInToolProvider } from "./scriptedBuiltInToolProvider"
 
 /** Published path of the chat route. */
 const CHAT_PATH = "/api/v1/chat"
+
+/** Longest a test MCP server may take to open. */
+const MCP_TEST_OPENING_TIMEOUT_MILLISECONDS = 10_000
 
 /**
  * System prompts of the built-in agents in the chat route test app; each
@@ -97,6 +103,11 @@ export type ChatRouteTestApp = TestFastify &
      * finishes, before the conversation database closes.
      */
     generations: ReplyGenerationRegistry
+    /**
+     * Settings reader of `app.mcpServerRegistry`; reads no server until a
+     * case configures it and applies the settings.
+     */
+    readMcpSettings: Mock<() => Promise<McpSettingsRead>>
   }>
 
 /**
@@ -129,7 +140,11 @@ export type ChatRouteTestApp = TestFastify &
  * `check_spelling`, whose provider is never ready (`api-key-missing`). The
  * decorated tool approval service reads the saved Just run choices through
  * the `readJustRunToolNames` spy. The decorated attachment file store is
- * real, over a directory created for the test. When the test finishes, the
+ * real, over a directory created for the test. The decorated MCP server
+ * registry is real, reads its settings through the `readMcpSettings` spy,
+ * which reads no server, opens servers with a 10-second limit, and logs
+ * nothing; it holds no server until a case applies settings, and it is
+ * closed when the test finishes. When the test finishes, the generation
  * registry is disposed first, so every generation it holds has stored its
  * final state before the in-memory conversation database is closed; the
  * directory is removed last.
@@ -199,6 +214,24 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   const readJustRunToolNames = vi.fn<ReadJustRunToolNames>(() =>
     Promise.reject(createUnexpectedCallError("readJustRunToolNames"))
   )
+  const readMcpSettings = vi.fn<() => Promise<McpSettingsRead>>(() =>
+    Promise.resolve(
+      Object.freeze({
+        status: "read",
+        settings: Object.freeze({ servers: Object.freeze([]) })
+      })
+    )
+  )
+  const mcpServerRegistry = new McpServerRegistry({
+    readSettings: readMcpSettings,
+    openServer: (settings, context) =>
+      openMcpServer(settings, context, MCP_TEST_OPENING_TIMEOUT_MILLISECONDS),
+    workingDirectory: process.cwd(),
+    reportEvent: () => undefined
+  })
+  onTestFinished(async () => {
+    await mcpServerRegistry.close()
+  })
   const generations = new ReplyGenerationRegistry()
   onTestFinished(async () => {
     await generations[Symbol.asyncDispose]()
@@ -220,6 +253,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     "attachmentFileStore",
     new AttachmentFileStore(attachmentsDirectoryPath)
   )
+  testFastify.app.decorate("mcpServerRegistry", mcpServerRegistry)
   testFastify.app.decorate(
     "builtInTools",
     Object.freeze([
@@ -251,7 +285,8 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     ),
     readJustRunToolNames,
     attachmentsDirectoryPath,
-    generations
+    generations,
+    readMcpSettings
   })
 }
 

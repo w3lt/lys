@@ -51,19 +51,23 @@ repository today; it is not a promise of unreleased work.
   title is generated at a time per conversation, and the composer accepts the
   next message as soon as the reply ends, without waiting for the title.
 - Interrupted streaming rows are recovered on backend startup.
-- Runtime, Model, Generation, Agents, Tools, and Secrets settings panes are
-  available.
+- Runtime, Model, Generation, Agents, Tools, MCP, and Secrets settings panes
+  are available.
   The Runtime pane starts and stops the backend and vmo, shows whether each
   is ready, and saves whether each starts when Lys opens; Lys stops both when
   it quits. Model controls refresh inventory, load and unload weights, and check
   loaded-state health. The Agents pane lists the built-in agents, Caliginia
   and Lysiptera, which can be read and duplicated but not changed or deleted,
   and creates, edits, duplicates, and deletes the user's agents through the
-  backend. The Tools pane lists the desktop's file tools and the backend's
-  `read_page` and `web_search`; each tool's switch and its Ask me or Just run
-  choice are saved, and the Tool calls switch lasts for the session only.
+  backend. The Tools pane lists the desktop's file tools, the backend's
+  `read_page` and `web_search`, and the tools of the connected MCP servers;
+  each tool's switch and its Ask me or Just run choice are saved, and the Tool calls switch lasts for the session only.
   `read_page` is
-  off and cannot be switched on while vmo is not ready. The
+  off and cannot be switched on while vmo is not ready. The MCP pane adds,
+  edits, and removes MCP servers, each a local program Lys starts or a remote
+  server it reaches over Streamable HTTP, fills a new one from a pasted
+  config, shows whether each is connected, switches its tools and sets
+  whether they ask first, lists the tools Lys skipped, and reconnects one. The
   Secrets pane saves the Tavily API key `web_search` needs, and checks it.
 - A chat offers the switched-on tools to a model trained for tool use and
   answers its tool calls: file tools run in the desktop, `read_page` asks vmo
@@ -71,7 +75,9 @@ repository today; it is not a promise of unreleased work.
   its scripts, following its redirects, and reading all of its text, hidden
   text included, and `web_search` searches the web through
   Tavily in the backend, unavailable until a Tavily API key is saved;
-  `read_page` is likewise unavailable until vmo answers its health route. Each call
+  `read_page` is likewise unavailable until vmo answers its health route. An
+  MCP tool runs on its server, which the backend calls while the server is
+  connected; MCP tools start on. Each call
   asks the person first unless its tool is set to Just run, which the backend
   decides for every tool from the saved choices; both web tools start off. Lys's instructions do not
   give her today's date yet
@@ -85,7 +91,7 @@ repository today; it is not a promise of unreleased work.
   [attachments](/architecture/backend/#attachments).
 - Generation controls apply to future chat requests and save automatically
   through Tauri to `$LYS_HOME/settings.json`, which contains runtime, model,
-  generation, load configuration, secrets, and tools groups. The runtime
+  generation, load configuration, secrets, tools, location, and MCP groups. The runtime
   group's two startup switches are saved when changed; the other runtime
   edits remain session-only.
 - Every model load Lys starts sends that model's load configuration: context
@@ -112,6 +118,17 @@ The current repository does not yet provide:
 - replay or reconnect semantics for chat streams
 - a production desktop release workflow
 - evidenced ADR and RFC records, and a canonical release log
+- for MCP servers: OAuth sign-in
+  ([#253](https://github.com/w3lt/lys/issues/253)), the older HTTP+SSE
+  transport ([#254](https://github.com/w3lt/lys/issues/254)), resources,
+  prompts, sampling, elicitation, and roots
+  ([#255](https://github.com/w3lt/lys/issues/255)), reading a changed tool
+  list without reconnecting ([#256](https://github.com/w3lt/lys/issues/256)),
+  images and other non-text results for the model
+  ([#257](https://github.com/w3lt/lys/issues/257)), the login shell's `PATH`
+  for commands ([#258](https://github.com/w3lt/lys/issues/258)), and one
+  switch for all of a server's tools
+  ([#259](https://github.com/w3lt/lys/issues/259))
 
 ## Related documents
 

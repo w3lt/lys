@@ -158,14 +158,15 @@ too.
 Carries one tool call the backend shows to the person before anything runs,
 in the same shape as a `tool-call` event's `call`. The backend's tool approval
 service sends it for every call of a tool that is not saved as Just run,
-client and backend tools alike except `read_attachment` and the agent state
-tools (`read_my_state`, `find_agents`, `read_agent_state`), which run without
-approval, right after the call's `reply-part` stored it
+client, backend, and MCP tools alike except `read_attachment` and the agent
+state tools (`read_my_state`, `find_agents`, `read_agent_state`), which run
+without approval, right after the call's `reply-part` stored it
 as `awaiting-approval`; a call of a tool on Just run gets no prompt. The
 client shows the call and answers with the
 [tool-approval route](/reference/api/#tool-approvals). After `allowed`, a
-backend tool runs in the backend, and a client tool's call comes back as a
-`tool-call` event under the same `id`. The event is live only: a client that
+backend tool runs in the backend, an MCP tool runs on its
+[MCP server](/reference/api/#mcp-servers), and a client tool's call comes
+back as a `tool-call` event under the same `id`. The event is live only: a client that
 was not following when it was sent finds the call in the next
 `reply-snapshot`'s `pendingToolApprovals`.
 
@@ -185,12 +186,17 @@ Carries one call of a client tool that the reply waits for the client to run:
 ```
 
 `id` is a UUIDv7 the backend made for the call. `toolName` names a tool the
-request offered, and `arguments` holds the model's values by argument name:
-strings, numbers, or Booleans, already checked against the tool's definition.
+request offered, and `arguments` holds the model's values by argument name,
+already checked against the tool's definition. A client tool's values are
+strings, numbers, or Booleans; in a `tool-approval` event for an MCP tool, a
+value can be any JSON value, such as an object or an array, because the
+backend checks only the shape of an MCP tool's arguments and its server
+checks the values.
 An optional argument the model left out is absent. A call whose arguments do
 not match never reaches the client; the backend answers it itself, and the
 model reads the error. A call of a backend tool, such as `read_page` or
-`web_search`, never arrives here: once allowed, the backend runs it itself.
+`web_search`, or of an MCP tool never arrives here: once allowed, the backend
+runs it itself.
 
 The backend sends this event only once the call may run: at once for a tool
 saved as Just run, otherwise after the person allowed its `tool-approval`

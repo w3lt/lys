@@ -1,7 +1,10 @@
 import type { ChatToolCall } from "@lys/protocol"
 import {
   buildToolFunctionFormat,
+  toolCallArgumentsSchema,
   toolDefinitionSchema,
+  type JsonValue,
+  type McpToolInputSchema,
   type OpenAIFunctionTool,
   type ToolArgumentDefinition,
   type ToolDefinition,
@@ -9,10 +12,7 @@ import {
   type ToolAccess
 } from "@lys/share"
 import * as z from "zod"
-import ToolArgument, {
-  type ToolArgumentValue,
-  type ToolArgumentValueSchema
-} from "./argument"
+import ToolArgument, { type ToolArgumentValueSchema } from "./argument"
 
 /** Checked argument values of one tool call, by argument name. */
 type ToolCallArguments = ChatToolCall["arguments"]
@@ -53,8 +53,19 @@ type ArgumentJsonResult =
  * because JSON has none, but its type allows one for an optional argument.
  */
 type ToolCallArgumentsSchema = z.ZodType<
-  Readonly<Record<string, ToolArgumentValue | undefined>>
+  Readonly<Record<string, JsonValue | undefined>>
 >
+
+/**
+ * Most bytes of UTF-8 argument text a model may send for one call of an MCP
+ * tool, inclusive.
+ *
+ * @remarks Bounds the arguments the backend parses, shows the person in the
+ * call's approval, and sends to the server, whose schema can accept any JSON
+ * value. Lys's own tools take only strings, numbers, and Booleans and keep
+ * no such bound.
+ */
+const MAXIMUM_MCP_ARGUMENT_TEXT_BYTES = 256 * 1024
 
 /** Arguments object of a call whose argument text is blank. */
 const NO_ARGUMENT_VALUES = Object.freeze({})
@@ -78,8 +89,10 @@ const UNPARSABLE_ARGUMENT_JSON = Object.freeze({
  * changes afterwards; the arguments schema is built from it once. Its `group`
  * and `access` describe the tool to the person using Lys and never reach the
  * model; `access` also decides whether the tool's results are cleaned of
- * invisible characters. Concurrency model: reentrant; the tool owns no mutable state and
- * retains no collaborator.
+ * invisible characters. One of Lys's own tools checks every argument against
+ * its declared type. An MCP tool checks only the shape of the arguments; its
+ * server checks them against its own schema. Concurrency model: reentrant;
+ * the tool owns no mutable state and retains no collaborator.
  */
 export default class AgentTool {
   /** Validated, frozen definition of the tool. */
@@ -113,9 +126,9 @@ export default class AgentTool {
   /**
    * Returns what the tool reaches.
    *
-   * @returns `reads` for a tool that only reads this machine, or `network`
-   * for a tool that reaches past it, whose results carry what remote servers
-   * sent.
+   * @returns `reads` for a tool that only reads this machine; `network` for a
+   * tool that reaches past it, whose results carry what remote servers sent;
+   * or `unknown` for an MCP tool, whose server decides what it reaches.
    */
   public get access(): ToolAccess {
     return this.#definition.access
@@ -137,11 +150,23 @@ export default class AgentTool {
    * @param argumentText - Untrusted text the model wrote for the call's
    * arguments; blank text means no arguments.
    * @returns `valid` with frozen checked values when the text is a JSON
-   * object whose keys are declared arguments, with every required argument
-   * present and every value of its argument's type. Otherwise `invalid`, with
-   * an explanation for the model that names the tool. Bad text never throws.
+   * object that fits the tool. For one of Lys's own tools, its keys are
+   * declared arguments, every required argument is present, and every value
+   * is of its argument's type. For an MCP tool, the text is at most
+   * 256 KiB, its keys follow the argument-name rule, every name the input
+   * schema requires is present, and it nests at most
+   * `MAXIMUM_JSON_NESTING_DEPTH` of `@lys/share` arrays and objects deep
+   * without a `__proto__` key. Otherwise `invalid`, with an explanation for
+   * the model that names the tool. Bad text never throws.
    */
   public parseCallArguments(argumentText: string): ToolCallArgumentsResult {
+    if (
+      this.#definition.runner === "mcp" &&
+      Buffer.byteLength(argumentText) > MAXIMUM_MCP_ARGUMENT_TEXT_BYTES
+    )
+      return buildInvalidArgumentsResult(
+        `The arguments for ${this.name} are longer than 256 KiB.`
+      )
     const argumentJson = parseArgumentJson(argumentText)
     if (argumentJson.status === "unparsable")
       return buildInvalidArgumentsResult(
@@ -158,19 +183,78 @@ export default class AgentTool {
 }
 
 /**
- * Builds the strict schema of one tool's arguments object.
+ * Builds the schema of one tool's arguments object.
  *
  * @param definition - Validated tool definition.
- * @returns A schema that accepts an object holding only declared arguments,
- * every required one present and every value of its argument's type, and
- * freezes its output.
+ * @returns The strict schema of a Lys tool's declared arguments, or the
+ * shape schema of an MCP tool's arguments; either freezes its output.
  */
 function buildToolCallArgumentsSchema(
   definition: ToolDefinition
 ): ToolCallArgumentsSchema {
+  switch (definition.runner) {
+    case "client":
+    case "backend":
+      return buildDeclaredArgumentsSchema(definition.arguments)
+    case "mcp":
+      return buildMcpArgumentsSchema(definition.inputSchema)
+  }
+}
+
+/**
+ * Builds the strict schema of a Lys tool's arguments object.
+ *
+ * @param toolArguments - Validated argument definitions.
+ * @returns A schema that accepts an object holding only declared arguments,
+ * every required one present and every value of its argument's type, and
+ * freezes its output.
+ */
+function buildDeclaredArgumentsSchema(
+  toolArguments: readonly ToolArgumentDefinition[]
+): ToolCallArgumentsSchema {
   const argumentSchemas: Readonly<Record<string, ToolArgumentValueSchema>> =
-    Object.fromEntries(definition.arguments.map(buildArgumentSchemaEntry))
+    Object.fromEntries(toolArguments.map(buildArgumentSchemaEntry))
   return z.strictObject(argumentSchemas).readonly()
+}
+
+/**
+ * Builds the shape schema of an MCP tool's arguments object.
+ *
+ * @param inputSchema - Validated input schema the server gave the tool.
+ * @returns A schema that accepts a JSON object whose keys follow the
+ * argument-name rule and that holds every name `required` lists, nested at
+ * most `MAXIMUM_JSON_NESTING_DEPTH` of `@lys/share` arrays and objects deep
+ * without a `__proto__` key. It freezes its output all the way down. Values
+ * are not checked against `properties`; the server does that.
+ */
+function buildMcpArgumentsSchema(
+  inputSchema: McpToolInputSchema
+): ToolCallArgumentsSchema {
+  const requiredNames = inputSchema.required ?? []
+  return toolCallArgumentsSchema.superRefine((callArguments, context) => {
+    addMissingArgumentIssues(callArguments, requiredNames, context)
+  })
+}
+
+/**
+ * Adds one issue for each required argument a call leaves out.
+ *
+ * @param callArguments - Arguments whose shape passed the checks.
+ * @param requiredNames - Names the tool's input schema requires.
+ * @param context - Refinement context that collects the issues.
+ */
+function addMissingArgumentIssues(
+  callArguments: Readonly<Record<string, JsonValue>>,
+  requiredNames: readonly string[],
+  context: z.RefinementCtx
+): void {
+  for (const name of requiredNames)
+    if (!Object.hasOwn(callArguments, name))
+      context.addIssue({
+        code: "custom",
+        path: [name],
+        message: "The tool requires this argument."
+      })
 }
 
 /**
@@ -212,7 +296,7 @@ function parseArgumentJson(argumentText: string): ArgumentJsonResult {
  * @returns A frozen record of the present values.
  */
 function buildToolCallArguments(
-  argumentValues: Readonly<Record<string, ToolArgumentValue | undefined>>
+  argumentValues: Readonly<Record<string, JsonValue | undefined>>
 ): ToolCallArguments {
   const presentEntries = Object.entries(argumentValues).filter(
     isPresentArgumentEntry
@@ -227,8 +311,8 @@ function buildToolCallArguments(
  * @returns True when the value is not undefined.
  */
 function isPresentArgumentEntry(
-  entry: [string, ToolArgumentValue | undefined]
-): entry is [string, ToolArgumentValue] {
+  entry: [string, JsonValue | undefined]
+): entry is [string, JsonValue] {
   return entry[1] !== undefined
 }
 

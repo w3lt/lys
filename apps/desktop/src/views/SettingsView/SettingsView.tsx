@@ -69,6 +69,16 @@ const ToolPane = lazy(
 )
 
 /**
+ * Lazily loads the MCP settings body; the parent supplies the fallback.
+ *
+ * @remarks React owns module loading and
+ * suspension while the settings view owns pane selection and the fallback.
+ */
+const McpPane = lazy(
+  () => import("@/components/SettingsViewComponents/McpPaneContent")
+)
+
+/**
  * Lazily loads the secrets settings body; the parent supplies the fallback.
  *
  * @remarks React owns module loading and
@@ -85,6 +95,7 @@ type SettingsPaneContentComponent =
   | typeof GenerationPaneContent
   | typeof AgentPane
   | typeof ToolPane
+  | typeof McpPane
   | typeof SecretsPane
 
 /** Metadata and lazy body used to render one settings pane. */
@@ -147,13 +158,22 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "05",
     note: "What the agents can reach for. Every tool that is on is described to the model with each request, so off is cheaper than unused.",
     footNote:
-      "Tools come from Lys itself and cannot be added or removed here. Each tool's switch and Just run choice are saved; the Tool calls switch resets when Lys restarts.",
+      "Lys's own tools cannot be added or removed here; MCP servers add theirs in Settings → MCP. Each tool's switch and Just run choice are saved; the Tool calls switch resets when Lys restarts.",
     contentComponent: ToolPane
+  },
+  {
+    value: "mcp",
+    label: "MCP",
+    ordinal: "06",
+    note: "Programs and services that give the agents more tools. Local ones Lys starts on this machine; remote ones it reaches by URL. Each runs as you, so add only servers you trust.",
+    footNote:
+      "Saved in settings.json in Lys's home folder, environment values, tokens, and headers in plain text, readable only by your user account. A command runs as you in your home folder, with a short PATH: use its full path, such as /opt/homebrew/bin/npx.",
+    contentComponent: McpPane
   },
   {
     value: "secrets",
     label: "Secrets",
-    ordinal: "06",
+    ordinal: "07",
     note: "Keys for the services Lys calls on your behalf. Each key goes only to its own service and is never sent to the model.",
     footNote:
       "Saved in plain text in settings.json in Lys's home folder, readable only by your user account. Lys's backend reads it when it lists tools and when a message offers web_search; a reply keeps the key it started with.",
@@ -283,9 +303,12 @@ export type SettingsViewProps = {
  * directly rather than through `SettingsContext`; its prompt measure reads the
  * loaded model's context length from the application store's model inventory,
  * and it proposes no settings patch. The Tools pane likewise reads the tool store directly; it
- * lists the tools the desktop and the backend report. Its tool-calls switch
+ * lists the tools the desktop and the backend report, MCP servers' tools
+ * among them. Its tool-calls switch
  * lasts for the session, and each tool's switch and approval are saved by
- * the application store.
+ * the application store. The MCP pane reads the saved MCP servers from the
+ * application store, which saves them, and their states from the MCP server
+ * store; it proposes no settings patch.
  *
  * Each pane body is a stable lazy component behind a `Suspense` fallback; a
  * pending body renders a separate busy frame, so its heading and Done action

@@ -1,4 +1,4 @@
-import type { BackendToolUnavailableReason } from "@lys/protocol"
+import type { ListedBackendToolUnavailableReason } from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
 import { useEffect, useId, useRef, useState, type ReactElement } from "react"
 
@@ -9,13 +9,13 @@ import { useToolStore, type ToolListState } from "@/lib/store/tools"
 
 import LocationCard from "./LocationCard"
 import PaneSkeleton from "./PaneSkeleton"
+import { ToolApprovalSaveFeedback } from "./ToolApprovalSaveFeedback"
 import { ToolCallsCard } from "./ToolCallsCard"
 import { ToolGroupSection } from "./ToolList"
 import { ToolUnavailableCard } from "./ToolUnavailableCard"
 import {
   buildToolGroups,
   calculateOfferedToolTotals,
-  formatToolSettingsSaveStatus,
   type ToolGroupListing
 } from "./tool-presentation"
 
@@ -89,7 +89,10 @@ type ToolGroupListProps = {
   /** Proposes showing one tool's details, or none with null. */
   readonly onExpandedToolNameChange: (toolName: string | null) => void
   /** Why each tool that cannot run now cannot, keyed by tool name. */
-  readonly unavailableTools: ReadonlyMap<string, BackendToolUnavailableReason>
+  readonly unavailableTools: ReadonlyMap<
+    string,
+    ListedBackendToolUnavailableReason
+  >
 }
 
 /**
@@ -99,7 +102,8 @@ type ToolGroupListProps = {
  * which it saves; the component passes each change to it. The parent owns
  * which tool is
  * expanded, the lock, the dimming, and the availability. Groups keep the
- * order in which the listed tools first name them. A tool that cannot run
+ * order in which the listed tools first name them; each MCP server's tools
+ * form a group of their own, after Lys's groups. A tool that cannot run
  * now offers to open the Secrets pane, which the application store selects.
  * @param props - Listed tools, expansion, lock, dimming, availability, and
  * the expansion proposal.
@@ -122,7 +126,7 @@ function ToolGroupList({
    * Builds the section of one tool group.
    *
    * @param listing - Group and its tools, in list order.
-   * @returns The group's section, keyed by its group.
+   * @returns The group's section, keyed by its listing's key.
    */
   function buildToolGroupSection(listing: ToolGroupListing): ReactElement {
     return (
@@ -130,7 +134,7 @@ function ToolGroupList({
         expandedToolName={expandedToolName}
         isDimmed={isDimmed}
         isLocked={isLocked}
-        key={listing.group}
+        key={listing.key}
         listing={listing}
         onExpandedToolNameChange={onExpandedToolNameChange}
         onOpenSecrets={() => setSettingsPane("secrets")}
@@ -145,47 +149,6 @@ function ToolGroupList({
   }
 
   return <>{buildToolGroups(tools).map(buildToolGroupSection)}</>
-}
-
-/**
- * Announces the automatic save of the tool choices and offers a retry when
- * a write fails.
- *
- * @remarks The application store owns the save across pane unmounts; the
- * component owns no state or effects. The status is one polite region named
- * "Tool choices save" that stays mounted while the pane is shown, also while
- * the tools are read again or cannot be read, so it exists before every
- * change it announces; it is empty while nothing needs saying. After a
- * failure, Retry saving writes the current choices again; until a save
- * works, each switch still applies, but tool calls follow the Just run
- * choices last saved, because the backend reads them from the settings file.
- * @returns The status region and, after a failed save, the retry button.
- */
-function ToolApprovalSaveFeedback(): ReactElement {
-  const save = useLysStore((state) => state.toolSettingsSave)
-  const saveToolSettings = useLysStore((state) => state.saveToolSettings)
-
-  return (
-    <div className="settings-view__tool-status">
-      <p
-        aria-label="Tool choices save"
-        aria-live="polite"
-        className="settings-view__note"
-        role="status"
-      >
-        {formatToolSettingsSaveStatus(save)}
-      </p>
-      {save.status === "failed" ? (
-        <Button
-          onClick={() => void saveToolSettings()}
-          type="button"
-          variant="outline"
-        >
-          Retry saving
-        </Button>
-      ) : null}
-    </div>
-  )
 }
 
 /**
@@ -229,7 +192,10 @@ type ToolWorkspaceProps = {
   /** Every tool, the app's then the backend's, in the order Settings lists them. */
   readonly tools: readonly ToolDefinition[]
   /** Why each tool that cannot run now cannot, keyed by tool name. */
-  readonly unavailableTools: ReadonlyMap<string, BackendToolUnavailableReason>
+  readonly unavailableTools: ReadonlyMap<
+    string,
+    ListedBackendToolUnavailableReason
+  >
 }
 
 /**
@@ -335,8 +301,8 @@ function ToolListBody({ list }: ToolListBodyProps): ReactElement | null {
 }
 
 /**
- * Presents the Tools pane: Lys's tools, in the app and in the backend, and
- * the choices about them.
+ * Presents the Tools pane: Lys's tools, in the app and in the backend, the
+ * tools of the connected MCP servers, and the choices about them.
  *
  * @remarks The tool store owns the list and the session's tool-calls switch,
  * and the application store owns the saved switches and approvals. The pane

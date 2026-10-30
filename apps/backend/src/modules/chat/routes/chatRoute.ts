@@ -14,6 +14,7 @@ import { v7 as uuidv7 } from "uuid"
 import type { BackendConfig } from "../../../config"
 import type Agent from "../../agent/agent"
 import type { AgentTurn } from "../../agent/agent"
+import { AgentRequestLimitError } from "../../agent/agentActivity"
 import type { FindAttachmentImage } from "../../agent/agentContext"
 import type { UnofferedTools } from "../../agent/unofferedTools"
 import type AttachmentFileStore from "../../attachment/attachmentFileStore"
@@ -948,7 +949,8 @@ async function createTurnReplyTask(
  * reply, which numbers new sources after the conversation's stored ones,
  * whose tool calls pass the approval gateway, and whose images are read
  * from the conversation's attachment files. With the request's logger, an
- * unreadable settings file is logged as a warning; a cancelled reply, and a
+ * unreadable settings file, and a reply refused because its agent's request
+ * slots and line were full, are logged as warnings; a cancelled reply, and a
  * round that was not sent because it did not fit or its model was not
  * loaded, at debug level; and any other reply failure as an error.
  */
@@ -1008,8 +1010,10 @@ function buildAgentTurn(
  * Builds the reporters that log how a reply ended without finishing.
  *
  * @param logger - Request logger, borrowed for the reply.
- * @returns Reporters that log a cancellation and a refused round as debug
- * entries and a failed stream as an error.
+ * @returns Reporters that log a reply refused because its agent's request
+ * slots and line were full as a warning, a cancellation and a round that was
+ * not sent because it did not fit or its model was not loaded as debug
+ * entries, and a failed stream as an error.
  */
 function buildReplyFailureReporters(
   logger: FastifyBaseLogger
@@ -1022,7 +1026,13 @@ function buildReplyFailureReporters(
       logger.debug({ err: failure }, "Chat completion was cancelled")
     },
     reportReplyRefusal: (failure) => {
-      logger.debug({ err: failure }, "Chat round was not sent to the model")
+      if (failure instanceof AgentRequestLimitError)
+        logger.warn(
+          { err: failure },
+          "Chat reply was refused because its agent was too busy"
+        )
+      else
+        logger.debug({ err: failure }, "Chat round was not sent to the model")
     },
     reportReplyFailure: (failure) => {
       logger.error({ err: failure }, "Chat completion stream failed")

@@ -166,6 +166,12 @@ each call still asks first unless the person set the tool to Just run; see
   backend can chat with any agent and so learn the titles of that agent's
   conversations, and with a built-in agent those of every agent
   ([#171](https://github.com/w3lt/lys/issues/171)).
+- Each live agent works on at most two replies at once and lets at most
+  eight more wait, so any caller that reaches the backend can fill an
+  agent's request slots and line with its own chats; until those end, the
+  person's new messages to that agent wait or fail with an `error` event
+  ([#171](https://github.com/w3lt/lys/issues/171)). The limits bound the
+  model requests and waiting replies of each agent, not of all agents.
 - Deleting a stored agent keeps its row, its system prompt included, in
   `lys_db.sqlite`, so that its code is never reused; Lys offers no way to
   erase it.

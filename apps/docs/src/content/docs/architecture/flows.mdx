@@ -130,7 +130,13 @@ seconds. Quitting Lys stops vmo and the backend together.
    backend answers with a problem instead and stores nothing.
 5. The backend emits a `start-new-conversation-turn` or
    `start-existing-conversation-turn` event.
-6. Before each round of the reply, the backend builds the round's context,
+6. The reply first takes one of the answering agent's
+   [request slots](/architecture/backend/#request-slots). When the agent is
+   already working on as many replies as it has slots, the reply waits in
+   line, first come first served, and sends nothing until a slot frees; Stop
+   ends it as `interrupted`. When the line is full too, the reply is stored
+   failed and the backend emits `error` with the reason. Before each round of
+   the reply, the backend builds the round's context,
    in which each user message carries its text, the list of its attachments,
    and the images a model with vision sees, and measures it with the loaded
    model's tokenizer, counting each image as its estimate. A round that does not fit the context

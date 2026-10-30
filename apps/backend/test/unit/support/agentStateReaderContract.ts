@@ -32,6 +32,8 @@ export const STATE_READER_DELETED_AT = "2026-10-20T08:00:00.000Z"
 export type AgentStateReaderHarness = Readonly<{
   /** Reader under test. */
   reader: AgentStateReader
+  /** Request slots every agent of the reader has. */
+  requestSlotCount: number
   /** Number of agent lookups and searches the reader made so far. */
   countAgentReads: () => number
   /**
@@ -155,6 +157,7 @@ export function registerAgentStateReaderContractSuite(
             name: STATE_READER_RESEARCHER.name,
             role: "member",
             deletedAt: null,
+            requestSlotCount: harness.requestSlotCount,
             requests: []
           }
         })
@@ -177,6 +180,7 @@ export function registerAgentStateReaderContractSuite(
           name: "Caliginia",
           role: "leader",
           deletedAt: null,
+          requestSlotCount: harness.requestSlotCount,
           requests: []
         }
       })

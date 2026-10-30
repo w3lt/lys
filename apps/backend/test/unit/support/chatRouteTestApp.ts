@@ -55,6 +55,16 @@ export const TEST_BUILT_IN_AGENT_PROMPTS = Object.freeze({
   lysiptera: "You are the test Lysiptera."
 })
 
+/**
+ * Request limits of every live agent in the chat route test app: two
+ * replies of one agent run at once and one more may wait, so a case reaches
+ * the waiting line and the refusal with few conversations.
+ */
+export const TEST_AGENT_REQUEST_LIMITS = Object.freeze({
+  slotCount: 2,
+  waitingLimit: 1
+})
+
 /** Test application decorated with the services the chat route borrows. */
 export type ChatRouteTestApp = TestFastify &
   Readonly<{
@@ -126,7 +136,8 @@ export type ChatRouteTestApp = TestFastify &
  * decorated agent service
  * keeps its records on the same in-memory database and builds the built-in
  * agents with {@link TEST_BUILT_IN_AGENT_PROMPTS}; the decorated agent
- * runtime service keeps the live agents over it and titles their requests'
+ * runtime service keeps the live agents over it, each with
+ * {@link TEST_AGENT_REQUEST_LIMITS}, and titles their requests'
  * conversations from the same database; every agent's model calls
  * go through the `completeChatStream` spy, and every measurement, by their
  * meters and by the title task, through the `findLlmContextMeasurement` spy
@@ -209,7 +220,8 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
       llmService.findLlmContextMeasurement(model, texts)
     ),
     findConversationTitle: (conversationId) =>
-      buildConversationTitleLookup(history.getConversation(conversationId))
+      buildConversationTitleLookup(history.getConversation(conversationId)),
+    requestLimits: TEST_AGENT_REQUEST_LIMITS
   })
   const readJustRunToolNames = vi.fn<ReadJustRunToolNames>(() =>
     Promise.reject(createUnexpectedCallError("readJustRunToolNames"))

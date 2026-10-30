@@ -1,6 +1,6 @@
 import type { GetAgentApiResponse } from "@lys/protocol"
 import Agent, { type AgentProfile } from "./agent"
-import type { AgentRequestState } from "./agentActivity"
+import type { AgentRequestLimits, AgentRequestState } from "./agentActivity"
 import {
   calculateAgentRole,
   hasAgentPermission,
@@ -69,6 +69,11 @@ export type AgentRuntimeServiceOptions = Readonly<{
   replyContextMeter: ReplyContextMeter
   /** Titles of the conversations the agents' requests belong to. */
   findConversationTitle: FindConversationTitle
+  /**
+   * Request slots and waiting limit every live agent gets, each agent its
+   * own slots and line.
+   */
+  requestLimits: AgentRequestLimits
 }>
 
 /** Shared outcome of a read or search the asking agent may not make. */
@@ -100,13 +105,19 @@ function buildAgentListing(match: AgentSearchMatch): AgentListing {
  * Builds the profile a live agent answers with.
  *
  * @param agent - The built-in or stored agent as found now.
- * @returns Its code, the role its kind gives, and its system prompt.
+ * @param requestLimits - Request slots and waiting limit of every agent.
+ * @returns Its code, the role its kind gives, its system prompt, and the
+ * request limits.
  */
-function buildAgentProfile(agent: GetAgentApiResponse): AgentProfile {
+function buildAgentProfile(
+  agent: GetAgentApiResponse,
+  requestLimits: AgentRequestLimits
+): AgentProfile {
   return Object.freeze({
     code: agent.code,
     role: calculateAgentRole(agent.kind),
-    systemPrompt: agent.systemPrompt
+    systemPrompt: agent.systemPrompt,
+    requestLimits
   })
 }
 
@@ -117,7 +128,8 @@ function buildAgentProfile(agent: GetAgentApiResponse): AgentProfile {
  * @remarks An agent becomes live the first time a chat or a context
  * measurement loads it, even for a request refused after the load, and stays
  * live for the service's lifetime, so every turn of an agent, overlapping or
- * not, runs on one instance that knows all of them. Each load gives the live
+ * not, runs on one instance that knows all of them and shares its request
+ * slots among them; each live agent has its own slots. Each load gives the live
  * agent the system prompt the agent has now; a reply already running keeps
  * the prompt it started with. A deleted agent answers no new turn, but its
  * live instance stays, so the replies it still writes stay listed. A state
@@ -143,27 +155,32 @@ export default class AgentRuntimeService implements AgentStateReader {
   /** Borrowed lookup of the titles of the requests' conversations. */
   readonly #findConversationTitle: FindConversationTitle
 
+  /** Request slots and waiting limit every live agent gets. */
+  readonly #requestLimits: AgentRequestLimits
+
   /** Live agents by code, each created on its agent's first load. */
   readonly #liveAgents = new Map<string, Agent>()
 
   /**
    * Retains the borrowed lookups and model access without reading anything.
-   * @param options - Agent lookup and search, model access, its meter, and
-   * the conversation title lookup.
+   * @param options - Agent lookup and search, model access, its meter, the
+   * conversation title lookup, and the request limits of every agent.
    */
   public constructor(options: AgentRuntimeServiceOptions) {
     this.#agents = options.agents
     this.#replyModel = options.replyModel
     this.#replyContextMeter = options.replyContextMeter
     this.#findConversationTitle = options.findConversationTitle
+    this.#requestLimits = options.requestLimits
   }
 
   /**
    * Loads the live agent that answers chats under a code: makes the agent
    * live on its first load and gives it the system prompt it has now.
    * @param code - Agent code as given, compared exactly.
-   * @returns The agent's live instance, created on its first load and
-   * holding the system prompt the built-in or stored agent has now; undefined
+   * @returns The agent's live instance, created on its first load with every
+   * request slot free and the service's request limits, and holding the
+   * system prompt the built-in or stored agent has now; undefined
    * when no agent has the code or its agent is deleted, which creates
    * nothing.
    * @throws For a code that is not a built-in agent's, if the store is closed
@@ -177,11 +194,14 @@ export default class AgentRuntimeService implements AgentStateReader {
       liveAgent.updateSystemPrompt(found.agent.systemPrompt)
       return liveAgent
     }
-    const createdAgent = new Agent(buildAgentProfile(found.agent), {
-      replyModel: this.#replyModel,
-      replyContextMeter: this.#replyContextMeter,
-      stateReader: this
-    })
+    const createdAgent = new Agent(
+      buildAgentProfile(found.agent, this.#requestLimits),
+      {
+        replyModel: this.#replyModel,
+        replyContextMeter: this.#replyContextMeter,
+        stateReader: this
+      }
+    )
     this.#liveAgents.set(code, createdAgent)
     return createdAgent
   }
@@ -218,9 +238,10 @@ export default class AgentRuntimeService implements AgentStateReader {
    * @returns `forbidden` without reading when the reader's role does not
    * grant `read-own-state` for its own code or `read-any-state` for another;
    * `missing` when no agent has the code; else `found` with the frozen state:
-   * the agent's name, role, and deletion, and the requests its live instance
-   * is working on, each with its conversation's title read now; none when
-   * the agent is not live. The read makes no agent live.
+   * the agent's name, role, deletion, and request slot count, and the
+   * requests its live instance is working on or that wait for a slot, each
+   * with its conversation's title read now; none when the agent is not
+   * live. The read makes no agent live.
    * @throws If the store is closed, or the agent or a conversation is
    * invalid.
    */
@@ -239,7 +260,8 @@ export default class AgentRuntimeService implements AgentStateReader {
   /**
    * Builds the state of one found agent.
    * @param found - The agent and its deletion.
-   * @returns The frozen state, with the requests of its live instance.
+   * @returns The frozen state, with the request slot count every agent has
+   * and the requests of its live instance.
    * @throws If the store is closed or a conversation is invalid.
    */
   #buildState(found: FoundAgent): AgentStateView {
@@ -250,6 +272,7 @@ export default class AgentRuntimeService implements AgentStateReader {
       name: found.agent.name,
       role: calculateAgentRole(found.agent.kind),
       deletedAt: found.deletedAt,
+      requestSlotCount: this.#requestLimits.slotCount,
       requests: Object.freeze(
         requests.map((request): AgentRequestView =>
           Object.freeze({

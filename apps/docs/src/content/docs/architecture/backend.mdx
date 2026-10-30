@@ -24,7 +24,7 @@ the services together.
 | Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services, the agent service over SQLite records and the agent runtime service over it, LLM services without contacting LM Studio, the built-in tools, the tool approval service, and the MCP server registry without reading the settings or starting a server. |
 | Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                                                                                                                                    |
 | Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, marks a deleted agent deleted, and searches every agent; contains no SQL.            |
-| Agent runtime service | `src/modules/agent`               | Keeps one live agent per agent a chat or a context measurement has loaded, finds the one that answers a chat, and tells agents about themselves and each other as their roles allow; see [live agents](#live-agents).                                                                                                                |
+| Agent runtime service | `src/modules/agent`               | Keeps one live agent per agent a chat or a context measurement has loaded, each with its own request slots, finds the one that answers a chat, and tells agents about themselves and each other as their roles allow; see [live agents](#live-agents).                                                                               |
 | Database              | `src/infrastructure/database`     | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and runs every conversation query in `conversations/` and every agent query in `agents/`.                                                                                                                    |
 | Chat routes           | `src/modules/chat/routes`         | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                                                                                                                                                                                                                                   |
 | Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                                               |
@@ -656,20 +656,22 @@ other tool of the turn. Their definitions have group `agents`, access
 choice, and their calls run without approval. Which ones an agent gets
 follows its role (see [roles](#roles)):
 
-| Tool               | Offered to          | Arguments                    | Result                                                                                                  |
-| ------------------ | ------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `read_my_state`    | every agent         | none                         | Who the agent is, its role, and each request it is working on, the reply that calls the tool included.  |
-| `find_agents`      | the built-in agents | `query`, 1 to 100 characters | Up to 20 agents whose code, name, or bio contains the query, deleted ones included, and how many match. |
-| `read_agent_state` | the built-in agents | `code`, an agent code        | Another agent's name, role, when it was deleted if it was, and the requests it is working on.           |
+| Tool               | Offered to          | Arguments                    | Result                                                                                                                                                                    |
+| ------------------ | ------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `read_my_state`    | every agent         | none                         | Who the agent is, its role, how many of its request slots are in use, and each request it is working on or that waits for a slot, the reply that calls the tool included. |
+| `find_agents`      | the built-in agents | `query`, 1 to 100 characters | Up to 20 agents whose code, name, or bio contains the query, deleted ones included, and how many match.                                                                   |
+| `read_agent_state` | the built-in agents | `code`, an agent code        | Another agent's name, role, when it was deleted if it was, how many of its request slots are in use, and the requests it is working on or that wait for a slot.           |
 
 A state names each request's conversation by its title, read when the tool
 runs (`This reply, in this conversation` for the calling reply, otherwise
 `In "<title>"`, `In an untitled conversation`, or
 `In a conversation that was deleted`), the model, when it
-started and how long ago, and its step: getting ready to answer, reading
-tool results, thinking, writing the reply, or using tools, with each call of
-the round and its status, `running in the app` for a client tool. A state
-also gives the time it was read. A query is trimmed first; a query that is
+started and how long ago, and its step: waiting for a free request slot,
+with its place in line, getting ready to answer, reading tool results,
+thinking, writing the reply, or using tools, with each call of the round and
+its status, `running in the app` for a client tool. A state also gives the
+time it was read and how many of the agent's request slots are in use, with
+how many requests wait for one. A query is trimmed first; a query that is
 then empty or longer than 100 characters, and a code that is not an agent
 code, fail the call with a result that says the rule. A code no agent has
 fails with a hint to use `find_agents`. A member that calls a leader's tool
@@ -695,12 +697,40 @@ agent and no request.
 While a reply runs, its agent follows the request in `AgentActivity`
 (`src/modules/agent/agentActivity.ts`): the conversation, the model, the
 start time, and the step of its current round, from the parts the reply
-stores. A request is added when `createReply` starts and removed when it
-ends, whether the reply completed, failed, or was stopped. A newer turn in the
+stores. A request is added when `createReply` starts, unless it is refused
+because the agent's slots and line are full (see
+[request slots](#request-slots)), and removed when it ends, whether the reply
+completed, failed, or was stopped. A newer turn in the
 conversation or a deletion ends a reply only once its next write is refused,
-so a reply waiting for an approval or a tool result stays listed until the
-call is answered, the reply is stopped, or the backend stops
-([#137](https://github.com/w3lt/lys/issues/137)).
+so a reply waiting for an approval, a tool result, or a request slot stays
+listed until the call is answered or it gets a slot, the reply is stopped, or
+the backend stops ([#137](https://github.com/w3lt/lys/issues/137)).
+
+### Request slots
+
+`AgentActivity` also keeps the agent's request slots. A live agent works on
+at most `agentRequestSlotCount` replies at once (2, from `src/config.ts`),
+and each live agent has its own slots, so a busy agent never holds back
+another. A reply takes a slot when `createReply` starts and keeps it until
+the reply ends, also while it waits on the person for an approval or a
+client tool's result. A reply that finds every slot held waits in line,
+listed with the step `waiting` after the replies that hold slots; when a
+reply of the agent ends, whatever its outcome, the reply that has waited
+longest takes the slot at once and starts its first round. A waiting reply
+has measured and sent nothing: Stop or shutdown ends it as `interrupted` and
+frees its place in line, and it answers with the system prompt its agent had
+when its turn was stored. The desktop shows it like a reply whose model has
+not written yet.
+
+At most `agentWaitingRequestLimit` replies wait per agent (8). A reply that
+finds every slot held and the line full is refused: it is stored as
+`failed` without reaching the model, its stream ends with an `error` event
+that says how many requests the agent has and to send the message again once
+it finishes one, and the chat route logs a warning. A reply is admitted, made
+to wait, or refused synchronously when `createReply` starts, so two replies
+can never take the same slot. Context measurements and title generation are
+not requests and take no slot. Nothing of the slots is stored: a restart
+frees them all.
 
 ### Roles
 

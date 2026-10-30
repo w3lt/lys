@@ -17,6 +17,8 @@ import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
 import { waitForSettlementOrAbort } from "../../utils/abort"
 import { ChatCompletionCancelledError } from "../../utils/errors"
 import AgentActivity, {
+  AgentRequestLimitError,
+  type AgentRequestLimits,
   type AgentRequestStart,
   type AgentRequestState
 } from "./agentActivity"
@@ -85,6 +87,11 @@ export type AgentProfile = Readonly<{
    * until {@link Agent.updateSystemPrompt} replaces them.
    */
   systemPrompt: string
+  /**
+   * How many of the agent's replies are written at once, and how many may
+   * wait for a free request slot; fixed for the agent's lifetime.
+   */
+  requestLimits: AgentRequestLimits
 }>
 
 /** What an agent borrows for its lifetime. */
@@ -227,11 +234,16 @@ export type AgentTurn = Readonly<{
   reportReplyCancellation: (failure: unknown) => void
   /**
    * Receives the failure that ended a reply stored as failed because a round
-   * was not sent: it did not fit the model's context window, or the model was
-   * not loaded. The person is told why through the reply's `error` event.
+   * was not sent: it did not fit the model's context window, the model was
+   * not loaded, or every request slot of the agent was held and its line of
+   * waiting replies was full. The person is told why through the reply's
+   * `error` event.
    */
   reportReplyRefusal: (
-    failure: ReplyContextOverflowError | ReplyModelNotLoadedError
+    failure:
+      | ReplyContextOverflowError
+      | ReplyModelNotLoadedError
+      | AgentRequestLimitError
   ) => void
   /** Receives any other failure that ended a reply stored as failed. */
   reportReplyFailure: (failure: unknown) => void
@@ -366,10 +378,12 @@ type ReplyRoundState = Readonly<{
  * with the conversation, followed by the notes about the tools the turn does
  * not offer when there are any. Between turns it keeps only that prompt and
  * its activity: each request is listed from the start of its `createReply`
- * call until the call settles, at the step its stored parts show. A turn's
- * rounds and context live only in that turn's `createReply` call, so one
- * instance answers overlapping turns, each through its own
- * {@link AgentTurn}, as long as the model access permits overlapping streams.
+ * call until the call settles, as waiting while it waits for a request slot
+ * and then at the step its stored parts show. A turn's rounds and context
+ * live only in that turn's `createReply` call, so one instance answers
+ * overlapping turns, each through its own {@link AgentTurn}: as many at once
+ * as it has request slots, the others waiting in line for one, as long as
+ * the model access permits overlapping streams.
  * Every round's context is measured against the model's window before it is
  * sent, and a round that does not fit, or whose model is not loaded, is never
  * sent. Owns no resource: the model's owner releases it. Concurrency model:
@@ -387,19 +401,24 @@ export default class Agent {
   readonly #replyContextMeter: ReplyContextMeter
   /** Borrowed reader of agents and their state, for the state tools. */
   readonly #stateReader: AgentStateReader
-  /** Requests this agent is working on and the step each is at. */
-  readonly #activity = new AgentActivity()
+  /**
+   * Requests this agent is working on, the step each is at, and its request
+   * slots.
+   */
+  readonly #activity: AgentActivity
 
   /**
-   * Creates a ready agent, working on no request, without contacting its
-   * model.
-   * @param profile - Trusted code, role, and system prompt of the agent.
+   * Creates a ready agent, working on no request, with every request slot
+   * free, without contacting its model.
+   * @param profile - Trusted code, role, system prompt, and request limits
+   * of the agent.
    * @param dependencies - Model access, its context meter, and the state
    * reader, lent for the agent's lifetime.
    */
   public constructor(profile: AgentProfile, dependencies: AgentDependencies) {
     this.#identity = Object.freeze({ code: profile.code, role: profile.role })
     this.#systemPrompt = profile.systemPrompt
+    this.#activity = new AgentActivity(profile.requestLimits)
     this.#replyModel = dependencies.replyModel
     this.#replyContextMeter = dependencies.replyContextMeter
     this.#stateReader = dependencies.stateReader
@@ -425,9 +444,11 @@ export default class Agent {
   }
 
   /**
-   * Lists the requests the agent is working on.
-   * @returns A frozen list in start order, each request with its step; later
-   * changes leave it as it was.
+   * Lists the requests the agent is working on, the ones waiting for a
+   * request slot included.
+   * @returns A frozen list in start order, each request with its step, so
+   * the replies that hold slots come before the waiting ones, in line order;
+   * later changes leave it as it was.
    */
   public listRequests(): readonly AgentRequestState[] {
     return this.#activity.listRequests()
@@ -450,7 +471,8 @@ export default class Agent {
    * the model is not loaded. When the model sees images, the history's image
    * files are looked up first without reading them, so a stored image counts
    * the tokens of its sides and a missing one its placeholder, as a turn
-   * sends them.
+   * sends them. A measurement is not a request: it takes no request slot
+   * and is not listed, so it runs at once while every slot is held.
    * @throws The meter's failure when the model's runtime cannot be reached,
    * is busy, or fails; the image file lookup's failure; and a Zod error for a
    * definition that does not match `toolDefinitionSchema`.
@@ -515,8 +537,9 @@ export default class Agent {
    * reported once, before its final state is stored: to
    * `reportReplyCancellation` when the turn was cancelled or the model
    * reports a cancellation, to `reportReplyRefusal` when a round was not sent
-   * because it did not fit or its model was not loaded, and to
-   * `reportReplyFailure` otherwise. Each round's reasoning and text are stored
+   * because it did not fit, its model was not loaded, or the agent's request
+   * slots and line were full, and to `reportReplyFailure` otherwise. Each
+   * round's reasoning and text are stored
    * and sent as parts of their round. When the turn offers tools, each round
    * that calls tools stores every call and its outcome as a part, has its
    * calls answered, and asks the model again; a call of a tool the turn
@@ -535,20 +558,31 @@ export default class Agent {
    * the system prompt the agent holds when the call starts. When the model is
    * trained for tool use, the agent's state tools are offered after the
    * turn's built-in and MCP tools, also while tool calls are off, and their
-   * calls run at once. The request is listed in the agent's activity from
-   * the call's start, preparing round 0, until the returned promise settles,
-   * whatever the outcome: each round's start shows it preparing that round,
-   * and each part or tool call change the reply stores shows the step it
-   * puts the request at. A reply that a newer turn of its conversation
-   * supersedes, or whose conversation is deleted, settles only once its next
-   * write is refused, so one waiting on an approval or a tool result stays
-   * listed until the call is answered, the reply is stopped, or the backend
-   * stops.
+   * calls run at once. The reply holds one of the agent's request slots from
+   * the call's start to its end, also while it waits on the person. When
+   * every slot is held, it waits in line for one, first come first served,
+   * and starts once a slot frees; Stop or shutdown while it waits ends it as
+   * cancelled before anything is read or sent. When every slot is held and
+   * the line is full, the reply is refused: stored as failed without
+   * reaching the model, with an `error` event that says why. The request is
+   * listed in the agent's activity from the call's start, preparing round 0,
+   * or waiting while it waits for a slot, until the returned promise
+   * settles, whatever the outcome; a refused reply is never listed. Each
+   * round's start shows it preparing that round, and each part or tool call
+   * change the reply stores shows the step it puts the request at. A reply
+   * that a newer turn of its conversation supersedes, or whose conversation
+   * is deleted, settles only once its next write is refused, so one waiting
+   * on an approval, a tool result, or a request slot stays listed until the
+   * call is answered or a slot frees for it, the reply is stopped, or the
+   * backend stops.
    */
   public async createReply(turn: AgentTurn): Promise<void> {
     const systemPrompt = this.#systemPrompt
-    this.#activity.addRequest(buildRequestStart(turn, new Date()))
+    const start = buildRequestStart(turn, new Date())
     try {
+      const offer = await this.#activity.offerRequest(start, turn.abortSignal)
+      if (offer.status === "refused")
+        throw new AgentRequestLimitError(offer.limits)
       const finishReason = await this.#createReplyText(turn, systemPrompt)
       if (finishReason === undefined) {
         turn.updateAssistantMessageState({ status: "interrupted" })
@@ -567,7 +601,7 @@ export default class Agent {
     } catch (error) {
       handleReplyFailure(turn, error)
     } finally {
-      this.#activity.removeRequest(turn.requestId)
+      this.#activity.removeRequest(start)
     }
   }
 
@@ -935,7 +969,8 @@ function handleReplyFailure(turn: AgentTurn, error: unknown): void {
     turn.reportReplyCancellation(error)
   } else if (
     error instanceof ReplyContextOverflowError ||
-    error instanceof ReplyModelNotLoadedError
+    error instanceof ReplyModelNotLoadedError ||
+    error instanceof AgentRequestLimitError
   ) {
     turn.reportReplyRefusal(error)
   } else {
@@ -964,8 +999,10 @@ function handleReplyFailure(turn: AgentTurn, error: unknown): void {
  *
  * @param failure - Failure that ended the reply.
  * @returns For a round that did not fit, what it needed and the window, with
- * the next steps; for a model that is not loaded, how to load it; otherwise
- * the general sentence. No upstream or internal text is included.
+ * the next steps; for a model that is not loaded, how to load it; for an
+ * agent whose request slots and line were full, how many replies it had and
+ * when to send again; otherwise the general sentence. No upstream or
+ * internal text is included.
  */
 function formatReplyFailureMessage(failure: unknown): string {
   if (failure instanceof ReplyContextOverflowError) {
@@ -974,7 +1011,39 @@ function formatReplyFailureMessage(failure: unknown): string {
   if (failure instanceof ReplyModelNotLoadedError) {
     return "The model is not loaded, so Lys cannot check that the conversation fits it. Load the model in Settings → Model, then try again."
   }
+  if (failure instanceof AgentRequestLimitError) {
+    return formatRequestLimitMessage(failure.limits)
+  }
   return "Chat completion failed. Please try again."
+}
+
+/**
+ * Formats the sentence followers are sent when a reply's agent had every
+ * request slot held and its line of waiting replies full.
+ *
+ * @param limits - The agent's request limits, all of them reached.
+ * @returns How many requests the agent was working on and how many were
+ * waiting, and that the message can be sent again once one finishes.
+ */
+function formatRequestLimitMessage(limits: AgentRequestLimits): string {
+  const working =
+    limits.slotCount === 1 ? "1 request" : `${limits.slotCount} requests`
+  return `This agent is already working on ${working}${formatWaitingRequests(limits.waitingLimit)}, so it did not take this message. Send it again once it finishes one.`
+}
+
+/**
+ * Formats the clause of the refusal sentence that tells how many requests
+ * wait for the agent.
+ *
+ * @param waitingLimit - The agent's waiting limit, all of it reached.
+ * @returns Nothing when no request may wait; otherwise the clause, starting
+ * with a comma.
+ */
+function formatWaitingRequests(waitingLimit: number): string {
+  if (waitingLimit === 0) return ""
+  return waitingLimit === 1
+    ? ", and 1 more is waiting for it"
+    : `, and ${waitingLimit} more are waiting for it`
 }
 
 /**

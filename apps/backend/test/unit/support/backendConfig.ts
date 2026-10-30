@@ -8,7 +8,8 @@ import { backendConfigSchema } from "../../../src/config"
  * absolute placeholder under a directory that does not exist; no case opens it,
  * and the attachments directory beside it is never written.
  * The LM Studio host and port are distinct from the production defaults so
- * endpoint derivation is observable. The vmo port differs from vmo's
+ * endpoint derivation is observable, and so do the agent request limits.
+ * The vmo port differs from vmo's
  * production port, so no case reaches a vmo running on this machine there; a
  * case that needs vmo starts a fake one on a free port and passes that port.
  * Prompts are short fixed strings.
@@ -27,5 +28,7 @@ export const TEST_BACKEND_CONFIG = backendConfigSchema.parse({
   lysipteraSystemPrompt: "Configured Lysiptera prompt",
   titleGenerationPrompt: "Configured title prompt",
   titleGenerationMaxAttempts: 2,
-  generatedTitleMaxLength: 40
+  generatedTitleMaxLength: 40,
+  agentRequestSlotCount: 3,
+  agentWaitingRequestLimit: 1
 })

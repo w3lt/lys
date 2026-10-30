@@ -34,6 +34,7 @@ import {
 import {
   createChatRouteTestApp,
   sendChatRequest,
+  TEST_AGENT_REQUEST_LIMITS,
   TEST_BUILT_IN_AGENT_PROMPTS,
   type ChatRouteTestApp
 } from "../../../support/chatRouteTestApp"
@@ -1126,6 +1127,144 @@ describe("updateFastifyWithChatRoute", () => {
     expect(testApp.log.records).not.toContainEqual(
       expect.objectContaining({ level: "error" })
     )
+  })
+
+  describe("request slots", () => {
+    /** Caliginia, as it reads its own state. */
+    const CALIGINIA_IDENTITY = Object.freeze({
+      code: CALIGINIA_AGENT_CODE,
+      role: "leader"
+    } as const)
+
+    /**
+     * Registers the chat route on a test application whose turns are stored
+     * for real and whose model keeps each reply open until the case ends it,
+     * then answers `Hi`.
+     *
+     * @returns The application, the end of each model request made so far in
+     * request order, the release of every reply, which also ends each later
+     * request at once, and the steps of Caliginia's requests.
+     */
+    async function createHoldingChatApp() {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+      const replyEnds: PromiseWithResolvers<void>[] = []
+      let isReleased = false
+      testApp.completeChatStream.mockImplementation(async () => {
+        const end = Promise.withResolvers<void>()
+        if (isReleased) end.resolve()
+        replyEnds.push(end)
+        return (async function* () {
+          await end.promise
+          yield createChatCompletionChunk({
+            content: "Hi",
+            finishReason: "stop"
+          })
+        })()
+      })
+      return {
+        testApp,
+        replyEnds,
+        releaseReplies: () => {
+          isReleased = true
+          for (const end of replyEnds) end.resolve()
+        },
+        listCaliginiaSteps: () => {
+          const outcome = testApp.app.agentRuntimeService.findAgentState(
+            CALIGINIA_IDENTITY,
+            CALIGINIA_AGENT_CODE
+          )
+          return outcome.status === "found"
+            ? outcome.state.requests.map((request) => request.step.kind)
+            : []
+        }
+      }
+    }
+
+    it("makes the reply of a third conversation wait while its agent writes two, then answers it once a slot frees", async () => {
+      const { testApp, replyEnds, releaseReplies, listCaliginiaSteps } =
+        await createHoldingChatApp()
+
+      const responses = Array.from(
+        { length: TEST_AGENT_REQUEST_LIMITS.slotCount + 1 },
+        () => sendChatRequest(testApp.app, NEW_CONVERSATION_REQUEST)
+      )
+      await vi.waitFor(() => {
+        expect(listCaliginiaSteps()).toEqual([
+          "preparing",
+          "preparing",
+          "waiting"
+        ])
+      })
+      const modelRequestsWhileWaiting =
+        testApp.completeChatStream.mock.calls.length
+      replyEnds[0]?.resolve()
+      await vi.waitFor(() => {
+        expect(testApp.completeChatStream).toHaveBeenCalledTimes(3)
+      })
+      releaseReplies()
+      const settled = await Promise.all(responses)
+
+      expect(modelRequestsWhileWaiting).toBe(2)
+      for (const response of settled) {
+        expect(response.statusCode).toBe(200)
+        expect(
+          parseSseEvents(response.body).map((event) => event.event)
+        ).toContain("done")
+      }
+      expect(listCaliginiaSteps()).toEqual([])
+    })
+
+    it("fails a reply whose agent's slots and line are full with an error event that says why, and logs a warning", async () => {
+      const { testApp, releaseReplies, listCaliginiaSteps } =
+        await createHoldingChatApp()
+      const accepted = Array.from(
+        {
+          length:
+            TEST_AGENT_REQUEST_LIMITS.slotCount +
+            TEST_AGENT_REQUEST_LIMITS.waitingLimit
+        },
+        () => sendChatRequest(testApp.app, NEW_CONVERSATION_REQUEST)
+      )
+      await vi.waitFor(() => {
+        expect(listCaliginiaSteps()).toEqual([
+          "preparing",
+          "preparing",
+          "waiting"
+        ])
+      })
+
+      const refused = await sendChatRequest(
+        testApp.app,
+        NEW_CONVERSATION_REQUEST
+      )
+      releaseReplies()
+      await Promise.all(accepted)
+
+      expect(refused.statusCode).toBe(200)
+      expect(parseSseEvents(refused.body)).toContainEqual({
+        event: "error",
+        data: {
+          type: "error",
+          message:
+            "This agent is already working on 2 requests, and 1 more is waiting for it, so it did not take this message. Send it again once it finishes one."
+        }
+      })
+      expect(testApp.log.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          msg: "Chat reply was refused because its agent was too busy",
+          reqId: expect.any(String),
+          err: expect.objectContaining({
+            message:
+              "The agent's request slots and line were full: slots held 2 of 2, requests waiting 1 of 1"
+          })
+        })
+      )
+      expect(testApp.log.records).not.toContainEqual(
+        expect.objectContaining({ level: "error" })
+      )
+    })
   })
 
   describe("tool call approval", () => {
@@ -2669,7 +2808,7 @@ describe("updateFastifyWithChatRoute", () => {
         /^You are Caliginia \(code caliginia\), a leader\. /
       )
       expect(callPart.result).toMatch(
-        /\nWorking on 1 request:\n1\. This reply, in this conversation: started [^\n]+ with qwen\/qwen3-8b; using tools: read_my_state running\.\nNothing else is in progress\.$/
+        /\nRequest slots: 1 of 2 in use\.\n1\. This reply, in this conversation: started [^\n]+ with qwen\/qwen3-8b; using tools: read_my_state running\.\nNothing else is in progress\.$/
       )
       expect(
         testApp.completeChatStream.mock.calls[1]?.[0].messages.at(-1)

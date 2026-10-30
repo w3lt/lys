@@ -186,8 +186,9 @@ unchanged.
   cannot be used through Lys, and neither can one whose name or input schema
   holds a character a person cannot see, such as a zero-width space.
 - Lys reads a server's first 128 tools, and its details say so when it lists
-  more. It reads the tool list across at most 16 pages: a server that splits
-  its first 128 tools into more than 16 pages fails to connect.
+  more. It reads the tool list across at most 16 pages: a server whose 16th
+  page names a next one fails to connect, unless its list passed 128 tools
+  before that page.
 - A tool whose input schema nests deeper than 32 levels is skipped, however
   deep it nests; the server's other tools stay usable.
 

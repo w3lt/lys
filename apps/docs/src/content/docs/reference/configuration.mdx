@@ -424,8 +424,10 @@ is refused; digits and hyphens fit any script. A hyphen may not start or end a
 part or stand as its third and fourth characters, and a part's punycode is at
 most 59 characters, so the part fits a 63-character DNS label. Such a name is
 also refused with uppercase letters beyond ASCII, such as `BÜCHER.example`;
-with letters URL parsers change, such as `ß`, `ĳ`, a letter followed by a
-combining accent, or fullwidth letters; with `。` in place of a dot; when
+with letters URL parsers change, such as `ĳ`, which becomes `ij`, a letter
+followed by a combining accent, or fullwidth letters; with `ß` or the final
+`ς`, which parsers that follow the older transitional rules of UTS #46 change
+to `ss` and `σ` while others keep them; with `。` in place of a dot; when
 percent-encoded; with a trailing dot; and with any other character, such as
 `_`, a right-to-left letter, or an emoji. The host's URL parser and the
 JavaScript ones in the renderer and the backend convert other names

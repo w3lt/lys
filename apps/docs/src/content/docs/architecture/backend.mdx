@@ -788,14 +788,15 @@ that leaves the group, such as one that starts a session of its own, is not
 covered. Every state change happens in one synchronous step, so a lookup sees
 one consistent state.
 
-When the backend's own process ends, its stdio servers' process groups end
-with it, because the desktop host's stop of the backend's group does not
-reach them. `McpServerProcessGroups` (`mcpServerProcessGroups.ts`) holds each
-group from the start of its command until no process of it is left, and
-`registerBackendStopHandlers` (`processStop.ts`) sends `SIGKILL` at once to
-every group it still holds: on `SIGTERM`, which the desktop host sends first,
-and on `SIGINT` and `SIGHUP`, after which the backend exits with 128 plus the
-signal's number, and on any other exit Node runs `exit` listeners for. A
+The desktop host's stop of the backend's process group does not reach the
+stdio servers' process groups, so the backend ends them itself when its own
+process ends. `McpServerProcessGroups` (`mcpServerProcessGroups.ts`) holds
+each group from the start of its command until no process of it is left, or
+until its stop gave up after `SIGKILL`, and `registerBackendStopHandlers`
+(`processStop.ts`) sends `SIGKILL` at once to every group it still holds: on
+`SIGTERM`, which the desktop host sends first, on `SIGINT`, and on `SIGHUP`,
+after each of which the backend exits with 128 plus the signal's number, and
+on any other exit Node runs `exit` listeners for. A
 backend killed with `SIGKILL` runs nothing; its servers then see their
 standard input close. A URL server's session is not ended then; the server
 ends it at its own time limit.
@@ -835,12 +836,15 @@ declares no client capabilities.
   settles once no process of the group is left, reaped included; the
   command's own exit does not count, because the processes it started may
   still run. A group still left two seconds after `SIGKILL` fails the close
-  and stays held for the backend's exit. `McpStdioTransport`
+  and is no longer held: every process of it the backend may signal already
+  received `SIGKILL`, and sending it again at the backend's exit could reach
+  another group that took the identifier once this one ended.
+  `McpStdioTransport`
   (`mcpStdioTransport.ts`) makes every close share that one stop, whoever
   starts it: the SDK client, the connection at a message line past 16 MiB, or
   the transport itself once the command's process exited by itself, which
   ends the rest of its group too. It tells the client that the transport
-  closed only once the group ended.
+  closed only once that stop settled.
 - **Streamable HTTP.** The SDK's `StreamableHTTPClientTransport` sends each
   request to the configured URL with the configured headers, and
   `redirect: "manual"`, so a redirect is an HTTP error and is never
@@ -882,22 +886,24 @@ the schema and run a `pattern` the server chose on the backend's event loop.
 A result's structured content is read as untrusted JSON within Lys's own
 limits instead.
 
-`readMcpToolCatalog` (`mcpToolList.ts`) reads the tool list one page at a
+`getMcpToolCatalog` (`mcpToolList.ts`) asks for the tool list one page at a
 time and turns each page's tools into catalog entries before it asks for the
-next page, so the read holds one page, at most 16 MiB, and the catalog, never
-the server's whole list or its objects. Reading stops at the end of the list;
-at the 129th tool, which marks the list as cut, so later pages are never asked
-for; or at a page whose next cursor is the cursor it was asked with, whose
-tools are left out as the server repeating itself. A 16th page that names a
-next one fails the opening as an answer that is not valid MCP.
+next page, so the read holds one page, at most 16 MiB, the names of the page
+before, and the catalog, never the server's whole list or its objects.
+Reading stops at the end of the list; at the 129th tool, which marks the list
+as cut, so later pages are never asked for; or, as the SDK's own list read
+stops, at a page that names the cursor it was asked with and holds as many
+tools with the same names as the page before, whose tools are left out as the
+server repeating itself. A 16th page that names a next one fails the opening
+as an answer that is not valid MCP.
 `calculateMcpRequestFailure`
 (`mcpError.ts`) tells failures apart by the SDK's error types and their
 causes: a time limit that passed, a process that exited or a connection that
 ended, an HTTP status (403 also when the SDK reports a missing scope), no
 connection at all,
 a command that could not be started, a JSON-RPC error the server answered
-with, an answer that is not valid MCP, an HTTP answer longer than 16 MiB, or
-none of these. An opening reports them as `timed-out`, `closed`,
+with, an answer that is not valid MCP, an answer longer than 16 MiB, or none
+of these. An opening reports them as `timed-out`, `closed`,
 `unauthorized` (HTTP 401 or 403), `http-error` (any other status),
 `unreachable`, `start-failed`, or `protocol-error` (an error answer, an answer
 that is not MCP or is too long, or a failure Lys cannot tell apart).
@@ -906,9 +912,10 @@ that is not MCP or is too long, or a failure Lys cannot tell apart).
 
 `McpToolCatalogBuilder` (`mcpToolCatalog.ts`) takes a server's tools one at a
 time, keeps the first 128, and marks the list as cut at the next one. It
-checks each tool against the SDK's MCP tool schema first, as the SDK checks
-every tool of a list it reads itself; a tool that schema refuses fails the
-opening as an answer that is not valid MCP. Each tool is offered to the model
+checks each tool against the SDK's MCP tool schema first; a tool that schema
+refuses fails the opening as an answer that is not valid MCP. That schema
+checks no more of a tool's output schema than that it is an object; Lys never
+reads output schemas. Each tool is offered to the model
 as `mcp__<server>__<tool>`, with every character of the server's name for it
 other than an ASCII letter, a digit, `_`, or `-` replaced by `_`. A tool is
 skipped, with its reason, when the server's name for it is empty, longer

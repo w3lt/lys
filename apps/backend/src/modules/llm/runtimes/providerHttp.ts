@@ -42,18 +42,48 @@ export type ProviderJsonRequest =
  * Sends one request to a provider and reads its JSON answer.
  *
  * @param request - Request to send.
+ * @param timeoutMs - Deadline of the whole request, in milliseconds;
+ * {@link PROVIDER_REQUEST_TIMEOUT_MS} when omitted.
  * @returns The parsed answer, untrusted and unchecked.
- * @throws An error naming the HTTP status when the answer is not 2xx, the
- * time limit when {@link PROVIDER_REQUEST_TIMEOUT_MS} passes, the size limit
- * when the answer passes {@link MAXIMUM_PROVIDER_RESPONSE_BYTES}, or that the
- * answer is not JSON; a transport failure keeps its cause. No message holds
- * the key or the answer's text.
+ * @throws `The provider did not answer within <timeoutMs> ms.` when the
+ * deadline passes, with the abort as its cause; otherwise an error naming
+ * the HTTP status when the answer is not 2xx, the size limit when the answer
+ * passes {@link MAXIMUM_PROVIDER_RESPONSE_BYTES}, or that the answer is not
+ * JSON; a transport failure keeps its cause. No message holds the key or the
+ * answer's text.
  * @remarks The deadline covers sending, waiting, and reading the body.
  */
 export async function requestProviderJson(
-  request: ProviderJsonRequest
+  request: ProviderJsonRequest,
+  timeoutMs: number = PROVIDER_REQUEST_TIMEOUT_MS
 ): Promise<unknown> {
-  const signal = AbortSignal.timeout(PROVIDER_REQUEST_TIMEOUT_MS)
+  const signal = AbortSignal.timeout(timeoutMs)
+  try {
+    return await exchangeProviderJson(request, signal)
+  } catch (failure) {
+    if (signal.aborted) {
+      throw new Error(`The provider did not answer within ${timeoutMs} ms.`, {
+        cause: failure
+      })
+    }
+    throw failure
+  }
+}
+
+/**
+ * Sends one request to a provider and reads its JSON answer, until the
+ * signal aborts.
+ *
+ * @param request - Request to send.
+ * @param signal - Aborts sending, waiting, and reading the body.
+ * @returns The parsed answer, untrusted and unchecked.
+ * @throws The failures {@link requestProviderJson} describes, with the
+ * abort's own failure when the signal aborts.
+ */
+async function exchangeProviderJson(
+  request: ProviderJsonRequest,
+  signal: AbortSignal
+): Promise<unknown> {
   const response = await fetch(request.url, {
     method: request.method,
     headers: buildProviderHeaders(request),

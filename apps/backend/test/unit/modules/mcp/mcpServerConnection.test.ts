@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { calculateMcpRequestFailure } from "../../../../src/modules/mcp/mcpError"
+import { MCP_SESSION_END_TIMEOUT_MILLISECONDS } from "../../../../src/modules/mcp/mcpHttpSessionEnd"
 import McpServerConnection from "../../../../src/modules/mcp/mcpServerConnection"
 import { MCP_SERVER_STOP_STEP_MILLISECONDS } from "../../../../src/modules/mcp/mcpServerProcess"
 import {
@@ -693,6 +694,99 @@ describe("McpServerConnection over HTTP", () => {
 
     expect(secondClose).toBe(firstClose)
     expect(events.closedCount).toBe(0)
+  })
+
+  it("asks the server to end its session as it closes, with the configured headers", async () => {
+    const server = await startFakeMcpHttpServer(answerAsMcpServer())
+    const { context, events } = createRecordingContext()
+    const connection = await McpServerConnection.open(
+      buildHttpServerSettings("remote", server.url, [
+        { name: "Authorization", value: SYNTHETIC_AUTHORIZATION }
+      ]),
+      context
+    )
+
+    await connection.close()
+
+    const sessionEnds = server.receivedRequests.filter(
+      (request) => request.method === "DELETE"
+    )
+    expect(sessionEnds).toEqual([
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: SYNTHETIC_AUTHORIZATION,
+          "mcp-session-id": "test-session",
+          "mcp-protocol-version": expect.any(String)
+        })
+      })
+    ])
+    expect(events.sessionEndFailures).toEqual([])
+  })
+
+  it(
+    "closes once the time limit passed when the server does not answer the end of its session, and reports it",
+    { timeout: MCP_SESSION_END_TIMEOUT_MILLISECONDS + 5000 },
+    async () => {
+      const answer = answerAsMcpServer()
+      const server = await startFakeMcpHttpServer((request, body, response) => {
+        if (request.method !== "DELETE") answer(request, body, response)
+      })
+      const { context, events } = createRecordingContext()
+      const connection = await McpServerConnection.open(
+        buildHttpServerSettings("remote", server.url),
+        context
+      )
+      const startedAt = performance.now()
+
+      await connection.close()
+
+      expect(performance.now() - startedAt).toBeLessThan(
+        MCP_SESSION_END_TIMEOUT_MILLISECONDS + 2000
+      )
+      expect(events.sessionEndFailures).toEqual([
+        expect.objectContaining({ name: "TimeoutError" })
+      ])
+      expect(events.closedCount).toBe(0)
+    }
+  )
+
+  it("ends the session a failed handshake started", async () => {
+    const server = await startFakeMcpHttpServer((request, body, response) => {
+      if (request.method === "POST") {
+        const { id } = JSON.parse(body) as { id?: number }
+        response.writeHead(200, JSON_ANSWER_HEADERS)
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            result: {
+              protocolVersion: "1999-01-01",
+              capabilities: {},
+              serverInfo: { name: "old", version: "1.0.0" }
+            }
+          })
+        )
+        return
+      }
+      response.writeHead(405).end()
+    })
+    const { context, events } = createRecordingContext()
+
+    await captureRejection(
+      McpServerConnection.open(
+        buildHttpServerSettings("remote", server.url),
+        context
+      )
+    )
+
+    expect(server.receivedRequests.map((request) => request.method)).toEqual([
+      "POST",
+      "DELETE"
+    ])
+    expect(server.receivedRequests[1]?.headers["mcp-session-id"]).toBe(
+      "test-session"
+    )
+    expect(events.sessionEndFailures).toEqual([])
   })
 
   it("closes with a call in flight without reporting the aborted request as a connection error", async () => {

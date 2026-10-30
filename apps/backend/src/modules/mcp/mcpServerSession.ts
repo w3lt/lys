@@ -207,7 +207,9 @@ export default class McpServerSession {
           reportEvent({ kind: "server-log-line", serverName, line }),
         reportConnectionClosed: () => this.#handleConnectionEnded(),
         reportConnectionError: (error) =>
-          reportEvent({ kind: "connection-error", serverName, error })
+          reportEvent({ kind: "connection-error", serverName, error }),
+        reportSessionEndFailure: (error) =>
+          reportEvent({ kind: "session-end-failed", serverName, error })
       })
     } catch (error) {
       opening = Object.freeze({

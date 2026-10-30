@@ -85,6 +85,8 @@ export type RecordedConnectionEvents = {
   closedCount: number
   /** Errors the SDK reported outside any request. */
   readonly errors: Error[]
+  /** Why HTTP servers did not end their sessions as connections closed. */
+  readonly sessionEndFailures: unknown[]
 }
 
 /** Path of the fake stdio server script. */
@@ -235,7 +237,8 @@ export function createRecordingContext(
   const events: RecordedConnectionEvents = {
     logLines: [],
     closedCount: 0,
-    errors: []
+    errors: [],
+    sessionEndFailures: []
   }
   return {
     events,
@@ -247,7 +250,8 @@ export function createRecordingContext(
       reportConnectionClosed: () => {
         events.closedCount += 1
       },
-      reportConnectionError: (error) => events.errors.push(error)
+      reportConnectionError: (error) => events.errors.push(error),
+      reportSessionEndFailure: (error) => events.sessionEndFailures.push(error)
     }
   }
 }

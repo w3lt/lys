@@ -1082,6 +1082,37 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       )
     })
 
+    it("reports a session an HTTP server does not end as its removed entry closes", async () => {
+      const answer = answerAsMcpServer()
+      const server = await startFakeMcpHttpServer((request, body, response) => {
+        if (request.method === "DELETE")
+          answerWithStatus(500)(request, body, response)
+        else answer(request, body, response)
+      })
+      const harness = createRegistryHarness()
+      harness.setServers([buildHttpServerSettings("remote", server.url)])
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildHttpStatus("remote", buildConnectedState(1))])
+      )
+
+      harness.setServers([])
+      await harness.registry.updateServers()
+      await waitForRegistryClose(
+        findOpenedConnection(harness.openedConnections, "remote")
+      )
+
+      expect(filterEvents(harness.events, "session-end-failed")).toEqual([
+        {
+          kind: "session-end-failed",
+          serverName: "remote",
+          error: expect.objectContaining({ data: { status: 500 } })
+        }
+      ])
+      expect(harness.registry.listServers()).toEqual(buildList([]))
+    })
+
     it("fails a server as closed when its connection ends before its opening is recorded", async () => {
       const exitCalls: Promise<unknown>[] = []
       const harness = createRegistryHarness({

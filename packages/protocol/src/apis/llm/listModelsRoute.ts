@@ -15,8 +15,10 @@ import { apiLlmListModelsRoute } from "./routes"
  *
  * @remarks `lys`: a model answers only once loaded, and the person loads and
  * unloads models through the load and unload endpoints. `provider`: the
- * provider loads a model when a request names it, so every listed model is
- * loaded and the load and unload endpoints refuse with status 409. The values
+ * provider decides which models are in memory, so the load and unload
+ * endpoints refuse with status 409, and a listed model is loaded while the
+ * provider serves it: every model of a hosted provider, and the models a
+ * local Ollama server is running. The values
  * are transmitted and not persisted; changing them requires coordinated
  * consumers.
  */

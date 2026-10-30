@@ -1567,7 +1567,7 @@ describe("Agent", () => {
         {
           type: "error",
           message:
-            "The model is not loaded, so Lys cannot check that the conversation fits it. Load the model in Settings → Model, then try again."
+            "The model is not loaded, so Lys cannot check that the conversation fits it. Load the model in Settings → Model, or in the provider itself when Lys does not load its models, then try again."
         }
       ])
       expect(run.reportedRefusals).toEqual([

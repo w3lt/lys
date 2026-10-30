@@ -28,8 +28,8 @@ export interface LlmRuntime extends LlmEngine, LlmRuntimeLifecycle {}
 export type AcquiredLlmRuntime =
   | Readonly<{
       /**
-       * The provider loads a model when a request names it, so every model
-       * it lists answers without a load from Lys.
+       * The provider decides which models are in memory; Lys neither loads
+       * nor unloads them.
        */
       modelLoading: "provider"
       /** Acquired runtime. */

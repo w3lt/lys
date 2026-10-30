@@ -69,6 +69,9 @@ const ollamaRunningModelListSchema = z.object({
   models: z.array(ollamaRunningModelSchema)
 })
 
+/** One model a local Ollama server is running. */
+type OllamaRunningModel = z.infer<typeof ollamaRunningModelSchema>
+
 /** Validates a context length found in a model's metadata. */
 const contextLengthSchema = z.int().positive()
 
@@ -124,13 +127,15 @@ export type OllamaRuntimeTarget =
  * @remarks Only chat models are listed: a model whose `/api/show`
  * capabilities lack `completion`, such as an embedding model, is left out of
  * every listing and measurement; a model is kept when Ollama reports no
- * capabilities. Ollama loads a model when a request names it, so every chat
- * model is reported as one loaded instance whose identifier is its name,
- * and the runtime offers no model loading. Ollama has no tokenizer endpoint:
- * measurements use {@link estimateTextTokenCount} and the context length a
- * local server reports for a running model, otherwise the model's own
- * window from `/api/show`. A local server that has not loaded the model yet
- * can load it with a smaller window than that. Every call reads the server
+ * capabilities. Ollama decides which models are in memory, and the runtime
+ * offers no model loading. A local server's loaded instances are the chat
+ * models its `/api/ps` lists, measured with the context length it reports
+ * for each; a model it is not running has no measurement, because Ollama
+ * would load it with a window of its own choosing, often smaller than the
+ * model's. Ollama Cloud reports every chat model as loaded, measured with
+ * the model's own window from `/api/show`. Each instance's identifier is the
+ * model's name. Ollama has no tokenizer endpoint, so counts are
+ * {@link estimateTextTokenCount} estimates. Every call reads the server
  * again; nothing is cached. The runtime holds no connection, so disposal
  * releases nothing beyond closing admission. Concurrency model:
  * single-owner; {@link LlmRuntimeAdmission} rejects overlapping calls.
@@ -216,10 +221,11 @@ export default class OllamaRuntime implements LlmRuntime {
   }
 
   /**
-   * Implements {@link LlmRuntime.listLoadedLlmModelInstances}: every chat
-   * model, because Ollama loads them on demand.
+   * Implements {@link LlmRuntime.listLoadedLlmModelInstances}: the chat
+   * models a local server is running, or every chat model of Ollama Cloud.
    *
-   * @returns One frozen instance per chat model, whose identifier is its name.
+   * @returns One frozen instance per loaded chat model, whose identifier is
+   * its name.
    * @throws The interface-defined admission failure, or `The LLM runtime
    * could not list loaded model instances.` with the failed request as its
    * cause.
@@ -228,7 +234,7 @@ export default class OllamaRuntime implements LlmRuntime {
     readonly LoadedLlmModelInstance[]
   > {
     return await this.#admission.runOperation(async () => {
-      const chatModels = await this.#listOllamaChatModels().catch(
+      const chatModels = await this.#listLoadedOllamaChatModels().catch(
         (cause: unknown) => {
           throw new Error(
             "The LLM runtime could not list loaded model instances.",
@@ -245,15 +251,17 @@ export default class OllamaRuntime implements LlmRuntime {
   }
 
   /**
-   * Implements {@link LlmRuntime.findLlmContextMeasurement} with the model's
-   * window and estimated counts.
+   * Implements {@link LlmRuntime.findLlmContextMeasurement} with the window
+   * the model is served with and estimated counts.
    *
    * @param model - Model name, as a chat request names it.
    * @param texts - Texts to count, each on its own.
    * @returns A frozen measurement whose context length is the one a local
-   * server reports for the running model, otherwise the model's own window,
-   * and whose counts are {@link estimateTextTokenCount} estimates; undefined
-   * when Ollama does not list the model or it cannot chat.
+   * server reports for the running model, or the model's own window in
+   * Ollama Cloud, and whose counts are {@link estimateTextTokenCount}
+   * estimates; undefined when Ollama does not list the model or it cannot
+   * chat, and when a local server is not running it or reports no length
+   * for it.
    * @throws The interface-defined admission failure, or `The LLM runtime
    * could not measure the context.` with the failed request or the missing
    * window as its cause.
@@ -268,11 +276,13 @@ export default class OllamaRuntime implements LlmRuntime {
         if (!tags.some((tag) => tag.name === model)) return undefined
         const description = await this.#showOllamaModel(model)
         if (!isOllamaChatModel(description)) return undefined
+        const contextLength = await this.#findServedContextLength(
+          model,
+          description
+        )
+        if (contextLength === undefined) return undefined
         return Object.freeze({
-          contextLength: await this.#findServedContextLength(
-            model,
-            description
-          ),
+          contextLength,
           textTokenCounts: Object.freeze(texts.map(estimateTextTokenCount))
         })
       } catch (cause) {
@@ -330,21 +340,41 @@ export default class OllamaRuntime implements LlmRuntime {
   }
 
   /**
+   * Lists the chat models Ollama serves now.
+   *
+   * @returns The chat models a local server is running, or every chat model
+   * of Ollama Cloud, in Ollama's order.
+   * @throws When a request fails or an answer does not match its shape.
+   */
+  async #listLoadedOllamaChatModels(): Promise<readonly OllamaChatModel[]> {
+    const chatModels = await this.#listOllamaChatModels()
+    if (this.#target.mode === "cloud") return chatModels
+    const runningModels = await this.#listRunningOllamaModels()
+    return chatModels.filter(({ tag }) =>
+      runningModels.some((running) => isRunningOllamaModel(running, tag.name))
+    )
+  }
+
+  /**
    * Finds the context length Ollama serves one listed chat model with.
    *
    * @param model - Listed model name.
    * @param description - Ollama's description of the model.
    * @returns The length a local server reports for the running model, or
-   * the model's own window.
-   * @throws When a request fails or the model's metadata holds no window.
+   * undefined when it is not running it or reports no length; the model's
+   * own window in Ollama Cloud.
+   * @throws When a request fails, or Ollama Cloud's metadata of the model
+   * holds no window.
    */
   async #findServedContextLength(
     model: string,
     description: OllamaModelDescription
-  ): Promise<number> {
+  ): Promise<number | undefined> {
     if (this.#target.mode === "local") {
-      const running = await this.#findRunningContextLength(model)
-      if (running !== undefined) return running
+      const runningModels = await this.#listRunningOllamaModels()
+      return runningModels.find((running) =>
+        isRunningOllamaModel(running, model)
+      )?.context_length
     }
     const contextLength = findModelInfoContextLength(description.model_info)
     if (contextLength === undefined) {
@@ -354,23 +384,20 @@ export default class OllamaRuntime implements LlmRuntime {
   }
 
   /**
-   * Finds the context length a local server is running one model with.
+   * Lists the models a local server is running.
    *
-   * @param model - Listed model name.
-   * @returns The reported length, or undefined when the model is not running
-   * or the server reports none.
+   * @returns The running models, each with the context length the server
+   * reports for it, if any.
    * @throws When the request fails or the answer does not match its shape.
    */
-  async #findRunningContextLength(model: string): Promise<number | undefined> {
+  async #listRunningOllamaModels(): Promise<readonly OllamaRunningModel[]> {
     const parsed = ollamaRunningModelListSchema.safeParse(
       await this.#requestOllamaJson({ method: "GET", path: "/api/ps" })
     )
     if (!parsed.success) {
       throw new Error("Ollama returned an invalid running-model list.")
     }
-    return parsed.data.models.find(
-      (running) => running.name === model || running.model === model
-    )?.context_length
+    return parsed.data.models
   }
 
   /**
@@ -409,6 +436,20 @@ export default class OllamaRuntime implements LlmRuntime {
       apiKey: this.#target.mode === "cloud" ? this.#target.apiKey : undefined
     })
   }
+}
+
+/**
+ * Answers whether a running model is the listed model of a name.
+ *
+ * @param running - Model `/api/ps` lists.
+ * @param model - Listed model name.
+ * @returns True when either of its names is that name.
+ */
+function isRunningOllamaModel(
+  running: OllamaRunningModel,
+  model: string
+): boolean {
+  return running.name === model || running.model === model
 }
 
 /**

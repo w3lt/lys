@@ -20,8 +20,8 @@ export type ModelInventoryState =
       readonly models: readonly LlmInfo[]
       /**
        * Who loads the models: `lys` when Lys loads and unloads them through
-       * the backend, `provider` when the provider loads a model when a
-       * request names it.
+       * the backend, `provider` when the provider decides which models are
+       * in memory.
        */
       readonly modelLoading: LlmModelLoading
     }

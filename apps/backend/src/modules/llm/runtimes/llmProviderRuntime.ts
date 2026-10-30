@@ -14,7 +14,7 @@ import OllamaRuntime from "./ollamaRuntime"
  * client; unused for other providers.
  * @returns A ready runtime whose cleanup ownership transfers to the caller:
  * LM Studio over `ws://<address>`, whose models Lys loads; or a provider
- * that loads a model when a request names it: a local Ollama server over
+ * that decides which models are in memory: a local Ollama server over
  * `http://<address>`, Ollama Cloud over `https://ollama.com`, or Groq over
  * `https://api.groq.com/openai/v1`.
  * @throws The acquisition failure of the provider's runtime, such as `The

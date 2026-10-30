@@ -39,7 +39,7 @@ import type {
  */
 export type ConnectedLlmEngine =
   | Readonly<{
-      /** The provider loads a model when a request names it. */
+      /** The provider decides which models are in memory. */
       modelLoading: "provider"
       /** Observes the engine's models and measures contexts. */
       llmEngine: LlmEngine
@@ -315,7 +315,8 @@ export default class LlmService
   }
 
   /**
-   * Measures texts with the tokenizer of a loaded model, through the queue.
+   * Measures texts with the tokenizer of a loaded model, or estimates them
+   * where the engine exposes no tokenizer, through the queue.
    *
    * @param model - Model selection as a chat request names it.
    * @param texts - Texts to count, each on its own.

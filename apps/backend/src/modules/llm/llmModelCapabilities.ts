@@ -66,8 +66,8 @@ export interface LlmModelInventory {
    * canonical model key, then by ascending path. A loaded model's snapshots
    * carry the smallest context length among its loaded instances, unless its
    * instances were gone by the time they were measured. `modelLoading` is
-   * `provider` when the connected provider loads a model when a request
-   * names it, and `lys` otherwise.
+   * `provider` when the connected provider decides which models are in
+   * memory, and `lys` otherwise.
    * @throws If the provider cannot query or validate its model inventory, or
    * its application lifetime has begun cleanup.
    * @throws A service-busy error if the shared model-operation queue is full;

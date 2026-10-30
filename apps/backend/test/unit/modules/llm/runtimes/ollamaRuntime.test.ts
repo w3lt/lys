@@ -121,13 +121,28 @@ describe("OllamaRuntime", () => {
     ).toEqual(Array(4).fill(`Bearer ${API_KEY}`))
   })
 
-  it("reports every listed model as loaded", async () => {
-    const { runtime } = await createOwnedRuntime("local")
+  it("reports the chat models a local server is running as loaded", async () => {
+    const { runtime } = await createOwnedRuntime("local", {
+      "GET /api/ps": answerWith({
+        models: [{ name: "qwen3:8b", model: "qwen3:8b", context_length: 4096 }]
+      })
+    })
+
+    expect(await runtime.listLoadedLlmModelInstances()).toEqual([
+      { modelKey: "qwen3:8b", modelIdentifier: "qwen3:8b" }
+    ])
+  })
+
+  it("reports every chat model of Ollama Cloud as loaded", async () => {
+    const { runtime, server } = await createOwnedRuntime("cloud")
 
     expect(await runtime.listLoadedLlmModelInstances()).toEqual([
       { modelKey: "qwen3:8b", modelIdentifier: "qwen3:8b" },
       { modelKey: "gpt-oss:120b", modelIdentifier: "gpt-oss:120b" }
     ])
+    expect(server.requests.map((request) => request.path)).not.toContain(
+      "/api/ps"
+    )
   })
 
   it("leaves a model that cannot chat out of every listing and measurement", async () => {
@@ -144,7 +159,13 @@ describe("OllamaRuntime", () => {
                 model_info: { "bert.context_length": 8192 }
               }
             }
-          : showModel(request)
+          : showModel(request),
+      "GET /api/ps": answerWith({
+        models: ["qwen3:8b", "gpt-oss:120b", "bge-m3:latest"].map((name) => ({
+          name,
+          context_length: 8192
+        }))
+      })
     })
 
     const models = await runtime.listDownloadedLlmModels()
@@ -215,19 +236,31 @@ describe("OllamaRuntime", () => {
     ).toEqual([{ model: "qwen3:8b" }])
   })
 
-  it("measures a model that is not running with its own window", async () => {
+  it("finds no measurement for a local model that is not running, whose window Ollama has not chosen yet", async () => {
     const { runtime } = await createOwnedRuntime("local")
 
-    expect(await runtime.findLlmContextMeasurement("gpt-oss:120b", [])).toEqual(
-      { contextLength: 131_072, textTokenCounts: [] }
-    )
+    expect(
+      await runtime.findLlmContextMeasurement("gpt-oss:120b", [])
+    ).toBeUndefined()
   })
 
-  it("measures a cloud model without asking for running models", async () => {
+  it("finds no measurement for a running local model whose window the server does not report", async () => {
+    const { runtime } = await createOwnedRuntime("local", {
+      "GET /api/ps": answerWith({ models: [{ name: "qwen3:8b" }] })
+    })
+
+    expect(
+      await runtime.findLlmContextMeasurement("qwen3:8b", ["a"])
+    ).toBeUndefined()
+  })
+
+  it("measures a cloud model with its own window, without asking for running models", async () => {
     const { runtime, server } = await createOwnedRuntime("cloud")
 
-    await runtime.findLlmContextMeasurement("qwen3:8b", ["a"])
-
+    expect(await runtime.findLlmContextMeasurement("qwen3:8b", ["a"])).toEqual({
+      contextLength: 40_960,
+      textTokenCounts: [1]
+    })
     expect(server.requests.map((request) => request.path)).not.toContain(
       "/api/ps"
     )

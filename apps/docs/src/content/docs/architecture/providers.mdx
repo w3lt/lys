@@ -136,14 +136,15 @@ unloads every model nor terminates the external LM Studio engine.
 ## Ollama and Groq runtimes
 
 `OllamaRuntime` uses Ollama's native API: `/api/tags` lists the models,
-`/api/show` describes each, and `/api/ps` reports a local server's running
-models. A model whose capabilities lack `completion`, such as an embedding
-model, is left out of every listing and measurement; a model is kept when
-Ollama reports no capabilities for it. `GroqRuntime` lists Groq's models
-from `/openai/v1/models` and hides one Groq marks inactive. Both report every
-listed model as one loaded instance whose identifier is its key, because the
-provider loads a model when a request names it, and neither offers model
-loading.
+`/api/show` describes each, at most four at once and none after one fails,
+and `/api/ps` reports a local server's running models. A model whose
+capabilities lack `completion`, such as an embedding model, is left out of
+every listing and measurement; a model is kept when Ollama reports no
+capabilities for it. `GroqRuntime` lists Groq's models from
+`/openai/v1/models` and hides one Groq marks inactive. Groq and Ollama Cloud
+report every listed model as one loaded instance, and a local Ollama server
+every model it is running, each with its key as its identifier and the window
+it is served with. Neither runtime offers model loading.
 Neither caches an answer nor holds a connection, so disposal only closes
 admission.
 

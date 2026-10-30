@@ -14,6 +14,7 @@ import {
   answerAsMcpServer,
   answerWithInvalidJson,
   answerWithStatus,
+  answerWithToolListPages,
   buildFakeStdioServerSettings,
   buildHttpServerSettings,
   buildSizedTextResult,
@@ -141,7 +142,7 @@ const MISSING_COMMAND_SETTINGS: McpServerSettings = Object.freeze({
 
 /**
  * Nesting depth of the input schema of {@link DEEP_SCHEMA_TOOL_TEXT}, deep
- * enough that the SDK's check of a tool list runs out of stack.
+ * enough that the SDK's check of a tool runs out of stack.
  */
 const DEEP_SCHEMA_DEPTH = 10_000
 
@@ -170,10 +171,14 @@ const DEEP_SCHEMA_TOOL_TEXT =
   DEEP_SCHEMA_TOOL_PIECES.levelEnd.repeat(DEEP_SCHEMA_DEPTH) +
   DEEP_SCHEMA_TOOL_PIECES.end
 
+/** JSON text of a tool listed before the deep one, which stays usable. */
+const SHALLOW_TOOL_TEXT = '{"name":"shallow","inputSchema":{"type":"object"}}'
+
 /**
- * Script of a stdio server that answers the handshake and lists one tool
- * of JSON text {@link DEEP_SCHEMA_TOOL_TEXT}. The script builds the text
- * from its pieces, since the whole text is longer than Linux allows one
+ * Script of a stdio server that answers the handshake and lists the tool
+ * of JSON text {@link SHALLOW_TOOL_TEXT}, then the one of
+ * {@link DEEP_SCHEMA_TOOL_TEXT}. The script builds the deep text from its
+ * pieces, since the whole text is longer than Linux allows one
  * command-line argument to be.
  */
 const DEEP_SCHEMA_STDIO_SERVER_SCRIPT = [
@@ -186,13 +191,14 @@ const DEEP_SCHEMA_STDIO_SERVER_SCRIPT = [
   '  if (message.method === "initialize")',
   '    process.stdout.write(head + JSON.stringify({ protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "deep", version: "1.0.0" } }) + "}\\n")',
   '  else if (message.method === "tools/list")',
-  '    process.stdout.write(head + \'{"tools":[\' + toolText + "]}}\\n")',
+  `    process.stdout.write(head + '{"tools":[${SHALLOW_TOOL_TEXT},' + toolText + "]}}\\n")`,
   "})"
 ].join("\n")
 
 /**
  * Builds a route that answers as {@link answerAsMcpServer} does, except
- * that it lists one tool of JSON text {@link DEEP_SCHEMA_TOOL_TEXT}.
+ * that it lists the tool of JSON text {@link SHALLOW_TOOL_TEXT}, then the
+ * one of {@link DEEP_SCHEMA_TOOL_TEXT}.
  *
  * @returns The route.
  */
@@ -212,7 +218,7 @@ function answerWithDeepSchemaTool(): McpHttpRoute {
       "mcp-session-id": "test-session"
     })
     response.end(
-      `{"jsonrpc":"2.0","id":${String(message.id)},"result":{"tools":[${DEEP_SCHEMA_TOOL_TEXT}]}}`
+      `{"jsonrpc":"2.0","id":${String(message.id)},"result":{"tools":[${SHALLOW_TOOL_TEXT},${DEEP_SCHEMA_TOOL_TEXT}]}}`
     )
   }
 }
@@ -452,8 +458,106 @@ describe("openMcpServer", () => {
     })
   })
 
-  it("fails an HTTP server whose tool list holds a schema too deep for the SDK's check as a protocol error", async () => {
-    const server = await startFakeMcpHttpServer(answerWithDeepSchemaTool())
+  it.each([
+    [
+      "an HTTP",
+      async (): Promise<McpServerSettings> =>
+        buildHttpServerSettings(
+          "deep",
+          (await startFakeMcpHttpServer(answerWithDeepSchemaTool())).url
+        )
+    ],
+    [
+      "a stdio",
+      (): Promise<McpServerSettings> =>
+        Promise.resolve(
+          buildScriptServerSettings("deep", DEEP_SCHEMA_STDIO_SERVER_SCRIPT)
+        )
+    ]
+  ])(
+    "connects %s server whose tool list holds an input schema too deep for the SDK's check, skipping only that tool",
+    async (_transport, buildSettings) => {
+      const { context } = createRecordingContext()
+
+      const opening = await openForTest(await buildSettings(), context)
+
+      if (opening.status !== "connected")
+        throw new Error("Expected the server to connect")
+      expect(opening.catalog.definitions.map((tool) => tool.name)).toEqual([
+        "mcp__deep__shallow"
+      ])
+      expect(opening.catalog.skippedTools).toEqual([
+        { name: "deep", reason: "unsupported-input-schema" }
+      ])
+    }
+  )
+
+  it("stops reading a tool list at the first tool past the 128 the backend keeps", async () => {
+    const tools = (first: number): unknown[] =>
+      Array.from({ length: 100 }, (_tool, index) => ({
+        name: `tool${String(first + index)}`,
+        inputSchema: { type: "object" }
+      }))
+    const server = await startFakeMcpHttpServer(
+      answerWithToolListPages({
+        "": { tools: tools(1), nextCursor: "2" },
+        "2": { tools: tools(101), nextCursor: "3" },
+        "3": { tools: tools(201) }
+      })
+    )
+    const { context } = createRecordingContext()
+
+    const opening = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    if (opening.status !== "connected")
+      throw new Error("Expected the server to connect")
+    expect(opening.catalog.definitions).toHaveLength(128)
+    expect(opening.catalog.definitions.at(-1)?.name).toBe(
+      "mcp__remote__tool128"
+    )
+    expect(opening.catalog.isToolListCut).toBe(true)
+    expect(
+      server.receivedRequests.filter(
+        (request) => request.rpcMethod === "tools/list"
+      )
+    ).toHaveLength(2)
+  })
+
+  it("ends a tool list at a page that names the cursor it was asked with, without that page's tools", async () => {
+    const server = await startFakeMcpHttpServer(
+      answerWithToolListPages({
+        "": {
+          tools: [{ name: "first", inputSchema: { type: "object" } }],
+          nextCursor: "again"
+        },
+        again: {
+          tools: [{ name: "repeated", inputSchema: { type: "object" } }],
+          nextCursor: "again"
+        }
+      })
+    )
+    const { context } = createRecordingContext()
+
+    const opening = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    if (opening.status !== "connected")
+      throw new Error("Expected the server to connect")
+    expect(opening.catalog.definitions.map((tool) => tool.name)).toEqual([
+      "mcp__remote__first"
+    ])
+    expect(opening.catalog.isToolListCut).toBe(false)
+  })
+
+  it("fails a tool list holding a tool the MCP tool schema refuses as a protocol error", async () => {
+    const server = await startFakeMcpHttpServer(
+      answerAsMcpServer([{ name: "no-schema" }])
+    )
     const { context } = createRecordingContext()
 
     const opening = await openForTest(
@@ -464,24 +568,8 @@ describe("openMcpServer", () => {
     expect(opening).toEqual({
       status: "failed",
       reason: "protocol-error",
-      failure: { kind: "unknown" },
-      unknownError: expect.any(RangeError)
-    })
-  })
-
-  it("fails a stdio server whose tool list holds a schema too deep for the SDK's check as a protocol error", async () => {
-    const { context } = createRecordingContext()
-
-    const opening = await openForTest(
-      buildScriptServerSettings("deep", DEEP_SCHEMA_STDIO_SERVER_SCRIPT),
-      context
-    )
-
-    expect(opening).toEqual({
-      status: "failed",
-      reason: "protocol-error",
-      failure: { kind: "unknown" },
-      unknownError: expect.any(RangeError)
+      failure: { kind: "invalid-answer" },
+      unknownError: undefined
     })
   })
 

@@ -15,6 +15,7 @@ import {
   answerAsMcpServer,
   answerToolCallsWith,
   answerWithStatus,
+  answerWithToolListPages,
   buildSizedTextResult,
   buildFakeLauncherServerSettings,
   buildFakeStdioServerSettings,
@@ -207,7 +208,67 @@ describe("McpServerConnection over stdio", () => {
       context
     )
 
-    expect(await connection.listTools(NEVER_ABORTED)).toEqual([ECHO_TOOL])
+    expect(await connection.readToolListPage(undefined, NEVER_ABORTED)).toEqual(
+      { tools: [ECHO_TOOL], nextCursor: undefined }
+    )
+  })
+
+  it("reads the page a cursor names and passes on its tools unchecked", async () => {
+    const server = await startFakeMcpHttpServer(
+      answerWithToolListPages({
+        "": { tools: [ECHO_TOOL], nextCursor: "page-2" },
+        "page-2": { tools: [{ name: 7 }] }
+      })
+    )
+    const { context } = createRecordingContext()
+    const connection = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    expect(await connection.readToolListPage(undefined, NEVER_ABORTED)).toEqual(
+      { tools: [ECHO_TOOL], nextCursor: "page-2" }
+    )
+    expect(await connection.readToolListPage("page-2", NEVER_ABORTED)).toEqual({
+      tools: [{ name: 7 }],
+      nextCursor: undefined
+    })
+  })
+
+  it("reads no tools from a server that offered none in the handshake, without asking it", async () => {
+    const server = await startFakeMcpHttpServer(
+      answerWithToolListPages({ "": { tools: [ECHO_TOOL] } }, {})
+    )
+    const { context } = createRecordingContext()
+    const connection = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    expect(await connection.readToolListPage(undefined, NEVER_ABORTED)).toEqual(
+      { tools: [], nextCursor: undefined }
+    )
+    expect(
+      server.receivedRequests.map((request) => request.rpcMethod)
+    ).not.toContain("tools/list")
+  })
+
+  it.each([
+    ["has no tools array", { tools: "none" }],
+    ["names a cursor that is not text", { tools: [], nextCursor: 2 }]
+  ])("fails a page that %s as an invalid result", async (_case, page) => {
+    const server = await startFakeMcpHttpServer(
+      answerWithToolListPages({ "": page })
+    )
+    const { context } = createRecordingContext()
+    const connection = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    await expect(
+      connection.readToolListPage(undefined, NEVER_ABORTED)
+    ).rejects.toMatchObject({ code: SdkErrorCode.InvalidResult })
   })
 
   it("calls a tool and returns the server's result", async () => {
@@ -247,7 +308,7 @@ describe("McpServerConnection over stdio", () => {
       }),
       context
     )
-    await connection.listTools(NEVER_ABORTED)
+    await connection.readToolListPage(undefined, NEVER_ABORTED)
 
     const result = await connection.sendToolCall(
       "structured",
@@ -447,7 +508,7 @@ describe("McpServerConnection over HTTP", () => {
       context
     )
 
-    await connection.listTools(NEVER_ABORTED)
+    await connection.readToolListPage(undefined, NEVER_ABORTED)
     await connection.sendToolCall("echo", { text: "hi" }, NEVER_ABORTED)
     await connection.close()
 

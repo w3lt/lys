@@ -416,6 +416,51 @@ export function answerAsMcpServer(
 
 /**
  * Builds a route that answers as {@link answerAsMcpServer} does, except for
+ * the handshake's capabilities and the pages of its tool list.
+ *
+ * @param pages - Result of each `tools/list` request, by the cursor it
+ * names; the empty key for the first page.
+ * @param capabilities - Capabilities the handshake offers.
+ * @returns The route.
+ */
+export function answerWithToolListPages(
+  pages: Readonly<Record<string, unknown>>,
+  capabilities: Readonly<Record<string, unknown>> = { tools: {} }
+): McpHttpRoute {
+  const answerOther = answerAsMcpServer()
+  return (request, body, response) => {
+    const message =
+      request.method === "POST"
+        ? (JSON.parse(body) as {
+            id?: number
+            method?: string
+            params?: { cursor?: string; protocolVersion?: string }
+          })
+        : {}
+    const result =
+      message.method === "initialize"
+        ? {
+            protocolVersion: message.params?.protocolVersion,
+            capabilities,
+            serverInfo: { name: "paged", version: "1.0.0" }
+          }
+        : message.method === "tools/list"
+          ? pages[message.params?.cursor ?? ""]
+          : undefined
+    if (result === undefined) {
+      answerOther(request, body, response)
+      return
+    }
+    response.writeHead(200, {
+      "content-type": "application/json",
+      "mcp-session-id": "test-session"
+    })
+    response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }))
+  }
+}
+
+/**
+ * Builds a route that answers as {@link answerAsMcpServer} does, except for
  * tool calls.
  *
  * @param answerCall - Answers each `tools/call` request, by its identifier.

@@ -3,9 +3,9 @@ import {
   Client,
   StreamableHTTPClientTransport,
   type CallToolResult,
-  type Tool,
   type Transport
 } from "@modelcontextprotocol/client"
+import { z } from "zod"
 import { version as LYS_VERSION } from "../../../package.json"
 import { calculateMcpRequestFailure, isSpawnFailure } from "./mcpError"
 import {
@@ -54,11 +54,28 @@ export type McpServerConnectionContext = Readonly<{
   reportConnectionError: (error: Error) => void
 }>
 
+/** One page of a server's tool list, as the backend reads it. */
+export type McpToolListPage = Readonly<{
+  /** The page's tools, in the server's order; untrusted and unchecked. */
+  tools: readonly unknown[]
+  /** Cursor of the next page; undefined on the last page. */
+  nextCursor: string | undefined
+}>
+
 /**
- * Most pages of a server's tool list the backend reads; a longer list fails
- * the opening.
+ * Checks the shape of one page of a tool list, but not its tools, so that
+ * no tool is checked by a recursive schema before the backend bounded it.
  */
-const MAXIMUM_TOOL_LIST_PAGES = 16
+const TOOL_LIST_PAGE_SCHEMA = z.looseObject({
+  tools: z.array(z.unknown()),
+  nextCursor: z.string().optional()
+})
+
+/** Page of a server that offers no tools. */
+const EMPTY_TOOL_LIST_PAGE: McpToolListPage = Object.freeze({
+  tools: Object.freeze([]),
+  nextCursor: undefined
+})
 
 /** Longest a tool call may take before it fails, in milliseconds. */
 export const MCP_TOOL_CALL_TIMEOUT_MILLISECONDS = 5 * 60 * 1000
@@ -146,7 +163,7 @@ export default class McpServerConnection {
    * `initialize`, the SDK's `legacy` mode and its default today, named here
    * so a new SDK default cannot change it unseen: in the 2026-07-28 era the
    * SDK would read the tool list again after a header mismatch and check
-   * results against output schemas, which {@link listTools} avoids.
+   * results against output schemas, which {@link readToolListPage} avoids.
    */
   public static async open(
     settings: McpServerSettings,
@@ -154,7 +171,6 @@ export default class McpServerConnection {
   ): Promise<McpServerConnection> {
     const client = new Client(LYS_CLIENT_INFO, {
       capabilities: {},
-      listMaxPages: MAXIMUM_TOOL_LIST_PAGES,
       versionNegotiation: { mode: "legacy" }
     })
     const connection = new McpServerConnection(client, context)
@@ -180,30 +196,50 @@ export default class McpServerConnection {
   }
 
   /**
-   * Reads the server's whole tool list.
+   * Reads one page of the server's tool list.
    *
+   * @param cursor - Cursor of the page, from the page before; undefined for
+   * the first page.
    * @param abortSignal - Stops the read; borrowed for it.
-   * @returns Every tool, in the server's order, across at most 16 pages.
-   * @throws The SDK's failure, such as a timeout, a JSON-RPC error, or a list
-   * longer than 16 pages. Once the signal aborts, the SDK's request-timeout
-   * error, which is how the SDK reports a cancelled request. Once an HTTP
-   * answer passed `MAXIMUM_MCP_RESPONSE_BYTES`, a
+   * @returns The page's tools, unchecked, and the next page's cursor. A
+   * server that did not offer tools in the handshake has one empty page,
+   * as the SDK's own list reads it.
+   * @throws The SDK's failure, such as a timeout, a JSON-RPC error, or an
+   * invalid-result error when the page is not an object with a `tools`
+   * array and a text `nextCursor` if any. Once the signal aborts, the SDK's
+   * request-timeout error, which is how the SDK reports a cancelled request.
+   * Once an answer passed `MAXIMUM_MCP_RESPONSE_BYTES`, a
    * {@link McpResponseTooLargeError} with the SDK's failure as its cause.
-   * @remarks The list bypasses the SDK's response cache, so the SDK holds no
-   * tool's output schema and {@link sendToolCall} never checks a result against
-   * one. The SDK would compile such a schema and run its `pattern` keywords
-   * on the backend's event loop, where one pattern a server chose could
-   * block the backend for minutes. Lys treats a result's structured content
-   * as untrusted JSON under its own limits instead.
+   * @remarks The SDK checks the page against a schema of the backend's that
+   * leaves each tool unchecked, because its own schema checks a tool's input
+   * schema recursively and a tool nested thousands of levels deep would
+   * exhaust the stack; the caller checks each tool. The SDK never sees the
+   * list as tools, so it holds no tool's output schema and
+   * {@link sendToolCall} never checks a result against one. The SDK would
+   * compile such a schema and run its `pattern` keywords on the backend's
+   * event loop, where one pattern a server chose could block the backend
+   * for minutes. Lys treats a result's structured content as untrusted JSON
+   * under its own limits instead.
    */
-  public async listTools(abortSignal: AbortSignal): Promise<readonly Tool[]> {
+  public async readToolListPage(
+    cursor: string | undefined,
+    abortSignal: AbortSignal
+  ): Promise<McpToolListPage> {
+    if (this.#client.getServerCapabilities()?.tools === undefined)
+      return EMPTY_TOOL_LIST_PAGE
     try {
-      const result = await this.#client.listTools(undefined, {
-        signal: abortSignal,
-        timeout: MCP_SERVER_OPENING_TIMEOUT_MILLISECONDS,
-        cacheMode: "bypass"
-      })
-      return result.tools
+      const page = await this.#client.request(
+        {
+          method: "tools/list",
+          ...(cursor === undefined ? {} : { params: { cursor } })
+        },
+        TOOL_LIST_PAGE_SCHEMA,
+        {
+          signal: abortSignal,
+          timeout: MCP_SERVER_OPENING_TIMEOUT_MILLISECONDS
+        }
+      )
+      return Object.freeze({ tools: page.tools, nextCursor: page.nextCursor })
     } catch (error) {
       throw this.#buildRequestFailure(error)
     }
@@ -218,7 +254,7 @@ export default class McpServerConnection {
    * cancelled. Borrowed for the call.
    * @returns The server's result, which may report a failure of the tool
    * through `isError`. Its structured content is not checked against the
-   * tool's output schema; see {@link listTools}.
+   * tool's output schema; see {@link readToolListPage}.
    * @throws The SDK's failure, such as a timeout after
    * {@link MCP_TOOL_CALL_TIMEOUT_MILLISECONDS}, a closed connection, an HTTP
    * error, or a JSON-RPC error. Once the signal aborts, the SDK's

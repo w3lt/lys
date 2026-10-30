@@ -37,6 +37,10 @@ import { createFakeLlmRuntime } from "../support/fakeLlmRuntime"
 import { writeSettingsFile } from "../support/settingsFile"
 import { answerWithBody, startVmoServer } from "../support/vmoServer"
 
+// The bundle imports the LM Studio SDK through its runtime adapter. No case
+// connects the runtime, so no case arranges the fake engine.
+vi.mock("@lmstudio/sdk", () => import("../support/lmStudioSdkFake"))
+
 /** Name of each acquisition whose release the bundle owns. */
 type AcquisitionName = "chat" | "database" | "llm-runtime"
 
@@ -360,7 +364,8 @@ describe("createSingletonServices", () => {
     })
 
     expect(services.agentService.findAgent("researcher")).toMatchObject({
-      name: "Researcher"
+      agent: { kind: "custom", name: "Researcher" },
+      deletedAt: null
     })
     acquisitions.database.service[Symbol.dispose]()
     expect(() => services.agentService.findAgent("researcher")).toThrow(

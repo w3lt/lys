@@ -220,23 +220,48 @@ describe("formatReconnectAction", () => {
     "offers %s/%s/%o recovery as %s",
     (backendStatus, lmStudioStatus, modelRuntime, label) => {
       expect(
-        formatReconnectAction(
+        formatReconnectAction({
           backendStatus,
           lmStudioStatus,
           modelRuntime,
-          LM_STUDIO_TARGET
-        )
+          modelLoading: "lys",
+          provider: LM_STUDIO_TARGET
+        })
       ).toEqual({ label, isEnabled: true })
     }
   )
 
-  it("names the provider to check, and chooses a model for one that loads its own", () => {
+  it("names the provider to check, and chooses a model when the inventory reports that the provider loads its own", () => {
     expect(
-      formatReconnectAction("running", "unreachable", UNAVAILABLE, GROQ_TARGET)
+      formatReconnectAction({
+        backendStatus: "running",
+        lmStudioStatus: "unreachable",
+        modelRuntime: UNAVAILABLE,
+        modelLoading: "unknown",
+        provider: GROQ_TARGET
+      })
     ).toEqual({ label: "Check Groq", isEnabled: true })
     expect(
-      formatReconnectAction("running", "connected", NONE, GROQ_TARGET)
+      formatReconnectAction({
+        backendStatus: "running",
+        lmStudioStatus: "connected",
+        modelRuntime: NONE,
+        modelLoading: "provider",
+        provider: GROQ_TARGET
+      })
     ).toEqual({ label: "Choose model", isEnabled: true })
+  })
+
+  it("loads a model when the inventory reports that Lys loads them, whatever the provider", () => {
+    expect(
+      formatReconnectAction({
+        backendStatus: "running",
+        lmStudioStatus: "connected",
+        modelRuntime: NONE,
+        modelLoading: "lys",
+        provider: GROQ_TARGET
+      })
+    ).toEqual({ label: "Load model", isEnabled: true })
   })
 
   it.each<[BackendServerStatus, LmStudioStatus, ModelRuntimeState]>([
@@ -250,12 +275,13 @@ describe("formatReconnectAction", () => {
     "offers no action while %s/%s/%o is already changing",
     (backendStatus, lmStudioStatus, modelRuntime) => {
       expect(
-        formatReconnectAction(
+        formatReconnectAction({
           backendStatus,
           lmStudioStatus,
           modelRuntime,
-          LM_STUDIO_TARGET
-        )
+          modelLoading: "lys",
+          provider: LM_STUDIO_TARGET
+        })
       ).toEqual({ label: "Working", isEnabled: false })
     }
   )

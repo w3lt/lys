@@ -241,18 +241,6 @@ describe("OllamaRuntime", () => {
     ).toBeUndefined()
   })
 
-  it("refuses to load or stop a model without contacting Ollama", async () => {
-    const { runtime, server } = await createOwnedRuntime("local")
-
-    await expect(runtime.loadLlmModel()).rejects.toThrow(
-      "The LLM runtime could not load the model."
-    )
-    await expect(runtime.stopLoadedLlmModelInstance()).rejects.toThrow(
-      "The LLM runtime could not stop the model instance."
-    )
-    expect(server.requests).toHaveLength(1)
-  })
-
   it("is not acquired when the server does not answer its model list", async () => {
     const server = await startProviderServer({
       "GET /api/tags": answerWith({ error: "unauthorized" }, 401)

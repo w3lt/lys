@@ -21,22 +21,27 @@ const LOADED_MODEL = llmInfoSchema.parse({
 })
 
 describe("updateFastifyWithLlmListModelsRoute", () => {
-  it("responds with the service inventory, with each loaded model's context length", async () => {
-    const testApp = createLlmRouteTestApp()
-    const listLlmModels = vi
-      .spyOn(testApp.service, "listLlmModels")
-      .mockResolvedValue(Object.freeze([LOADED_MODEL]))
-    await updateFastifyWithLlmListModelsRoute(testApp.app)
+  it.each(["lys", "provider"] as const)(
+    "responds with the service inventory, each loaded model's context length, and who loads the models (%s)",
+    async (modelLoading) => {
+      const testApp = createLlmRouteTestApp()
+      const listLlmModels = vi
+        .spyOn(testApp.service, "listLlmModels")
+        .mockResolvedValue(
+          Object.freeze({ llms: Object.freeze([LOADED_MODEL]), modelLoading })
+        )
+      await updateFastifyWithLlmListModelsRoute(testApp.app)
 
-    const response = await testApp.app.inject({
-      method: "GET",
-      url: LIST_MODELS_PATH
-    })
+      const response = await testApp.app.inject({
+        method: "GET",
+        url: LIST_MODELS_PATH
+      })
 
-    expect(response.statusCode).toBe(200)
-    expect(response.json()).toEqual({ llms: [LOADED_MODEL] })
-    expect(listLlmModels).toHaveBeenCalledOnce()
-  })
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual({ llms: [LOADED_MODEL], modelLoading })
+      expect(listLlmModels).toHaveBeenCalledOnce()
+    }
+  )
 
   it("responds with the service-busy problem when admission is refused", async () => {
     const testApp = createLlmRouteTestApp()

@@ -41,7 +41,11 @@ const FAILED_SAVE_LINE =
 /** LM Studio connected, the chosen default on disk and nothing loaded. */
 const NOTHING_LOADED: RuntimeArrangement = {
   ...READY_RUNTIME,
-  modelInventory: { status: "ready", models: [buildLlmInfo("qwen3-8b")] }
+  modelInventory: {
+    status: "ready",
+    modelLoading: "lys",
+    models: [buildLlmInfo("qwen3-8b")]
+  }
 }
 
 /**
@@ -498,8 +502,8 @@ describe("RuntimePaneContent", () => {
     it("offers no model command while LM Studio is not reachable", async () => {
       await startRuntimePane(buildUnreachableRuntime("running", "unreachable"))
 
-      expect(screen.getByRole("button", { name: "Load" })).toBeDisabled()
-      expect(screen.getByRole("button", { name: "Unload" })).toBeDisabled()
+      expect(screen.queryByRole("button", { name: "Load" })).toBeNull()
+      expect(screen.queryByRole("button", { name: "Unload" })).toBeNull()
     })
   })
 })

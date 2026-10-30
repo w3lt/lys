@@ -96,7 +96,8 @@ const CONNECTED_BACKEND: BackendRoutes = Object.freeze({
   "GET /api/v1/heath": () => buildJsonResponse(200, { status: "ok" }),
   "GET /api/v1/llm/runtime": () =>
     buildJsonResponse(200, { status: "connected" }),
-  "GET /api/v1/llm/list": () => buildJsonResponse(200, { llms: INVENTORY })
+  "GET /api/v1/llm/list": () =>
+    buildJsonResponse(200, { llms: INVENTORY, modelLoading: "lys" })
 })
 
 /**
@@ -467,7 +468,11 @@ describe("useLysStore", () => {
           stoppedAt: undefined
         },
         lmStudioStatus: "connected",
-        modelInventory: { status: "ready", models: INVENTORY }
+        modelInventory: {
+          status: "ready",
+          modelLoading: "lys",
+          models: INVENTORY
+        }
       })
     })
 
@@ -755,7 +760,8 @@ describe("useLysStore", () => {
               buildLlmInfo("first", { loaded: true }),
               buildLlmInfo("on-disk", { loaded: true }),
               buildLlmInfo("later", { loaded: true })
-            ]
+            ],
+            modelLoading: "lys"
           })
       })
       startDesktopHost(DISK_SETTINGS_DOCUMENT)

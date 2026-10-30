@@ -20,7 +20,10 @@ export type DownloadedLlmModel = Readonly<
 export type LoadedLlmModelInstance = Readonly<{
   /** Non-empty canonical model key, scoped to this runtime. */
   modelKey: string
-  /** Non-empty opaque instance identifier accepted by this runtime's stop operation. */
+  /**
+   * Non-empty opaque instance identifier, which the runtime's stop operation
+   * accepts when the runtime offers one.
+   */
   modelIdentifier: string
 }>
 

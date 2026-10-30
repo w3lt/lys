@@ -11,7 +11,10 @@ import type {
   ConversationOpenState
 } from "@/lib/store/chat-view"
 import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
-import type { ModelRuntimeState } from "@/lib/store/model-runtime"
+import type {
+  ModelRuntimeState,
+  ObservedModelLoading
+} from "@/lib/store/model-runtime"
 
 /**
  * Chat work that keeps the composer from sending.
@@ -53,6 +56,20 @@ export type UnavailableRuntimeState = {
   readonly provider: LlmProviderTarget
   /** Observed residency, including unavailable observations. */
   readonly modelRuntime: ModelRuntimeState
+}
+
+/** Runtime facts that choose the unavailable banner's recovery action. */
+export type ReconnectActionState = {
+  /** Store-owned backend lifecycle state. */
+  readonly backendStatus: BackendServerStatus
+  /** Latest published provider status. */
+  readonly lmStudioStatus: LmStudioStatus
+  /** Observed residency or current weight transition. */
+  readonly modelRuntime: ModelRuntimeState
+  /** Who loads the models, as the latest inventory reports. */
+  readonly modelLoading: ObservedModelLoading
+  /** Active provider, which the action names. */
+  readonly provider: LlmProviderTarget
 }
 
 /**
@@ -143,21 +160,16 @@ function formatRunningRuntimeMessage(
 /**
  * Formats the banner's recovery action for the current runtime state.
  *
- * @param backendStatus - Store-owned backend lifecycle state.
- * @param lmStudioStatus - Latest published provider status.
- * @param modelRuntime - Observed residency or current weight transition.
- * @param provider - Active provider, which the action names.
+ * @param runtime - Backend, provider, residency, and model-loading facts.
  * @returns The action for the first missing prerequisite; a state that is
  * already transitioning offers no action. With no model in memory, the
- * action loads one for a provider whose loading Lys manages, and chooses one
- * otherwise.
+ * action loads one when the inventory reports that Lys loads the models, and
+ * chooses one otherwise.
  */
 export function formatReconnectAction(
-  backendStatus: BackendServerStatus,
-  lmStudioStatus: LmStudioStatus,
-  modelRuntime: ModelRuntimeState,
-  provider: LlmProviderTarget
+  runtime: ReconnectActionState
 ): ReconnectAction {
+  const { backendStatus, lmStudioStatus, modelRuntime, provider } = runtime
   const workingAction = Object.freeze({
     label: "Working",
     isEnabled: false
@@ -181,7 +193,7 @@ export function formatReconnectAction(
   }
   if (modelRuntime.status === "none") {
     return {
-      label: provider.managesModelLoading ? "Load model" : "Choose model",
+      label: runtime.modelLoading === "lys" ? "Load model" : "Choose model",
       isEnabled: true
     }
   }

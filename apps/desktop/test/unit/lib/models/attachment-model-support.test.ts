@@ -9,6 +9,7 @@ import { buildLlmInfo } from "../../support/modelFixtures"
 /** Inventory listing one model that sees images and calls tools, and one that does neither. */
 const INVENTORY: ModelInventoryState = {
   status: "ready",
+  modelLoading: "lys",
   models: [
     buildLlmInfo("capable", {
       loaded: true,

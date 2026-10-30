@@ -36,9 +36,10 @@ type GroqModel = z.infer<typeof groqModelSchema>
  * Implements {@link LlmRuntime} over Groq's OpenAI-compatible API.
  *
  * @remarks Groq serves every model it lists on demand, so every listed model
- * is reported as one loaded instance whose identifier is its key, and loading
- * or stopping a model fails. Groq has no tokenizer endpoint: measurements use
- * the model's context window and {@link estimateTextTokenCount}. Every call
+ * is reported as one loaded instance whose identifier is its key, and the
+ * runtime offers no model loading. Groq has no tokenizer endpoint:
+ * measurements use the model's context window and
+ * {@link estimateTextTokenCount}. Every call
  * lists the models again; nothing is cached. The runtime holds no connection,
  * so disposal releases nothing beyond closing admission. Concurrency model:
  * single-owner; {@link LlmRuntimeAdmission} rejects overlapping calls.
@@ -151,40 +152,6 @@ export default class GroqRuntime implements LlmRuntime {
         )
       )
     })
-  }
-
-  /**
-   * Refuses to load a model: Groq serves its models without loading them.
-   *
-   * @returns Never resolves.
-   * @throws The interface-defined admission failure, or `The LLM runtime
-   * could not load the model.` without contacting Groq.
-   */
-  public async loadLlmModel(): Promise<LoadedLlmModelInstance> {
-    return await this.#admission.runOperation(() =>
-      Promise.reject(
-        new Error("The LLM runtime could not load the model.", {
-          cause: new Error("Groq serves its models without loading them.")
-        })
-      )
-    )
-  }
-
-  /**
-   * Refuses to stop a model: Groq serves its models without loading them.
-   *
-   * @returns Never resolves.
-   * @throws The interface-defined admission failure, or `The LLM runtime
-   * could not stop the model instance.` without contacting Groq.
-   */
-  public async stopLoadedLlmModelInstance(): Promise<void> {
-    await this.#admission.runOperation(() =>
-      Promise.reject(
-        new Error("The LLM runtime could not stop the model instance.", {
-          cause: new Error("Groq serves its models without loading them.")
-        })
-      )
-    )
   }
 
   /**

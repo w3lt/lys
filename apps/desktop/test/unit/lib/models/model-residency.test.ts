@@ -55,7 +55,11 @@ describe("findLoadedModel", () => {
     expect(
       findLoadedModel(
         { status: "loaded", modelKey: "resident" },
-        { status: "ready", models: [buildLlmInfo("on-disk"), resident] }
+        {
+          status: "ready",
+          modelLoading: "lys",
+          models: [buildLlmInfo("on-disk"), resident]
+        }
       )
     ).toBe(resident)
   })
@@ -64,7 +68,11 @@ describe("findLoadedModel", () => {
     [
       "no model is loaded",
       NONE,
-      { status: "ready", models: [buildLlmInfo("resident", { loaded: true })] }
+      {
+        status: "ready",
+        modelLoading: "lys",
+        models: [buildLlmInfo("resident", { loaded: true })]
+      }
     ],
     [
       "the inventory cannot be read",
@@ -79,7 +87,11 @@ describe("findLoadedModel", () => {
     [
       "the inventory does not list the loaded model",
       { status: "loaded", modelKey: "resident" },
-      { status: "ready", models: [buildLlmInfo("on-disk")] }
+      {
+        status: "ready",
+        modelLoading: "lys",
+        models: [buildLlmInfo("on-disk")]
+      }
     ]
   ])("finds no entry while %s", (_case, modelRuntime, inventory) => {
     expect(findLoadedModel(modelRuntime, inventory)).toBeUndefined()

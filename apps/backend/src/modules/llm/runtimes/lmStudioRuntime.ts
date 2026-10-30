@@ -6,6 +6,7 @@ import {
 } from "@lmstudio/sdk"
 import type { ModelLoadConfiguration } from "@lys/share"
 import * as z from "zod"
+import type { LlmModelInstanceController } from "../llmModelInstanceController"
 import type { LlmRuntime } from "../llmRuntime"
 import type {
   DownloadedLlmModel,
@@ -26,7 +27,8 @@ const lmStudioContextLengthSchema = z.int().positive()
 const lmStudioTokenCountSchema = z.int().nonnegative()
 
 /**
- * Owns one LM Studio client to implement {@link LlmRuntime} with terminal cleanup.
+ * Owns one LM Studio client to implement {@link LlmRuntime} and
+ * {@link LlmModelInstanceController} with terminal cleanup.
  *
  * @remarks Concurrency
  * model: single-owner; the owning service confines calls, and
@@ -36,7 +38,9 @@ const lmStudioTokenCountSchema = z.int().nonnegative()
  * Model operations retain the interface's application-owned completion-only
  * lifetime. Cleanup closes SDK connections without unloading engine models.
  */
-export default class LmStudioRuntime implements LlmRuntime {
+export default class LmStudioRuntime
+  implements LlmRuntime, LlmModelInstanceController
+{
   /** SDK client borrowed from this runtime's exclusively owned disposal stack. */
   readonly #client: LMStudioClient
 
@@ -167,7 +171,8 @@ export default class LmStudioRuntime implements LlmRuntime {
   }
 
   /**
-   * Implements {@link LlmRuntime.loadLlmModel} with a completion-only SDK load.
+   * Implements {@link LlmModelInstanceController.loadLlmModel} with a
+   * completion-only SDK load.
    *
    * @param modelKeyOrAlias - Interface-defined engine model selection.
    * @param loadConfiguration - Interface-defined load settings, given to the SDK
@@ -194,7 +199,8 @@ export default class LmStudioRuntime implements LlmRuntime {
   }
 
   /**
-   * Implements {@link LlmRuntime.stopLoadedLlmModelInstance} through SDK unloading.
+   * Implements {@link LlmModelInstanceController.stopLoadedLlmModelInstance}
+   * through SDK unloading.
    *
    * @param modelIdentifier - Interface-defined opaque loaded-instance identifier.
    * @returns A promise resolving after the SDK acknowledges unloading.

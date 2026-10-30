@@ -8,7 +8,7 @@ import GroqRuntime from "../../../../../src/modules/llm/runtimes/groqRuntime"
 import { acquireLlmProviderRuntime } from "../../../../../src/modules/llm/runtimes/llmProviderRuntime"
 import LmStudioRuntime from "../../../../../src/modules/llm/runtimes/lmStudioRuntime"
 import OllamaRuntime from "../../../../../src/modules/llm/runtimes/ollamaRuntime"
-import type { LlmRuntime } from "../../../../../src/modules/llm/llmRuntime"
+import type { AcquiredLlmRuntime } from "../../../../../src/modules/llm/llmRuntime"
 import {
   DISCARDING_SDK_LOGGER,
   fakeLmStudio
@@ -27,14 +27,14 @@ const OLLAMA_KEY = ollamaApiKeySchema.parse("ollama-synthetic-0123456789")
 const GROQ_KEY = groqApiKeySchema.parse("gsk_synthetic_0123456789")
 
 /**
- * Disposes a runtime when the current test finishes.
+ * Disposes an acquired runtime when the current test finishes.
  *
- * @param runtime - Acquired runtime.
- * @returns The same runtime.
+ * @param acquired - Acquired runtime, with who loads its models.
+ * @returns The same acquisition.
  */
-function ownRuntime(runtime: LlmRuntime): LlmRuntime {
-  onTestFinished(async () => await runtime[Symbol.asyncDispose]())
-  return runtime
+function ownRuntime(acquired: AcquiredLlmRuntime): AcquiredLlmRuntime {
+  onTestFinished(async () => await acquired.llmRuntime[Symbol.asyncDispose]())
+  return acquired
 }
 
 /**
@@ -68,7 +68,7 @@ describe("acquireLlmProviderRuntime", () => {
     const constructClient = vi.fn()
     fakeLmStudio.operations = { ...fakeLmStudio.operations, constructClient }
 
-    const runtime = ownRuntime(
+    const acquired = ownRuntime(
       await acquireLlmProviderRuntime(
         {
           provider: "lmStudio",
@@ -78,7 +78,12 @@ describe("acquireLlmProviderRuntime", () => {
       )
     )
 
-    expect(runtime).toBeInstanceOf(LmStudioRuntime)
+    expect(acquired.llmRuntime).toBeInstanceOf(LmStudioRuntime)
+    expect(acquired).toEqual({
+      modelLoading: "lys",
+      llmRuntime: acquired.llmRuntime,
+      llmModelInstanceController: acquired.llmRuntime
+    })
     expect(constructClient).toHaveBeenCalledWith(
       expect.objectContaining({ baseUrl: "ws://192.168.1.20:1234" })
     )
@@ -89,7 +94,7 @@ describe("acquireLlmProviderRuntime", () => {
       "GET /api/tags": answerWith({ models: [] })
     })
 
-    const runtime = ownRuntime(
+    const acquired = ownRuntime(
       await acquireLlmProviderRuntime(
         {
           provider: "ollama",
@@ -102,7 +107,8 @@ describe("acquireLlmProviderRuntime", () => {
       )
     )
 
-    expect(runtime).toBeInstanceOf(OllamaRuntime)
+    expect(acquired.llmRuntime).toBeInstanceOf(OllamaRuntime)
+    expect(acquired.modelLoading).toBe("provider")
     expect(server.requests).toEqual([
       {
         method: "GET",
@@ -116,14 +122,15 @@ describe("acquireLlmProviderRuntime", () => {
   it("reaches Ollama's cloud over HTTPS with the key", async () => {
     const requests = stubFetch({ models: [] })
 
-    const runtime = ownRuntime(
+    const acquired = ownRuntime(
       await acquireLlmProviderRuntime(
         { provider: "ollama", mode: "cloud", apiKey: OLLAMA_KEY },
         DISCARDING_SDK_LOGGER
       )
     )
 
-    expect(runtime).toBeInstanceOf(OllamaRuntime)
+    expect(acquired.llmRuntime).toBeInstanceOf(OllamaRuntime)
+    expect(acquired.modelLoading).toBe("provider")
     expect(requests).toEqual([
       {
         url: "https://ollama.com/api/tags",
@@ -135,14 +142,15 @@ describe("acquireLlmProviderRuntime", () => {
   it("reaches Groq over HTTPS with the key", async () => {
     const requests = stubFetch({ data: [] })
 
-    const runtime = ownRuntime(
+    const acquired = ownRuntime(
       await acquireLlmProviderRuntime(
         { provider: "groq", apiKey: GROQ_KEY },
         DISCARDING_SDK_LOGGER
       )
     )
 
-    expect(runtime).toBeInstanceOf(GroqRuntime)
+    expect(acquired.llmRuntime).toBeInstanceOf(GroqRuntime)
+    expect(acquired.modelLoading).toBe("provider")
     expect(requests).toEqual([
       {
         url: "https://api.groq.com/openai/v1/models",

@@ -1,14 +1,18 @@
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
+import { isLlmProviderLoadsModelsError } from "../../../../src/modules/llm/llmProviderLoadsModelsError"
 import LlmService, {
+  type ConnectedLlmEngine,
   type LlmEngineOperation,
   type LlmEngineOperationQueue,
   type LlmServiceCreationOptions
 } from "../../../../src/modules/llm/llmService"
-import type { LlmEngine } from "../../../../src/modules/llm/llmEngine"
 import type { LoadedLlmModelInstance } from "../../../../src/modules/llm/llmRuntimeTypes"
 import LmStudioRuntime from "../../../../src/modules/llm/runtimes/lmStudioRuntime"
-import { createFakeLlmRuntime } from "../../support/fakeLlmRuntime"
+import {
+  createConnectedFakeLlmEngine,
+  createFakeLlmRuntime
+} from "../../support/fakeLlmRuntime"
 import {
   createDownloadedLlmModel,
   createLmStudioLlmRecord
@@ -40,7 +44,7 @@ function createLoadedInstance(modelKey: string): LoadedLlmModelInstance {
 /**
  * Creates a queue that admits every operation and runs it against one engine.
  *
- * @param llmEngine - Engine handed to every admitted operation.
+ * @param connectedLlmEngine - Engine view handed to every admitted operation.
  * @param waitForAdmission - Settles when an admitted operation may start;
  * defaults to starting at once.
  * @returns The queue and a spy recording every operation request.
@@ -50,7 +54,7 @@ function createLoadedInstance(modelKey: string): LoadedLlmModelInstance {
  * unchanged, as the queue contract requires.
  */
 function createAdmittingQueue(
-  llmEngine: LlmEngine,
+  connectedLlmEngine: ConnectedLlmEngine,
   waitForAdmission: () => Promise<void> = async () => undefined
 ) {
   const queue = {
@@ -58,7 +62,7 @@ function createAdmittingQueue(
       operation: LlmEngineOperation<Result>
     ): Promise<Result> {
       await waitForAdmission()
-      return await operation(llmEngine)
+      return await operation(connectedLlmEngine)
     }
   } satisfies LlmEngineOperationQueue
   const requests = vi.spyOn(queue, "handleLlmEngineOperationRequest")
@@ -69,12 +73,19 @@ function createAdmittingQueue(
  * Creates a service whose admitting queue runs operations on a runtime double.
  *
  * @param options - Optional clock; every other setting is the default.
+ * @param modelLoading - Who loads the double's models; `lys` by default, so
+ * the double also acts as the model-loading capability.
  * @returns The service, the runtime double acting as its engine, and the spy
  * recording queue requests.
  */
-function createServiceWithEngine(options: LlmServiceTestOptions = {}) {
+function createServiceWithEngine(
+  options: LlmServiceTestOptions = {},
+  modelLoading: ConnectedLlmEngine["modelLoading"] = "lys"
+) {
   const engine = createFakeLlmRuntime()
-  const { queue, requests } = createAdmittingQueue(engine)
+  const { queue, requests } = createAdmittingQueue(
+    createConnectedFakeLlmEngine(engine, modelLoading)
+  )
   const service = new LlmService({ ...options, llmEngineOperationQueue: queue })
   return { service, engine, requests }
 }
@@ -135,7 +146,7 @@ describe("LlmService", () => {
         textTokenCounts: []
       })
 
-      const models = await service.listLlmModels()
+      const { llms: models } = await service.listLlmModels()
 
       expect(
         models.map(({ modelKey, path, loaded }) => ({ modelKey, path, loaded }))
@@ -167,7 +178,7 @@ describe("LlmService", () => {
         textTokenCounts: []
       })
 
-      const models = await service.listLlmModels()
+      const { llms: models } = await service.listLlmModels()
 
       expect(
         models.map(({ modelKey, loadedContextLength }) => ({
@@ -196,7 +207,7 @@ describe("LlmService", () => {
       ])
       engine.findLlmContextMeasurement.mockResolvedValue(undefined)
 
-      const models = await service.listLlmModels()
+      const { llms: models } = await service.listLlmModels()
 
       expect(models).toEqual([
         { ...createDownloadedLlmModel({ modelKey: "a/model" }), loaded: true }
@@ -232,10 +243,16 @@ describe("LlmService", () => {
       onTestFinished(async () => {
         await runtime[Symbol.asyncDispose]()
       })
-      const { queue } = createAdmittingQueue(runtime)
+      const { queue } = createAdmittingQueue(
+        Object.freeze({
+          modelLoading: "lys",
+          llmEngine: runtime,
+          llmModelInstanceController: runtime
+        })
+      )
       const service = new LlmService({ llmEngineOperationQueue: queue })
 
-      const models = await service.listLlmModels()
+      const { llms: models } = await service.listLlmModels()
 
       expect(
         models.map(({ modelKey, loadedContextLength }) => ({
@@ -256,11 +273,25 @@ describe("LlmService", () => {
       ])
       engine.listLoadedLlmModelInstances.mockResolvedValue([])
 
-      const models = await service.listLlmModels()
+      const inventory = await service.listLlmModels()
 
-      expect(Object.isFrozen(models)).toBe(true)
-      expect(Object.isFrozen(models[0])).toBe(true)
+      expect(Object.isFrozen(inventory)).toBe(true)
+      expect(Object.isFrozen(inventory.llms)).toBe(true)
+      expect(Object.isFrozen(inventory.llms[0])).toBe(true)
     })
+
+    it.each(["lys", "provider"] as const)(
+      "reports that the models are loaded by %s, as the connected engine says",
+      async (modelLoading) => {
+        const { service, engine } = createServiceWithEngine({}, modelLoading)
+        engine.listDownloadedLlmModels.mockResolvedValue([])
+        engine.listLoadedLlmModelInstances.mockResolvedValue([])
+
+        const inventory = await service.listLlmModels()
+
+        expect(inventory).toEqual({ llms: [], modelLoading })
+      }
+    )
 
     it.each([
       ["downloaded", "listDownloadedLlmModels"],
@@ -358,6 +389,18 @@ describe("LlmService", () => {
       )
     })
 
+    it("refuses without a runtime call when the provider loads its own models", async () => {
+      const { service, engine } = createServiceWithEngine({}, "provider")
+
+      const rejection: unknown = await service
+        .loadLlmModel("qwen/qwen3-8b", {})
+        .catch((error: unknown) => error)
+
+      expect(isLlmProviderLoadsModelsError(rejection)).toBe(true)
+      expect(engine.loadLlmModel).not.toHaveBeenCalled()
+      expect(engine.listDownloadedLlmModels).not.toHaveBeenCalled()
+    })
+
     it("propagates a load failure without querying inventory", async () => {
       const { service, engine } = createServiceWithEngine()
       const failure = new Error("The LLM runtime could not load the model.")
@@ -399,7 +442,7 @@ describe("LlmService", () => {
         inventoryQuery.promise
       )
       const { queue } = createAdmittingQueue(
-        engine,
+        createConnectedFakeLlmEngine(engine),
         async () => await admission.promise
       )
       let nowMs = 0
@@ -493,6 +536,18 @@ describe("LlmService", () => {
         "qwen/qwen3-8b"
       )
       expect(requests).toHaveBeenCalledOnce()
+    })
+
+    it("refuses without a runtime call when the provider loads its own models", async () => {
+      const { service, engine } = createServiceWithEngine({}, "provider")
+
+      const rejection: unknown = await service
+        .stopLlmModelsByKey("qwen/qwen3-8b")
+        .catch((error: unknown) => error)
+
+      expect(isLlmProviderLoadsModelsError(rejection)).toBe(true)
+      expect(engine.listLoadedLlmModelInstances).not.toHaveBeenCalled()
+      expect(engine.stopLoadedLlmModelInstance).not.toHaveBeenCalled()
     })
   })
 

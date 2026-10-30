@@ -7,7 +7,10 @@ import {
   formatModelRowTag,
   readModelRowTone
 } from "@/lib/models/model-residency"
-import type { ModelRuntimeState } from "@/lib/store/model-runtime"
+import type {
+  ModelRuntimeState,
+  ObservedModelLoading
+} from "@/lib/store/model-runtime"
 
 /** Selection contract for one backend model row. */
 type ModelChoiceProps = {
@@ -69,10 +72,10 @@ type ModelRowActionsProps = {
   /** Prevents new requests while the backend is stopped or busy. */
   readonly disabled: boolean
   /**
-   * Whether Lys loads and unloads the active provider's models; Load and
-   * Unload are absent otherwise.
+   * Who loads the models, as the inventory reports; Load and Unload are
+   * present only when Lys loads them.
    */
-  readonly isModelLoadingManaged: boolean
+  readonly modelLoading: ObservedModelLoading
   /** Loads the selected key and handles failures in shared state. */
   readonly onLoad: (modelKey: string) => Promise<void>
   /** Unloads the selected key and handles failures in shared state. */
@@ -84,8 +87,8 @@ type ModelRowActionsProps = {
 /**
  * Presents model operations supported by the backend.
  * @param props - Model, availability, and store-owned asynchronous callbacks.
- * @returns Named native controls for health and, while Lys manages the
- * provider's model loading, residency.
+ * @returns Named native controls for health and, while the inventory
+ * reports that Lys loads the models, residency.
  * @remarks The store observes all failures;
  * this row does not cancel application work on unmount. Health path eligibility
  * comes from the shared parameter validator rather than a copied length limit.
@@ -93,7 +96,7 @@ type ModelRowActionsProps = {
 function ModelRowActions({
   model,
   disabled,
-  isModelLoadingManaged,
+  modelLoading,
   onLoad,
   onUnload,
   onTest
@@ -118,7 +121,7 @@ function ModelRowActions({
       >
         Test
       </Button>
-      {isModelLoadingManaged ? (
+      {modelLoading === "lys" ? (
         <Button
           aria-label={`${model.loaded ? "Unload" : "Load"} ${model.modelKey}`}
           className="settings-view__model-act"
@@ -154,7 +157,7 @@ export default function ModelRow({
   modelRuntime,
   onSelect,
   disabled,
-  isModelLoadingManaged,
+  modelLoading,
   onLoad,
   onUnload,
   onTest
@@ -173,7 +176,7 @@ export default function ModelRow({
       <ModelRowActions
         model={model}
         disabled={disabled}
-        isModelLoadingManaged={isModelLoadingManaged}
+        modelLoading={modelLoading}
         onLoad={onLoad}
         onUnload={onUnload}
         onTest={onTest}

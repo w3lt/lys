@@ -43,6 +43,7 @@ import {
 } from "./ComposerComponents/composer-presentation"
 import { calculateModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
 import { describeLlmProviderTarget } from "@/lib/models/llm-provider-target"
+import { readObservedModelLoading } from "@/lib/store/model-runtime"
 
 import "./Composer.scss"
 
@@ -148,6 +149,9 @@ export function Composer({
 }: ComposerProps): ReactElement {
   const backendServerInfo = useLysStore((state) => state.backendServerInfo)
   const modelRuntime = useLysStore((state) => state.modelRuntime)
+  const modelLoading = useLysStore((state) =>
+    readObservedModelLoading(state.modelInventory)
+  )
   const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
   const settings = useLysStore((state) => state.settings)
   const setActiveView = useLysStore((state) => state.setActiveView)
@@ -397,12 +401,13 @@ export function Composer({
     <footer className="composer">
       {isUnavailable ? (
         <ComposerOfflineBanner
-          action={formatReconnectAction(
+          action={formatReconnectAction({
             backendStatus,
             lmStudioStatus,
             modelRuntime,
+            modelLoading,
             provider
-          )}
+          })}
           message={formatUnavailableRuntimeMessage({
             backendStatus,
             backendAddress: settings.runtime.backendAddress,

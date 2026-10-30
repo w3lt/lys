@@ -34,7 +34,11 @@ import {
   createTurnUserMessage,
   createUserMessage
 } from "../support/conversationFixtures"
-import { createFakeLlmRuntime } from "../support/fakeLlmRuntime"
+import {
+  createAcquiredFakeLlmRuntime,
+  createConnectedFakeLlmEngine,
+  createFakeLlmRuntime
+} from "../support/fakeLlmRuntime"
 import { writeSettingsFile } from "../support/settingsFile"
 import { answerWithBody, startVmoServer } from "../support/vmoServer"
 
@@ -211,7 +215,8 @@ describe("createSingletonServices", () => {
     const llmRuntimeService = new LlmRuntimeService({
       ...createLogReporters().llmRuntime,
       findLlmProviderAccess: async () => ({ provider: "groq", apiKey }),
-      acquireLlmRuntime: async () => createFakeLlmRuntime()
+      acquireLlmRuntime: async () =>
+        createAcquiredFakeLlmRuntime(createFakeLlmRuntime(), "provider")
     })
     factories.createLlmRuntimeService.mockReturnValue(
       createAcquisition(llmRuntimeService, "llm-runtime", closeLog)
@@ -426,7 +431,10 @@ describe("createSingletonServices", () => {
       vi.spyOn(
         acquisitions.llmRuntime.service,
         "handleLlmEngineOperationRequest"
-      ).mockImplementation(async (operation) => await operation(engine))
+      ).mockImplementation(
+        async (operation) =>
+          await operation(createConnectedFakeLlmEngine(engine))
+      )
       const completeChatStream = vi
         .spyOn(acquisitions.chat.service, "completeChatStream")
         .mockRejectedValue(new Error("model not loaded"))

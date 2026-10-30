@@ -26,7 +26,10 @@ import ToolApprovalService, {
   type ReadJustRunToolNames
 } from "../../../src/modules/toolApproval/toolApprovalService"
 import { createChatSseTestApp } from "./chatSseRoute"
-import { createFakeLlmRuntime } from "./fakeLlmRuntime"
+import {
+  createAcquiredFakeLlmRuntime,
+  createFakeLlmRuntime
+} from "./fakeLlmRuntime"
 import { DEFAULT_LM_STUDIO_ACCESS } from "./llmFixtures"
 import { openConversationTestServices } from "./conversationDatabase"
 import type { TestFastify } from "./fastifyTestApp"
@@ -194,7 +197,8 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     reportLlmRuntimeAcquisitionFailure: vi.fn(),
     reportLlmRuntimeAvailabilityCheckFailure: vi.fn(),
     findLlmProviderAccess: () => Promise.resolve(DEFAULT_LM_STUDIO_ACCESS),
-    acquireLlmRuntime: () => Promise.resolve(createFakeLlmRuntime())
+    acquireLlmRuntime: () =>
+      Promise.resolve(createAcquiredFakeLlmRuntime(createFakeLlmRuntime()))
   })
   await llmRuntimeService.connectLlmRuntime()
   onTestFinished(async () => await llmRuntimeService[Symbol.asyncDispose]())

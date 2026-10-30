@@ -25,11 +25,6 @@ export type LlmProviderTarget = {
   readonly access: "address" | "key"
   /** Where requests go: the server's address, or the hosted API's host. */
   readonly location: string
-  /**
-   * Whether Lys loads and unloads the provider's models; only LM Studio's.
-   * Ollama loads a model when a request names it, and Groq's are hosted.
-   */
-  readonly managesModelLoading: boolean
 }
 
 /** Name of each provider. */
@@ -49,9 +44,8 @@ export const DEFAULT_PROVIDER_ADDRESSES = Object.freeze({
  * Describes the provider the saved choice makes the backend connect to.
  *
  * @param providers - Saved provider choice and addresses.
- * @returns The active provider, its name, how and where it is reached, with
- * a provider's default address while none is saved, and whether Lys manages
- * its model loading.
+ * @returns The active provider, its name, and how and where it is reached,
+ * with a provider's default address while none is saved.
  */
 export function describeLlmProviderTarget(
   providers: ProvidersSettings
@@ -63,8 +57,7 @@ export function describeLlmProviderTarget(
         name: LLM_PROVIDER_NAMES.lmStudio,
         access: "address",
         location:
-          providers.lmStudio.address ?? DEFAULT_PROVIDER_ADDRESSES.lmStudio,
-        managesModelLoading: true
+          providers.lmStudio.address ?? DEFAULT_PROVIDER_ADDRESSES.lmStudio
       }
     case "ollama":
       return {
@@ -74,16 +67,14 @@ export function describeLlmProviderTarget(
         location:
           providers.ollama.mode === "local"
             ? (providers.ollama.address ?? DEFAULT_PROVIDER_ADDRESSES.ollama)
-            : OLLAMA_CLOUD_API_HOST,
-        managesModelLoading: false
+            : OLLAMA_CLOUD_API_HOST
       }
     case "groq":
       return {
         provider: "groq",
         name: LLM_PROVIDER_NAMES.groq,
         access: "key",
-        location: GROQ_API_HOST,
-        managesModelLoading: false
+        location: GROQ_API_HOST
       }
   }
 }

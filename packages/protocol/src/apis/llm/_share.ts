@@ -85,8 +85,9 @@ export const llmInfoSchema = z
      */
     maxContextLength: z.number(),
     /**
-     * Whether the model can answer a chat request now: loaded in LM Studio,
-     * or served by a provider that loads its models on demand.
+     * Whether the model can answer a chat request now: loaded, for a
+     * provider whose models Lys loads, or always, for a provider that loads
+     * a model when a request names it.
      */
     loaded: z.boolean(),
     /**

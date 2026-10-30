@@ -27,6 +27,7 @@ export const READY_RUNTIME: RuntimeArrangement = Object.freeze({
   lmStudioStatus: "connected",
   modelInventory: Object.freeze({
     status: "ready",
+    modelLoading: "lys",
     models: Object.freeze([
       buildLlmInfo("qwen3-8b", { loaded: true, loadedContextLength: 8192 })
     ])

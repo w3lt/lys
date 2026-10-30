@@ -124,7 +124,7 @@ export type OllamaRuntimeTarget =
  * every listing and measurement; a model is kept when Ollama reports no
  * capabilities. Ollama loads a model when a request names it, so every chat
  * model is reported as one loaded instance whose identifier is its name,
- * and loading or stopping a model fails. Ollama has no tokenizer endpoint:
+ * and the runtime offers no model loading. Ollama has no tokenizer endpoint:
  * measurements use {@link estimateTextTokenCount} and the context length a
  * local server reports for a running model, otherwise the model's own
  * window from `/api/show`. A local server that has not loaded the model yet
@@ -240,40 +240,6 @@ export default class OllamaRuntime implements LlmRuntime {
         )
       )
     })
-  }
-
-  /**
-   * Refuses to load a model: Ollama loads a model when a request names it.
-   *
-   * @returns Never resolves.
-   * @throws The interface-defined admission failure, or `The LLM runtime
-   * could not load the model.` without contacting Ollama.
-   */
-  public async loadLlmModel(): Promise<LoadedLlmModelInstance> {
-    return await this.#admission.runOperation(() =>
-      Promise.reject(
-        new Error("The LLM runtime could not load the model.", {
-          cause: new Error("Ollama loads its models when a request names them.")
-        })
-      )
-    )
-  }
-
-  /**
-   * Refuses to stop a model: Lys does not manage Ollama's loaded models.
-   *
-   * @returns Never resolves.
-   * @throws The interface-defined admission failure, or `The LLM runtime
-   * could not stop the model instance.` without contacting Ollama.
-   */
-  public async stopLoadedLlmModelInstance(): Promise<void> {
-    await this.#admission.runOperation(() =>
-      Promise.reject(
-        new Error("The LLM runtime could not stop the model instance.", {
-          cause: new Error("Ollama loads its models when a request names them.")
-        })
-      )
-    )
   }
 
   /**

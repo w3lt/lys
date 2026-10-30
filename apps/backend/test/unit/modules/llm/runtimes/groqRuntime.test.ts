@@ -123,18 +123,6 @@ describe("GroqRuntime", () => {
     ).toBeUndefined()
   })
 
-  it("refuses to load or stop a model without contacting Groq", async () => {
-    const { runtime, server } = await createOwnedRuntime()
-
-    await expect(runtime.loadLlmModel()).rejects.toThrow(
-      "The LLM runtime could not load the model."
-    )
-    await expect(runtime.stopLoadedLlmModelInstance()).rejects.toThrow(
-      "The LLM runtime could not stop the model instance."
-    )
-    expect(server.requests).toHaveLength(1)
-  })
-
   it("reports Groq unavailable once it stops answering", async () => {
     let status = 200
     const { runtime } = await createOwnedRuntime(() => ({

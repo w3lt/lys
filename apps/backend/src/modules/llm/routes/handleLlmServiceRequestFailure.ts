@@ -1,8 +1,10 @@
 import {
+  createLlmProviderLoadsModelsProblem,
   createLlmRuntimeUnavailableProblem,
   createLlmServiceBusyProblem
 } from "@lys/protocol"
 import type { FastifyError, FastifyReply, FastifyRequest } from "fastify"
+import { isLlmProviderLoadsModelsError } from "../llmProviderLoadsModelsError"
 import { isLlmRuntimeUnavailableError } from "../llmRuntimeUnavailableError"
 import { isLlmServiceBusyError } from "../llmServiceBusyError"
 
@@ -14,10 +16,12 @@ import { isLlmServiceBusyError } from "../llmServiceBusyError"
  * @param reply - Borrowed response for the failed model request.
  * @throws If the existing application error handler fails.
  * @remarks Service-busy and runtime-unavailable failures become their 503
- * Problem Details. Only a recognized service rejection establishes that no work
- * was accepted. A runtime-unavailable failure that retains original runtime
- * failures is logged at `warn` before the response; a refusal without runtime
- * work is not. Internal error evidence is excluded from the public projection.
+ * Problem Details, and a load or unload refused because the connected
+ * provider loads its own models becomes 409 Problem Details. Only a
+ * recognized service rejection establishes that no work was accepted. A
+ * runtime-unavailable failure that retains original runtime failures is
+ * logged at `warn` before the response; a refusal without runtime work is
+ * not. Internal error evidence is excluded from the public projection.
  * Unrecognized failures are delegated directly because Fastify's rethrow path
  * bypasses a parent error handler for non-Error rejection values.
  */
@@ -31,6 +35,14 @@ export default function handleLlmServiceRequestFailure(
   if (isLlmServiceBusyError(failure)) {
     const problem = createLlmServiceBusyProblem()
     reply.type(problemDetailsMediaType).code(503).send(problem)
+    return
+  }
+
+  if (isLlmProviderLoadsModelsError(failure)) {
+    const problem = createLlmProviderLoadsModelsProblem(
+      "The connected model provider loads a model when a request names it, so Lys does not load or unload its models."
+    )
+    reply.type(problemDetailsMediaType).code(409).send(problem)
     return
   }
 

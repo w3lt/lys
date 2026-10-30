@@ -10,9 +10,11 @@ import {
 } from "@/lib/models/model-residency"
 import {
   isModelTransitionInFlight,
+  readObservedModelLoading,
   type ModelInventoryState,
   type ModelRequestState,
-  type ModelRuntimeState
+  type ModelRuntimeState,
+  type ObservedModelLoading
 } from "@/lib/store/model-runtime"
 
 /**
@@ -57,6 +59,29 @@ function findLoadableDefaultModelKey(
         ? null
         : defaultEntry.modelKey
     }
+  }
+}
+
+/**
+ * Formats the card's note.
+ *
+ * @param modelLoading - Who loads the models, as the inventory reports.
+ * @param provider - Active provider, which the note names.
+ * @returns That Load and Unload go to the provider through the backend, or
+ * that the provider loads its models itself, then where every model is
+ * listed; only where every model is listed while no inventory has been read.
+ */
+function formatModelResidencyNote(
+  modelLoading: ObservedModelLoading,
+  provider: LlmProviderTarget
+): string {
+  switch (modelLoading) {
+    case "lys":
+      return `Loading and unloading use ${provider.name} through the backend. This summary prefers the loaded default; manage every loaded model in Model settings.`
+    case "provider":
+      return `${provider.name} decides which models are in memory, so Lys does not load or unload them. This summary prefers the default; see every model in Model settings.`
+    case "unknown":
+      return "This summary prefers the loaded default; see every model in Model settings."
   }
 }
 
@@ -109,10 +134,11 @@ type ModelResidencyRowProps = {
 
 /**
  * Presents the residency summary, a tone dot, the heading, and the meta line,
- * with Load and Unload while Lys manages the provider's model loading.
+ * with Load and Unload while the inventory reports that Lys loads the models.
  *
  * @remarks Owns no state or effects. Load and Unload are absent for a
- * provider that loads its models itself. A command can be sent only while
+ * provider that loads its models itself, and before an inventory says who
+ * loads the models. A command can be sent only while
  * the provider is connected and no model request is in flight. Load is
  * offered then only while the inventory lists the default model and it is
  * not loaded, and requests the default; Unload only while a model is loaded,
@@ -157,7 +183,7 @@ function ModelResidencyRow({
           </p>
         </div>
       </div>
-      {provider.managesModelLoading ? (
+      {readObservedModelLoading(modelInventory) === "lys" ? (
         <div className="settings-view__actions">
           <Button
             disabled={loadModelKey === null}
@@ -183,7 +209,7 @@ function ModelResidencyRow({
 
 /** Properties accepted by {@link ModelResidencyCard}. */
 type ModelResidencyCardProps = {
-  /** Active provider, which the card names and whose loading it manages. */
+  /** Active provider, which the card names. */
   readonly provider: LlmProviderTarget
   /** Whether model requests can reach the active provider, and why not. */
   readonly availability: ModelRuntimeAvailability
@@ -217,8 +243,8 @@ type ModelResidencyCardProps = {
 
 /**
  * Presents which model weights are resident in the active provider, with
- * Load for the default model and Unload for the loaded one while Lys manages
- * the provider's model loading.
+ * Load for the default model and Unload for the loaded one while the
+ * inventory reports that Lys loads the models.
  *
  * @remarks The parent owns every input and the requests; the card owns no
  * state, effect, or store access. Its first row shows the residency and the
@@ -228,7 +254,7 @@ type ModelResidencyCardProps = {
  * bar named after the heading: the backend reports completion without
  * progress, so no value is claimed. A note says that the commands go to the
  * provider through the backend, or that the provider loads its models
- * itself, and where every model is listed.
+ * itself, as the inventory reports, and where every model is listed.
  * @param props - Parent-owned provider, model state, requests, and request
  * feedback.
  * @returns The model card.
@@ -281,9 +307,10 @@ export default function ModelResidencyCard({
       <div className="settings-view__card-divider" />
 
       <p className="settings-view__card-note">
-        {provider.managesModelLoading
-          ? `Loading and unloading use ${provider.name} through the backend. This summary prefers the loaded default; manage every loaded model in Model settings.`
-          : `${provider.name} decides which models are in memory, so Lys does not load or unload them. This summary prefers the default; see every model in Model settings.`}
+        {formatModelResidencyNote(
+          readObservedModelLoading(modelInventory),
+          provider
+        )}
       </p>
       {children}
     </section>

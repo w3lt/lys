@@ -46,7 +46,11 @@ export function buildInventoryRoute(
   const inventory = runtime.modelInventory
   switch (inventory.status) {
     case "ready":
-      return () => buildJsonResponse(200, { llms: inventory.models })
+      return () =>
+        buildJsonResponse(200, {
+          llms: inventory.models,
+          modelLoading: inventory.modelLoading
+        })
     case "failed":
       return () => new Response(null, { status: 500 })
     case "unavailable":

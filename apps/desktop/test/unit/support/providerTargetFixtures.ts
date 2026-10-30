@@ -15,7 +15,7 @@ export const LM_STUDIO_TARGET: LlmProviderTarget = Object.freeze(
   )
 )
 
-/** Groq, a hosted provider reached with a key, which loads its own models. */
+/** Groq, a hosted provider reached with a key. */
 export const GROQ_TARGET: LlmProviderTarget = Object.freeze(
   describeLlmProviderTarget(
     llmProviderSettingsSchema.parse({

@@ -3,12 +3,15 @@ import { groqApiKeySchema, providerAddressSchema } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import LlmRuntimeService from "../../../../src/modules/llm/llmRuntimeService"
 import type { LlmEngineOperation } from "../../../../src/modules/llm/llmService"
-import type { LlmRuntime } from "../../../../src/modules/llm/llmRuntime"
 import type { LlmProviderAccess } from "../../../../src/modules/llm/llmProviderAccess"
 import { isLlmRuntimeUnavailableError } from "../../../../src/modules/llm/llmRuntimeUnavailableError"
 import type { LlmRuntimeAvailability } from "../../../../src/modules/llm/llmRuntimeTypes"
 import { isLlmServiceBusyError } from "../../../../src/modules/llm/llmServiceBusyError"
-import { createFakeLlmRuntime } from "../../support/fakeLlmRuntime"
+import {
+  createAcquiredFakeLlmRuntime,
+  createFakeLlmRuntime,
+  type FakeLlmRuntime
+} from "../../support/fakeLlmRuntime"
 import { waitForMicrotasks } from "../../support/microtasks"
 
 /** Accepted operations the service admits at once: one active and eight waiting. */
@@ -32,14 +35,16 @@ const GROQ_ACCESS: LlmProviderAccess = Object.freeze({
 /**
  * Creates a service over one acquisition capability with recording reporters.
  *
- * @param acquireLlmRuntime - Acquisition capability the service borrows.
+ * @param acquireLlmRuntime - Acquisition of runtime doubles the service
+ * borrows; each acquired double is presented as a runtime whose models Lys
+ * loads.
  * @param findLlmProviderAccess - Saved-provider lookup the service borrows;
  * LM Studio at its default address unless a case supplies another.
  * @returns The ready service, which holds no runtime until it connects, and
  * both failure reporters.
  */
 function createService(
-  acquireLlmRuntime: (access: LlmProviderAccess) => Promise<LlmRuntime>,
+  acquireLlmRuntime: (access: LlmProviderAccess) => Promise<FakeLlmRuntime>,
   findLlmProviderAccess: () => Promise<LlmProviderAccess> = async () =>
     LM_STUDIO_ACCESS
 ) {
@@ -48,7 +53,8 @@ function createService(
     vi.fn<(failure: unknown) => void>()
   const service = new LlmRuntimeService({
     findLlmProviderAccess,
-    acquireLlmRuntime,
+    acquireLlmRuntime: async (access) =>
+      createAcquiredFakeLlmRuntime(await acquireLlmRuntime(access)),
     reportLlmRuntimeAcquisitionFailure,
     reportLlmRuntimeAvailabilityCheckFailure
   })
@@ -96,9 +102,9 @@ function createFailingRuntimeCallOperations(
   runtime.listLoadedLlmModelInstances.mockRejectedValue(failure)
   return {
     propagating: vi.fn<LlmEngineOperation<unknown>>(
-      async (llmEngine) => await llmEngine.listLoadedLlmModelInstances()
+      async ({ llmEngine }) => await llmEngine.listLoadedLlmModelInstances()
     ),
-    absorbing: vi.fn<LlmEngineOperation<string>>(async (llmEngine) => {
+    absorbing: vi.fn<LlmEngineOperation<string>>(async ({ llmEngine }) => {
       await llmEngine.listLoadedLlmModelInstances().catch(() => undefined)
       return "kept result"
     })
@@ -289,7 +295,7 @@ describe("LlmRuntimeService", () => {
 
   describe("connection status", () => {
     it("starts connecting before any attempt settles", () => {
-      const acquireLlmRuntime = vi.fn<() => Promise<LlmRuntime>>()
+      const acquireLlmRuntime = vi.fn<() => Promise<FakeLlmRuntime>>()
       const { service } = createService(acquireLlmRuntime)
 
       expect(service.llmRuntimeConnectionStatus).toBe("connecting")
@@ -357,7 +363,7 @@ describe("LlmRuntimeService", () => {
       const heldRuntime = createFakeLlmRuntime()
       const newRuntime = createFakeLlmRuntime()
       const acquireLlmRuntime = vi
-        .fn<(access: LlmProviderAccess) => Promise<LlmRuntime>>()
+        .fn<(access: LlmProviderAccess) => Promise<FakeLlmRuntime>>()
         .mockResolvedValueOnce(heldRuntime)
         .mockResolvedValueOnce(newRuntime)
       const findLlmProviderAccess = vi
@@ -419,7 +425,7 @@ describe("LlmRuntimeService", () => {
       const newRuntime = createFakeLlmRuntime()
       newRuntime.listLoadedLlmModelInstances.mockResolvedValue([])
       const acquireLlmRuntime = vi
-        .fn<() => Promise<LlmRuntime>>()
+        .fn<() => Promise<FakeLlmRuntime>>()
         .mockResolvedValueOnce(heldRuntime)
         .mockResolvedValueOnce(newRuntime)
       const { service } = createService(acquireLlmRuntime)
@@ -432,7 +438,7 @@ describe("LlmRuntimeService", () => {
       expect(acquireLlmRuntime).toHaveBeenCalledTimes(2)
       await expect(
         service.handleLlmEngineOperationRequest(
-          async (llmEngine) => await llmEngine.listLoadedLlmModelInstances()
+          async ({ llmEngine }) => await llmEngine.listLoadedLlmModelInstances()
         )
       ).resolves.toEqual([])
       expect(newRuntime.listLoadedLlmModelInstances).toHaveBeenCalledOnce()
@@ -467,9 +473,9 @@ describe("LlmRuntimeService", () => {
 
     it("shares one pending attempt between concurrent calls", async () => {
       const runtime = createFakeLlmRuntime()
-      const acquisition = Promise.withResolvers<LlmRuntime>()
+      const acquisition = Promise.withResolvers<FakeLlmRuntime>()
       const acquireLlmRuntime = vi
-        .fn<() => Promise<LlmRuntime>>()
+        .fn<() => Promise<FakeLlmRuntime>>()
         .mockReturnValue(acquisition.promise)
       const { service } = createService(acquireLlmRuntime)
 
@@ -686,5 +692,78 @@ describe("LlmRuntimeService", () => {
         expect(service.llmRuntimeConnectionStatus).toBe(expectedStatus)
       }
     )
+  })
+
+  describe("model loading", () => {
+    it("gives an operation the model-loading capability of a runtime whose models Lys loads", async () => {
+      const { service, runtime } = await createConnectedService()
+      runtime.loadLlmModel.mockResolvedValue({
+        modelKey: "qwen/qwen3-8b",
+        modelIdentifier: "qwen/qwen3-8b:1"
+      })
+
+      const loaded = await service.handleLlmEngineOperationRequest(
+        async (connectedLlmEngine) => {
+          if (connectedLlmEngine.modelLoading === "provider") return undefined
+          return await connectedLlmEngine.llmModelInstanceController.loadLlmModel(
+            "qwen3",
+            {}
+          )
+        }
+      )
+
+      expect(loaded).toEqual({
+        modelKey: "qwen/qwen3-8b",
+        modelIdentifier: "qwen/qwen3-8b:1"
+      })
+      expect(runtime.loadLlmModel).toHaveBeenCalledExactlyOnceWith("qwen3", {})
+    })
+
+    it("tells an operation that a provider which loads its own models offers no model loading", async () => {
+      const runtime = createFakeLlmRuntime()
+      const service = new LlmRuntimeService({
+        findLlmProviderAccess: async () => GROQ_ACCESS,
+        acquireLlmRuntime: async () =>
+          createAcquiredFakeLlmRuntime(runtime, "provider"),
+        reportLlmRuntimeAcquisitionFailure: vi.fn(),
+        reportLlmRuntimeAvailabilityCheckFailure: vi.fn()
+      })
+      await service.connectLlmRuntime()
+
+      const connectedLlmEngine = await service.handleLlmEngineOperationRequest(
+        async (connected) => connected
+      )
+
+      expect(connectedLlmEngine.modelLoading).toBe("provider")
+      expect(connectedLlmEngine).not.toHaveProperty(
+        "llmModelInstanceController"
+      )
+    })
+
+    it("probes availability after a failed load and releases a runtime that stopped answering", async () => {
+      const { service, runtime } = await createConnectedService()
+      const failure = new Error("load failed")
+      runtime.loadLlmModel.mockRejectedValue(failure)
+      runtime.getRuntimeAvailability.mockResolvedValue("unavailable")
+
+      const operation = service.handleLlmEngineOperationRequest(
+        async (connectedLlmEngine) => {
+          if (connectedLlmEngine.modelLoading === "provider") return undefined
+          return await connectedLlmEngine.llmModelInstanceController.loadLlmModel(
+            "qwen3",
+            {}
+          )
+        }
+      )
+
+      const rejection: unknown = await operation.catch(
+        (error: unknown) => error
+      )
+      expect(isLlmRuntimeUnavailableError(rejection)).toBe(true)
+      expect(rejection).toHaveProperty("errors", [failure])
+      expect(runtime.getRuntimeAvailability).toHaveBeenCalledOnce()
+      expect(runtime[Symbol.asyncDispose]).toHaveBeenCalledOnce()
+      expect(service.llmRuntimeConnectionStatus).toBe("unreachable")
+    })
   })
 })

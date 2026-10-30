@@ -5,7 +5,9 @@ import {
   type LlmServiceBusyProblem
 } from "../../http/errors/llmServiceBusy"
 import {
+  llmProviderLoadsModelsProblemSchema,
   llmRuntimeUnavailableProblemSchema,
+  type LlmProviderLoadsModelsProblem,
   type LlmRuntimeUnavailableProblem
 } from "../../http/errors/llm"
 import { llmInfoSchema } from "./_share"
@@ -58,6 +60,7 @@ const llmLoadModelApiServiceUnavailableResponseSchema = z.union([
 /** Selects the model-load response validator by HTTP status. */
 const llmLoadModelApiResponseSchemas = Object.freeze({
   200: llmLoadModelApiResponseBodySchema,
+  409: llmProviderLoadsModelsProblemSchema,
   503: llmLoadModelApiServiceUnavailableResponseSchema
 })
 
@@ -72,7 +75,8 @@ const llmLoadModelApiResponseSchemas = Object.freeze({
  * responses mean the load was refused before queue acceptance. Accepted loads
  * continue under the service owner even if the requesting client disconnects.
  * Runtime-unavailable responses mean the backend has no connected LLM runtime;
- * no load ran, or the runtime stopped answering during it.
+ * no load ran, or the runtime stopped answering during it. A 409 response
+ * means the connected provider loads its own models, so no load ran.
  */
 export const llmLoadModelApi = Object.freeze({
   method: "POST",
@@ -92,6 +96,8 @@ export type LlmLoadModelApiResponse = z.infer<typeof llmLoadModelApi.response>
 export type LlmLoadModelApiReply = {
   /** Metadata of the canonical model after loading completed. */
   readonly 200: LlmLoadModelApiResponse
+  /** The connected provider loads its own models; no load ran. */
+  readonly 409: LlmProviderLoadsModelsProblem
   /** The load was refused before acceptance, or no LLM runtime is connected. */
   readonly 503: LlmServiceBusyProblem | LlmRuntimeUnavailableProblem
 }

@@ -18,13 +18,12 @@ function buildProviders(changes: Record<string, unknown>) {
 }
 
 describe("describeLlmProviderTarget", () => {
-  it("reaches LM Studio at its default address while none is saved, and manages its loading", () => {
+  it("reaches LM Studio at its default address while none is saved", () => {
     expect(describeLlmProviderTarget(buildProviders({}))).toEqual({
       provider: "lmStudio",
       name: "LM Studio",
       access: "address",
-      location: "127.0.0.1:1234",
-      managesModelLoading: true
+      location: "127.0.0.1:1234"
     })
   })
 
@@ -36,15 +35,14 @@ describe("describeLlmProviderTarget", () => {
     ).toBe("192.168.1.5:1234")
   })
 
-  it("reaches local Ollama at an address and leaves loading to it", () => {
+  it("reaches local Ollama at an address", () => {
     expect(
       describeLlmProviderTarget(buildProviders({ active: "ollama" }))
     ).toEqual({
       provider: "ollama",
       name: "Ollama",
       access: "address",
-      location: "127.0.0.1:11434",
-      managesModelLoading: false
+      location: "127.0.0.1:11434"
     })
   })
 
@@ -63,8 +61,7 @@ describe("describeLlmProviderTarget", () => {
       provider: "groq",
       name: "Groq",
       access: "key",
-      location: "api.groq.com",
-      managesModelLoading: false
+      location: "api.groq.com"
     })
   })
 })

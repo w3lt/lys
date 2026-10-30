@@ -13,9 +13,11 @@ import {
   type LlmProviderTarget
 } from "@/lib/models/llm-provider-target"
 import { useLysStore } from "@/lib/store"
-import type {
-  ModelInventoryState,
-  ModelRequestState
+import {
+  readObservedModelLoading,
+  type ModelInventoryState,
+  type ModelRequestState,
+  type ObservedModelLoading
 } from "@/lib/store/model-runtime"
 
 import ModelLoadConfigurationPanel from "./ModelLoadConfigurationPanel"
@@ -66,13 +68,37 @@ function formatModelInventoryEmptyMessage(
 }
 
 /**
- * Presents the downloaded inventory and the default-model selection.
- * @returns Backend model rows or an explicit unavailable/empty state.
+ * Formats the note under the model list.
+ *
+ * @param modelLoading - Who loads the models, as the inventory reports.
+ * @param provider - Active provider, which the note names.
+ * @returns How choosing and testing a row work, and who loads the models;
+ * nothing about loading while no inventory has been read.
+ */
+function formatModelInventoryNote(
+  modelLoading: ObservedModelLoading,
+  provider: LlmProviderTarget
+): string {
+  switch (modelLoading) {
+    case "lys":
+      return `Choosing a row sets the default for this session. Load and Unload update ${provider.name}. Test checks loaded state; it does not generate a response.`
+    case "provider":
+      return `Choosing a row sets the default for this session. ${provider.name} decides which models are in memory. Test checks loaded state; it does not generate a response.`
+    case "unknown":
+      return "Choosing a row sets the default for this session. Test checks loaded state; it does not generate a response."
+  }
+}
+
+/**
+ * Presents the active provider's downloaded inventory and the default-model
+ * selection.
+ * @returns A heading naming the provider, then backend model rows or an
+ * explicit unavailable/empty state.
  * @remarks Requires SettingsContext and the
  * application store. The store owns requests, errors, and inventory; refreshing
  * prevents overlapping actions. Multiple models may be loaded independently.
  * Model actions require a running backend and a connected provider; Load and
- * Unload appear only while Lys manages the provider's model loading. While
+ * Unload appear only while the inventory reports that Lys loads the models. While
  * the provider is not reachable the list is empty, Refresh is disabled, and a
  * pointer tooltip plus `aria-describedby` repeat the empty-state explanation.
  */
@@ -96,6 +122,7 @@ function ModelInventoryPanel(): ReactElement {
     lmStudioStatus
   )
   const provider = describeLlmProviderTarget(settings.providers)
+  const modelLoading = readObservedModelLoading(modelInventory)
   const isLmStudioUnreachable = availability === "lm-studio-unreachable"
   const disabled =
     availability !== "available" || modelRequest.status !== "idle"
@@ -124,7 +151,7 @@ function ModelInventoryPanel(): ReactElement {
   return (
     <section className="settings-view__section">
       <div className="settings-view__section-heading">
-        <h2>models</h2>
+        <h2>{`models · ${provider.name}`}</h2>
         {isLmStudioUnreachable ? (
           <Tooltip description={formatProviderUnreachableMessage(provider)}>
             {refreshButton}
@@ -146,7 +173,7 @@ function ModelInventoryPanel(): ReactElement {
             modelRuntime={modelRuntime}
             onSelect={(modelKey) => onRuntimeChange({ defaultModel: modelKey })}
             disabled={disabled}
-            isModelLoadingManaged={provider.managesModelLoading}
+            modelLoading={modelLoading}
             onLoad={onLoadModel}
             onUnload={onUnloadModel}
             onTest={onTestModel}
@@ -160,30 +187,31 @@ function ModelInventoryPanel(): ReactElement {
       ) : null}
       <ModelRequestFeedback />
       <p className="settings-view__note">
-        {provider.managesModelLoading
-          ? `Choosing a row sets the default for this session. Load and Unload update ${provider.name}. Test checks loaded state; it does not generate a response.`
-          : `Choosing a row sets the default for this session. ${provider.name} decides which models are in memory. Test checks loaded state; it does not generate a response.`}
+        {formatModelInventoryNote(modelLoading, provider)}
       </p>
     </section>
   )
 }
 
 /**
- * Composes the backend-backed model inventory and, while Lys manages the
- * active provider's model loading, the load configuration of the model being
- * edited.
+ * Composes the backend-backed model inventory and, while the inventory
+ * reports that Lys loads the models, the load configuration of the model
+ * being edited.
  * @returns The model list with its operations, then the load configuration.
  * @remarks Children share SettingsContext;
  * the application store owns request lifetime and handles asynchronous failures.
- * A provider that loads its models itself takes no load configuration.
+ * A provider that loads its models itself takes no load configuration, and
+ * none is offered before an inventory says who loads the models.
  */
 export default function ModelPaneContent(): ReactElement {
-  const { settings } = useSettingsContext()
-  const provider = describeLlmProviderTarget(settings.providers)
+  const { modelInventory } = useSettingsContext()
   return (
     <div className="settings-view__stack">
       <ModelInventoryPanel />
-      {provider.managesModelLoading ? <ModelLoadConfigurationPanel /> : null}
+      {modelInventory.status === "ready" &&
+      modelInventory.modelLoading === "lys" ? (
+        <ModelLoadConfigurationPanel models={modelInventory.models} />
+      ) : null}
     </div>
   )
 }

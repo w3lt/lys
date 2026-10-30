@@ -10,11 +10,28 @@ import {
 import { llmInfoSchema } from "./_share"
 import { apiLlmListModelsRoute } from "./routes"
 
+/**
+ * Validates who loads the models of the connected provider.
+ *
+ * @remarks `lys`: a model answers only once loaded, and the person loads and
+ * unloads models through the load and unload endpoints. `provider`: the
+ * provider loads a model when a request names it, so every listed model is
+ * loaded and the load and unload endpoints refuse with status 409. The values
+ * are transmitted and not persisted; changing them requires coordinated
+ * consumers.
+ */
+export const llmModelLoadingSchema = z.enum(["lys", "provider"])
+
+/** Who loads the models of the connected provider. */
+export type LlmModelLoading = z.infer<typeof llmModelLoadingSchema>
+
 /** Validates the complete downloaded-model inventory response. */
 export const llmListModelsApiResponseSchema = z
   .strictObject({
     /** Downloaded language models annotated with their current loaded state. */
-    llms: z.array(llmInfoSchema).readonly()
+    llms: z.array(llmInfoSchema).readonly(),
+    /** Who loads the listed models, observed with them. */
+    modelLoading: llmModelLoadingSchema
   })
   .readonly()
 

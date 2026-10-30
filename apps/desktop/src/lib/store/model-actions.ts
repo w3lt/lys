@@ -243,9 +243,9 @@ async function readInventoryOutcome(
   priorError: string | null
 ): Promise<ModelInventoryOutcome> {
   try {
-    const models = await listModels(connection)
+    const { llms: models, modelLoading } = await listModels(connection)
     return {
-      modelInventory: { status: "ready", models },
+      modelInventory: { status: "ready", models, modelLoading },
       modelError: priorError,
       isModelRuntimeUnavailable: false
     }

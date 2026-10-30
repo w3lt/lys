@@ -3,6 +3,7 @@ import {
   llmLoadModelApiResponseBodySchema,
   llmTestModelApiParamsSchema,
   type LlmInfo,
+  type LlmListModelsApiResponse,
   type LlmLoadModelApiResponse
 } from "@lys/protocol"
 import type { ModelLoadConfiguration } from "@lys/share"
@@ -22,6 +23,8 @@ import type {
   LlmModelStopper
 } from "./llmModelCapabilities"
 import type { LlmEngine } from "./llmEngine"
+import type { LlmModelInstanceController } from "./llmModelInstanceController"
+import { createLlmProviderLoadsModelsError } from "./llmProviderLoadsModelsError"
 import type {
   DownloadedLlmModel,
   LlmContextMeasurement,
@@ -29,12 +32,34 @@ import type {
 } from "./llmRuntimeTypes"
 
 /**
+ * The connected engine as one model operation sees it, with who loads its
+ * models.
+ *
+ * @remarks Both capabilities stay valid until the operation settles.
+ */
+export type ConnectedLlmEngine =
+  | Readonly<{
+      /** The provider loads a model when a request names it. */
+      modelLoading: "provider"
+      /** Observes the engine's models and measures contexts. */
+      llmEngine: LlmEngine
+    }>
+  | Readonly<{
+      /** A model answers only once Lys loads it. */
+      modelLoading: "lys"
+      /** Observes the engine's models and measures contexts. */
+      llmEngine: LlmEngine
+      /** Loads the engine's models and stops their instances. */
+      llmModelInstanceController: LlmModelInstanceController
+    }>
+
+/**
  * One model operation performed against the connected engine.
  *
  * @typeParam Result - Result produced by the operation.
  */
 export type LlmEngineOperation<Result> = (
-  llmEngine: LlmEngine
+  connectedLlmEngine: ConnectedLlmEngine
 ) => Promise<Result>
 
 /**
@@ -51,7 +76,8 @@ export interface LlmEngineOperationQueue {
    * Performs one model operation after earlier accepted work settles.
    *
    * @typeParam Result - Result produced by the operation.
-   * @param operation - Operation receiving an engine valid until it settles.
+   * @param operation - Operation receiving the connected engine, valid until
+   * it settles.
    * @returns The operation's result.
    * @throws `The LLM runtime is closed.` after cleanup begins.
    * @throws A runtime-unavailable error recognized by
@@ -163,7 +189,7 @@ export default class LlmService
   ): Promise<LlmModelHealthOutcome> {
     const { modelId } = llmTestModelApiParamsSchema.parse({ modelId: modelKey })
     return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
-      async (llmEngine) =>
+      async ({ llmEngine }) =>
         await getLlmModelHealth(
           modelId,
           async () => await llmEngine.listLoadedLlmModelInstances(),
@@ -185,18 +211,28 @@ export default class LlmService
    * @throws An `Error` with the message `Loaded model "<canonical model key>"
    * was not found in the downloaded LLM inventory` if the canonical model is
    * absent from inventory after loading.
+   * @throws The provider-loads-models refusal when the connected provider
+   * loads its own models.
    */
   public async loadLlmModel(
     modelKeyOrAlias: string,
     loadConfiguration: ModelLoadConfiguration
   ): Promise<LlmLoadModelApiResponse> {
     return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
-      async (llmEngine) =>
-        await loadRuntimeLlmModel(
+      async (connectedLlmEngine) => {
+        if (connectedLlmEngine.modelLoading === "provider") {
+          throw createLlmProviderLoadsModelsError()
+        }
+        const { llmEngine, llmModelInstanceController } = connectedLlmEngine
+        return await loadRuntimeLlmModel(
           async () =>
-            await llmEngine.loadLlmModel(modelKeyOrAlias, loadConfiguration),
+            await llmModelInstanceController.loadLlmModel(
+              modelKeyOrAlias,
+              loadConfiguration
+            ),
           async () => await llmEngine.listDownloadedLlmModels()
         )
+      }
     )
   }
 
@@ -205,20 +241,23 @@ export default class LlmService
    *
    * @returns A promise resolving to snapshots in the order defined by
    * {@link LlmModelInventory.listLlmModels}, each loaded model with the
-   * context length its instances are loaded with.
+   * context length its instances are loaded with, and who loads them.
    * @throws If an inventory query fails or the queue rejects the operation.
    * @remarks The downloaded models, the loaded instances, and each loaded
    * model's context length are observed in one queued operation.
    */
-  public async listLlmModels(): Promise<readonly LlmInfo[]> {
+  public async listLlmModels(): Promise<LlmListModelsApiResponse> {
     return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
-      async (llmEngine) =>
-        await listLlmModels(
-          async () => await llmEngine.listDownloadedLlmModels(),
-          async () => await llmEngine.listLoadedLlmModelInstances(),
-          async (model, texts) =>
-            await llmEngine.findLlmContextMeasurement(model, texts)
-        )
+      async ({ llmEngine, modelLoading }) =>
+        Object.freeze({
+          llms: await listLlmModels(
+            async () => await llmEngine.listDownloadedLlmModels(),
+            async () => await llmEngine.listLoadedLlmModelInstances(),
+            async (model, texts) =>
+              await llmEngine.findLlmContextMeasurement(model, texts)
+          ),
+          modelLoading
+        })
     )
   }
 
@@ -240,7 +279,7 @@ export default class LlmService
     readonly DownloadedLlmModel[]
   > {
     return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
-      async (llmEngine) => await llmEngine.listDownloadedLlmModels()
+      async ({ llmEngine }) => await llmEngine.listDownloadedLlmModels()
     )
   }
 
@@ -251,18 +290,27 @@ export default class LlmService
    * @returns A promise resolving to the immutable outcome from a fresh reconciliation snapshot.
    * @throws If the queue rejects the operation; runtime-operation failures are
    * represented in the returned outcome.
+   * @throws The provider-loads-models refusal when the connected provider
+   * loads its own models.
    */
   public async stopLlmModelsByKey(
     modelKey: string
   ): Promise<StopLlmModelsByKeyOutcome> {
     return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
-      async (llmEngine) =>
-        await stopLlmModelsByKey(
+      async (connectedLlmEngine) => {
+        if (connectedLlmEngine.modelLoading === "provider") {
+          throw createLlmProviderLoadsModelsError()
+        }
+        const { llmEngine, llmModelInstanceController } = connectedLlmEngine
+        return await stopLlmModelsByKey(
           modelKey,
           async () => await llmEngine.listLoadedLlmModelInstances(),
           async (identifier) =>
-            await llmEngine.stopLoadedLlmModelInstance(identifier)
+            await llmModelInstanceController.stopLoadedLlmModelInstance(
+              identifier
+            )
         )
+      }
     )
   }
 
@@ -286,7 +334,7 @@ export default class LlmService
     texts: readonly string[]
   ): Promise<LlmContextMeasurement | undefined> {
     return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
-      async (llmEngine) =>
+      async ({ llmEngine }) =>
         await llmEngine.findLlmContextMeasurement(model, texts)
     )
   }

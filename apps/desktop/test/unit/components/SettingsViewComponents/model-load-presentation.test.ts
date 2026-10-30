@@ -3,7 +3,6 @@ import {
   buildModelReloadPrompt,
   findLoadedSettingValue,
   formatContextLengthNote,
-  formatLoadConfigurationEmptyMessage,
   isModelResidencyChanging,
   type ModelReloadPrompt
 } from "@/components/SettingsViewComponents/model-load-presentation"
@@ -133,21 +132,4 @@ describe("formatContextLengthNote", () => {
       "Tokens the weights can hold at once."
     )
   })
-})
-
-describe("formatLoadConfigurationEmptyMessage", () => {
-  it("asks for a default model once the models are listed", () => {
-    expect(formatLoadConfigurationEmptyMessage("ready")).toBe(
-      "Choose a default model above to edit its load configuration."
-    )
-  })
-
-  it.each(["unavailable", "failed"] as const)(
-    "says the model list is needed while the inventory is %s",
-    (status) => {
-      expect(formatLoadConfigurationEmptyMessage(status)).toBe(
-        "Load configurations can be edited once the models are listed."
-      )
-    }
-  )
 })

@@ -77,6 +77,7 @@ describe("BuiltInAgentView", () => {
       ...READY_RUNTIME,
       modelInventory: {
         status: "ready",
+        modelLoading: "lys",
         models: [
           buildLlmInfo("qwen3-8b", { loaded: true, loadedContextLength: 4096 })
         ]
@@ -93,7 +94,11 @@ describe("BuiltInAgentView", () => {
   it("leaves the window share out of the measure while no model is loaded", async () => {
     await startBuiltInAgentView({
       ...READY_RUNTIME,
-      modelInventory: { status: "ready", models: [buildLlmInfo("qwen3-8b")] }
+      modelInventory: {
+        status: "ready",
+        modelLoading: "lys",
+        models: [buildLlmInfo("qwen3-8b")]
+      }
     })
 
     expect(

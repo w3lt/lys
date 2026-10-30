@@ -72,6 +72,12 @@ export type LlmChatEndpoint = Readonly<{
   baseUrl: string
   /** Bearer credential, or undefined for a server that takes none. */
   apiKey: string | undefined
+  /**
+   * Request field the endpoint reads the reply ceiling from: `max_tokens`
+   * for Ollama, whose OpenAI-compatible API ignores `max_completion_tokens`,
+   * and `max_completion_tokens` for the other providers.
+   */
+  replyCeilingField: "max_completion_tokens" | "max_tokens"
 }>
 
 /**
@@ -80,7 +86,8 @@ export type LlmChatEndpoint = Readonly<{
  * @param access - How the provider is reached.
  * @returns `http://<address>/v1` for LM Studio and a local Ollama server,
  * `https://ollama.com/v1` with the key for Ollama Cloud, and
- * `https://api.groq.com/openai/v1` with the key for Groq.
+ * `https://api.groq.com/openai/v1` with the key for Groq; both Ollama
+ * endpoints read the reply ceiling from `max_tokens`.
  */
 export function buildLlmChatEndpoint(
   access: LlmProviderAccess
@@ -89,22 +96,26 @@ export function buildLlmChatEndpoint(
     case "lmStudio":
       return Object.freeze({
         baseUrl: `http://${access.address}/v1`,
-        apiKey: undefined
+        apiKey: undefined,
+        replyCeilingField: "max_completion_tokens"
       })
     case "ollama":
       return Object.freeze({
         baseUrl: `http://${access.address}/v1`,
-        apiKey: undefined
+        apiKey: undefined,
+        replyCeilingField: "max_tokens"
       })
     case "ollamaCloud":
       return Object.freeze({
         baseUrl: `https://${OLLAMA_CLOUD_API_HOST}/v1`,
-        apiKey: access.apiKey
+        apiKey: access.apiKey,
+        replyCeilingField: "max_tokens"
       })
     case "groq":
       return Object.freeze({
         baseUrl: `https://${GROQ_API_HOST}/openai/v1`,
-        apiKey: access.apiKey
+        apiKey: access.apiKey,
+        replyCeilingField: "max_completion_tokens"
       })
   }
 }

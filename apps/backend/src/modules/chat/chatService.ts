@@ -2,6 +2,7 @@ import { APIUserAbortError, OpenAI } from "openai"
 import type {
   ChatCompletion,
   ChatCompletionChunk,
+  ChatCompletionCreateParamsStreaming,
   ChatCompletionFunctionTool,
   ChatCompletionMessageParam,
   ResponseFormatJSONSchema
@@ -93,6 +94,12 @@ type ChatEndpointClient = Readonly<{
   openaiClient: OpenAI
 }>
 
+/** Request field of a chat completion that carries the reply ceiling. */
+type ReplyCeilingParameter = Pick<
+  ChatCompletionCreateParamsStreaming,
+  "max_completion_tokens" | "max_tokens"
+>
+
 /**
  * Matches reply content wrapped in one Markdown code fence, with an optional
  * `json` language tag, and captures the fenced text.
@@ -174,7 +181,7 @@ export default class ChatService {
   }: CompleteChatOptions): Promise<AsyncIterable<ChatCompletionChunk>> {
     const { temperature, replyCeiling } = generationOptions
     const toolOffer = tools.length === 0 ? {} : { tools: [...tools] }
-    const openaiClient = this.#getChatEndpointClient()
+    const { endpoint, openaiClient } = this.#getChatEndpointClient()
     try {
       return await openaiClient.chat.completions.create(
         {
@@ -182,7 +189,10 @@ export default class ChatService {
           model,
           stream: true,
           temperature,
-          max_completion_tokens: replyCeiling ?? null,
+          ...buildReplyCeilingParameter(
+            endpoint.replyCeilingField,
+            replyCeiling
+          ),
           ...toolOffer
         },
         { signal }
@@ -229,7 +239,7 @@ export default class ChatService {
       content: message
     }
 
-    const openaiClient = this.#getChatEndpointClient()
+    const { openaiClient } = this.#getChatEndpointClient()
     const completion = await openaiClient.chat.completions.create(
       {
         messages: [this.#titleSystemMessage, userMessage],
@@ -255,12 +265,13 @@ export default class ChatService {
 
   /**
    * Gets the client for the connected provider's endpoint, creating one when
-   * the endpoint differs from the latest one used.
+   * the endpoint's base URL or key differs from the latest one used.
    *
-   * @returns The client a new request uses.
+   * @returns The endpoint found for this request and the client a new
+   * request uses.
    * @throws A runtime-unavailable error while no provider is connected.
    */
-  #getChatEndpointClient(): OpenAI {
+  #getChatEndpointClient(): ChatEndpointClient {
     const endpoint = this.#findChatEndpoint()
     if (endpoint === undefined) throw createLlmRuntimeUnavailableError([])
     const current = this.#chatEndpointClient
@@ -268,15 +279,34 @@ export default class ChatService {
       current?.endpoint.baseUrl === endpoint.baseUrl &&
       current.endpoint.apiKey === endpoint.apiKey
     ) {
-      return current.openaiClient
+      return Object.freeze({ endpoint, openaiClient: current.openaiClient })
     }
     const openaiClient = new OpenAI({
       baseURL: endpoint.baseUrl,
       apiKey: endpoint.apiKey ?? DUMMY_API_KEY
     })
     this.#chatEndpointClient = Object.freeze({ endpoint, openaiClient })
-    return openaiClient
+    return this.#chatEndpointClient
   }
+}
+
+/**
+ * Builds the request field that carries the reply ceiling, under the name
+ * the endpoint reads.
+ *
+ * @param field - Field the endpoint reads the reply ceiling from.
+ * @param replyCeiling - Most tokens the reply may hold, or undefined for no
+ * limit.
+ * @returns The field holding the ceiling, or `null` for no limit.
+ */
+function buildReplyCeilingParameter(
+  field: LlmChatEndpoint["replyCeilingField"],
+  replyCeiling: number | undefined
+): ReplyCeilingParameter {
+  const ceiling = replyCeiling ?? null
+  return field === "max_tokens"
+    ? { max_tokens: ceiling }
+    : { max_completion_tokens: ceiling }
 }
 
 /**

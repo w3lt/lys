@@ -236,7 +236,8 @@ describe("createSingletonServices", () => {
 
     expect(findChatEndpoint?.()).toEqual({
       baseUrl: "https://api.groq.com/openai/v1",
-      apiKey
+      apiKey,
+      replyCeilingField: "max_completion_tokens"
     })
   })
 

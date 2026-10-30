@@ -159,7 +159,8 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   const chatService = new ChatService({
     findChatEndpoint: () => ({
       baseUrl: "http://lmstudio.test/v1",
-      apiKey: undefined
+      apiKey: undefined,
+      replyCeilingField: "max_completion_tokens"
     }),
     titleGenerationPrompt: "Summarize the message as a short title.",
     generatedTitleMaxLength: 50

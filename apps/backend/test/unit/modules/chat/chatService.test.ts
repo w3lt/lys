@@ -24,7 +24,11 @@ const OPENAI_BASE_URL = "http://lmstudio.test/v1"
 
 /** Creation options shared by the cases; each case varies only what it tests. */
 const SERVICE_OPTIONS = Object.freeze({
-  findChatEndpoint: () => ({ baseUrl: OPENAI_BASE_URL, apiKey: undefined }),
+  findChatEndpoint: () => ({
+    baseUrl: OPENAI_BASE_URL,
+    apiKey: undefined,
+    replyCeilingField: "max_completion_tokens"
+  }),
   titleGenerationPrompt: "Summarize the message as a short title.",
   generatedTitleMaxLength: 12
 } satisfies ChatServiceCreationOptions)
@@ -133,6 +137,32 @@ describe("ChatService", () => {
       })
     })
 
+    it("sends the reply ceiling as max_tokens to an endpoint that reads only that field, such as Ollama's", async () => {
+      const { service, endpoint } = createServiceWithEndpoint(
+        () => createChatCompletionStreamResponse([]),
+        {
+          findChatEndpoint: () => ({
+            baseUrl: OPENAI_BASE_URL,
+            apiKey: undefined,
+            replyCeilingField: "max_tokens"
+          })
+        }
+      )
+
+      await listChunks(
+        await service.completeChatStream({
+          messages: [{ role: "user", content: "Hello" }],
+          tools: [],
+          model: "llama3.2",
+          generationOptions: { temperature: 0.4, replyCeiling: 256 }
+        })
+      )
+
+      const body = endpoint.requests[0]?.body
+      expect(body).toMatchObject({ max_tokens: 256 })
+      expect(body).not.toHaveProperty("max_completion_tokens")
+    })
+
     it("sends the offered tools as function tools", async () => {
       const { service, endpoint } = createServiceWithEndpoint(() =>
         createChatCompletionStreamResponse([])
@@ -207,7 +237,8 @@ describe("ChatService", () => {
         ...SERVICE_OPTIONS,
         findChatEndpoint: () => ({
           baseUrl: OPENAI_BASE_URL,
-          apiKey: "local-key"
+          apiKey: "local-key",
+          replyCeilingField: "max_completion_tokens"
         })
       })
 
@@ -231,7 +262,11 @@ describe("ChatService", () => {
 
     it("sends each request to the provider connected when it starts", async () => {
       let endpoint: ReturnType<ChatServiceCreationOptions["findChatEndpoint"]> =
-        { baseUrl: OPENAI_BASE_URL, apiKey: undefined }
+        {
+          baseUrl: OPENAI_BASE_URL,
+          apiKey: undefined,
+          replyCeilingField: "max_completion_tokens"
+        }
       const { service, endpoint: fake } = createServiceWithEndpoint(
         () => createChatCompletionStreamResponse([]),
         { findChatEndpoint: () => endpoint }
@@ -246,7 +281,8 @@ describe("ChatService", () => {
       await listChunks(await service.completeChatStream(request))
       endpoint = {
         baseUrl: "https://api.groq.test/openai/v1",
-        apiKey: "gsk_synthetic_0123456789"
+        apiKey: "gsk_synthetic_0123456789",
+        replyCeilingField: "max_completion_tokens"
       }
       await listChunks(await service.completeChatStream(request))
 

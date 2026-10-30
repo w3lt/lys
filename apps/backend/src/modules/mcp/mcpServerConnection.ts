@@ -6,16 +6,15 @@ import {
   type Tool,
   type Transport
 } from "@modelcontextprotocol/client"
-import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 import { version as LYS_VERSION } from "../../../package.json"
 import { calculateMcpRequestFailure, isSpawnFailure } from "./mcpError"
 import {
   sendMcpHttpRequest,
-  MAXIMUM_MCP_RESPONSE_BYTES,
   McpResponseTooLargeError
 } from "./mcpResponseLimit"
 import McpHttpTransport from "./mcpHttpTransport"
-import McpServerLogLines from "./mcpServerLogLines"
+import McpServerProcess, { type McpServerCommand } from "./mcpServerProcess"
+import type McpServerProcessGroups from "./mcpServerProcessGroups"
 import McpStdioTransport from "./mcpStdioTransport"
 
 /** Arguments of one call, by argument name, as the backend checked them. */
@@ -25,6 +24,11 @@ export type McpToolCallArguments = Readonly<Record<string, JsonValue>>
 export type McpServerConnectionContext = Readonly<{
   /** Folder a stdio server starts in, such as the person's home folder. */
   workingDirectory: string
+  /**
+   * Holds the process group of a stdio server while it may run, so the
+   * backend can end it when it exits; borrowed.
+   */
+  processGroups: McpServerProcessGroups
   /** Stops the opening and closes what it started; borrowed for the opening. */
   abortSignal: AbortSignal
   /** Receives each line a stdio server writes to its standard error, cut to a bound. */
@@ -32,15 +36,17 @@ export type McpServerConnectionContext = Readonly<{
   /**
    * Told at most once, after the handshake, when the connection ends without
    * {@link McpServerConnection.close}: the process exits, the transport
-   * closes, an answer passes {@link MAXIMUM_MCP_RESPONSE_BYTES}, or the
+   * closes, an answer passes `MAXIMUM_MCP_RESPONSE_BYTES`, or the
    * server answers a call with HTTP 404, which ends a Streamable HTTP
    * session.
    */
   reportConnectionClosed: () => void
   /**
    * Receives a failure the SDK reports outside any request, such as a bad
-   * message, or a {@link McpResponseTooLargeError} when an HTTP answer or
-   * one event of it passes {@link MAXIMUM_MCP_RESPONSE_BYTES}; never a
+   * message or a stdio server's process group that outlived `SIGKILL` after
+   * its command ended by itself, or a {@link McpResponseTooLargeError} when
+   * an HTTP answer, one event of it, or a stdio message line passes
+   * `MAXIMUM_MCP_RESPONSE_BYTES`; never a
    * failure a request rejects with, which reaches its caller, and never a
    * failure to start the command, which the opening reports, because Node's
    * error for it holds the command's arguments.
@@ -71,19 +77,20 @@ const LYS_CLIENT_INFO = Object.freeze({ name: "lys", version: LYS_VERSION })
 
 /**
  * Owns the connection to one MCP server: the SDK client and the transport it
- * talks through, which is a process Lys started or an HTTP session.
+ * talks through, which is a process group Lys started or an HTTP session.
  *
  * @remarks Created by {@link McpServerConnection.open}, which finishes the
  * MCP handshake before it returns, so a connection is ready to list and call
- * tools. Closing ends a stdio server's process and aborts an HTTP
+ * tools. Closing ends a stdio server's process group and aborts an HTTP
  * connection's requests; it is idempotent, and see {@link close} for what
  * it waits for. When the connection ends by itself, the context's
  * `reportConnectionClosed` is told once; calls in flight then fail. An HTTP
  * 404 answer to a call counts as such an end, because the server no longer
  * knows the session, though the SDK keeps its transport open. So does an
- * HTTP answer longer than {@link MAXIMUM_MCP_RESPONSE_BYTES}: the connection
- * closes its client at once, because the SDK would leave a request whose
- * event stream breaks waiting for its time limit, and from then on every
+ * answer longer than `MAXIMUM_MCP_RESPONSE_BYTES`, over either
+ * transport: the connection closes its client at once, because the SDK
+ * would leave a request whose event stream breaks waiting for its time
+ * limit, and from then on every
  * failure is a {@link McpResponseTooLargeError} with the SDK's failure as
  * its cause. Resource ownership: owns the client and its transport until
  * {@link close}.
@@ -102,7 +109,7 @@ export default class McpServerConnection {
   #closing: Promise<void> | undefined
   /** Whether an end Lys did not ask for was reported. */
   #hasReportedEnd: boolean
-  /** Whether an HTTP answer passed the response limit, which ended the client. */
+  /** Whether an answer passed the response limit, which ended the client. */
   #hasPassedResponseLimit: boolean
 
   /**
@@ -131,8 +138,8 @@ export default class McpServerConnection {
    * @throws The SDK's or the transport's failure, such as a spawn error, an
    * HTTP error, a closed connection, or a timeout. Once the context's signal
    * aborts, the SDK's request-timeout error, which is how the SDK reports a
-   * cancelled request. Once an HTTP answer passed
-   * {@link MAXIMUM_MCP_RESPONSE_BYTES}, a {@link McpResponseTooLargeError}
+   * cancelled request. Once an answer passed
+   * `MAXIMUM_MCP_RESPONSE_BYTES`, a {@link McpResponseTooLargeError}
    * with the SDK's failure as its cause. Whatever was started is closed
    * first.
    * @remarks The client negotiates the protocol version through
@@ -180,7 +187,7 @@ export default class McpServerConnection {
    * @throws The SDK's failure, such as a timeout, a JSON-RPC error, or a list
    * longer than 16 pages. Once the signal aborts, the SDK's request-timeout
    * error, which is how the SDK reports a cancelled request. Once an HTTP
-   * answer passed {@link MAXIMUM_MCP_RESPONSE_BYTES}, a
+   * answer passed `MAXIMUM_MCP_RESPONSE_BYTES`, a
    * {@link McpResponseTooLargeError} with the SDK's failure as its cause.
    * @remarks The list bypasses the SDK's response cache, so the SDK holds no
    * tool's output schema and {@link sendToolCall} never checks a result against
@@ -217,7 +224,7 @@ export default class McpServerConnection {
    * error, or a JSON-RPC error. Once the signal aborts, the SDK's
    * request-timeout error, which is how the SDK reports a cancelled request.
    * An HTTP 404 answer is also reported as an ended connection first. Once
-   * an HTTP answer passed {@link MAXIMUM_MCP_RESPONSE_BYTES}, a
+   * an answer passed `MAXIMUM_MCP_RESPONSE_BYTES`, a
    * {@link McpResponseTooLargeError} with the SDK's failure as its cause.
    */
   public async sendToolCall(
@@ -237,14 +244,17 @@ export default class McpServerConnection {
   }
 
   /**
-   * Closes the connection: over stdio, ends the server's process; over
-   * HTTP, aborts the requests in flight without asking the server to end
-   * its session.
+   * Closes the connection: over stdio, ends the server's process group;
+   * over HTTP, aborts the requests in flight without asking the server to
+   * end its session.
    *
    * @returns A promise that settles once the transport closed, which every
-   * later call returns too. Over stdio, that is once the process exited
-   * after its standard input closed or after `SIGTERM`, or once `SIGKILL`
-   * was sent, without waiting for the killed process to exit.
+   * later call returns too. Over stdio, that is once no process of the
+   * server's group is left, after its standard input closed, after
+   * `SIGTERM` to the group, or after `SIGKILL` to it, each two seconds after
+   * the step before.
+   * @throws Over stdio, when a process of the group is still left two
+   * seconds after `SIGKILL`.
    * @remarks The connection counts as closing before its client starts to
    * close, so `reportConnectionClosed` is not told about a close asked for
    * here, even though the HTTP transport reports its end while it closes.
@@ -268,7 +278,7 @@ export default class McpServerConnection {
   }
 
   /**
-   * Ends the connection at an HTTP answer over the response limit.
+   * Ends the connection at an answer over the response limit.
    *
    * @remarks Reports the limit, then closes the client, which fails every
    * request in flight at once and stops reading every other answer; after
@@ -332,18 +342,19 @@ function isSessionEnded(error: unknown): boolean {
  * Creates the transport one server's settings name.
  *
  * @param settings - Validated server settings.
- * @param context - Working folder and the server log reporter.
- * @param reportLimitPassed - Told when an HTTP answer, or one event of it,
- * passes the response limit, before its body fails; borrowed.
- * @returns A stdio transport that starts the command in the working folder
- * with the SDK's default environment plus the configured variables, its
- * standard error read line by line, and whose every close waits for the
- * same end of the process; or a Streamable HTTP transport that sends the
- * configured headers, refuses redirects, passes on each failure once, and
- * keeps answers' bodies out of the errors its sends throw. Each reads at
- * most {@link MAXIMUM_MCP_RESPONSE_BYTES} of one answer: a longer stdio
- * message line ends the connection, and a longer HTTP body, or event of an
- * event stream, is reported and fails.
+ * @param context - Working folder, process group holder, and the server log
+ * reporter.
+ * @param reportLimitPassed - Told when an HTTP answer, one event of it, or a
+ * stdio message line passes the response limit, before it fails; borrowed.
+ * @returns A stdio transport that starts the command in a process group of
+ * its own, in the working folder, with the SDK's default environment plus
+ * the configured variables, its standard error read line by line, and whose
+ * every close waits for the same end of the whole group; or a Streamable
+ * HTTP transport that sends the configured headers, refuses redirects,
+ * passes on each failure once, and keeps answers' bodies out of the errors
+ * its sends throw. Each reads at most `MAXIMUM_MCP_RESPONSE_BYTES` of
+ * one answer: a longer stdio message line, HTTP body, or event of an event
+ * stream is reported and ends the connection.
  */
 function createTransport(
   settings: McpServerSettings,
@@ -352,22 +363,15 @@ function createTransport(
 ): Transport {
   switch (settings.transport) {
     case "stdio": {
-      const transport = new StdioClientTransport({
-        command: settings.command,
-        args: [...settings.arguments],
-        env: Object.fromEntries(
-          settings.environment.map((variable) => [
-            variable.name,
-            variable.value
-          ])
-        ),
-        cwd: context.workingDirectory,
-        stderr: "pipe",
-        maxBufferSize: MAXIMUM_MCP_RESPONSE_BYTES
-      })
-      const logLines = new McpServerLogLines(context.reportServerLogLine)
-      transport.stderr?.on("data", (chunk: Buffer) => logLines.read(chunk))
-      return new McpStdioTransport(transport)
+      const command = buildServerCommand(settings, context.workingDirectory)
+      const processContext = {
+        processGroups: context.processGroups,
+        reportServerLogLine: context.reportServerLogLine,
+        reportLimitPassed
+      }
+      return new McpStdioTransport((handlers) =>
+        McpServerProcess.start(command, { ...handlers, ...processContext })
+      )
     }
     case "http":
       return new McpHttpTransport(
@@ -384,4 +388,27 @@ function createTransport(
         })
       )
   }
+}
+
+/**
+ * Builds the command a stdio server's settings name.
+ *
+ * @param settings - Validated settings of a stdio server.
+ * @param workingDirectory - Folder the command starts in.
+ * @returns A frozen command with the configured arguments and variables.
+ */
+function buildServerCommand(
+  settings: Extract<McpServerSettings, { transport: "stdio" }>,
+  workingDirectory: string
+): McpServerCommand {
+  return Object.freeze({
+    command: settings.command,
+    arguments: settings.arguments,
+    environment: Object.freeze(
+      Object.fromEntries(
+        settings.environment.map((variable) => [variable.name, variable.value])
+      )
+    ),
+    workingDirectory
+  })
 }

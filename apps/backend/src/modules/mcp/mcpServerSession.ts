@@ -8,6 +8,7 @@ import type {
 } from "./mcpServerConnection"
 import type { McpServerEvent } from "./mcpServerEvent"
 import type { McpServerOpening } from "./mcpServerOpening"
+import type McpServerProcessGroups from "./mcpServerProcessGroups"
 import type { McpToolCatalog } from "./mcpToolCatalog"
 import {
   formatMcpServerNotConnected,
@@ -30,6 +31,8 @@ export type McpServerSessionDependencies = Readonly<{
   ) => Promise<McpServerOpening>
   /** Folder a stdio server starts in, such as the person's home folder. */
   workingDirectory: string
+  /** Holds the process group of a stdio server while it may run. */
+  processGroups: McpServerProcessGroups
   /** Receives every {@link McpServerEvent} of the session. */
   reportEvent: (event: McpServerEvent) => void
   /**
@@ -117,7 +120,7 @@ const UNKNOWN_TOOL_LOOKUP: McpSessionToolLookup = Object.freeze({
 export default class McpServerSession {
   /** Validated settings the session opens. */
   readonly #settings: McpServerSettings
-  /** Borrowed opener, working folder, reporter, and task tracker. */
+  /** Borrowed opener, working folder, group holder, reporter, and task tracker. */
   readonly #dependencies: McpServerSessionDependencies
   /** Cancels the opening. */
   readonly #controller: AbortController
@@ -134,8 +137,8 @@ export default class McpServerSession {
    * Creates a session that is connecting.
    *
    * @param settings - Validated settings of the server.
-   * @param dependencies - Opener, working folder, reporter, and task
-   * tracker, borrowed for the session's lifetime.
+   * @param dependencies - Opener, working folder, process group holder,
+   * reporter, and task tracker, borrowed for the session's lifetime.
    * @remarks Starts and contacts nothing; {@link open} does.
    */
   public constructor(
@@ -165,8 +168,8 @@ export default class McpServerSession {
    * this one released their servers.
    *
    * @param previousRelease - Settles once what {@link stop} returned for
-   * each of those sessions settled, so the process each of their commands
-   * started has ended before this one's starts, whatever name each was
+   * each of those sessions settled, so the process group each of their
+   * commands started has ended before this one's starts, whatever name each was
    * applied under; undefined when none is releasing, and the opening starts
    * at once.
    * @returns A promise that settles once the opening ended; it never
@@ -198,6 +201,7 @@ export default class McpServerSession {
     try {
       opening = await this.#dependencies.openServer(this.#settings, {
         workingDirectory: this.#dependencies.workingDirectory,
+        processGroups: this.#dependencies.processGroups,
         abortSignal: this.#controller.signal,
         reportServerLogLine: (line) =>
           reportEvent({ kind: "server-log-line", serverName, line }),
@@ -295,9 +299,9 @@ export default class McpServerSession {
    * Ends the session: cancels its opening or closes its connection.
    *
    * @returns A promise that settles once the session released the server:
-   * its opening ended and every connection it led to closed, the process a
-   * command server's command started included, though not processes that
-   * one started itself. It never rejects.
+   * its opening ended and every connection it led to closed, the whole
+   * process group a command server's command started included, though not
+   * a process that left that group. It never rejects.
    * @remarks Idempotent; every call's promise settles once the same work
    * ended. The state stays as it was; the owner forgets the session.
    */

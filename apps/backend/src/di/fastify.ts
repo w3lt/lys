@@ -111,6 +111,10 @@ function registerSingletonServices(
   app.decorate("webSearchToolProvider", singletonServices.webSearchToolProvider)
   app.decorate("toolApprovalService", singletonServices.toolApprovalService)
   app.decorate("mcpServerRegistry", singletonServices.mcpServerRegistry)
+  app.decorate(
+    "mcpServerProcessGroups",
+    singletonServices.mcpServerProcessGroups
+  )
   app.decorate("attachmentFileStore", singletonServices.attachmentFileStore)
 }
 

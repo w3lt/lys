@@ -1,30 +1,53 @@
-import type { JSONRPCMessage, Transport } from "@modelcontextprotocol/client"
-import type { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
+import {
+  SdkError,
+  SdkErrorCode,
+  type JSONRPCMessage,
+  type Transport
+} from "@modelcontextprotocol/client"
+import type McpServerProcess from "./mcpServerProcess"
+import type { McpServerProcessHandlers } from "./mcpServerProcess"
+
+/** What the transport uses of a started server's process. */
+export type McpStdioServerProcess = Pick<McpServerProcess, "send" | "stop">
 
 /**
- * Owns the SDK's stdio transport of one MCP server, so that every close of
- * it waits for the same end of its process.
+ * Starts one server's process whose output reaches the given handlers.
  *
- * @remarks The SDK's transport forgets its process as soon as a close
- * starts, so a second close, such as the one Lys makes after the SDK closed
- * a failed handshake without waiting, returned at once while the first was
- * still stopping the process. Here the first close is shared by every later
- * one: it settles once the process exited after its standard input closed,
- * or after `SIGTERM` two seconds later, or once `SIGKILL` was sent two
- * seconds after that, without waiting for the killed process to exit. The
- * close the SDK transport starts by itself, after a standard-output line
- * passed the response limit, does not go through here, so a later close
- * does not wait for that one. The callbacks the client installs are told
- * what the SDK transport reports, from {@link start} on. Resource
- * ownership: owns the SDK transport and the process it starts. Concurrency
- * model: single-owner; the SDK client that connects it is its only user.
+ * @param handlers - Receivers of what the process reports.
+ * @returns The started process, which the caller owns.
+ * @throws Node's failure to start the command.
+ */
+export type McpServerProcessStarter = (
+  handlers: McpServerProcessHandlers
+) => Promise<McpStdioServerProcess>
+
+/**
+ * Owns the process group of one stdio MCP server for the SDK's client, so
+ * that every close of the connection waits for the same end of the whole
+ * group.
+ *
+ * @remarks {@link start} starts the server's command in a process group of
+ * its own through a {@link McpServerProcess}. The first close is shared by
+ * every later one, whoever starts it: the client, the connection after a
+ * message line passed the response limit, or the transport itself once the
+ * command's process closed by itself, which ends the rest of its group too.
+ * It settles once no process of the group is left, as
+ * {@link McpServerProcess.stop} describes, and only then tells the client
+ * that the transport closed, so the client never forgets a transport whose
+ * processes still run. The callbacks the client installs are told what the
+ * process reports, from {@link start} on. Resource ownership: owns the
+ * process it starts. Concurrency model: single-owner; the SDK client that
+ * connects it is its only user, while the process reports on the backend's
+ * event loop.
  */
 export default class McpStdioTransport implements Transport {
-  /** The SDK's transport, which starts and ends the process; owned. */
-  readonly #transport: StdioClientTransport
+  /** Starts the server's process; borrowed from the connection. */
+  readonly #startProcess: McpServerProcessStarter
+  /** The start of the process, once {@link start} ran. */
+  #starting: Promise<McpStdioServerProcess> | undefined
   /** Completion of the first close, shared by every later close. */
   #closing: Promise<void> | undefined
-  /** Told when the process has closed; installed by the client. */
+  /** Told when the transport has closed; installed by the client. */
   #onclose: Transport["onclose"]
   /** Told of a failure outside any request; installed by the client. */
   #onerror: Transport["onerror"]
@@ -32,13 +55,13 @@ export default class McpStdioTransport implements Transport {
   #onmessage: Transport["onmessage"]
 
   /**
-   * Takes ownership of a transport that has not started.
+   * Creates a transport that has started nothing.
    *
-   * @param transport - The SDK's stdio transport, not started; owned from
-   * here on.
+   * @param startProcess - Starts the server's process; borrowed.
    */
-  public constructor(transport: StdioClientTransport) {
-    this.#transport = transport
+  public constructor(startProcess: McpServerProcessStarter) {
+    this.#startProcess = startProcess
+    this.#starting = undefined
     this.#closing = undefined
     this.#onclose = undefined
     this.#onerror = undefined
@@ -57,7 +80,7 @@ export default class McpStdioTransport implements Transport {
   /**
    * Implements {@link Transport.onclose}.
    *
-   * @param callback - Told when the process has closed.
+   * @param callback - Told once the transport has closed.
    */
   public set onclose(callback: Transport["onclose"]) {
     this.#onclose = callback
@@ -100,23 +123,22 @@ export default class McpStdioTransport implements Transport {
   }
 
   /**
-   * Implements {@link Transport.start} by starting the process, whose
-   * events reach the installed callbacks from here on.
+   * Implements {@link Transport.start} by starting the server's process,
+   * whose reports reach the installed callbacks from here on.
    *
    * @returns A promise that settles once the process started.
-   * @throws The spawn failure when the command cannot start.
+   * @throws Node's failure to start the command, such as `spawn npx ENOENT`;
+   * the transport can still be closed then, which ends nothing.
    */
-  public start(): Promise<void> {
-    this.#transport.onclose = () => {
-      this.#onclose?.()
-    }
-    this.#transport.onerror = (error) => {
-      this.#onerror?.(error)
-    }
-    this.#transport.onmessage = (message: JSONRPCMessage) => {
-      this.#onmessage?.(message)
-    }
-    return this.#transport.start()
+  public async start(): Promise<void> {
+    this.#starting = this.#startProcess({
+      handleMessage: (message) => this.#onmessage?.(message),
+      handleError: (error) => this.#onerror?.(error),
+      handleClose: () => {
+        this.close().catch((error: unknown) => this.#reportCloseFailure(error))
+      }
+    })
+    await this.#starting
   }
 
   /**
@@ -125,20 +147,61 @@ export default class McpStdioTransport implements Transport {
    *
    * @param message - Message to send.
    * @returns A promise that settles once the line was written.
-   * @throws The SDK's `NotConnected` failure once the process is gone.
+   * @throws The SDK's `NotConnected` failure before the process started,
+   * once a close started, or once the process is gone.
    */
-  public send(message: JSONRPCMessage): Promise<void> {
-    return this.#transport.send(message)
+  public async send(message: JSONRPCMessage): Promise<void> {
+    if (this.#starting === undefined || this.#closing !== undefined)
+      throw new SdkError(SdkErrorCode.NotConnected, "Not connected")
+    const serverProcess = await this.#starting
+    await serverProcess.send(message)
   }
 
   /**
-   * Implements {@link Transport.close} by ending the process once.
+   * Implements {@link Transport.close} by ending the process group once.
    *
    * @returns The promise of the first close, which every later call returns
    * too; see the class remarks for when it settles.
+   * @throws What {@link McpServerProcess.stop} throws when the group
+   * outlived `SIGKILL`; the client is told the transport closed all the
+   * same.
    */
   public close(): Promise<void> {
-    this.#closing ??= this.#transport.close()
+    this.#closing ??= this.#closeProcess()
     return this.#closing
+  }
+
+  /**
+   * Reports a close the transport started itself that failed, which no
+   * caller observes.
+   *
+   * @param error - Why the process group could not be ended.
+   */
+  #reportCloseFailure(error: unknown): void {
+    this.#onerror?.(
+      error instanceof Error
+        ? error
+        : new Error("The MCP server's process could not be ended.", {
+            cause: error
+          })
+    )
+  }
+
+  /**
+   * Waits for the process to start, if it was being started, ends its
+   * group, and tells the client the transport closed. A start that failed
+   * started nothing, and its failure reached the client through
+   * {@link start}.
+   *
+   * @returns A promise that settles once the group ended.
+   * @throws What stopping the group threw.
+   */
+  async #closeProcess(): Promise<void> {
+    try {
+      const serverProcess = await this.#starting?.catch(() => undefined)
+      await serverProcess?.stop()
+    } finally {
+      this.#onclose?.()
+    }
   }
 }

@@ -13,6 +13,7 @@ import {
 import { fileURLToPath } from "node:url"
 import { onTestFinished } from "vitest"
 import type { McpServerConnectionContext } from "../../../src/modules/mcp/mcpServerConnection"
+import McpServerProcessGroups from "../../../src/modules/mcp/mcpServerProcessGroups"
 
 /** Options the fake stdio server reads from its first argument. */
 export type FakeStdioServerOptions = Readonly<{
@@ -34,6 +35,21 @@ export type FakeStdioServerOptions = Readonly<{
   holdLock?: boolean
   /** Wait this long after standard input closes before exiting. */
   shutdownDelayMilliseconds?: number
+  /** Keep running after standard input closes, until a signal ends it. */
+  ignoreClosedInput?: boolean
+  /** Keep running when `SIGTERM` arrives. */
+  ignoreSigterm?: boolean
+  /**
+   * Listen on this loopback port while running, as a server that runs one
+   * copy at a time, or exit with code 3 when another process listens on it.
+   */
+  holdPort?: number
+  /**
+   * Start a helper process that keeps none of the server's standard streams,
+   * ignores `SIGTERM`, and runs until killed; write `helper pid <id>` to
+   * standard error.
+   */
+  startHelper?: boolean
 }>
 
 /** One request the fake HTTP server received. */
@@ -76,6 +92,11 @@ const FAKE_STDIO_SERVER_PATH = fileURLToPath(
   new URL("./fakeMcpStdioServer.ts", import.meta.url)
 )
 
+/** Path of the fake launcher script, which runs the fake stdio server. */
+const FAKE_LAUNCHER_PATH = fileURLToPath(
+  new URL("./fakeMcpLauncher.ts", import.meta.url)
+)
+
 /** Tool the fake servers list by default. */
 export const ECHO_TOOL = Object.freeze({
   name: "echo",
@@ -111,6 +132,71 @@ export function buildFakeStdioServerSettings(
     ]),
     environment: Object.freeze(environment.map((entry) => Object.freeze(entry)))
   })
+}
+
+/**
+ * Builds the settings of a server whose command is a launcher, like `npx`,
+ * that runs the fake stdio server as its child and does not pass `SIGTERM`
+ * on; the launcher writes `launcher pid <id>` to standard error.
+ *
+ * @param name - Server name.
+ * @param options - What the fake server does.
+ * @returns Validated-shape settings.
+ */
+export function buildFakeLauncherServerSettings(
+  name: string,
+  options: FakeStdioServerOptions
+): McpServerSettings {
+  return Object.freeze({
+    name,
+    transport: "stdio",
+    command: process.execPath,
+    arguments: Object.freeze([
+      "--no-warnings",
+      FAKE_LAUNCHER_PATH,
+      JSON.stringify(options)
+    ]),
+    environment: Object.freeze([])
+  })
+}
+
+/**
+ * Finds the process identifier a fake server or launcher wrote to its
+ * standard error.
+ *
+ * @param logLines - Lines the server's standard error held.
+ * @param prefix - Text before the identifier, such as `pid` or `launcher
+ * pid`.
+ * @returns The identifier.
+ * @throws When no line reports one.
+ */
+export function findReportedProcessId(
+  logLines: readonly string[],
+  prefix: string
+): number {
+  const line = logLines.find((logLine) => logLine.startsWith(`${prefix} `))
+  if (line === undefined) throw new Error(`No line reports the ${prefix}`)
+  return Number(line.slice(prefix.length + 1))
+}
+
+/**
+ * Answers whether a process still runs or waits to be reaped.
+ *
+ * @param processId - Its identifier.
+ * @returns False once no process has the identifier; true when one does,
+ * even one the test may not signal.
+ */
+export function isProcessRunning(processId: number): boolean {
+  try {
+    process.kill(processId, 0)
+    return true
+  } catch (error) {
+    return !(
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ESRCH"
+    )
+  }
 }
 
 /**
@@ -155,6 +241,7 @@ export function createRecordingContext(
     events,
     context: {
       workingDirectory: process.cwd(),
+      processGroups: new McpServerProcessGroups(),
       abortSignal,
       reportServerLogLine: (line) => events.logLines.push(line),
       reportConnectionClosed: () => {

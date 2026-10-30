@@ -130,6 +130,62 @@ describe("OllamaRuntime", () => {
     ])
   })
 
+  it("leaves a model that cannot chat out of every listing and measurement", async () => {
+    const { runtime } = await createOwnedRuntime("local", {
+      "GET /api/tags": answerWith({
+        models: [...TAG_LIST.models, { name: "bge-m3:latest", size: 1_157 }]
+      }),
+      "POST /api/show": (request) =>
+        (request.body as { model: string }).model === "bge-m3:latest"
+          ? {
+              status: 200,
+              body: {
+                capabilities: ["embedding"],
+                model_info: { "bert.context_length": 8192 }
+              }
+            }
+          : showModel(request)
+    })
+
+    const models = await runtime.listDownloadedLlmModels()
+    const instances = await runtime.listLoadedLlmModelInstances()
+    const measurement = await runtime.findLlmContextMeasurement(
+      "bge-m3:latest",
+      []
+    )
+
+    expect(models.map(({ modelKey }) => modelKey)).toEqual([
+      "qwen3:8b",
+      "gpt-oss:120b"
+    ])
+    expect(instances.map(({ modelKey }) => modelKey)).toEqual([
+      "qwen3:8b",
+      "gpt-oss:120b"
+    ])
+    expect(measurement).toBeUndefined()
+  })
+
+  it("keeps a model when Ollama reports no capabilities for it", async () => {
+    const { runtime } = await createOwnedRuntime("local", {
+      "POST /api/show": answerWith({
+        model_info: { "llama.context_length": 8192 }
+      })
+    })
+
+    const models = await runtime.listDownloadedLlmModels()
+
+    expect(
+      models.map(({ modelKey, vision, trainedForToolUse }) => ({
+        modelKey,
+        vision,
+        trainedForToolUse
+      }))
+    ).toEqual([
+      { modelKey: "qwen3:8b", vision: false, trainedForToolUse: false },
+      { modelKey: "gpt-oss:120b", vision: false, trainedForToolUse: false }
+    ])
+  })
+
   it("rejects a model whose metadata holds no context length", async () => {
     const { runtime } = await createOwnedRuntime("local", {
       "POST /api/show": answerWith({ capabilities: ["completion"] })
@@ -152,9 +208,11 @@ describe("OllamaRuntime", () => {
     ])
 
     expect(measurement).toEqual({ contextLength: 4096, textTokenCounts: [2] })
-    expect(server.requests.map((request) => request.path)).not.toContain(
-      "/api/show"
-    )
+    expect(
+      server.requests
+        .filter((request) => request.path === "/api/show")
+        .map((request) => request.body)
+    ).toEqual([{ model: "qwen3:8b" }])
   })
 
   it("measures a model that is not running with its own window", async () => {

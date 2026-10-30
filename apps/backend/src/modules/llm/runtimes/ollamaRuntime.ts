@@ -36,11 +36,25 @@ type OllamaTag = z.infer<typeof ollamaTagSchema>
 
 /** Validates the part of Ollama's `/api/show` answer the runtime uses. */
 const ollamaShowSchema = z.object({
-  /** What the model can do, such as `completion`, `tools`, or `vision`. */
+  /**
+   * What the model can do, such as `completion`, `tools`, `vision`, or
+   * `embedding`; absent from a server that does not report capabilities.
+   */
   capabilities: z.array(z.string()).optional(),
   /** Model metadata, whose `<architecture>.context_length` is its window. */
   model_info: z.record(z.string(), z.unknown()).optional()
 })
+
+/** The part of Ollama's description of one model the runtime uses. */
+type OllamaModelDescription = z.infer<typeof ollamaShowSchema>
+
+/** A model Ollama lists that can answer a chat request, with its description. */
+type OllamaChatModel = Readonly<{
+  /** The model as Ollama's list names it. */
+  tag: OllamaTag
+  /** Ollama's description of the model. */
+  description: OllamaModelDescription
+}>
 
 /** Validates one running model in Ollama's `/api/ps` answer. */
 const ollamaRunningModelSchema = z.object({
@@ -105,7 +119,10 @@ export type OllamaRuntimeTarget =
  * Implements {@link LlmRuntime} over Ollama's native API, on a local server
  * or in Ollama's cloud.
  *
- * @remarks Ollama loads a model when a request names it, so every listed
+ * @remarks Only chat models are listed: a model whose `/api/show`
+ * capabilities lack `completion`, such as an embedding model, is left out of
+ * every listing and measurement; a model is kept when Ollama reports no
+ * capabilities. Ollama loads a model when a request names it, so every chat
  * model is reported as one loaded instance whose identifier is its name,
  * and loading or stopping a model fails. Ollama has no tokenizer endpoint:
  * measurements use {@link estimateTextTokenCount} and the context length a
@@ -170,10 +187,10 @@ export default class OllamaRuntime implements LlmRuntime {
   }
 
   /**
-   * Implements {@link LlmRuntime.listDownloadedLlmModels} with Ollama's model
-   * list and each model's `/api/show` answer, asked all at once.
+   * Implements {@link LlmRuntime.listDownloadedLlmModels} with Ollama's chat
+   * models.
    *
-   * @returns Frozen metadata for every listed model, with `vision` and
+   * @returns Frozen metadata for every chat model, with `vision` and
    * `trainedForToolUse` from its capabilities and its window from its
    * metadata.
    * @throws The interface-defined admission failure; `The LLM runtime could
@@ -185,39 +202,40 @@ export default class OllamaRuntime implements LlmRuntime {
     readonly DownloadedLlmModel[]
   > {
     return await this.#admission.runOperation(async () => {
-      const tags = await this.#listOllamaTags().catch((cause: unknown) => {
-        throw new Error("The LLM runtime could not list downloaded models.", {
-          cause
-        })
-      })
-      const models = await Promise.all(
-        tags.map(async (tag) => await this.#describeOllamaModel(tag))
+      const chatModels = await this.#listOllamaChatModels().catch(
+        (cause: unknown) => {
+          throw new Error("The LLM runtime could not list downloaded models.", {
+            cause
+          })
+        }
       )
-      return Object.freeze(models)
+      return Object.freeze(chatModels.map(buildDownloadedOllamaModel))
     })
   }
 
   /**
-   * Implements {@link LlmRuntime.listLoadedLlmModelInstances}: every model
-   * Ollama lists, because it loads them on demand.
+   * Implements {@link LlmRuntime.listLoadedLlmModelInstances}: every chat
+   * model, because Ollama loads them on demand.
    *
-   * @returns One frozen instance per listed model, whose identifier is its name.
+   * @returns One frozen instance per chat model, whose identifier is its name.
    * @throws The interface-defined admission failure, or `The LLM runtime
-   * could not list loaded model instances.` with the failed listing as its
+   * could not list loaded model instances.` with the failed request as its
    * cause.
    */
   public async listLoadedLlmModelInstances(): Promise<
     readonly LoadedLlmModelInstance[]
   > {
     return await this.#admission.runOperation(async () => {
-      const tags = await this.#listOllamaTags().catch((cause: unknown) => {
-        throw new Error(
-          "The LLM runtime could not list loaded model instances.",
-          { cause }
-        )
-      })
+      const chatModels = await this.#listOllamaChatModels().catch(
+        (cause: unknown) => {
+          throw new Error(
+            "The LLM runtime could not list loaded model instances.",
+            { cause }
+          )
+        }
+      )
       return Object.freeze(
-        tags.map((tag) =>
+        chatModels.map(({ tag }) =>
           Object.freeze({ modelKey: tag.name, modelIdentifier: tag.name })
         )
       )
@@ -267,7 +285,7 @@ export default class OllamaRuntime implements LlmRuntime {
    * @returns A frozen measurement whose context length is the one a local
    * server reports for the running model, otherwise the model's own window,
    * and whose counts are {@link estimateTextTokenCount} estimates; undefined
-   * when Ollama does not list the model.
+   * when Ollama does not list the model or it cannot chat.
    * @throws The interface-defined admission failure, or `The LLM runtime
    * could not measure the context.` with the failed request or the missing
    * window as its cause.
@@ -280,8 +298,13 @@ export default class OllamaRuntime implements LlmRuntime {
       try {
         const tags = await this.#listOllamaTags()
         if (!tags.some((tag) => tag.name === model)) return undefined
+        const description = await this.#showOllamaModel(model)
+        if (!isOllamaChatModel(description)) return undefined
         return Object.freeze({
-          contextLength: await this.#findServedContextLength(model),
+          contextLength: await this.#findServedContextLength(
+            model,
+            description
+          ),
           textTokenCounts: Object.freeze(texts.map(estimateTextTokenCount))
         })
       } catch (cause) {
@@ -319,62 +342,43 @@ export default class OllamaRuntime implements LlmRuntime {
   }
 
   /**
-   * Builds the frozen metadata of one listed model from its `/api/show` answer.
+   * Lists the models Ollama has that can chat, each with its description,
+   * asking for every description at once.
    *
-   * @param tag - Model from Ollama's list.
-   * @returns Metadata keyed and named by the model name.
-   * @throws `The LLM runtime could not list downloaded models.` when the show
-   * request fails, or `The LLM runtime returned invalid model metadata.` when
-   * the answer holds no context length.
+   * @returns The chat models, in Ollama's order.
+   * @throws When a request fails or an answer does not match its shape.
    */
-  async #describeOllamaModel(tag: OllamaTag): Promise<DownloadedLlmModel> {
-    const shown = await this.#showOllamaModel(tag.name).catch(
-      (cause: unknown) => {
-        throw new Error("The LLM runtime could not list downloaded models.", {
-          cause
+  async #listOllamaChatModels(): Promise<readonly OllamaChatModel[]> {
+    const tags = await this.#listOllamaTags()
+    const models = await Promise.all(
+      tags.map(async (tag) =>
+        Object.freeze({
+          tag,
+          description: await this.#showOllamaModel(tag.name)
         })
-      }
+      )
     )
-    const maxContextLength = findModelInfoContextLength(shown.model_info)
-    if (maxContextLength === undefined) {
-      throw new Error("The LLM runtime returned invalid model metadata.", {
-        cause: new Error(`Ollama reports no context length for ${tag.name}.`)
-      })
-    }
-    const capabilities = shown.capabilities ?? []
-    const format = modelCompatibilityTypeSchema.safeParse(tag.details?.format)
-    return Object.freeze({
-      modelKey: tag.name,
-      displayName: tag.name,
-      ...(format.success ? { format: format.data } : {}),
-      ...(tag.size !== undefined && tag.size > 0
-        ? { sizeBytes: tag.size }
-        : {}),
-      ...(tag.details?.parameter_size
-        ? { paramsString: tag.details.parameter_size }
-        : {}),
-      ...(tag.details?.family ? { architecture: tag.details.family } : {}),
-      vision: capabilities.includes("vision"),
-      trainedForToolUse: capabilities.includes("tools"),
-      maxContextLength
-    })
+    return models.filter(({ description }) => isOllamaChatModel(description))
   }
 
   /**
-   * Finds the context length Ollama serves one listed model with.
+   * Finds the context length Ollama serves one listed chat model with.
    *
    * @param model - Listed model name.
+   * @param description - Ollama's description of the model.
    * @returns The length a local server reports for the running model, or
    * the model's own window.
    * @throws When a request fails or the model's metadata holds no window.
    */
-  async #findServedContextLength(model: string): Promise<number> {
+  async #findServedContextLength(
+    model: string,
+    description: OllamaModelDescription
+  ): Promise<number> {
     if (this.#target.mode === "local") {
       const running = await this.#findRunningContextLength(model)
       if (running !== undefined) return running
     }
-    const shown = await this.#showOllamaModel(model)
-    const contextLength = findModelInfoContextLength(shown.model_info)
+    const contextLength = findModelInfoContextLength(description.model_info)
     if (contextLength === undefined) {
       throw new Error(`Ollama reports no context length for ${model}.`)
     }
@@ -408,9 +412,7 @@ export default class OllamaRuntime implements LlmRuntime {
    * @returns The capabilities and metadata the runtime uses.
    * @throws When the request fails or the answer does not match its shape.
    */
-  async #showOllamaModel(
-    model: string
-  ): Promise<z.infer<typeof ollamaShowSchema>> {
+  async #showOllamaModel(model: string): Promise<OllamaModelDescription> {
     const parsed = ollamaShowSchema.safeParse(
       await this.#requestOllamaJson({
         method: "POST",
@@ -439,6 +441,55 @@ export default class OllamaRuntime implements LlmRuntime {
       apiKey: this.#target.mode === "cloud" ? this.#target.apiKey : undefined
     })
   }
+}
+
+/**
+ * Answers whether a model can answer a chat request.
+ *
+ * @param description - Ollama's description of the model.
+ * @returns True when its capabilities include `completion`, or when Ollama
+ * reports no capabilities; false for a model such as an embedding model.
+ */
+function isOllamaChatModel(description: OllamaModelDescription): boolean {
+  return (
+    description.capabilities === undefined ||
+    description.capabilities.includes("completion")
+  )
+}
+
+/**
+ * Builds the frozen metadata of one chat model.
+ *
+ * @param chatModel - The model and its description.
+ * @returns Metadata keyed and named by the model name.
+ * @throws `The LLM runtime returned invalid model metadata.` when the
+ * description holds no context length.
+ */
+function buildDownloadedOllamaModel({
+  tag,
+  description
+}: OllamaChatModel): DownloadedLlmModel {
+  const maxContextLength = findModelInfoContextLength(description.model_info)
+  if (maxContextLength === undefined) {
+    throw new Error("The LLM runtime returned invalid model metadata.", {
+      cause: new Error(`Ollama reports no context length for ${tag.name}.`)
+    })
+  }
+  const capabilities = description.capabilities ?? []
+  const format = modelCompatibilityTypeSchema.safeParse(tag.details?.format)
+  return Object.freeze({
+    modelKey: tag.name,
+    displayName: tag.name,
+    ...(format.success ? { format: format.data } : {}),
+    ...(tag.size !== undefined && tag.size > 0 ? { sizeBytes: tag.size } : {}),
+    ...(tag.details?.parameter_size
+      ? { paramsString: tag.details.parameter_size }
+      : {}),
+    ...(tag.details?.family ? { architecture: tag.details.family } : {}),
+    vision: capabilities.includes("vision"),
+    trainedForToolUse: capabilities.includes("tools"),
+    maxContextLength
+  })
 }
 
 /**

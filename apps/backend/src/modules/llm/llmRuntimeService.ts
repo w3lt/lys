@@ -195,8 +195,8 @@ export default class LlmRuntimeService
 
   /**
    * Settlement joined by concurrent connect callers while a queued attempt
-   * has not yet read the saved provider; cleared once it has, so a later
-   * caller's attempt reads the settings again.
+   * has not yet started reading the saved provider; cleared when it starts,
+   * so a later caller's attempt reads the settings again.
    */
   #pendingConnection: Promise<LlmRuntimeConnectionStatus> | undefined =
     undefined
@@ -337,15 +337,16 @@ export default class LlmRuntimeService
    * @returns The settled status after the attempt.
    * @throws If probing or releasing the held runtime fails.
    * @remarks Runs only as queued work, so no model operation overlaps it.
-   * Once the saved provider is read, a connect call no longer joins this
-   * attempt, because a provider saved since then would not be served by it.
+   * Once it starts reading the saved provider, a connect call no longer
+   * joins this attempt, because a provider saved since then might not be
+   * the one it reads.
    * A held runtime for a provider that is no longer the saved one is released
    * before the new one is acquired; when no usable provider is saved, the
    * held runtime is released and the status becomes `unreachable`.
    */
   async #updateLlmRuntimeConnection(): Promise<LlmRuntimeConnectionStatus> {
-    const llmProviderAccess = await this.#findSavedLlmProviderAccess()
     this.#pendingConnection = undefined
+    const llmProviderAccess = await this.#findSavedLlmProviderAccess()
     const connection = this.#connection
     if (connection.status === "connected") {
       if (

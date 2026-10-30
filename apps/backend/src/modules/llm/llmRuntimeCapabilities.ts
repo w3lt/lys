@@ -22,11 +22,11 @@ export interface LlmRuntimeConnectionObserver {
  * @remarks Implementations are ready when injected. An attempt occupies one
  * position in the shared model-operation queue and runs after earlier accepted
  * work, so it never overlaps a model operation. Concurrent calls share one
- * pending attempt until it reads the saved provider; a call made after that
- * queues an attempt of its own, which reads the saved provider again. The
- * application-scoped provider owns an accepted attempt
- * until it settles, independently of the requesting client. No completion
- * deadline is guaranteed.
+ * pending attempt until it starts reading the saved provider; a call made
+ * after that queues an attempt of its own, which reads the saved provider
+ * again. The application-scoped provider owns an accepted attempt until it
+ * settles, independently of the requesting client. No completion deadline is
+ * guaranteed.
  */
 export interface LlmRuntimeConnector {
   /**

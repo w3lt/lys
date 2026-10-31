@@ -11,8 +11,8 @@ import {
   isSameLlmProviderAccess,
   type LlmProviderAccess
 } from "./llmProviderAccess"
+import LlmRuntimeOperationQueue from "./llmRuntimeOperationQueue"
 import { createLlmRuntimeUnavailableError } from "./llmRuntimeUnavailableError"
-import { createLlmServiceBusyError } from "./llmServiceBusyError"
 import type {
   ConnectedLlmEngine,
   LlmEngineOperation,
@@ -71,63 +71,6 @@ type LlmRuntimeConnectionState =
       status: "unreachable"
     }>
 
-/** Admission lifecycle that prevents new work after cleanup begins. */
-type LlmRuntimeServiceState =
-  | Readonly<{
-      /** The service accepts connection attempts and model operations. */
-      status: "ready"
-    }>
-  | Readonly<{
-      /** Cleanup is waiting for accepted work or releasing the runtime. */
-      status: "closing"
-      /** Shared completion joined by concurrent cleanup calls. */
-      completion: Promise<void>
-    }>
-  | Readonly<{
-      /** Cleanup settled; new attempts and operations are rejected. */
-      status: "closed"
-      /** Settled cleanup result reused by repeated cleanup calls. */
-      completion: Promise<void>
-    }>
-
-/** Ready lifecycle state established before queue admission. */
-type ReadyLlmRuntimeServiceState = Extract<
-  LlmRuntimeServiceState,
-  { status: "ready" }
->
-
-/**
- * Work accepted by the serialized queue.
- *
- * @typeParam Result - Result produced by the work.
- */
-type LlmRuntimeServiceOperation<Result> = () => Promise<Result>
-
-/** Private admission count and completion tail for the FIFO queue. */
-type LlmRuntimeServiceQueueState = {
-  /** Completion of every accepted operation, preserving progress after failure. */
-  completion: Promise<void>
-  /** Accepted operations that have not settled, including the active one. */
-  acceptedOperationCount: number
-}
-
-/**
- * Inclusive capacity: one active operation and eight waiting operations.
- *
- * @remarks Connection attempts and model operations share this capacity. The
- * first operation reserves the active position at admission, before its
- * execution microtask starts. Excess requests are rejected without waiting.
- */
-const MAX_ACCEPTED_LLM_RUNTIME_SERVICE_OPERATIONS = 9
-
-/** Stable failure text for work requested after cleanup begins. */
-const CLOSED_LLM_RUNTIME_SERVICE_MESSAGE = "The LLM runtime is closed."
-
-/** Lifecycle state that admits work. */
-const READY_LLM_RUNTIME_SERVICE_STATE = Object.freeze({
-  status: "ready"
-} as const satisfies LlmRuntimeServiceState)
-
 /** Connection state before an attempt settles or while a runtime is acquired. */
 const CONNECTING_LLM_RUNTIME_CONNECTION_STATE = Object.freeze({
   status: "connecting"
@@ -145,10 +88,10 @@ const UNREACHABLE_LLM_RUNTIME_CONNECTION_STATE = Object.freeze({
  * @remarks Owns at most one runtime, acquired through the supplied
  * capability for the provider the person saved, which each connection
  * attempt reads again; a held runtime for a provider that is no longer saved
- * is released before another is acquired. It also owns the FIFO queue
- * shared by connection attempts and model operations: one active and at most
- * eight waiting; excess requests reject
- * with the service-busy error before acceptance. Invariant: a runtime is held
+ * is released before another is acquired. Connection attempts and model
+ * operations run through one owned {@link LlmRuntimeOperationQueue}, which
+ * refuses work beyond its capacity with the service-busy error before
+ * acceptance. Invariant: a runtime is held
  * exactly while the status is `connected`, and only queued work acquires,
  * probes, or releases it, so no attempt overlaps a model operation.
  * A model operation whose runtime call rejects is followed, before the next
@@ -183,11 +126,8 @@ export default class LlmRuntimeService
   /** Borrowed reporter for failed probes or releases after a resolved operation. */
   readonly #reportLlmRuntimeAvailabilityCheckFailure: (failure: unknown) => void
 
-  /** Exclusively owned admission accounting and completion tail. */
-  readonly #operationQueue: LlmRuntimeServiceQueueState = {
-    completion: Promise.resolve(),
-    acceptedOperationCount: 0
-  }
+  /** Exclusively owned queue of attempts and model operations, with its lifecycle. */
+  readonly #operationQueue = new LlmRuntimeOperationQueue()
 
   /** Authoritative connection state and the runtime it holds while connected. */
   #connection: LlmRuntimeConnectionState =
@@ -200,9 +140,6 @@ export default class LlmRuntimeService
    */
   #pendingConnection: Promise<LlmRuntimeConnectionStatus> | undefined =
     undefined
-
-  /** Authoritative lifecycle state controlling admission and cleanup. */
-  #state: LlmRuntimeServiceState = READY_LLM_RUNTIME_SERVICE_STATE
 
   /**
    * Creates a ready service that holds no runtime until its first attempt.
@@ -255,14 +192,17 @@ export default class LlmRuntimeService
    * @throws The interface-defined closed, service-busy, probe, and release failures.
    */
   public async connectLlmRuntime(): Promise<LlmRuntimeConnectionStatus> {
-    this.#getReadyLlmRuntimeServiceState()
-    if (this.#pendingConnection !== undefined) {
+    if (
+      this.#pendingConnection !== undefined &&
+      this.#operationQueue.status === "ready"
+    ) {
       return await this.#pendingConnection
     }
 
-    const pendingConnection = this.#handleLlmRuntimeServiceOperationRequest(
-      async () => await this.#updateLlmRuntimeConnection()
-    )
+    const pendingConnection =
+      this.#operationQueue.handleLlmRuntimeOperationRequest(
+        async () => await this.#updateLlmRuntimeConnection()
+      )
     this.#pendingConnection = pendingConnection
     try {
       return await pendingConnection
@@ -288,12 +228,14 @@ export default class LlmRuntimeService
   public async handleLlmEngineOperationRequest<Result>(
     operation: LlmEngineOperation<Result>
   ): Promise<Result> {
-    this.#getReadyLlmRuntimeServiceState()
-    if (this.#connection.status !== "connected") {
+    if (
+      this.#operationQueue.status === "ready" &&
+      this.#connection.status !== "connected"
+    ) {
       throw createLlmRuntimeUnavailableError([])
     }
 
-    return await this.#handleLlmRuntimeServiceOperationRequest(
+    return await this.#operationQueue.handleLlmRuntimeOperationRequest(
       async () => await this.#handleAcceptedLlmEngineOperation(operation)
     )
   }
@@ -308,26 +250,9 @@ export default class LlmRuntimeService
    * `The LLM runtime is closed.`
    */
   public async [Symbol.asyncDispose](): Promise<void> {
-    if (this.#state.status !== "ready") {
-      await this.#state.completion
-      return
-    }
-
-    const cleanupCompletion = this.#operationQueue.completion.then(
+    await this.#operationQueue.close(
       async () => await this.#closeHeldLlmRuntime()
     )
-    this.#state = Object.freeze({
-      status: "closing",
-      completion: cleanupCompletion
-    })
-    try {
-      await cleanupCompletion
-    } finally {
-      this.#state = Object.freeze({
-        status: "closed",
-        completion: cleanupCompletion
-      })
-    }
   }
 
   /**
@@ -543,72 +468,6 @@ export default class LlmRuntimeService
         "The LLM operation and the runtime availability check both failed.",
         { cause: availabilityError }
       )
-    }
-  }
-
-  /**
-   * Adds one operation to the serialized queue.
-   *
-   * @typeParam Result - Result produced by the operation.
-   * @param operation - Deferred work that may access the held runtime.
-   * @returns The operation result after earlier accepted work settles.
-   * @throws A service-busy error when capacity is exhausted, or the
-   * operation's failure.
-   * @remarks Admission reserves capacity synchronously. Completion releases it
-   * on success or failure before the caller observes the outcome. Callers check
-   * the lifecycle state first.
-   */
-  #handleLlmRuntimeServiceOperationRequest<Result>(
-    operation: LlmRuntimeServiceOperation<Result>
-  ): Promise<Result> {
-    if (
-      this.#operationQueue.acceptedOperationCount >=
-      MAX_ACCEPTED_LLM_RUNTIME_SERVICE_OPERATIONS
-    ) {
-      return Promise.reject(createLlmServiceBusyError())
-    }
-
-    this.#operationQueue.acceptedOperationCount += 1
-    const operationResult = this.#operationQueue.completion.then(
-      async () =>
-        await this.#handleAcceptedLlmRuntimeServiceOperation(operation)
-    )
-    this.#operationQueue.completion = operationResult.then(
-      () => undefined,
-      () => undefined
-    )
-    return operationResult
-  }
-
-  /**
-   * Gets the ready lifecycle state or rejects work after cleanup begins.
-   *
-   * @returns The current ready state authorizing admission.
-   * @throws The canonical closed failure after cleanup begins.
-   */
-  #getReadyLlmRuntimeServiceState(): ReadyLlmRuntimeServiceState {
-    if (this.#state.status !== "ready") {
-      throw new Error(CLOSED_LLM_RUNTIME_SERVICE_MESSAGE)
-    }
-
-    return this.#state
-  }
-
-  /**
-   * Completes one accepted operation and releases its reserved capacity.
-   *
-   * @typeParam Result - Result produced by the operation.
-   * @param operation - Accepted work whose predecessors have settled.
-   * @returns The operation result after its capacity is released.
-   * @throws The operation failure after its capacity is released.
-   */
-  async #handleAcceptedLlmRuntimeServiceOperation<Result>(
-    operation: LlmRuntimeServiceOperation<Result>
-  ): Promise<Result> {
-    try {
-      return await operation()
-    } finally {
-      this.#operationQueue.acceptedOperationCount -= 1
     }
   }
 }

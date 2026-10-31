@@ -71,6 +71,26 @@ type LlmRuntimeConnectionState =
       status: "unreachable"
     }>
 
+/** A connection attempt that connect calls share while it is pending. */
+type LlmRuntimeConnectionAttempt =
+  | Readonly<{
+      /** Accepted by the queue; it has not started reading the saved provider. */
+      status: "queued"
+      /** Settled status shared by every call that joins the attempt. */
+      settlement: Promise<LlmRuntimeConnectionStatus>
+    }>
+  | Readonly<{
+      /** Started; it reads the saved provider, then connects to it. */
+      status: "running"
+      /** Settled status shared by every call that joins the attempt. */
+      settlement: Promise<LlmRuntimeConnectionStatus>
+      /**
+       * The saved provider the attempt read, or undefined when none is
+       * usable; rejects only when the failure reporter throws.
+       */
+      llmProviderAccess: Promise<LlmProviderAccess | undefined>
+    }>
+
 /** Connection state before an attempt settles or while a runtime is acquired. */
 const CONNECTING_LLM_RUNTIME_CONNECTION_STATE = Object.freeze({
   status: "connecting"
@@ -91,7 +111,9 @@ const UNREACHABLE_LLM_RUNTIME_CONNECTION_STATE = Object.freeze({
  * is released before another is acquired. Connection attempts and model
  * operations run through one owned {@link LlmRuntimeOperationQueue}, which
  * refuses work beyond its capacity with the service-busy error before
- * acceptance. Invariant: a runtime is held
+ * acceptance. A connect call shares a queued attempt, or a running attempt
+ * that read the same saved provider as the call reads; otherwise it queues
+ * an attempt of its own. Invariant: a runtime is held
  * exactly while the status is `connected`, and only queued work acquires,
  * probes, or releases it, so no attempt overlaps a model operation.
  * A model operation whose runtime call rejects is followed, before the next
@@ -134,12 +156,11 @@ export default class LlmRuntimeService
     CONNECTING_LLM_RUNTIME_CONNECTION_STATE
 
   /**
-   * Settlement joined by concurrent connect callers while a queued attempt
-   * has not yet started reading the saved provider; cleared when it starts,
-   * so a later caller's attempt reads the settings again.
+   * The latest connection attempt connect calls may share, until the call
+   * that queued it observes its settlement. At most one queued attempt
+   * exists, and it is always the latest, so it is the next attempt to start.
    */
-  #pendingConnection: Promise<LlmRuntimeConnectionStatus> | undefined =
-    undefined
+  #connectionAttempt: LlmRuntimeConnectionAttempt | undefined = undefined
 
   /**
    * Creates a ready service that holds no runtime until its first attempt.
@@ -192,25 +213,25 @@ export default class LlmRuntimeService
    * @throws The interface-defined closed, service-busy, probe, and release failures.
    */
   public async connectLlmRuntime(): Promise<LlmRuntimeConnectionStatus> {
+    const attempt = this.#connectionAttempt
     if (
-      this.#pendingConnection !== undefined &&
+      attempt?.status === "running" &&
       this.#operationQueue.status === "ready"
     ) {
-      return await this.#pendingConnection
-    }
-
-    const pendingConnection =
-      this.#operationQueue.handleLlmRuntimeOperationRequest(
-        async () => await this.#updateLlmRuntimeConnection()
+      const savedLlmProviderAccess = await findComparableLlmProviderAccess(
+        this.#findLlmProviderAccess
       )
-    this.#pendingConnection = pendingConnection
-    try {
-      return await pendingConnection
-    } finally {
-      if (this.#pendingConnection === pendingConnection) {
-        this.#pendingConnection = undefined
+      if (
+        isSameFoundLlmProviderAccess(
+          savedLlmProviderAccess,
+          await attempt.llmProviderAccess
+        )
+      ) {
+        return await attempt.settlement
       }
     }
+
+    return await this.#handleLlmRuntimeConnectionRequest()
   }
 
   /**
@@ -256,22 +277,64 @@ export default class LlmRuntimeService
   }
 
   /**
+   * Shares the queued connection attempt, or queues an attempt of its own.
+   *
+   * @returns The settled status of the shared or queued attempt.
+   * @throws The closed and service-busy failures of the queue, which start no
+   * attempt, and the attempt's probe and release failures.
+   * @remarks Runs synchronously up to its wait, so calls made one after
+   * another share one queued attempt. A queued attempt is not shared once
+   * cleanup has begun. The call that queued the attempt stops offering it
+   * when it observes the settlement, unless a later attempt replaced it.
+   */
+  async #handleLlmRuntimeConnectionRequest(): Promise<LlmRuntimeConnectionStatus> {
+    const attempt = this.#connectionAttempt
+    if (
+      attempt?.status === "queued" &&
+      this.#operationQueue.status === "ready"
+    ) {
+      return await attempt.settlement
+    }
+
+    const settlement = this.#operationQueue.handleLlmRuntimeOperationRequest(
+      async () => await this.#updateLlmRuntimeConnection()
+    )
+    this.#connectionAttempt = Object.freeze({ status: "queued", settlement })
+    try {
+      return await settlement
+    } finally {
+      if (this.#connectionAttempt?.settlement === settlement) {
+        this.#connectionAttempt = undefined
+      }
+    }
+  }
+
+  /**
    * Reads the saved provider, then keeps a held runtime for it that still
    * answers, or acquires a new one.
    *
    * @returns The settled status after the attempt.
    * @throws If probing or releasing the held runtime fails.
    * @remarks Runs only as queued work, so no model operation overlaps it.
-   * Once it starts reading the saved provider, a connect call no longer
-   * joins this attempt, because a provider saved since then might not be
-   * the one it reads.
+   * As it starts, the queued attempt becomes running and carries the read it
+   * makes. From then on, a connect call joins it only when the call reads the
+   * same provider, because a provider saved since then might not be the one
+   * it reads.
    * A held runtime for a provider that is no longer the saved one is released
    * before the new one is acquired; when no usable provider is saved, the
    * held runtime is released and the status becomes `unreachable`.
    */
   async #updateLlmRuntimeConnection(): Promise<LlmRuntimeConnectionStatus> {
-    this.#pendingConnection = undefined
-    const llmProviderAccess = await this.#findSavedLlmProviderAccess()
+    const savedLlmProviderAccess = this.#findSavedLlmProviderAccess()
+    const attempt = this.#connectionAttempt
+    if (attempt?.status === "queued") {
+      this.#connectionAttempt = Object.freeze({
+        status: "running",
+        settlement: attempt.settlement,
+        llmProviderAccess: savedLlmProviderAccess
+      })
+    }
+    const llmProviderAccess = await savedLlmProviderAccess
     const connection = this.#connection
     if (connection.status === "connected") {
       if (
@@ -470,6 +533,44 @@ export default class LlmRuntimeService
       )
     }
   }
+}
+
+/**
+ * Finds the saved provider for a connect call to compare with a running
+ * attempt's.
+ *
+ * @param findLlmProviderAccess - Saved-provider lookup the service borrows.
+ * @returns How to reach the saved provider, or undefined when none is usable.
+ * @remarks A failure is not reported here: the call then queues an attempt
+ * of its own, which reads the saved provider again and reports a failure.
+ */
+async function findComparableLlmProviderAccess(
+  findLlmProviderAccess: () => Promise<LlmProviderAccess>
+): Promise<LlmProviderAccess | undefined> {
+  try {
+    return await findLlmProviderAccess()
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Determines whether two reads of the saved provider both found the same
+ * usable provider.
+ *
+ * @param savedLlmProviderAccess - What a connect call read, if usable.
+ * @param attemptLlmProviderAccess - What the running attempt read, if usable.
+ * @returns Whether both are present and reach the same provider.
+ */
+function isSameFoundLlmProviderAccess(
+  savedLlmProviderAccess: LlmProviderAccess | undefined,
+  attemptLlmProviderAccess: LlmProviderAccess | undefined
+): boolean {
+  return (
+    savedLlmProviderAccess !== undefined &&
+    attemptLlmProviderAccess !== undefined &&
+    isSameLlmProviderAccess(savedLlmProviderAccess, attemptLlmProviderAccess)
+  )
 }
 
 /**

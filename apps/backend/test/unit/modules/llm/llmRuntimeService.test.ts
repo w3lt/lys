@@ -491,6 +491,145 @@ describe("LlmRuntimeService", () => {
       expect(acquireLlmRuntime).toHaveBeenCalledOnce()
     })
 
+    it("joins the running attempt for a call that reads the same saved provider, so a provider that does not answer is tried once", async () => {
+      const acquisition = Promise.withResolvers<FakeLlmRuntime>()
+      const acquireLlmRuntime = vi
+        .fn<(access: LlmProviderAccess) => Promise<FakeLlmRuntime>>()
+        .mockReturnValue(acquisition.promise)
+      const findLlmProviderAccess = vi.fn(async () => LM_STUDIO_ACCESS)
+      const { service, reportLlmRuntimeAcquisitionFailure } = createService(
+        acquireLlmRuntime,
+        findLlmProviderAccess
+      )
+      const acquisitionFailure = new Error(
+        "connect ECONNREFUSED 127.0.0.1:1234"
+      )
+
+      const first = service.connectLlmRuntime()
+      await waitForMicrotasks()
+      expect(acquireLlmRuntime).toHaveBeenCalledOnce()
+      const second = service.connectLlmRuntime()
+      await waitForMicrotasks()
+      acquisition.reject(acquisitionFailure)
+
+      await expect(first).resolves.toBe("unreachable")
+      await expect(second).resolves.toBe("unreachable")
+      expect(acquireLlmRuntime).toHaveBeenCalledOnce()
+      expect(findLlmProviderAccess).toHaveBeenCalledTimes(2)
+      expect(
+        reportLlmRuntimeAcquisitionFailure
+      ).toHaveBeenCalledExactlyOnceWith(acquisitionFailure)
+    })
+
+    it("queues an attempt of its own for a call that cannot read the saved provider while an attempt runs", async () => {
+      const runtime = createFakeLlmRuntime()
+      const acquisition = Promise.withResolvers<FakeLlmRuntime>()
+      const acquireLlmRuntime = vi
+        .fn<(access: LlmProviderAccess) => Promise<FakeLlmRuntime>>()
+        .mockReturnValue(acquisition.promise)
+      const readFailure = new Error("The settings file could not be read.")
+      const findLlmProviderAccess = vi
+        .fn<() => Promise<LlmProviderAccess>>()
+        .mockResolvedValueOnce(LM_STUDIO_ACCESS)
+        .mockRejectedValue(readFailure)
+      const { service, reportLlmRuntimeAcquisitionFailure } = createService(
+        acquireLlmRuntime,
+        findLlmProviderAccess
+      )
+
+      const first = service.connectLlmRuntime()
+      await waitForMicrotasks()
+      const second = service.connectLlmRuntime()
+      await waitForMicrotasks()
+      acquisition.resolve(runtime)
+
+      await expect(first).resolves.toBe("connected")
+      await expect(second).resolves.toBe("unreachable")
+      expect(findLlmProviderAccess).toHaveBeenCalledTimes(3)
+      expect(acquireLlmRuntime).toHaveBeenCalledOnce()
+      expect(runtime[Symbol.asyncDispose]).toHaveBeenCalledOnce()
+      expect(
+        reportLlmRuntimeAcquisitionFailure
+      ).toHaveBeenCalledExactlyOnceWith(readFailure)
+    })
+
+    it("refuses a call that reads another saved provider after cleanup began while an attempt ran", async () => {
+      const runtime = createFakeLlmRuntime()
+      const acquisition = Promise.withResolvers<FakeLlmRuntime>()
+      const acquireLlmRuntime = vi
+        .fn<(access: LlmProviderAccess) => Promise<FakeLlmRuntime>>()
+        .mockReturnValue(acquisition.promise)
+      const comparedRead = Promise.withResolvers<LlmProviderAccess>()
+      const findLlmProviderAccess = vi
+        .fn<() => Promise<LlmProviderAccess>>()
+        .mockResolvedValueOnce(LM_STUDIO_ACCESS)
+        .mockReturnValueOnce(comparedRead.promise)
+      const { service } = createService(
+        acquireLlmRuntime,
+        findLlmProviderAccess
+      )
+
+      const first = service.connectLlmRuntime()
+      await waitForMicrotasks()
+      const second = service.connectLlmRuntime()
+      await waitForMicrotasks()
+      const disposal = service[Symbol.asyncDispose]()
+      comparedRead.resolve(GROQ_ACCESS)
+
+      await expect(second).rejects.toThrow(CLOSED_MESSAGE)
+      acquisition.resolve(runtime)
+      await expect(first).resolves.toBe("connected")
+      await disposal
+      expect(findLlmProviderAccess).toHaveBeenCalledTimes(2)
+      expect(acquireLlmRuntime).toHaveBeenCalledExactlyOnceWith(
+        LM_STUDIO_ACCESS
+      )
+      expect(runtime[Symbol.asyncDispose]).toHaveBeenCalledOnce()
+    })
+
+    it("lets a later call share the attempt queued behind a running one after the running one settles", async () => {
+      const lmStudioRuntime = createFakeLlmRuntime()
+      const probe = Promise.withResolvers<LlmRuntimeAvailability>()
+      lmStudioRuntime.getRuntimeAvailability.mockReturnValue(probe.promise)
+      const groqRuntime = createFakeLlmRuntime()
+      const acquireLlmRuntime = vi
+        .fn<(access: LlmProviderAccess) => Promise<FakeLlmRuntime>>()
+        .mockResolvedValueOnce(lmStudioRuntime)
+        .mockResolvedValueOnce(groqRuntime)
+      const findLlmProviderAccess = vi
+        .fn<() => Promise<LlmProviderAccess>>()
+        .mockResolvedValueOnce(LM_STUDIO_ACCESS)
+        .mockResolvedValueOnce(LM_STUDIO_ACCESS)
+        .mockResolvedValue(GROQ_ACCESS)
+      const { service } = createService(
+        acquireLlmRuntime,
+        findLlmProviderAccess
+      )
+      await service.connectLlmRuntime()
+      const gate = Promise.withResolvers<void>()
+
+      const first = service.connectLlmRuntime()
+      await waitForMicrotasks()
+      expect(lmStudioRuntime.getRuntimeAvailability).toHaveBeenCalledOnce()
+      const operation = service.handleLlmEngineOperationRequest(
+        createGatedOperation(gate.promise)
+      )
+      const second = service.connectLlmRuntime()
+      await waitForMicrotasks()
+      probe.resolve("available")
+      await expect(first).resolves.toBe("connected")
+      const third = service.connectLlmRuntime()
+      gate.resolve()
+
+      await expect(operation).resolves.toBeUndefined()
+      await expect(second).resolves.toBe("connected")
+      await expect(third).resolves.toBe("connected")
+      expect(acquireLlmRuntime).toHaveBeenCalledTimes(2)
+      expect(acquireLlmRuntime).toHaveBeenLastCalledWith(GROQ_ACCESS)
+      expect(groqRuntime.getRuntimeAvailability).not.toHaveBeenCalled()
+      expect(service.connectedLlmProviderAccess).toBe(GROQ_ACCESS)
+    })
+
     it("reads the saved provider again for a call that arrives after the pending attempt read it", async () => {
       const groqRuntime = createFakeLlmRuntime()
       const lmStudioRuntime = createFakeLlmRuntime()
@@ -502,7 +641,7 @@ describe("LlmRuntimeService", () => {
       const findLlmProviderAccess = vi
         .fn<() => Promise<LlmProviderAccess>>()
         .mockResolvedValueOnce(GROQ_ACCESS)
-        .mockResolvedValueOnce(LM_STUDIO_ACCESS)
+        .mockResolvedValue(LM_STUDIO_ACCESS)
       const { service } = createService(
         acquireLlmRuntime,
         findLlmProviderAccess
@@ -516,7 +655,7 @@ describe("LlmRuntimeService", () => {
 
       await expect(first).resolves.toBe("connected")
       await expect(second).resolves.toBe("connected")
-      expect(findLlmProviderAccess).toHaveBeenCalledTimes(2)
+      expect(findLlmProviderAccess).toHaveBeenCalledTimes(3)
       expect(groqRuntime[Symbol.asyncDispose]).toHaveBeenCalledOnce()
       expect(acquireLlmRuntime).toHaveBeenLastCalledWith(LM_STUDIO_ACCESS)
       expect(service.connectedLlmProviderAccess).toBe(LM_STUDIO_ACCESS)
@@ -527,7 +666,7 @@ describe("LlmRuntimeService", () => {
       const findLlmProviderAccess = vi
         .fn<() => Promise<LlmProviderAccess>>()
         .mockReturnValueOnce(groqRead.promise)
-        .mockResolvedValueOnce(LM_STUDIO_ACCESS)
+        .mockResolvedValue(LM_STUDIO_ACCESS)
       const acquireLlmRuntime = vi.fn(async () => createFakeLlmRuntime())
       const { service } = createService(
         acquireLlmRuntime,
@@ -542,7 +681,7 @@ describe("LlmRuntimeService", () => {
 
       await expect(first).resolves.toBe("connected")
       await expect(second).resolves.toBe("connected")
-      expect(findLlmProviderAccess).toHaveBeenCalledTimes(2)
+      expect(findLlmProviderAccess).toHaveBeenCalledTimes(3)
       expect(acquireLlmRuntime).toHaveBeenLastCalledWith(LM_STUDIO_ACCESS)
       expect(service.connectedLlmProviderAccess).toBe(LM_STUDIO_ACCESS)
     })

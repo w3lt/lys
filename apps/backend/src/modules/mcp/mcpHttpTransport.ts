@@ -35,7 +35,10 @@ type PendingSend = {
  * also rejects with; here such a failure is passed on only by the send's
  * rejection. A failure the SDK reports during a send that the send does not
  * reject with, or after it, such as a broken event stream, is passed on
- * through `onerror`, once even when the SDK reports the same error twice. A
+ * through `onerror`, once even when the SDK reports the same error twice.
+ * Once {@link close} started, an abort failure the SDK reports is dropped:
+ * the close aborted that request, and the SDK reports the aborted request
+ * for the server's event stream although it was asked to abort it. A
  * failed send rejects with an `SdkHttpError` of the same code and status
  * whose message is Lys's fixed text and which keeps no body, because the
  * SDK writes the error into the message of a failure it reports later, such
@@ -53,6 +56,8 @@ export default class McpHttpTransport implements Transport {
   readonly #sends: AsyncLocalStorage<PendingSend>
   /** Failures already passed on, so one reported twice is passed on once. */
   readonly #reportedErrors: WeakSet<Error>
+  /** Whether {@link close} started, after which an abort failure is Lys's. */
+  #isClosing: boolean
   /** Told when the transport closes; installed by the client. */
   #onclose: Transport["onclose"]
   /** Told of a failure outside any request; installed by the client. */
@@ -70,6 +75,7 @@ export default class McpHttpTransport implements Transport {
     this.#transport = transport
     this.#sends = new AsyncLocalStorage()
     this.#reportedErrors = new WeakSet()
+    this.#isClosing = false
     this.#onclose = undefined
     this.#onerror = undefined
     this.#onmessage = undefined
@@ -197,22 +203,25 @@ export default class McpHttpTransport implements Transport {
   }
 
   /**
-   * Implements {@link Transport.close} by aborting every request in flight.
+   * Implements {@link Transport.close} by aborting every request in flight,
+   * whose abort failures are then dropped rather than passed on.
    *
    * @returns A promise that settles once the requests were aborted; the
    * server is not asked to end its session.
    */
   public close(): Promise<void> {
+    this.#isClosing = true
     return this.#transport.close()
   }
 
   /**
    * Holds a failure the SDK reports during a pending send until the send
-   * settles, or passes it on.
+   * settles, or passes it on; drops an abort failure once the close started.
    *
    * @param error - Failure the SDK transport reported.
    */
   #handleTransportError(error: Error): void {
+    if (this.#isClosing && isAbortFailure(error)) return
     const send = this.#sends.getStore()
     if (send === undefined || send.isSettled) this.#sendErrorToClient(error)
     else send.heldErrors.push(error)
@@ -243,6 +252,17 @@ export default class McpHttpTransport implements Transport {
     this.#reportedErrors.add(error)
     this.#onerror?.(error)
   }
+}
+
+/**
+ * Answers whether a failure says a request was aborted.
+ *
+ * @param error - Failure the SDK transport reported.
+ * @returns True for the `AbortError` a fetch rejects with once its signal
+ * aborts.
+ */
+function isAbortFailure(error: Error): boolean {
+  return error.name === "AbortError"
 }
 
 /**

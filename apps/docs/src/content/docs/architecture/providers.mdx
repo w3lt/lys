@@ -137,7 +137,9 @@ unloads every model nor terminates the external LM Studio engine.
 
 `OllamaRuntime` uses Ollama's native API: `/api/tags` lists the models,
 `/api/show` describes each, at most four at once and none after one fails,
-and `/api/ps` reports a local server's running models. A model whose
+and `/api/ps` reports a local server's running models. Listing what a local
+server serves now reads `/api/ps` first and describes only the listed models
+it runs. A model whose
 capabilities lack `completion`, such as an embedding model, is left out of
 every listing and measurement; a model is kept when Ollama reports no
 capabilities for it. `GroqRuntime` lists Groq's models from

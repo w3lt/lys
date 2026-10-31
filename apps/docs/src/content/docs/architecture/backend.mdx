@@ -92,7 +92,7 @@ the services together.
 5. The agent found when the turn is stored answers with the system prompt it
    has then: a built-in agent's shipped prompt, or a stored agent's current
    one. The agent's `createReply` opens an
-   OpenAI-compatible streaming completion against LM Studio through
+   OpenAI-compatible streaming completion against the connected provider through
    `OpenAiReplyModel`, offers the request's tools (client tools first, then
    built-in tools, then the attachment reader when the conversation holds a
    text file and the model is trained for tool use, then MCP tools, then,
@@ -140,8 +140,8 @@ one) together stay within that context length. Otherwise the round is not
 sent: the reply is stored `failed`, keeping the parts earlier rounds stored,
 and its `error` event names the tokens needed and the context length. A model
 that is not loaded is never loaded for the round; the reply fails with an
-`error` that asks to load it. A measurement that fails, because LM Studio is
-not connected or the queue is full, also fails the reply, with the general
+`error` that asks to load it. A measurement that fails, because no provider
+is connected or the queue is full, also fails the reply, with the general
 sentence. Without this check, LM Studio's context overflow setting could keep
 the start of the conversation, drop its middle, and let the model answer an
 earlier message. With the reply ceiling off, nothing is held back for the
@@ -271,7 +271,7 @@ Only a reply that cannot be used as a title leads to another attempt, up to
 attempt, the task asks the model-operation queue whether the model is loaded,
 without loading it. When it is not, the turn requests no title, logs
 `model-not-loaded` at debug level, and the next turn tries again, so a title
-request does not make LM Studio load the model with its own settings. An HTTP,
+request does not make the provider load the model with its own settings. An HTTP,
 connection, or cancellation failure ends title generation for the turn, after
 the OpenAI SDK has retried a connection failure, timeout, or 408, 409, 429, or
 5xx response up to two more times within the attempt. A generated title is
@@ -1091,9 +1091,13 @@ or after a held runtime stops answering. Model operations are refused with
 `connected`. When a runtime call fails during a model operation, the service
 probes the runtime before the queue moves on and releases it if the provider
 no longer answers. Refresh keeps a runtime that still answers and otherwise
-acquires a new one. Refreshes share an attempt until it starts reading the
-saved provider; a later refresh queues one of its own, so a provider picked while
-an attempt runs is the one connected.
+acquires a new one. Refreshes share a queued attempt. A refresh made while an
+attempt runs reads the saved provider and shares that attempt when it read the
+same provider, so a provider that does not answer is not tried twice;
+otherwise the refresh queues one of its own, so a provider picked while an
+attempt runs is the one connected. The queue and its `ready`, `closing`, and
+`closed` lifecycle belong to `LlmRuntimeOperationQueue`, which
+`LlmRuntimeService` owns.
 
 `LmStudioRuntime.create()` still waits for LM Studio to answer its version
 query, so a held runtime was always available when acquired. The installed SDK

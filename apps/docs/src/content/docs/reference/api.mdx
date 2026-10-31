@@ -49,8 +49,10 @@ for a model whose capabilities the backend has not read yet, answer `503`
 with `urn:lys:problem:llm:runtime-unavailable` while the backend has no
 connected model provider. The runtime-status route never contacts the
 provider; the runtime-connect route waits for a connection attempt, which
-reads the provider saved in `settings.json` again. Requests share an attempt
-until it starts reading the file; a later request waits for an attempt of its own.
+reads the provider saved in `settings.json` again. Requests share a queued
+attempt. A request made while an attempt runs reads the file and shares that
+attempt when it read the same provider; otherwise it waits for an attempt of
+its own.
 
 Every request body is limited to 1 MiB (1,048,576 bytes), Fastify's default,
 except a tool result, which is limited to 8 MiB (8,388,608 bytes) so that a
@@ -1116,13 +1118,13 @@ runtime call, and the unload route answers the same way:
   "type": "urn:lys:problem:llm:provider-loads-models",
   "title": "Provider loads its own models",
   "status": 409,
-  "detail": "The connected model provider loads a model when a request names it, so Lys does not load or unload its models."
+  "detail": "The connected model provider decides which models are in memory, so Lys does not load or unload its models."
 }
 ```
 
 ## Model operation admission
 
-Inventory, health, load, unload, and LM Studio connection attempts share one
+Inventory, health, load, unload, and provider connection attempts share one
 queue with one active operation and at most eight waiting. Accepted operations
 execute in arrival order. When all nine positions are occupied, each of these
 endpoints returns `503 Service Unavailable` with `Content-Type:

@@ -7,12 +7,22 @@ use std::{
 };
 
 /// Lys home directory: the root for the desktop settings file, the backend's
-/// conversation database, and the runtime that release builds start.
+/// conversation database and list of MCP server process groups, and the
+/// runtime that release builds start.
 ///
-/// Values are created only by [`LysHome::resolve`]. The directory is not
-/// created or required to exist, and the derived paths below are computed
-/// without touching the filesystem.
+/// Outside tests, values are created only by [`LysHome::resolve`]. The
+/// directory is not created or required to exist, and the derived paths below
+/// are computed without touching the filesystem.
 pub struct LysHome(PathBuf);
+
+#[cfg(test)]
+impl LysHome {
+    /// Returns the Lys home at `path` without reading `LYS_HOME`, so that a
+    /// test can point the host at a directory it owns.
+    pub fn from_test_directory(path: &Path) -> Self {
+        Self(path.to_path_buf())
+    }
+}
 
 impl LysHome {
     /// Resolves the Lys home from the `LYS_HOME` environment variable.
@@ -109,5 +119,14 @@ impl LysHome {
     /// Returns the desktop settings file, `settings.json` under the Lys home.
     pub fn settings_path(&self) -> PathBuf {
         self.0.join("settings.json")
+    }
+
+    /// Returns the file in which the backend lists the process groups of its
+    /// stdio MCP servers, `mcp-process-groups` under the Lys home.
+    ///
+    /// The backend writes the list; the desktop host deletes it before it
+    /// starts a backend and reads it after it stopped one.
+    pub fn mcp_process_groups_path(&self) -> PathBuf {
+        self.0.join("mcp-process-groups")
     }
 }

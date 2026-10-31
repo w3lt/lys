@@ -3,7 +3,7 @@ const LLM_PROVIDER_LOADS_MODELS_CAUSE = Symbol("llm-provider-loads-models")
 
 /**
  * Creates the failure for a load or unload refused because the connected
- * provider loads a model when a request names it.
+ * provider decides which models are in memory.
  *
  * @returns A new native error recognized by {@link isLlmProviderLoadsModelsError}.
  * @remarks This error guarantees the refused operation made no runtime call.

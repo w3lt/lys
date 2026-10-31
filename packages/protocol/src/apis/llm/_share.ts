@@ -85,9 +85,11 @@ export const llmInfoSchema = z
      */
     maxContextLength: z.number(),
     /**
-     * Whether the model can answer a chat request now: loaded, for a
-     * provider whose models Lys loads, or always, for a provider that loads
-     * a model when a request names it.
+     * Whether the model can answer a chat request now. For a provider whose
+     * models Lys loads, whether Lys has loaded it. For a provider that decides
+     * which models are in memory, whether it serves the model now: every
+     * model of a hosted provider, and the models a local Ollama server is
+     * running.
      */
     loaded: z.boolean(),
     /**

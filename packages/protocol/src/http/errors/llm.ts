@@ -346,7 +346,7 @@ export type LlmProviderLoadsModelsProblem = z.infer<
 
 /**
  * Creates Problem Details for a load or unload refused because the connected
- * provider loads a model when a request names it, so Lys neither loads nor
+ * provider decides which models are in memory, so Lys neither loads nor
  * stops its models.
  *
  * @param detail - Client-safe explanation naming what the person can do.

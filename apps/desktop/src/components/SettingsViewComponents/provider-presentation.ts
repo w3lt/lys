@@ -179,7 +179,7 @@ export const PROVIDER_DESCRIPTIONS = Object.freeze({
   ollama: Object.freeze({
     name: LLM_PROVIDER_NAMES.ollama,
     blurb:
-      "Runs open models on your machine or in Ollama Cloud, loading each when a message names it.",
+      "Runs open models on your machine or in Ollama Cloud. On your machine, Lys uses the models Ollama is running.",
     logoUrl: ollamaLogoUrl
   }),
   groq: Object.freeze({

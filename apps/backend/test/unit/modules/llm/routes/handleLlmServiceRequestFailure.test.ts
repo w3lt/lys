@@ -52,7 +52,7 @@ describe("handleLlmServiceRequestFailure", () => {
     )
     expect(response.json()).toEqual(
       createLlmProviderLoadsModelsProblem(
-        "The connected model provider loads a model when a request names it, so Lys does not load or unload its models."
+        "The connected model provider decides which models are in memory, so Lys does not load or unload its models."
       )
     )
   })

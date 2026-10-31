@@ -5,8 +5,9 @@ import type { LoadedLlmModelInstance } from "./llmRuntimeTypes"
  * Loads models into one attached LLM engine and stops its loaded instances.
  *
  * @remarks Boundary capability used by the owning application service for an
- * engine whose models answer only once Lys loads them. An engine that loads a
- * model when a request names it does not offer this capability. Both
+ * engine whose models answer only once Lys loads them. An engine whose
+ * provider decides which models are in memory does not offer this
+ * capability. Both
  * operations are completion-only commands: user cancellation is unavailable,
  * and a client disconnect does not end accepted work or its ownership. The
  * capability shares the attached engine's admission: one operation at a time,

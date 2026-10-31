@@ -216,13 +216,13 @@ export default class OllamaRuntime implements LlmRuntime {
     readonly DownloadedLlmModel[]
   > {
     return await this.#admission.runOperation(async () => {
-      const chatModels = await this.#listOllamaChatModels().catch(
-        (cause: unknown) => {
+      const chatModels = await this.#listOllamaTags()
+        .then(async (tags) => await this.#listOllamaChatModels(tags))
+        .catch((cause: unknown) => {
           throw new Error("The LLM runtime could not list downloaded models.", {
             cause
           })
-        }
-      )
+        })
       return Object.freeze(chatModels.map(buildDownloadedOllamaModel))
     })
   }
@@ -324,16 +324,18 @@ export default class OllamaRuntime implements LlmRuntime {
   }
 
   /**
-   * Lists the models Ollama has that can chat, each with its description,
-   * with at most {@link MAXIMUM_CONCURRENT_OLLAMA_DESCRIPTIONS} descriptions
-   * asked for at once.
+   * Lists the given models that can chat, each with its description, with
+   * at most {@link MAXIMUM_CONCURRENT_OLLAMA_DESCRIPTIONS} descriptions asked
+   * for at once.
    *
-   * @returns The chat models, in Ollama's order.
+   * @param tags - Models Ollama lists, each asked about once.
+   * @returns The chat models, in the given order.
    * @throws When a request fails or an answer does not match its shape,
    * once the descriptions already asked for have settled.
    */
-  async #listOllamaChatModels(): Promise<readonly OllamaChatModel[]> {
-    const tags = await this.#listOllamaTags()
+  async #listOllamaChatModels(
+    tags: readonly OllamaTag[]
+  ): Promise<readonly OllamaChatModel[]> {
     const models = await mapWithConcurrencyLimit(
       tags,
       MAXIMUM_CONCURRENT_OLLAMA_DESCRIPTIONS,
@@ -353,10 +355,14 @@ export default class OllamaRuntime implements LlmRuntime {
    * with the context length it reports, or per chat model of Ollama Cloud,
    * with the model's own window; in Ollama's order.
    * @throws When a request fails or an answer does not match its shape.
+   * @remarks A local server is asked for its running models first, and only
+   * those are described.
    */
   async #listLoadedOllamaInstances(): Promise<LoadedLlmModelInstance[]> {
-    const chatModels = await this.#listOllamaChatModels()
     if (this.#target.mode === "cloud") {
+      const chatModels = await this.#listOllamaChatModels(
+        await this.#listOllamaTags()
+      )
       return chatModels.map(({ tag, description }) =>
         buildOllamaInstance(
           tag.name,
@@ -365,14 +371,18 @@ export default class OllamaRuntime implements LlmRuntime {
       )
     }
     const runningModels = await this.#listRunningOllamaModels()
-    return chatModels.flatMap(({ tag }) => {
-      const running = runningModels.find((candidate) =>
-        isRunningOllamaModel(candidate, tag.name)
+    const tags = await this.#listOllamaTags()
+    const runningChatModels = await this.#listOllamaChatModels(
+      tags.filter(
+        (tag) => findRunningOllamaModel(runningModels, tag.name) !== undefined
       )
-      return running === undefined
-        ? []
-        : [buildOllamaInstance(tag.name, running.context_length)]
-    })
+    )
+    return runningChatModels.map(({ tag }) =>
+      buildOllamaInstance(
+        tag.name,
+        findRunningOllamaModel(runningModels, tag.name)?.context_length
+      )
+    )
   }
 
   /**
@@ -392,9 +402,7 @@ export default class OllamaRuntime implements LlmRuntime {
   ): Promise<number | undefined> {
     if (this.#target.mode === "local") {
       const runningModels = await this.#listRunningOllamaModels()
-      return runningModels.find((running) =>
-        isRunningOllamaModel(running, model)
-      )?.context_length
+      return findRunningOllamaModel(runningModels, model)?.context_length
     }
     const contextLength = findModelInfoContextLength(description.model_info)
     if (contextLength === undefined) {
@@ -524,17 +532,20 @@ function buildOllamaInstance(
 }
 
 /**
- * Answers whether a running model is the listed model of a name.
+ * Finds the running model that is the listed model of a name.
  *
- * @param running - Model `/api/ps` lists.
+ * @param runningModels - Models `/api/ps` lists.
  * @param model - Listed model name.
- * @returns True when either of its names is that name.
+ * @returns The running model either of whose names is that name, or
+ * undefined when the server is not running it.
  */
-function isRunningOllamaModel(
-  running: OllamaRunningModel,
+function findRunningOllamaModel(
+  runningModels: readonly OllamaRunningModel[],
   model: string
-): boolean {
-  return running.name === model || running.model === model
+): OllamaRunningModel | undefined {
+  return runningModels.find(
+    (running) => running.name === model || running.model === model
+  )
 }
 
 /**

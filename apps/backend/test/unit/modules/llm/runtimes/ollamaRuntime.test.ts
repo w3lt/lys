@@ -133,6 +133,25 @@ describe("OllamaRuntime", () => {
     ])
   })
 
+  it("asks a local server to describe only the models it is running when it lists loaded instances", async () => {
+    const { runtime, server } = await createOwnedRuntime("local", {
+      "GET /api/ps": answerWith({
+        models: [{ name: "qwen3:8b", model: "qwen3:8b", context_length: 4096 }]
+      })
+    })
+    const requestsBefore = server.requests.length
+
+    const instances = await runtime.listLoadedLlmModelInstances()
+
+    expect(instances.map(({ modelKey }) => modelKey)).toEqual(["qwen3:8b"])
+    expect(
+      server.requests
+        .slice(requestsBefore)
+        .filter((request) => request.path === "/api/show")
+        .map((request) => request.body)
+    ).toEqual([{ model: "qwen3:8b" }])
+  })
+
   it("reports every chat model of Ollama Cloud as loaded, with its own window", async () => {
     const { runtime, server } = await createOwnedRuntime("cloud")
 

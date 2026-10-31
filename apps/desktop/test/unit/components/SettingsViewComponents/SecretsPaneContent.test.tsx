@@ -9,6 +9,7 @@ import {
 } from "../../support/backendFake"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import { waitForRenderedWork } from "../../support/rendering"
+import { createControlledPromise } from "../../support/settlement"
 import {
   STORED_SETTINGS,
   STORED_SETTINGS_DOCUMENT
@@ -39,12 +40,13 @@ async function startSecretsPane(routes: BackendRoutes = {}) {
     ...routes
   })
   const { useLysStore, SettingsView } = await loadFreshSettingsView("secrets")
+  const { useToolStore } = await import("@/lib/store/tools")
   useLysStore.setState({ settings: STORED_SETTINGS })
   render(<SettingsView onDone={vi.fn()} />)
   // The closing note is withheld until the lazily loaded pane body is shown.
   await screen.findByText(/^Saved in plain text in settings\.json/)
   await waitForRenderedWork()
-  return { useLysStore, backend }
+  return { useLysStore, useToolStore, backend }
 }
 
 /**
@@ -123,6 +125,49 @@ describe("SecretsPaneContent", () => {
       tavilyApiKey: "tvly-new-key"
     })
     expect(listRouteRequests(backend, TOOLS_ROUTE)).toHaveLength(1)
+    expect(screen.getByLabelText("API key")).toHaveValue("")
+  })
+
+  it("reads the tool list again after a read in flight when the save finishes, so the list reflects the saved key", async () => {
+    startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null,
+      list_tools: () => []
+    })
+    const staleList = createControlledPromise<Response>()
+    let toolListReads = 0
+    const { useToolStore, backend } = await startSecretsPane({
+      [TOOLS_ROUTE]: () => {
+        toolListReads += 1
+        return toolListReads === 1
+          ? staleList.promise
+          : buildJsonResponse(200, {
+              tools: [buildBackendToolDefinition("web_search")],
+              unavailableTools: []
+            })
+      }
+    })
+    const user = userEvent.setup()
+    const readInFlight = useToolStore.getState().loadTools()
+
+    await user.type(screen.getByLabelText("API key"), "tvly-new-key{Enter}")
+    await waitForRenderedWork()
+    const requestsWhileStale = listRouteRequests(backend, TOOLS_ROUTE).length
+    staleList.resolve(
+      buildJsonResponse(200, {
+        tools: [],
+        unavailableTools: [{ name: "web_search", reason: "api-key-missing" }]
+      })
+    )
+    await readInFlight
+    await waitForRenderedWork()
+
+    expect(requestsWhileStale).toBe(1)
+    expect(listRouteRequests(backend, TOOLS_ROUTE)).toHaveLength(2)
+    expect(useToolStore.getState().list).toMatchObject({
+      status: "loaded",
+      unavailableTools: new Map()
+    })
     expect(screen.getByLabelText("API key")).toHaveValue("")
   })
 

@@ -3661,6 +3661,32 @@
     "accepted": false
   },
   {
+    "case": "an https URL whose punycode label decodes to an uppercase Latin letter",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn--12-9ka.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an https URL whose punycode label decodes to an uppercase Cyrillic letter",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://xn--12-4kc.example/mcp"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
     "case": "an https URL whose punycode label starts with xn-- again",
     "group": {
       "servers": [

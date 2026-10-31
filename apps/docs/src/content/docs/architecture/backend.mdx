@@ -847,8 +847,11 @@ declares no client capabilities.
   failure it reports while a send is pending is passed on once the send
   settles; and an HTTP error a send throws carries the status but never the
   answer's body. Closing the connection aborts its open requests, which fail
-  without being reported as connection errors; Lys does not ask the server to
-  end its session ([#287](https://github.com/w3lt/lys/issues/287)).
+  without being reported as connection errors: an abort failure the SDK
+  reports once the close started is dropped, because the SDK reports the
+  aborted request for the server's event stream although it was asked to
+  abort it. Lys does not ask the server to end its session
+  ([#287](https://github.com/w3lt/lys/issues/287)).
 
 The tool list is read past the SDK's response cache, so the SDK holds no
 tool's output schema and never checks a result against one: it would compile

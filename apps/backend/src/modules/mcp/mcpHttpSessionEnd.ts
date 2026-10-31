@@ -56,12 +56,15 @@ export async function closeMcpHttpSession(
   headers.set("mcp-session-id", session.sessionId)
   if (session.protocolVersion !== undefined)
     headers.set("mcp-protocol-version", session.protocolVersion)
+  const timeoutSignal = AbortSignal.timeout(
+    MCP_SESSION_END_TIMEOUT_MILLISECONDS
+  )
   try {
     const response = await fetch(session.url, {
       method: "DELETE",
       headers,
       redirect: "manual",
-      signal: AbortSignal.timeout(MCP_SESSION_END_TIMEOUT_MILLISECONDS)
+      signal: timeoutSignal
     })
     await response.body?.cancel()
     if (!response.ok && !ACCEPTED_FAILURE_STATUSES.has(response.status))

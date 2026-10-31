@@ -3,6 +3,7 @@ import {
   Client,
   StreamableHTTPClientTransport,
   type CallToolResult,
+  type ListToolsRequest,
   type Transport
 } from "@modelcontextprotocol/client"
 import { z } from "zod"
@@ -14,7 +15,11 @@ import {
   McpResponseTooLargeError
 } from "./mcpResponseLimit"
 import McpHttpTransport from "./mcpHttpTransport"
-import McpServerProcess, { type McpServerCommand } from "./mcpServerProcess"
+import McpServerProcess, {
+  type McpServerCommand,
+  type McpServerProcessContext,
+  type McpServerProcessHandlers
+} from "./mcpServerProcess"
 import type McpServerProcessGroups from "./mcpServerProcessGroups"
 import McpStdioTransport from "./mcpStdioTransport"
 
@@ -92,6 +97,11 @@ const TOOL_LIST_PAGE_SCHEMA = z.looseObject({
   nextCursor: z.string().optional()
 })
 
+/** Request of the first page of a tool list, which names no cursor. */
+const FIRST_TOOL_LIST_PAGE_REQUEST: ListToolsRequest = Object.freeze({
+  method: "tools/list"
+})
+
 /** Page of a server that offers no tools. */
 const EMPTY_TOOL_LIST_PAGE: McpToolListPage = Object.freeze({
   tools: Object.freeze([]),
@@ -127,9 +137,10 @@ const LYS_CLIENT_INFO = Object.freeze({ name: "lys", version: LYS_VERSION })
  * 404 answer to a call counts as such an end, because the server no longer
  * knows the session, though the SDK keeps its transport open. So does an
  * answer longer than `MAXIMUM_MCP_RESPONSE_BYTES`, over either
- * transport: the connection closes its client at once, because the SDK
- * would leave a request whose event stream breaks waiting for its time
- * limit, and from then on every
+ * transport: the connection starts to close its client at once, because
+ * the SDK would leave a request whose event stream breaks waiting for its
+ * time limit. The calls in flight then fail, over HTTP at once and over
+ * stdio once the server's process group ended, and from then on every
  * failure is a {@link McpResponseTooLargeError} with the SDK's failure as
  * its cause. Resource ownership: owns the client and its transport until
  * {@link close}.
@@ -263,10 +274,7 @@ export default class McpServerConnection {
       return EMPTY_TOOL_LIST_PAGE
     try {
       const page = await this.#client.request(
-        {
-          method: "tools/list",
-          ...(cursor === undefined ? {} : { params: { cursor } })
-        },
+        buildToolListPageRequest(cursor),
         TOOL_LIST_PAGE_SCHEMA,
         {
           signal: abortSignal,
@@ -335,17 +343,19 @@ export default class McpServerConnection {
     if (this.#closing !== undefined) return this.#closing
     const { promise, resolve, reject } = Promise.withResolvers<void>()
     this.#closing = promise
-    this.#closeClient().then(resolve, reject)
+    this.#closeClientAndSession().then(resolve, reject)
     return promise
   }
 
   /**
-   * Closes the client, then ends an HTTP server's session.
+   * Closes the client, which ends a stdio server's process group or aborts
+   * an HTTP connection's requests, then asks an HTTP server to end its
+   * session.
    *
    * @returns A promise that settles once both are done.
    * @throws What the client's close throws; the session is then not ended.
    */
-  async #closeClient(): Promise<void> {
+  async #closeClientAndSession(): Promise<void> {
     await this.#client.close()
     await this.#closeSession?.()
   }
@@ -363,10 +373,11 @@ export default class McpServerConnection {
   /**
    * Ends the connection at an answer over the response limit.
    *
-   * @remarks Reports the limit, then closes the client, which fails every
-   * request in flight at once and stops reading every other answer; after
-   * the handshake, the client's close is reported as an end Lys did not ask
-   * for.
+   * @remarks Reports the limit, then closes the client, which stops reading
+   * every other answer and fails every request in flight: over HTTP at once,
+   * as the transport's requests abort, and over stdio once the server's
+   * process group ended, as the steps {@link close} lists end it. After the
+   * handshake, the client's close is reported as an end Lys did not ask for.
    */
   #handleTooLargeAnswer(): void {
     this.#hasPassedResponseLimit = true
@@ -422,6 +433,22 @@ function isSessionEnded(error: unknown): boolean {
 }
 
 /**
+ * Builds the request of one page of a tool list.
+ *
+ * @param cursor - Cursor of the page, from the page before; undefined for
+ * the first page.
+ * @returns {@link FIRST_TOOL_LIST_PAGE_REQUEST}, without parameters, for the
+ * first page; otherwise a frozen request whose parameters name the cursor.
+ */
+function buildToolListPageRequest(
+  cursor: string | undefined
+): ListToolsRequest {
+  if (cursor === undefined) return FIRST_TOOL_LIST_PAGE_REQUEST
+  const params = Object.freeze({ cursor })
+  return Object.freeze({ method: "tools/list", params })
+}
+
+/**
  * Creates the transport one server's settings name.
  *
  * @param settings - Validated server settings.
@@ -446,19 +473,43 @@ function createTransport(
   switch (settings.transport) {
     case "stdio": {
       const command = buildServerCommand(settings, context.workingDirectory)
-      const processContext = {
-        processGroups: context.processGroups,
-        reportServerLogLine: context.reportServerLogLine,
-        reportLimitPassed
-      }
       const transport = new McpStdioTransport((handlers) =>
-        McpServerProcess.start(command, { ...handlers, ...processContext })
+        McpServerProcess.start(
+          command,
+          buildServerProcessContext(handlers, context, reportLimitPassed)
+        )
       )
       return Object.freeze({ transport, closeSession: undefined })
     }
     case "http":
       return createHttpTransport(settings, context, reportLimitPassed)
   }
+}
+
+/**
+ * Builds what the process of a stdio server borrows for its lifetime.
+ *
+ * @param handlers - Receivers of the process's messages, failures, and end,
+ * which its transport passes; borrowed.
+ * @param context - The connection's process group holder and server log
+ * reporter; borrowed.
+ * @param reportLimitPassed - Told when a message line passes the response
+ * limit, before it fails; borrowed.
+ * @returns A frozen context that names each of them.
+ */
+function buildServerProcessContext(
+  handlers: McpServerProcessHandlers,
+  context: McpServerConnectionContext,
+  reportLimitPassed: () => void
+): McpServerProcessContext {
+  return Object.freeze({
+    handleMessage: handlers.handleMessage,
+    handleError: handlers.handleError,
+    handleClose: handlers.handleClose,
+    reportLimitPassed,
+    processGroups: context.processGroups,
+    reportServerLogLine: context.reportServerLogLine
+  })
 }
 
 /**
@@ -485,10 +536,14 @@ function createHttpTransport(
     header.name,
     header.value
   ])
+  const requestInit: RequestInit = Object.freeze({
+    headers,
+    redirect: "manual"
+  })
   const sdkTransport = new StreamableHTTPClientTransport(url, {
     fetch: (requestUrl, init) =>
       sendMcpHttpRequest(requestUrl, init, reportLimitPassed),
-    requestInit: { headers, redirect: "manual" }
+    requestInit
   })
   const closeSession = (): Promise<void> => {
     const { sessionId, protocolVersion } = sdkTransport
@@ -512,14 +567,15 @@ function buildServerCommand(
   settings: Extract<McpServerSettings, { transport: "stdio" }>,
   workingDirectory: string
 ): McpServerCommand {
+  const environment = Object.freeze(
+    Object.fromEntries(
+      settings.environment.map((variable) => [variable.name, variable.value])
+    )
+  )
   return Object.freeze({
     command: settings.command,
     arguments: settings.arguments,
-    environment: Object.freeze(
-      Object.fromEntries(
-        settings.environment.map((variable) => [variable.name, variable.value])
-      )
-    ),
+    environment,
     workingDirectory
   })
 }

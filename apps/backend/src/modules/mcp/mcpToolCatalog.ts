@@ -218,22 +218,37 @@ export default class McpToolCatalogBuilder {
  * The schema checks no other part of a tool recursively.
  */
 function parseListedTool(rawTool: unknown): CheckedMcpTool {
-  const isInputSchemaWithinLimits =
-    typeof rawTool !== "object" ||
-    rawTool === null ||
-    !("inputSchema" in rawTool) ||
-    isWithinJsonValueLimits(rawTool.inputSchema)
+  const isInputSchemaPastLimits =
+    hasInputSchema(rawTool) && !isWithinJsonValueLimits(rawTool.inputSchema)
   const outcome = specTypeSchemas.Tool["~standard"].validate(
-    isInputSchemaWithinLimits
-      ? rawTool
-      : { ...rawTool, inputSchema: PLACEHOLDER_INPUT_SCHEMA }
+    isInputSchemaPastLimits
+      ? { ...rawTool, inputSchema: PLACEHOLDER_INPUT_SCHEMA }
+      : rawTool
   )
   if (outcome.issues !== undefined)
     throw new SdkError(
       SdkErrorCode.InvalidResult,
       "Invalid result for tools/list: a tool does not match the MCP tool schema."
     )
-  return Object.freeze({ tool: outcome.value, isInputSchemaWithinLimits })
+  return Object.freeze({
+    tool: outcome.value,
+    isInputSchemaWithinLimits: !isInputSchemaPastLimits
+  })
+}
+
+/**
+ * Answers whether a listed tool is an object with an input schema.
+ *
+ * @param rawTool - Untrusted tool the server listed.
+ * @returns True for an object that has an `inputSchema` property, whatever
+ * its value; false for anything else.
+ */
+function hasInputSchema(
+  rawTool: unknown
+): rawTool is Readonly<{ inputSchema: unknown }> {
+  return (
+    typeof rawTool === "object" && rawTool !== null && "inputSchema" in rawTool
+  )
 }
 
 /**
@@ -303,7 +318,6 @@ function findSkippedToolReason(
   if (listedNames.has(name)) return "duplicate-name"
   if (
     !checkedTool.isInputSchemaWithinLimits ||
-    !isWithinJsonValueLimits(tool.inputSchema) ||
     !isVisibleJsonValue(tool.inputSchema)
   )
     return "unsupported-input-schema"

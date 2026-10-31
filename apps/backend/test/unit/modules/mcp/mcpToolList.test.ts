@@ -117,6 +117,26 @@ describe("getMcpToolCatalog", () => {
     expect(catalog.isToolListCut).toBe(true)
   })
 
+  it(`keeps a list cut on page ${String(MAXIMUM_TOOL_LIST_PAGES)} that names a next page as cut, without failing it`, async () => {
+    const pages: Record<string, McpToolListPage> = {}
+    for (let page = 1; page < MAXIMUM_TOOL_LIST_PAGES; page += 1)
+      pages[page === 1 ? "" : String(page)] = {
+        tools: buildTools((page - 1) * 8 + 1, 8),
+        nextCursor: String(page + 1)
+      }
+    pages[String(MAXIMUM_TOOL_LIST_PAGES)] = {
+      tools: buildTools((MAXIMUM_TOOL_LIST_PAGES - 1) * 8 + 1, 10),
+      nextCursor: "more"
+    }
+    const getPage = createPageGetter(pages)
+
+    const catalog = await getMcpToolCatalog(SERVER_NAME, getPage)
+
+    expect(getPage).toHaveBeenCalledTimes(MAXIMUM_TOOL_LIST_PAGES)
+    expect(catalog.definitions).toHaveLength(128)
+    expect(catalog.isToolListCut).toBe(true)
+  })
+
   it("ends the list at a page that names the cursor it was asked with and holds the tools of the page before, leaving out its tools", async () => {
     const getPage = createPageGetter({
       "": { tools: buildTools(1, 2), nextCursor: "same" },
@@ -157,6 +177,43 @@ describe("getMcpToolCatalog", () => {
       "mcp__notes__tool1",
       "mcp__notes__tool2",
       "mcp__notes__tool3"
+    ])
+  })
+
+  it("does not take a page with the tools of the page before for a repeat when it names another cursor", async () => {
+    const getPage = createPageGetter({
+      "": { tools: buildTools(1, 1), nextCursor: "b" },
+      b: { tools: buildTools(1, 1), nextCursor: "c" },
+      c: { tools: buildTools(2, 1), nextCursor: undefined }
+    })
+
+    const catalog = await getMcpToolCatalog(SERVER_NAME, getPage)
+
+    expect(getPage.mock.calls).toEqual([[undefined], ["b"], ["c"]])
+    expect(catalog.definitions.map((definition) => definition.name)).toEqual([
+      "mcp__notes__tool1",
+      "mcp__notes__tool2"
+    ])
+    expect(catalog.skippedTools).toEqual([
+      { name: "tool1", reason: "duplicate-name" }
+    ])
+  })
+
+  it("does not take a page that names the cursor it was asked with for a repeat when it holds fewer tools than the page before", async () => {
+    const getPage = createPageGetter({
+      "": { tools: buildTools(1, 2), nextCursor: "same" },
+      same: { tools: buildTools(1, 1), nextCursor: "same" }
+    })
+
+    const catalog = await getMcpToolCatalog(SERVER_NAME, getPage)
+
+    expect(getPage.mock.calls).toEqual([[undefined], ["same"], ["same"]])
+    expect(catalog.definitions.map((definition) => definition.name)).toEqual([
+      "mcp__notes__tool1",
+      "mcp__notes__tool2"
+    ])
+    expect(catalog.skippedTools).toEqual([
+      { name: "tool1", reason: "duplicate-name" }
     ])
   })
 

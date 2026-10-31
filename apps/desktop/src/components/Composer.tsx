@@ -270,8 +270,12 @@ export function Composer({
    * current draft when Enter is pressed without a Shift modifier.
    *
    * @param event - Keyboard event emitted by the composer textarea.
+   * @remarks A key pressed while an input method composes text, such as the
+   * Enter that confirms a composition or the Escape that cancels one, is
+   * left to the input method and neither sends nor answers anything.
    */
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (event.nativeEvent.isComposing) return
     if (handleToolCallKeyDown(event)) return
     if (event.key !== "Enter" || event.shiftKey) return
 

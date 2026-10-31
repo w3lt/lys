@@ -23,7 +23,10 @@ export type McpServerCommand = Readonly<{
   command: string
   /** Arguments passed to the program as they are, without a shell. */
   arguments: readonly string[]
-  /** Variables set on top of the SDK's default environment. */
+  /**
+   * Variables set on top of the SDK's default environment, each replacing
+   * a default variable of the same name.
+   */
   environment: Readonly<Record<string, string>>
   /** Folder the program starts in. */
   workingDirectory: string
@@ -36,8 +39,9 @@ export type McpServerProcessHandlers = Pick<
 > &
   Readonly<{
     /**
-     * Told once, when the command's process has exited and every holder of
-     * its standard streams has closed them, whether or not Lys stopped it.
+     * Told once, when the command's process has exited and its standard
+     * streams have closed, whether or not Lys stopped it: they close once
+     * every holder of them closed them, or once a stop closed the pipes.
      */
     handleClose: () => void
   }>
@@ -77,10 +81,14 @@ export const MCP_SERVER_STOP_STEP_MILLISECONDS = 2000
  * {@link MCP_SERVER_STOP_STEP_MILLISECONDS} and `SIGKILL` after as long
  * again, and settles only once no process of the group is left, reaped
  * included; the command's own exit does not count, because its descendants
- * may still run. A process that leaves the group, such as one that starts
- * a session of its own, is not owned. Resource ownership: owns the process
- * group and the three pipes. Concurrency model: single-owner; one transport
- * starts, writes to, and stops it, and every stop shares the first one.
+ * may still run. Once the group ended, or the stop gave up, it closes the
+ * three pipes before it settles, so nothing reaches the context after
+ * that. A process that leaves the group, such as one that starts a session
+ * of its own, is not owned, even when it keeps a standard stream of the
+ * command: once the pipes closed, what it writes reaches nobody. Resource
+ * ownership: owns the process group and the three pipes. Concurrency model:
+ * single-owner; one transport starts, writes to, and stops it, and every
+ * stop shares the first one.
  */
 export default class McpServerProcess {
   /** The command's process, which leads the group; owned. */
@@ -125,9 +133,14 @@ export default class McpServerProcess {
     command: McpServerCommand,
     context: McpServerProcessContext
   ): Promise<McpServerProcess> {
+    const defaultEnvironment = getDefaultEnvironment()
+    const environment = buildMcpServerEnvironment(
+      defaultEnvironment,
+      command.environment
+    )
     const child = spawn(command.command, [...command.arguments], {
       cwd: command.workingDirectory,
-      env: { ...getDefaultEnvironment(), ...command.environment },
+      env: environment,
       stdio: ["pipe", "pipe", "pipe"],
       detached: true,
       shell: false
@@ -206,10 +219,13 @@ export default class McpServerProcess {
   }
 
   /**
-   * Ends the whole process group, as the class remarks describe.
+   * Ends the whole process group and closes the pipes, as the class remarks
+   * describe.
    *
    * @returns The promise of the first stop, which every later call returns
-   * too; it settles once no process of the group is left.
+   * too; it settles once no process of the group is left and the pipes
+   * closed. Once the command's process exited, closing the pipes lets it
+   * report its close through the context's `handleClose`.
    * @throws When a process of the group is still left
    * {@link MCP_SERVER_STOP_STEP_MILLISECONDS} after `SIGKILL`, such as one
    * the backend may not signal, or `kill` fails for another reason. A group
@@ -217,10 +233,10 @@ export default class McpServerProcess {
    * backend may signal already received `SIGKILL`, and sending it again at
    * the backend's exit could reach another group that took the identifier
    * once this one ended. A group `kill` failed for stays held, so the
-   * backend's exit sends `SIGKILL` to it.
+   * backend's exit sends `SIGKILL` to it. The pipes are closed then too.
    */
   public stop(): Promise<void> {
-    this.#stopping ??= this.#stopGroup()
+    this.#stopping ??= this.#stopGroup().finally(() => this.#closePipes())
     return this.#stopping
   }
 
@@ -250,6 +266,37 @@ export default class McpServerProcess {
       `The MCP server's process group was still running ${MCP_SERVER_STOP_STEP_MILLISECONDS} ms after SIGKILL.`
     )
   }
+
+  /**
+   * Closes the three pipes, dropping what is still to be written to or read
+   * from them, so that nothing they carry reaches the context any more.
+   */
+  #closePipes(): void {
+    this.#child.stdin.destroy()
+    this.#child.stdout.destroy()
+    this.#child.stderr.destroy()
+  }
+}
+
+/**
+ * Builds the environment a server's command runs in.
+ *
+ * @param defaultEnvironment - The SDK's default variables, those of the
+ * backend's own environment it passes on.
+ * @param configured - The variables the server's settings set.
+ * @returns Every default variable, with the configured value in place of
+ * the default one when the settings set a variable of the same name, then
+ * every other configured variable; as the plain record Node's `spawn`
+ * takes.
+ */
+function buildMcpServerEnvironment(
+  defaultEnvironment: Readonly<Record<string, string>>,
+  configured: Readonly<Record<string, string>>
+): Record<string, string> {
+  const environment = new Map(Object.entries(defaultEnvironment))
+  for (const [name, value] of Object.entries(configured))
+    environment.set(name, value)
+  return Object.fromEntries(environment)
 }
 
 /**

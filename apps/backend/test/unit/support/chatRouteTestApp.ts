@@ -38,7 +38,7 @@ import {
 } from "./scriptedBuiltInTool"
 import { ROOMY_CONTEXT_LENGTH } from "./replyContextMeterFakes"
 import { ScriptedBuiltInToolProvider } from "./scriptedBuiltInToolProvider"
-import McpServerProcessGroups from "../../../src/modules/mcp/mcpServerProcessGroups"
+import { createOwnedMcpServerProcessGroups } from "./mcpServerProcessGroups"
 
 /** Published path of the chat route. */
 const CHAT_PATH = "/api/v1/chat"
@@ -223,12 +223,13 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
       })
     )
   )
+  const { processGroups } = createOwnedMcpServerProcessGroups()
   const mcpServerRegistry = new McpServerRegistry({
     readSettings: readMcpSettings,
     openServer: (settings, context) =>
       openMcpServer(settings, context, MCP_TEST_OPENING_TIMEOUT_MILLISECONDS),
     workingDirectory: process.cwd(),
-    processGroups: new McpServerProcessGroups(),
+    processGroups,
     reportEvent: () => undefined
   })
   onTestFinished(async () => {

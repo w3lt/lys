@@ -34,6 +34,7 @@ const VALID_RAW_CONFIG = Object.freeze({
   databaseFilePath: "/test-home/lys/lys_db.sqlite",
   settingsFilePath: "/test-home/lys/settings.json",
   attachmentsDirectoryPath: "/test-home/lys/attachments",
+  mcpProcessGroupsFilePath: "/test-home/lys/mcp-process-groups",
   vmoHost: "127.0.0.1",
   vmoPort: 8080,
   caliginiaSystemPrompt: "Fixture Caliginia prompt",
@@ -121,6 +122,7 @@ describe("loadBackendConfig", () => {
       databaseFilePath: "/test-home/lys/lys_db.sqlite",
       settingsFilePath: "/test-home/lys/settings.json",
       attachmentsDirectoryPath: "/test-home/lys/attachments",
+      mcpProcessGroupsFilePath: "/test-home/lys/mcp-process-groups",
       vmoHost: "127.0.0.1",
       vmoPort: 8080,
       caliginiaSystemPrompt: "Fixture Caliginia prompt",
@@ -325,6 +327,11 @@ describe("backendConfigSchema", () => {
       "a relative attachments directory path",
       { ...VALID_RAW_CONFIG, attachmentsDirectoryPath: "attachments" },
       "attachmentsDirectoryPath"
+    ],
+    [
+      "a relative MCP process groups file path",
+      { ...VALID_RAW_CONFIG, mcpProcessGroupsFilePath: "mcp-process-groups" },
+      "mcpProcessGroupsFilePath"
     ],
     ["a vmo port of 0", { ...VALID_RAW_CONFIG, vmoPort: 0 }, "vmoPort"],
     [

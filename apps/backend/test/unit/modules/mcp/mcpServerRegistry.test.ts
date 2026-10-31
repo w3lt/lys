@@ -29,7 +29,6 @@ import {
   type McpServerOpening
 } from "../../../../src/modules/mcp/mcpServerOpening"
 import type { McpServerEvent } from "../../../../src/modules/mcp/mcpServerEvent"
-import McpServerProcessGroups from "../../../../src/modules/mcp/mcpServerProcessGroups"
 import McpServerRegistry, {
   type TurnMcpTool
 } from "../../../../src/modules/mcp/mcpServerRegistry"
@@ -47,6 +46,7 @@ import {
 } from "../../support/mcpTestServers"
 import { waitForMicrotasks } from "../../support/microtasks"
 import { createSettlementReader } from "../../support/settlement"
+import { createOwnedMcpServerProcessGroups } from "../../support/mcpServerProcessGroups"
 
 /** Longest one test opening may take; far above a local fake server's start. */
 const OPENING_TIMEOUT_MILLISECONDS = 10_000
@@ -332,11 +332,12 @@ function createRegistryHarness(
       return opening
     }
   )
+  const { processGroups } = createOwnedMcpServerProcessGroups()
   const registry = new McpServerRegistry({
     readSettings,
     openServer,
     workingDirectory: options.workingDirectory ?? WORKING_DIRECTORY,
-    processGroups: new McpServerProcessGroups(),
+    processGroups,
     reportEvent: (event) => events.push(event)
   })
   onTestFinished(async () => {

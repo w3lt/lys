@@ -1,3 +1,4 @@
+import { renameSync, writeFileSync } from "node:fs"
 import { setTimeout as waitFor } from "node:timers/promises"
 
 /** Time between two checks of whether a process group still runs. */
@@ -10,9 +11,16 @@ const NO_SUCH_PROCESS = "ESRCH"
 const NOT_PERMITTED = "EPERM"
 
 /**
+ * Ending of the file each save writes first, beside the groups file, and
+ * then renames over it.
+ */
+const TEMPORARY_FILE_SUFFIX = ".tmp"
+
+/**
  * Owns the identifiers of the process groups the stdio MCP servers run in,
  * so that every group still running can be ended at once when the backend
- * stops.
+ * stops, and saves them to a file, so that the desktop host can end them
+ * when the backend did not.
  *
  * @remarks Each stdio server's command runs in a process group of its own,
  * which the backend's own process group, the one the desktop host ends,
@@ -22,40 +30,75 @@ const NOT_PERMITTED = "EPERM"
  * `SIGKILL`. {@link stopEveryGroup} is the backend's last resort when it
  * exits: it sends `SIGKILL` to every group still held, without waiting,
  * because an exiting process cannot wait.
- * Resource ownership: owns the identifiers, not the processes; each group's
- * {@link McpServerProcess} ends its own group normally. Concurrency model:
- * single-threaded on the backend's event loop.
+ *
+ * Every change saves the held identifiers to the groups file at once, each
+ * in decimal followed by a line feed, in UTF-8; an empty file holds none.
+ * The text is written to a file of the same name ending in `.tmp` beside
+ * it, which is then renamed over it, so a reader sees the whole list from
+ * before or after a change, never part of one. The desktop host deletes the
+ * file before it starts the backend, and once a stop of the backend ended
+ * it, reads it and sends `SIGKILL` to each group listed, which reaches them
+ * even when the backend was killed before it could end them. No file is
+ * written before the first change. A failed save changes no group the
+ * holder holds and is told to the failure receiver, with the file's path;
+ * the file then keeps the list of the save before.
+ *
+ * Resource ownership: owns the identifiers and the groups file's contents,
+ * not the processes; each group's {@link McpServerProcess} ends its own
+ * group normally. Concurrency model: single-threaded on the backend's
+ * event loop; each save completes before the change that caused it returns.
  */
 export default class McpServerProcessGroups {
   /** Identifiers of the groups that may still run, each its leader's pid. */
   readonly #groupIds: Set<number>
+  /** Absolute path of the groups file the identifiers are saved to. */
+  readonly #filePath: string
+  /** Told of each save that failed; borrowed. */
+  readonly #reportSaveFailure: (failure: Error) => void
 
-  /** Creates an owner that holds no group. */
-  public constructor() {
+  /**
+   * Creates an owner that holds no group and has written nothing.
+   *
+   * @param filePath - Absolute path of the groups file; its folder must
+   * exist when a group is first added, or that save fails.
+   * @param reportSaveFailure - Told of each failed save, as an error whose
+   * message names the file and whose cause is what writing it threw;
+   * borrowed.
+   */
+  public constructor(
+    filePath: string,
+    reportSaveFailure: (failure: Error) => void
+  ) {
     this.#groupIds = new Set()
+    this.#filePath = filePath
+    this.#reportSaveFailure = reportSaveFailure
   }
 
   /**
-   * Holds one group that started.
+   * Holds one group that started, and saves the groups file.
    *
    * @param groupId - Identifier of the group, the pid of the command's
    * process, which leads it.
    */
   public add(groupId: number): void {
     this.#groupIds.add(groupId)
+    this.#handleGroupIdsChange()
   }
 
   /**
-   * Forgets one group no process of which is left.
+   * Forgets one group no process of which is left, and saves the groups
+   * file.
    *
    * @param groupId - Identifier of the group.
    */
   public remove(groupId: number): void {
     this.#groupIds.delete(groupId)
+    this.#handleGroupIdsChange()
   }
 
   /**
-   * Sends `SIGKILL` to every group still held and forgets them all.
+   * Sends `SIGKILL` to every group still held, forgets them all, and saves
+   * the groups file empty.
    *
    * @returns What `kill` threw for each group it could not signal for a
    * reason other than the group having ended or holding no process the
@@ -73,8 +116,47 @@ export default class McpServerProcessGroups {
       }
     }
     this.#groupIds.clear()
+    this.#handleGroupIdsChange()
     return failures
   }
+
+  /**
+   * Saves the groups file after the held groups changed, and tells the
+   * failure receiver when that failed, without undoing the change.
+   */
+  #handleGroupIdsChange(): void {
+    try {
+      saveProcessGroupIds(this.#filePath, this.#groupIds)
+    } catch (error) {
+      this.#reportSaveFailure(
+        new Error(
+          `The MCP servers' process groups could not be saved to ${this.#filePath}.`,
+          { cause: error }
+        )
+      )
+    }
+  }
+}
+
+/**
+ * Saves group identifiers to a file, replacing it whole: the text is
+ * written to a temporary file beside it, which is then renamed over it.
+ *
+ * @param filePath - Absolute path of the file.
+ * @param groupIds - Identifiers to save, each written in decimal followed
+ * by a line feed.
+ * @throws What writing the temporary file or renaming it threw; the file
+ * then keeps what it held, and a temporary file may be left, which the next
+ * save replaces.
+ */
+function saveProcessGroupIds(
+  filePath: string,
+  groupIds: ReadonlySet<number>
+): void {
+  const temporaryFilePath = `${filePath}${TEMPORARY_FILE_SUFFIX}`
+  const text = Array.from(groupIds, (groupId) => `${groupId}\n`).join("")
+  writeFileSync(temporaryFilePath, text, "utf8")
+  renameSync(temporaryFilePath, filePath)
 }
 
 /**

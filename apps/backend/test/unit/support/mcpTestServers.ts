@@ -13,7 +13,7 @@ import {
 import { fileURLToPath } from "node:url"
 import { onTestFinished } from "vitest"
 import type { McpServerConnectionContext } from "../../../src/modules/mcp/mcpServerConnection"
-import McpServerProcessGroups from "../../../src/modules/mcp/mcpServerProcessGroups"
+import { createOwnedMcpServerProcessGroups } from "./mcpServerProcessGroups"
 
 /** Options the fake stdio server reads from its first argument. */
 export type FakeStdioServerOptions = Readonly<{
@@ -225,10 +225,12 @@ export function buildHttpServerSettings(
 }
 
 /**
- * Builds a connection context that records what the connection reports.
+ * Creates a connection context that records what the connection reports,
+ * for the current test.
  *
  * @param abortSignal - Cancels the opening; never aborted when omitted.
- * @returns The context, and what it recorded.
+ * @returns The context, whose holder of process groups saves them to a
+ * folder the test owns, and what it recorded.
  */
 export function createRecordingContext(
   abortSignal: AbortSignal = new AbortController().signal
@@ -242,11 +244,12 @@ export function createRecordingContext(
     errors: [],
     sessionEndFailures: []
   }
+  const { processGroups } = createOwnedMcpServerProcessGroups()
   return {
     events,
     context: {
       workingDirectory: process.cwd(),
-      processGroups: new McpServerProcessGroups(),
+      processGroups,
       abortSignal,
       reportServerLogLine: (line) => events.logLines.push(line),
       reportConnectionClosed: () => {

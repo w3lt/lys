@@ -91,6 +91,19 @@ export const backendConfigSchema = z
       .string()
       .refine(isAbsolute, "Attachments directory path must be absolute."),
     /**
+     * Absolute filesystem path of the file that lists the process groups the
+     * stdio MCP servers run in, one decimal identifier per line, so that the
+     * desktop host can end them when it had to kill the backend.
+     *
+     * @remarks The backend writes it first once a server's group starts,
+     * replaces it whole each time a group starts or ends, and empties it as
+     * it exits. The desktop host deletes it before it starts the backend and
+     * reads it once the backend stopped.
+     */
+    mcpProcessGroupsFilePath: z
+      .string()
+      .refine(isAbsolute, "MCP process groups file path must be absolute."),
+    /**
      * IPv4 loopback address of vmo, which reads every `read_page` page in a
      * micro VM.
      *
@@ -156,8 +169,9 @@ export type BackendConfig = z.infer<typeof backendConfigSchema>
  *
  * @returns A frozen configuration snapshot that satisfies the complete backend
  * configuration schema, whose database path is `lys_db.sqlite`, whose
- * settings file path is `settings.json`, and whose attachments directory is
- * `attachments` in the `LYS_HOME` directory, whose vmo endpoint is
+ * settings file path is `settings.json`, whose attachments directory is
+ * `attachments`, and whose MCP process groups file is `mcp-process-groups`
+ * in the `LYS_HOME` directory, whose vmo endpoint is
  * `127.0.0.1:8080`, and whose prompts were read once during this call.
  * @throws If `LYS_HOME` is unset, empty, or not an absolute path, as
  * described by {@link parseLysHome}.
@@ -178,6 +192,7 @@ export function loadBackendConfig(): BackendConfig {
     databaseFilePath: join(lysHome, "lys_db.sqlite"),
     settingsFilePath: join(lysHome, "settings.json"),
     attachmentsDirectoryPath: join(lysHome, "attachments"),
+    mcpProcessGroupsFilePath: join(lysHome, "mcp-process-groups"),
     vmoHost: VMO_HOST,
     vmoPort: VMO_PORT,
     caliginiaSystemPrompt: readPrompt("caliginia-system"),

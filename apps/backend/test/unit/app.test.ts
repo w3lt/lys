@@ -1,5 +1,11 @@
 import type { McpServerSettings } from "@lys/share"
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
@@ -34,11 +40,12 @@ vi.mock("@lmstudio/sdk", () => import("./support/lmStudioSdkFake"))
 
 /**
  * Creates a configuration that satisfies `backendConfigSchema`, with the
- * conversation database in a temporary directory owned by the current test.
+ * conversation database and the MCP process groups file in a temporary
+ * directory owned by the current test.
  *
  * @returns The test configuration; the directory exists, so a store opened on
- * its database path would create the file. The directory is removed when the
- * test finishes.
+ * its database path would create the file, and the MCP process groups file
+ * can be saved. The directory is removed when the test finishes.
  */
 function createOwnedBackendConfig(): BackendConfig {
   const directory = mkdtempSync(join(tmpdir(), "lys-app-test-"))
@@ -47,7 +54,8 @@ function createOwnedBackendConfig(): BackendConfig {
   })
   return {
     ...TEST_BACKEND_CONFIG,
-    databaseFilePath: join(directory, "lys_db.sqlite")
+    databaseFilePath: join(directory, "lys_db.sqlite"),
+    mcpProcessGroupsFilePath: join(directory, "mcp-process-groups")
   }
 }
 
@@ -432,6 +440,39 @@ describe("buildApp", () => {
       await app.close()
 
       expect(isProcessRunning(processId)).toBe(false)
+    },
+    2 * MCP_SERVER_WAIT_MILLISECONDS
+  )
+
+  it(
+    "lists an MCP server's process group in the configured file and ends it through the decorated holder, as the backend's stop does",
+    async () => {
+      const log = new CapturedLogDestination()
+      const config = createConfigWithMcpServers([
+        buildFakeStdioServerSettings("files", { reportProcessId: true })
+      ])
+      const app = await buildApp({ config, logger: createBackendLogger(log) })
+      onTestFinished(async () => await app.close())
+      await app.ready()
+      const processId = await vi.waitFor(() => readLoggedProcessId(log), {
+        timeout: MCP_SERVER_WAIT_MILLISECONDS
+      })
+      onTestFinished(() => {
+        if (isProcessRunning(processId)) process.kill(processId, "SIGKILL")
+      })
+      expect(readFileSync(config.mcpProcessGroupsFilePath, "utf8")).toBe(
+        `${processId}\n`
+      )
+
+      expect(app.mcpServerProcessGroups.stopEveryGroup()).toEqual([])
+
+      await vi.waitFor(
+        () => {
+          expect(isProcessRunning(processId)).toBe(false)
+        },
+        { timeout: MCP_SERVER_WAIT_MILLISECONDS }
+      )
+      expect(readFileSync(config.mcpProcessGroupsFilePath, "utf8")).toBe("")
     },
     2 * MCP_SERVER_WAIT_MILLISECONDS
   )

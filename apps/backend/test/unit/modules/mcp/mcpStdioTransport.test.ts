@@ -1,4 +1,5 @@
 import { SdkErrorCode, type JSONRPCMessage } from "@modelcontextprotocol/client"
+import { setImmediate as waitForImmediate } from "node:timers/promises"
 import { describe, expect, it, vi } from "vitest"
 import type { McpServerProcessHandlers } from "../../../../src/modules/mcp/mcpServerProcess"
 import McpStdioTransport from "../../../../src/modules/mcp/mcpStdioTransport"
@@ -145,6 +146,27 @@ describe("McpStdioTransport", () => {
     started.handlers?.handleClose()
 
     await vi.waitFor(() => expect(errors).toEqual([failure]))
+    expect(closes()).toBe(1)
+  })
+
+  it("reports a failed close it was asked for only to its caller when its process closes meanwhile, and its close once", async () => {
+    const failure = new Error("still running after SIGKILL")
+    const stopped = Promise.withResolvers<void>()
+    const { transport, started, closes } = createTransport(
+      () => stopped.promise
+    )
+    const errors: Error[] = []
+    transport.onerror = (error) => errors.push(error)
+    await transport.start()
+
+    const closing = transport.close()
+    started.handlers?.handleClose()
+    stopped.reject(failure)
+
+    await expect(closing).rejects.toBe(failure)
+    await waitForImmediate()
+    expect(errors).toEqual([])
+    expect(started.stop).toHaveBeenCalledOnce()
     expect(closes()).toBe(1)
   })
 

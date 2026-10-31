@@ -37,7 +37,9 @@ export type BackendStopDependencies = Readonly<{
  * `exit`, for any other end Node runs listeners for, such as a failure
  * nothing caught, it ends the groups too; the groups are already gone after
  * a signal, so each ends once. A backend killed with `SIGKILL` runs nothing:
- * its servers then see their standard input close. Call once per process.
+ * its servers then see their standard input close, and the desktop host
+ * ends the groups the MCP process groups file still lists. Call once per
+ * process.
  */
 export function registerBackendStopHandlers(
   dependencies: BackendStopDependencies

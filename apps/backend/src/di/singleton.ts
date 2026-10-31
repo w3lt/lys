@@ -98,6 +98,12 @@ export type SingletonLogReporters = Readonly<{
    * failed connection or a server's own log lines.
    */
   reportMcpServerEvent: (event: McpServerEvent) => void
+  /**
+   * Receives each failure to save the MCP servers' process groups file,
+   * after which the desktop host may not end a server that a killed
+   * backend left running.
+   */
+  reportMcpProcessGroupsSaveFailure: (failure: Error) => void
 }>
 
 /** Production factories used when the composition root supplies no substitutes. */
@@ -160,7 +166,7 @@ export type SingletonServices = Readonly<{
   /**
    * The process groups the registry's stdio servers run in, which the
    * backend ends at once when it exits; it owns no process, only their
-   * identifiers.
+   * identifiers and the MCP process groups file it saves them to.
    */
   mcpServerProcessGroups: McpServerProcessGroups
   /**
@@ -200,11 +206,13 @@ type DatabaseServices = Pick<
  * @param config - LM Studio host and port used to derive local service endpoints,
  * the title-generation prompt and title length limit given to the chat
  * service, the built-in agents' system prompts given to the agent service,
- * vmo's host and port given to the read-page tool, and the attachments
- * directory given to the attachment file store.
+ * vmo's host and port given to the read-page tool, the attachments
+ * directory given to the attachment file store, and the MCP process groups
+ * file given to the holder of the MCP servers' process groups.
  * @param logReporters - Receive, for logging, the LLM runtime failures that
  * no caller observes, the causes of read failures the model learns only by
- * kind, the LM Studio SDK's messages, and the MCP servers' events.
+ * kind, the LM Studio SDK's messages, the MCP servers' events, and the
+ * failures to save their process groups file.
  * @param factories - Service factories owned by the composition root.
  * @returns A promise resolving to the frozen bundle of owned services,
  * configured with the HTTP `/v1` chat endpoint and WebSocket LM Studio
@@ -373,10 +381,12 @@ function createAgentServices(
  * Creates the services that run, find, and approve tools.
  *
  * @param config - Settings file the web search key, the Just run choices,
- * and the MCP servers are read from, and vmo's host and port given to the
- * read-page tool.
+ * and the MCP servers are read from, vmo's host and port given to the
+ * read-page tool, and the file the MCP servers' process groups are saved
+ * to.
  * @param logReporters - Receive the causes of read failures the model
- * learns only by kind, and the MCP servers' events.
+ * learns only by kind, the MCP servers' events, and the failures to save
+ * their process groups file.
  * @returns The web search tool provider, every built-in tool, the tool
  * approval service, the MCP server registry, whose stdio servers start in
  * the person's home folder, and the holder of those servers' process
@@ -387,7 +397,9 @@ function createToolServices(
   config: BackendConfig,
   logReporters: Pick<
     SingletonLogReporters,
-    "pageRendering" | "reportMcpServerEvent"
+    | "pageRendering"
+    | "reportMcpServerEvent"
+    | "reportMcpProcessGroupsSaveFailure"
   >
 ): ToolServices {
   const webSearchToolProvider = new WebSearchToolProvider(
@@ -402,7 +414,10 @@ function createToolServices(
   const toolApprovalService = new ToolApprovalService(() =>
     readJustRunToolNames(config.settingsFilePath)
   )
-  const mcpServerProcessGroups = new McpServerProcessGroups()
+  const mcpServerProcessGroups = new McpServerProcessGroups(
+    config.mcpProcessGroupsFilePath,
+    logReporters.reportMcpProcessGroupsSaveFailure
+  )
   const mcpServerRegistry = new McpServerRegistry({
     readSettings: () => readMcpSettings(config.settingsFilePath),
     openServer: (settings, context) =>

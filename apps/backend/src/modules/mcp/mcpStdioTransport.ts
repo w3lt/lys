@@ -34,11 +34,13 @@ export type McpServerProcessStarter = (
  * It settles once no process of the group is left, as
  * {@link McpServerProcess.stop} describes, or once that stop gave up, and
  * only then tells the client that the transport closed, so the client never
- * forgets a transport whose processes it still stops. The callbacks the client installs are told what the
- * process reports, from {@link start} on. Resource ownership: owns the
- * process it starts. Concurrency model: single-owner; the SDK client that
- * connects it is its only user, while the process reports on the backend's
- * event loop.
+ * forgets a transport whose processes it still stops. When the command's
+ * process closes while a close runs, as it can once the stop closed the
+ * pipes, that close alone reports the end and any failure. The callbacks
+ * the client installs are told what the process reports, from
+ * {@link start} on. Resource ownership: owns the process it starts.
+ * Concurrency model: single-owner; the SDK client that connects it is its
+ * only user, while the process reports on the backend's event loop.
  */
 export default class McpStdioTransport implements Transport {
   /** Starts the server's process; borrowed from the connection. */
@@ -134,9 +136,7 @@ export default class McpStdioTransport implements Transport {
     this.#starting = this.#startProcess({
       handleMessage: (message) => this.#onmessage?.(message),
       handleError: (error) => this.#onerror?.(error),
-      handleClose: () => {
-        this.close().catch((error: unknown) => this.#reportCloseFailure(error))
-      }
+      handleClose: () => this.#handleProcessClose()
     })
     await this.#starting
   }
@@ -172,12 +172,21 @@ export default class McpStdioTransport implements Transport {
   }
 
   /**
-   * Reports a close the transport started itself that failed, which no
-   * caller observes.
+   * Closes the transport once its command's process closed, unless a close
+   * already runs, which then reports its own end and failure.
+   */
+  #handleProcessClose(): void {
+    if (this.#closing !== undefined) return
+    this.close().catch((error: unknown) => this.#handleCloseFailure(error))
+  }
+
+  /**
+   * Tells the client of a close the transport started itself that failed,
+   * which no caller observes.
    *
    * @param error - Why the process group could not be ended.
    */
-  #reportCloseFailure(error: unknown): void {
+  #handleCloseFailure(error: unknown): void {
     this.#onerror?.(
       error instanceof Error
         ? error

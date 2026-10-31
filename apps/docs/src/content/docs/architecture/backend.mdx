@@ -777,7 +777,8 @@ the background, and the registry keeps each until it settles. Stopping also
 returns the session's release, which settles once its opening ended and every
 connection it led to closed, a command server's whole process group
 included; for a group that does not end when its input closes, that takes
-up to about four seconds. The registry keeps the release of every session it stopped until it
+up to about four seconds, and asking a URL server to end its session up to
+two more. The registry keeps the release of every session it stopped until it
 settles, and every new session, after Reconnect or a new, changed, renamed,
 or re-added server, opens only once all of them settled, whatever names
 their servers had; applying the group stops every session it does not keep
@@ -796,10 +797,23 @@ until its stop gave up after `SIGKILL`, and `registerBackendStopHandlers`
 (`processStop.ts`) sends `SIGKILL` at once to every group it still holds: on
 `SIGTERM`, which the desktop host sends first, on `SIGINT`, and on `SIGHUP`,
 after each of which the backend exits with 128 plus the signal's number, and
-on any other exit Node runs `exit` listeners for. A
-backend killed with `SIGKILL` runs nothing; its servers then see their
-standard input close. A URL server's session is not ended then; the server
-ends it at its own time limit.
+on any other exit Node runs `exit` listeners for.
+
+A backend killed with `SIGKILL`, or one that hangs until the host kills it,
+runs none of that, so the holder also saves the groups it holds to
+`$LYS_HOME/mcp-process-groups` (the `mcpProcessGroupsFilePath` setting) on
+every change: each identifier in decimal followed by a line feed, written to
+`mcp-process-groups.tmp` beside it and renamed over it, so a reader sees a
+whole list; ending every group saves it empty. Once the host's stop has killed
+and waited for the backend, it sends `SIGKILL` to every group the file still
+names and deletes it; see
+[backend process ownership](/architecture/host/#backend-process-ownership). A
+save that fails is logged as an error and changes no group the holder holds;
+the file then keeps the list of the save before. A backend that dies without
+the host stopping it leaves its servers running until they notice their
+closed standard input, and the next start deletes the file. A URL server's
+session is not ended when the backend stops; the server ends it at its own
+time limit.
 
 ### Opening a server
 
@@ -830,12 +844,15 @@ declares no client capabilities.
   message per line, as the SDK's own stdio transport does. A line longer than
   16 MiB is reported as soon as its bytes show it, and the rest of it is
   dropped; it fails the request it answers as too large and ends the
-  connection. Closing the connection ends the whole process group: Lys closes
+  connection; the calls in flight then fail as too large once the process
+  group ended. Closing the connection ends the whole process group: Lys closes
   the command's standard input, sends `SIGTERM` to the group when a process of
   it is still left two seconds later, then `SIGKILL` after two more. A close
-  settles once no process of the group is left, reaped included; the
-  command's own exit does not count, because the processes it started may
-  still run. A group still left two seconds after `SIGKILL` fails the close
+  settles once no process of the group is left, reaped included, and the
+  three pipes are closed; the command's own exit does not count, because the
+  processes it started may still run. Once the pipes are closed, what a
+  process that left the group but kept one of the command's standard streams
+  writes reaches nobody. A group still left two seconds after `SIGKILL` fails the close
   and is no longer held: every process of it the backend may signal already
   received `SIGKILL`, and sending it again at the backend's exit could reach
   another group that took the identifier once this one ended.
@@ -868,7 +885,7 @@ declares no client capabilities.
   answer's body. Closing the connection aborts its open requests, which fail
   without being reported as connection errors, and then asks the server to
   end its session, as the MCP specification asks of a client:
-  `endMcpHttpSession` (`mcpHttpSessionEnd.ts`) sends `DELETE` to the URL with
+  `closeMcpHttpSession` (`mcpHttpSessionEnd.ts`) sends `DELETE` to the URL with
   the configured headers, `Mcp-Session-Id`, and `Mcp-Protocol-Version`,
   following no redirect, and gives up after two seconds. An answer of `2xx`,
   `404`, which says the server no longer knows the session, or `405`, which
@@ -891,11 +908,13 @@ time and turns each page's tools into catalog entries before it asks for the
 next page, so the read holds one page, at most 16 MiB, the names of the page
 before, and the catalog, never the server's whole list or its objects.
 Reading stops at the end of the list; at the 129th tool, which marks the list
-as cut, so later pages are never asked for; or, as the SDK's own list read
-stops, at a page that names the cursor it was asked with and holds as many
-tools with the same names as the page before, whose tools are left out as the
-server repeating itself. A 16th page that names a next one fails the opening
-as an answer that is not valid MCP.
+as cut, so later pages are never asked for; or at a page that names the cursor
+it was asked with and holds as many tools with the same names as the page
+before, whose tools are left out as the server repeating itself. The SDK's own
+list read stops at such a page too, but compares the whole tools; Lys compares
+only their names, so that it never walks two untrusted pages. A 16th page that
+names a next one fails the opening as an answer that is not valid MCP, unless
+the list passed 128 tools by the end of that page.
 `calculateMcpRequestFailure`
 (`mcpError.ts`) tells failures apart by the SDK's error types and their
 causes: a time limit that passed, a process that exited or a connection that

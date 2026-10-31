@@ -655,7 +655,8 @@ an argument, an environment variable, a URL, or a header.
 
 A connected server's tools are read once, when it connects, across at most 16
 pages of its tool list; a 16th page that names a next one fails the opening,
-unless the list passed 128 tools before it, where reading stops. Lys reads
+unless the list passed 128 tools by the end of that page, where reading stops.
+Lys reads
 the first 128 tools and lists each one it can offer; `skippedTools` names the
 others it read, each with why: `unsupported-name` (its name is empty, longer
 than 128 characters, or holds a character a person cannot see, or its

@@ -95,6 +95,14 @@ group it could not signal is logged as
 `An MCP server's process group could not be ended as the backend stopped` at
 `error` with `err`.
 
+The backend saves the identifiers of those groups to
+`$LYS_HOME/mcp-process-groups` each time a server's group starts or ends, so
+that the desktop host can end them after it had to kill the backend. A save
+that fails is logged as
+`The MCP servers' process groups file could not be saved; if the backend is killed, the desktop may not end every MCP server`
+at `error`, with `err` naming the file and what writing it threw. The backend
+keeps running, and the file keeps the list of the save before.
+
 The Tauri host does not keep the backend's output. It writes its own failures,
 such as a backend it could not stop at exit, to its standard error, which only
 an app started from a terminal shows.

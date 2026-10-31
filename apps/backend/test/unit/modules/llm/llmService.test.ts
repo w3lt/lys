@@ -436,7 +436,7 @@ describe("LlmService", () => {
         reason: "runtime-unavailable",
         latencyMs: 0
       })
-      outcome.diagnostics[0]?.handleLlmModelHealthFailureReport(reporter)
+      outcome.diagnostics[0]?.handleLlmRuntimeFailureReport(reporter)
       expect(reporter.mock.calls[0]?.[0]).toBe(failure)
     })
 

@@ -3,13 +3,11 @@ import {
   type LlmTestModelApiResponse
 } from "@lys/protocol"
 import {
-  createLlmModelHealthDiagnostic,
-  type LlmModelHealthDiagnostic
-} from "./llmModelHealthDiagnostic"
+  createLlmRuntimeFailureEvidence,
+  type LlmRuntimeFailureEvidence
+} from "./llmRuntimeFailureEvidence"
 import type { ListLoadedLlmModelInstances } from "./stopLlmModelsByKey"
 import type { LoadedLlmModelInstance } from "./llmRuntimeTypes"
-
-export type { LlmModelHealthDiagnostic } from "./llmModelHealthDiagnostic"
 
 /**
  * Immutable health observation and internal diagnostics for one canonical model key.
@@ -23,7 +21,7 @@ export type LlmModelHealthOutcome = Readonly<{
   /** Validated public loaded-state observation. */
   health: LlmTestModelApiResponse
   /** Required internal failure reports, empty after a successful query. */
-  diagnostics: readonly LlmModelHealthDiagnostic[]
+  diagnostics: readonly LlmRuntimeFailureEvidence[]
 }>
 
 /** Result of one loaded-inventory query before health response construction. */
@@ -38,7 +36,7 @@ type LoadedLlmModelInventoryOutcome =
       /** The runtime inventory query failed. */
       status: "unavailable"
       /** Immutable failure detail retained for application logging. */
-      diagnostic: LlmModelHealthDiagnostic
+      diagnostic: LlmRuntimeFailureEvidence
     }>
 
 /** Immutable empty diagnostic collection shared by successful inventory observations. */
@@ -83,7 +81,7 @@ export async function getLlmModelHealth(
 function createUnavailableLlmModelInventoryOutcome(
   failure: unknown
 ): LoadedLlmModelInventoryOutcome {
-  const diagnostic = createLlmModelHealthDiagnostic(failure)
+  const diagnostic = createLlmRuntimeFailureEvidence(failure)
   return Object.freeze({ status: "unavailable", diagnostic })
 }
 

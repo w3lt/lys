@@ -122,7 +122,7 @@ describe("ModelPaneContent", () => {
     ).toBeNull()
     expect(
       screen.getByText(
-        "Choosing a row sets the default for this session. LM Studio decides which models are in memory. Test checks loaded state; it does not generate a response."
+        "Choosing a row sets the default for this session. LM Studio decides which models are in memory: a model it is not running answers once you start it in LM Studio. Test checks loaded state; it does not generate a response."
       )
     ).toBeInTheDocument()
   })

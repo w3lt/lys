@@ -72,8 +72,9 @@ function formatModelInventoryEmptyMessage(
  *
  * @param modelLoading - Who loads the models, as the inventory reports.
  * @param provider - Active provider, which the note names.
- * @returns How choosing and testing a row work, and who loads the models;
- * nothing about loading while no inventory has been read.
+ * @returns How choosing and testing a row work, and who loads the models,
+ * with where to start a model the provider is not running; nothing about
+ * loading while no inventory has been read.
  */
 function formatModelInventoryNote(
   modelLoading: ObservedModelLoading,
@@ -83,7 +84,7 @@ function formatModelInventoryNote(
     case "lys":
       return `Choosing a row sets the default for this session. Load and Unload update ${provider.name}. Test checks loaded state; it does not generate a response.`
     case "provider":
-      return `Choosing a row sets the default for this session. ${provider.name} decides which models are in memory. Test checks loaded state; it does not generate a response.`
+      return `Choosing a row sets the default for this session. ${provider.name} decides which models are in memory: a model it is not running answers once you start it in ${provider.name}. Test checks loaded state; it does not generate a response.`
     case "unknown":
       return "Choosing a row sets the default for this session. Test checks loaded state; it does not generate a response."
   }

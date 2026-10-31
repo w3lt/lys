@@ -549,21 +549,36 @@ function isAcceptedLabel(typedLabel: string, label: string): boolean {
 }
 
 /**
+ * Gets the host and port of an `http:` or `https:` URL as its text holds
+ * them, before the URL parser converts them: after the scheme, the slashes
+ * or backslashes that follow it, and any user name and password, up to the
+ * path, query, or fragment.
+ *
+ * @param urlText - Text of a URL that parses with an `http:` or `https:`
+ * scheme, such as `https:bücher.example:8443/mcp`, which needs no `//`.
+ * @returns The host and port as typed, such as `bücher.example:8443`, with
+ * the brackets of an IPv6 address; the host alone when the text names no
+ * port.
+ */
+export function getTypedHostAndPort(urlText: string): string {
+  const afterScheme = urlText
+    .slice(urlText.indexOf(":") + 1)
+    .replace(AUTHORITY_START_PATTERN, "")
+  const authority = afterScheme.split(AUTHORITY_END_PATTERN, 1)[0] ?? ""
+  return authority.slice(authority.lastIndexOf("@") + 1)
+}
+
+/**
  * Gets the host of an `http:` or `https:` URL as its text holds it, before
- * the URL parser converts it: after the scheme, the slashes or backslashes
- * that follow it, and any user name and password, up to the port, path,
- * query, or fragment.
+ * the URL parser converts it, as {@link getTypedHostAndPort} finds it,
+ * without the port.
  *
  * @param urlText - Text of a URL that parses with an `http:` or `https:`
  * scheme.
  * @returns The host as typed, with the brackets of an IPv6 address.
  */
 function getTypedHost(urlText: string): string {
-  const afterScheme = urlText
-    .slice(urlText.indexOf(":") + 1)
-    .replace(AUTHORITY_START_PATTERN, "")
-  const authority = afterScheme.split(AUTHORITY_END_PATTERN, 1)[0] ?? ""
-  const hostAndPort = authority.slice(authority.lastIndexOf("@") + 1)
+  const hostAndPort = getTypedHostAndPort(urlText)
   if (hostAndPort.startsWith("["))
     return hostAndPort.slice(0, hostAndPort.indexOf("]") + 1)
   return hostAndPort.split(":", 1)[0] ?? ""

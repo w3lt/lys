@@ -81,6 +81,7 @@ export {
   type LocationSettings,
   type PlaceName
 } from "./location"
+export { getTypedHostAndPort } from "./internationalizedHost"
 export {
   isWithinJsonValueLimits,
   jsonValueSchema,

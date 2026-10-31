@@ -419,6 +419,27 @@ describe("formatMcpServerStatus", () => {
   )
 
   it.each([
+    ["https:example.com/mcp", "example.com"],
+    ["https:\\\\example.com\\mcp", "example.com"],
+    ["https:/example.com/a//b", "example.com"],
+    ["HTTPS://MCP.Example.TEST:443/mcp", "mcp.example.test"],
+    ["https:bücher.example/mcp", "bücher.example"],
+    ["https:///bücher.example/mcp", "bücher.example"],
+    ["https:bücher.example:8443/a//b", "bücher.example:8443"]
+  ])(
+    "names the host and port of %s, which the URL rule accepts, as %s",
+    (url, host) => {
+      const server = parseMcpServer({ name: "docs", transport: "http", url })
+
+      expect(
+        formatMcpServerStatus(
+          buildAppliedRowFacts(server, CONNECTING_MCP_STATE)
+        ).detail
+      ).toBe(`waiting for initialize from ${host}`)
+    }
+  )
+
+  it.each([
     [
       "local program",
       COMMAND_SERVER,

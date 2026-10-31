@@ -10,6 +10,7 @@ import {
 } from "@lys/protocol"
 import {
   buildMcpToolNamePrefix,
+  getTypedHostAndPort,
   MAXIMUM_MCP_SERVER_COUNT,
   MAXIMUM_MCP_SERVER_NAME_LENGTH,
   type McpServerName,
@@ -282,6 +283,9 @@ const NO_UNAVAILABLE_TOOLS: ReadonlyMap<
   ListedBackendToolUnavailableReason
 > = new Map<string, ListedBackendToolUnavailableReason>()
 
+/** Finds a character beyond ASCII in a server URL's typed host. */
+const NON_ASCII_PATTERN = /\P{ASCII}/u
+
 /** Note shown while the backend is not running. */
 export const MCP_BACKEND_STOPPED_NOTE =
   "Start the backend in Settings → Runtime to connect to MCP servers."
@@ -333,17 +337,21 @@ function formatMcpServerUrl(url: string): string {
 }
 
 /**
- * Formats the host and port of a saved server URL as its text holds them.
+ * Formats the host and port of a saved server URL.
  *
- * @param url - Saved URL: its scheme and `//`, then a host without a user
- * name or password.
- * @returns The text after `//` up to the path, query, or fragment, such as
- * `localhost:3845`; an internationalized host keeps the letters it was saved
- * in, as the server's row shows it.
+ * @param url - Saved URL, which the shared URL rule accepted, with or
+ * without `//` after its scheme.
+ * @returns For a host typed in its own letters beyond ASCII, the host and
+ * port as the URL holds them, such as `bücher.example:8443`, as the
+ * server's row shows them; for a host typed in ASCII, the host and port as
+ * the URL parser writes them, such as `localhost:3845` or `example.com` for
+ * `HTTPS://Example.COM:443/mcp`.
  */
 function formatMcpServerHost(url: string): string {
-  const authority = url.slice(url.indexOf("//") + 2)
-  return authority.split(/[/\\?#]/u, 1)[0] ?? authority
+  const typedHostAndPort = getTypedHostAndPort(url)
+  return NON_ASCII_PATTERN.test(typedHostAndPort)
+    ? typedHostAndPort
+    : new URL(url).host
 }
 
 /**

@@ -356,13 +356,18 @@ async function listLoadedContextLengths(
   modelKeys: ReadonlySet<string>,
   findLlmContextMeasurement: LlmEngine["findLlmContextMeasurement"]
 ): Promise<ReadonlyMap<string, number>> {
-  const contextLengths = new Map<string, number>()
-  for (const modelKey of modelKeys) {
-    const measurement = await findLlmContextMeasurement(modelKey, [])
-    if (measurement !== undefined)
-      contextLengths.set(modelKey, measurement.contextLength)
-  }
-  return contextLengths
+  const [modelKey, ...laterModelKeys] = [...modelKeys]
+  if (modelKey === undefined) return new Map()
+  const measurement = await findLlmContextMeasurement(modelKey, [])
+  const laterContextLengths = await listLoadedContextLengths(
+    new Set(laterModelKeys),
+    findLlmContextMeasurement
+  )
+  if (measurement === undefined) return laterContextLengths
+  return new Map([
+    [modelKey, measurement.contextLength],
+    ...laterContextLengths
+  ])
 }
 
 /**

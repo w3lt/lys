@@ -36,13 +36,29 @@ const VMO_READINESS_TIMEOUT_MS = 600_000
  * caller revalidates its own state before publishing.
  */
 export async function getVmoReadiness(): Promise<VmoReadiness> {
-  const deadlineMs = performance.now() + VMO_READINESS_TIMEOUT_MS
-  while (performance.now() < deadlineMs) {
-    if ((await getVmoStatus()).status !== "running") return "exited"
-    if ((await getVmoHealth()) === "ready") return "ready"
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, VMO_READINESS_CHECK_INTERVAL_MS)
-    })
-  }
-  return "unresponsive"
+  return getVmoReadinessBefore(performance.now() + VMO_READINESS_TIMEOUT_MS)
+}
+
+/**
+ * Checks a started vmo once, then again after the check interval, until it
+ * answers its health route, its process exits, or a moment passes.
+ *
+ * @param deadlineMs - Moment on the monotonic clock, as `performance.now()`
+ * reads it, after which no check starts.
+ * @returns The first readiness outcome observed; `unresponsive` once the
+ * deadline passed before a check.
+ * @throws The Tauri rejection when the process status or the health check
+ * cannot be read.
+ * @remarks Each check runs after the one before has finished.
+ */
+async function getVmoReadinessBefore(
+  deadlineMs: number
+): Promise<VmoReadiness> {
+  if (performance.now() >= deadlineMs) return "unresponsive"
+  if ((await getVmoStatus()).status !== "running") return "exited"
+  if ((await getVmoHealth()) === "ready") return "ready"
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, VMO_READINESS_CHECK_INTERVAL_MS)
+  })
+  return getVmoReadinessBefore(deadlineMs)
 }

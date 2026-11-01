@@ -173,6 +173,14 @@ export type AgentStateToolContext = Readonly<{
   reader: AgentStateReader
 }>
 
+/** One run of a state tool: the reply that calls it, and when it runs. */
+type StateToolRun = Readonly<{
+  /** UUIDv7 of the reply whose turn calls the tool. */
+  requestId: string
+  /** Time of the run. */
+  now: Date
+}>
+
 /** Copy shown for a query that is blank or too long. */
 const INVALID_QUERY_MESSAGE = `The query must be 1 to ${MAXIMUM_AGENT_QUERY_LENGTH} characters long after trimming.`
 
@@ -378,19 +386,17 @@ function formatRequestPlace(
  * Formats one request an agent is working on or that waits for a slot.
  *
  * @param request - The request.
- * @param requestId - Reply id of the turn that calls the tool.
  * @param linePlace - One-based place in line of a waiting request.
- * @param now - Time of the run.
+ * @param run - The reply that calls the tool, and the time of the run.
  * @returns Where it is, when it started, its model, and its step.
  */
 function formatRequest(
   request: AgentRequestView,
-  requestId: string,
   linePlace: number,
-  now: Date
+  run: StateToolRun
 ): string {
-  const place = formatRequestPlace(request, requestId)
-  const elapsed = formatElapsedTime(request.startedAt, now)
+  const place = formatRequestPlace(request, run.requestId)
+  const elapsed = formatElapsedTime(request.startedAt, run.now)
   return `${place}: started ${request.startedAt} (${elapsed}) with ${request.model}; ${formatRequestStep(request.step, linePlace)}.`
 }
 
@@ -431,13 +437,12 @@ function formatRequests(
 ): readonly string[] {
   const { requests } = state
   const clock = `Now: ${now.toISOString()}.`
+  const run: StateToolRun = Object.freeze({ requestId, now })
   const lines: string[] = []
   let waitingCount = 0
   for (const [index, request] of requests.entries()) {
     if (request.step.kind === "waiting") waitingCount += 1
-    lines.push(
-      `${index + 1}. ${formatRequest(request, requestId, waitingCount, now)}`
-    )
+    lines.push(`${index + 1}. ${formatRequest(request, waitingCount, run)}`)
   }
   const slots = formatRequestSlots(
     state.requestSlotCount,

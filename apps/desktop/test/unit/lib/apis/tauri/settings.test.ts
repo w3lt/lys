@@ -1,4 +1,7 @@
-import { modelLoadConfigurationSchema } from "@lys/share"
+import {
+  llmProviderSettingsSchema,
+  modelLoadConfigurationSchema
+} from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   loadSettings,
@@ -6,6 +9,7 @@ import {
   saveLoadConfigurationSettings,
   saveLocationSettings,
   saveMcpSettings,
+  saveProviderSettings,
   saveRuntimeAutoStartSettings,
   saveSecretsSettings,
   saveSettings,
@@ -25,12 +29,21 @@ import {
   waitForMicrotasks
 } from "../../../support/settlement"
 import {
+  STORED_GROQ_API_KEY,
   STORED_MCP_SETTINGS,
+  STORED_PROVIDERS_SETTINGS,
   STORED_SETTINGS,
   STORED_SETTINGS_DOCUMENT,
   STORED_TAVILY_API_KEY,
   type SettingsDocument
 } from "../../../support/settingsFixtures"
+
+/** Secrets group of a settings file that saves no key. */
+const NO_SAVED_KEYS = Object.freeze({
+  tavilyApiKey: null,
+  ollamaApiKey: null,
+  groqApiKey: null
+})
 
 /** Load settings of the model whose key names an object-prototype member. */
 const PROTOTYPE_KEY_LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
@@ -116,36 +129,64 @@ describe("loadSettings", () => {
     startNativeHostFake({
       load_settings: () => ({
         ...STORED_SETTINGS_DOCUMENT,
-        secrets: { tavilyApiKey: null }
+        secrets: NO_SAVED_KEYS
       })
     })
 
     const settings = await loadSettings()
 
-    expect(settings.secrets).toEqual({ tavilyApiKey: null })
+    expect(settings.secrets).toEqual(NO_SAVED_KEYS)
   })
 
-  it("rejects a key that fails the key format without naming the key", async () => {
-    const spacedKey = "tvly-key with-a-space"
+  it.each([
+    ["tavilyApiKey", "Tavily"],
+    ["ollamaApiKey", "Ollama"],
+    ["groqApiKey", "Groq"]
+  ])(
+    "rejects a %s that fails the key format without naming the key",
+    async (field, serviceName) => {
+      const spacedKey = "key with-a-space"
+      startNativeHostFake({
+        load_settings: () => ({
+          ...STORED_SETTINGS_DOCUMENT,
+          secrets: { ...STORED_SETTINGS_DOCUMENT.secrets, [field]: spacedKey }
+        })
+      })
+
+      const failure = await loadSettings().then(
+        () => {
+          throw new Error("The settings loaded")
+        },
+        (rejection: unknown) => rejection
+      )
+
+      expect(failure).toBeInstanceOf(Error)
+      expect(failure).toMatchObject({
+        message: `The settings file holds an invalid ${serviceName} API key.`
+      })
+      expect(String(failure)).not.toContain(spacedKey)
+    }
+  )
+
+  it("reads the provider choice with its addresses", async () => {
+    startNativeHostFake({ load_settings: () => STORED_SETTINGS_DOCUMENT })
+
+    const settings = await loadSettings()
+
+    expect(settings.providers).toEqual(STORED_PROVIDERS_SETTINGS)
+  })
+
+  it("rejects a provider choice that fails the provider rules", async () => {
     startNativeHostFake({
       load_settings: () => ({
         ...STORED_SETTINGS_DOCUMENT,
-        secrets: { tavilyApiKey: spacedKey }
+        providers: { ...STORED_PROVIDERS_SETTINGS, active: "openai" }
       })
     })
 
-    const failure = await loadSettings().then(
-      () => {
-        throw new Error("The settings loaded")
-      },
-      (rejection: unknown) => rejection
+    await expect(loadSettings()).rejects.toThrow(
+      "The settings file holds an invalid provider choice."
     )
-
-    expect(failure).toBeInstanceOf(Error)
-    expect(failure).toMatchObject({
-      message: "The settings file holds an invalid Tavily API key."
-    })
-    expect(String(failure)).not.toContain(spacedKey)
   })
 
   it("reads a settings file without a saved location as no location", async () => {
@@ -431,7 +472,7 @@ describe("saveLoadConfigurationSettings", () => {
 })
 
 describe("saveSecretsSettings", () => {
-  it("replaces only the secrets group of the document on disk", async () => {
+  it("replaces only the given key of the document on disk", async () => {
     const host = startNativeHostFake({
       load_settings: () => STORED_SETTINGS_DOCUMENT,
       save_settings: () => null
@@ -446,7 +487,11 @@ describe("saveSecretsSettings", () => {
         args: {
           newSettings: {
             ...STORED_SETTINGS_DOCUMENT,
-            secrets: { tavilyApiKey: null }
+            secrets: {
+              tavilyApiKey: null,
+              ollamaApiKey: null,
+              groqApiKey: STORED_GROQ_API_KEY
+            }
           }
         }
       }
@@ -457,7 +502,7 @@ describe("saveSecretsSettings", () => {
     const host = startNativeHostFake({
       load_settings: () => ({
         ...STORED_SETTINGS_DOCUMENT,
-        secrets: { tavilyApiKey: null }
+        secrets: { ...STORED_SETTINGS_DOCUMENT.secrets, tavilyApiKey: null }
       }),
       save_settings: () => null
     })
@@ -493,6 +538,44 @@ describe("saveSecretsSettings", () => {
     await expect(saveSecretsSettings({ tavilyApiKey: null })).rejects.toBe(
       "Disk full"
     )
+  })
+})
+
+describe("saveProviderSettings", () => {
+  it("replaces only the providers group of the document on disk", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+    const providers = llmProviderSettingsSchema.parse({
+      active: "ollamaCloud",
+      lmStudio: { address: "10.0.0.5:1234" },
+      ollama: { address: null }
+    })
+
+    await saveProviderSettings(providers)
+
+    expect(host.commands).toEqual([
+      { command: "load_settings", args: {} },
+      {
+        command: "save_settings",
+        args: { newSettings: { ...STORED_SETTINGS_DOCUMENT, providers } }
+      }
+    ])
+  })
+
+  it("writes nothing when the document cannot be loaded", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => Promise.reject("Failed to read settings.json"),
+      save_settings: () => null
+    })
+
+    await expect(saveProviderSettings(STORED_PROVIDERS_SETTINGS)).rejects.toBe(
+      "Failed to read settings.json"
+    )
+    expect(host.commands.map((invoked) => invoked.command)).toEqual([
+      "load_settings"
+    ])
   })
 })
 

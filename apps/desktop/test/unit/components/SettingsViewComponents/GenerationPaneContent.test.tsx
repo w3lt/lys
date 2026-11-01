@@ -181,7 +181,11 @@ describe("GenerationPaneContent", () => {
       { temperature: 0.7, replyCeiling: 2048 },
       {
         ...READY_RUNTIME,
-        modelInventory: { status: "ready", models: [buildLlmInfo("qwen3-8b")] }
+        modelInventory: {
+          status: "ready",
+          modelLoading: "lys",
+          models: [buildLlmInfo("qwen3-8b")]
+        }
       }
     )
 

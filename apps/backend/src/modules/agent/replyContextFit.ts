@@ -5,8 +5,9 @@ import type { ReplyContextMeasurement } from "./replyContextMeter"
  * next round's context cannot be measured against its window.
  *
  * @remarks Passive failure value constructed once per refused round. The
- * round is not sent, because LM Studio would load the model with settings Lys
- * does not know and could shorten a context that does not fit. It preserves
+ * round is not sent, because the provider would load the model with settings
+ * Lys does not know, such as a local Ollama server's own default window, and
+ * could shorten a context that does not fit. It preserves
  * the native `Error` contract and owns no mutable state.
  */
 export class ReplyModelNotLoadedError extends Error {

@@ -29,8 +29,9 @@ export type LlmRouteTestApp = TestFastify &
  * @remarks `app.llmService` borrows an operation queue that rejects every
  * operation with `Unexpected LLM engine operation`, so a route outcome comes
  * only from the capability method a case stubs with `vi.spyOn`.
- * `app.llmRuntimeService` holds no runtime: it is never connected, and an
- * acquisition would reject with `Unexpected LLM runtime acquisition`. Routes
+ * `app.llmRuntimeService` holds no runtime: it is never connected, and a
+ * provider lookup or an acquisition would reject with `Unexpected LLM
+ * provider lookup` or `Unexpected LLM runtime acquisition`. Routes
  * are not registered; each case registers the route under test.
  */
 export function createLlmRouteTestApp(): LlmRouteTestApp {
@@ -41,6 +42,8 @@ export function createLlmRouteTestApp(): LlmRouteTestApp {
   })
   const service = new LlmService({ llmEngineOperationQueue })
   const runtimeService = new LlmRuntimeService({
+    findLlmProviderAccess: () =>
+      Promise.reject(new Error("Unexpected LLM provider lookup")),
     acquireLlmRuntime: () =>
       Promise.reject(new Error("Unexpected LLM runtime acquisition")),
     reportLlmRuntimeAcquisitionFailure: vi.fn<(failure: unknown) => void>(),

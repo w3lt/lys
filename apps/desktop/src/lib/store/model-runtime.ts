@@ -1,4 +1,8 @@
-import type { LlmInfo, LlmTestModelApiResponse } from "@lys/protocol"
+import type {
+  LlmInfo,
+  LlmModelLoading,
+  LlmTestModelApiResponse
+} from "@lys/protocol"
 
 import { buildModelLoadConfiguration } from "@/lib/models/model-load-configuration"
 
@@ -11,7 +15,36 @@ import type {
 export type ModelInventoryState =
   | { readonly status: "unavailable" }
   | { readonly status: "failed" }
-  | { readonly status: "ready"; readonly models: readonly LlmInfo[] }
+  | {
+      readonly status: "ready"
+      readonly models: readonly LlmInfo[]
+      /**
+       * Who loads the models: `lys` when Lys loads and unloads them through
+       * the backend, `provider` when the provider decides which models are
+       * in memory.
+       */
+      readonly modelLoading: LlmModelLoading
+    }
+
+/**
+ * Who loads the models, as the latest inventory reports.
+ *
+ * @remarks `unknown` while no inventory has been read, so nothing may be
+ * offered or explained that depends on who loads the models.
+ */
+export type ObservedModelLoading = LlmModelLoading | "unknown"
+
+/**
+ * Reads who loads the models from the latest inventory observation.
+ *
+ * @param inventory - Latest inventory observation.
+ * @returns What a read inventory reports; `unknown` otherwise.
+ */
+export function readObservedModelLoading(
+  inventory: ModelInventoryState
+): ObservedModelLoading {
+  return inventory.status === "ready" ? inventory.modelLoading : "unknown"
+}
 
 /** One application-owned model request; mutations are serialized in the renderer. */
 export type ModelRequestState =

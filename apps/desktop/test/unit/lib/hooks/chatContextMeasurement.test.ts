@@ -43,6 +43,7 @@ const TRAINED_RUNTIME: RuntimeArrangement = {
   ...READY_RUNTIME,
   modelInventory: {
     status: "ready",
+    modelLoading: "lys",
     models: [
       buildLlmInfo("qwen3-8b", { loaded: true, trainedForToolUse: true })
     ]
@@ -231,6 +232,7 @@ describe("useChatContextMeasurement", () => {
       ...READY_RUNTIME,
       modelInventory: {
         status: "ready",
+        modelLoading: "lys",
         models: [
           buildLlmInfo("qwen3-8b", { loaded: true, trainedForToolUse: true })
         ]

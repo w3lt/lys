@@ -5,21 +5,25 @@ import {
   formatLmStudioStatusLabel,
   formatLmStudioStatusMeta
 } from "@/lib/models/lm-studio-connection"
+import type { LlmProviderTarget } from "@/lib/models/llm-provider-target"
 import type { BackendServerStatus } from "@/lib/store"
 import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
 
 /** Properties accepted by {@link LmStudioStatusCard}. */
 type LmStudioStatusCardProps = {
-  /** Latest LM Studio status published by the application store. */
+  /** Active provider, which the card names and locates. */
+  readonly provider: LlmProviderTarget
+  /** Latest provider status published by the application store. */
   readonly lmStudioStatus: LmStudioStatus
   /** Backend lifecycle state; only a running backend can be asked to reconnect. */
   readonly backendStatus: BackendServerStatus
-  /** Requests one new LM Studio connection attempt from the backend. */
+  /** Requests one new provider connection attempt from the backend. */
   readonly onRefreshLmStudioStatus: () => void
 }
 
 /**
- * Presents the backend's LM Studio connection status with one Refresh action.
+ * Presents the backend's connection status to the active provider with one
+ * Refresh action.
  *
  * @remarks The parent owns the status and the refresh request; the card owns
  * no state, effect, or store access. The heading and meta line are announced
@@ -29,6 +33,7 @@ type LmStudioStatusCardProps = {
  * @returns The LM Studio status card.
  */
 export default function LmStudioStatusCard({
+  provider,
   lmStudioStatus,
   backendStatus,
   onRefreshLmStudioStatus
@@ -37,7 +42,10 @@ export default function LmStudioStatusCard({
     backendStatus === "running" && lmStudioStatus !== "connecting"
 
   return (
-    <section aria-label="LM Studio connection" className="settings-view__card">
+    <section
+      aria-label={`${provider.name} connection`}
+      className="settings-view__card"
+    >
       <div className="settings-view__card-row">
         <div className="settings-view__identity">
           <span
@@ -46,9 +54,13 @@ export default function LmStudioStatusCard({
             data-tone={calculateLmStudioStatusTone(lmStudioStatus)}
           />
           <div aria-live="polite" className="settings-view__identity-lines">
-            <h2>{formatLmStudioStatusLabel(lmStudioStatus)}</h2>
+            <h2>{formatLmStudioStatusLabel(lmStudioStatus, provider)}</h2>
             <p className="settings-view__meta">
-              {formatLmStudioStatusMeta(lmStudioStatus, backendStatus)}
+              {formatLmStudioStatusMeta(
+                lmStudioStatus,
+                backendStatus,
+                provider
+              )}
             </p>
           </div>
         </div>

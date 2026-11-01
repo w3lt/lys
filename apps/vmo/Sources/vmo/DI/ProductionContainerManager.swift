@@ -11,9 +11,11 @@ private let initfsReference = "ghcr.io/apple/containerization/vminit:0.52.0"
 /// Support directory, created when it's missing. The store is held for this
 /// process before anything opens it (``holdImageStoreForProcess(at:)``), so
 /// a second vmo fails here, before it pulls or deletes, while this one runs.
-/// The manager then pulls the vminit image when the store doesn't have it
-/// yet, and unpacks the filesystem that VMs boot from out of that image
-/// unless the store holds it unpacked from that image already; see
+/// Next, what a pull that an earlier vmo didn't finish left in the store is
+/// deleted (``ImageStore/deleteUnfinishedPulls()``). The manager then pulls
+/// the vminit image when the store doesn't have it yet, and unpacks the
+/// filesystem that VMs boot from out of that image unless the store holds it
+/// unpacked from that image already; see
 /// ``ImageStore/loadInitfs(reference:)``. It pulls the
 /// ``readPageImageReference`` image at every start, so vmo reads pages with
 /// the image its `latest` tag names at that time. It then deletes every other
@@ -27,14 +29,15 @@ private let initfsReference = "ghcr.io/apple/containerization/vminit:0.52.0"
 /// - Throws: ``ImageStoreInUseError`` when another process holds the store,
 ///   or the file system's error when the store's directory can't be created
 ///   or its lock file can't be opened or locked, before anything else is
-///   done. Containerization's error when vmnet refuses to create the
-///   network, an image can't be pulled, for example without network access,
-///   vminit can't be unpacked, or deleting the images vmo no longer uses
-///   fails. The file system's error when the filesystem unpacked from vminit
-///   can't be checked, its record exists but can't be read, either can't be
-///   deleted, or a new unpack or its record can't be saved. Either way, vmo
-///   doesn't start, even when an earlier pull left the reader image in the
-///   store.
+///   done. The file system's error when the files of an unfinished pull
+///   can't be listed or deleted. Containerization's error when vmnet refuses
+///   to create the network, an image can't be pulled, for example without
+///   network access, vminit can't be unpacked, or deleting the images vmo no
+///   longer uses fails. The file system's error when the filesystem unpacked
+///   from vminit can't be checked, its record exists but can't be read,
+///   either can't be deleted, or a new unpack or its record can't be saved.
+///   Either way, vmo doesn't start, even when an earlier pull left the reader
+///   image in the store.
 func createProductionContainerManager() async throws -> ContainerManager {
     // TODO(#200): this kernel path only exists on the author's machine, so
     // read-page can't boot its VMs on any other Mac. vmo needs another way to
@@ -47,6 +50,7 @@ func createProductionContainerManager() async throws -> ContainerManager {
     let imageStorePath = URL.applicationSupportDirectory.appending(path: "com.w3lt.lys-vmo", directoryHint: .isDirectory)
     try holdImageStoreForProcess(at: imageStorePath)
     let imageStore = try ImageStore(path: imageStorePath)
+    try await imageStore.deleteUnfinishedPulls()
     let network = SharedNetwork(try VmnetNetwork())
     let initfs = try await imageStore.loadInitfs(reference: initfsReference)
     let manager = try ContainerManager(

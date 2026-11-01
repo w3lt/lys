@@ -128,7 +128,13 @@ each call still asks first unless the person set the tool to Just run; see
   had to kill a backend that did not end those groups, it ends every group
   the backend listed in `$LYS_HOME/mcp-process-groups`. Any process of the
   person's account that can write that file can make the host signal a group
-  of that account, which such a process could signal itself.
+  of that account, which such a process could signal itself. Between the
+  backend's last save of that file and the host's signal, at most the two
+  seconds of the stop, a listed group can end and the OS can give its
+  identifier to a new process of the account that starts a group of its own;
+  the signal then ends that group. The backend drops a group from the file as
+  soon as it sees it ended, which keeps that window short but does not close
+  it.
 - An MCP server writes its tools' descriptions, input schemas, and results,
   and all reach the model. A description is offered as the tool's
   description, cleaned of invisible characters and cut to 4,096 characters,

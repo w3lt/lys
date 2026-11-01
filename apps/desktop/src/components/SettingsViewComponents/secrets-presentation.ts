@@ -117,12 +117,12 @@ const NO_KEY_MESSAGE: TavilyKeyMessage = Object.freeze({
 /**
  * Formats a saved key for display, masked.
  *
- * @param apiKey - Saved key.
+ * @param apiKey - Saved key of any service; a secret.
  * @returns The first 5 and last 4 characters around bullets for a key of 16
  * or more characters; bullets only for a shorter one, which would otherwise
  * be shown almost whole.
  */
-function formatMaskedTavilyApiKey(apiKey: TavilyApiKey): string {
+export function formatMaskedApiKey(apiKey: string): string {
   if (apiKey.length < MINIMUM_PARTLY_SHOWN_KEY_LENGTH) return KEY_MASK
   return `${apiKey.slice(0, SHOWN_KEY_PREFIX_LENGTH)}${KEY_MASK}${apiKey.slice(-SHOWN_KEY_SUFFIX_LENGTH)}`
 }
@@ -139,7 +139,7 @@ export function formatTavilyKeyPlaceholder(
 ): string {
   return savedApiKey === null
     ? TAVILY_KEY_PLACEHOLDER
-    : formatMaskedTavilyApiKey(savedApiKey)
+    : formatMaskedApiKey(savedApiKey)
 }
 
 /**
@@ -302,7 +302,7 @@ export function formatTavilyKeyMessage(
   if (checkMessage !== undefined) return checkMessage
   if (input.savedApiKey === null) return NO_KEY_MESSAGE
   return {
-    text: `saved · ${formatMaskedTavilyApiKey(input.savedApiKey)}`,
+    text: `saved · ${formatMaskedApiKey(input.savedApiKey)}`,
     tone: "muted"
   }
 }

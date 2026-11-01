@@ -79,7 +79,8 @@ const llmRuntimeConnectApiResponseSchemas = Object.freeze({
  * Describes the POST endpoint that connects the backend to its LLM runtime.
  *
  * @remarks A connected backend keeps a runtime that still answers; otherwise
- * it acquires a new one. Concurrent requests share one attempt. The attempt
+ * it acquires a new one. Concurrent requests share one attempt while it is
+ * for the provider saved when they arrive. The attempt
  * occupies one position in the model-operation queue, so a full queue answers
  * with service-busy Problem Details and starts no attempt. A 200 response
  * carries the settled status, `connected` or `unreachable`. A client that

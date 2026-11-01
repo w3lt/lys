@@ -14,7 +14,6 @@ import type { LoadConfigurationSaveState } from "@/lib/store/load-configuration-
 import ModelLoadSettingFields from "./ModelLoadSettingFields"
 import {
   buildModelReloadPrompt,
-  formatLoadConfigurationEmptyMessage,
   isModelResidencyChanging
 } from "./model-load-presentation"
 import { useSettingsContext } from "./SettingsContext"
@@ -197,23 +196,30 @@ function ModelLoadConfigurationEditor({
   )
 }
 
+/** Properties accepted by {@link ModelLoadConfigurationPanel}. */
+type ModelLoadConfigurationPanelProps = {
+  /** Models of an inventory that was read, among which the edited one is found. */
+  readonly models: readonly LlmInfo[]
+}
+
 /**
  * Presents the load configuration of the model the Model pane edits.
  *
+ * @param props - The models of the inventory that was read.
  * @returns The section heading with the model's key, then that model's load
- * settings, or one line explaining why no model can be edited, and the save
- * feedback.
+ * settings, or a request to choose a default model when none can be edited,
+ * and the save feedback.
  * @remarks Requires SettingsContext. The edited model is the selected default
- * model when the inventory lists it; a loaded model that is not the default is
+ * model when the models include it; a loaded model that is not the default is
  * not edited. Choosing another model starts a new editor, so text being typed
- * for the previous model is discarded. Without an editable model the section
- * says to choose a default model, or that the model list is needed while the
- * inventory is not ready.
+ * for the previous model is discarded.
  */
-export default function ModelLoadConfigurationPanel(): ReactElement {
-  const { settings, modelInventory } = useSettingsContext()
+export default function ModelLoadConfigurationPanel({
+  models
+}: ModelLoadConfigurationPanelProps): ReactElement {
+  const { settings } = useSettingsContext()
   const model = findLoadConfigurationTarget(
-    modelInventory.status === "ready" ? modelInventory.models : [],
+    models,
     settings.runtime.defaultModel
   )
   return (
@@ -226,7 +232,7 @@ export default function ModelLoadConfigurationPanel(): ReactElement {
       </div>
       {model === undefined ? (
         <p className="settings-view__note">
-          {formatLoadConfigurationEmptyMessage(modelInventory.status)}
+          Choose a default model above to edit its load configuration.
         </p>
       ) : (
         <ModelLoadConfigurationEditor key={model.modelKey} model={model} />

@@ -6,7 +6,6 @@ import {
 } from "@/lib/models/model-load-configuration"
 import type {
   LoadedModelConfiguration,
-  ModelInventoryState,
   ModelRequestState
 } from "@/lib/store/model-runtime"
 import type { CompleteModelLoadConfiguration } from "@/lib/store/settings"
@@ -105,23 +104,4 @@ export function formatContextLengthNote(
   return maximumText === null
     ? "Tokens the weights can hold at once."
     : `Tokens the weights can hold at once. ${modelKey} tops out at ${maximumText}.`
-}
-
-/**
- * Formats the line shown when no model's load configuration can be edited.
- *
- * @param inventoryStatus - Latest inventory observation status.
- * @returns A request to choose a default model when the inventory is ready,
- * otherwise that the model list is needed first.
- */
-export function formatLoadConfigurationEmptyMessage(
-  inventoryStatus: ModelInventoryState["status"]
-): string {
-  switch (inventoryStatus) {
-    case "ready":
-      return "Choose a default model above to edit its load configuration."
-    case "unavailable":
-    case "failed":
-      return "Load configurations can be edited once the models are listed."
-  }
 }

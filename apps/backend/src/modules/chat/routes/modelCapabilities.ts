@@ -1,3 +1,7 @@
+import {
+  isSameLlmProviderAccess,
+  type LlmProviderAccess
+} from "../../llm/llmProviderAccess"
 import type { DownloadedLlmModel } from "../../llm/llmRuntimeTypes"
 
 /** What a turn needs to know about the model that answers it. */
@@ -11,11 +15,11 @@ export type ModelCapabilities = Readonly<{
 /**
  * Finds the capabilities of one model.
  *
- * @param model - Model a request names, which is LM Studio's model key.
+ * @param model - Model a request names, which is the provider's model key.
  * @returns A promise resolving to the capabilities, or to undefined when no
  * downloaded model has the key.
- * @throws If the inventory cannot be read: LM Studio cannot be reached, or
- * the model-operation queue is full.
+ * @throws If the inventory cannot be read: no provider is connected or it
+ * cannot be reached, or the model-operation queue is full.
  */
 export type FindModelCapabilities = (
   model: string
@@ -46,29 +50,52 @@ export async function findListedModelCapabilities(
   return (await findModelCapabilities(model)) ?? NO_MODEL_CAPABILITIES
 }
 
+/** Capabilities remembered for the provider they were listed by. */
+type RememberedCapabilities = Readonly<{
+  /** Provider whose listings the capabilities come from. */
+  access: LlmProviderAccess
+  /** Capabilities by model key. */
+  capabilities: Map<string, ModelCapabilities>
+}>
+
 /**
  * Creates the capability lookup over the downloaded models, which remembers
- * each listed model's capabilities.
+ * each listed model's capabilities for the connected provider.
  *
  * @param listDownloadedLlmModels - Downloaded-model query of the LLM service;
  * borrowed for the lookup's lifetime.
+ * @param findConnectedLlmProvider - Finds the provider the runtime service is
+ * connected to, or undefined while none is; borrowed for the lookup's
+ * lifetime.
  * @returns The lookup, which matches the model key exactly. The first lookup
  * of a model lists the downloaded models; once a listing has the model, its
- * capabilities are remembered for the lookup's lifetime and later lookups of
- * it list nothing. A model the listing does not have, or a failed listing,
- * is not remembered, so the next lookup lists again. It reads no loaded
- * state, which the capabilities do not depend on.
- * @remarks A model's capabilities come from its downloaded files, so they
- * are taken not to change while the backend runs; a restart reads them
- * again. Concurrent first lookups of one model may each list. Concurrency
- * model: single-owner, on the backend's event loop.
+ * capabilities are remembered and later lookups of it list nothing while the
+ * same provider stays connected. Connecting another provider, or the same
+ * one at another address or with another key, forgets every remembered
+ * model. A model the listing does not have, a failed listing, a listing made
+ * while no provider is connected, and a listing during which the connected
+ * provider changed are not remembered, so the next lookup lists again. It
+ * reads no loaded state, which the capabilities do not depend on.
+ * @remarks A model's capabilities come from its provider's metadata, so they
+ * are taken not to change while the backend stays connected to it; a restart
+ * reads them again. Concurrent first lookups of one model may each list.
+ * Concurrency model: single-owner, on the backend's event loop.
  */
 export function createModelCapabilitiesLookup(
-  listDownloadedLlmModels: () => Promise<readonly DownloadedLlmModel[]>
+  listDownloadedLlmModels: () => Promise<readonly DownloadedLlmModel[]>,
+  findConnectedLlmProvider: () => LlmProviderAccess | undefined
 ): FindModelCapabilities {
-  const remembered = new Map<string, ModelCapabilities>()
+  let remembered: RememberedCapabilities | undefined = undefined
   return async (model) => {
-    const known = remembered.get(model)
+    const listedBy = findConnectedLlmProvider()
+    if (
+      remembered !== undefined &&
+      (listedBy === undefined ||
+        !isSameLlmProviderAccess(remembered.access, listedBy))
+    ) {
+      remembered = undefined
+    }
+    const known = remembered?.capabilities.get(model)
     if (known !== undefined) return known
     const info = (await listDownloadedLlmModels()).find(
       (entry) => entry.modelKey === model
@@ -78,7 +105,23 @@ export function createModelCapabilitiesLookup(
       vision: info.vision,
       trainedForToolUse: info.trainedForToolUse
     })
-    remembered.set(model, capabilities)
+    const connected = findConnectedLlmProvider()
+    if (
+      listedBy !== undefined &&
+      connected !== undefined &&
+      isSameLlmProviderAccess(listedBy, connected)
+    ) {
+      if (
+        remembered === undefined ||
+        !isSameLlmProviderAccess(remembered.access, listedBy)
+      ) {
+        remembered = Object.freeze({
+          access: listedBy,
+          capabilities: new Map()
+        })
+      }
+      remembered.capabilities.set(model, capabilities)
+    }
     return capabilities
   }
 }

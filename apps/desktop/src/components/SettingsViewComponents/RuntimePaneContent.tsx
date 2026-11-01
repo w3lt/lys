@@ -7,6 +7,7 @@ import StartupSwitchSaveStatus from "./StartupSwitchSaveStatus"
 import VmoStatusCard from "./VmoStatusCard"
 import { useBackendUptimeMs } from "@/lib/hooks/backendRuntime"
 import { calculateModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
+import { describeLlmProviderTarget } from "@/lib/models/llm-provider-target"
 import { useLysStore } from "@/lib/store"
 
 import { useSettingsContext } from "./SettingsContext"
@@ -78,13 +79,13 @@ function ProcessCardGroup(): ReactElement {
 }
 
 /**
- * Presents the LM Studio card and, under it, the model card with the model
- * request feedback.
+ * Presents the active provider's card and, under it, the model card with the
+ * model request feedback.
  *
- * @remarks The application store owns the backend and LM Studio status and
- * the LM Studio connect command; the settings context owns the default
- * model, the model state, and the load and unload requests, and must be
- * provided. Refresh, Load, and Unload intentionally discard their promises
+ * @remarks The application store owns the backend and provider status and
+ * the connect command; the settings context owns the provider choice, the
+ * default model, the model state, and the load and unload requests, and must
+ * be provided. Refresh, Load, and Unload intentionally discard their promises
  * with `void`; their stores own each request's completion, and the model
  * request feedback, rendered last in the model card, reports the model
  * requests. The group renders no host of its own, so each card takes its
@@ -107,11 +108,13 @@ function ModelRuntimeCardGroup(): ReactElement {
     backendStatus,
     lmStudioStatus
   )
+  const provider = describeLlmProviderTarget(settings.providers)
 
   return (
     <>
       <LmStudioStatusCard
         backendStatus={backendStatus}
+        provider={provider}
         lmStudioStatus={lmStudioStatus}
         onRefreshLmStudioStatus={() => {
           void connectLmStudio()
@@ -119,6 +122,7 @@ function ModelRuntimeCardGroup(): ReactElement {
       />
       <ModelResidencyCard
         availability={availability}
+        provider={provider}
         defaultModel={settings.runtime.defaultModel}
         modelInventory={modelInventory}
         modelRequest={modelRequest}

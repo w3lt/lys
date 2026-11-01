@@ -28,9 +28,10 @@ Toolchain versions, platform prerequisites, and first build.
   `apps/vmo/run.sh` and `build.sh` installs. vmo builds and runs only on
   macOS 26 on Apple silicon; see
   [Runtime dependencies](/operate/dependencies/#vmo).
-- **LM Studio**: required for the local model inventory, model loading, chat,
-  and title-generation paths. Lys starts without it and shows LM Studio as not
-  reachable until it runs.
+- **A model provider**: LM Studio, a local Ollama server, Ollama Cloud, or
+  Groq, chosen in Settings → Providers; required for the model inventory,
+  chat, and title-generation paths, and LM Studio also for model loading. Lys
+  starts without it and shows the provider as not reachable until it answers.
 
 ## Install and bootstrap
 
@@ -80,12 +81,14 @@ readiness.
 ## Local endpoints to expect
 
 - The backend listens on `127.0.0.1:12345`.
-- The backend expects LM Studio on `127.0.0.1:1234`.
+- The backend reaches the provider chosen in Settings → Providers, at its
+  saved address for LM Studio and a local Ollama server; with nothing saved,
+  LM Studio on `127.0.0.1:1234`.
 - vmo listens on `127.0.0.1:8080`.
 
-Backend startup does not wait for LM Studio: the backend opens its HTTP
-listener, then tries once to connect. If LM Studio starts later, press
-**Refresh** on the LM Studio card in Settings → Runtime. A running desktop child
+Backend startup does not wait for the provider: the backend opens its HTTP
+listener, then tries once to connect. If the provider starts later, press
+**Refresh** on the provider card in Settings → Runtime. A running desktop child
 process alone does not establish that the HTTP endpoint is ready; the desktop
 reports the backend as running only after `GET /api/v1/heath` answers.
 

@@ -1,4 +1,3 @@
-import type { ModelLoadConfiguration } from "@lys/share"
 import type {
   DownloadedLlmModel,
   LlmContextMeasurement,
@@ -6,14 +5,17 @@ import type {
 } from "./llmRuntimeTypes"
 
 /**
- * Performs model operations against one attached LLM engine.
+ * Observes the models of one attached LLM engine and measures contexts with
+ * their tokenizers, or with estimates where the engine exposes none.
  *
  * @remarks Boundary capability used by the owning application service. All
- * operations are completion-only: user cancellation is unavailable, and a
- * client disconnect does not end accepted work or its ownership. Snapshots are
- * newly owned, transitively immutable observations, not model ownership or SDK
- * handles. External actors can change the engine afterward. Failure never
- * implies rollback of effects already performed.
+ * operations are completion-only queries: user cancellation is unavailable,
+ * and a client disconnect does not end accepted work or its ownership.
+ * Snapshots are newly owned, transitively immutable observations, not model
+ * ownership or SDK handles. External actors can change the engine afterward.
+ * Loading and stopping models is the separate
+ * [LlmModelInstanceController](./llmModelInstanceController.ts) capability,
+ * which only engines that Lys loads models in offer.
  */
 export interface LlmEngine {
   /**
@@ -29,10 +31,17 @@ export interface LlmEngine {
   listDownloadedLlmModels(): Promise<readonly DownloadedLlmModel[]>
 
   /**
-   * Observes the current loaded instances without changing model state.
+   * Observes the model instances that answer a request now, without changing
+   * model state.
    *
    * @returns A newly owned frozen array of frozen identities, empty when none
-   * are observed. Array order follows the engine observation.
+   * are observed. Array order follows the engine observation. An engine that
+   * Lys loads models in reports the instances it has loaded. An engine whose
+   * provider decides which models are in memory reports the models it serves
+   * now: the ones a local server reports running, or every model a hosted
+   * provider lists, because it serves each on demand. An instance carries
+   * the context length it is served with when the engine's listing reports
+   * it, so the caller need not measure it.
    * @throws The shared closed/busy failures, or
    * `The LLM runtime could not list loaded model instances.` for query failure,
    * or `The LLM runtime returned an invalid model instance.` for malformed identity.
@@ -40,49 +49,18 @@ export interface LlmEngine {
   listLoadedLlmModelInstances(): Promise<readonly LoadedLlmModelInstance[]>
 
   /**
-   * Loads the selected model to completion and observes its canonical identity.
-   *
-   * @param modelKeyOrAlias - Model selection interpreted within the attached engine.
-   * Unknown or rejected selections fail; repeated loads may create additional instances.
-   * @param loadConfiguration - Validated load settings applied to this load only.
-   * The engine decides each setting that is absent. How the engine treats a
-   * value the selected model cannot use, such as a context length above the
-   * model's maximum, is engine-defined.
-   * @returns A frozen identity after the engine has completed loading and its
-   * non-empty canonical key and instance identifier have been validated.
-   * @throws The shared closed/busy failures, or
-   * `The LLM runtime could not load the model.` for load failure, or
-   * `The LLM runtime returned an invalid model instance.` for malformed identity.
-   * @remarks Non-idempotent and completion-only. Failure can leave a model loaded.
-   */
-  loadLlmModel(
-    modelKeyOrAlias: string,
-    loadConfiguration: ModelLoadConfiguration
-  ): Promise<LoadedLlmModelInstance>
-
-  /**
-   * Stops one addressed model instance to the engine's acknowledgement.
-   *
-   * @param modelIdentifier - Opaque instance identifier scoped to the attached runtime.
-   * An already absent or otherwise rejected identifier may fail.
-   * @returns A promise resolving after the engine acknowledges the stop.
-   * @throws The shared closed/busy failures, or
-   * `The LLM runtime could not stop the model instance.` for stop failure.
-   * @remarks Completion-only; neither idempotence nor whole-model absence is
-   * promised. The service reconciles final model-key state through fresh inventory.
-   */
-  stopLoadedLlmModelInstance(modelIdentifier: string): Promise<void>
-
-  /**
-   * Measures texts with the tokenizer of a loaded model and observes the
-   * context length it is loaded with, without changing model state.
+   * Measures texts with the tokenizer of a loaded model, or estimates their
+   * counts where the engine exposes no tokenizer, and observes the context
+   * length the model is loaded with, without changing model state.
    *
    * @param model - Model selection as a chat request names it: a loaded
    * instance's identifier or a loaded model's canonical key.
    * @param texts - Texts to count, each on its own; may be empty.
    * @returns A frozen measurement whose context length is the smallest among
    * the loaded instances the selection names, with one count per text in
-   * text order; undefined when no loaded instance matches the selection.
+   * text order, exact or estimated as the implementation documents;
+   * undefined when no loaded instance matches the selection, or the engine
+   * does not report the length one is loaded with.
    * @throws The shared closed/busy failures, or
    * `The LLM runtime could not measure the context.` for a failed query or a
    * malformed engine answer.

@@ -44,6 +44,7 @@ const TRAINED_RUNTIME: RuntimeArrangement = {
   ...READY_RUNTIME,
   modelInventory: {
     status: "ready",
+    modelLoading: "lys",
     models: [
       buildLlmInfo("qwen3-8b", { loaded: true, trainedForToolUse: true })
     ]
@@ -55,6 +56,7 @@ const UNTRAINED_RUNTIME: RuntimeArrangement = {
   ...READY_RUNTIME,
   modelInventory: {
     status: "ready",
+    modelLoading: "lys",
     models: [buildLlmInfo("gemma-3", { loaded: true })]
   },
   defaultModel: "gemma-3"

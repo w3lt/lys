@@ -8,6 +8,7 @@ import { openMenuWithKeyboard } from "../../support/rendering"
 /** Inventory with one resident model and one on disk. */
 const INVENTORY: ModelInventoryState = {
   status: "ready",
+  modelLoading: "lys",
   models: [buildLlmInfo("qwen3-8b", { loaded: true }), buildLlmInfo("gemma-3")]
 }
 

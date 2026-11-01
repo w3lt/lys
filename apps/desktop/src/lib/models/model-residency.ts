@@ -144,21 +144,24 @@ export function formatModelResidencyHeading(
 /**
  * Formats the supporting line shown while no weights are known to be resident.
  *
- * @param availability - Whether model requests can reach LM Studio, and why not.
+ * @param availability - Whether model requests can reach the active
+ * provider, and why not.
  * @param defaultModel - Current default model identifier, when one is chosen.
+ * @param providerName - Name of the active provider.
  * @returns The reason nothing is in memory, naming what to do about it.
  */
 function formatAbsentResidencyMeta(
   availability: ModelRuntimeAvailability,
-  defaultModel: string | null
+  defaultModel: string | null,
+  providerName: string
 ): string {
   switch (availability) {
     case "backend-offline":
       return "start the backend first"
     case "lm-studio-connecting":
-      return "connecting to LM Studio"
+      return `connecting to ${providerName}`
     case "lm-studio-unreachable":
-      return "LM Studio is not reachable"
+      return `${providerName} is not reachable`
     case "available":
       return defaultModel === null
         ? "no default model chosen · pick one in Model"
@@ -170,18 +173,21 @@ function formatAbsentResidencyMeta(
  * Formats the supporting line under the residency heading.
  *
  * @param modelRuntime - Current residency state.
- * @param availability - Whether model requests can reach LM Studio, and why not.
+ * @param availability - Whether model requests can reach the active
+ * provider, and why not.
  * @param defaultModel - Current default model identifier, when one is chosen.
+ * @param providerName - Name of the active provider.
  * @returns The observed weights or the reason residency is unavailable.
  */
 export function formatModelResidencyMeta(
   modelRuntime: ModelRuntimeState,
   availability: ModelRuntimeAvailability,
-  defaultModel: string | null
+  defaultModel: string | null,
+  providerName: string
 ): string {
   switch (modelRuntime.status) {
     case "loaded":
-      return `${modelRuntime.modelKey} · loaded in LM Studio`
+      return `${modelRuntime.modelKey} · loaded in ${providerName}`
     case "loading":
       return modelRuntime.modelKey
     case "unloading":
@@ -191,9 +197,9 @@ export function formatModelResidencyMeta(
     case "unavailable":
       return availability === "available"
         ? UNOBSERVED_RESIDENCY_META
-        : formatAbsentResidencyMeta(availability, defaultModel)
+        : formatAbsentResidencyMeta(availability, defaultModel, providerName)
     case "none":
-      return formatAbsentResidencyMeta(availability, defaultModel)
+      return formatAbsentResidencyMeta(availability, defaultModel, providerName)
   }
 }
 
@@ -202,7 +208,8 @@ export function formatModelResidencyMeta(
  *
  * @param modelRuntime - Current residency state.
  * @param model - Weights the row represents.
- * @returns The row's state when it is the one in play, otherwise its disk size.
+ * @returns The row's state when it is the one in play, otherwise its disk
+ * size, or `not loaded` when the provider reports no size.
  */
 export function formatModelRowTag(
   modelRuntime: ModelRuntimeState,
@@ -214,7 +221,7 @@ export function formatModelRowTag(
 
   if (modelRuntime.status === "unknown") return "state unavailable"
   if (model.loaded) return "loaded"
-  return `${model.sizeLabel} on disk`
+  return formatOnDiskTag(model)
 }
 
 /**
@@ -224,7 +231,8 @@ export function formatModelRowTag(
  * @param model - Weights the row represents.
  * @param selectedModelKey - Current default model identifier, when chosen.
  * @returns The row's live condition when it has one, otherwise whether it is
- * merely the chosen default, otherwise its on-disk size. A resident tag reports
+ * merely the chosen default, otherwise its on-disk size, or `not loaded`
+ * when the provider reports no size. A resident tag reports
  * loaded weights for this row, including models outside the runtime projection.
  */
 export function formatComposerModelRowTag(
@@ -240,5 +248,17 @@ export function formatComposerModelRowTag(
   if (model.loaded) return "resident"
   if (model.modelKey === selectedModelKey) return "selected"
 
-  return `${model.sizeLabel} on disk`
+  return formatOnDiskTag(model)
+}
+
+/**
+ * Formats the tag of a model that is not loaded.
+ *
+ * @param model - Weights the row represents.
+ * @returns Its disk size, or `not loaded` when the provider reports no size.
+ */
+function formatOnDiskTag(model: LocalModelDescriptor): string {
+  return model.sizeLabel === undefined
+    ? "not loaded"
+    : `${model.sizeLabel} on disk`
 }

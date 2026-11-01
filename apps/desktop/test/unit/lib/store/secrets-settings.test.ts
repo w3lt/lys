@@ -24,8 +24,7 @@ import {
 } from "../../support/settlement"
 import {
   STORED_SETTINGS,
-  STORED_SETTINGS_DOCUMENT,
-  STORED_TAVILY_API_KEY
+  STORED_SETTINGS_DOCUMENT
 } from "../../support/settingsFixtures"
 
 /** Store state the slice borrows: the current settings and the slice. */
@@ -122,13 +121,17 @@ describe("createSecretsSettingsSlice", () => {
       expect(whileWriting).toEqual({ status: "saving" })
       expect(store.getState().secretsSave).toEqual({ status: "saved" })
       expect(store.getState().settings.secrets).toEqual({
+        ...STORED_SETTINGS.secrets,
         tavilyApiKey: NEW_TAVILY_API_KEY
       })
       expect(listSettingsWrites(host.commands)).toEqual([
         {
           newSettings: {
             ...STORED_SETTINGS_DOCUMENT,
-            secrets: { tavilyApiKey: NEW_TAVILY_API_KEY }
+            secrets: {
+              ...STORED_SETTINGS_DOCUMENT.secrets,
+              tavilyApiKey: NEW_TAVILY_API_KEY
+            }
           }
         }
       ])
@@ -143,12 +146,15 @@ describe("createSecretsSettingsSlice", () => {
       writes[0]?.resolve(null)
 
       await expect(removal).resolves.toBe("saved")
-      expect(store.getState().settings.secrets).toEqual({ tavilyApiKey: null })
+      expect(store.getState().settings.secrets).toEqual({
+        ...STORED_SETTINGS.secrets,
+        tavilyApiKey: null
+      })
       expect(listSettingsWrites(host.commands)).toEqual([
         {
           newSettings: {
             ...STORED_SETTINGS_DOCUMENT,
-            secrets: { tavilyApiKey: null }
+            secrets: { ...STORED_SETTINGS_DOCUMENT.secrets, tavilyApiKey: null }
           }
         }
       ])
@@ -167,9 +173,7 @@ describe("createSecretsSettingsSlice", () => {
         status: "failed",
         error: "Lys couldn't write the key to its settings file."
       })
-      expect(store.getState().settings.secrets).toEqual({
-        tavilyApiKey: STORED_TAVILY_API_KEY
-      })
+      expect(store.getState().settings.secrets).toEqual(STORED_SETTINGS.secrets)
     })
 
     it("answers busy without writing while another save runs", async () => {
@@ -185,6 +189,7 @@ describe("createSecretsSettingsSlice", () => {
       expect(second).toBe("busy")
       expect(listSettingsWrites(host.commands)).toHaveLength(1)
       expect(store.getState().settings.secrets).toEqual({
+        ...STORED_SETTINGS.secrets,
         tavilyApiKey: NEW_TAVILY_API_KEY
       })
     })
@@ -266,7 +271,10 @@ describe("createSecretsSettingsSlice", () => {
 
       expect(backend.requests).toHaveLength(0)
       expect(store.getState().tavilyKeyCheck).toEqual({ status: "idle" })
-      expect(store.getState().settings.secrets).toEqual({ tavilyApiKey: null })
+      expect(store.getState().settings.secrets).toEqual({
+        ...STORED_SETTINGS.secrets,
+        tavilyApiKey: null
+      })
     })
 
     it("drops the late answer of a check that a save started after", async () => {

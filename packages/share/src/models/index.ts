@@ -113,7 +113,22 @@ export {
   type McpServerTransport,
   type McpSettings
 } from "./mcp"
-export { tavilyApiKeySchema, type TavilyApiKey } from "./secrets"
+export {
+  llmProviderSchema,
+  llmProviderSettingsSchema,
+  providerAddressSchema,
+  type LlmProvider,
+  type LlmProviderSettings,
+  type ProviderAddress
+} from "./providers"
+export {
+  groqApiKeySchema,
+  ollamaApiKeySchema,
+  tavilyApiKeySchema,
+  type GroqApiKey,
+  type OllamaApiKey,
+  type TavilyApiKey
+} from "./secrets"
 export { MAXIMUM_SETTINGS_FILE_BYTES } from "./settingsFile"
 export {
   BACKEND_INTERNAL_TOOL_NAMES,

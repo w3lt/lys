@@ -23,14 +23,15 @@ This page documents only the flows implemented in the current codebase.
 5. Before it listens, the backend reads the `mcp` group of `settings.json`
    and starts connecting to each server it names in the background; see
    [Connect MCP servers](#connect-mcp-servers). It then opens its HTTP
-   listener without contacting LM Studio or waiting for an MCP server, and
-   makes one LM Studio connection attempt.
+   listener without contacting the model provider or waiting for an MCP
+   server, and makes one connection attempt to the saved provider.
 6. The store checks `GET /api/v1/heath` until it answers (`running`), the
    process exits (`stopped`), or 30 seconds pass (`unresponsive`).
-7. Once running, the store reads the LM Studio status, joining the startup
-   attempt if it is still `connecting`.
-8. If LM Studio is connected, the store requests model inventory; otherwise
-   the model list stays empty.
+7. Once running, the store reads the provider's connection status, joining
+   the startup attempt if it is still `connecting`. The request shares that
+   attempt when the saved provider is the one the attempt read.
+8. If the provider is connected, the store requests model inventory;
+   otherwise the model list stays empty.
 
 A manual Start follows steps 4–8.
 
@@ -92,14 +93,17 @@ seconds. Quitting Lys stops vmo and the backend together.
    connection, or cancels its opening, and opens it again from step 3 once
    that close or cancellation ended.
 
-## Reconnect to LM Studio
+## Reconnect to the model provider
 
-1. The user starts LM Studio and presses **Refresh** on the Runtime pane's LM
-   Studio card.
+1. The user starts the provider, such as LM Studio or a local Ollama server,
+   and presses **Refresh** on the Runtime pane's provider card.
 2. The store shows `connecting` and sends `POST /api/v1/llm/runtime/connect`.
 3. The backend queues one attempt behind accepted model work. It keeps a held
-   runtime that still answers and otherwise acquires a new one. Concurrent
-   requests share the attempt.
+   runtime that still answers and otherwise acquires a new one. Requests that
+   arrive while the attempt is queued share it. A request that arrives once
+   it runs reads the saved provider and shares it when the attempt read the
+   same provider; otherwise it queues another attempt, which reads the
+   provider again when it starts.
 4. The response carries `connected` or `unreachable`, and the store publishes
    it.
 5. On `connected`, the store requests model inventory.
@@ -118,16 +122,17 @@ seconds. Quitting Lys stops vmo and the backend together.
    the current temperature and an optional reply ceiling; a local zero ceiling
    is omitted from the request.
 4. The backend reads what each attachment is from its bytes and finds the
-   agent that answers. It reads from LM Studio whether the model sees images
-   and is trained for tool use, once per model until the backend stops. It
+   agent that answers. It reads from the connected provider whether the model
+   sees images and is trained for tool use, once per model while the backend
+   stays connected to that provider. It
    then writes the attachment files under
    `$LYS_HOME/attachments/<conversation id>/<message id>/`, creates or reuses
    the conversation, inserts the user message with its numbered attachments,
    and inserts an empty streaming assistant message. When an attachment is
    neither text nor an image Lys sends, no agent has the requested code, the
    conversation is not stored, its agent was deleted, an image is attached
-   for a model without vision, or LM Studio cannot answer about the model, the
-   backend answers with a problem instead and stores nothing.
+   for a model without vision, or the connected provider cannot answer about
+   the model, the backend answers with a problem instead and stores nothing.
 5. The backend emits a `start-new-conversation-turn` or
    `start-existing-conversation-turn` event.
 6. The reply first takes one of the answering agent's
@@ -194,8 +199,8 @@ seconds. Quitting Lys stops vmo and the backend together.
    Stop pressed before the turn-start event is sent as soon as that event
    names the reply, unless the user opens another conversation or starts a new
    one first; the reply then generates to its end.
-3. The backend aborts the reply's upstream LM Studio request. Title generation
-   continues.
+3. The backend aborts the reply's upstream request to the provider. Title
+   generation continues.
 4. The reply task stores the reply as `interrupted` and sends `interrupted` to
    every stream following it; the stop request then answers `204`.
 5. The desktop marks the assistant message `interrupted` when that event

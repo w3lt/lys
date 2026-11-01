@@ -1,10 +1,12 @@
 import {
   createLlmServiceBusyProblem,
   llmModelNotFoundProblemSchema,
+  llmProviderLoadsModelsProblemSchema,
   llmRuntimeUnavailableProblemSchema,
   llmUnloadFailedProblemSchema
 } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
+import { createLlmProviderLoadsModelsError } from "../../../../../src/modules/llm/llmProviderLoadsModelsError"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import updateFastifyWithLlmModelUnloadRoute from "../../../../../src/modules/llm/routes/unloadModelRoute"
@@ -207,6 +209,24 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     )
     expect(
       llmRuntimeUnavailableProblemSchema.safeParse(response.json()).success
+    ).toBe(true)
+  })
+
+  it("responds 409 with the provider-loads-models problem when the provider loads its own models", async () => {
+    const testApp = createLlmRouteTestApp()
+    vi.spyOn(testApp.service, "stopLlmModelsByKey").mockRejectedValue(
+      createLlmProviderLoadsModelsError()
+    )
+    await updateFastifyWithLlmModelUnloadRoute(testApp.app)
+
+    const response = await sendUnloadRequest(testApp)
+
+    expect(response.statusCode).toBe(409)
+    expect(response.headers["content-type"]).toMatch(
+      /^application\/problem\+json/
+    )
+    expect(
+      llmProviderLoadsModelsProblemSchema.safeParse(response.json()).success
     ).toBe(true)
   })
 })

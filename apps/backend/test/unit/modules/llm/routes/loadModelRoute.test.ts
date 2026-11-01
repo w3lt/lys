@@ -1,9 +1,11 @@
 import {
   createLlmServiceBusyProblem,
   llmLoadModelApiResponseBodySchema,
+  llmProviderLoadsModelsProblemSchema,
   llmRuntimeUnavailableProblemSchema
 } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
+import { createLlmProviderLoadsModelsError } from "../../../../../src/modules/llm/llmProviderLoadsModelsError"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import updateFastifyWithLlmModelLoadRoute from "../../../../../src/modules/llm/routes/loadModelRoute"
@@ -208,6 +210,28 @@ describe("updateFastifyWithLlmModelLoadRoute", () => {
     )
     expect(
       llmRuntimeUnavailableProblemSchema.safeParse(response.json()).success
+    ).toBe(true)
+  })
+
+  it("responds 409 with the provider-loads-models problem when the provider loads its own models", async () => {
+    const testApp = createLlmRouteTestApp()
+    vi.spyOn(testApp.service, "loadLlmModel").mockRejectedValue(
+      createLlmProviderLoadsModelsError()
+    )
+    await updateFastifyWithLlmModelLoadRoute(testApp.app)
+
+    const response = await testApp.app.inject({
+      method: "POST",
+      url: LOAD_MODEL_PATH,
+      payload: { modelId: "qwen3" }
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.headers["content-type"]).toMatch(
+      /^application\/problem\+json/
+    )
+    expect(
+      llmProviderLoadsModelsProblemSchema.safeParse(response.json()).success
     ).toBe(true)
   })
 })

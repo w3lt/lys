@@ -3,9 +3,11 @@ import {
   llmLoadModelApi,
   llmTestModelApi,
   llmUnloadModelApi,
+  llmProviderLoadsModelsProblemSchema,
   llmServiceBusyProblemSchema,
   llmUnloadProblemSchema,
   type LlmInfo,
+  type LlmListModelsApiResponse,
   type LlmTestModelApiResponse
 } from "@lys/protocol"
 import type { ModelLoadConfiguration } from "@lys/share"
@@ -81,6 +83,10 @@ async function createModelResponseError(response: Response): Promise<Error> {
     if (busy.success && response.status === busy.data.status) {
       return new Error(busy.data.detail)
     }
+    const refusal = llmProviderLoadsModelsProblemSchema.safeParse(body)
+    if (refusal.success && response.status === refusal.data.status) {
+      return new Error(refusal.data.detail)
+    }
     const problem = llmUnloadProblemSchema.safeParse(body)
     if (problem.success && response.status === problem.data.status) {
       return problem.data.type === "urn:lys:problem:llm:runtime-unavailable"
@@ -123,28 +129,29 @@ async function parseModelResponse<TPayload>(
 }
 
 /**
- * Lists the downloaded models and their observed loaded state.
+ * Lists the downloaded models, their observed loaded state, and who loads them.
  * @param connection - Backend origin and local cancellation signal.
- * @returns A validated immutable inventory after the response is consumed.
+ * @returns A validated immutable inventory, with whether Lys or the provider
+ * loads the models, after the response is consumed.
  * @throws On transport, HTTP, JSON, or protocol validation failure.
  */
 export async function listModels(
   connection: ModelApiConnection
-): Promise<readonly LlmInfo[]> {
+): Promise<LlmListModelsApiResponse> {
   const response = await getModelResponse({
     ...connection,
     path: llmListModelsApi.path,
     method: llmListModelsApi.method
   })
-  const { llms } = await parseModelResponse(
+  const inventory = await parseModelResponse(
     response,
     llmListModelsApi.responses[200].parse
   )
-  const keys = new Set(llms.map((model) => model.modelKey))
-  if (keys.size !== llms.length || keys.has("")) {
+  const keys = new Set(inventory.llms.map((model) => model.modelKey))
+  if (keys.size !== inventory.llms.length || keys.has("")) {
     throw new Error("The backend returned invalid or duplicate model keys.")
   }
-  return llms
+  return inventory
 }
 
 /**
@@ -156,7 +163,8 @@ export async function listModels(
  * @returns Canonical model metadata after the backend confirms loading.
  * @throws On invalid input, including a load setting outside its accepted
  * range, before any request is sent; or on transport, HTTP, JSON, or protocol
- * failure.
+ * failure, including the backend's refusal when the connected provider loads
+ * its own models.
  * @remarks Accepted loads can finish after local cancellation; no automatic retry occurs.
  */
 export async function loadModel(
@@ -182,7 +190,9 @@ export async function loadModel(
  * @param modelKey - Canonical inventory key to unload.
  * @param connection - Backend origin and local cancellation signal.
  * @returns Resolves only for the protocol's bodyless 204 acknowledgement.
- * @throws On invalid input, transport, declared failure, or an unexpected success status.
+ * @throws On invalid input, transport, declared failure, including the
+ * backend's refusal when the connected provider loads its own models, or an
+ * unexpected success status.
  */
 export async function unloadModel(
   modelKey: string,

@@ -393,6 +393,7 @@ describe("AgentEditor", () => {
           ...READY_RUNTIME,
           modelInventory: {
             status: "ready",
+            modelLoading: "lys",
             models: [buildLlmInfo("qwen3-8b")]
           }
         }

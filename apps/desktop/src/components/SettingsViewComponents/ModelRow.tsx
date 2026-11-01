@@ -7,7 +7,10 @@ import {
   formatModelRowTag,
   readModelRowTone
 } from "@/lib/models/model-residency"
-import type { ModelRuntimeState } from "@/lib/store/model-runtime"
+import type {
+  ModelRuntimeState,
+  ObservedModelLoading
+} from "@/lib/store/model-runtime"
 
 /** Selection contract for one backend model row. */
 type ModelChoiceProps = {
@@ -68,6 +71,11 @@ type ModelRowActionsProps = {
   readonly model: LocalModelDescriptor
   /** Prevents new requests while the backend is stopped or busy. */
   readonly disabled: boolean
+  /**
+   * Who loads the models, as the inventory reports; Load and Unload are
+   * present only when Lys loads them.
+   */
+  readonly modelLoading: ObservedModelLoading
   /** Loads the selected key and handles failures in shared state. */
   readonly onLoad: (modelKey: string) => Promise<void>
   /** Unloads the selected key and handles failures in shared state. */
@@ -79,7 +87,8 @@ type ModelRowActionsProps = {
 /**
  * Presents model operations supported by the backend.
  * @param props - Model, availability, and store-owned asynchronous callbacks.
- * @returns Named native controls for health and residency.
+ * @returns Named native controls for health and, while the inventory
+ * reports that Lys loads the models, residency.
  * @remarks The store observes all failures;
  * this row does not cancel application work on unmount. Health path eligibility
  * comes from the shared parameter validator rather than a copied length limit.
@@ -87,6 +96,7 @@ type ModelRowActionsProps = {
 function ModelRowActions({
   model,
   disabled,
+  modelLoading,
   onLoad,
   onUnload,
   onTest
@@ -111,21 +121,23 @@ function ModelRowActions({
       >
         Test
       </Button>
-      <Button
-        aria-label={`${model.loaded ? "Unload" : "Load"} ${model.modelKey}`}
-        className="settings-view__model-act"
-        disabled={disabled}
-        onClick={() =>
-          void (model.loaded
-            ? onUnload(model.modelKey)
-            : onLoad(model.modelKey))
-        }
-        size="sm"
-        type="button"
-        variant={model.loaded ? "outline" : "default"}
-      >
-        {model.loaded ? "Unload" : "Load"}
-      </Button>
+      {modelLoading === "lys" ? (
+        <Button
+          aria-label={`${model.loaded ? "Unload" : "Load"} ${model.modelKey}`}
+          className="settings-view__model-act"
+          disabled={disabled}
+          onClick={() =>
+            void (model.loaded
+              ? onUnload(model.modelKey)
+              : onLoad(model.modelKey))
+          }
+          size="sm"
+          type="button"
+          variant={model.loaded ? "outline" : "default"}
+        >
+          {model.loaded ? "Unload" : "Load"}
+        </Button>
+      ) : null}
     </div>
   )
 }
@@ -145,6 +157,7 @@ export default function ModelRow({
   modelRuntime,
   onSelect,
   disabled,
+  modelLoading,
   onLoad,
   onUnload,
   onTest
@@ -163,6 +176,7 @@ export default function ModelRow({
       <ModelRowActions
         model={model}
         disabled={disabled}
+        modelLoading={modelLoading}
         onLoad={onLoad}
         onUnload={onUnload}
         onTest={onTest}

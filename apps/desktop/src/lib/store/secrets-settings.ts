@@ -72,8 +72,13 @@ type SecretsSettingsStore = SecretsSettingsSlice & {
 
 /** Capabilities the secrets slice uses. */
 export type SecretsSettingsDependencies = {
-  /** Saves the secrets group, serialized with the other group saves. */
-  readonly saveSecretsSettings: (secrets: SecretsSettings) => Promise<void>
+  /**
+   * Saves some keys of the secrets group, serialized with the other group
+   * saves; keys not given keep their values on disk.
+   */
+  readonly saveSecretsSettings: (
+    changedSecrets: Partial<SecretsSettings>
+  ) => Promise<void>
   /** Asks the backend to check the saved key; rejects on transport failure. */
   readonly sendWebSearchKeyCheck: () => Promise<CheckWebSearchKeyApiResponse>
 }
@@ -135,16 +140,21 @@ export function createSecretsSettingsSlice(
   ): Promise<SecretsSaveOutcome> {
     if (get().secretsSave.status === "saving") return "busy"
     currentKeyCheckOperation += 1
-    const secrets: SecretsSettings = Object.freeze({ tavilyApiKey: apiKey })
     set({ secretsSave: SAVING, tavilyKeyCheck: IDLE_CHECK })
     try {
-      await dependencies.saveSecretsSettings(secrets)
+      await dependencies.saveSecretsSettings({ tavilyApiKey: apiKey })
     } catch {
       set({ secretsSave: SAVE_FAILED })
       return "failed"
     }
     set((state) => ({
-      settings: { ...state.settings, secrets },
+      settings: {
+        ...state.settings,
+        secrets: Object.freeze({
+          ...state.settings.secrets,
+          tavilyApiKey: apiKey
+        })
+      },
       secretsSave: SAVED
     }))
     return "saved"

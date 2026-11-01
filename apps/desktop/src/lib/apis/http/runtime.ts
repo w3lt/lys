@@ -97,7 +97,7 @@ async function parseLlmRuntimeConnectionResponse(
   if (!response.ok) {
     await response.body?.cancel()
     throw new Error(
-      `LM Studio status request failed (HTTP ${response.status}).`
+      `Model provider status request failed (HTTP ${response.status}).`
     )
   }
 
@@ -105,7 +105,7 @@ async function parseLlmRuntimeConnectionResponse(
     const payload: unknown = await response.json()
     return llmRuntimeConnectionApiResponseSchema.parse(payload).status
   } catch (cause) {
-    throw new Error("The backend returned an invalid LM Studio status.", {
+    throw new Error("The backend returned an invalid model provider status.", {
       cause
     })
   }

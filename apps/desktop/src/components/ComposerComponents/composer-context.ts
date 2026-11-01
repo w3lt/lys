@@ -27,10 +27,10 @@ const MEASURING_CONTEXT_METER_STATE: ContextMeterState = Object.freeze({
   status: "measuring"
 })
 
-/** Meter for a model LM Studio has not loaded; it carries no data. */
+/** Meter for a model the provider has not loaded; it carries no data. */
 const MODEL_NOT_LOADED_CONTEXT_METER_STATE: ContextMeterState = Object.freeze({
   status: "unknown",
-  reason: "LM Studio has not loaded the model, so the window is unknown."
+  reason: "The provider has not loaded the model, so the window is unknown."
 })
 
 /** Breakdown of the context window the next message would take. */

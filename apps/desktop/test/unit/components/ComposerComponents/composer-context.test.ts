@@ -204,7 +204,7 @@ describe("buildContextMeterState", () => {
       )
     ).toEqual({
       status: "unknown",
-      reason: "LM Studio has not loaded the model, so the window is unknown."
+      reason: "The provider has not loaded the model, so the window is unknown."
     })
   })
 

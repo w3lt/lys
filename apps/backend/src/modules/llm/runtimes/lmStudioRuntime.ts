@@ -6,6 +6,7 @@ import {
 } from "@lmstudio/sdk"
 import type { ModelLoadConfiguration } from "@lys/share"
 import * as z from "zod"
+import type { LlmModelInstanceController } from "../llmModelInstanceController"
 import type { LlmRuntime } from "../llmRuntime"
 import type {
   DownloadedLlmModel,
@@ -13,6 +14,7 @@ import type {
   LlmRuntimeAvailability,
   LoadedLlmModelInstance
 } from "../llmRuntimeTypes"
+import LlmRuntimeAdmission from "./llmRuntimeAdmission"
 import {
   createDownloadedLlmModelSnapshot,
   createLoadedLlmModelInstanceSnapshot
@@ -24,52 +26,29 @@ const lmStudioContextLengthSchema = z.int().positive()
 /** Validates the token count LM Studio returns for one text. */
 const lmStudioTokenCountSchema = z.int().nonnegative()
 
-/** Admission and cleanup state owned exclusively by one LM Studio runtime. */
-type LmStudioRuntimeState =
-  | Readonly<{
-      /** No active operation; model work may begin. */
-      status: "ready"
-    }>
-  | Readonly<{
-      /** One accepted operation retains the SDK client until settlement. */
-      status: "active"
-      /** Non-rejecting settlement joined by cleanup regardless of operation outcome. */
-      completion: Promise<void>
-    }>
-  | Readonly<{
-      /** Admission is terminally closed while work and cleanup settle. */
-      status: "closing"
-      /** Shared cleanup outcome retained for every disposal caller. */
-      completion: Promise<void>
-    }>
-  | Readonly<{
-      /** Cleanup settled successfully or failed; model operations remain forbidden. */
-      status: "closed"
-      /** Settled cleanup outcome retained without retrying resource release. */
-      completion: Promise<void>
-    }>
-
 /**
- * Owns one LM Studio client to implement {@link LlmRuntime} with terminal cleanup.
+ * Owns one LM Studio client to implement {@link LlmRuntime} and
+ * {@link LlmModelInstanceController} with terminal cleanup.
  *
  * @remarks Concurrency
- * model: single-owner; the owning service confines calls, and synchronous
- * admission rejects operational overlap before SDK access. State transitions are
- * `ready -> active -> ready` and `ready | active -> closing -> closed`.
+ * model: single-owner; the owning service confines calls, and
+ * {@link LlmRuntimeAdmission} rejects operational overlap before SDK access.
  * There is no runtime waiting queue. The owned disposal stack is the client's
  * sole release registration; the client field borrows that protected resource.
  * Model operations retain the interface's application-owned completion-only
  * lifetime. Cleanup closes SDK connections without unloading engine models.
  */
-export default class LmStudioRuntime implements LlmRuntime {
+export default class LmStudioRuntime
+  implements LlmRuntime, LlmModelInstanceController
+{
   /** SDK client borrowed from this runtime's exclusively owned disposal stack. */
   readonly #client: LMStudioClient
 
   /** Sole owner of the SDK client's required release operation. */
   readonly #clientLifetime: AsyncDisposableStack
 
-  /** Authoritative operational admission and terminal cleanup state. */
-  #state: LmStudioRuntimeState = Object.freeze({ status: "ready" })
+  /** Admits one operation at a time and closes the runtime once. */
+  readonly #admission = new LlmRuntimeAdmission()
 
   /**
    * Retains an already protected SDK client without starting external work.
@@ -137,8 +116,7 @@ export default class LmStudioRuntime implements LlmRuntime {
    * @throws The interface-defined admission failure when the runtime is busy or closed.
    */
   public async getRuntimeAvailability(): Promise<LlmRuntimeAvailability> {
-    const operation = this.#startRuntimeOperation()
-    try {
+    return await this.#admission.runOperation(async () => {
       const availabilityQuery = this.#client.system.getLMStudioVersion()
       try {
         await availabilityQuery
@@ -146,9 +124,7 @@ export default class LmStudioRuntime implements LlmRuntime {
       } catch {
         return "unavailable"
       }
-    } finally {
-      this.#handleRuntimeOperationCompletion(operation)
-    }
+    })
   }
 
   /**
@@ -160,8 +136,7 @@ export default class LmStudioRuntime implements LlmRuntime {
   public async listDownloadedLlmModels(): Promise<
     readonly DownloadedLlmModel[]
   > {
-    const operation = this.#startRuntimeOperation()
-    try {
+    return await this.#admission.runOperation(async () => {
       const models = await this.#client.system
         .listDownloadedModels("llm")
         .catch((cause: unknown) => {
@@ -170,9 +145,7 @@ export default class LmStudioRuntime implements LlmRuntime {
           })
         })
       return Object.freeze(models.map(createDownloadedLlmModelSnapshot))
-    } finally {
-      this.#handleRuntimeOperationCompletion(operation)
-    }
+    })
   }
 
   /**
@@ -184,8 +157,7 @@ export default class LmStudioRuntime implements LlmRuntime {
   public async listLoadedLlmModelInstances(): Promise<
     readonly LoadedLlmModelInstance[]
   > {
-    const operation = this.#startRuntimeOperation()
-    try {
+    return await this.#admission.runOperation(async () => {
       const models = await this.#client.llm
         .listLoaded()
         .catch((cause: unknown) => {
@@ -195,13 +167,12 @@ export default class LmStudioRuntime implements LlmRuntime {
           )
         })
       return Object.freeze(models.map(createLoadedLlmModelInstanceSnapshot))
-    } finally {
-      this.#handleRuntimeOperationCompletion(operation)
-    }
+    })
   }
 
   /**
-   * Implements {@link LlmRuntime.loadLlmModel} with a completion-only SDK load.
+   * Implements {@link LlmModelInstanceController.loadLlmModel} with a
+   * completion-only SDK load.
    *
    * @param modelKeyOrAlias - Interface-defined engine model selection.
    * @param loadConfiguration - Interface-defined load settings, given to the SDK
@@ -213,8 +184,7 @@ export default class LmStudioRuntime implements LlmRuntime {
     modelKeyOrAlias: string,
     loadConfiguration: ModelLoadConfiguration
   ): Promise<LoadedLlmModelInstance> {
-    const operation = this.#startRuntimeOperation()
-    try {
+    return await this.#admission.runOperation(async () => {
       const loadedModel = await this.#client.llm
         .load(modelKeyOrAlias, {
           config: buildLmStudioLoadConfig(loadConfiguration)
@@ -225,13 +195,12 @@ export default class LmStudioRuntime implements LlmRuntime {
           })
         })
       return createLoadedLlmModelInstanceSnapshot(loadedModel)
-    } finally {
-      this.#handleRuntimeOperationCompletion(operation)
-    }
+    })
   }
 
   /**
-   * Implements {@link LlmRuntime.stopLoadedLlmModelInstance} through SDK unloading.
+   * Implements {@link LlmModelInstanceController.stopLoadedLlmModelInstance}
+   * through SDK unloading.
    *
    * @param modelIdentifier - Interface-defined opaque loaded-instance identifier.
    * @returns A promise resolving after the SDK acknowledges unloading.
@@ -240,16 +209,15 @@ export default class LmStudioRuntime implements LlmRuntime {
   public async stopLoadedLlmModelInstance(
     modelIdentifier: string
   ): Promise<void> {
-    const operation = this.#startRuntimeOperation()
-    try {
-      await this.#client.llm.unload(modelIdentifier)
-    } catch (cause) {
-      throw new Error("The LLM runtime could not stop the model instance.", {
-        cause
-      })
-    } finally {
-      this.#handleRuntimeOperationCompletion(operation)
-    }
+    await this.#admission.runOperation(async () => {
+      try {
+        await this.#client.llm.unload(modelIdentifier)
+      } catch (cause) {
+        throw new Error("The LLM runtime could not stop the model instance.", {
+          cause
+        })
+      }
+    })
   }
 
   /**
@@ -266,22 +234,21 @@ export default class LmStudioRuntime implements LlmRuntime {
     model: string,
     texts: readonly string[]
   ): Promise<LlmContextMeasurement | undefined> {
-    const operation = this.#startRuntimeOperation()
-    try {
-      const loadedModels = await this.#client.llm.listLoaded()
-      return await findLoadedLlmContextMeasurement(
-        loadedModels.filter((loadedModel) =>
-          isSelectedLoadedModel(loadedModel, model)
-        ),
-        texts
-      )
-    } catch (cause) {
-      throw new Error("The LLM runtime could not measure the context.", {
-        cause
-      })
-    } finally {
-      this.#handleRuntimeOperationCompletion(operation)
-    }
+    return await this.#admission.runOperation(async () => {
+      try {
+        const loadedModels = await this.#client.llm.listLoaded()
+        return await findLoadedLlmContextMeasurement(
+          loadedModels.filter((loadedModel) =>
+            isSelectedLoadedModel(loadedModel, model)
+          ),
+          texts
+        )
+      } catch (cause) {
+        throw new Error("The LLM runtime could not measure the context.", {
+          cause
+        })
+      }
+    })
   }
 
   /**
@@ -291,63 +258,7 @@ export default class LmStudioRuntime implements LlmRuntime {
    * @throws The interface-defined terminal resource-release failure.
    */
   public async [Symbol.asyncDispose](): Promise<void> {
-    if (this.#state.status === "closing" || this.#state.status === "closed") {
-      return await this.#state.completion
-    }
-    const activeCompletion =
-      this.#state.status === "active"
-        ? this.#state.completion
-        : Promise.resolve()
-    const cleanupCompletion = activeCompletion.then(
-      async () => await this.#closeRuntimeResources()
-    )
-    this.#state = Object.freeze({
-      status: "closing",
-      completion: cleanupCompletion
-    })
-    try {
-      await cleanupCompletion
-    } finally {
-      this.#state = Object.freeze({
-        status: "closed",
-        completion: cleanupCompletion
-      })
-    }
-  }
-
-  /**
-   * Reserves the runtime's sole operation position before any SDK effect.
-   *
-   * @returns Settlement authority retained by the accepted operation's finalizer.
-   * @throws The interface-defined closed or active-operation failure.
-   */
-  #startRuntimeOperation(): PromiseWithResolvers<void> {
-    if (this.#state.status === "closing" || this.#state.status === "closed") {
-      throw new Error("The LLM runtime is closed.")
-    }
-    if (this.#state.status === "active") {
-      throw new Error("The LLM runtime already has an active operation.")
-    }
-    const operation = Promise.withResolvers<void>()
-    this.#state = Object.freeze({
-      status: "active",
-      completion: operation.promise
-    })
-    return operation
-  }
-
-  /**
-   * Ends the accepted call while preserving a concurrent terminal cleanup transition.
-   *
-   * @param operation - Settlement authority of the currently active operation.
-   */
-  #handleRuntimeOperationCompletion(
-    operation: PromiseWithResolvers<void>
-  ): void {
-    if (this.#state.status === "active") {
-      this.#state = Object.freeze({ status: "ready" })
-    }
-    operation.resolve()
+    await this.#admission.close(async () => await this.#closeRuntimeResources())
   }
 
   /**

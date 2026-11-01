@@ -1993,6 +1993,7 @@ describe("useChatViewStore", () => {
     useLysStore.setState({
       modelInventory: {
         status: "ready",
+        modelLoading: "lys",
         models: [
           buildLlmInfo("resident", { loaded: true, trainedForToolUse: true })
         ]
@@ -2026,6 +2027,7 @@ describe("useChatViewStore", () => {
     useLysStore.setState({
       modelInventory: {
         status: "ready",
+        modelLoading: "lys",
         models: [
           buildLlmInfo("resident", { loaded: true, trainedForToolUse: true })
         ]
@@ -2060,6 +2062,7 @@ describe("useChatViewStore", () => {
     useLysStore.setState({
       modelInventory: {
         status: "ready",
+        modelLoading: "lys",
         models: [
           buildLlmInfo("resident", { loaded: true, trainedForToolUse: true })
         ]
@@ -2097,6 +2100,7 @@ describe("useChatViewStore", () => {
       useLysStore.setState({
         modelInventory: {
           status: "ready",
+          modelLoading: "lys",
           models: [
             buildLlmInfo("resident", { loaded: true, trainedForToolUse: true })
           ]
@@ -2135,6 +2139,7 @@ describe("useChatViewStore", () => {
     useLysStore.setState({
       modelInventory: {
         status: "ready",
+        modelLoading: "lys",
         models: [
           buildLlmInfo("resident", { loaded: true, trainedForToolUse: false })
         ]
@@ -2174,6 +2179,7 @@ describe("useChatViewStore", () => {
     useLysStore.setState({
       modelInventory: {
         status: "ready",
+        modelLoading: "lys",
         models: [
           buildLlmInfo("resident", { loaded: true, trainedForToolUse: true })
         ]
@@ -2219,6 +2225,7 @@ describe("useChatViewStore", () => {
     useLysStore.setState({
       modelInventory: {
         status: "ready",
+        modelLoading: "lys",
         models: [
           buildLlmInfo("resident", {
             loaded: true,

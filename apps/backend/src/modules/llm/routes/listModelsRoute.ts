@@ -9,7 +9,7 @@ import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
  *
  * The registrar mutates `app` by installing the protocol GET path. The handler
  * reads the application-owned LLM service and serializes downloaded models
- * enriched with their loaded state.
+ * enriched with their loaded state, and who loads them.
  *
  * @param app - Application instance that receives the LLM inventory route.
  * @returns A promise that resolves after route registration completes.
@@ -53,10 +53,7 @@ function registerLlmListModelsRoute(app: FastifyInstance): void {
     },
     errorHandler: handleLlmServiceRequestFailure,
     handler: async function () {
-      const llms = await llmModelInventory.listLlmModels()
-      return Object.freeze({
-        llms
-      })
+      return await llmModelInventory.listLlmModels()
     }
   })
 }

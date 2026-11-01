@@ -9,6 +9,7 @@ import { buildLlmInfo } from "../../support/modelFixtures"
 /** Inventory listing one model trained for tools and one that is not. */
 const INVENTORY: ModelInventoryState = {
   status: "ready",
+  modelLoading: "lys",
   models: [
     buildLlmInfo("trained", { loaded: true, trainedForToolUse: true }),
     buildLlmInfo("untrained", { loaded: true, trainedForToolUse: false })

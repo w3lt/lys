@@ -1,22 +1,31 @@
 import { vi, type Mock } from "vitest"
 import type { LlmEngine } from "../../../src/modules/llm/llmEngine"
-import type { LlmRuntime } from "../../../src/modules/llm/llmRuntime"
+import type { LlmModelInstanceController } from "../../../src/modules/llm/llmModelInstanceController"
+import type {
+  AcquiredLlmRuntime,
+  LlmRuntime
+} from "../../../src/modules/llm/llmRuntime"
 import type { LlmRuntimeLifecycle } from "../../../src/modules/llm/llmRuntimeLifecycle"
+import type { ConnectedLlmEngine } from "../../../src/modules/llm/llmService"
 
 /**
- * Runtime double usable wherever an `LlmRuntime` or its `LlmEngine` view is
- * accepted, with every operation observable.
+ * Runtime double usable wherever an `LlmRuntime`, its `LlmEngine` view, or a
+ * model-loading `LlmModelInstanceController` is accepted, with every
+ * operation observable.
  */
 export type FakeLlmRuntime = LlmRuntime &
+  LlmModelInstanceController &
   Readonly<{
     /** Downloaded-inventory query. */
     listDownloadedLlmModels: Mock<LlmEngine["listDownloadedLlmModels"]>
     /** Loaded-inventory query. */
     listLoadedLlmModelInstances: Mock<LlmEngine["listLoadedLlmModelInstances"]>
     /** Model load command. */
-    loadLlmModel: Mock<LlmEngine["loadLlmModel"]>
+    loadLlmModel: Mock<LlmModelInstanceController["loadLlmModel"]>
     /** Instance stop command. */
-    stopLoadedLlmModelInstance: Mock<LlmEngine["stopLoadedLlmModelInstance"]>
+    stopLoadedLlmModelInstance: Mock<
+      LlmModelInstanceController["stopLoadedLlmModelInstance"]
+    >
     /** Context measurement query. */
     findLlmContextMeasurement: Mock<LlmEngine["findLlmContextMeasurement"]>
     /** Provider readiness probe. */
@@ -43,12 +52,13 @@ export function createFakeLlmRuntime(): FakeLlmRuntime {
     >(() =>
       Promise.reject(createUnexpectedCallError("listLoadedLlmModelInstances"))
     ),
-    loadLlmModel: vi.fn<LlmEngine["loadLlmModel"]>(() =>
+    loadLlmModel: vi.fn<LlmModelInstanceController["loadLlmModel"]>(() =>
       Promise.reject(createUnexpectedCallError("loadLlmModel"))
     ),
-    stopLoadedLlmModelInstance: vi.fn<LlmEngine["stopLoadedLlmModelInstance"]>(
-      () =>
-        Promise.reject(createUnexpectedCallError("stopLoadedLlmModelInstance"))
+    stopLoadedLlmModelInstance: vi.fn<
+      LlmModelInstanceController["stopLoadedLlmModelInstance"]
+    >(() =>
+      Promise.reject(createUnexpectedCallError("stopLoadedLlmModelInstance"))
     ),
     findLlmContextMeasurement: vi.fn<LlmEngine["findLlmContextMeasurement"]>(
       () =>
@@ -61,6 +71,49 @@ export function createFakeLlmRuntime(): FakeLlmRuntime {
     ),
     [Symbol.asyncDispose]: vi.fn(() => Promise.resolve())
   })
+}
+
+/**
+ * Presents a runtime double as an acquired runtime.
+ *
+ * @param runtime - Double held as the runtime, and as its model-loading
+ * capability when Lys loads its models.
+ * @param modelLoading - Who loads the double's models; `lys` by default.
+ * @returns The acquisition the runtime service receives.
+ */
+export function createAcquiredFakeLlmRuntime(
+  runtime: FakeLlmRuntime,
+  modelLoading: AcquiredLlmRuntime["modelLoading"] = "lys"
+): AcquiredLlmRuntime {
+  return modelLoading === "lys"
+    ? Object.freeze({
+        modelLoading,
+        llmRuntime: runtime,
+        llmModelInstanceController: runtime
+      })
+    : Object.freeze({ modelLoading, llmRuntime: runtime })
+}
+
+/**
+ * Presents a runtime double as the connected engine one model operation
+ * receives.
+ *
+ * @param runtime - Double used as the engine, and as its model-loading
+ * capability when Lys loads its models.
+ * @param modelLoading - Who loads the double's models; `lys` by default.
+ * @returns The view a queued operation receives.
+ */
+export function createConnectedFakeLlmEngine(
+  runtime: FakeLlmRuntime,
+  modelLoading: ConnectedLlmEngine["modelLoading"] = "lys"
+): ConnectedLlmEngine {
+  return modelLoading === "lys"
+    ? Object.freeze({
+        modelLoading,
+        llmEngine: runtime,
+        llmModelInstanceController: runtime
+      })
+    : Object.freeze({ modelLoading, llmEngine: runtime })
 }
 
 /**

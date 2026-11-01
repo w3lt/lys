@@ -139,9 +139,10 @@ seconds. Quitting Lys stops vmo and the backend together.
    [request slots](/architecture/backend/#request-slots). When the agent is
    already working on as many replies as it has slots, the reply waits in
    line, first come first served, and sends nothing until a slot frees; Stop
-   ends it as `interrupted`. When the line is full too, the reply is stored
-   failed and the backend emits `error` with the reason. Before each round of
-   the reply, the backend builds the round's context,
+   ends it as `interrupted`, and so does a newer turn or a deletion once the
+   reply gets its slot, before anything is sent. When the line is full too,
+   the reply is stored failed and the backend emits `error` with the reason.
+   Before each round of the reply, the backend builds the round's context,
    in which each user message carries its text, the list of its attachments,
    and the images a model with vision sees, and measures it with the loaded
    model's tokenizer, counting each image as its estimate. A round that does not fit the context

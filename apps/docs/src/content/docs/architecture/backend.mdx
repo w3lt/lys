@@ -703,10 +703,12 @@ stores. A request is added when `createReply` starts, unless it is refused
 because the agent's slots and line are full (see
 [request slots](#request-slots)), and removed when it ends, whether the reply
 completed, failed, or was stopped. A newer turn in the
-conversation or a deletion ends a reply only once its next write is refused,
-so a reply waiting for an approval, a tool result, or a request slot stays
-listed until the call is answered or it gets a slot, the reply is stopped, or
-the backend stops ([#137](https://github.com/w3lt/lys/issues/137)).
+conversation or a deletion ends a running reply only once its next write is
+refused, so a reply waiting for an approval or a tool result stays listed
+until the call is answered, the reply is stopped, or the backend stops
+([#137](https://github.com/w3lt/lys/issues/137)). A reply waiting for a
+request slot stays listed until it gets one, then ends at once (see
+[request slots](#request-slots)).
 
 ### Request slots
 
@@ -722,7 +724,11 @@ longest takes the slot at once and starts its first round. A waiting reply
 has measured and sent nothing: Stop or shutdown ends it as `interrupted` and
 frees its place in line, and it answers with the system prompt its agent had
 when its turn was stored. The desktop shows it like a reply whose model has
-not written yet.
+not written yet. A newer turn in its conversation or a deletion does not
+take it out of line, so it still counts toward the limit below; once it gets
+its slot, the reply reads its stored state first, and when it is no longer
+streaming, it ends as `interrupted` without reading, measuring, or sending
+anything of its conversation, and frees the slot for the next reply.
 
 At most `agentWaitingRequestLimit` replies wait per agent (8). A reply that
 finds every slot held and the line full is refused: it is stored as

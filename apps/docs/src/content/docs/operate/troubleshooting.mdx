@@ -78,8 +78,12 @@ The vmo card in Settings → Runtime says why:
   without the kernel described there
   ([#200](https://github.com/w3lt/lys/issues/200)).
 - **vmo stopped** right after Start: the process exited before it answered,
-  for example because it could not reach `ghcr.io` for its images; could not
-  read which `vminit` [its image store](/operate/data/#vmos-image-store)
+  for example because another vmo holds
+  [its image store](/operate/data/#vmos-image-store), such as one left by a
+  Lys that died or one started by `apps/vmo/run.sh` (its error says
+  `another vmo uses the image store at …`; stop that vmo first); because it
+  could not reach `ghcr.io` for its images; could not delete the files of a
+  pull an earlier vmo did not finish; could not read which `vminit` the store
   holds unpacked, delete that unpack, or unpack and save the new one; could
   not delete the images it no longer uses from the store; or, in a
   development build, did not compile. In development, vmo's build and error
@@ -105,10 +109,12 @@ Lys stops vmo and the backend when it quits. When it dies without quitting,
 after a crash, Force Quit, or `kill -9`, or when a development rebuild restarts
 the desktop host, both keep running
 ([#202](https://github.com/w3lt/lys/issues/202)). The next Lys cannot start its
-own: the vmo and backend it starts cannot listen and exit. Its cards still show
-**vmo running** and **Backend running**, because the old processes answer their
-health routes, and `read_page` works through the old vmo. Stop and quitting Lys
-do not reach either old process.
+own: the vmo it starts stops at once because the old vmo holds
+[its image store](/operate/data/#vmos-image-store), and the backend it starts
+cannot listen and exits. Its cards still show **vmo running** and
+**Backend running**, because the old processes answer their health routes, and
+`read_page` works through the old vmo. Stop and quitting Lys do not reach
+either old process.
 
 To end them, find each process by its port and send it `SIGTERM`:
 

@@ -147,14 +147,22 @@ The backend keeps its log here, one file per UTC day; see
 
 vmo, the page reader `read_page` uses, keeps its images and the files of its
 VMs in `~/Library/Application Support/com.w3lt.lys-vmo`, outside the Lys home,
-because vmo does not read `LYS_HOME`. Containerization creates and lays out
-the directory at vmo's first start, and only vmo writes it.
+because vmo does not read `LYS_HOME`. vmo creates the directory at its first
+start, Containerization lays it out, and only vmo writes it. One vmo uses it
+at a time: from its start until it exits, vmo holds `vmo.lock` there with an
+exclusive lock, and a second vmo started meanwhile, such as one
+`apps/vmo/run.sh` starts beside the desktop's, stops at once with
+`another vmo uses the image store at …`.
 
 - it holds the `vminit` image; `initfs.ext4`, the filesystem vmo's VMs boot
   from, unpacked from that `vminit`; `initfs.ext4.vminit-digest`, which names
   the `vminit` that `initfs.ext4` was unpacked from; the reader image that
-  `ghcr.io/w3lt/lys-readpage:latest` named at vmo's last start; and, while a
-  read runs, that read's VM under `containers/`
+  `ghcr.io/w3lt/lys-readpage:latest` named at vmo's last start; `vmo.lock`,
+  empty; and, while a read runs, that read's VM under `containers/`
+- at each start, before it fetches anything, vmo deletes every entry of
+  `content/ingest/`: the files of a pull that an earlier vmo did not finish,
+  such as one stopped during a first start's download, which Containerization
+  never removes by itself
 - at each start, vmo reuses `initfs.ext4` only when
   `initfs.ext4.vminit-digest` names the `vminit` it pins. Otherwise it deletes
   both files and unpacks `vminit` again: after an update that pins another

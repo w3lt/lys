@@ -160,6 +160,20 @@ describe("ProvidersPaneContent", () => {
     ).toBeNull()
   })
 
+  it("shows each provider's logo on its card, hidden from assistive technology", async () => {
+    startNativeHostFake({})
+    await startProvidersPane()
+
+    expect(
+      ["LM Studio", "Ollama", "Groq"].map((name) => {
+        const logo = screen
+          .getByRole("article", { name })
+          .querySelector("svg[aria-hidden='true']")
+        return logo?.querySelector("title")?.textContent
+      })
+    ).toEqual(["LM Studio", "Ollama", "Groq"])
+  })
+
   it("saves a picked provider and reconnects to it", async () => {
     const host = startSettingsHost()
     const { useLysStore, backend } = await startProvidersPane(

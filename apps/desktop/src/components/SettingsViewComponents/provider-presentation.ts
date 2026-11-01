@@ -1,3 +1,7 @@
+import type { IconType } from "@lobehub/icons"
+import GroqLogo from "@lobehub/icons/es/Groq/components/Mono.js"
+import LmStudioLogo from "@lobehub/icons/es/LmStudio/components/Mono.js"
+import OllamaLogo from "@lobehub/icons/es/Ollama/components/Mono.js"
 import {
   groqApiKeySchema,
   ollamaApiKeySchema,
@@ -7,15 +11,6 @@ import {
   type OllamaApiKey,
   type ProviderAddress
 } from "@lys/share"
-
-import {
-  Groq as GroqLogo,
-  Ollama as OllamaLogo,
-  LmStudio as LmStudioLogo,
-  type GroqProps,
-  type OllamaProps,
-  type LmStudioProps
-} from "@lobehub/icons"
 
 import {
   DEFAULT_PROVIDER_ADDRESSES,
@@ -42,16 +37,17 @@ export type ProviderCardKind = "lmStudio" | "ollama" | "groq"
 /** Provider an Ollama card's Local or Cloud button makes active. */
 export type OllamaLlmProvider = "ollama" | "ollamaCloud"
 
-type CompoundedIcon = OllamaProps | LmStudioProps | GroqProps
-
 /** What a provider card shows of its provider. */
 export type ProviderDescription = {
   /** Provider's name. */
   readonly name: string
   /** One line on what the provider is and where requests go. */
   readonly blurb: string
-  /** Bundled logo, served by the app. */
-  readonly logo: CompoundedIcon
+  /**
+   * Provider's monochrome logo from `@lobehub/icons`, drawn in the current
+   * text color; its title names the provider.
+   */
+  readonly logo: IconType
 }
 
 /** How the active provider is reached, which decides the card's form. */

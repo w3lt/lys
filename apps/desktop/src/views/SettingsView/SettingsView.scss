@@ -2864,9 +2864,10 @@ legend.settings-view__mcp-field-label {
   width: 36px;
   height: 36px;
   flex: none;
+  padding: 7px;
   border: 1px solid var(--app-border-subtle);
   border-radius: 8px;
-  object-fit: contain;
+  color: var(--app-text-strong);
 }
 
 .settings-view__provider-identity {

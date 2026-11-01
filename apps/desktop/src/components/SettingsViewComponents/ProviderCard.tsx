@@ -377,8 +377,9 @@ function ProviderCardBody({
  * {@link PROVIDER_CARD_PROVIDERS}' provider, which makes the backend connect
  * to it; Ollama's card then makes the local server active. The radio button
  * is disabled while a save runs. Only the card of the active provider shows
- * its settings. The logo is a bundled file of the app, decorative next to
- * the name.
+ * its settings. The logo is the provider's monochrome mark from
+ * `@lobehub/icons`, drawn in the text color and hidden from assistive
+ * technology, because the name beside it says the same.
  * @param props - Card, radio name, saved settings, connection, save, and
  * requests.
  * @returns The card.
@@ -424,12 +425,10 @@ export default function ProviderCard({
           type="radio"
           value={card}
         />
-        <img
-          alt=""
+        <description.logo
+          aria-hidden="true"
           className="settings-view__provider-logo"
-          height={36}
-          src={description.logoUrl}
-          width={36}
+          size={36}
         />
         <span className="settings-view__provider-identity">
           <span className="settings-view__provider-name-line">

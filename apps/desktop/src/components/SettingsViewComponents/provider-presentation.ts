@@ -8,9 +8,15 @@ import {
   type ProviderAddress
 } from "@lys/share"
 
-import groqLogoUrl from "@/assets/providers/groq.svg"
-import lmStudioLogoUrl from "@/assets/providers/lm-studio.svg"
-import ollamaLogoUrl from "@/assets/providers/ollama.svg"
+import {
+  Groq as GroqLogo,
+  Ollama as OllamaLogo,
+  LmStudio as LmStudioLogo,
+  type GroqProps,
+  type OllamaProps,
+  type LmStudioProps
+} from "@lobehub/icons"
+
 import {
   DEFAULT_PROVIDER_ADDRESSES,
   LLM_PROVIDER_NAMES,
@@ -36,6 +42,8 @@ export type ProviderCardKind = "lmStudio" | "ollama" | "groq"
 /** Provider an Ollama card's Local or Cloud button makes active. */
 export type OllamaLlmProvider = "ollama" | "ollamaCloud"
 
+type CompoundedIcon = OllamaProps | LmStudioProps | GroqProps
+
 /** What a provider card shows of its provider. */
 export type ProviderDescription = {
   /** Provider's name. */
@@ -43,7 +51,7 @@ export type ProviderDescription = {
   /** One line on what the provider is and where requests go. */
   readonly blurb: string
   /** Bundled logo, served by the app. */
-  readonly logoUrl: string
+  readonly logo: CompoundedIcon
 }
 
 /** How the active provider is reached, which decides the card's form. */
@@ -174,19 +182,19 @@ export const PROVIDER_DESCRIPTIONS = Object.freeze({
     name: LLM_PROVIDER_NAMES.lmStudio,
     blurb:
       "Runs models on a machine you choose. Lys loads and unloads them for you.",
-    logoUrl: lmStudioLogoUrl
+    logo: LmStudioLogo
   }),
   ollama: Object.freeze({
     name: LLM_PROVIDER_NAMES.ollama,
     blurb:
       "Runs open models on your machine or in Ollama Cloud. On your machine, Lys uses the models Ollama is running.",
-    logoUrl: ollamaLogoUrl
+    logo: OllamaLogo
   }),
   groq: Object.freeze({
     name: LLM_PROVIDER_NAMES.groq,
     blurb:
       "Hosted models on Groq's chips. Your conversations go to Groq to be answered.",
-    logoUrl: groqLogoUrl
+    logo: GroqLogo
   })
 } satisfies Readonly<Record<ProviderCardKind, ProviderDescription>>)
 

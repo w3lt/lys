@@ -4,6 +4,7 @@ import type {
 } from "@lys/protocol"
 import type {
   ConversationAssistantMessageFinishReason,
+  ConversationAssistantMessageStatus,
   ConversationMessage,
   ConversationSource,
   ConversationUserMessage,
@@ -210,6 +211,13 @@ export type AgentTurn = Readonly<{
   updateAssistantMessageState: (
     completion: AssistantMessageCompletion
   ) => boolean
+  /**
+   * Reads the reply's state as stored now, without changing it: `streaming`
+   * until it is finalized or superseded; undefined after its conversation is
+   * deleted. Called once, when the reply gets a request slot after waiting
+   * in line for it.
+   */
+  findReplyStatus: () => ConversationAssistantMessageStatus | undefined
   /** Queues one event for every stream following the reply; never waits. */
   sendEvent: (event: ChatGenerationEvent) => void
   /**
@@ -572,9 +580,11 @@ export default class Agent {
    * change the reply stores shows the step it puts the request at. A reply
    * that a newer turn of its conversation supersedes, or whose conversation
    * is deleted, settles only once its next write is refused, so one waiting
-   * on an approval, a tool result, or a request slot stays listed until the
-   * call is answered or a slot frees for it, the reply is stopped, or the
-   * backend stops.
+   * on an approval or a tool result stays listed until the call is answered,
+   * the reply is stopped, or the backend stops. One that waits in line keeps
+   * its place until a slot frees for it, then reads its stored state before
+   * anything else: when it is no longer streaming, it ends as interrupted
+   * without reading, measuring, or sending anything, and frees the slot.
    */
   public async createReply(turn: AgentTurn): Promise<void> {
     const systemPrompt = this.#systemPrompt
@@ -583,7 +593,12 @@ export default class Agent {
       const offer = await this.#activity.offerRequest(start, turn.abortSignal)
       if (offer.status === "refused")
         throw new AgentRequestLimitError(offer.limits)
-      const finishReason = await this.#createReplyText(turn, systemPrompt)
+      // A newer turn or a deletion may have ended the stored reply while it
+      // waited, and its conversation must then not reach the model.
+      const finishReason =
+        offer.waited && turn.findReplyStatus() !== "streaming"
+          ? undefined
+          : await this.#createReplyText(turn, systemPrompt)
       if (finishReason === undefined) {
         turn.updateAssistantMessageState({ status: "interrupted" })
         turn.sendEvent({ type: "interrupted" })

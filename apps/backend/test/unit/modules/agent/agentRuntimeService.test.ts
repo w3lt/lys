@@ -188,6 +188,7 @@ async function createHelloReply(
     unofferedTools: NO_UNOFFERED_TOOLS,
     abortSignal: new AbortController().signal,
     updateAssistantMessageState: () => true,
+    findReplyStatus: () => "streaming",
     createReplyPart: vi.fn(),
     updateReplyPartContent: vi.fn(),
     updateReplyToolCall: vi.fn(),

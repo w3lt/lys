@@ -9,6 +9,7 @@ import {
   calculateImageTokens,
   toolDefinitionSchema,
   type ConversationAssistantMessage,
+  type ConversationAssistantMessageStatus,
   type ConversationMessage,
   type ConversationSource,
   type ConversationUserMessage,
@@ -192,6 +193,7 @@ type ReplyStorage = Pick<
   | "updateReplyPartContent"
   | "updateReplyToolCall"
   | "updateAssistantMessageState"
+  | "findReplyStatus"
 >
 
 /**
@@ -242,6 +244,8 @@ type AgentTurnScenario = Readonly<{
   updateAssistantMessageState?: ReplyStorageOverride<
     AgentTurn["updateAssistantMessageState"]
   >
+  /** Stored state of the reply; read from the stored turn by default. */
+  findReplyStatus?: ReplyStorageOverride<AgentTurn["findReplyStatus"]>
   /** Message the turn answers; `Hello` without attachments by default. */
   userMessage?: ConversationUserMessage
   /** Whether the model sees images; false by default. */
@@ -314,8 +318,24 @@ function buildReplyStorage(store: AgentTurnStore): ReplyStorage {
     updateReplyToolCall: (toolCallId, change) =>
       replyParts.updateReplyToolCall(store.replyId, toolCallId, change),
     updateAssistantMessageState: (completion) =>
-      turns.updateAssistantMessageState(store.replyId, completion)
+      turns.updateAssistantMessageState(store.replyId, completion),
+    findReplyStatus: () => findStoredReplyStatus(store)
   }
+}
+
+/**
+ * Finds the status of a stored turn's reply as stored now.
+ *
+ * @param store - Stored turn.
+ * @returns The reply's status; undefined when the reply is no longer stored.
+ */
+function findStoredReplyStatus(
+  store: AgentTurnStore
+): ConversationAssistantMessageStatus | undefined {
+  const reply = store.services.history
+    .getConversation(store.conversationId)
+    ?.messages.find((message) => message.id === store.replyId)
+  return reply?.role === "assistant" ? reply.status : undefined
 }
 
 /**
@@ -693,6 +713,10 @@ function buildScenarioReplyStorage(
       scenario.updateAssistantMessageState?.(
         stored.updateAssistantMessageState
       ) ?? stored.updateAssistantMessageState
+    ),
+    findReplyStatus: vi.fn(
+      scenario.findReplyStatus?.(stored.findReplyStatus) ??
+        stored.findReplyStatus
     )
   }
 }
@@ -797,7 +821,8 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
       updateAssistantMessageState: (completion) => {
         persistedStates.push(completion)
         return storage.updateAssistantMessageState(completion)
-      }
+      },
+      findReplyStatus: storage.findReplyStatus
     })
     .then(
       () => ({ status: "resolved" as const }),
@@ -3918,6 +3943,80 @@ describe("Agent", () => {
         replyContextMeter.findReplyContextMeasurement
       ).toHaveBeenCalledTimes(3)
       expect(openReplyStream).toHaveBeenCalledTimes(3)
+    })
+
+    it("ends a reply that a newer turn supersedes while it waits for a slot as interrupted once it gets one, without measuring or sending it, and frees the slot", async () => {
+      const { agent, openReplyStream, replyContextMeter, roundEnds } =
+        createHoldingAgent()
+      const running = [
+        getAgentReplyOutcome({ agent }),
+        getAgentReplyOutcome({ agent })
+      ]
+      const store = openAgentTurnStore()
+      const waiting = getAgentReplyOutcome({ agent, store })
+      await waitForMicrotasks()
+
+      updateStoredReplyToInterrupted(store)
+      roundEnds[0]?.resolve()
+      await running[0]
+      await waitForMicrotasks()
+      const stepsAfterHandOver = agent
+        .listRequests()
+        .map((request) => request.step)
+      const measuredAfterHandOver =
+        replyContextMeter.findReplyContextMeasurement.mock.calls.length
+      const openedAfterHandOver = openReplyStream.mock.calls.length
+      for (const end of roundEnds) end.resolve()
+      const superseded = await waiting
+      await running[1]
+
+      expect(stepsAfterHandOver).toEqual([FIRST_ROUND_STEP])
+      expect(measuredAfterHandOver).toBe(2)
+      expect(openedAfterHandOver).toBe(2)
+      expect(superseded.events).toEqual([INTERRUPTED_EVENT])
+      expect(superseded.persistedStates).toEqual([{ status: "interrupted" }])
+      expect(superseded.reply.status).toBe("interrupted")
+      expect(superseded.parts).toEqual([])
+      expect(superseded.storage.findReplyStatus).toHaveBeenCalledTimes(1)
+      expect(superseded.reportedCancellations).toEqual([])
+      expect(superseded.reportedRefusals).toEqual([])
+      expect(superseded.reportedFailures).toEqual([])
+      expect(agent.listRequests()).toEqual([])
+    })
+
+    it("ends a reply whose conversation is deleted while it waits for a slot as interrupted once it gets one, without measuring or sending it", async () => {
+      const { agent, openReplyStream, replyContextMeter, roundEnds } =
+        createHoldingAgent()
+      const running = [
+        getAgentReplyOutcome({ agent }),
+        getAgentReplyOutcome({ agent })
+      ]
+      let isDeleted = false
+      const waiting = getAgentReplyOutcome({
+        agent,
+        // The store finds no reply once its conversation is deleted.
+        findReplyStatus: (stored) => () => (isDeleted ? undefined : stored())
+      })
+      await waitForMicrotasks()
+
+      isDeleted = true
+      roundEnds[0]?.resolve()
+      await running[0]
+      await waitForMicrotasks()
+      const measuredAfterHandOver =
+        replyContextMeter.findReplyContextMeasurement.mock.calls.length
+      const openedAfterHandOver = openReplyStream.mock.calls.length
+      for (const end of roundEnds) end.resolve()
+      const deleted = await waiting
+      await running[1]
+
+      expect(measuredAfterHandOver).toBe(2)
+      expect(openedAfterHandOver).toBe(2)
+      expect(deleted.events).toEqual([INTERRUPTED_EVENT])
+      expect(deleted.reportedCancellations).toEqual([])
+      expect(deleted.reportedRefusals).toEqual([])
+      expect(deleted.reportedFailures).toEqual([])
+      expect(agent.listRequests()).toEqual([])
     })
 
     it.each<readonly [AgentRequestLimits, string]>([

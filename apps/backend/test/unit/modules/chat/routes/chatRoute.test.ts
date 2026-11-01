@@ -155,9 +155,18 @@ async function startWebResearcherConversation(
 ): Promise<string> {
   testApp.app.agentService.createAgent(WEB_RESEARCHER_DEFINITION)
   const response = await sendChatRequest(testApp.app, WEB_RESEARCHER_REQUEST)
-  const start = chatApiStreamEventSchema.parse(
-    parseSseEvents(response.body)[0]?.data
-  )
+  return findStartedConversationId(response.body)
+}
+
+/**
+ * Finds the conversation a chat response's turn started.
+ *
+ * @param body - The response's SSE body.
+ * @returns UUIDv7 of the new conversation.
+ * @throws If the response did not start a new conversation.
+ */
+function findStartedConversationId(body: string): string {
+  const start = chatApiStreamEventSchema.parse(parseSseEvents(body)[0]?.data)
   if (start.type !== "start-new-conversation-turn")
     throw new Error("The chat route did not start a new conversation")
   return start.conversation.id
@@ -1143,7 +1152,7 @@ describe("updateFastifyWithChatRoute", () => {
      *
      * @returns The application, the end of each model request made so far in
      * request order, the release of every reply, which also ends each later
-     * request at once, and the steps of Caliginia's requests.
+     * request at once, and Caliginia's requests and their steps.
      */
     async function createHoldingChatApp() {
       const testApp = await createChatRouteTestApp()
@@ -1162,6 +1171,13 @@ describe("updateFastifyWithChatRoute", () => {
           })
         })()
       })
+      const listCaliginiaRequests = () => {
+        const outcome = testApp.app.agentRuntimeService.findAgentState(
+          CALIGINIA_IDENTITY,
+          CALIGINIA_AGENT_CODE
+        )
+        return outcome.status === "found" ? outcome.state.requests : []
+      }
       return {
         testApp,
         replyEnds,
@@ -1169,15 +1185,9 @@ describe("updateFastifyWithChatRoute", () => {
           isReleased = true
           for (const end of replyEnds) end.resolve()
         },
-        listCaliginiaSteps: () => {
-          const outcome = testApp.app.agentRuntimeService.findAgentState(
-            CALIGINIA_IDENTITY,
-            CALIGINIA_AGENT_CODE
-          )
-          return outcome.status === "found"
-            ? outcome.state.requests.map((request) => request.step.kind)
-            : []
-        }
+        listCaliginiaRequests,
+        listCaliginiaSteps: () =>
+          listCaliginiaRequests().map((request) => request.step.kind)
       }
     }
 
@@ -1213,6 +1223,59 @@ describe("updateFastifyWithChatRoute", () => {
         ).toContain("done")
       }
       expect(listCaliginiaSteps()).toEqual([])
+    })
+
+    it("ends the waiting reply of a conversation deleted while it waits as interrupted once a slot frees, without sending it to the model", async () => {
+      const {
+        testApp,
+        replyEnds,
+        releaseReplies,
+        listCaliginiaRequests,
+        listCaliginiaSteps
+      } = await createHoldingChatApp()
+      const responses = Array.from(
+        { length: TEST_AGENT_REQUEST_LIMITS.slotCount + 1 },
+        () => sendChatRequest(testApp.app, NEW_CONVERSATION_REQUEST)
+      )
+      await vi.waitFor(() => {
+        expect(listCaliginiaSteps()).toEqual([
+          "preparing",
+          "preparing",
+          "waiting"
+        ])
+      })
+      const deletedConversationId = listCaliginiaRequests().find(
+        (request) => request.step.kind === "waiting"
+      )?.conversationId
+      if (deletedConversationId === undefined)
+        throw new Error("No reply of Caliginia waits for a slot")
+
+      testApp.app.conversationHistoryEditor.deleteConversation(
+        deletedConversationId
+      )
+      replyEnds[0]?.resolve()
+      await vi.waitFor(() => {
+        expect(listCaliginiaSteps()).toEqual(["preparing"])
+      })
+      const modelRequestsAfterHandOver =
+        testApp.completeChatStream.mock.calls.length
+      releaseReplies()
+      const settled = await Promise.all(responses)
+      const deletedResponse = settled.find(
+        (response) =>
+          findStartedConversationId(response.body) === deletedConversationId
+      )
+
+      expect(modelRequestsAfterHandOver).toBe(2)
+      expect(testApp.completeChatStream).toHaveBeenCalledTimes(2)
+      expect(deletedResponse?.statusCode).toBe(200)
+      expect(
+        parseSseEvents(deletedResponse?.body ?? "").map((event) => event.event)
+      ).toContain("interrupted")
+      expect(listCaliginiaSteps()).toEqual([])
+      expect(testApp.log.records).not.toContainEqual(
+        expect.objectContaining({ level: "error" })
+      )
     })
 
     it("fails a reply whose agent's slots and line are full with an error event that says why, and logs a warning", async () => {

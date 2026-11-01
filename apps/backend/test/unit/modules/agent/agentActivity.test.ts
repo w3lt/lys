@@ -72,7 +72,7 @@ function buildOtherStart(sequence: number): AgentRequestStart {
 async function createStartedActivity(): Promise<AgentActivity> {
   const activity = new AgentActivity(LIMITS)
   await expect(activity.offerRequest(START, UNSTOPPED_SIGNAL)).resolves.toEqual(
-    { status: "started" }
+    { status: "started", waited: false }
   )
   return activity
 }
@@ -389,7 +389,10 @@ describe("AgentActivity request slots", () => {
       activity.offerRequest(buildOtherStart(102), UNSTOPPED_SIGNAL)
     ])
 
-    expect(offers).toEqual([{ status: "started" }, { status: "started" }])
+    expect(offers).toEqual([
+      { status: "started", waited: false },
+      { status: "started", waited: false }
+    ])
     expect(listRequestSteps(activity)).toEqual([
       [createFixtureUuidV7(101), "preparing"],
       [createFixtureUuidV7(102), "preparing"]
@@ -444,7 +447,7 @@ describe("AgentActivity request slots", () => {
     expect(activity.listRequests()).toHaveLength(1)
   })
 
-  it("hands a freed slot to the request that has waited longest, which prepares its first round", async () => {
+  it("hands a freed slot to the request that has waited longest, whose offer tells it waited, and which prepares its first round", async () => {
     const activity = await createFullActivity({ slotCount: 1, waitingLimit: 2 })
     const first = activity.offerRequest(buildOtherStart(102), UNSTOPPED_SIGNAL)
     const second = createSettlementReader(
@@ -453,7 +456,7 @@ describe("AgentActivity request slots", () => {
 
     activity.removeRequest(buildOtherStart(101))
 
-    await expect(first).resolves.toEqual({ status: "started" })
+    await expect(first).resolves.toEqual({ status: "started", waited: true })
     expect(second()).toBe("pending")
     expect(activity.listRequests()).toEqual([
       expect.objectContaining({
@@ -533,7 +536,7 @@ describe("AgentActivity request slots", () => {
 
     await expect(
       activity.offerRequest(START, AbortSignal.abort(new Error("Stopped")))
-    ).resolves.toEqual({ status: "started" })
+    ).resolves.toEqual({ status: "started", waited: false })
   })
 
   it("frees a stopped request's place in line, not a slot, and hands the next free slot past it", async () => {

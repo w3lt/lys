@@ -100,7 +100,8 @@ function createAcquisition<Service>(
  * sources, or tools.
  *
  * @param requestId - Reply the turn writes; a fixed reply by default.
- * @returns The turn: it accepts the reply's final state, its part writes
+ * @returns The turn: it finds its reply still streaming and accepts the
+ * reply's final state, its part writes
  * are spies that store nothing, which the turn contract reads as a refused
  * write, and its senders and reporters are spies. The cases that use it read
  * only what the model was sent, or how the reply was reported.
@@ -125,6 +126,7 @@ function buildHelloAgentTurn(
     unofferedTools: NO_UNOFFERED_TOOLS,
     abortSignal: new AbortController().signal,
     updateAssistantMessageState: () => true,
+    findReplyStatus: () => "streaming",
     createReplyPart: vi.fn(),
     updateReplyPartContent: vi.fn(),
     updateReplyToolCall: vi.fn(),

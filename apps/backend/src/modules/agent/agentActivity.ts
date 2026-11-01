@@ -84,6 +84,11 @@ export type AgentRequestOffer =
   | Readonly<{
       /** The request holds a request slot and is followed. */
       status: "started"
+      /**
+       * Whether the request waited in line for its slot: false when a slot
+       * was free when it was offered.
+       */
+      waited: boolean
     }>
   | Readonly<{
       /**
@@ -204,8 +209,17 @@ const FIRST_ROUND_STEP: AgentRequestStep = Object.freeze({
   round: 0
 })
 
-/** Outcome of an offered request that holds a request slot. */
-const STARTED_OFFER: AgentRequestOffer = Object.freeze({ status: "started" })
+/** Outcome of an offered request that found a request slot free. */
+const STARTED_AT_ONCE_OFFER: AgentRequestOffer = Object.freeze({
+  status: "started",
+  waited: false
+})
+
+/** Outcome of an offered request that got its slot after waiting in line. */
+const STARTED_AFTER_WAITING_OFFER: AgentRequestOffer = Object.freeze({
+  status: "started",
+  waited: true
+})
 
 /** Failure of the offer of a request removed while it waited. */
 const REMOVED_WHILE_WAITING_MESSAGE =
@@ -253,9 +267,9 @@ export default class AgentActivity {
    * request holds a slot, the signal is no longer observed here.
    * @returns A promise resolving to `started` once the request holds a
    * slot, preparing its first round: at once when a slot was free, else when
-   * an earlier request is removed and hands it the slot; or to `refused`,
-   * with the limits, when every slot was held and the line was full, without
-   * following the request.
+   * an earlier request is removed and hands it the slot, which the outcome
+   * tells as having waited; or to `refused`, with the limits, when every slot
+   * was held and the line was full, without following the request.
    * @throws The signal's abort reason when it aborts, or had aborted, before
    * a waiting request gets a slot; the request stays followed, waiting,
    * until it is removed. An `Error` when the request is removed while it
@@ -275,8 +289,9 @@ export default class AgentActivity {
     const request = this.#addOfferedRequest(start)
     if (request === undefined)
       return Object.freeze({ status: "refused", limits: this.#limits })
+    const waited = request.step.kind === "waiting"
     await waitForSettlementOrAbort(request.slot.promise, abortSignal)
-    return STARTED_OFFER
+    return waited ? STARTED_AFTER_WAITING_OFFER : STARTED_AT_ONCE_OFFER
   }
 
   /**

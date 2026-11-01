@@ -834,13 +834,17 @@ and it reads the tool list once when it was never read.
 ## Providers
 
 The Providers pane lists three cards as native radio buttons in one group:
-LM Studio, Ollama, and Groq, each with its bundled logo, its name, a `local`
+LM Studio, Ollama, and Groq, each with its logo, its name, a `local`
 or `cloud` tag, a line on where requests go, and a badge: `standby` for the
 cards not chosen, `needs key` for the chosen provider without its key, and
 otherwise the connection status. The Ollama card stands for two providers, a
 local Ollama server and Ollama Cloud, and is chosen while either is active.
 Picking a card saves its provider as active at once, the local server for
-the Ollama card; the radio buttons are disabled while a save runs.
+the Ollama card; the radio buttons are disabled while a save runs. The logos
+are the providers' monochrome marks from `@lobehub/icons`, imported one by one
+so the rest of the icon set and its `@lobehub/ui` peer stay out of the bundle.
+They take the text color, so they follow the theme, and are hidden from
+assistive technology, because each card's name says the same.
 
 Only the active card opens. On the Ollama card, Local and Cloud buttons make
 the local server or Ollama Cloud the active provider, and the tag follows.

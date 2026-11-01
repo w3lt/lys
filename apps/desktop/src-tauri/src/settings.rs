@@ -7,6 +7,7 @@
 
 pub mod commands;
 pub mod generation;
+mod json;
 pub mod load_configuration;
 pub mod location;
 pub mod mcp;
@@ -15,6 +16,7 @@ pub mod secrets;
 pub mod tools;
 
 use generation::GenerationSettings;
+use json::parse_json_object;
 use load_configuration::LoadConfigurationSettings;
 use location::LocationSettings;
 use mcp::McpSettings;
@@ -31,7 +33,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::utils::lys_home::LysHome;
 
@@ -39,20 +41,22 @@ use crate::utils::lys_home::LysHome;
 /// running at once in one process never share a temporary file.
 static TEMPORARY_FILE_COUNT: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
 /// Complete persisted Lys settings value.
 ///
 /// The private fields group runtime, generation, load configuration, secrets,
 /// tools, location, and MCP server settings in the serialized JSON
 /// representation while keeping those groups behind the settings module's API
-/// boundary. A missing group takes that group's defaults; the load
-/// configuration group's default is empty, the secrets group's default holds
-/// no key, the tools group's default puts no tool on Just run and saves no
-/// tool switch, the location group's default saves no location, and the MCP
-/// group's default lists no server. A group the value does not hold, such as
-/// the `model` group of files written before the local context estimate was
-/// removed, is ignored when loading and left out of the next save.
+/// boundary. The value and each group are read from a JSON object only, as
+/// the `@lys/share` schemas read them: an array in their place is refused. A
+/// missing group takes that group's defaults; the load configuration group's
+/// default is empty, the secrets group's default holds no key, the tools
+/// group's default puts no tool on Just run and saves no tool switch, the
+/// location group's default saves no location, and the MCP group's default
+/// lists no server. A group the value does not hold, such as the `model`
+/// group of files written before the local context estimate was removed, is
+/// ignored when loading and left out of the next save.
 pub struct LysSettings {
     /// Process settings and default-model selection in the `runtime` object.
     runtime: RunTimeSettings,
@@ -68,6 +72,71 @@ pub struct LysSettings {
     location: LocationSettings,
     /// MCP servers Lys connects to, in the `mcp` object.
     mcp: McpSettings,
+}
+
+/// Deserializes the settings from a JSON object only.
+impl<'de> Deserialize<'de> for LysSettings {
+    /// Reads the settings object, each group from a JSON object only.
+    ///
+    /// # Errors
+    ///
+    /// Returns the deserializer's error when the input or a group is not a
+    /// JSON object, or a group breaks its own rules.
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let stored: StoredLysSettings = parse_json_object(deserializer)?;
+
+        Ok(Self::from(stored))
+    }
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+/// The settings JSON object with each group read from a JSON object only.
+///
+/// Serde's derived groups would also read a JSON array as their fields in
+/// order; the `@lys/share` schemas refuse that form, so each group is read
+/// from an object first, as the `mcp` group's own reader does. A missing
+/// group takes its default, and an unknown group is ignored.
+struct StoredLysSettings {
+    /// The `runtime` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    runtime: RunTimeSettings,
+    /// The `generation` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    generation: GenerationSettings,
+    /// The `loadConfiguration` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    load_configuration: LoadConfigurationSettings,
+    /// The `secrets` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    secrets: SecretsSettings,
+    /// The `tools` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    tools: ToolSettings,
+    /// The `location` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    location: LocationSettings,
+    /// The `mcp` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    mcp: McpSettings,
+}
+
+impl From<StoredLysSettings> for LysSettings {
+    /// Takes every group as stored.
+    fn from(stored: StoredLysSettings) -> Self {
+        Self {
+            runtime: stored.runtime,
+            generation: stored.generation,
+            load_configuration: stored.load_configuration,
+            secrets: stored.secrets,
+            tools: stored.tools,
+            location: stored.location,
+            mcp: stored.mcp,
+        }
+    }
 }
 
 impl LysSettings {
@@ -562,6 +631,24 @@ mod tests {
         newer_mcp_field["mcp"]["enabled"] = json!(true);
         let mut newer_server_field = get_complete_settings();
         newer_server_field["mcp"]["servers"][1]["timeoutSeconds"] = json!(30);
+        let mut runtime_list = get_complete_settings();
+        runtime_list["runtime"] = json!([false, false, "qwen/qwen3-8b", "http://127.0.0.1:23456"]);
+        let mut generation_list = get_complete_settings();
+        generation_list["generation"] = json!([0.2, 512]);
+        let mut load_configuration_list = get_complete_settings();
+        load_configuration_list["loadConfiguration"] = json!([{}, {}]);
+        let mut secrets_list = get_complete_settings();
+        secrets_list["secrets"] = json!(["tvly-synthetic-0123456789"]);
+        let mut empty_secrets_list = get_complete_settings();
+        empty_secrets_list["secrets"] = json!([]);
+        let mut tools_list = get_complete_settings();
+        tools_list["tools"] = json!([[], {}]);
+        let mut location_list = get_complete_settings();
+        location_list["location"] = json!(["Paris", null, null]);
+        let mut empty_location_list = get_complete_settings();
+        empty_location_list["location"] = json!([]);
+        let mut mcp_list = get_complete_settings();
+        mcp_list["mcp"] = json!([[]]);
         let lone_surrogate = get_complete_settings()
             .to_string()
             .replace("env-synthetic-value", "env-synthetic-value\\ud800");
@@ -584,8 +671,19 @@ mod tests {
             newer_location_field.to_string(),
             newer_mcp_field.to_string(),
             newer_server_field.to_string(),
+            runtime_list.to_string(),
+            generation_list.to_string(),
+            load_configuration_list.to_string(),
+            secrets_list.to_string(),
+            empty_secrets_list.to_string(),
+            tools_list.to_string(),
+            location_list.to_string(),
+            empty_location_list.to_string(),
+            mcp_list.to_string(),
             lone_surrogate,
             String::from("{ not json"),
+            String::from("[]"),
+            String::from("null"),
         ];
 
         for stored_text in unusable_files {

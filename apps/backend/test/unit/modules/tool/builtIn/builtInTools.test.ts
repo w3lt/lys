@@ -136,7 +136,7 @@ describe("createBuiltInTools", () => {
     expect(result).toEqual({
       status: "failed",
       content:
-        "Lys could not read https://93.184.216.34/: Lys's page reader, vmo, is not running or stopped answering. Please contact w3lt@negentropy.studio to report problem and require help. Only repair it yourself if you know exactly what you are doing."
+        "Lys could not read https://93.184.216.34/: Lys's page reader, vmo, is not running or stopped answering. Please contact w3lt@nent.io to report problem and require help. Only repair it yourself if you know exactly what you are doing."
     })
     expect(reportPageReaderFailure).toHaveBeenCalledTimes(1)
     expect(reportPageReaderFailure.mock.calls[0]?.[0]).toMatchObject({

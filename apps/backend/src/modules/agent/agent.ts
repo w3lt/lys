@@ -665,11 +665,12 @@ export default class Agent {
       ),
       sourceCatalog: new SourceCatalog(turn.sources)
     })
-    const images = await readContextImages(
-      [...turn.history, turn.userMessage],
-      turn.canSeeImages,
-      turn.findAttachmentImage
-    )
+    const images: AgentContextImages = turn.canSeeImages
+      ? await readAgentContextImages(
+          [...turn.history, turn.userMessage],
+          turn.findAttachmentImage
+        )
+      : UNSEEN_CONTEXT_IMAGES
     const messages = buildAgentContext({
       systemPrompt: formatSystemPrompt(systemPrompt, turn.unofferedTools),
       history: turn.history,
@@ -868,30 +869,6 @@ function buildActivityReplyStorage(
       ),
     sendEvent: turn.sendEvent
   })
-}
-
-/**
- * Reads the images a context sends, for the model that answers it.
- *
- * @param messages - Stored messages the context is built from, in
- * conversation order.
- * @param canSeeImages - Whether the model sees images.
- * @param findAttachmentImage - Reads one image's bytes; borrowed until the
- * returned promise settles.
- * @returns A promise resolving to {@link UNSEEN_CONTEXT_IMAGES} for a model
- * without vision, without reading any file; otherwise to the images as
- * {@link readAgentContextImages} read them.
- * @throws The reader's failure, for a file that cannot be read although it
- * is not missing.
- */
-async function readContextImages(
-  messages: readonly ConversationMessage[],
-  canSeeImages: boolean,
-  findAttachmentImage: FindAttachmentImage
-): Promise<AgentContextImages> {
-  return canSeeImages
-    ? await readAgentContextImages(messages, findAttachmentImage)
-    : UNSEEN_CONTEXT_IMAGES
 }
 
 /**

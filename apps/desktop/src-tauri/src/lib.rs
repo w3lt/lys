@@ -40,7 +40,8 @@ fn greet(name: &str) -> String {
 /// to stderr and the process exits with status 1 before any window opens.
 ///
 /// The builder registers the opener plugin, manages the resolved `LysHome`, one
-/// mutex-protected `backend::Backend` resource, and one `vmo::Vmo` owner, and
+/// mutex-protected `backend::Backend` resource, which reads the backend's list
+/// of MCP server process groups from that Lys home, and one `vmo::Vmo` owner, and
 /// exposes the backend, vmo, settings, and client tool commands to the
 /// renderer. On `Exit`, the managed backend and vmo are stopped together, and
 /// a failure or a killed vmo is reported to stderr without preventing the
@@ -61,10 +62,12 @@ pub fn run() {
         }
     };
 
+    let backend = backend::Backend::new(lys_home.mcp_process_groups_path());
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(lys_home)
-        .manage(backend::Backend::default())
+        .manage(backend)
         .manage(vmo::Vmo::new(vmo::VMO_STOP_TIMEOUT))
         .invoke_handler(tauri::generate_handler![
             greet,

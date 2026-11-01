@@ -4,7 +4,8 @@ import { calculateMcpRequestFailure, type McpRequestFailure } from "./mcpError"
 import McpServerConnection, {
   type McpServerConnectionContext
 } from "./mcpServerConnection"
-import { buildMcpToolCatalog, type McpToolCatalog } from "./mcpToolCatalog"
+import type { McpToolCatalog } from "./mcpToolCatalog"
+import { getMcpToolCatalog } from "./mcpToolList"
 
 /** What opening one server led to. */
 export type McpServerOpening =
@@ -48,9 +49,11 @@ const CANCELLED_OPENING: McpServerOpening = Object.freeze({
  * its requests has that limit too.
  * @returns `connected` with the connection and its catalog; `failed` with
  * the reason; or `cancelled` once the context's signal aborted. A failure
- * Lys cannot tell apart is `protocol-error`, with what was thrown.
- * @throws Only when closing what it started fails, which the SDK's
- * transports do not do.
+ * Lys cannot tell apart is `protocol-error`, with what was thrown; so is a
+ * failed handshake whose close failed, with the close's failure.
+ * @throws Only when closing a connection it opened fails, after a failure
+ * reading its tools: a stdio server's process group still running two
+ * seconds after `SIGKILL`.
  * @remarks Whatever the opening started is closed before it returns
  * anything but `connected`.
  */
@@ -63,16 +66,15 @@ export async function openMcpServer(
   const abortSignal = AbortSignal.any([context.abortSignal, timeoutSignal])
   let connection: McpServerConnection | undefined
   try {
-    connection = await McpServerConnection.open(settings, {
+    const openConnection = await McpServerConnection.open(settings, {
       ...context,
       abortSignal
     })
-    const tools = await connection.listTools(abortSignal)
-    return Object.freeze({
-      status: "connected",
-      connection,
-      catalog: buildMcpToolCatalog(settings.name, tools)
-    })
+    connection = openConnection
+    const catalog = await getMcpToolCatalog(settings.name, (cursor) =>
+      openConnection.getToolListPage(cursor, abortSignal)
+    )
+    return Object.freeze({ status: "connected", connection, catalog })
   } catch (error) {
     await connection?.close()
     if (context.abortSignal.aborted) return CANCELLED_OPENING

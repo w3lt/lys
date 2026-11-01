@@ -35,6 +35,7 @@ import {
   findClosedVmoOrigin,
   startVmoServer
 } from "../../../support/vmoServer"
+import { createOwnedMcpServerProcessGroups } from "../../../support/mcpServerProcessGroups"
 
 /** Path of the key check. */
 const KEY_CHECK_URL = "/api/v1/tools/web_search/key-check"
@@ -101,12 +102,14 @@ function createMcpServerRegistry(
   servers: readonly McpServerSettings[] = []
 ): McpServerRegistry {
   const events: McpServerEvent[] = []
+  const { processGroups } = createOwnedMcpServerProcessGroups()
   const registry = new McpServerRegistry({
     readSettings: () =>
       Promise.resolve({ status: "read", settings: { servers } }),
     openServer: (settings, context) =>
       openMcpServer(settings, context, MCP_OPENING_TIMEOUT_MILLISECONDS),
     workingDirectory: process.cwd(),
+    processGroups,
     reportEvent: (event) => events.push(event)
   })
   onTestFinished(async () => {

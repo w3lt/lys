@@ -347,6 +347,29 @@ describe("handleMcpServerEvent", () => {
     })
   })
 
+  it("warns of a session a server did not end, with its status", () => {
+    expect(
+      logEvent({
+        kind: "session-end-failed",
+        serverName: "notes",
+        error: new SdkHttpError(
+          SdkErrorCode.ClientHttpFailedToTerminateSession,
+          "The MCP server answered the end of its session with HTTP status 500.",
+          { status: 500 }
+        )
+      })
+    ).toEqual({
+      level: "warn",
+      mcpServer: "notes",
+      err: {
+        type: "SdkHttpError",
+        code: "CLIENT_HTTP_FAILED_TO_TERMINATE_SESSION",
+        status: 500
+      },
+      msg: "An MCP server did not end its session as its connection closed; it ends it at its own time limit"
+    })
+  })
+
   it("logs a failed close as an error with what was thrown", () => {
     expect(
       logEvent({

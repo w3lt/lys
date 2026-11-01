@@ -16,7 +16,8 @@ import type { McpToolCallOutcome } from "./mcpToolResult"
 
 /**
  * What the registry borrows for its lifetime: the settings reader, and the
- * opener, working folder, and reporter every server's session borrows.
+ * opener, working folder, process group holder, and reporter every server's
+ * session borrows.
  */
 export type McpServerRegistryDependencies = Readonly<{
   /** Reads the `mcp` group from the settings file again. */
@@ -90,12 +91,11 @@ const UNKNOWN_TOOL: McpTurnToolLookup = Object.freeze({ status: "unknown" })
  * connecting until its opening ends. Nothing reconnects by itself:
  * {@link openServerAgain} or a changed setting starts a new session. Every new
  * session opens only once every session the registry stopped before it
- * released its server, whatever name either has, so the process a command
- * server's command started has ended before the next one starts, after a
- * rename or a removal and re-adding too; processes that process started
- * itself, such as the server a launcher like `npx` runs, are not waited for.
- * Settings that fail their rules or cannot be read keep the servers applied
- * before.
+ * released its server, whatever name either has, so the process group a
+ * command server's command started, the server a launcher like `npx` runs
+ * included, has ended before the next one starts, after a rename or a
+ * removal and re-adding too. Settings that fail their rules or cannot be
+ * read keep the servers applied before.
  * Resource ownership: owns every session it started until it stops it; a
  * stopped session closes its connection, now or when its opening ends.
  * Concurrency model: single-threaded with background tasks; settings reads
@@ -105,7 +105,10 @@ const UNKNOWN_TOOL: McpTurnToolLookup = Object.freeze({ status: "unknown" })
  * opening and close it started.
  */
 export default class McpServerRegistry {
-  /** Borrowed settings reader, opener, working folder, and reporter. */
+  /**
+   * Borrowed settings reader, opener, working folder, process group holder,
+   * and reporter.
+   */
   readonly #dependencies: McpServerRegistryDependencies
   /** Applied servers in the settings group's order. */
   #entries: Map<string, ServerEntry>
@@ -126,8 +129,8 @@ export default class McpServerRegistry {
   /**
    * Creates a registry with no server.
    *
-   * @param dependencies - Settings reader, opener, working folder, and
-   * reporter, borrowed for the registry's lifetime.
+   * @param dependencies - Settings reader, opener, working folder, process
+   * group holder, and reporter, borrowed for the registry's lifetime.
    * @remarks Reads, starts, and contacts nothing.
    */
   public constructor(dependencies: McpServerRegistryDependencies) {
@@ -345,6 +348,7 @@ export default class McpServerRegistry {
     const session = new McpServerSession(settings, {
       openServer: this.#dependencies.openServer,
       workingDirectory: this.#dependencies.workingDirectory,
+      processGroups: this.#dependencies.processGroups,
       reportEvent: this.#dependencies.reportEvent,
       addTask: (task) => this.#addTask(task)
     })

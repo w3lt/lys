@@ -20,6 +20,7 @@ import {
   findClosedMcpUrl
 } from "../../../support/mcpTestServers"
 import { createSettingsFilePath } from "../../../support/settingsFile"
+import { createOwnedMcpServerProcessGroups } from "../../../support/mcpServerProcessGroups"
 
 /** Path of the server list. */
 const SERVERS_URL = "/api/v1/mcp/servers"
@@ -113,10 +114,12 @@ async function createMcpRouteApp(settingsFilePath: string) {
     (settings: McpServerSettings, context: McpServerConnectionContext) =>
       openMcpServer(settings, context, OPENING_TIMEOUT_MILLISECONDS)
   )
+  const { processGroups } = createOwnedMcpServerProcessGroups()
   const registry = new McpServerRegistry({
     readSettings,
     openServer,
     workingDirectory: process.cwd(),
+    processGroups,
     reportEvent: (event) => events.push(event)
   })
   onTestFinished(async () => {

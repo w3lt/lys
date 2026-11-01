@@ -61,7 +61,7 @@ export const PAGE_READER_TIMEOUT_MS = 60_000
  * telling the person what to do.
  */
 const READER_HELP_SENTENCES =
-  "Please contact w3lt@negentropy.studio to report problem and require help. Only repair it yourself if you know exactly what you are doing."
+  "Please contact w3lt@nent.io to report problem and require help. Only repair it yourself if you know exactly what you are doing."
 
 /** Milliseconds in one second. */
 const MILLISECONDS_PER_SECOND = 1_000

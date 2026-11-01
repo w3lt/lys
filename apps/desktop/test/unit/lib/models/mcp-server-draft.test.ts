@@ -45,6 +45,13 @@ const NAME_RULE_PROBLEM =
 const URL_RULE_PROBLEM =
   "A URL starts with https://, or http:// for localhost, 127.0.0.1, or [::1], and has no user name, password, or #."
 
+/**
+ * The shared schema's sentence for a URL whose internationalized domain name
+ * breaks its rule.
+ */
+const INTERNATIONALIZED_HOST_PROBLEM =
+  "A URL's host is plain ASCII or an internationalized domain name whose every part is lowercase letters of one of the Latin, Greek, Cyrillic, Chinese, Japanese, or Korean scripts, digits, and hyphens."
+
 /** The shared schema's sentence for a variable name that breaks its rule. */
 const VARIABLE_NAME_PROBLEM =
   "A variable name is up to 128 ASCII letters, digits, and underscores, not starting with a digit."
@@ -1166,6 +1173,20 @@ describe("parseMcpServerDraft", () => {
     expect(
       readProblems({ ...URL_DRAFT, url: "http://mcp.example.test" })
     ).toEqual({ url: URL_RULE_PROBLEM })
+  })
+
+  it("reads a URL to an internationalized domain name of lowercase letters of one listed script as typed", () => {
+    const url = "https://bücher.example/mcp"
+
+    expect(
+      parseMcpServerDraft({ ...URL_DRAFT, url }, NO_OTHER_NAMES)
+    ).toMatchObject({ status: "valid", server: { url } })
+  })
+
+  it("gives the schema's sentence for a URL whose internationalized domain name the URL parser changes", () => {
+    expect(
+      readProblems({ ...URL_DRAFT, url: "https://BÜCHER.example/mcp" })
+    ).toEqual({ url: INTERNATIONALIZED_HOST_PROBLEM })
   })
 
   it("reports the first problem of each field at once", () => {

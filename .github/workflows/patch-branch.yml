@@ -135,10 +135,10 @@ jobs:
             echo
             echo "Before merging:"
             echo
-            echo "- [ ] Set the version to \`$NEXT\` as [Versioning](https://lys.negentropy.studio/operate/releases/#versioning) describes."
-            echo "- [ ] Record the release as [Recording a release](https://lys.negentropy.studio/changelog/#recording-a-release) describes."
+            echo "- [ ] Set the version to \`$NEXT\` as [Versioning](https://lys.nent.io/operate/releases/#versioning) describes."
+            echo "- [ ] Record the release as [Recording a release](https://lys.nent.io/changelog/#recording-a-release) describes."
             echo
-            echo "After merging, tag \`v$NEXT\` on \`stable\`. At 00:00 UTC, the Stable into main workflow then opens the pull request that brings it into \`main\`; squash it. See [Patch releases](https://lys.negentropy.studio/operate/releases/#patch-releases)."
+            echo "After merging, tag \`v$NEXT\` on \`stable\`. At 00:00 UTC, the Stable into main workflow then opens the pull request that brings it into \`main\`; squash it. See [Patch releases](https://lys.nent.io/operate/releases/#patch-releases)."
             echo
             echo "Opened by the [Patch branch workflow]($RUN_URL)."
           } > "$RUNNER_TEMP/pull-request.md"

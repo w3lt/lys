@@ -7,7 +7,7 @@
 </picture>
 
 <p>
-  <a href="https://lys.negentropy.studio"><img src=".github/assets/badges/handbook.svg" alt="Engineering handbook"></a>
+  <a href="https://lys.nent.io"><img src=".github/assets/badges/handbook.svg" alt="Engineering handbook"></a>
   <img src=".github/assets/badges/license.svg" alt="License: MPL-2.0">
   <img src=".github/assets/badges/react.svg" alt="React">
   <img src=".github/assets/badges/typescript.svg" alt="TypeScript">
@@ -52,7 +52,7 @@ server holding your half of the conversation, no third party in the middle of
 it. What she keeps is a SQLite database in your home directory,
 `~/.lys/lys_db.sqlite` with its `-wal` and `-shm` files, alongside a small
 settings file — all of them yours to read, move, or delete, as long as the
-[three database files travel together](https://lys.negentropy.studio/operate/data/).
+[three database files travel together](https://lys.nent.io/operate/data/).
 Set `LYS_HOME` to an absolute path and she keeps them there instead.
 There are two ways out, and both start off. A web page you let her read: the
 `read_page` tool has vmo, a page reader on your own machine, open it in a
@@ -67,7 +67,7 @@ account.
 
 That closeness is the design goal rather than a finished guarantee. Local
 ownership is how the system is built, but the handbook is candid about
-[where the current trust boundaries actually stop](https://lys.negentropy.studio/architecture/security/).
+[where the current trust boundaries actually stop](https://lys.nent.io/architecture/security/).
 
 <img src=".github/assets/divider.svg" alt="" width="100%">
 
@@ -85,7 +85,7 @@ She can use tools when you let her: read and search files on your machine,
 search the web, or read a public web page, asking before each call. Memory and continuity are
 directions Lys is growing toward, not capabilities she already has.
 
-[See what exists today and what remains unfinished →](https://lys.negentropy.studio/overview/status/)
+[See what exists today and what remains unfinished →](https://lys.nent.io/overview/status/)
 
 <img src=".github/assets/divider.svg" alt="" width="100%">
 
@@ -99,16 +99,16 @@ everything the surface does not.
 
 <div align="center">
 
-**[lys.negentropy.studio](https://lys.negentropy.studio)**
+**[lys.nent.io](https://lys.nent.io)**
 
 </div>
 
-- [Introduction](https://lys.negentropy.studio/overview/introduction/) — begin with the repository and its boundaries
-- [Status](https://lys.negentropy.studio/overview/status/) — what Lys can do today
-- [Architecture](https://lys.negentropy.studio/architecture/system/) — follow one conversation through the system
-- [Development setup](https://lys.negentropy.studio/develop/setup/) — run her locally
-- [Reference](https://lys.negentropy.studio/reference/api/) — routes, events, schemas, and rules
-- [Operations](https://lys.negentropy.studio/operate/configuration/) — configuration, data, logs, and troubleshooting
+- [Introduction](https://lys.nent.io/overview/introduction/) — begin with the repository and its boundaries
+- [Status](https://lys.nent.io/overview/status/) — what Lys can do today
+- [Architecture](https://lys.nent.io/architecture/system/) — follow one conversation through the system
+- [Development setup](https://lys.nent.io/develop/setup/) — run her locally
+- [Reference](https://lys.nent.io/reference/api/) — routes, events, schemas, and rules
+- [Operations](https://lys.nent.io/operate/configuration/) — configuration, data, logs, and troubleshooting
 
 The handbook's source is [`apps/docs`](apps/docs).
 

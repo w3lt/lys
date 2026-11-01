@@ -102,7 +102,7 @@ jobs:
           {
             echo "Brings the patch releases on \`stable\` into \`main\`. Opened when \`stable\` was at \`$STABLE_VERSION\` and \`main\` at \`$MAIN_VERSION\`."
             echo
-            echo "Squash it, so that \`main\`'s \`VERSION\` matches \`stable\`'s and the [Stable into main workflow]($RUN_URL) stays quiet until the next patch release. See [Patch releases](https://lys.negentropy.studio/operate/releases/#patch-releases)."
+            echo "Squash it, so that \`main\`'s \`VERSION\` matches \`stable\`'s and the [Stable into main workflow]($RUN_URL) stays quiet until the next patch release. See [Patch releases](https://lys.nent.io/operate/releases/#patch-releases)."
           } > "$RUNNER_TEMP/pull-request.md"
 
           url="$(gh api "repos/$GH_REPO/pulls" \

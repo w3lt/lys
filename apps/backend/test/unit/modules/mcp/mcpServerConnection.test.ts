@@ -3,9 +3,12 @@ import { mkdtemp, realpath, rm } from "node:fs/promises"
 import type { ServerResponse } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { setTimeout as delay } from "node:timers/promises"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { calculateMcpRequestFailure } from "../../../../src/modules/mcp/mcpError"
+import { MCP_SESSION_END_TIMEOUT_MILLISECONDS } from "../../../../src/modules/mcp/mcpHttpSessionEnd"
 import McpServerConnection from "../../../../src/modules/mcp/mcpServerConnection"
+import { MCP_SERVER_STOP_STEP_MILLISECONDS } from "../../../../src/modules/mcp/mcpServerProcess"
 import {
   MAXIMUM_MCP_RESPONSE_BYTES,
   McpResponseTooLargeError
@@ -14,16 +17,36 @@ import {
   answerAsMcpServer,
   answerToolCallsWith,
   answerWithStatus,
+  answerWithToolListPages,
   buildSizedTextResult,
+  buildFakeLauncherServerSettings,
   buildFakeStdioServerSettings,
   buildHttpServerSettings,
   createRecordingContext,
   ECHO_TOOL,
-  startFakeMcpHttpServer
+  findReportedProcessId,
+  isProcessRunning,
+  startFakeMcpHttpServer,
+  type McpHttpRoute
 } from "../../support/mcpTestServers"
 
 /** Longest a test waits for something a server process reports. */
 const EVENT_WAIT = Object.freeze({ timeout: 5000 })
+
+/**
+ * Longest a test waits for a process group that ends only at `SIGKILL`,
+ * three stop steps after its close started.
+ */
+const PROCESS_GROUP_STOP_WAIT = Object.freeze({
+  timeout: 3 * MCP_SERVER_STOP_STEP_MILLISECONDS + 2000
+})
+
+/** Time limit of a test that waits for such a process group. */
+const PROCESS_GROUP_STOP_TEST_TIMEOUT =
+  4 * MCP_SERVER_STOP_STEP_MILLISECONDS + 5000
+
+/** How much earlier than asked a timer may fire on a busy test machine. */
+const TIMER_TOLERANCE_MILLISECONDS = 50
 
 /** Synthetic bearer token; not a real credential. */
 const SYNTHETIC_AUTHORIZATION = "Bearer synthetic-token-0123"
@@ -42,6 +65,13 @@ const EVENT_STREAM_ANSWER_HEADERS = Object.freeze({
 
 /** A signal that never aborts, for calls a test does not cancel. */
 const NEVER_ABORTED = new AbortController().signal
+
+/**
+ * Longest a fake server holds the end of a session while it waits for the
+ * request of a call to end; below the session end's own time limit, so the
+ * held answer still reaches the connection.
+ */
+const CALL_END_HOLD_MILLISECONDS = MCP_SESSION_END_TIMEOUT_MILLISECONDS / 2
 
 /** Synthetic body of a server's HTTP error answer, which no log may hold. */
 const SYNTHETIC_ANSWER_BODY = "SYNTHETIC-SERVER-ANSWER-BODY-0123"
@@ -98,6 +128,69 @@ async function createWorkingFolder(): Promise<string> {
  */
 function filterTooLargeErrors(errors: readonly Error[]): readonly Error[] {
   return errors.filter((error) => error instanceof McpResponseTooLargeError)
+}
+
+/** A route that holds a tool call open, and what it saw as the session ended. */
+type CallHoldingRoute = Readonly<{
+  /** The route; see {@link createCallHoldingRoute}. */
+  route: McpHttpRoute
+  /**
+   * For each end of a session the route answered, whether the request of
+   * the call it held had ended by then.
+   */
+  sessionEndObservations: readonly boolean[]
+}>
+
+/**
+ * Builds a route that answers as {@link answerAsMcpServer} does, except that
+ * it never answers a tool call, and that it holds the end of a session until
+ * the request of the call ended, at most {@link CALL_END_HOLD_MILLISECONDS},
+ * before it answers HTTP 405.
+ *
+ * @returns The route and what it saw at each end of a session.
+ */
+function createCallHoldingRoute(): CallHoldingRoute {
+  const callEnd = Promise.withResolvers<boolean>()
+  const sessionEndObservations: boolean[] = []
+  const answerCall = answerToolCallsWith((_id, response) => {
+    response.once("close", () => {
+      callEnd.resolve(true)
+    })
+  })
+  const route: McpHttpRoute = (request, body, response) => {
+    if (request.method !== "DELETE") {
+      answerCall(request, body, response)
+      return
+    }
+    void answerSessionEndAfterCall(
+      callEnd.promise,
+      sessionEndObservations,
+      response
+    )
+  }
+  return Object.freeze({ route, sessionEndObservations })
+}
+
+/**
+ * Answers the end of a session with HTTP 405 once a call's request ended,
+ * or once {@link CALL_END_HOLD_MILLISECONDS} passed.
+ *
+ * @param callEnd - Fulfills with true once the call's request ended; never
+ * rejects.
+ * @param observations - Receives whether the call's request ended within the
+ * hold.
+ * @param response - Answer to the end of the session.
+ * @returns A promise that settles once the answer was sent; it never
+ * rejects.
+ */
+async function answerSessionEndAfterCall(
+  callEnd: Promise<boolean>,
+  observations: boolean[],
+  response: ServerResponse
+): Promise<void> {
+  const holdEnd = delay(CALL_END_HOLD_MILLISECONDS, false, { ref: false })
+  observations.push(await Promise.race([callEnd, holdEnd]))
+  response.writeHead(405).end()
 }
 
 /**
@@ -188,7 +281,89 @@ describe("McpServerConnection over stdio", () => {
       context
     )
 
-    expect(await connection.listTools(NEVER_ABORTED)).toEqual([ECHO_TOOL])
+    expect(await connection.getToolListPage(undefined, NEVER_ABORTED)).toEqual({
+      tools: [ECHO_TOOL],
+      nextCursor: undefined
+    })
+  })
+
+  it("reads the page a cursor names and passes on its tools unchecked", async () => {
+    const server = await startFakeMcpHttpServer(
+      answerWithToolListPages({
+        "": { tools: [ECHO_TOOL], nextCursor: "page-2" },
+        "page-2": { tools: [{ name: 7 }] }
+      })
+    )
+    const { context } = createRecordingContext()
+    const connection = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    expect(await connection.getToolListPage(undefined, NEVER_ABORTED)).toEqual({
+      tools: [ECHO_TOOL],
+      nextCursor: "page-2"
+    })
+    expect(await connection.getToolListPage("page-2", NEVER_ABORTED)).toEqual({
+      tools: [{ name: 7 }],
+      nextCursor: undefined
+    })
+  })
+
+  it("reads no tools from a server that offered none in the handshake, without asking it", async () => {
+    const server = await startFakeMcpHttpServer(
+      answerWithToolListPages({ "": { tools: [ECHO_TOOL] } }, {})
+    )
+    const { context } = createRecordingContext()
+    const connection = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    expect(await connection.getToolListPage(undefined, NEVER_ABORTED)).toEqual({
+      tools: [],
+      nextCursor: undefined
+    })
+    expect(
+      server.receivedRequests.map((request) => request.rpcMethod)
+    ).not.toContain("tools/list")
+  })
+
+  it("reads a page that carries fields besides its tools and cursor, such as _meta", async () => {
+    const server = await startFakeMcpHttpServer(
+      answerWithToolListPages({
+        "": { tools: [ECHO_TOOL], _meta: { origin: "synthetic" } }
+      })
+    )
+    const { context } = createRecordingContext()
+    const connection = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    expect(await connection.getToolListPage(undefined, NEVER_ABORTED)).toEqual({
+      tools: [ECHO_TOOL],
+      nextCursor: undefined
+    })
+  })
+
+  it.each([
+    ["has no tools array", { tools: "none" }],
+    ["names a cursor that is not text", { tools: [], nextCursor: 2 }],
+    ["names a null cursor", { tools: [], nextCursor: null }]
+  ])("fails a page that %s as an invalid result", async (_case, page) => {
+    const server = await startFakeMcpHttpServer(
+      answerWithToolListPages({ "": page })
+    )
+    const { context } = createRecordingContext()
+    const connection = await openForTest(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+
+    await expect(
+      connection.getToolListPage(undefined, NEVER_ABORTED)
+    ).rejects.toMatchObject({ code: SdkErrorCode.InvalidResult })
   })
 
   it("calls a tool and returns the server's result", async () => {
@@ -228,7 +403,7 @@ describe("McpServerConnection over stdio", () => {
       }),
       context
     )
-    await connection.listTools(NEVER_ABORTED)
+    await connection.getToolListPage(undefined, NEVER_ABORTED)
 
     const result = await connection.sendToolCall(
       "structured",
@@ -255,27 +430,36 @@ describe("McpServerConnection over stdio", () => {
     expect(result.content).toHaveLength(1)
   })
 
-  it("ends the connection at an answer line longer than the response limit, reporting why", async () => {
-    const { context, events } = createRecordingContext()
-    const connection = await openForTest(
-      buildFakeStdioServerSettings("fake"),
-      context
-    )
-
-    const error = await captureRejection(
-      connection.sendToolCall(
-        "sized",
-        { lineBytes: MAXIMUM_MCP_RESPONSE_BYTES + 1 },
-        NEVER_ABORTED
+  it(
+    "ends the connection at an answer line longer than the response limit, reporting why, and a later close waits for the process",
+    async () => {
+      const { context, events } = createRecordingContext()
+      const connection = await openForTest(
+        buildFakeStdioServerSettings("fake", {
+          ignoreClosedInput: true,
+          reportProcessId: true
+        }),
+        context
       )
-    )
 
-    expect(calculateMcpRequestFailure(error)).toEqual({ kind: "closed" })
-    await vi.waitFor(() => expect(events.closedCount).toBe(1), EVENT_WAIT)
-    expect(events.errors.map((reported) => reported.message)).toContainEqual(
-      expect.stringContaining(`${MAXIMUM_MCP_RESPONSE_BYTES} bytes`)
-    )
-  })
+      const error = await captureRejection(
+        connection.sendToolCall(
+          "sized",
+          { lineBytes: MAXIMUM_MCP_RESPONSE_BYTES + 1 },
+          NEVER_ABORTED
+        )
+      )
+      const processId = findReportedProcessId(events.logLines, "pid")
+      await connection.close()
+
+      expect(error).toBeInstanceOf(McpResponseTooLargeError)
+      expect(calculateMcpRequestFailure(error)).toEqual({ kind: "too-large" })
+      expect(isProcessRunning(processId)).toBe(false)
+      expect(events.closedCount).toBe(1)
+      expect(filterTooLargeErrors(events.errors)).toHaveLength(1)
+    },
+    PROCESS_GROUP_STOP_TEST_TIMEOUT
+  )
 
   it("tells the server a cancelled call was cancelled and rejects the call", async () => {
     const { context, events } = createRecordingContext()
@@ -318,6 +502,78 @@ describe("McpServerConnection over stdio", () => {
     expect(events.closedCount).toBe(1)
   })
 
+  it(
+    "ends a server a launcher runs, which ignores its closed input and SIGTERM, with its whole process group before the close settles",
+    async () => {
+      const { context, events } = createRecordingContext()
+      const connection = await McpServerConnection.open(
+        buildFakeLauncherServerSettings("fake", {
+          ignoreClosedInput: true,
+          ignoreSigterm: true,
+          reportProcessId: true
+        }),
+        context
+      )
+      await connection.sendToolCall("echo", { text: "ready" }, NEVER_ABORTED)
+      const serverId = findReportedProcessId(events.logLines, "pid")
+      const launcherId = findReportedProcessId(events.logLines, "launcher pid")
+      const startedAt = performance.now()
+
+      await connection.close()
+
+      expect(isProcessRunning(serverId)).toBe(false)
+      expect(isProcessRunning(launcherId)).toBe(false)
+      expect(performance.now() - startedAt).toBeGreaterThanOrEqual(
+        2 * MCP_SERVER_STOP_STEP_MILLISECONDS - TIMER_TOLERANCE_MILLISECONDS
+      )
+      expect(events.closedCount).toBe(0)
+    },
+    PROCESS_GROUP_STOP_TEST_TIMEOUT
+  )
+
+  it("ends a server a launcher runs once its input closes, without a signal", async () => {
+    const { context, events } = createRecordingContext()
+    const connection = await McpServerConnection.open(
+      buildFakeLauncherServerSettings("fake", { reportProcessId: true }),
+      context
+    )
+    await connection.sendToolCall("echo", { text: "ready" }, NEVER_ABORTED)
+    const serverId = findReportedProcessId(events.logLines, "pid")
+    const startedAt = performance.now()
+
+    await connection.close()
+
+    expect(isProcessRunning(serverId)).toBe(false)
+    expect(performance.now() - startedAt).toBeLessThan(
+      MCP_SERVER_STOP_STEP_MILLISECONDS
+    )
+  })
+
+  it(
+    "ends the rest of its process group when the command exits by itself, before it reports the ended connection",
+    async () => {
+      const { context, events } = createRecordingContext()
+      const connection = await openForTest(
+        buildFakeStdioServerSettings("fake", { startHelper: true }),
+        context
+      )
+      await connection.sendToolCall("echo", { text: "ready" }, NEVER_ABORTED)
+      const helperId = findReportedProcessId(events.logLines, "helper pid")
+
+      const error = await captureRejection(
+        connection.sendToolCall("exit", {}, NEVER_ABORTED)
+      )
+      await vi.waitFor(
+        () => expect(events.closedCount).toBe(1),
+        PROCESS_GROUP_STOP_WAIT
+      )
+
+      expect(calculateMcpRequestFailure(error)).toEqual({ kind: "closed" })
+      expect(isProcessRunning(helperId)).toBe(false)
+    },
+    PROCESS_GROUP_STOP_TEST_TIMEOUT
+  )
+
   it("returns one promise for every close and does not report it as an ended connection", async () => {
     const { context, events } = createRecordingContext()
     const connection = await McpServerConnection.open(
@@ -347,7 +603,7 @@ describe("McpServerConnection over HTTP", () => {
       context
     )
 
-    await connection.listTools(NEVER_ABORTED)
+    await connection.getToolListPage(undefined, NEVER_ABORTED)
     await connection.sendToolCall("echo", { text: "hi" }, NEVER_ABORTED)
     await connection.close()
 
@@ -534,13 +790,105 @@ describe("McpServerConnection over HTTP", () => {
     expect(events.closedCount).toBe(0)
   })
 
-  it("closes with a call in flight without reporting the aborted request as a connection error", async () => {
-    let receivedCallCount = 0
-    const server = await startFakeMcpHttpServer(
-      answerToolCallsWith(() => {
-        receivedCallCount += 1
-      })
+  it("asks the server to end its session as it closes, with the configured headers", async () => {
+    const server = await startFakeMcpHttpServer(answerAsMcpServer())
+    const { context, events } = createRecordingContext()
+    const connection = await McpServerConnection.open(
+      buildHttpServerSettings("remote", server.url, [
+        { name: "Authorization", value: SYNTHETIC_AUTHORIZATION }
+      ]),
+      context
     )
+
+    await connection.close()
+
+    const sessionEnds = server.receivedRequests.filter(
+      (request) => request.method === "DELETE"
+    )
+    expect(sessionEnds).toEqual([
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: SYNTHETIC_AUTHORIZATION,
+          "mcp-session-id": "test-session",
+          "mcp-protocol-version": expect.any(String)
+        })
+      })
+    ])
+    expect(events.sessionEndFailures).toEqual([])
+  })
+
+  it(
+    "closes once the time limit passed when the server does not answer the end of its session, and reports it",
+    { timeout: MCP_SESSION_END_TIMEOUT_MILLISECONDS + 5000 },
+    async () => {
+      const answer = answerAsMcpServer()
+      const server = await startFakeMcpHttpServer((request, body, response) => {
+        if (request.method !== "DELETE") answer(request, body, response)
+      })
+      const { context, events } = createRecordingContext()
+      const connection = await McpServerConnection.open(
+        buildHttpServerSettings("remote", server.url),
+        context
+      )
+      const startedAt = performance.now()
+
+      await connection.close()
+
+      expect(performance.now() - startedAt).toBeLessThan(
+        MCP_SESSION_END_TIMEOUT_MILLISECONDS + 2000
+      )
+      expect(events.sessionEndFailures).toEqual([
+        expect.objectContaining({ name: "TimeoutError" })
+      ])
+      expect(events.closedCount).toBe(0)
+    }
+  )
+
+  it("ends the session a failed handshake started", async () => {
+    const server = await startFakeMcpHttpServer((request, body, response) => {
+      if (request.method === "POST") {
+        const { id } = JSON.parse(body) as { id?: number }
+        response.writeHead(200, JSON_ANSWER_HEADERS)
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            result: {
+              protocolVersion: "1999-01-01",
+              capabilities: {},
+              serverInfo: { name: "old", version: "1.0.0" }
+            }
+          })
+        )
+        return
+      }
+      response.writeHead(405).end()
+    })
+    const { context, events } = createRecordingContext()
+
+    await captureRejection(
+      McpServerConnection.open(
+        buildHttpServerSettings("remote", server.url),
+        context
+      )
+    )
+
+    expect(server.receivedRequests.map((request) => request.method)).toEqual([
+      "POST",
+      "DELETE"
+    ])
+    expect(server.receivedRequests[1]?.headers["mcp-session-id"]).toBe(
+      "test-session"
+    )
+    expect(server.receivedRequests[1]?.headers).not.toHaveProperty(
+      "mcp-protocol-version"
+    )
+    expect(events.sessionEndFailures).toEqual([])
+  })
+
+  it("closes with a call in flight by ending the call's request before it asks the server to end the session, without reporting the aborted request as a connection error", async () => {
+    const { route, sessionEndObservations } = createCallHoldingRoute()
+    const server = await startFakeMcpHttpServer(route)
     const { context, events } = createRecordingContext()
     const connection = await McpServerConnection.open(
       buildHttpServerSettings("remote", server.url),
@@ -549,10 +897,17 @@ describe("McpServerConnection over HTTP", () => {
     const call = captureRejection(
       connection.sendToolCall("echo", {}, NEVER_ABORTED)
     )
-    await vi.waitFor(() => expect(receivedCallCount).toBe(1), EVENT_WAIT)
+    await vi.waitFor(
+      () =>
+        expect(
+          server.receivedRequests.map((request) => request.rpcMethod)
+        ).toContain("tools/call"),
+      EVENT_WAIT
+    )
 
     await connection.close()
 
+    expect(sessionEndObservations).toEqual([true])
     expect(calculateMcpRequestFailure(await call)).toEqual({ kind: "closed" })
     expect(events.errors).toEqual([])
     expect(events.closedCount).toBe(0)

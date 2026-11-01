@@ -410,24 +410,50 @@ async function listLoadedContextLengths(
   loadedLlmModelInstances: readonly LoadedLlmModelInstance[],
   findLlmContextMeasurement: LlmEngine["findLlmContextMeasurement"]
 ): Promise<ReadonlyMap<string, number>> {
-  const contextLengths = new Map<string, number>()
-  const instancesByKey = Map.groupBy(
-    loadedLlmModelInstances,
-    ({ modelKey }) => modelKey
+  const [firstInstance] = loadedLlmModelInstances
+  if (firstInstance === undefined) return new Map()
+  const { modelKey } = firstInstance
+  const contextLength = await findLoadedContextLength(
+    modelKey,
+    loadedLlmModelInstances.filter(
+      (instance) => instance.modelKey === modelKey
+    ),
+    findLlmContextMeasurement
   )
-  for (const [modelKey, instances] of instancesByKey) {
-    const reportedLengths = instances.map(({ contextLength }) => contextLength)
-    if (
-      reportedLengths.every((length): length is number => length !== undefined)
-    ) {
-      contextLengths.set(modelKey, Math.min(...reportedLengths))
-      continue
-    }
-    const measurement = await findLlmContextMeasurement(modelKey, [])
-    if (measurement !== undefined)
-      contextLengths.set(modelKey, measurement.contextLength)
+  const laterContextLengths = await listLoadedContextLengths(
+    loadedLlmModelInstances.filter(
+      (instance) => instance.modelKey !== modelKey
+    ),
+    findLlmContextMeasurement
+  )
+  if (contextLength === undefined) return laterContextLengths
+  return new Map([[modelKey, contextLength], ...laterContextLengths])
+}
+
+/**
+ * Finds the context length one model's loaded instances are loaded with.
+ *
+ * @param modelKey - Canonical key of the model.
+ * @param instances - The model's loaded instances; at least one.
+ * @param findLlmContextMeasurement - Measurement query of the engine.
+ * @returns A promise resolving to the smallest length the instances report,
+ * or, when one of them reports none, to the measurement of the key without
+ * text; undefined when that measurement finds the model no longer loaded.
+ * @throws If the measurement fails.
+ */
+async function findLoadedContextLength(
+  modelKey: string,
+  instances: readonly LoadedLlmModelInstance[],
+  findLlmContextMeasurement: LlmEngine["findLlmContextMeasurement"]
+): Promise<number | undefined> {
+  const reportedLengths = instances.map(({ contextLength }) => contextLength)
+  if (
+    reportedLengths.every((length): length is number => length !== undefined)
+  ) {
+    return Math.min(...reportedLengths)
   }
-  return contextLengths
+  const measurement = await findLlmContextMeasurement(modelKey, [])
+  return measurement?.contextLength
 }
 
 /**

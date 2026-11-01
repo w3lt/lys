@@ -11,9 +11,10 @@
 //! Every rule matches `mcpSettingsSchema` in `@lys/share`, which the renderer
 //! and the backend check. A text with a lone surrogate, which that schema
 //! refuses, never reaches these rules: the JSON reader refuses its escape, so
-//! the whole settings file fails to load. URLs to internationalized domain
-//! names are refused on both sides, because this host's URL parser and the
-//! JavaScript ones convert such names differently.
+//! the whole settings file fails to load. A URL's host must be plain ASCII or
+//! an internationalized domain name of one of a few long-stable scripts, as
+//! [`internationalized_host`] defines, because this host's URL parser and the
+//! JavaScript ones convert other such names differently.
 //!
 //! Environment variable values and header values can hold secrets, such as
 //! tokens: they are stored as plain text in the owner-only settings file,
@@ -22,12 +23,16 @@
 //! such as a `servers` value that is not a list, can quote that value, because
 //! it is the JSON reader's own message.
 
+mod internationalized_host;
+
 use std::{collections::HashSet, fmt};
 
 use serde::de::{DeserializeOwned, Error};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use tauri::Url;
+
+use internationalized_host::is_accepted_host;
 
 /// Most servers the group may hold, inclusive. Matches
 /// `MAXIMUM_MCP_SERVER_COUNT` in `@lys/share`.
@@ -103,9 +108,6 @@ const UNSENDABLE_HEADER_NAMES: [&str; 4] = ["expect", "keep-alive", "transfer-en
 /// Hosts a server URL may reach over plain `http:`, as the URL parser writes
 /// them.
 const LOOPBACK_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
-
-/// Start of a label of an internationalized domain name, in ASCII form.
-const PUNYCODE_LABEL_PREFIX: &str = "xn--";
 
 /// Characters an HTTP header name may hold besides ASCII letters and digits:
 /// the rest of an RFC 9110 token.
@@ -363,8 +365,8 @@ impl TryFrom<StoredHttpMcpServer> for HttpMcpServer {
         if !is_server_url(&stored.url) {
             return Err("a URL must be up to 2048 characters without spaces, start with https://, or http:// for localhost, 127.0.0.1, or [::1], and have no user name, password, or #");
         }
-        if has_internationalized_host(&stored.url) {
-            return Err("a URL's host must not be an internationalized domain name: no part of it may start with xn--");
+        if has_refused_internationalized_host(&stored.url) {
+            return Err("a URL's host must be plain ASCII or an internationalized domain name whose every part is lowercase letters of one of the Latin, Greek, Cyrillic, Chinese, Japanese, or Korean scripts, digits, and hyphens");
         }
 
         Ok(Self {
@@ -675,19 +677,15 @@ fn is_server_url(value: &str) -> bool {
     }
 }
 
-/// Reports whether `value` parses as a URL whose host, as the URL parser
-/// writes it in lowercase ASCII, has a label starting with `xn--`, which a
-/// Unicode host such as `bücher.example` also gets.
-///
-/// URL parsers do not convert such names alike: this host's and Node's
-/// accept different ones. Refusing them all keeps one judgement of every
-/// server URL with `@lys/share`.
-fn has_internationalized_host(value: &str) -> bool {
+/// Reports whether `value`, a URL that [`is_server_url`] accepts, parses with
+/// a host that [`is_accepted_host`] refuses: an internationalized domain name
+/// that holds a character other than lowercase letters of one accepted
+/// script, digits, and hyphens, or that the URL parser changed. A URL that
+/// does not parse is not reported here.
+fn has_refused_internationalized_host(value: &str) -> bool {
     Url::parse(value).is_ok_and(|url| {
-        url.host_str().is_some_and(|host| {
-            host.split('.')
-                .any(|label| label.starts_with(PUNYCODE_LABEL_PREFIX))
-        })
+        url.host_str()
+            .is_some_and(|host| !is_accepted_host(value, host))
     })
 }
 
@@ -1114,6 +1112,9 @@ mod tests {
             "http://127.1/mcp",
             "http://[::1]:3000/mcp",
             "http://[0:0:0:0:0:0:0:1]/mcp",
+            "https://bücher.example/mcp",
+            "https://xn--bcher-kva.example/mcp",
+            "https://MCP.XN--9CA.COM/mcp",
         ] {
             assert_server_accepted(get_http_server_with("url", json!(url)));
         }
@@ -1142,11 +1143,28 @@ mod tests {
             " https://secret.example.com/mcp".to_string(),
             "https://secret.example.com/m cp".to_string(),
             "https://secret.example.com/\u{0007}".to_string(),
-            "https://secret.bücher.example/mcp".to_string(),
-            "https://secret.xn--bcher-kva.example/mcp".to_string(),
+            "https://secret.BÜCHER.example/mcp".to_string(),
+            "https://secret.straße.example/mcp".to_string(),
+            "https://secret.xn--zca.example/mcp".to_string(),
         ] {
             assert_server_refused(get_http_server_with("url", json!(url)), "secret");
         }
+    }
+
+    #[test]
+    fn reports_a_refused_internationalized_host_with_its_rule() {
+        let failure = parse_server(get_http_server_with(
+            "url",
+            json!("https://bu\u{308}cher.example/mcp"),
+        ))
+        .expect_err("a host the URL parser changed");
+
+        assert!(
+            failure.to_string().contains(
+                "a URL's host must be plain ASCII or an internationalized domain name whose every part is lowercase letters of one of the Latin, Greek, Cyrillic, Chinese, Japanese, or Korean scripts, digits, and hyphens"
+            ),
+            "{failure}"
+        );
     }
 
     #[test]

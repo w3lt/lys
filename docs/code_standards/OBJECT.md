@@ -1051,6 +1051,8 @@ The following are prohibited:
 
 Invalid-input tests MUST build the raw boundary representation rather than manufacture an invalid trusted domain object.
 
+A raw boundary representation a test builds, such as the message a server sends or the value a boundary is expected to return, MAY nest literals: it is the data the boundary carries, not a repository-owned object, so OBJECT-056 does not apply to it.
+
 ### OBJECT-061 — Externally imposed object shapes are isolated
 
 A framework, language runtime, or third-party API may require an object shape that violates repository categories, such as a callback table containing framework-required metadata.

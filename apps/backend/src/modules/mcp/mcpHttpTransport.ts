@@ -200,7 +200,8 @@ export default class McpHttpTransport implements Transport {
    * Implements {@link Transport.close} by aborting every request in flight.
    *
    * @returns A promise that settles once the requests were aborted; the
-   * server is not asked to end its session.
+   * server is not asked to end its session here, but by the connection
+   * once this close settled.
    */
   public close(): Promise<void> {
     return this.#transport.close()

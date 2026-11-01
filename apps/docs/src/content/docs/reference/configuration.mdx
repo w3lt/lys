@@ -51,15 +51,16 @@ A rejected value stops the desktop app before any window opens and prints
 `Lys cannot start: …` to standard error. The host does not create the directory
 at startup; loading settings creates it when `settings.json` is missing.
 
-| Path under `$LYS_HOME`        | Used by        | Contents                                                                                                                                                         |
-| ----------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `settings.json`               | Tauri host     | [Persisted settings JSON](#persisted-settings-json)                                                                                                              |
-| `lys_db.sqlite`               | Backend        | Conversation database                                                                                                                                            |
-| `attachments/`                | Backend        | One folder per conversation and one per message under it, holding the files sent with that message under their own names; created on the first attachment stored |
-| `runtime/node/bin/node`       | Release builds | Node.js executable that runs the backend                                                                                                                         |
-| `runtime/backend/backend.mjs` | Release builds | Backend bundle that the release Node.js executable runs                                                                                                          |
-| `runtime/vmo/vmo`             | Release builds | vmo, the page reader the desktop starts, signed with the virtualization entitlement                                                                              |
-| `logs/backend-YYYY-MM-DD.log` | Backend        | The backend's log lines of one UTC day, appended by every run that day and never deleted; see [the backend log files](/operate/logging/#the-backend-log-files)   |
+| Path under `$LYS_HOME`        | Used by        | Contents                                                                                                                                                                                                  |
+| ----------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `settings.json`               | Tauri host     | [Persisted settings JSON](#persisted-settings-json)                                                                                                                                                       |
+| `lys_db.sqlite`               | Backend        | Conversation database                                                                                                                                                                                     |
+| `attachments/`                | Backend        | One folder per conversation and one per message under it, holding the files sent with that message under their own names; created on the first attachment stored                                          |
+| `mcp-process-groups`          | Backend, host  | The process groups of the running stdio MCP servers, one decimal identifier per line; the host deletes it before it starts the backend and, once it stopped one, ends every group it lists and deletes it |
+| `runtime/node/bin/node`       | Release builds | Node.js executable that runs the backend                                                                                                                                                                  |
+| `runtime/backend/backend.mjs` | Release builds | Backend bundle that the release Node.js executable runs                                                                                                                                                   |
+| `runtime/vmo/vmo`             | Release builds | vmo, the page reader the desktop starts, signed with the virtualization entitlement                                                                                                                       |
+| `logs/backend-YYYY-MM-DD.log` | Backend        | The backend's log lines of one UTC day, appended by every run that day and never deleted; see [the backend log files](/operate/logging/#the-backend-log-files)                                            |
 
 On macOS, `build.sh` installs the three `runtime/` entries under
 `${LYS_HOME:-$HOME/.lys}`. It treats an empty value as unset but does not reject
@@ -88,6 +89,7 @@ not find a runtime that `build.sh` installed under another directory.
 | SQLite path                    | `$LYS_HOME/lys_db.sqlite`; see [Lys home directory](#lys-home-directory)                                                                                                                                          |
 | Settings file path             | `$LYS_HOME/settings.json`, as `settingsFilePath`; read for the model provider, its address and key, and the Tavily API key                                                                                        |
 | Attachments directory          | `$LYS_HOME/attachments`, as `attachmentsDirectoryPath`; created with its folders on the first attachment stored                                                                                                   |
+| MCP process groups file        | `$LYS_HOME/mcp-process-groups`, as `mcpProcessGroupsFilePath`; written once the first stdio MCP server's group starts                                                                                             |
 | vmo endpoint                   | `127.0.0.1:8080`, as `vmoHost` and `vmoPort`, from `VMO_HOST` and `VMO_PORT` in `@lys/protocol`; where vmo listens. It reads every `read_page` page, and its `GET /health` decides whether `read_page` is offered |
 | Caliginia system prompt        | `src/utils/prompts/caliginia.txt`, as `caliginiaSystemPrompt`                                                                                                                                                     |
 | Lysiptera system prompt        | `src/utils/prompts/lysiptera.txt`, as `lysipteraSystemPrompt`                                                                                                                                                     |
@@ -111,14 +113,14 @@ The backend validates the complete configuration with `backendConfigSchema` in
 application or any service. Every key is required, unknown keys are rejected,
 and no defaults are applied.
 
-| Key                                                                       | Accepted values                                                                               |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `backendHost`                                                             | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers |
-| `backendPort`, `vmoPort`                                                  | An integer from 1 to 65535                                                                    |
-| `vmoHost`                                                                 | An IPv4 loopback address (`127.x.x.x`); vmo does not authenticate its callers                 |
-| `databaseFilePath`, `settingsFilePath`, `attachmentsDirectoryPath`        | An absolute path                                                                              |
-| `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `titleGenerationPrompt` | Non-empty text without leading or trailing whitespace                                         |
-| `titleGenerationMaxAttempts`, `generatedTitleMaxLength`                   | A positive integer                                                                            |
+| Key                                                                                            | Accepted values                                                                               |
+| ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `backendHost`                                                                                  | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers |
+| `backendPort`, `vmoPort`                                                                       | An integer from 1 to 65535                                                                    |
+| `vmoHost`                                                                                      | An IPv4 loopback address (`127.x.x.x`); vmo does not authenticate its callers                 |
+| `databaseFilePath`, `settingsFilePath`, `attachmentsDirectoryPath`, `mcpProcessGroupsFilePath` | An absolute path                                                                              |
+| `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `titleGenerationPrompt`                      | Non-empty text without leading or trailing whitespace                                         |
+| `titleGenerationMaxAttempts`, `generatedTitleMaxLength`                                        | A positive integer                                                                            |
 
 A value outside these rules stops the backend at startup with a `ZodError`
 whose issues name each failing key. The shared constants, the `LYS_HOME`
@@ -175,20 +177,20 @@ defaults:
 | -------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `runtime.autoStartBackend` | `boolean`               | Whether desktop initialization should ask Tauri to start the backend automatically                                   |
 | `runtime.autoStartVmo`     | `boolean`               | Whether desktop initialization should ask Tauri to start vmo, the page reader `read_page` uses                       |
-| `runtime.defaultModel`     | `string \| null`        | Preferred model used when it is loaded; otherwise the first loaded inventory entry is the fallback                   |
+| `runtime.defaultModel`     | `string \|null`         | Preferred model used when it is loaded; otherwise the first loaded inventory entry is the fallback                   |
 | `runtime.backendAddress`   | `string`                | Backend address displayed in settings; HTTP clients still target the fixed loopback address                          |
 | `generation.temperature`   | number in `[0, 1]`      | Sampling temperature sent with each new chat request                                                                 |
 | `generation.replyCeiling`  | unsigned 32-bit integer | Maximum reply tokens; the desktop omits the request limit when this is `0`                                           |
 | `loadConfiguration`        | object                  | Settings sent with each model load; see [Load configuration](#load-configuration)                                    |
-| `secrets.tavilyApiKey`     | `string \| null`        | Tavily API key of `web_search`, 1 to 256 visible ASCII characters, stored as plain text; see [Secrets](#secrets)     |
-| `secrets.ollamaApiKey`     | `string \| null`        | API key of Ollama Cloud, under the same rule; see [Secrets](#secrets)                                                |
-| `secrets.groqApiKey`       | `string \| null`        | Groq API key, under the same rule; see [Secrets](#secrets)                                                           |
+| `secrets.tavilyApiKey`     | `string \|null`         | Tavily API key of `web_search`, 1 to 256 visible ASCII characters, stored as plain text; see [Secrets](#secrets)     |
+| `secrets.ollamaApiKey`     | `string \|null`         | API key of Ollama Cloud, under the same rule; see [Secrets](#secrets)                                                |
+| `secrets.groqApiKey`       | `string \|null`         | Groq API key, under the same rule; see [Secrets](#secrets)                                                           |
 | `providers`                | object                  | The model provider every request goes to, and where to find it; see [Providers](#providers)                          |
 | `tools.justRun`            | array of tool names     | Tools that run without asking when a model calls them; every other tool asks; see [Tools](#tools)                    |
 | `tools.switches`           | object of `boolean`     | Whether each tool the person switched is on, by tool name; any other tool starts at its default; see [Tools](#tools) |
-| `location.city`            | `string \| null`        | City the person saved for `get_location`; see [Location](#location)                                                  |
-| `location.region`          | `string \| null`        | State, province, or other region the person saved; see [Location](#location)                                         |
-| `location.country`         | `string \| null`        | Country the person saved; see [Location](#location)                                                                  |
+| `location.city`            | `string \|null`         | City the person saved for `get_location`; see [Location](#location)                                                  |
+| `location.region`          | `string \|null`         | State, province, or other region the person saved; see [Location](#location)                                         |
+| `location.country`         | `string \|null`         | Country the person saved; see [Location](#location)                                                                  |
 | `mcp.servers`              | array of server objects | MCP servers Lys connects to, in the order Settings → MCP lists them; see [MCP servers](#mcp-servers)                 |
 
 A missing group, or a missing field in one of them, uses the host defaults;
@@ -280,11 +282,11 @@ provider key at each connection attempt; see [Providers](#providers).
 The `providers` group holds the model provider every request goes to, chosen
 in Settings → Providers, and where to find it.
 
-| Key                          | Type                                                | Meaning                                                                                  |
-| ---------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `providers.active`           | `"lmStudio" \| "ollama" \| "ollamaCloud" \| "groq"` | Provider every request goes to: LM Studio, a local Ollama server, Ollama Cloud, or Groq  |
-| `providers.lmStudio.address` | `string \| null`                                    | LM Studio's server, or `null` for `LMSTUDIO_HOST:LMSTUDIO_PORT`                          |
-| `providers.ollama.address`   | `string \| null`                                    | The local Ollama server, or `null` for `OLLAMA_HOST:OLLAMA_PORT`; unused by Ollama Cloud |
+| Key                          | Type                                             | Meaning                                                                                  |
+| ---------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `providers.active`           | `"lmStudio" \|"ollama" \|"ollamaCloud" \|"groq"` | Provider every request goes to: LM Studio, a local Ollama server, Ollama Cloud, or Groq  |
+| `providers.lmStudio.address` | `string \|null`                                  | LM Studio's server, or `null` for `LMSTUDIO_HOST:LMSTUDIO_PORT`                          |
+| `providers.ollama.address`   | `string \|null`                                  | The local Ollama server, or `null` for `OLLAMA_HOST:OLLAMA_PORT`; unused by Ollama Cloud |
 
 - An address is a host name or IPv4 address, a colon, and a port from 1 to
   65535, such as `127.0.0.1:1234`. A scheme, a path, a user name, or an IPv6
@@ -416,7 +418,7 @@ Streamable HTTP (`http`):
 | `command`     | `stdio` | 1 to 1,024 characters, no control character or tab, no white space at either end. A bare name such as `npx` is found through the backend's `PATH`; see [Configuration](/operate/configuration/#mcp-servers)                                             |
 | `arguments`   | `stdio` | Up to 64 arguments in order, each 1 to 1,024 characters without a line break or another control character but a tab; omitted means none. Passed as they are, without a shell                                                                            |
 | `environment` | `stdio` | Up to 32 `{ name, value }` variables, each name once: a name is an ASCII letter or underscore, then up to 127 letters, digits, or underscores; a value is up to 4,096 characters without a control character but a tab, and may be empty                |
-| `url`         | `http`  | Up to 2,048 characters without spaces: `https://`, or `http://` only for `localhost`, `127.0.0.1`, or `[::1]`; no user name, password, or `#`; no internationalized domain name, see below                                                              |
+| `url`         | `http`  | Up to 2,048 characters without spaces: `https://`, or `http://` only for `localhost`, `127.0.0.1`, or `[::1]`; no user name, password, or `#`; a plain ASCII host or an internationalized domain name, see below                                        |
 | `headers`     | `http`  | Up to 32 `{ name, value }` headers, each name once ignoring case: a name is an HTTP token of up to 128 characters, and not one Lys sets itself; a value is up to 8,192 visible ASCII characters, spaces, and tabs, without a space or tab at either end |
 
 - The group holds at most 16 servers, which take at most 512 KiB together:
@@ -430,12 +432,8 @@ Streamable HTTP (`http`):
   loading the settings fail; an error about a server names the broken rule
   and never quotes a value. An error about the group itself, such as a
   `servers` value that is not a list, can quote that value.
-- A URL whose host has a part starting with `xn--` is refused, and so is one
-  to a Unicode host such as `bücher.example`, which the URL parser writes in
-  that form. The host's URL parser and the backend's convert such
-  internationalized domain names differently, so one of them could accept a
-  name the other refuses ([#285](https://github.com/w3lt/lys/issues/285)). A host whose characters map to ASCII, such as
-  fullwidth letters, is accepted as its ASCII name.
+- A URL's host is plain ASCII or an internationalized domain name that
+  follows the rule below.
 - Lys sets these headers itself and refuses them in `headers`: `Accept`,
   `Content-Length`, `Content-Type`, `Host`, `Last-Event-ID`,
   `MCP-Protocol-Version`, and `Mcp-Session-Id`. It also refuses `Expect`,
@@ -461,6 +459,36 @@ Streamable HTTP (`http`):
   cannot be read, or the group fails its rules, the backend keeps the servers
   it applied before and reports why; see
   [MCP servers](/reference/api/#mcp-servers).
+
+An internationalized domain name, such as `bücher.example`, `пример.рф`, or
+`サーバー.例え.テスト`, is accepted when every part of it is lowercase letters
+of one script, digits, and hyphens. A part is typed as those letters or as its
+punycode, such as `xn--bcher-kva`, with its ASCII letters in either case. The
+letters of each script:
+
+- Latin: `a` to `z`, `à` to `ö`, `ø` to `ÿ`, and the lowercase letters of
+  Latin Extended-A (U+0100 to U+017F) but `ĳ`, `ŀ`, `ŉ`, and `ſ`.
+- Greek: `ά` to `ώ` (U+03AC to U+03CE) but the final `ς`.
+- Cyrillic: `а` to `џ` (U+0430 to U+045F).
+- Chinese, Japanese, and Korean, which one part may mix: hiragana `ぁ` to `ん`
+  (U+3041 to U+3093), katakana `ァ` to `ヶ` (U+30A1 to U+30F6) and `ー`, the
+  CJK unified ideographs U+4E00 to U+9FA5, and the Hangul syllables U+AC00 to
+  U+D7A3.
+
+A part that mixes scripts, such as `pаypal` with a Cyrillic `а` or `jリーグ`,
+is refused; digits and hyphens fit any script. A hyphen may not start or end a
+part or stand as its third and fourth characters, and a part's punycode is at
+most 59 characters, so the part fits a 63-character DNS label. Such a name is
+also refused with uppercase letters beyond ASCII, such as `BÜCHER.example`;
+with letters URL parsers change, such as `ĳ`, which becomes `ij`, a letter
+followed by a combining accent, or fullwidth letters; with `ß` or the final
+`ς`, which parsers that follow the older transitional rules of UTS #46 change
+to `ss` and `σ` while others keep them; with `。` in place of a dot; when
+percent-encoded; with a trailing dot; and with any other character, such as
+`_`, a right-to-left letter, or an emoji. The host's URL parser and the
+JavaScript ones in the renderer and the backend convert other names
+differently, so one of them could accept a name another refuses or reach
+another host; every accepted name is one they all write alike.
 
 An older Lys build does not know the group. It ignores it and removes it the
 next time it saves settings, so the servers must be added again after going

@@ -70,7 +70,8 @@ function createLogReporters() {
     llmRuntime,
     pageRendering,
     lmStudioSdk,
-    reportMcpServerEvent: vi.fn()
+    reportMcpServerEvent: vi.fn(),
+    reportMcpProcessGroupsSaveFailure: vi.fn()
   } satisfies SingletonLogReporters
 }
 

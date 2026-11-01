@@ -393,7 +393,15 @@ describe("formatMcpServerStatus", () => {
 
   it.each([
     [URL_SERVER, "waiting for initialize from mcp.example.test"],
-    [OPEN_URL_SERVER, "waiting for initialize from localhost:3845"]
+    [OPEN_URL_SERVER, "waiting for initialize from localhost:3845"],
+    [
+      parseMcpServer({
+        name: "books",
+        transport: "http",
+        url: "https://bücher.example/mcp?team=lys"
+      }),
+      "waiting for initialize from bücher.example"
+    ]
   ])(
     "says a remote server is connecting, naming its host and port",
     (server, detail) => {
@@ -407,6 +415,27 @@ describe("formatMcpServerStatus", () => {
         heading: "Connecting",
         detail
       })
+    }
+  )
+
+  it.each([
+    ["https:example.com/mcp", "example.com"],
+    ["https:\\\\example.com\\mcp", "example.com"],
+    ["https:/example.com/a//b", "example.com"],
+    ["HTTPS://MCP.Example.TEST:443/mcp", "mcp.example.test"],
+    ["https:bücher.example/mcp", "bücher.example"],
+    ["https:///bücher.example/mcp", "bücher.example"],
+    ["https:bücher.example:8443/a//b", "bücher.example:8443"]
+  ])(
+    "names the host and port of %s, which the URL rule accepts, as %s",
+    (url, host) => {
+      const server = parseMcpServer({ name: "docs", transport: "http", url })
+
+      expect(
+        formatMcpServerStatus(
+          buildAppliedRowFacts(server, CONNECTING_MCP_STATE)
+        ).detail
+      ).toBe(`waiting for initialize from ${host}`)
     }
   )
 

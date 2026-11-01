@@ -1,8 +1,10 @@
 import * as z from "zod"
 import {
   llmModelNotFoundProblemSchema,
+  llmProviderLoadsModelsProblemSchema,
   llmRuntimeUnavailableProblemSchema,
-  llmUnloadFailedProblemSchema
+  llmUnloadFailedProblemSchema,
+  type LlmProviderLoadsModelsProblem
 } from "../../http/errors/llm"
 import { llmServiceBusyProblemSchema } from "../../http/errors/llmServiceBusy"
 import { apiLlmUnloadModelRoute } from "./routes"
@@ -25,6 +27,7 @@ export const llmUnloadModelApiServiceUnavailableResponseSchema = z.union([
 /** Selects the model-unload error validator by HTTP status. */
 export const llmUnloadModelApiResponseSchemas = Object.freeze({
   404: llmModelNotFoundProblemSchema,
+  409: llmProviderLoadsModelsProblemSchema,
   503: llmUnloadModelApiServiceUnavailableResponseSchema
 })
 
@@ -37,7 +40,8 @@ export const llmUnloadModelApiResponseSchemas = Object.freeze({
  * reconciliation snapshot found no matching instance; another runtime client
  * may load a new matching instance afterward. Service-busy responses mean the
  * unload was refused before queue acceptance. Accepted unloads continue under
- * the service owner even if the requesting client disconnects.
+ * the service owner even if the requesting client disconnects. A 409 response
+ * means the connected provider loads its own models, so nothing was stopped.
  */
 export const llmUnloadModelApi = Object.freeze({
   method: "PATCH",
@@ -67,6 +71,8 @@ export type LlmUnloadModelApiReply = {
   readonly 204: undefined
   /** Loaded model was not found. */
   readonly 404: LlmUnloadModelApiNotFoundResponse
+  /** The connected provider loads its own models; nothing was stopped. */
+  readonly 409: LlmProviderLoadsModelsProblem
   /** Admission was refused, runtime access failed, or the unload failed. */
   readonly 503: LlmUnloadModelApiServiceUnavailableResponse
 }

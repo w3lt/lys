@@ -55,7 +55,11 @@ describe("findLoadedModel", () => {
     expect(
       findLoadedModel(
         { status: "loaded", modelKey: "resident" },
-        { status: "ready", models: [buildLlmInfo("on-disk"), resident] }
+        {
+          status: "ready",
+          modelLoading: "lys",
+          models: [buildLlmInfo("on-disk"), resident]
+        }
       )
     ).toBe(resident)
   })
@@ -64,7 +68,11 @@ describe("findLoadedModel", () => {
     [
       "no model is loaded",
       NONE,
-      { status: "ready", models: [buildLlmInfo("resident", { loaded: true })] }
+      {
+        status: "ready",
+        modelLoading: "lys",
+        models: [buildLlmInfo("resident", { loaded: true })]
+      }
     ],
     [
       "the inventory cannot be read",
@@ -79,7 +87,11 @@ describe("findLoadedModel", () => {
     [
       "the inventory does not list the loaded model",
       { status: "loaded", modelKey: "resident" },
-      { status: "ready", models: [buildLlmInfo("on-disk")] }
+      {
+        status: "ready",
+        modelLoading: "lys",
+        models: [buildLlmInfo("on-disk")]
+      }
     ]
   ])("finds no entry while %s", (_case, modelRuntime, inventory) => {
     expect(findLoadedModel(modelRuntime, inventory)).toBeUndefined()
@@ -167,9 +179,20 @@ describe("formatModelResidencyMeta", () => {
     [{ status: "unloading", modelKey: "qwen" }, "releasing qwen"],
     [UNKNOWN, "refresh the model inventory to check loaded weights"]
   ])("describes %o as %j", (modelRuntime, meta) => {
-    expect(formatModelResidencyMeta(modelRuntime, "available", "qwen")).toBe(
-      meta
-    )
+    expect(
+      formatModelResidencyMeta(modelRuntime, "available", "qwen", "LM Studio")
+    ).toBe(meta)
+  })
+
+  it("names the active provider holding the weights", () => {
+    expect(
+      formatModelResidencyMeta(
+        { status: "loaded", modelKey: "qwen" },
+        "available",
+        "qwen",
+        "Ollama"
+      )
+    ).toBe("qwen · loaded in Ollama")
   })
 
   it.each([
@@ -181,9 +204,9 @@ describe("formatModelResidencyMeta", () => {
   ] as const)(
     "explains no resident weights when %s with default %s",
     (availability, defaultModel, meta) => {
-      expect(formatModelResidencyMeta(NONE, availability, defaultModel)).toBe(
-        meta
-      )
+      expect(
+        formatModelResidencyMeta(NONE, availability, defaultModel, "LM Studio")
+      ).toBe(meta)
     }
   )
 
@@ -195,9 +218,9 @@ describe("formatModelResidencyMeta", () => {
   ] as const)(
     "explains why residency cannot be observed yet when %s, without claiming nothing is loaded",
     (availability, meta) => {
-      expect(formatModelResidencyMeta(UNAVAILABLE, availability, "qwen")).toBe(
-        meta
-      )
+      expect(
+        formatModelResidencyMeta(UNAVAILABLE, availability, "qwen", "LM Studio")
+      ).toBe(meta)
     }
   )
 })

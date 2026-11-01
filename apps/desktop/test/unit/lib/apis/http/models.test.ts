@@ -1,4 +1,5 @@
 import {
+  createLlmProviderLoadsModelsProblem,
   createLlmRuntimeUnavailableProblem,
   createLlmServiceBusyProblem,
   createLlmUnloadProblem
@@ -52,30 +53,48 @@ async function getListModelsFailure(response: Response): Promise<unknown> {
 }
 
 describe("listModels", () => {
-  it("returns the listed models after a validated response", async () => {
-    const models = [
-      buildLlmInfo("qwen3-8b", { loaded: true }),
-      buildLlmInfo("gemma-3")
-    ]
-    const backend = startBackendFake({
-      "GET /api/v1/llm/list": () => buildJsonResponse(200, { llms: models })
-    })
-    const connection = createConnection()
+  it.each(["lys", "provider"] as const)(
+    "returns the listed models and who loads them (%s) after a validated response",
+    async (modelLoading) => {
+      const models = [
+        buildLlmInfo("qwen3-8b", { loaded: true }),
+        buildLlmInfo("gemma-3")
+      ]
+      const backend = startBackendFake({
+        "GET /api/v1/llm/list": () =>
+          buildJsonResponse(200, { llms: models, modelLoading })
+      })
+      const connection = createConnection()
 
-    await expect(listModels(connection)).resolves.toEqual(models)
-    expect(backend.requests).toHaveLength(1)
-    expect(backend.requests[0]?.url).toBe(
-      `${FIXTURE_BACKEND_URL}/api/v1/llm/list`
+      await expect(listModels(connection)).resolves.toEqual({
+        llms: models,
+        modelLoading
+      })
+      expect(backend.requests).toHaveLength(1)
+      expect(backend.requests[0]?.url).toBe(
+        `${FIXTURE_BACKEND_URL}/api/v1/llm/list`
+      )
+      expect(backend.requests[0]?.signal).toBe(connection.signal)
+      expect(backend.requests[0]?.cache).toBe("no-store")
+    }
+  )
+
+  it("rejects a list that does not say who loads the models", async () => {
+    startBackendFake({
+      "GET /api/v1/llm/list": () =>
+        buildJsonResponse(200, { llms: [buildLlmInfo("qwen3-8b")] })
+    })
+
+    await expect(listModels(createConnection())).rejects.toThrow(
+      "The backend returned an invalid model response."
     )
-    expect(backend.requests[0]?.signal).toBe(connection.signal)
-    expect(backend.requests[0]?.cache).toBe("no-store")
   })
 
   it("rejects a list that names a model twice", async () => {
     const model = buildLlmInfo("qwen3-8b")
     startBackendFake({
       "GET /api/v1/llm/list": () =>
-        buildJsonResponse(200, { llms: [model, model] })
+        buildJsonResponse(200, { llms: [model, model], modelLoading: "lys" })
     })
 
     await expect(listModels(createConnection())).rejects.toThrow(Error)
@@ -84,7 +103,10 @@ describe("listModels", () => {
   it("rejects a list containing an empty model key", async () => {
     startBackendFake({
       "GET /api/v1/llm/list": () =>
-        buildJsonResponse(200, { llms: [buildLlmInfo("")] })
+        buildJsonResponse(200, {
+          llms: [buildLlmInfo("")],
+          modelLoading: "lys"
+        })
     })
 
     await expect(listModels(createConnection())).rejects.toThrow(Error)
@@ -93,7 +115,10 @@ describe("listModels", () => {
   it("rejects a malformed list and keeps the decoding failure as its cause", async () => {
     startBackendFake({
       "GET /api/v1/llm/list": () =>
-        buildJsonResponse(200, { llms: [{ modelKey: "raw-secret" }] })
+        buildJsonResponse(200, {
+          llms: [{ modelKey: "raw-secret" }],
+          modelLoading: "lys"
+        })
     })
 
     const models = listModels(createConnection())
@@ -107,7 +132,7 @@ describe("listModels", () => {
   it("rejects a success response that is not JSON", async () => {
     startBackendFake({
       "GET /api/v1/llm/list": () =>
-        new Response(JSON.stringify({ llms: [] }), {
+        new Response(JSON.stringify({ llms: [], modelLoading: "lys" }), {
           status: 200,
           headers: { "Content-Type": "text/plain" }
         })
@@ -118,7 +143,8 @@ describe("listModels", () => {
 
   it("rejects a success status other than 200", async () => {
     startBackendFake({
-      "GET /api/v1/llm/list": () => buildJsonResponse(201, { llms: [] })
+      "GET /api/v1/llm/list": () =>
+        buildJsonResponse(201, { llms: [], modelLoading: "lys" })
     })
 
     await expect(listModels(createConnection())).rejects.toThrow(Error)
@@ -272,6 +298,25 @@ describe("loadModel", () => {
 
     expect(isModelRuntimeUnavailableError(failure)).toBe(true)
   })
+
+  it("reports a refusal by a provider that loads its own models with its detail and no runtime mark", async () => {
+    startBackendFake({
+      "POST /api/v1/llm/load": () =>
+        buildJsonResponse(
+          409,
+          createLlmProviderLoadsModelsProblem("Groq loads its own models.")
+        )
+    })
+
+    const failure = await loadModel(
+      "qwen3-8b",
+      LOAD_CONFIGURATION,
+      createConnection()
+    ).catch((error: unknown) => error)
+
+    expect(failure).toMatchObject({ message: "Groq loads its own models." })
+    expect(isModelRuntimeUnavailableError(failure)).toBe(false)
+  })
 })
 
 describe("unloadModel", () => {
@@ -318,6 +363,22 @@ describe("unloadModel", () => {
       expect(isModelRuntimeUnavailableError(failure)).toBe(false)
     }
   )
+
+  it("reports a refusal by a provider that loads its own models with its detail", async () => {
+    startBackendFake({
+      "PATCH /api/v1/llm/unload": () =>
+        buildJsonResponse(
+          409,
+          createLlmProviderLoadsModelsProblem("Groq loads its own models.")
+        )
+    })
+
+    const failure = await unloadModel("qwen3-8b", createConnection()).catch(
+      (error: unknown) => error
+    )
+
+    expect(failure).toMatchObject({ message: "Groq loads its own models." })
+  })
 
   it("marks a runtime-unavailable refusal", async () => {
     startBackendFake({

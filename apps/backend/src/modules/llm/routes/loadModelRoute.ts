@@ -18,10 +18,11 @@ const UNSET_MODEL_LOAD_CONFIGURATION: ModelLoadConfiguration = Object.freeze({})
  * @returns A promise that resolves after route registration completes.
  * @throws If Fastify cannot register the route. The failure rejects the
  * promise rather than escaping the call synchronously.
- * @remarks Refused queue admission returns service-busy Problem Details, and a
+ * @remarks Refused queue admission returns service-busy Problem Details, a
  * missing or lost LLM runtime connection returns runtime-unavailable Problem
- * Details. Other service failures remain owned by Fastify's parent error
- * boundary.
+ * Details, and a connected provider that loads its own models returns
+ * provider-loads-models Problem Details. Other service failures remain owned
+ * by Fastify's parent error boundary.
  */
 export default function updateFastifyWithLlmModelLoadRoute(
   app: FastifyInstance
@@ -48,6 +49,9 @@ function registerLlmModelLoadRoute(app: FastifyInstance): void {
       body: llmLoadModelApi.body,
       response: {
         200: z.toJSONSchema(llmLoadModelApi.responses[200], {
+          target: "draft-7"
+        }),
+        409: z.toJSONSchema(llmLoadModelApi.responses[409], {
           target: "draft-7"
         }),
         503: z.toJSONSchema(llmLoadModelApi.responses[503], {

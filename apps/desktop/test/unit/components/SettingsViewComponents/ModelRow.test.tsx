@@ -33,6 +33,7 @@ function startModelRow(props: Partial<ComponentProps<typeof ModelRow>> = {}) {
         disabled={false}
         isDefault={false}
         model={ON_DISK}
+        modelLoading="lys"
         modelRuntime={{ status: "loaded", modelKey: "qwen3-8b" }}
         {...actions}
         {...props}
@@ -114,4 +115,18 @@ describe("ModelRow", () => {
 
     expect(actions.onSelect).toHaveBeenCalledOnce()
   })
+
+  it.each(["provider", "unknown"] as const)(
+    "offers Test but no Load or Unload while the inventory reports model loading as %s",
+    (modelLoading) => {
+      startModelRow({ model: RESIDENT, modelLoading })
+
+      expect(
+        screen.getByRole("button", { name: "Test qwen3-8b" })
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "Unload qwen3-8b" })
+      ).toBeNull()
+    }
+  )
 })

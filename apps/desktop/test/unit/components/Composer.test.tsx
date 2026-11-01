@@ -161,6 +161,7 @@ const ATTACHING_RUNTIME: RuntimeArrangement = Object.freeze({
   ...READY_RUNTIME,
   modelInventory: Object.freeze({
     status: "ready",
+    modelLoading: "lys",
     models: Object.freeze([
       buildLlmInfo("qwen3-8b", {
         loaded: true,
@@ -835,6 +836,7 @@ describe("Composer", () => {
           defaultModel: null,
           modelInventory: {
             status: "ready",
+            modelLoading: "lys",
             models: [buildLlmInfo("qwen3-8b")]
           }
         },
@@ -879,6 +881,7 @@ describe("Composer", () => {
       ...READY_RUNTIME,
       modelInventory: {
         status: "ready",
+        modelLoading: "lys",
         models: [
           buildLlmInfo("qwen3-8b", { loaded: true }),
           buildLlmInfo("gemma-3", { loaded: true }),

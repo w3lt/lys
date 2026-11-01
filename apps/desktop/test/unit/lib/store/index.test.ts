@@ -97,7 +97,8 @@ const CONNECTED_BACKEND: BackendRoutes = Object.freeze({
   "GET /api/v1/heath": () => buildJsonResponse(200, { status: "ok" }),
   "GET /api/v1/llm/runtime": () =>
     buildJsonResponse(200, { status: "connected" }),
-  "GET /api/v1/llm/list": () => buildJsonResponse(200, { llms: INVENTORY })
+  "GET /api/v1/llm/list": () =>
+    buildJsonResponse(200, { llms: INVENTORY, modelLoading: "lys" })
 })
 
 /**
@@ -275,7 +276,14 @@ describe("useLysStore", () => {
       models: new Map()
     })
     expect(useLysStore.getState().settings.secrets).toEqual({
-      tavilyApiKey: null
+      tavilyApiKey: null,
+      ollamaApiKey: null,
+      groqApiKey: null
+    })
+    expect(useLysStore.getState().settings.providers).toEqual({
+      active: "lmStudio",
+      lmStudio: { address: null },
+      ollama: { address: null }
     })
   })
 
@@ -485,7 +493,11 @@ describe("useLysStore", () => {
           stoppedAt: undefined
         },
         lmStudioStatus: "connected",
-        modelInventory: { status: "ready", models: INVENTORY }
+        modelInventory: {
+          status: "ready",
+          modelLoading: "lys",
+          models: INVENTORY
+        }
       })
     })
 
@@ -775,7 +787,8 @@ describe("useLysStore", () => {
               buildLlmInfo("first", { loaded: true }),
               buildLlmInfo("on-disk", { loaded: true }),
               buildLlmInfo("later", { loaded: true })
-            ]
+            ],
+            modelLoading: "lys"
           })
       })
       startDesktopHost(DISK_SETTINGS_DOCUMENT)
@@ -834,11 +847,12 @@ describe("useLysStore", () => {
         args: {
           newSettings: {
             ...DISK_SETTINGS_DOCUMENT,
-            secrets: { tavilyApiKey: null }
+            secrets: { ...DISK_SETTINGS_DOCUMENT.secrets, tavilyApiKey: null }
           }
         }
       })
       expect(useLysStore.getState().settings.secrets).toEqual({
+        ...DISK_SETTINGS.secrets,
         tavilyApiKey: null
       })
     })

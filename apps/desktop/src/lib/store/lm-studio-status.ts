@@ -117,8 +117,9 @@ export function createLmStudioStatusSlice(
    * Implements {@link LmStudioStatusSlice.updateLmStudioStatus}.
    *
    * @remarks A published `connecting` status is followed by a connect request
-   * that joins the backend's pending attempt; if that attempt settled in the
-   * meantime, the request starts a new one.
+   * that joins the backend's pending attempt for the saved provider; if that
+   * attempt settled in the meantime, or another provider was saved, the
+   * request starts a new one.
    */
   async function updateLmStudioStatus(): Promise<void> {
     const lmStudioStatus = await startLmStudioStatusRequest(

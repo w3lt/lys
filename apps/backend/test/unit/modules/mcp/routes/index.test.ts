@@ -6,6 +6,7 @@ import {
   type McpServerList
 } from "@lys/protocol"
 import type { McpServerSettings } from "@lys/share"
+import { spawn } from "node:child_process"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -42,6 +43,12 @@ import {
 } from "../../../support/mcpTestServers"
 import { createSettingsFilePath } from "../../../support/settingsFile"
 import { createOwnedMcpServerProcessGroups } from "../../../support/mcpServerProcessGroups"
+import { createUnstartedChildProcess } from "../../../support/unstartedChildProcess"
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<Readonly<{ spawn: typeof spawn }>>()
+  return { ...actual, spawn: vi.fn(actual.spawn) }
+})
 
 /** Path of the server list. */
 const SERVERS_URL = "/api/v1/mcp/servers"
@@ -779,6 +786,36 @@ describe("registerMcpRoutes", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         await createSettingsFilePath(),
         { emailServerCommand: { command: join(file, "email"), arguments: [] } }
       )
+
+      const response = await app.inject({
+        method: "POST",
+        url: ACCOUNT_CHECK_URL,
+        payload: ACCEPTED_CHECK
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual({
+        status: "unavailable",
+        reason: "server-failed"
+      })
+      expect(checkEvents).toEqual([
+        {
+          kind: "server-failed",
+          failure: { kind: "start-failed", error: expect.any(Error) }
+        }
+      ])
+    })
+
+    it("answers unavailable, not an HTTP error, when Node finds no file descriptor for the email server's pipes", async () => {
+      const { app, checkEvents } = await createMcpRouteApp(
+        await createSettingsFilePath()
+      )
+      vi.mocked(spawn).mockImplementationOnce((command, args) =>
+        createUnstartedChildProcess(command, args, "EMFILE")
+      )
+      onTestFinished(() => {
+        vi.mocked(spawn).mockReset()
+      })
 
       const response = await app.inject({
         method: "POST",

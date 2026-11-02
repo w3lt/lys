@@ -5,7 +5,7 @@ import {
 } from "@lys/protocol"
 import type { EmailAccount, EmailPassword } from "@lys/share"
 import { getDefaultEnvironment } from "@modelcontextprotocol/client/stdio"
-import { spawn, type ChildProcessByStdio } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import type { Readable } from "node:stream"
 import * as z from "zod"
 import { isSpawnFailure } from "../../mcpError"
@@ -172,8 +172,23 @@ type EmailServerCheckStart = Readonly<{
   timeoutMilliseconds: number
 }>
 
-/** Process of one check: standard input ignored, the other two piped. */
-type CheckChildProcess = ChildProcessByStdio<null, Readable, Readable>
+/**
+ * Process of one check: standard input ignored, the other two piped.
+ *
+ * @remarks Node's types promise both pipes, but Node returns the process
+ * without them when it finds no file descriptor for them (`EMFILE` or
+ * `ENFILE`), and reports that as an `error` event on the next tick.
+ */
+type CheckChildProcess = Omit<
+  ChildProcess,
+  "stdin" | "stdout" | "stderr" | "stdio"
+> &
+  Readonly<{
+    /** Its standard output, unless Node found no file descriptor for it. */
+    stdout: Readable | undefined
+    /** Its standard error, unless Node found no file descriptor for it. */
+    stderr: Readable | undefined
+  }>
 
 /** Answer when the email server is not installed. */
 const SERVER_MISSING: CheckEmailAccountApiResponse = Object.freeze({
@@ -426,7 +441,8 @@ class EmailServerCheckRun {
    * @returns The run, whose output it reads from here on.
    * @throws Node's refusal of the command's arguments, such as a text that
    * holds a NUL character, before any process is started; a command that
-   * cannot be started ends the run as `start-failed` instead.
+   * cannot be started, even for lack of file descriptors, ends the run as
+   * `start-failed` instead.
    */
   public static start(start: EmailServerCheckStart): EmailServerCheckRun {
     const timeLimit = AbortSignal.timeout(start.timeoutMilliseconds)
@@ -434,11 +450,11 @@ class EmailServerCheckRun {
     if (started instanceof Error)
       return EmailServerCheckRun.#createStartFailedRun(started, timeLimit)
     const run = new EmailServerCheckRun(started, timeLimit)
-    started.stdout.setEncoding("utf8")
-    started.stdout.on("data", (chunk: string) => {
+    started.stdout?.setEncoding("utf8")
+    started.stdout?.on("data", (chunk: string) => {
       run.#readOutput(chunk)
     })
-    started.stderr.on("data", (chunk: Uint8Array) => {
+    started.stderr?.on("data", (chunk: Uint8Array) => {
       run.#errorLineReader.read(chunk)
     })
     started.on("error", (error) => {
@@ -546,7 +562,8 @@ class EmailServerCheckRun {
  * @returns The process Node started, or the error Node threw because it
  * could not start one, such as for a path that goes through a file
  * (`ENOTDIR`). Node reports other failures to start, such as a missing
- * executable, after it returned the process, as an `error` event.
+ * executable or no file descriptor left, after it returned the process, as
+ * an `error` event.
  * @throws Node's refusal of the command's arguments, such as a text that
  * holds a NUL character.
  */

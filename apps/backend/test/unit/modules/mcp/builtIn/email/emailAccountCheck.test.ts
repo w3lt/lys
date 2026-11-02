@@ -1,4 +1,5 @@
 import type { EmailServerCheckFailure } from "@lys/protocol"
+import { spawn } from "node:child_process"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -17,6 +18,12 @@ import {
 } from "../../../../support/emailTestServer"
 import { isProcessRunning } from "../../../../support/mcpTestServers"
 import { createSettlementReader } from "../../../../support/settlement"
+import { createUnstartedChildProcess } from "../../../../support/unstartedChildProcess"
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<Readonly<{ spawn: typeof spawn }>>()
+  return { ...actual, spawn: vi.fn(actual.spawn) }
+})
 
 /** Longest one check may run in a case that expects it to end. */
 const CHECK_TIMEOUT_MILLISECONDS = 10_000
@@ -259,6 +266,38 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       ])
       expect(events[0]).toMatchObject({
         failure: { error: { code: "ENOEXEC" } }
+      })
+    }
+  )
+
+  it.each(["EMFILE", "ENFILE"] as const)(
+    "answers server-failed with Node's error when Node finds no file descriptor for the server's pipes (%s)",
+    async (shortage) => {
+      const { checker, events } = createChecker()
+      vi.mocked(spawn).mockImplementationOnce((command, args) =>
+        createUnstartedChildProcess(command, args, shortage)
+      )
+      onTestFinished(() => {
+        vi.mocked(spawn).mockReset()
+      })
+
+      const answer = await checker.sendCheck(
+        buildEmailAccount("accepted@example.com"),
+        SYNTHETIC_EMAIL_PASSWORD
+      )
+
+      expect(answer).toEqual({
+        status: "unavailable",
+        reason: "server-failed"
+      })
+      expect(events).toEqual([
+        {
+          kind: "server-failed",
+          failure: { kind: "start-failed", error: expect.any(Error) }
+        }
+      ])
+      expect(events[0]).toMatchObject({
+        failure: { error: { code: shortage } }
       })
     }
   )

@@ -290,9 +290,12 @@ function formatCheckMessage(
  * still concerns the fields.
  *
  * @param input - The save, the check, and how the fields relate to them.
- * @returns A failed save or removal while the fields were not edited since
- * the save was tried; what a tried save's check found while the fields are
- * still those it was tried with; undefined otherwise.
+ * @returns While the fields were not edited since the save was tried, or
+ * since the card was shown, which keeps no edit: a failed save or removal,
+ * then what the check found when a server refused, no sign-in was tried,
+ * or it could not be asked; undefined otherwise. The application store
+ * keeps both across the card's unmounts, so a check that ended while the
+ * card was not shown is reported once it is shown again.
  */
 function formatOutcomeMessage(
   input: EmailAccountStatusInput
@@ -301,7 +304,6 @@ function formatOutcomeMessage(
   if (input.saveState.status === "failed") {
     return { text: input.saveState.error, tone: "danger" }
   }
-  if (!input.hasSubmitted) return undefined
   return formatCheckMessage(input.checkState)
 }
 
@@ -344,9 +346,9 @@ function formatRestingMessage(
  * @returns In order of precedence: a running check or save; a tried save
  * while a field breaks a rule; an edit made since the last tried save, with
  * how it is saved or that the backend must run first; a failed save or
- * removal, or what the tried save's check found, while the fields are
- * still those it concerns; an unsaved edit; then whether an account is
- * saved, or that it was just saved.
+ * removal, or what the latest check found, until the fields are edited;
+ * an unsaved edit; then whether an account is saved, or that it was just
+ * saved.
  */
 export function formatEmailAccountMessage(
   input: EmailAccountStatusInput

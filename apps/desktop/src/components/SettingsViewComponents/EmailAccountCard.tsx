@@ -597,8 +597,9 @@ function useEmailFieldHosts() {
  * differs from the saved one or a new password, no check, save, or removal
  * runs, and the backend runs; Save is disabled while nothing differs, while
  * a save runs, or while the backend is not running, which the status line
- * says. What a tried save found shows until the fields are edited again.
- * Escape in an input discards the edit while there is one. A save that
+ * says. What the latest save or check found shows until the fields are
+ * edited again, also when it ended while the card was not shown. Escape in
+ * an input discards the edit while there is one. A save that
  * succeeded resets the edit unless the person changed the fields while it
  * ran. After a removal succeeds, focus moves to the address field, because
  * Remove leaves. The status line is a polite live region.

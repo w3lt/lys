@@ -379,16 +379,26 @@ describe("formatEmailAccountMessage", () => {
     ).toEqual(UNSAVED_LINE)
   })
 
-  it("does not repeat an earlier refusal once the card starts afresh", () => {
+  it("shows a refusal kept from before the card was shown again, until the fields are edited", () => {
+    const refusal = buildChecked({
+      status: "unavailable",
+      reason: "server-failed"
+    })
+
+    expect(
+      formatEmailAccountMessage({ ...RESTING_INPUT, checkState: refusal })
+    ).toEqual({
+      text: "Lys's email server failed while checking the account.",
+      tone: "danger"
+    })
     expect(
       formatEmailAccountMessage({
         ...RESTING_INPUT,
-        checkState: buildChecked({
-          status: "unavailable",
-          reason: "server-failed"
-        })
+        draftParse: CHANGED_PARSE,
+        isEditedSinceSubmit: true,
+        checkState: refusal
       })
-    ).toEqual(SAVED_LINE)
+    ).toEqual(UNSAVED_LINE)
   })
 
   it("says the account was saved after a save that followed an accepted check", () => {

@@ -804,6 +804,46 @@ describe("McpPaneContent", () => {
     )
   })
 
+  it("shows the outcome of a check that ended while the card was not shown, until the fields are edited", async () => {
+    startSettingsHost()
+    const accountCheck = createControlledRoute()
+    await startMcpPane({ [ACCOUNT_CHECK_ROUTE]: accountCheck.route })
+    const user = userEvent.setup()
+    const card = await openEmailAccountCard(user)
+
+    await user.type(
+      within(card).getByLabelText("Password"),
+      "new-app-password{Enter}"
+    )
+    await waitForRenderedWork()
+    const whileChecking = within(card).getByRole("status").textContent
+    await openNewServerEditor(user)
+    accountCheck.responses[0]?.resolve(
+      buildJsonResponse(200, {
+        status: "checked",
+        imap: { status: "accepted" },
+        smtp: { status: "failed", reason: "wrong-password" }
+      })
+    )
+    await waitForRenderedWork()
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    const shownAgain = within(getServerRow("email")).getByRole("form", {
+      name: "Email account"
+    })
+
+    expect(whileChecking).toBe("Signing in…")
+    expect(within(shownAgain).getByRole("status")).toHaveTextContent(
+      "IMAP: accepted · SMTP: the user name or password was refused"
+    )
+    await user.type(
+      within(shownAgain).getByRole("textbox", { name: "Display name" }),
+      " Lovelace"
+    )
+    expect(within(shownAgain).getByRole("status")).toHaveTextContent(
+      "Unsaved · Save signs in to both servers first."
+    )
+  })
+
   it("removes the account and its password after confirming, switching the email server off first", async () => {
     const host = startSettingsHost()
     const { backend, useLysStore } = await startMcpPane({

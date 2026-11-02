@@ -306,13 +306,25 @@ const INITIAL_LOCATION_SETTINGS: LocationSettings = Object.freeze({
   country: null
 })
 
+/** Added MCP servers of a first-run settings file: none. */
+const NO_ADDED_MCP_SERVERS: McpSettings["servers"] = Object.freeze([])
+
+/** The email server's switch in a first-run settings file: off. */
+const INITIAL_EMAIL_SERVER_SWITCH: McpSettings["builtIn"]["email"] =
+  Object.freeze({ enabled: false })
+
+/** Switches of the MCP servers Lys ships in a first-run settings file. */
+const INITIAL_BUILT_IN_MCP_SWITCHES: McpSettings["builtIn"] = Object.freeze({
+  email: INITIAL_EMAIL_SERVER_SWITCH
+})
+
 /**
  * MCP servers shown before Tauri initialization completes: no added server
  * and every built-in server off, as in a first-run settings file.
  */
 const INITIAL_MCP_SETTINGS: McpSettings = Object.freeze({
-  servers: Object.freeze([]),
-  builtIn: Object.freeze({ email: Object.freeze({ enabled: false }) })
+  servers: NO_ADDED_MCP_SERVERS,
+  builtIn: INITIAL_BUILT_IN_MCP_SWITCHES
 })
 
 /**

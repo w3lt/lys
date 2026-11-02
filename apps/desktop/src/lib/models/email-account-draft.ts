@@ -119,16 +119,28 @@ const EMPTY_ACCOUNT_DRAFT: EmailAccountDraft = Object.freeze({
   serverKeepsSentCopy: false
 })
 
+/** Host and port inputs of one server side. */
+type EmailServerFields = Readonly<
+  Record<"host" | "port", EmailAccountDraftField>
+>
+
+/** Host and port inputs of the IMAP server. */
+const IMAP_SERVER_FIELDS = Object.freeze({
+  host: "imapHost",
+  port: "imapPort"
+} satisfies EmailServerFields)
+
+/** Host and port inputs of the SMTP server. */
+const SMTP_SERVER_FIELDS = Object.freeze({
+  host: "smtpHost",
+  port: "smtpPort"
+} satisfies EmailServerFields)
+
 /** Host and port inputs of each server side. */
 const SERVER_FIELDS = Object.freeze({
-  imap: Object.freeze({ host: "imapHost", port: "imapPort" }),
-  smtp: Object.freeze({ host: "smtpHost", port: "smtpPort" })
-} satisfies Readonly<
-  Record<
-    EmailServerSide,
-    Readonly<Record<"host" | "port", EmailAccountDraftField>>
-  >
->)
+  imap: IMAP_SERVER_FIELDS,
+  smtp: SMTP_SERVER_FIELDS
+} satisfies Readonly<Record<EmailServerSide, EmailServerFields>>)
 
 /** One problem placed on an input. */
 type PlacedProblem = readonly [EmailAccountDraftField, string]

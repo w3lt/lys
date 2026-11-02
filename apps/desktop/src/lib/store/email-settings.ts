@@ -2,10 +2,10 @@ import type {
   CheckEmailAccountApiRequestBody,
   CheckEmailAccountApiResponse
 } from "@lys/protocol"
-import type { EmailAccount, EmailPassword } from "@lys/share"
+import type { EmailAccount, EmailPassword, EmailSettings } from "@lys/share"
 import type { StoreApi } from "zustand"
 
-import type { LysSettings } from "./settings"
+import type { LysSettings, SecretsSettings } from "./settings"
 
 /** Lifecycle of the latest save or removal of the email account. */
 export type EmailAccountSaveState =
@@ -135,6 +135,28 @@ const CHECK_FAILED: EmailAccountCheckState = Object.freeze({
 })
 
 /**
+ * Builds the settings that hold an account and its password, or neither.
+ *
+ * @param settings - Settings before the change.
+ * @param account - Account the file now holds, or null after a removal.
+ * @param password - Its password, or null after a removal.
+ * @returns The settings with the `email` group and the email password
+ * replaced, every other group and secret kept.
+ */
+function buildEmailAccountSettings(
+  settings: LysSettings,
+  account: EmailAccount | null,
+  password: EmailPassword | null
+): LysSettings {
+  const secrets: SecretsSettings = Object.freeze({
+    ...settings.secrets,
+    emailPassword: password
+  })
+  const email: EmailSettings = Object.freeze({ account })
+  return { ...settings, secrets, email }
+}
+
+/**
  * Answers whether a check accepted the sign-in to both servers.
  *
  * @param outcome - What the backend answered.
@@ -200,17 +222,14 @@ export function createEmailSettingsSlice(
       set({ emailAccountSave: SAVE_FAILED })
       return "failed"
     }
-    set((state) => ({
-      settings: {
-        ...state.settings,
-        secrets: Object.freeze({
-          ...state.settings.secrets,
-          emailPassword: password
-        }),
-        email: Object.freeze({ account })
-      },
-      emailAccountSave: SAVED
-    }))
+    set((state) => {
+      const settings = buildEmailAccountSettings(
+        state.settings,
+        account,
+        password
+      )
+      return { settings, emailAccountSave: SAVED }
+    })
     return "saved"
   }
 
@@ -233,7 +252,11 @@ export function createEmailSettingsSlice(
       set({ emailAccountCheck: CHECK_FAILED })
       return "failed"
     }
-    set({ emailAccountCheck: Object.freeze({ status: "checked", outcome }) })
+    const checked: EmailAccountCheckState = Object.freeze({
+      status: "checked",
+      outcome
+    })
+    set({ emailAccountCheck: checked })
     if (!isAccountAccepted(outcome)) return "refused"
     return await saveAccountWithPassword(account, password)
   }

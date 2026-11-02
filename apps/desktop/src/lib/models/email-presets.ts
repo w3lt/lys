@@ -12,55 +12,91 @@ export type EmailPreset = {
   readonly serverKeepsSentCopy: EmailAccount["serverKeepsSentCopy"]
 }
 
+/** Gmail's server mail is read from. */
+const GMAIL_IMAP_SERVER: EmailServerSettings = Object.freeze({
+  host: "imap.gmail.com",
+  port: 993,
+  security: "tls"
+})
+
+/** Gmail's server mail is sent through. */
+const GMAIL_SMTP_SERVER: EmailServerSettings = Object.freeze({
+  host: "smtp.gmail.com",
+  port: 465,
+  security: "tls"
+})
+
 /** Gmail and Google Workspace addresses on Google's own domains. */
 const GMAIL_PRESET: EmailPreset = Object.freeze({
   name: "Gmail",
-  imap: Object.freeze({ host: "imap.gmail.com", port: 993, security: "tls" }),
-  smtp: Object.freeze({ host: "smtp.gmail.com", port: 465, security: "tls" }),
+  imap: GMAIL_IMAP_SERVER,
+  smtp: GMAIL_SMTP_SERVER,
   serverKeepsSentCopy: true
+})
+
+/** iCloud Mail's server mail is read from. */
+const ICLOUD_IMAP_SERVER: EmailServerSettings = Object.freeze({
+  host: "imap.mail.me.com",
+  port: 993,
+  security: "tls"
+})
+
+/** iCloud Mail's server mail is sent through. */
+const ICLOUD_SMTP_SERVER: EmailServerSettings = Object.freeze({
+  host: "smtp.mail.me.com",
+  port: 587,
+  security: "starttls"
 })
 
 /** iCloud Mail addresses, including the older me.com and mac.com domains. */
 const ICLOUD_PRESET: EmailPreset = Object.freeze({
   name: "iCloud",
-  imap: Object.freeze({ host: "imap.mail.me.com", port: 993, security: "tls" }),
-  smtp: Object.freeze({
-    host: "smtp.mail.me.com",
-    port: 587,
-    security: "starttls"
-  }),
+  imap: ICLOUD_IMAP_SERVER,
+  smtp: ICLOUD_SMTP_SERVER,
   serverKeepsSentCopy: false
+})
+
+/** Yahoo Mail's server mail is read from. */
+const YAHOO_IMAP_SERVER: EmailServerSettings = Object.freeze({
+  host: "imap.mail.yahoo.com",
+  port: 993,
+  security: "tls"
+})
+
+/** Yahoo Mail's server mail is sent through. */
+const YAHOO_SMTP_SERVER: EmailServerSettings = Object.freeze({
+  host: "smtp.mail.yahoo.com",
+  port: 465,
+  security: "tls"
 })
 
 /** Yahoo Mail addresses. */
 const YAHOO_PRESET: EmailPreset = Object.freeze({
   name: "Yahoo",
-  imap: Object.freeze({
-    host: "imap.mail.yahoo.com",
-    port: 993,
-    security: "tls"
-  }),
-  smtp: Object.freeze({
-    host: "smtp.mail.yahoo.com",
-    port: 465,
-    security: "tls"
-  }),
+  imap: YAHOO_IMAP_SERVER,
+  smtp: YAHOO_SMTP_SERVER,
   serverKeepsSentCopy: true
+})
+
+/** Fastmail's server mail is read from. */
+const FASTMAIL_IMAP_SERVER: EmailServerSettings = Object.freeze({
+  host: "imap.fastmail.com",
+  port: 993,
+  security: "tls"
+})
+
+/** Fastmail's server mail is sent through. */
+const FASTMAIL_SMTP_SERVER: EmailServerSettings = Object.freeze({
+  host: "smtp.fastmail.com",
+  port: 465,
+  security: "tls"
 })
 
 /** Fastmail addresses. */
 const FASTMAIL_PRESET: EmailPreset = Object.freeze({
   name: "Fastmail",
-  imap: Object.freeze({
-    host: "imap.fastmail.com",
-    port: 993,
-    security: "tls"
-  }),
-  smtp: Object.freeze({
-    host: "smtp.fastmail.com",
-    port: 465,
-    security: "tls"
-  }),
+  imap: FASTMAIL_IMAP_SERVER,
+  smtp: FASTMAIL_SMTP_SERVER,
   serverKeepsSentCopy: true
 })
 

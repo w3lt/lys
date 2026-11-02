@@ -237,15 +237,18 @@ const MCP_SERVER_OFF_DETAIL =
 /** What the email server needs before it runs, and why it failed without it. */
 const EMAIL_ACCOUNT_MISSING_NOTE = "Needs an email account. Add one below."
 
+/** How the email server is shown. */
+const EMAIL_SERVER_PRESENTATION: BuiltInMcpServerPresentation = Object.freeze({
+  transport: "stdio",
+  blurb: "Reads, searches, and sends your email over IMAP and SMTP.",
+  needsNote: EMAIL_ACCOUNT_MISSING_NOTE,
+  startFailure:
+    "Lys couldn't start its email server. Run build.sh to install it."
+})
+
 /** How each server Lys ships is shown; a new built-in server must add one. */
 const BUILT_IN_MCP_SERVER_PRESENTATIONS = Object.freeze({
-  email: Object.freeze({
-    transport: "stdio",
-    blurb: "Reads, searches, and sends your email over IMAP and SMTP.",
-    needsNote: EMAIL_ACCOUNT_MISSING_NOTE,
-    startFailure:
-      "Lys couldn't start its email server. Run build.sh to install it."
-  })
+  email: EMAIL_SERVER_PRESENTATION
 } satisfies Readonly<
   Record<BuiltInMcpServerName, BuiltInMcpServerPresentation>
 >)

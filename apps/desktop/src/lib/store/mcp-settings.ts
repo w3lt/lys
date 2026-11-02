@@ -180,10 +180,14 @@ export function createMcpSettingsSlice(
     isOn: boolean
   ): Promise<McpSettingsSaveOutcome> {
     const { servers, builtIn } = get().settings.mcp
-    return saveMcpGroup({
-      servers,
-      builtIn: { ...builtIn, [serverName]: { enabled: isOn } }
-    })
+    const serverSwitch: McpSettings["builtIn"][BuiltInMcpServerName] = {
+      enabled: isOn
+    }
+    const switches: McpSettings["builtIn"] = {
+      ...builtIn,
+      [serverName]: serverSwitch
+    }
+    return saveMcpGroup({ servers, builtIn: switches })
   }
 
   return {

@@ -16,6 +16,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   buildEmailAccountDraft,
   EMAIL_ACCOUNT_DRAFT_FIELDS,
+  isEmailAccountDraftDifferent,
   parseEmailAccountDraft,
   updateEmailAccountAddress,
   type EmailAccountDraft,
@@ -597,7 +598,8 @@ function useEmailFieldHosts() {
  * differs from the saved one or a new password, no check, save, or removal
  * runs, and the backend runs; Save is disabled while nothing differs, while
  * a save runs, or while the backend is not running, which the status line
- * says. What the latest save or check found shows until the fields are
+ * says once the fields differ from the saved account, valid or not. What
+ * the latest save or check found shows until the fields are
  * edited again, also when it ended while the card was not shown. Escape in
  * an input discards the edit while there is one. A save that
  * succeeded resets the edit unless the person changed the fields while it
@@ -641,6 +643,7 @@ export default function EmailAccountCard({
   const message = formatEmailAccountMessage({
     savedAccount,
     draftParse,
+    isDraftDifferent: isEmailAccountDraftDifferent(draft, savedAccount),
     hasSubmitted,
     isEditedSinceSubmit: editedDraft !== submittedDraft,
     saveState,

@@ -45,6 +45,7 @@ const INVALID_PARSE: EmailAccountDraftParse = Object.freeze({
 const RESTING_INPUT: EmailAccountStatusInput = Object.freeze({
   savedAccount: STORED_EMAIL_ACCOUNT,
   draftParse: Object.freeze({ status: "unchanged" }),
+  isDraftDifferent: false,
   hasSubmitted: false,
   isEditedSinceSubmit: false,
   saveState: Object.freeze({ status: "idle" }),
@@ -75,6 +76,12 @@ const SAVED_LINE: EmailAccountMessage = {
 /** Line of an edit while the backend runs. */
 const UNSAVED_LINE: EmailAccountMessage = {
   text: "Unsaved · Save signs in to both servers first.",
+  tone: "attention"
+}
+
+/** Line of an edit while the backend is not running. */
+const BACKEND_STOPPED_LINE: EmailAccountMessage = {
+  text: "Unsaved · start the backend in Settings → Runtime to sign in and save.",
   tone: "attention"
 }
 
@@ -235,11 +242,80 @@ describe("formatEmailAccountMessage", () => {
         draftParse: CHANGED_PARSE,
         isBackendRunning: false
       })
-    ).toEqual({
-      text: "Unsaved · start the backend in Settings → Runtime to sign in and save.",
-      tone: "attention"
-    })
+    ).toEqual(BACKEND_STOPPED_LINE)
   })
+
+  it.each<[string, Partial<EmailAccountStatusInput>]>([
+    [
+      "they break a rule before a save was tried",
+      {
+        savedAccount: null,
+        draftParse: INVALID_PARSE,
+        isDraftDifferent: true,
+        isEditedSinceSubmit: true
+      }
+    ],
+    [
+      "a tried save marked a rule they break",
+      { ...SUBMITTED_INPUT, draftParse: INVALID_PARSE, isDraftDifferent: true }
+    ],
+    [
+      "a server refused the sign-in they were tried with",
+      {
+        ...SUBMITTED_INPUT,
+        checkState: buildChecked({
+          status: "checked",
+          imap: { status: "failed", reason: "wrong-password" },
+          smtp: { status: "accepted" }
+        })
+      }
+    ],
+    [
+      "the save they were tried with failed",
+      {
+        ...SUBMITTED_INPUT,
+        saveState: { status: "failed", error: "Lys couldn't write." }
+      }
+    ]
+  ])(
+    "says the backend must run while the fields differ from the saved account, when %s",
+    (_label, input) => {
+      expect(
+        formatEmailAccountMessage({
+          ...RESTING_INPUT,
+          ...input,
+          isBackendRunning: false
+        })
+      ).toEqual(BACKEND_STOPPED_LINE)
+    }
+  )
+
+  it.each<[string, Partial<EmailAccountStatusInput>, EmailAccountMessage]>([
+    [
+      "an empty card nobody typed in",
+      { savedAccount: null, draftParse: INVALID_PARSE },
+      {
+        text: "No account yet. The email server stays off until you save one.",
+        tone: "muted"
+      }
+    ],
+    [
+      "spaces typed around the saved values",
+      { isDraftDifferent: true, isEditedSinceSubmit: true },
+      SAVED_LINE
+    ]
+  ])(
+    "keeps the resting line while the backend is not running and the fields hold nothing to save, as %s",
+    (_label, input, line) => {
+      expect(
+        formatEmailAccountMessage({
+          ...RESTING_INPUT,
+          ...input,
+          isBackendRunning: false
+        })
+      ).toEqual(line)
+    }
+  )
 
   it("reports a failed save while the fields are still those it was tried with", () => {
     expect(

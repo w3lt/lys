@@ -522,3 +522,26 @@ export function parseEmailAccountDraft(
     password: password.password
   }
 }
+
+/**
+ * Answers whether the fields hold other values than the card shows for the
+ * saved account, whether or not they follow the rules.
+ *
+ * @param draft - Fields as they are.
+ * @param savedAccount - Saved account, or null for an empty card.
+ * @returns True when a text differs as typed, a password is typed, or a
+ * server or the Sent copy switch differs.
+ */
+export function isEmailAccountDraftDifferent(
+  draft: EmailAccountDraft,
+  savedAccount: EmailAccount | null
+): boolean {
+  const shown = buildEmailAccountDraft(savedAccount)
+  return !(
+    draft.address === shown.address &&
+    draft.displayName === shown.displayName &&
+    draft.userName === shown.userName &&
+    draft.password === shown.password &&
+    hasEmailServerChoices(draft, shown)
+  )
+}

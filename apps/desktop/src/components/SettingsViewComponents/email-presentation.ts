@@ -40,6 +40,11 @@ type EmailAccountStatusInput = {
   readonly savedAccount: EmailAccount | null
   /** Outcome of reading the fields. */
   readonly draftParse: EmailAccountDraftParse
+  /**
+   * Whether the fields hold other values than the card shows for the saved
+   * account, whether or not they follow the rules.
+   */
+  readonly isDraftDifferent: boolean
   /** Whether a save was tried, from which the fields' problems are shown. */
   readonly hasSubmitted: boolean
   /**
@@ -256,14 +261,25 @@ function formatPendingMessage(
 }
 
 /**
- * Formats the line of an edit that is not saved.
+ * Answers whether the fields wait for the backend, which keeps Save
+ * disabled while it is not running.
  *
- * @param isBackendRunning - Whether the backend runs, which the sign-in
- * needs.
- * @returns How the edit is saved, or that the backend must run first.
+ * @param input - How the fields were read, whether they differ from the
+ * saved account, and the backend's status.
+ * @returns True while the backend is not running and the fields hold an
+ * account to save, or break a rule while they differ from the saved
+ * account; false while it runs or the fields hold the saved account.
  */
-function formatUnsavedMessage(isBackendRunning: boolean): EmailAccountMessage {
-  return isBackendRunning ? UNSAVED_MESSAGE : BACKEND_STOPPED_MESSAGE
+function isWaitingForBackend(input: EmailAccountStatusInput): boolean {
+  if (input.isBackendRunning) return false
+  switch (input.draftParse.status) {
+    case "changed":
+      return true
+    case "unchanged":
+      return false
+    case "invalid":
+      return input.isDraftDifferent
+  }
 }
 
 /**
@@ -343,12 +359,13 @@ function formatRestingMessage(
  *
  * @param input - Saved account, the fields, the save, the check, and the
  * backend's status.
- * @returns In order of precedence: a running check or save; a tried save
- * while a field breaks a rule; an edit made since the last tried save, with
- * how it is saved or that the backend must run first; a failed save or
- * removal, or what the latest check found, until the fields are edited;
- * an unsaved edit; then whether an account is saved, or that it was just
- * saved.
+ * @returns In order of precedence: a running check or save; that the
+ * backend must run, while it does not and the fields hold an account to
+ * save, or break a rule while they differ from the saved account; a tried
+ * save while a field breaks a rule; an edit made since the last tried save,
+ * with how it is saved; a failed save or removal, or what the latest check
+ * found, until the fields are edited; an unsaved edit; then whether an
+ * account is saved, or that it was just saved.
  */
 export function formatEmailAccountMessage(
   input: EmailAccountStatusInput
@@ -356,16 +373,17 @@ export function formatEmailAccountMessage(
   const { draftParse } = input
   const pending = formatPendingMessage(input.saveState, input.checkState)
   if (pending !== undefined) return pending
+  if (isWaitingForBackend(input)) return BACKEND_STOPPED_MESSAGE
   if (input.hasSubmitted && draftParse.status === "invalid") {
     return INVALID_MESSAGE
   }
   if (draftParse.status === "changed" && input.isEditedSinceSubmit) {
-    return formatUnsavedMessage(input.isBackendRunning)
+    return UNSAVED_MESSAGE
   }
   const outcome = formatOutcomeMessage(input)
   if (outcome !== undefined) return outcome
   if (draftParse.status === "changed") {
-    return formatUnsavedMessage(input.isBackendRunning)
+    return UNSAVED_MESSAGE
   }
   return formatRestingMessage(input)
 }

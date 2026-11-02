@@ -298,6 +298,24 @@ describe("EmailAccountCard", () => {
     expect(requests.onSaveEmailAccount).not.toHaveBeenCalled()
   })
 
+  it("says what to start once an empty card is typed in, before it holds a whole account, while the backend is not running", async () => {
+    const { requests } = startEmptyEmailAccountCard({ isBackendRunning: false })
+    const user = userEvent.setup()
+
+    expect(getStatusLine()).toHaveTextContent(
+      "No account yet. The email server stays off until you save one."
+    )
+
+    await user.type(getField("Address"), "ada@fastmail.com")
+    await user.type(getField("User name"), "ada@fastmail.com{Enter}")
+
+    expect(getSaveButton()).toBeDisabled()
+    expect(getStatusLine()).toHaveTextContent(
+      "Unsaved · start the backend in Settings → Runtime to sign in and save."
+    )
+    expect(requests.onSaveEmailAccount).not.toHaveBeenCalled()
+  })
+
   it("marks the fields that break a rule on Save, moves focus to the first, and asks for no save", async () => {
     const { requests } = startEmptyEmailAccountCard()
     const user = userEvent.setup()

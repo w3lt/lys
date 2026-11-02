@@ -4,6 +4,7 @@ import {
   buildEmailAccountDraft,
   EMAIL_ACCOUNT_DRAFT_FIELDS,
   hasEmailPresetServers,
+  isEmailAccountDraftDifferent,
   parseEmailAccountDraft,
   updateEmailAccountAddress,
   type EmailAccountDraft
@@ -431,5 +432,43 @@ describe("parseEmailAccountDraft", () => {
       account: moved,
       password: STORED_EMAIL_PASSWORD
     })
+  })
+})
+
+describe("isEmailAccountDraftDifferent", () => {
+  it.each([
+    ["the saved account's fields", SAVED_DRAFT, STORED_EMAIL_ACCOUNT],
+    ["the fields of an empty card without an account", EMPTY_DRAFT, null]
+  ] as const)("is false for %s", (_label, draft, savedAccount) => {
+    expect(isEmailAccountDraftDifferent(draft, savedAccount)).toBe(false)
+  })
+
+  it.each<[string, Partial<EmailAccountDraft>]>([
+    ["a space is typed after the address", { address: "ada@fastmail.com " }],
+    ["the display name changes", { displayName: "Ada Lovelace" }],
+    ["the user name is emptied", { userName: "" }],
+    ["a password is typed", { password: "app-password" }],
+    [
+      "the IMAP host changes",
+      { imap: { ...SAVED_DRAFT.imap, host: "mail.example.test" } }
+    ],
+    [
+      "the SMTP security changes",
+      { smtp: { ...SAVED_DRAFT.smtp, security: "starttls" } }
+    ],
+    ["the Sent copy switch changes", { serverKeepsSentCopy: false }]
+  ])("is true once %s in the saved account's fields", (_label, change) => {
+    expect(
+      isEmailAccountDraftDifferent(
+        { ...SAVED_DRAFT, ...change },
+        STORED_EMAIL_ACCOUNT
+      )
+    ).toBe(true)
+  })
+
+  it("is true once anything is typed in an empty card", () => {
+    expect(
+      isEmailAccountDraftDifferent({ ...EMPTY_DRAFT, userName: "ada" }, null)
+    ).toBe(true)
   })
 })

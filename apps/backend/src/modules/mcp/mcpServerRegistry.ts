@@ -701,7 +701,7 @@ async function createBuiltInServerPlans(
     builtIns.map((builtIn) =>
       settings.builtIn[builtIn.name].enabled
         ? createBuiltInServerPlan(builtIn)
-        : buildOffBuiltInServerPlan(builtIn)
+        : Promise.resolve(buildOffBuiltInServerPlan(builtIn))
     )
   )
   const plans: ServerPlan[] = []

@@ -589,7 +589,8 @@ function useEmailFieldHosts() {
  * was tried and with which edit, whether the removal is being confirmed,
  * and whether Remove account takes focus back after the confirmation left
  * without removing. Typing an address whose provider has a preset fills the server
- * fields while they are empty or still hold the previous preset. Problems
+ * fields and the Sent copy switch while they all still hold what an empty
+ * card holds or the previous address's preset. Problems
  * show from the first Save on, each under its input, and a rejected Save
  * moves focus to the first input with a problem. Enter or Save asks the
  * parent to sign in and save when the fields hold a valid account that

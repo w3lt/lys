@@ -226,30 +226,73 @@ export function hasEmailPresetServers(
   )
 }
 
+/** The fields a preset fills: both servers and the Sent copy switch. */
+type EmailServerChoices = Pick<
+  EmailAccountDraft,
+  "imap" | "smtp" | "serverKeepsSentCopy"
+>
+
 /**
- * Answers whether a preset may fill a draft's server fields: both hosts are
- * empty, or the fields still hold the preset of the address they were
- * filled for.
+ * Answers whether a draft's server fields and Sent copy switch hold given
+ * values.
+ *
+ * @param draft - Fields as they are.
+ * @param choices - Servers and switch to compare with.
+ * @returns True when both servers and the switch are equal.
+ */
+function hasEmailServerChoices(
+  draft: EmailAccountDraft,
+  choices: EmailServerChoices
+): boolean {
+  return (
+    isEmailServerEqual(draft.imap, choices.imap) &&
+    isEmailServerEqual(draft.smtp, choices.smtp) &&
+    draft.serverKeepsSentCopy === choices.serverKeepsSentCopy
+  )
+}
+
+/**
+ * Builds the fields a preset fills.
+ *
+ * @param preset - Preset to read.
+ * @returns Its servers, the ports as text, and its Sent copy.
+ */
+function buildPresetChoices(preset: EmailPreset): EmailServerChoices {
+  return {
+    imap: buildServerDraft(preset.imap),
+    smtp: buildServerDraft(preset.smtp),
+    serverKeepsSentCopy: preset.serverKeepsSentCopy
+  }
+}
+
+/**
+ * Answers whether a preset may fill a draft's server fields and Sent copy
+ * switch: every one of them still holds what an empty card holds, or they
+ * all still hold the preset of the address they were filled for.
  *
  * @param draft - Fields as they are, with the address before its change.
- * @returns True when a preset may replace the server fields.
+ * @returns True when a preset may replace the server fields and the switch.
  */
 function canApplyEmailPreset(draft: EmailAccountDraft): boolean {
-  if (draft.imap.host === "" && draft.smtp.host === "") return true
+  if (hasEmailServerChoices(draft, EMPTY_ACCOUNT_DRAFT)) return true
   const applied = findEmailPreset(draft.address)
-  return applied !== undefined && hasEmailPresetServers(draft, applied)
+  return (
+    applied !== undefined &&
+    hasEmailServerChoices(draft, buildPresetChoices(applied))
+  )
 }
 
 /**
  * Replaces the address and, when its provider has a preset and the server
- * fields are free to fill, fills the servers and the Sent copy from it.
+ * fields and the Sent copy switch are free to fill, fills them from it.
  *
  * @param draft - Fields as they are.
  * @param address - New address as typed.
  * @returns The draft with the address, and with the preset's servers and
- * Sent copy while the server fields are empty or still hold the preset
- * applied for the previous address; server values the person typed are
- * kept.
+ * Sent copy while every server field and the switch still hold what an
+ * empty card holds, or they all still hold the preset applied for the
+ * previous address; otherwise the servers and the Sent copy the person
+ * made or kept stay as they are.
  */
 export function updateEmailAccountAddress(
   draft: EmailAccountDraft,

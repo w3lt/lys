@@ -143,6 +143,40 @@ describe("updateEmailAccountAddress", () => {
     })
   })
 
+  it("keeps a port and a security the person chose before the hosts", () => {
+    const chosen: EmailAccountDraft = {
+      ...EMPTY_DRAFT,
+      imap: { host: "", port: "1993", security: "starttls" }
+    }
+
+    expect(updateEmailAccountAddress(chosen, "ada@gmail.com")).toEqual({
+      ...chosen,
+      address: "ada@gmail.com"
+    })
+  })
+
+  it("keeps a Sent-copy choice the person made before the address", () => {
+    const chosen: EmailAccountDraft = {
+      ...EMPTY_DRAFT,
+      serverKeepsSentCopy: true
+    }
+
+    expect(updateEmailAccountAddress(chosen, "ada@icloud.com")).toEqual({
+      ...chosen,
+      address: "ada@icloud.com"
+    })
+  })
+
+  it("keeps a Sent-copy choice the person changed after the preset filled it", () => {
+    const gmail = updateEmailAccountAddress(EMPTY_DRAFT, "ad@gmail.com")
+    const changed = { ...gmail, serverKeepsSentCopy: false }
+
+    expect(updateEmailAccountAddress(changed, "ada@gmail.com")).toEqual({
+      ...changed,
+      address: "ada@gmail.com"
+    })
+  })
+
   it("keeps the servers of a preset the person changed", () => {
     const gmail = updateEmailAccountAddress(EMPTY_DRAFT, "ada@gmail.com")
     const changed = { ...gmail, smtp: { ...gmail.smtp, port: "587" } }

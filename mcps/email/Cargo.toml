@@ -18,7 +18,7 @@ lettre = { version = "0.11.23", default-features = false, features = [
   "ring",
   "rustls-platform-verifier",
 ] }
-mail-parser = "0.11.9"
+mail-parser = "1.0.1"
 rmcp = { version = "3.8.0", features = [
   "server",
   "macros",

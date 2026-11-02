@@ -26,7 +26,9 @@ export type McpServerEvent =
       /**
        * A server's session was stopped because the settings just applied
        * switched the server off, changed it, or no longer name it; a
-       * changed server opens in a new session.
+       * changed server opens in a new session when it can start, and a
+       * built-in server that cannot, such as one without a usable account,
+       * is listed as failed instead.
        */
       kind: "server-stopped"
       /** Name of the server. */

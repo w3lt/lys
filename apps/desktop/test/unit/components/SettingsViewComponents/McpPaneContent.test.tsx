@@ -12,6 +12,7 @@ import {
 } from "@/components/SettingsViewComponents/tool-presentation"
 import {
   buildJsonResponse,
+  createControlledRoute,
   createTransportFailure,
   startBackendFake,
   type BackendFake,
@@ -684,6 +685,63 @@ describe("McpPaneContent", () => {
     expect(
       screen.getByRole("region", { name: "servers" })
     ).not.toHaveTextContent("new-app-password")
+  })
+
+  it("saves the account without applying the group while the email server is off", async () => {
+    const host = startSettingsHost()
+    const { backend } = await startMcpPane({
+      [ACCOUNT_CHECK_ROUTE]: () =>
+        buildJsonResponse(200, ACCEPTED_ACCOUNT_CHECK)
+    })
+    const user = userEvent.setup()
+    const card = await openEmailAccountCard(user)
+
+    await user.type(
+      within(card).getByLabelText("Password"),
+      "new-app-password{Enter}"
+    )
+    await waitForRenderedWork()
+
+    expect(listWrittenDocuments(host.commands)).toHaveLength(1)
+    expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, ACCOUNT_CHECK_ROUTE])
+    expect(within(card).getByRole("status")).toHaveTextContent("Account saved.")
+  })
+
+  it("applies the group after the save when the email server was switched on during the check", async () => {
+    const host = startSettingsHost()
+    const accountCheck = createControlledRoute()
+    const { backend } = await startMcpPane({
+      [ACCOUNT_CHECK_ROUTE]: accountCheck.route,
+      [SYNC_ROUTE]: answerList(STORED_LIST)
+    })
+    const user = userEvent.setup()
+    const card = await openEmailAccountCard(user)
+
+    await user.type(
+      within(card).getByLabelText("Password"),
+      "new-app-password{Enter}"
+    )
+    await waitForRenderedWork()
+    await user.click(getServerSwitch("email"))
+    await waitForRenderedWork()
+    const beforeTheSave = listMcpRouteKeys(backend)
+    accountCheck.responses[0]?.resolve(
+      buildJsonResponse(200, ACCEPTED_ACCOUNT_CHECK)
+    )
+    await waitForRenderedWork()
+
+    // The switch's sync started the server before the new password was saved.
+    expect(beforeTheSave).toEqual([LIST_ROUTE, ACCOUNT_CHECK_ROUTE, SYNC_ROUTE])
+    expect(listWrittenDocuments(host.commands)).toHaveLength(2)
+    expect(listWrittenDocuments(host.commands)[1]).toMatchObject({
+      secrets: { emailPassword: "new-app-password" }
+    })
+    expect(listMcpRouteKeys(backend)).toEqual([
+      LIST_ROUTE,
+      ACCOUNT_CHECK_ROUTE,
+      SYNC_ROUTE,
+      SYNC_ROUTE
+    ])
   })
 
   it("says which server refused the sign-in, saves nothing, and keeps the edit", async () => {

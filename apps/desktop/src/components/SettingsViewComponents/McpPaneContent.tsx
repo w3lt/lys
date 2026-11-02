@@ -474,13 +474,18 @@ function EmailAccountCardView(): ReactElement {
    * @param account - Valid account.
    * @param password - Its password.
    * @returns The save outcome.
+   * @remarks The switch is read once the save settled, not when the save
+   * started: the person can switch the server on while the check runs, and
+   * that switch's sync starts the server with the account saved before.
    */
   async function handleSaveEmailAccount(
     account: EmailAccount,
     password: EmailPassword
   ): Promise<EmailAccountSaveOutcome> {
     const outcome = await saveEmailAccount(account, password)
-    if (outcome === "saved" && isEmailServerOn) void sendMcpServerSync()
+    const isOnAfterSave =
+      useLysStore.getState().settings.mcp.builtIn.email.enabled
+    if (outcome === "saved" && isOnAfterSave) void sendMcpServerSync()
     return outcome
   }
 

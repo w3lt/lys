@@ -763,6 +763,37 @@ mod tests {
     }
 
     #[test]
+    fn a_load_failure_names_the_line_where_reading_stopped() {
+        // Pretty-printed, as saves write the file, so each value has a line
+        // of its own. A value of the wrong type stops reading on its own
+        // line. A rule a string breaks is found once the string is read, and
+        // the JSON reader then names the end of the string's object.
+        let unusable_values = [
+            (json!({ "generation": { "temperature": "hot" } }), 3),
+            (
+                json!({ "providers": { "lmStudio": { "address": "http://127.0.0.1:1234" } } }),
+                5,
+            ),
+            (
+                json!({ "loadConfiguration": { "models": { "qwen/qwen3-8b": { "contextLength": 0 } } } }),
+                5,
+            ),
+        ];
+
+        for (settings, line) in unusable_values {
+            let stored_text =
+                serde_json::to_string_pretty(&settings).expect("settings that serialize");
+
+            let failure = assert_loading_fails_without_rewriting(&stored_text);
+
+            assert!(
+                failure.contains(&format!(" at line {line} column ")),
+                "{failure}"
+            );
+        }
+    }
+
+    #[test]
     fn fails_when_the_settings_path_cannot_be_read() {
         let directory = TestDirectory::create("settings-unreadable");
         let path = directory.create_subdirectory("settings.json");

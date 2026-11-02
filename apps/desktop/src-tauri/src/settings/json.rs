@@ -5,13 +5,13 @@
 //! `["Paris", null, null]` in place of its object. The `@lys/share` schemas,
 //! which the renderer and the backend check, refuse that form; every stored
 //! shape is read from an object first so that both sides judge a settings
-//! file the same way.
+//! file the same way. The shape reads the object's entries as the JSON reader
+//! reads them, so a failure inside it still names its line and column.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt, marker::PhantomData};
 
-use serde::de::{DeserializeOwned, Error};
+use serde::de::{value::MapAccessDeserializer, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
-use serde_json::{Map, Value};
 
 /// Reads a JSON object into a stored shape, refusing every other JSON value.
 ///
@@ -22,11 +22,9 @@ use serde_json::{Map, Value};
 pub(super) fn parse_json_object<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
-    T: DeserializeOwned,
+    T: Deserialize<'de>,
 {
-    let object = Map::<String, Value>::deserialize(deserializer)?;
-
-    T::deserialize(Value::Object(object)).map_err(D::Error::custom)
+    deserializer.deserialize_map(JsonObjectVisitor(PhantomData))
 }
 
 /// Reads a JSON array of objects into stored shapes, refusing any item that is
@@ -39,12 +37,11 @@ where
 pub(super) fn parse_json_objects<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
 where
     D: Deserializer<'de>,
-    T: DeserializeOwned,
+    T: Deserialize<'de>,
 {
-    Vec::<Map<String, Value>>::deserialize(deserializer)?
-        .into_iter()
-        .map(|object| T::deserialize(Value::Object(object)).map_err(D::Error::custom))
-        .collect()
+    let objects = Vec::<JsonObject<T>>::deserialize(deserializer)?;
+
+    Ok(objects.into_iter().map(|JsonObject(shape)| shape).collect())
 }
 
 /// Reads a JSON object whose values are JSON objects into stored shapes by
@@ -60,16 +57,65 @@ pub(super) fn parse_keyed_json_objects<'de, D, T>(
 ) -> Result<BTreeMap<String, T>, D::Error>
 where
     D: Deserializer<'de>,
-    T: DeserializeOwned,
+    T: Deserialize<'de>,
 {
-    BTreeMap::<String, Map<String, Value>>::deserialize(deserializer)?
+    let objects = BTreeMap::<String, JsonObject<T>>::deserialize(deserializer)?;
+
+    Ok(objects
         .into_iter()
-        .map(|(key, object)| {
-            T::deserialize(Value::Object(object))
-                .map(|shape| (key, shape))
-                .map_err(D::Error::custom)
-        })
-        .collect()
+        .map(|(key, JsonObject(shape))| (key, shape))
+        .collect())
+}
+
+/// A stored shape read from a JSON object only, as [`parse_json_object`]
+/// reads it, so that a list or a map of them is read the same way.
+struct JsonObject<T>(
+    /// The shape read from the object.
+    T,
+);
+
+/// Deserializes the shape from a JSON object only.
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for JsonObject<T> {
+    /// Reads the shape as [`parse_json_object`] does.
+    ///
+    /// # Errors
+    ///
+    /// Returns the deserializer's error when the input is not a JSON object,
+    /// and the shape's error when the object does not match it.
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        parse_json_object(deserializer).map(Self)
+    }
+}
+
+/// Visitor that accepts a JSON object only and reads a stored shape from it.
+struct JsonObjectVisitor<T>(
+    /// The shape the object is read into; the visitor holds no value.
+    PhantomData<T>,
+);
+
+/// Hands the object's entries, as the JSON reader reads them, to the shape.
+impl<'de, T: Deserialize<'de>> Visitor<'de> for JsonObjectVisitor<T> {
+    type Value = T;
+
+    /// Names what was expected in a refusal of any other JSON value.
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON object")
+    }
+
+    /// Reads the shape from the object's entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns the shape's error when the object does not match it.
+    fn visit_map<A>(self, map: A) -> Result<T, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        T::deserialize(MapAccessDeserializer::new(map))
+    }
 }
 
 #[cfg(test)]
@@ -119,7 +165,7 @@ mod tests {
             let failure = parse_json_object::<_, Shape>(value.clone()).expect_err("not an object");
 
             assert!(
-                failure.to_string().contains("expected a map"),
+                failure.to_string().contains("expected a JSON object"),
                 "{value}: {failure}"
             );
         }
@@ -177,5 +223,31 @@ mod tests {
                 "{value}"
             );
         }
+    }
+
+    #[test]
+    fn a_failure_inside_an_object_names_the_line_the_json_reader_was_on() {
+        let single = "{\n  \"name\": 1\n}";
+        let listed = "[\n  {},\n  { \"name\": 1 }\n]";
+        let keyed = "{\n  \"a\": {},\n  \"b\": { \"name\": 1 }\n}";
+
+        let single_failure =
+            parse_json_object::<_, Shape>(&mut serde_json::Deserializer::from_str(single))
+                .expect_err("a name that is a number");
+        let listed_failure =
+            parse_json_objects::<_, Shape>(&mut serde_json::Deserializer::from_str(listed))
+                .expect_err("a name that is a number");
+        let keyed_failure =
+            parse_keyed_json_objects::<_, Shape>(&mut serde_json::Deserializer::from_str(keyed))
+                .expect_err("a name that is a number");
+
+        assert_eq!(
+            [
+                single_failure.line(),
+                listed_failure.line(),
+                keyed_failure.line()
+            ],
+            [2, 3, 3]
+        );
     }
 }

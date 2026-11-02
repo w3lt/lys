@@ -6,7 +6,7 @@ import {
   type McpServerList
 } from "@lys/protocol"
 import type { McpServerSettings } from "@lys/share"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
@@ -30,6 +30,7 @@ import registerMcpRoutes from "../../../../../src/modules/mcp/routes"
 import {
   buildEmailAccount,
   buildFakeEmailServerCommand,
+  readRecordedEmailVariable,
   SYNTHETIC_EMAIL_PASSWORD
 } from "../../../support/emailTestServer"
 import { createTestFastify } from "../../../support/fastifyTestApp"
@@ -135,14 +136,14 @@ async function writeMcpSettings(
 }
 
 /**
- * Writes a settings file that switches the built-in email server on,
+ * Saves a settings file that switches the built-in email server on,
  * replacing the file.
  *
  * @param path - Settings file path.
  * @param servers - Added servers in settings order.
  * @param account - The saved account, or null for none.
  */
-async function writeEmailSettings(
+async function saveEmailSettings(
   path: string,
   servers: readonly McpServerSettings[],
   account: unknown
@@ -175,6 +176,11 @@ type McpRouteAppOptions = Readonly<{
   /** How the email server is run; the fake email server when omitted. */
   emailServerCommand?: EmailServerCommand
   /**
+   * Folder stdio servers and account checks start in; the test run's
+   * folder when omitted.
+   */
+  workingDirectory?: string
+  /**
    * Whether the registry applies the built-in email server over the
    * settings file and the email server command; false when omitted.
    */
@@ -201,6 +207,7 @@ async function createMcpRouteApp(
   const checkEvents: EmailAccountCheckEvent[] = []
   const emailServerCommand =
     options.emailServerCommand ?? buildFakeEmailServerCommand()
+  const workingDirectory = options.workingDirectory ?? process.cwd()
   const readSettings = vi.fn(() => readMcpSettings(settingsFilePath))
   const openServer = vi.fn(
     (settings: McpServerSettings, context: McpServerConnectionContext) =>
@@ -218,12 +225,13 @@ async function createMcpRouteApp(
     readSettings,
     builtInServers,
     openServer,
-    workingDirectory: process.cwd(),
+    workingDirectory,
     processGroups,
     reportEvent: (event) => events.push(event)
   })
   const checker = new EmailAccountChecker({
     serverCommand: emailServerCommand,
+    workingDirectory,
     timeoutMilliseconds: CHECK_TIMEOUT_MILLISECONDS,
     reportEvent: (event) => checkEvents.push(event)
   })
@@ -322,15 +330,17 @@ describe("registerMcpRoutes", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("lists the built-in email server first, as a server Lys ships, connected with the saved account", async () => {
       const folder = await createCaseFolder()
-      const recordFile = join(folder, "variable")
       const settingsFilePath = await createSettingsFilePath()
-      await writeEmailSettings(
+      await saveEmailSettings(
         settingsFilePath,
         [FILES_SERVER],
         buildEmailAccount("accepted@example.com")
       )
       const { app, registry } = await createMcpRouteApp(settingsFilePath, {
-        emailServerCommand: buildFakeEmailServerCommand({ recordFile }),
+        emailServerCommand: buildFakeEmailServerCommand({
+          recordsVariable: true
+        }),
+        workingDirectory: folder,
         withBuiltInEmailServer: true
       })
 
@@ -370,7 +380,7 @@ describe("registerMcpRoutes", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
           ...FILES_CONNECTED.servers
         ]
       })
-      expect(JSON.parse(await readFile(recordFile, "utf8"))).toMatchObject({
+      expect(await readRecordedEmailVariable(folder)).toMatchObject({
         address: "accepted@example.com",
         password: SYNTHETIC_EMAIL_PASSWORD
       })
@@ -378,7 +388,7 @@ describe("registerMcpRoutes", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("lists the switched-on built-in email server as failed while no account is saved, without starting it", async () => {
       const settingsFilePath = await createSettingsFilePath()
-      await writeEmailSettings(settingsFilePath, [], null)
+      await saveEmailSettings(settingsFilePath, [], null)
       const { app, openServer } = await createMcpRouteApp(settingsFilePath, {
         withBuiltInEmailServer: true
       })

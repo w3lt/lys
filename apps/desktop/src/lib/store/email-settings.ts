@@ -181,15 +181,15 @@ export function createEmailSettingsSlice(
   }
 
   /**
-   * Writes an account and its password, or removes both, and publishes the
+   * Saves an account and its password, or removes both, and publishes the
    * outcome.
    *
-   * @param account - Account to write, or null to remove the saved one.
+   * @param account - Account to save, or null to remove the saved one.
    * @param password - Its password, or null to remove the saved one.
    * @returns `saved` once the file and the store hold the new value, or
    * `failed`.
    */
-  async function writeEmailAccount(
+  async function saveAccountWithPassword(
     account: EmailAccount | null,
     password: EmailPassword | null
   ): Promise<"saved" | "failed"> {
@@ -235,14 +235,14 @@ export function createEmailSettingsSlice(
     }
     set({ emailAccountCheck: Object.freeze({ status: "checked", outcome }) })
     if (!isAccountAccepted(outcome)) return "refused"
-    return await writeEmailAccount(account, password)
+    return await saveAccountWithPassword(account, password)
   }
 
   /** Implements {@link EmailSettingsSlice.removeEmailAccount}. */
   async function removeEmailAccount(): Promise<EmailAccountRemovalOutcome> {
     if (isBusy()) return "busy"
     set({ emailAccountCheck: IDLE_CHECK })
-    return await writeEmailAccount(null, null)
+    return await saveAccountWithPassword(null, null)
   }
 
   return {

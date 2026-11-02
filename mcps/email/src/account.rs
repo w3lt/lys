@@ -111,7 +111,7 @@ pub struct Password(String);
 
 impl Password {
     /// Returns the password's text, for the sign-in that needs it.
-    pub fn expose(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 }
@@ -431,7 +431,7 @@ mod tests {
         assert_eq!(account.address, "person@example.com");
         assert_eq!(account.display_name, "A Person");
         assert_eq!(account.user_name, "person@example.com");
-        assert_eq!(account.password.expose(), SYNTHETIC_PASSWORD);
+        assert_eq!(account.password.as_str(), SYNTHETIC_PASSWORD);
         assert_eq!(
             account.imap,
             MailServer {

@@ -4,7 +4,7 @@ import {
   type CheckEmailAccountApiResponse
 } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
-import { checkEmailAccount } from "@/lib/apis/http/email"
+import { sendEmailAccountCheck } from "@/lib/apis/http/email"
 import {
   buildJsonResponse,
   createTransportFailure,
@@ -39,12 +39,12 @@ const ACCEPTED_CHECK = checkEmailAccountApiResponseSchema.parse({
  * Sends an account check against one answer and returns the rejection.
  *
  * @param response - Answer of the account-check route.
- * @returns What `checkEmailAccount` rejected with.
+ * @returns What `sendEmailAccountCheck` rejected with.
  * @throws When the check resolves instead.
  */
 async function getAccountCheckFailure(response: Response): Promise<unknown> {
   startBackendFake({ [ACCOUNT_CHECK_ROUTE]: () => response })
-  return await checkEmailAccount(CONNECTION, CHECK_BODY).then(
+  return await sendEmailAccountCheck(CONNECTION, CHECK_BODY).then(
     () => {
       throw new Error("The check resolved")
     },
@@ -52,13 +52,13 @@ async function getAccountCheckFailure(response: Response): Promise<unknown> {
   )
 }
 
-describe("checkEmailAccount", () => {
+describe("sendEmailAccountCheck", () => {
   it("posts the account and its password as JSON to the backend origin, uncached, and returns the frozen outcome", async () => {
     const backend = startBackendFake({
       [ACCOUNT_CHECK_ROUTE]: () => buildJsonResponse(200, ACCEPTED_CHECK)
     })
 
-    const outcome = await checkEmailAccount(CONNECTION, CHECK_BODY)
+    const outcome = await sendEmailAccountCheck(CONNECTION, CHECK_BODY)
 
     expect(outcome).toEqual(ACCEPTED_CHECK)
     expect(Object.isFrozen(outcome)).toBe(true)
@@ -95,9 +95,9 @@ describe("checkEmailAccount", () => {
         [ACCOUNT_CHECK_ROUTE]: () => buildJsonResponse(200, answer)
       })
 
-      await expect(checkEmailAccount(CONNECTION, CHECK_BODY)).resolves.toEqual(
-        answer
-      )
+      await expect(
+        sendEmailAccountCheck(CONNECTION, CHECK_BODY)
+      ).resolves.toEqual(answer)
     }
   )
 
@@ -168,7 +168,7 @@ describe("checkEmailAccount", () => {
     })
 
     await expect(
-      checkEmailAccount(CONNECTION, CHECK_BODY)
+      sendEmailAccountCheck(CONNECTION, CHECK_BODY)
     ).rejects.toMatchObject({
       message: "The backend could not be reached.",
       cause: transportFailure

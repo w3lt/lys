@@ -142,7 +142,7 @@ type AccountIssue = {
 }
 
 /** The password field read: the password to save, or its problem. */
-type PasswordDraftRead =
+type PasswordDraftParse =
   { readonly password: EmailPassword } | { readonly problem: string }
 
 /**
@@ -182,16 +182,25 @@ export function buildEmailAccountDraft(
   }
 }
 
+/** Values that identify one mail server, as typed or as saved. */
+type EmailServerValues = Readonly<{
+  host: string
+  port: string | number
+  security: EmailSecurity
+}>
+
 /**
- * Answers whether two server drafts hold the same values.
+ * Answers whether two servers hold the same values.
  *
- * @param first - One server's fields.
- * @param second - Another server's fields.
+ * @typeParam TServer - Kind of both servers: typed fields, whose port is
+ * text, or saved settings, whose port is a number.
+ * @param first - One server.
+ * @param second - Another server of the same kind.
  * @returns True when host, port, and security are equal.
  */
-function isServerDraftEqual(
-  first: EmailServerDraft,
-  second: EmailServerDraft
+function isEmailServerEqual<TServer extends EmailServerValues>(
+  first: TServer,
+  second: TServer
 ): boolean {
   return (
     first.host === second.host &&
@@ -207,13 +216,13 @@ function isServerDraftEqual(
  * @param preset - Preset to compare with.
  * @returns True when both servers equal the preset's.
  */
-export function holdsEmailPresetServers(
+export function hasEmailPresetServers(
   draft: EmailAccountDraft,
   preset: EmailPreset
 ): boolean {
   return (
-    isServerDraftEqual(draft.imap, buildServerDraft(preset.imap)) &&
-    isServerDraftEqual(draft.smtp, buildServerDraft(preset.smtp))
+    isEmailServerEqual(draft.imap, buildServerDraft(preset.imap)) &&
+    isEmailServerEqual(draft.smtp, buildServerDraft(preset.smtp))
   )
 }
 
@@ -228,7 +237,7 @@ export function holdsEmailPresetServers(
 function canApplyEmailPreset(draft: EmailAccountDraft): boolean {
   if (draft.imap.host === "" && draft.smtp.host === "") return true
   const applied = findEmailPreset(draft.address)
-  return applied !== undefined && holdsEmailPresetServers(draft, applied)
+  return applied !== undefined && hasEmailPresetServers(draft, applied)
 }
 
 /**
@@ -307,7 +316,7 @@ function buildAccountCandidate(
 }
 
 /**
- * Places one issue of one server on an input.
+ * Builds the problem of one server issue, placed on an input.
  *
  * @param side - Server the issue concerns.
  * @param part - Field of the server the issue names, or undefined for the
@@ -317,7 +326,7 @@ function buildAccountCandidate(
  * input with the rule otherwise, because a connection without TLS is fixed
  * at the host or beside it.
  */
-function placeServerIssue(
+function buildPlacedServerProblem(
   side: EmailServerSide,
   part: PropertyKey | undefined,
   message: string
@@ -328,13 +337,15 @@ function placeServerIssue(
 }
 
 /**
- * Places one issue of the account on an input.
+ * Finds the input one account issue concerns, and builds its problem.
  *
  * @param issue - The issue.
  * @returns The input and the problem, or undefined for an issue of no
  * input, which the schema does not report.
  */
-function placeAccountIssue(issue: AccountIssue): PlacedProblem | undefined {
+function findPlacedAccountProblem(
+  issue: AccountIssue
+): PlacedProblem | undefined {
   const [group, part] = issue.path
   switch (group) {
     case "address":
@@ -343,14 +354,14 @@ function placeAccountIssue(issue: AccountIssue): PlacedProblem | undefined {
       return [group, issue.message]
     case "imap":
     case "smtp":
-      return placeServerIssue(group, part, issue.message)
+      return buildPlacedServerProblem(group, part, issue.message)
     default:
       return undefined
   }
 }
 
 /**
- * Reads the password field.
+ * Parses the password field.
  *
  * @param password - Text in the field, as typed.
  * @param savedPassword - Saved password, or null.
@@ -358,10 +369,10 @@ function placeAccountIssue(issue: AccountIssue): PlacedProblem | undefined {
  * while nothing is typed, or the problem: an empty field while none is
  * saved, or the rule a typed password breaks.
  */
-function readPasswordDraft(
+function parsePasswordDraft(
   password: string,
   savedPassword: EmailPassword | null
-): PasswordDraftRead {
+): PasswordDraftParse {
   if (password === "") {
     return savedPassword === null
       ? { problem: EMPTY_PASSWORD_PROBLEM }
@@ -374,13 +385,13 @@ function readPasswordDraft(
 }
 
 /**
- * Collects the first problem of each input.
+ * Builds the first problem of each input.
  *
  * @param placed - Problems in the schema's order, an input possibly
  * repeated or a problem placed nowhere.
  * @returns The first problem of each input, keyed by input.
  */
-function collectProblems(
+function buildDraftProblems(
   placed: readonly (PlacedProblem | undefined)[]
 ): EmailAccountDraftProblems {
   const problems: Partial<Record<EmailAccountDraftField, string>> = {}
@@ -388,24 +399,6 @@ function collectProblems(
     if (entry !== undefined) problems[entry[0]] ??= entry[1]
   }
   return problems
-}
-
-/**
- * Answers whether two servers hold the same settings.
- *
- * @param first - One server.
- * @param second - Another server.
- * @returns True when host, port, and security are equal.
- */
-function isEmailServerEqual(
-  first: EmailServerSettings,
-  second: EmailServerSettings
-): boolean {
-  return (
-    first.host === second.host &&
-    first.port === second.port &&
-    first.security === second.security
-  )
 }
 
 /**
@@ -452,9 +445,11 @@ export function parseEmailAccountDraft(
   savedPassword: EmailPassword | null
 ): EmailAccountDraftParse {
   const account = emailAccountSchema.safeParse(buildAccountCandidate(draft))
-  const password = readPasswordDraft(draft.password, savedPassword)
-  const problems = collectProblems([
-    ...(account.success ? [] : account.error.issues.map(placeAccountIssue)),
+  const password = parsePasswordDraft(draft.password, savedPassword)
+  const problems = buildDraftProblems([
+    ...(account.success
+      ? []
+      : account.error.issues.map(findPlacedAccountProblem)),
     "problem" in password ? ["password", password.problem] : undefined
   ])
   if (!account.success || "problem" in password) {

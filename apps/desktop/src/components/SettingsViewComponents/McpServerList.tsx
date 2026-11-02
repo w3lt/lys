@@ -526,22 +526,24 @@ function McpServerKindChoice({
   )
 }
 
+/** Facts the connected servers' tools are drawn from. */
+type McpConnectedToolFacts = Pick<
+  McpServerSectionProps,
+  "servers" | "list" | "toolList" | "isBackendRunning"
+>
+
 /**
  * Lists the tools of the connected servers.
  *
- * @param servers - Listed servers.
- * @param list - Lifecycle of the list of applied servers.
- * @param toolList - Lifecycle of the tool list.
- * @param isBackendRunning - Whether the backend is running.
+ * @param facts - Listed servers, the lifecycles of the list of applied
+ * servers and of the tool list, and whether the backend is running.
  * @returns Every connected server's listed tools, or undefined while the
  * tool list is not read.
  */
 function listConnectedMcpTools(
-  servers: readonly McpListedServer[],
-  list: McpServerListState,
-  toolList: ToolListState,
-  isBackendRunning: boolean
+  facts: McpConnectedToolFacts
 ): readonly McpToolDefinition[] | undefined {
+  const { servers, list, toolList, isBackendRunning } = facts
   if (toolList.status !== "loaded") return undefined
   return servers.flatMap((server) => {
     const { condition } = formatMcpServerStatus({
@@ -742,7 +744,7 @@ type McpServerSectionMetaFacts = Pick<
  * that are on cost per request.
  */
 function formatMcpServerSectionMeta(facts: McpServerSectionMetaFacts): string {
-  const { servers, list, toolList, toolSettings, isBackendRunning } = facts
+  const { servers, list, toolSettings, isBackendRunning } = facts
   return formatMcpServerListMeta({
     serverCount: servers.length,
     connectedCount: calculateConnectedMcpServerCount(
@@ -750,12 +752,7 @@ function formatMcpServerSectionMeta(facts: McpServerSectionMetaFacts): string {
       list,
       isBackendRunning
     ),
-    connectedTools: listConnectedMcpTools(
-      servers,
-      list,
-      toolList,
-      isBackendRunning
-    ),
+    connectedTools: listConnectedMcpTools(facts),
     toolSwitches: toolSettings.switches
   })
 }

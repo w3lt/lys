@@ -19,6 +19,10 @@ use tokio_rustls::rustls::{ClientConfig, Error as TlsError};
 
 /// The certificate trust of this process: the operating system's store,
 /// plus the extra roots given to it.
+///
+/// Concurrency model: reentrant; it holds no mutable state, and each build
+/// makes a new connector or new parameters. Resource ownership: it holds
+/// no resource, only the extra roots' bytes.
 #[derive(Clone, Debug, Default)]
 pub struct Trust {
     /// Roots trusted besides the operating system's, in DER form.
@@ -28,7 +32,7 @@ pub struct Trust {
 impl Trust {
     /// Creates the trust the server runs with: the operating system's
     /// store and nothing else.
-    pub fn of_platform() -> Self {
+    pub fn create_platform() -> Self {
         Self::default()
     }
 
@@ -38,7 +42,7 @@ impl Trust {
     /// # Arguments
     ///
     /// * `extra_roots` - Root certificates in DER form.
-    pub fn with_extra_roots(extra_roots: Vec<CertificateDer<'static>>) -> Self {
+    pub fn create_with_extra_roots(extra_roots: Vec<CertificateDer<'static>>) -> Self {
         Self { extra_roots }
     }
 
@@ -134,7 +138,7 @@ mod tests {
 
     #[test]
     fn builds_a_connector_and_parameters_with_an_extra_root() {
-        let trust = Trust::with_extra_roots(Vec::new());
+        let trust = Trust::create_with_extra_roots(Vec::new());
 
         assert!(trust.build_imap_connector().is_ok());
         assert!(trust.build_smtp_parameters("smtp.example.com").is_ok());

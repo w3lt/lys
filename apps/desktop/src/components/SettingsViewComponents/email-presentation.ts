@@ -12,7 +12,7 @@ import {
 } from "@lys/share"
 
 import {
-  holdsEmailPresetServers,
+  hasEmailPresetServers,
   type EmailAccountDraft,
   type EmailAccountDraftParse,
   type EmailServerSide
@@ -197,7 +197,7 @@ export function formatEmailPresetNote(draft: EmailAccountDraft): string {
   if (preset === undefined) {
     return "No preset for this address. Enter the servers."
   }
-  return holdsEmailPresetServers(draft, preset)
+  return hasEmailPresetServers(draft, preset)
     ? `Preset: ${preset.name}`
     : `Preset: ${preset.name} · servers changed`
 }

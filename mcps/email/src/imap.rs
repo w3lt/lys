@@ -26,10 +26,10 @@ use tokio::time::{error::Elapsed, timeout};
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::pki_types::ServerName;
 
-use crate::account::{MailServer, Security};
+use crate::account::{Account, MailServer, Security};
 use crate::failure::{ConnectionFailure, SignInFailure};
 use crate::folders::FolderListing;
-use crate::log::log_line;
+use crate::log::send_log_line;
 use crate::trust::{Trust, is_certificate_refusal};
 
 /// Longest a TCP connection or a TLS handshake may take.
@@ -132,6 +132,16 @@ pub struct FetchedMessage {
     pub bytes: Vec<u8>,
 }
 
+/// How a folder is opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FolderAccess {
+    /// Examined (`EXAMINE`): nothing in the folder changes, not even the
+    /// `\Recent` flags.
+    Read,
+    /// Selected (`SELECT`): flags can be stored and messages deleted.
+    Change,
+}
+
 /// What a selected folder reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SelectedFolder {
@@ -142,6 +152,12 @@ pub struct SelectedFolder {
 }
 
 /// A signed-in IMAP session.
+///
+/// Concurrency model: single-owner; every command takes the session
+/// mutably, so one task at a time uses it, and each tool call opens its
+/// own. Resource ownership: owns the connection; [`Self::close`] logs out
+/// and closes it, and dropping the session closes the socket without
+/// logging out.
 pub struct ImapSession {
     /// The protocol session.
     session: Session<Stream>,
@@ -158,13 +174,12 @@ impl fmt::Debug for ImapSession {
     }
 }
 
-/// Connects to the IMAP server and signs in.
+/// Connects to the account's IMAP server and signs in.
 ///
 /// # Arguments
 ///
-/// * `server` - The server and how the connection is protected.
-/// * `user_name` - The user name to sign in with.
-/// * `password` - The password.
+/// * `account` - The server, how the connection is protected, and the
+///   user name and password to sign in with.
 /// * `trust` - Which certificates are accepted.
 ///
 /// # Returns
@@ -176,15 +191,14 @@ impl fmt::Debug for ImapSession {
 /// [`EXCHANGE_LIMIT`]; the credentials were refused; or the server
 /// answered something unreadable or ended the connection.
 pub async fn open_imap_session(
-    server: &MailServer,
-    user_name: &str,
-    password: &str,
+    account: &Account,
     trust: &Trust,
 ) -> Result<ImapSession, SignInFailure> {
-    let tcp = connect_tcp(server).await?;
+    let server = &account.imap;
+    let tcp = open_tcp_stream(server).await?;
     let client: Client<Stream> = match server.security {
         Security::Tls => {
-            let tls = connect_tls(server, trust, tcp).await?;
+            let tls = open_tls_stream(server, trust, tcp).await?;
             let mut client = Client::new(Box::new(tls) as Stream);
             read_greeting(&mut client).await?;
             client
@@ -193,7 +207,7 @@ pub async fn open_imap_session(
             let mut client = Client::new(tcp);
             read_greeting(&mut client).await?;
             start_tls(&mut client).await?;
-            let tls = connect_tls(server, trust, client.into_inner()).await?;
+            let tls = open_tls_stream(server, trust, client.into_inner()).await?;
             Client::new(Box::new(tls) as Stream)
         }
         Security::Plain => {
@@ -202,9 +216,10 @@ pub async fn open_imap_session(
             client
         }
     };
-    let session = match timeout(EXCHANGE_LIMIT, client.login(user_name, password)).await {
+    let login = client.login(&account.user_name, account.password.as_str());
+    let session = match timeout(EXCHANGE_LIMIT, login).await {
         Ok(Ok(session)) => session,
-        Ok(Err((error, _client))) => return Err(classify_sign_in_error(&error)),
+        Ok(Err((error, _client))) => return Err(calculate_sign_in_failure(&error)),
         Err(_) => return Err(SignInFailure::TimedOut),
     };
     Ok(ImapSession {
@@ -214,7 +229,7 @@ pub async fn open_imap_session(
 }
 
 /// Opens the TCP connection within [`CONNECT_LIMIT`].
-async fn connect_tcp(server: &MailServer) -> Result<TcpStream, SignInFailure> {
+async fn open_tcp_stream(server: &MailServer) -> Result<TcpStream, SignInFailure> {
     match timeout(
         CONNECT_LIMIT,
         TcpStream::connect((server.server_name(), server.port)),
@@ -227,13 +242,13 @@ async fn connect_tcp(server: &MailServer) -> Result<TcpStream, SignInFailure> {
 }
 
 /// Runs the TLS handshake within [`CONNECT_LIMIT`].
-async fn connect_tls(
+async fn open_tls_stream(
     server: &MailServer,
     trust: &Trust,
     tcp: TcpStream,
 ) -> Result<TlsStream<TcpStream>, SignInFailure> {
     let connector = trust.build_imap_connector().map_err(|error| {
-        log_line(&format!(
+        send_log_line(&format!(
             "imap: the TLS configuration could not be built: {error}"
         ));
         SignInFailure::ProtocolError
@@ -243,7 +258,7 @@ async fn connect_tls(
     match timeout(CONNECT_LIMIT, connector.connect(name, tcp)).await {
         Ok(Ok(tls)) => Ok(tls),
         Ok(Err(error)) if is_certificate_refusal(&error) => Err(SignInFailure::CertificateRefused),
-        Ok(Err(error)) => Err(classify_io_error(&error)),
+        Ok(Err(error)) => Err(calculate_io_sign_in_failure(&error)),
         Err(_) => Err(SignInFailure::TimedOut),
     }
 }
@@ -253,7 +268,7 @@ async fn read_greeting<T: AsyncStream>(client: &mut Client<T>) -> Result<(), Sig
     match timeout(EXCHANGE_LIMIT, client.read_response()).await {
         Ok(Ok(Some(_))) => Ok(()),
         Ok(Ok(None)) => Err(SignInFailure::ProtocolError),
-        Ok(Err(error)) => Err(classify_io_error(&error)),
+        Ok(Err(error)) => Err(calculate_io_sign_in_failure(&error)),
         Err(_) => Err(SignInFailure::TimedOut),
     }
 }
@@ -268,16 +283,16 @@ async fn start_tls(client: &mut Client<TcpStream>) -> Result<(), SignInFailure> 
     {
         Ok(Ok(())) => Ok(()),
         Ok(Err(ImapError::No(_) | ImapError::Bad(_))) => Err(SignInFailure::EncryptionNotOffered),
-        Ok(Err(error)) => Err(classify_sign_in_error(&error)),
+        Ok(Err(error)) => Err(calculate_sign_in_failure(&error)),
         Err(_) => Err(SignInFailure::TimedOut),
     }
 }
 
 /// Classifies a protocol error met before the session was signed in.
-fn classify_sign_in_error(error: &ImapError) -> SignInFailure {
+fn calculate_sign_in_failure(error: &ImapError) -> SignInFailure {
     match error {
         ImapError::No(_) => SignInFailure::WrongPassword,
-        ImapError::Io(error) => classify_io_error(error),
+        ImapError::Io(error) => calculate_io_sign_in_failure(error),
         ImapError::Bad(_)
         | ImapError::ConnectionLost
         | ImapError::Parse(_)
@@ -290,7 +305,7 @@ fn classify_sign_in_error(error: &ImapError) -> SignInFailure {
 /// Classifies an I/O error met before the session was signed in: a
 /// timeout of the operating system is reported as such, anything else as
 /// an unreadable or ended connection.
-fn classify_io_error(error: &io::Error) -> SignInFailure {
+fn calculate_io_sign_in_failure(error: &io::Error) -> SignInFailure {
     match error.kind() {
         io::ErrorKind::TimedOut => SignInFailure::TimedOut,
         _ => SignInFailure::ProtocolError,
@@ -304,7 +319,7 @@ impl ImapSession {
     ///
     /// The folders in the server's order, or why the listing failed.
     pub async fn list_folders(&mut self) -> Result<Vec<FolderListing>, ImapFailure> {
-        complete(
+        build_command_result(
             timeout(EXCHANGE_LIMIT, async {
                 let mut names = self.session.list(Some(""), Some("*")).await?;
                 let mut listings = Vec::new();
@@ -322,33 +337,35 @@ impl ImapSession {
     /// # Arguments
     ///
     /// * `raw_name` - The folder's name as the server wrote it.
-    pub async fn count_messages(&mut self, raw_name: &str) -> Result<u32, ImapFailure> {
-        complete(timeout(EXCHANGE_LIMIT, self.session.status(raw_name, "(MESSAGES)")).await)
-            .map(|mailbox| mailbox.exists)
+    pub async fn get_message_count(&mut self, raw_name: &str) -> Result<u32, ImapFailure> {
+        build_command_result(
+            timeout(EXCHANGE_LIMIT, self.session.status(raw_name, "(MESSAGES)")).await,
+        )
+        .map(|mailbox| mailbox.exists)
     }
 
-    /// Selects a folder, read-only or for changes.
+    /// Opens a folder, read-only or for changes; it stays open until
+    /// another folder is opened or the session closes.
     ///
     /// # Arguments
     ///
     /// * `raw_name` - The folder's name as the server wrote it.
-    /// * `read_only` - Whether to examine it instead of selecting it.
+    /// * `access` - Whether to examine the folder or select it.
     ///
     /// # Returns
     ///
     /// The folder's UIDVALIDITY and message count, or why the selection
     /// failed; a server that reports no UIDVALIDITY is unreadable.
-    pub async fn select_folder(
+    pub async fn open_folder(
         &mut self,
         raw_name: &str,
-        read_only: bool,
+        access: FolderAccess,
     ) -> Result<SelectedFolder, ImapFailure> {
-        let mailbox = complete(
+        let mailbox = build_command_result(
             timeout(EXCHANGE_LIMIT, async {
-                if read_only {
-                    self.session.examine(raw_name).await
-                } else {
-                    self.session.select(raw_name).await
+                match access {
+                    FolderAccess::Read => self.session.examine(raw_name).await,
+                    FolderAccess::Change => self.session.select(raw_name).await,
                 }
             })
             .await,
@@ -372,8 +389,9 @@ impl ImapSession {
     /// # Returns
     ///
     /// The matching UIDs, highest first.
-    pub async fn search_uids(&mut self, criteria: &str) -> Result<Vec<u32>, ImapFailure> {
-        let uids = complete(timeout(EXCHANGE_LIMIT, self.session.uid_search(criteria)).await)?;
+    pub async fn list_matching_uids(&mut self, criteria: &str) -> Result<Vec<u32>, ImapFailure> {
+        let uids =
+            build_command_result(timeout(EXCHANGE_LIMIT, self.session.uid_search(criteria)).await)?;
         let mut uids: Vec<u32> = uids.into_iter().collect();
         uids.sort_unstable_by(|left, right| right.cmp(left));
         Ok(uids)
@@ -386,12 +404,12 @@ impl ImapSession {
     ///
     /// * `uids` - The messages' UIDs; a UID that no longer exists is left
     ///   out of the answer.
-    pub async fn fetch_summaries(&mut self, uids: &[u32]) -> Result<Vec<Summary>, ImapFailure> {
+    pub async fn list_summaries(&mut self, uids: &[u32]) -> Result<Vec<Summary>, ImapFailure> {
         if uids.is_empty() {
             return Ok(Vec::new());
         }
         let set = format_uid_set(uids);
-        complete(
+        build_command_result(
             timeout(EXCHANGE_LIMIT, async {
                 let mut fetches = self.session.uid_fetch(&set, SUMMARY_QUERY).await?;
                 let mut summaries = Vec::new();
@@ -416,8 +434,8 @@ impl ImapSession {
     /// # Returns
     ///
     /// The message, or `None` when no message has the UID any more.
-    pub async fn fetch_message(&mut self, uid: u32) -> Result<Option<FetchedMessage>, ImapFailure> {
-        complete(
+    pub async fn find_message(&mut self, uid: u32) -> Result<Option<FetchedMessage>, ImapFailure> {
+        build_command_result(
             timeout(EXCHANGE_LIMIT, async {
                 let mut fetches = self
                     .session
@@ -449,13 +467,13 @@ impl ImapSession {
     /// * `raw_name` - The folder's name as the server wrote it.
     /// * `flags` - The flag list, such as `(\Seen)`.
     /// * `bytes` - The message (RFC 5322).
-    pub async fn append_message(
+    pub async fn save_message(
         &mut self,
         raw_name: &str,
         flags: &str,
         bytes: &[u8],
     ) -> Result<(), ImapFailure> {
-        complete(
+        build_command_result(
             timeout(
                 EXCHANGE_LIMIT,
                 self.session.append(raw_name, Some(flags), None, bytes),
@@ -475,7 +493,7 @@ impl ImapSession {
     pub async fn delete_message(&mut self, uid: u32) -> Result<(), ImapFailure> {
         let supports_uid_plus = self.find_uid_plus().await?;
         let set = uid.to_string();
-        complete(
+        build_command_result(
             timeout(EXCHANGE_LIMIT, async {
                 let mut stored = self
                     .session
@@ -488,7 +506,7 @@ impl ImapSession {
             })
             .await,
         )?;
-        complete(
+        build_command_result(
             timeout(EXCHANGE_LIMIT, async {
                 if supports_uid_plus {
                     let mut expunged = Box::pin(self.session.uid_expunge(&set).await?);
@@ -513,7 +531,7 @@ impl ImapSession {
     ///
     /// * `raw_name` - The new folder's name as the server expects it.
     pub async fn create_folder(&mut self, raw_name: &str) -> Result<(), ImapFailure> {
-        complete(timeout(EXCHANGE_LIMIT, self.session.create(raw_name)).await)
+        build_command_result(timeout(EXCHANGE_LIMIT, self.session.create(raw_name)).await)
     }
 
     /// Deletes a folder.
@@ -522,7 +540,7 @@ impl ImapSession {
     ///
     /// * `raw_name` - The folder's name as the server wrote it.
     pub async fn delete_folder(&mut self, raw_name: &str) -> Result<(), ImapFailure> {
-        complete(timeout(EXCHANGE_LIMIT, self.session.delete(raw_name)).await)
+        build_command_result(timeout(EXCHANGE_LIMIT, self.session.delete(raw_name)).await)
     }
 
     /// Renames a folder.
@@ -531,12 +549,14 @@ impl ImapSession {
     ///
     /// * `raw_name` - The folder's name as the server wrote it.
     /// * `new_raw_name` - The new name as the server expects it.
-    pub async fn rename_folder(
+    pub async fn update_folder_name(
         &mut self,
         raw_name: &str,
         new_raw_name: &str,
     ) -> Result<(), ImapFailure> {
-        complete(timeout(EXCHANGE_LIMIT, self.session.rename(raw_name, new_raw_name)).await)
+        build_command_result(
+            timeout(EXCHANGE_LIMIT, self.session.rename(raw_name, new_raw_name)).await,
+        )
     }
 
     /// Logs out and closes the connection; a failure to log out is logged
@@ -544,8 +564,8 @@ impl ImapSession {
     pub async fn close(mut self) {
         match timeout(EXCHANGE_LIMIT, self.session.logout()).await {
             Ok(Ok(())) => {}
-            Ok(Err(_)) => log_line("imap: logout refused"),
-            Err(_) => log_line("imap: logout timed out"),
+            Ok(Err(_)) => send_log_line("imap: logout refused"),
+            Err(_) => send_log_line("imap: logout timed out"),
         }
     }
 
@@ -554,7 +574,8 @@ impl ImapSession {
         if let Some(supported) = self.supports_uid_plus {
             return Ok(supported);
         }
-        let capabilities = complete(timeout(EXCHANGE_LIMIT, self.session.capabilities()).await)?;
+        let capabilities =
+            build_command_result(timeout(EXCHANGE_LIMIT, self.session.capabilities()).await)?;
         let supported = capabilities.has_str("UIDPLUS");
         self.supports_uid_plus = Some(supported);
         Ok(supported)
@@ -562,16 +583,18 @@ impl ImapSession {
 }
 
 /// Turns a timed command's outcome into the session's contract.
-fn complete<T>(outcome: Result<Result<T, ImapError>, Elapsed>) -> Result<T, ImapFailure> {
+fn build_command_result<T>(
+    outcome: Result<Result<T, ImapError>, Elapsed>,
+) -> Result<T, ImapFailure> {
     match outcome {
         Ok(Ok(value)) => Ok(value),
-        Ok(Err(error)) => Err(classify_command_error(error)),
+        Ok(Err(error)) => Err(calculate_command_failure(error)),
         Err(_) => Err(ImapFailure::Connection(ConnectionFailure::TimedOut)),
     }
 }
 
 /// Classifies a protocol error met by a command of a signed-in session.
-fn classify_command_error(error: ImapError) -> ImapFailure {
+fn calculate_command_failure(error: ImapError) -> ImapFailure {
     match error {
         ImapError::No(text) | ImapError::Bad(text) => ImapFailure::Refused(text),
         ImapError::Append => {
@@ -720,23 +743,23 @@ mod tests {
     #[test]
     fn classifies_command_errors_by_kind() {
         assert_eq!(
-            classify_command_error(ImapError::No("Unknown mailbox".to_owned())),
+            calculate_command_failure(ImapError::No("Unknown mailbox".to_owned())),
             ImapFailure::Refused("Unknown mailbox".to_owned())
         );
         assert_eq!(
-            classify_command_error(ImapError::ConnectionLost),
+            calculate_command_failure(ImapError::ConnectionLost),
             ImapFailure::Connection(ConnectionFailure::Lost)
         );
         assert_eq!(
-            classify_sign_in_error(&ImapError::No("AUTHENTICATIONFAILED".to_owned())),
+            calculate_sign_in_failure(&ImapError::No("AUTHENTICATIONFAILED".to_owned())),
             SignInFailure::WrongPassword
         );
         assert_eq!(
-            classify_sign_in_error(&ImapError::Io(io::Error::from(io::ErrorKind::TimedOut))),
+            calculate_sign_in_failure(&ImapError::Io(io::Error::from(io::ErrorKind::TimedOut))),
             SignInFailure::TimedOut
         );
         assert_eq!(
-            classify_sign_in_error(&ImapError::Io(io::Error::from(
+            calculate_sign_in_failure(&ImapError::Io(io::Error::from(
                 io::ErrorKind::UnexpectedEof
             ))),
             SignInFailure::ProtocolError

@@ -459,6 +459,7 @@ function createToolServices(
     logReporters.reportMcpProcessGroupsSaveFailure
   )
   const emailServerCommand = buildEmailServerCommand(config.emailServerPath)
+  const mcpWorkingDirectory = homedir()
   const mcpServerRegistry = new McpServerRegistry({
     readSettings: () => readMcpSettings(config.settingsFilePath),
     builtInServers: [
@@ -468,12 +469,13 @@ function createToolServices(
     ],
     openServer: (settings, context) =>
       openMcpServer(settings, context, MCP_SERVER_OPENING_TIMEOUT_MILLISECONDS),
-    workingDirectory: homedir(),
+    workingDirectory: mcpWorkingDirectory,
     processGroups: mcpServerProcessGroups,
     reportEvent: logReporters.reportMcpServerEvent
   })
   const emailAccountChecker = new EmailAccountChecker({
     serverCommand: emailServerCommand,
+    workingDirectory: mcpWorkingDirectory,
     timeoutMilliseconds: EMAIL_ACCOUNT_CHECK_TIMEOUT_MILLISECONDS,
     reportEvent: logReporters.reportEmailAccountCheckEvent
   })

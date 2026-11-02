@@ -145,11 +145,11 @@ function getSaveButton(): HTMLElement {
 }
 
 /**
- * Fills the fields of a Gmail account into an empty card.
+ * Updates the fields of an empty card to a Gmail account, typing each.
  *
  * @param user - User-event session of the case.
  */
-async function typeGmailAccount(
+async function updateGmailAccountFields(
   user: ReturnType<typeof userEvent.setup>
 ): Promise<void> {
   await user.type(getField("Address"), "ada@gmail.com")
@@ -335,7 +335,7 @@ describe("EmailAccountCard", () => {
     const { requests } = startEmptyEmailAccountCard()
     const user = userEvent.setup()
 
-    await typeGmailAccount(user)
+    await updateGmailAccountFields(user)
     await user.keyboard("{Enter}")
     await waitForMicrotasks()
 

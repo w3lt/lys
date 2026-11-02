@@ -490,8 +490,8 @@ function EmailAccountFooter({
  * returns, which React attaches and detaches; it reads them only when
  * asked to move focus. It returns the same operations each render; the
  * refs it builds are new each call, which React tolerates.
- * @returns A ref builder for each field, a focus move to the first input
- * with a problem, and a focus move to one field.
+ * @returns A ref builder for each field, and the handlers of a rejected
+ * save and of a removed account, which move focus.
  */
 function useEmailFieldHosts() {
   const hosts = useRef<EmailFieldHosts>({})
@@ -510,27 +510,27 @@ function useEmailFieldHosts() {
   }
 
   /**
-   * Moves focus to one field's input, when it is attached.
-   *
-   * @param field - The field.
-   */
-  function focusField(field: EmailAccountDraftField): void {
-    hosts.current[field]?.focus()
-  }
-
-  /**
-   * Moves focus to the first input with a problem, in the card's order.
+   * Handles a save the fields' problems rejected, by moving focus to the
+   * first input with a problem, in the card's order, when it is attached.
    *
    * @param problems - First problem of each input that has one.
    */
-  function focusFirstProblem(problems: EmailAccountDraftProblems): void {
+  function handleRejectedSave(problems: EmailAccountDraftProblems): void {
     const field = EMAIL_ACCOUNT_DRAFT_FIELDS.find(
       (candidate) => problems[candidate] !== undefined
     )
-    if (field !== undefined) focusField(field)
+    if (field !== undefined) hosts.current[field]?.focus()
   }
 
-  return { buildFieldRef, focusField, focusFirstProblem }
+  /**
+   * Handles the removal of the saved account, by moving focus to the
+   * address input, when it is attached.
+   */
+  function handleRemovedAccount(): void {
+    hosts.current.address?.focus()
+  }
+
+  return { buildFieldRef, handleRejectedSave, handleRemovedAccount }
 }
 
 /**
@@ -576,7 +576,8 @@ export default function EmailAccountCard({
   const [isPasswordShown, setIsPasswordShown] = useState(false)
   const [isConfirmingRemoval, setIsConfirmingRemoval] = useState(false)
   const [isRemoveFocusedOnAttach, setIsRemoveFocusedOnAttach] = useState(false)
-  const { buildFieldRef, focusField, focusFirstProblem } = useEmailFieldHosts()
+  const { buildFieldRef, handleRejectedSave, handleRemovedAccount } =
+    useEmailFieldHosts()
   const cardId = useId()
   const statusId = `${cardId}-status`
   const presetId = `${cardId}-preset`
@@ -650,7 +651,7 @@ export default function EmailAccountCard({
     setSubmittedDraft(editedDraft)
     setHasSubmitted(true)
     if (draftParse.status === "invalid") {
-      focusFirstProblem(draftParse.problems)
+      handleRejectedSave(draftParse.problems)
       return
     }
     if (draftParse.status === "changed") {
@@ -710,7 +711,7 @@ export default function EmailAccountCard({
       return
     }
     resetEdit()
-    focusField("address")
+    handleRemovedAccount()
   }
 
   return (

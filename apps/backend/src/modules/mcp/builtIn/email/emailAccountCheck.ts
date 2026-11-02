@@ -5,7 +5,8 @@ import {
 } from "@lys/protocol"
 import type { EmailAccount, EmailPassword } from "@lys/share"
 import { getDefaultEnvironment } from "@modelcontextprotocol/client/stdio"
-import { spawn, type ChildProcess } from "node:child_process"
+import { spawn, type ChildProcessByStdio } from "node:child_process"
+import type { Readable } from "node:stream"
 import * as z from "zod"
 import McpServerLogLines from "../../mcpServerLogLines"
 import {
@@ -104,6 +105,13 @@ export type EmailAccountCheckEvent =
 export type EmailAccountCheckerDependencies = Readonly<{
   /** How the email server is run; the checker adds the check subcommand. */
   serverCommand: EmailServerCommand
+  /**
+   * Folder each check's process starts in: the folder every stdio MCP
+   * server starts in, such as the person's home folder. A folder that does
+   * not exist fails the start as a missing executable does, because Node
+   * reports both as `ENOENT`.
+   */
+  workingDirectory: string
   /** Longest one check may run before its process is killed. */
   timeoutMilliseconds: number
   /** Receives every {@link EmailAccountCheckEvent}. */
@@ -137,6 +145,24 @@ type EmailServerRun =
       errorLines: readonly string[]
     }>
 
+/** How one run of the check subcommand starts, and how long it may run. */
+type EmailServerCheckStart = Readonly<{
+  /** How the email server is run; the check subcommand is added. */
+  serverCommand: EmailServerCommand
+  /** Folder the process starts in. */
+  workingDirectory: string
+  /**
+   * Value of the account variable: the account and the password as the
+   * server reads them.
+   */
+  accountVariableValue: string
+  /** Longest the process may run before it is killed. */
+  timeoutMilliseconds: number
+}>
+
+/** Process of one check: standard input ignored, the other two piped. */
+type CheckChildProcess = ChildProcessByStdio<null, Readable, Readable>
+
 /** Answer when the email server is not installed. */
 const SERVER_MISSING: CheckEmailAccountApiResponse = Object.freeze({
   status: "unavailable",
@@ -164,33 +190,34 @@ const TIMED_OUT_FAILURE: EmailServerRunFailure = Object.freeze({
  * @remarks Each check starts the email server with the account and the
  * password in its environment, waits for it to print its report, and
  * answers with the report, or with why there is none; nothing is saved.
- * Resource ownership: owns the process of the running check until it
- * ends, and kills it at the time limit or on {@link close}; a check that
- * runs when the backend is killed ends by itself at the email server's
- * own limits. Concurrency model: single-threaded; checks run one after
- * another in call order, so at most one email server process runs for
- * checks. {@link close} is idempotent.
+ * Each check starts in the folder MCP servers start in. Resource
+ * ownership: owns the run of the check running now until it ends, which
+ * kills its process at the time limit, and stops it on {@link close}; a
+ * check that runs when the backend is killed ends by itself at the email
+ * server's own limits. Concurrency model: serialized; checks queue and run
+ * one after another in call order, so at most one email server process runs
+ * for checks. {@link close} is idempotent.
  */
 export default class EmailAccountChecker {
-  /** Borrowed command, time limit, and reporter. */
+  /** Borrowed command, folder, time limit, and reporter. */
   readonly #dependencies: EmailAccountCheckerDependencies
   /** Settles once every check asked for so far ended. */
   #checks: Promise<unknown>
-  /** Process of the check running now, if any. */
-  #runningProcess: ChildProcess | undefined
+  /** Run of the check running now, if any; owned. */
+  #runningCheck: EmailServerCheckRun | undefined
   /** Whether {@link close} was called. */
   #isClosed: boolean
 
   /**
    * Creates a checker that runs nothing yet.
    *
-   * @param dependencies - Command, time limit, and reporter, borrowed for
-   * the checker's lifetime.
+   * @param dependencies - Command, folder, time limit, and reporter,
+   * borrowed for the checker's lifetime.
    */
   public constructor(dependencies: EmailAccountCheckerDependencies) {
     this.#dependencies = dependencies
     this.#checks = Promise.resolve()
-    this.#runningProcess = undefined
+    this.#runningCheck = undefined
     this.#isClosed = false
   }
 
@@ -212,7 +239,7 @@ export default class EmailAccountChecker {
     account: EmailAccount,
     password: EmailPassword
   ): Promise<CheckEmailAccountApiResponse> {
-    const check = this.#checks.then(() => this.#runCheck(account, password))
+    const check = this.#checks.then(() => this.#sendCheckNow(account, password))
     this.#checks = Promise.allSettled([check])
     return check
   }
@@ -225,35 +252,36 @@ export default class EmailAccountChecker {
    */
   public async close(): Promise<void> {
     this.#isClosed = true
-    this.#runningProcess?.kill("SIGKILL")
+    await this.#runningCheck?.stop()
     await this.#checks
   }
 
   /**
-   * Runs one check now.
+   * Sends one check to a new email server process now.
    *
    * @param account - Account to sign in with.
    * @param password - Its password.
    * @returns The answer as {@link sendCheck} describes.
    */
-  async #runCheck(
+  async #sendCheckNow(
     account: EmailAccount,
     password: EmailPassword
   ): Promise<CheckEmailAccountApiResponse> {
-    if (this.#isClosed) return this.#reportFailure(CLOSED_FAILURE)
-    const run = await runEmailServerCheck(
-      this.#dependencies.serverCommand,
-      formatEmailAccountVariable(account, password),
-      this.#dependencies.timeoutMilliseconds,
-      (process) => {
-        this.#runningProcess = process
-      }
-    )
+    if (this.#isClosed) return this.#handleFailedRun(CLOSED_FAILURE)
+    const check = EmailServerCheckRun.start({
+      serverCommand: this.#dependencies.serverCommand,
+      workingDirectory: this.#dependencies.workingDirectory,
+      accountVariableValue: formatEmailAccountVariable(account, password),
+      timeoutMilliseconds: this.#dependencies.timeoutMilliseconds
+    })
+    this.#runningCheck = check
+    const run = await check.waitForEnd()
+    this.#runningCheck = undefined
     switch (run.status) {
       case "start-failed":
         return this.#handleStartFailure(run.error)
       case "timed-out":
-        return this.#reportFailure(TIMED_OUT_FAILURE)
+        return this.#handleFailedRun(TIMED_OUT_FAILURE)
       case "exited":
         return this.#handleExit(run)
     }
@@ -271,7 +299,7 @@ export default class EmailAccountChecker {
       this.#dependencies.reportEvent({ kind: "server-missing" })
       return SERVER_MISSING
     }
-    return this.#reportFailure(Object.freeze({ kind: "start-failed", error }))
+    return this.#handleFailedRun(Object.freeze({ kind: "start-failed", error }))
   }
 
   /**
@@ -286,9 +314,9 @@ export default class EmailAccountChecker {
     run: Extract<EmailServerRun, { status: "exited" }>
   ): CheckEmailAccountApiResponse {
     if (this.#isClosed && run.signal !== null)
-      return this.#reportFailure(CLOSED_FAILURE)
+      return this.#handleFailedRun(CLOSED_FAILURE)
     if (run.exitCode !== 0)
-      return this.#reportFailure(
+      return this.#handleFailedRun(
         Object.freeze({
           kind: "exited",
           exitCode: run.exitCode,
@@ -298,7 +326,7 @@ export default class EmailAccountChecker {
       )
     const report = parseCheckOutput(run.output)
     if (report === undefined)
-      return this.#reportFailure(
+      return this.#handleFailedRun(
         Object.freeze({ kind: "unreadable-output", errorLines: run.errorLines })
       )
     this.#dependencies.reportEvent({
@@ -314,102 +342,187 @@ export default class EmailAccountChecker {
   }
 
   /**
-   * Reports why a check did not report, and answers `server-failed`.
+   * Handles a run that did not report: reports why, and answers
+   * `server-failed`.
    *
    * @param failure - Why.
    * @returns The `server-failed` answer.
    */
-  #reportFailure(failure: EmailServerRunFailure): CheckEmailAccountApiResponse {
+  #handleFailedRun(
+    failure: EmailServerRunFailure
+  ): CheckEmailAccountApiResponse {
     this.#dependencies.reportEvent({ kind: "server-failed", failure })
     return SERVER_FAILED
   }
 }
 
 /**
- * Runs the email server's check subcommand once.
+ * Owns one run of the email server's check subcommand: its process, and
+ * what the process printed so far.
  *
- * @param serverCommand - How the email server is run.
- * @param accountVariableValue - Value of the account variable: the account
- * and the password as the server reads them.
- * @param timeoutMilliseconds - Longest the process may run before it is
- * killed.
- * @param trackProcess - Receives the process once started, and undefined
- * once it ended, so the caller can kill it meanwhile.
- * @returns A promise of how the run ended; it never rejects.
- * @remarks The process runs in the backend's default environment for MCP
- * servers, with the account variable added, and reads nothing from its
- * standard input. Its standard output is read up to a bound, and its
- * standard error line by line up to a bound, each line cut as a server's
- * log line is.
+ * @remarks Created by {@link EmailServerCheckRun.start}. The process runs
+ * in the backend's default environment for MCP servers, with the account
+ * variable added, and reads nothing from its standard input. Its standard
+ * output is read up to a bound, and its standard error line by line up to
+ * a bound, each line cut as a server's log line is. Resource ownership:
+ * owns the process until it ends; Node kills it with `SIGKILL` once the
+ * time limit passed, and {@link stop} kills it before. Concurrency model:
+ * single-owner; the checker starts and stops it, and the process's events
+ * reach it on the backend's event loop.
  */
-function runEmailServerCheck(
-  serverCommand: EmailServerCommand,
-  accountVariableValue: string,
-  timeoutMilliseconds: number,
-  trackProcess: (process: ChildProcess | undefined) => void
-): Promise<EmailServerRun> {
-  return new Promise((resolve) => {
+class EmailServerCheckRun {
+  /** The check's process; owned until it ends. */
+  readonly #child: CheckChildProcess
+  /** Aborts once the time limit passed, when Node kills the process. */
+  readonly #timeLimit: AbortSignal
+  /** Settles once, with how the run ended. */
+  readonly #ending: PromiseWithResolvers<EmailServerRun>
+  /** Standard error lines kept for the log, up to a bound. */
+  readonly #errorLines: string[]
+  /** Reads standard error into the kept lines. */
+  readonly #errorLineReader: McpServerLogLines
+  /** What the process printed so far; undefined once it printed more than is read. */
+  #output: string | undefined
+
+  /**
+   * Keeps a process that was started, of which nothing was read yet.
+   *
+   * @param child - The started process; owned from here on.
+   * @param timeLimit - Signal that aborts once the time limit passed.
+   */
+  private constructor(child: CheckChildProcess, timeLimit: AbortSignal) {
+    this.#child = child
+    this.#timeLimit = timeLimit
+    this.#ending = Promise.withResolvers()
+    const errorLines: string[] = []
+    this.#errorLines = errorLines
+    this.#errorLineReader = new McpServerLogLines((line) => {
+      addErrorLine(errorLines, line)
+    })
+    this.#output = ""
+  }
+
+  /**
+   * Starts the check subcommand in a process of its own.
+   *
+   * @param start - The command, folder, account variable, and time limit.
+   * @returns The run, whose output it reads from here on.
+   * @throws Node's refusal of the command's arguments, such as a text that
+   * holds a NUL character, before any process is started; a command that
+   * cannot be started ends the run as `start-failed` instead.
+   */
+  public static start(start: EmailServerCheckStart): EmailServerCheckRun {
+    const timeLimit = AbortSignal.timeout(start.timeoutMilliseconds)
     const child = spawn(
-      serverCommand.command,
-      [...serverCommand.arguments, EMAIL_SERVER_CHECK_SUBCOMMAND],
+      start.serverCommand.command,
+      [...start.serverCommand.arguments, EMAIL_SERVER_CHECK_SUBCOMMAND],
       {
+        cwd: start.workingDirectory,
         env: {
           ...getDefaultEnvironment(),
-          [EMAIL_ACCOUNT_VARIABLE_NAME]: accountVariableValue
+          [EMAIL_ACCOUNT_VARIABLE_NAME]: start.accountVariableValue
         },
-        stdio: ["ignore", "pipe", "pipe"]
+        stdio: ["ignore", "pipe", "pipe"],
+        signal: timeLimit,
+        killSignal: "SIGKILL"
       }
     )
-    trackProcess(child)
-    const errorLines: string[] = []
-    const errorLineReader = new McpServerLogLines((line) => {
-      if (errorLines.length < MAXIMUM_ERROR_LINE_COUNT) errorLines.push(line)
-    })
-    let output: string | undefined = ""
-    let hasTimedOut = false
-    let hasEnded = false
-    const end = (run: EmailServerRun): void => {
-      if (hasEnded) return
-      hasEnded = true
-      clearTimeout(timer)
-      trackProcess(undefined)
-      resolve(run)
-    }
-    const timer = setTimeout(() => {
-      hasTimedOut = true
-      child.kill("SIGKILL")
-    }, timeoutMilliseconds)
+    const run = new EmailServerCheckRun(child, timeLimit)
     child.stdout.setEncoding("utf8")
     child.stdout.on("data", (chunk: string) => {
-      if (output === undefined) return
-      output =
-        output.length + chunk.length > MAXIMUM_OUTPUT_LENGTH
-          ? undefined
-          : output + chunk
+      run.#readOutput(chunk)
     })
     child.stderr.on("data", (chunk: Uint8Array) => {
-      errorLineReader.read(chunk)
+      run.#errorLineReader.read(chunk)
     })
-    child.once("error", (error) => {
-      end(Object.freeze({ status: "start-failed", error }))
+    child.on("error", (error) => {
+      run.#handleError(error)
     })
     child.once("close", (exitCode, signal) => {
-      end(
-        hasTimedOut
-          ? Object.freeze({
-              status: "timed-out",
-              errorLines: Object.freeze([...errorLines])
-            })
-          : Object.freeze({
-              status: "exited",
-              exitCode,
-              signal,
-              output,
-              errorLines: Object.freeze([...errorLines])
-            })
-      )
+      run.#handleClose(exitCode, signal)
     })
-  })
+    return run
+  }
+
+  /**
+   * Waits for the run to end.
+   *
+   * @returns A promise of how it ended, settled once the process ended or
+   * could not be started; it never rejects.
+   */
+  public waitForEnd(): Promise<EmailServerRun> {
+    return this.#ending.promise
+  }
+
+  /**
+   * Kills the process with `SIGKILL`, if it still runs.
+   *
+   * @returns A promise that settles once the run ended; every later call
+   * does the same.
+   */
+  public async stop(): Promise<void> {
+    this.#child.kill("SIGKILL")
+    await this.#ending.promise
+  }
+
+  /**
+   * Keeps what the process printed, up to the bound.
+   *
+   * @param chunk - Text it printed next.
+   */
+  #readOutput(chunk: string): void {
+    if (this.#output === undefined) return
+    this.#output =
+      this.#output.length + chunk.length > MAXIMUM_OUTPUT_LENGTH
+        ? undefined
+        : this.#output + chunk
+  }
+
+  /**
+   * Ends the run as `start-failed` when the process could not be started.
+   *
+   * @param error - Node's error.
+   * @remarks Ignores the `AbortError` Node emits once it killed the
+   * process at the time limit: the process's close then ends the run.
+   */
+  #handleError(error: Error): void {
+    if (this.#timeLimit.aborted) return
+    this.#ending.resolve(Object.freeze({ status: "start-failed", error }))
+  }
+
+  /**
+   * Ends the run once the process ended and its streams closed.
+   *
+   * @param exitCode - Exit code, or null when a signal ended the process.
+   * @param signal - Signal that ended the process, or null when it exited.
+   * @remarks A process a signal ended after the time limit passed was
+   * killed at the limit, and ends the run as `timed-out`.
+   */
+  #handleClose(exitCode: number | null, signal: NodeJS.Signals | null): void {
+    const errorLines = Object.freeze([...this.#errorLines])
+    this.#ending.resolve(
+      this.#timeLimit.aborted && signal !== null
+        ? Object.freeze({ status: "timed-out", errorLines })
+        : Object.freeze({
+            status: "exited",
+            exitCode,
+            signal,
+            output: this.#output,
+            errorLines
+          })
+    )
+  }
+}
+
+/**
+ * Adds one standard error line of a check while fewer than the bound are
+ * kept.
+ *
+ * @param errorLines - Lines kept so far, in order; the line is added to it.
+ * @param line - The next line.
+ */
+function addErrorLine(errorLines: string[], line: string): void {
+  if (errorLines.length < MAXIMUM_ERROR_LINE_COUNT) errorLines.push(line)
 }
 
 /**

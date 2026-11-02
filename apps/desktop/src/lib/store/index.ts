@@ -52,7 +52,7 @@ import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
 import { getBackendStatus, startBackend, stopBackend } from "../apis"
 import { getVmoStatus } from "@/lib/apis/tauri/vmo"
 import { sendWebSearchKeyCheck } from "../apis/http/tools"
-import { checkEmailAccount } from "../apis/http/email"
+import { sendEmailAccountCheck } from "../apis/http/email"
 import { isLoadConfigurationSettingsEqual } from "../models/model-load-configuration"
 
 /** Top-level view selected by the application store. */
@@ -349,7 +349,7 @@ export const useLysStore = create<LysStore>()((set, get) => {
     ...createEmailSettingsSlice(set, get, {
       saveEmailAccountSettings: settingsGroupSaves.saveEmailAccountSettings,
       sendEmailAccountCheck: (body) =>
-        checkEmailAccount({ backendUrl: get().backendUrl }, body)
+        sendEmailAccountCheck({ backendUrl: get().backendUrl }, body)
     }),
     ...createModelSlice(set, get, {
       getConnection: () => ({

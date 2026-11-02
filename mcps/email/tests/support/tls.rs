@@ -13,6 +13,10 @@ use tokio_rustls::rustls::crypto::ring;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 
 /// A root certificate and the key signing server certificates with it.
+///
+/// Concurrency model: reentrant; it changes nothing after it is created,
+/// and each acceptor it builds has a certificate of its own. Resource
+/// ownership: it holds no resource, only the key and the root in memory.
 pub struct TestAuthority {
     /// The root certificate, DER.
     pub root: CertificateDer<'static>,

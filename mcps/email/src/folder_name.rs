@@ -18,7 +18,7 @@ const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 ///
 /// The name in modified UTF-7; a name of printable ASCII without `&` is
 /// returned unchanged.
-pub fn encode_folder_name(name: &str) -> String {
+pub fn build_encoded_folder_name(name: &str) -> String {
     let mut encoded = String::with_capacity(name.len());
     let mut run = String::new();
     for character in name.chars() {
@@ -47,13 +47,13 @@ fn close_run(encoded: &mut String, run: &mut String) {
         bytes.extend_from_slice(&unit.to_be_bytes());
     }
     encoded.push('&');
-    encoded.push_str(&encode_base64(&bytes));
+    encoded.push_str(&build_modified_base64(&bytes));
     encoded.push('-');
     run.clear();
 }
 
 /// Encodes bytes in the modified base64 of UTF-7, without padding.
-fn encode_base64(bytes: &[u8]) -> String {
+fn build_modified_base64(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let value = chunk.iter().enumerate().fold(0u32, |value, (index, byte)| {
@@ -79,7 +79,7 @@ fn encode_base64(bytes: &[u8]) -> String {
 /// The name as the person and the model see it. A run that is not valid
 /// modified UTF-7 is kept as written, so every server name decodes to
 /// something.
-pub fn decode_folder_name(encoded: &str) -> String {
+pub fn parse_encoded_folder_name(encoded: &str) -> String {
     let mut decoded = String::with_capacity(encoded.len());
     let mut rest = encoded;
     while let Some(start) = rest.find('&') {
@@ -93,7 +93,7 @@ pub fn decode_folder_name(encoded: &str) -> String {
         if run.is_empty() {
             decoded.push('&');
         } else {
-            match decode_run(run) {
+            match parse_encoded_run(run) {
                 Some(text) => decoded.push_str(&text),
                 None => decoded.push_str(&rest[start..start + 2 + end]),
             }
@@ -105,7 +105,7 @@ pub fn decode_folder_name(encoded: &str) -> String {
 }
 
 /// Decodes one `&…-` run's base64 as UTF-16.
-fn decode_run(run: &str) -> Option<String> {
+fn parse_encoded_run(run: &str) -> Option<String> {
     let mut bits: u32 = 0;
     let mut bit_count = 0;
     let mut bytes = Vec::with_capacity(run.len() * 3 / 4);
@@ -136,34 +136,34 @@ mod tests {
 
     #[test]
     fn keeps_plain_ascii_names_and_escapes_the_ampersand() {
-        assert_eq!(encode_folder_name("INBOX"), "INBOX");
-        assert_eq!(encode_folder_name("Projects/2026"), "Projects/2026");
-        assert_eq!(encode_folder_name("Tom & Jerry"), "Tom &- Jerry");
-        assert_eq!(decode_folder_name("Tom &- Jerry"), "Tom & Jerry");
+        assert_eq!(build_encoded_folder_name("INBOX"), "INBOX");
+        assert_eq!(build_encoded_folder_name("Projects/2026"), "Projects/2026");
+        assert_eq!(build_encoded_folder_name("Tom & Jerry"), "Tom &- Jerry");
+        assert_eq!(parse_encoded_folder_name("Tom &- Jerry"), "Tom & Jerry");
     }
 
     #[test]
     fn encodes_and_decodes_non_ascii_names_as_rfc_3501_shows() {
         assert_eq!(
-            encode_folder_name("~peter/mail/台北/日本語"),
+            build_encoded_folder_name("~peter/mail/台北/日本語"),
             "~peter/mail/&U,BTFw-/&ZeVnLIqe-"
         );
         assert_eq!(
-            decode_folder_name("~peter/mail/&U,BTFw-/&ZeVnLIqe-"),
+            parse_encoded_folder_name("~peter/mail/&U,BTFw-/&ZeVnLIqe-"),
             "~peter/mail/台北/日本語"
         );
-        assert_eq!(encode_folder_name("Entwürfe"), "Entw&APw-rfe");
-        assert_eq!(decode_folder_name("Entw&APw-rfe"), "Entwürfe");
+        assert_eq!(build_encoded_folder_name("Entwürfe"), "Entw&APw-rfe");
+        assert_eq!(parse_encoded_folder_name("Entw&APw-rfe"), "Entwürfe");
         assert_eq!(
-            decode_folder_name(&encode_folder_name("Café & Bar ☕")),
+            parse_encoded_folder_name(&build_encoded_folder_name("Café & Bar ☕")),
             "Café & Bar ☕"
         );
     }
 
     #[test]
     fn keeps_a_run_that_is_not_modified_utf7() {
-        assert_eq!(decode_folder_name("Open&Run"), "Open&Run");
-        assert_eq!(decode_folder_name("Bad&*-x"), "Bad&*-x");
-        assert_eq!(decode_folder_name("Odd&AP-x"), "Odd&AP-x");
+        assert_eq!(parse_encoded_folder_name("Open&Run"), "Open&Run");
+        assert_eq!(parse_encoded_folder_name("Bad&*-x"), "Bad&*-x");
+        assert_eq!(parse_encoded_folder_name("Odd&AP-x"), "Odd&AP-x");
     }
 }

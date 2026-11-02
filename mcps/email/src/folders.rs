@@ -5,7 +5,7 @@
 //! from the folder's name, as mail clients do for servers without the
 //! extension. Each role is given to one folder at most.
 
-use crate::folder_name::decode_folder_name;
+use crate::folder_name::parse_encoded_folder_name;
 
 /// What a folder is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,7 +52,7 @@ impl FolderRole {
     }
 
     /// Finds the role a `LIST` attribute declares.
-    fn from_attribute(attribute: &str) -> Option<Self> {
+    fn find_for_attribute(attribute: &str) -> Option<Self> {
         match attribute.to_ascii_lowercase().as_str() {
             "\\sent" => Some(Self::Sent),
             "\\drafts" => Some(Self::Drafts),
@@ -66,7 +66,7 @@ impl FolderRole {
     }
 
     /// Finds the role a folder's name suggests, by its last path component.
-    fn from_name(name: &str, delimiter: Option<&str>) -> Option<Self> {
+    fn find_for_name(name: &str, delimiter: Option<&str>) -> Option<Self> {
         if name.eq_ignore_ascii_case("INBOX") {
             return Some(Self::Inbox);
         }
@@ -121,11 +121,11 @@ pub struct Folder {
 /// # Arguments
 ///
 /// * `listings` - The server's `LIST` responses, in the server's order.
-pub fn classify_folders(listings: &[FolderListing]) -> Vec<Folder> {
+pub fn build_folders(listings: &[FolderListing]) -> Vec<Folder> {
     let mut folders: Vec<Folder> = listings
         .iter()
         .map(|listing| Folder {
-            name: decode_folder_name(&listing.raw_name),
+            name: parse_encoded_folder_name(&listing.raw_name),
             raw_name: listing.raw_name.clone(),
             role: None,
             selectable: !listing
@@ -139,12 +139,12 @@ pub fn classify_folders(listings: &[FolderListing]) -> Vec<Folder> {
             listing
                 .attributes
                 .iter()
-                .any(|attribute| FolderRole::from_attribute(attribute) == Some(role))
+                .any(|attribute| FolderRole::find_for_attribute(attribute) == Some(role))
         });
         let by_name = || {
             listings.iter().enumerate().position(|(index, listing)| {
                 folders[index].role.is_none()
-                    && FolderRole::from_name(&folders[index].name, listing.delimiter.as_deref())
+                    && FolderRole::find_for_name(&folders[index].name, listing.delimiter.as_deref())
                         == Some(role)
             })
         };
@@ -218,7 +218,7 @@ mod tests {
             build_listing("Deleted Items", &["\\Trash"]),
         ];
 
-        let folders = classify_folders(&listings);
+        let folders = build_folders(&listings);
 
         let roles: Vec<(&str, Option<FolderRole>, bool)> = folders
             .iter()
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn finds_folders_by_name_with_inbox_in_any_case() {
-        let folders = classify_folders(&[build_listing("INBOX", &[]), build_listing("Sent", &[])]);
+        let folders = build_folders(&[build_listing("INBOX", &[]), build_listing("Sent", &[])]);
 
         assert_eq!(
             find_folder(&folders, "inbox").map(|folder| folder.name.as_str()),

@@ -19,9 +19,11 @@ import {
   type BackendRoutes
 } from "../../support/backendFake"
 import {
+  buildBuiltInMcpServerStatus,
   buildConnectedMcpState,
   buildFailedMcpState,
   buildMcpServerList,
+  buildMcpServerListRoute,
   buildMcpServerStatus,
   CONNECTING_MCP_STATE,
   OFF_MCP_STATE
@@ -76,7 +78,7 @@ const FILES_TOOLS = ["read_file", "write_file", "search"].map((name) =>
 const STORED_LIST = buildMcpServerList([
   buildMcpServerStatus("files", "stdio", buildConnectedMcpState(3)),
   buildMcpServerStatus("notes", "http", buildFailedMcpState("unauthorized")),
-  buildMcpServerStatus("email", "stdio", OFF_MCP_STATE, true)
+  buildBuiltInMcpServerStatus("email", OFF_MCP_STATE)
 ])
 
 /** What the email server's row says it does. */
@@ -137,22 +139,6 @@ function answerList(list: McpServerList): BackendRoute {
 }
 
 /**
- * Builds a route whose answers follow the given lists, one per request; the
- * last list answers every later request.
- *
- * @param lists - Lists in answer order, at least one.
- * @returns The route.
- */
-function answerListsInOrder(lists: readonly McpServerList[]): BackendRoute {
-  let answered = 0
-  return () => {
-    const list = lists[Math.min(answered, lists.length - 1)]
-    answered += 1
-    return buildJsonResponse(200, list)
-  }
-}
-
-/**
  * Gets the switch of one server.
  *
  * @param serverName - Server name.
@@ -165,12 +151,12 @@ function getServerSwitch(serverName: string): HTMLElement {
 }
 
 /**
- * Shows the email server's details and gets its account card.
+ * Opens the email server's details and gets its account card.
  *
  * @param user - User-event session of the case.
  * @returns The form named Email account.
  */
-async function expandEmailAccountCard(
+async function openEmailAccountCard(
   user: ReturnType<typeof userEvent.setup>
 ): Promise<HTMLElement> {
   const email = await expandServer(user, "email")
@@ -400,7 +386,7 @@ describe("McpPaneContent", () => {
       ...STORED_LIST.servers.slice(1)
     ])
     const { backend } = await startMcpPane({
-      [SYNC_ROUTE]: answerListsInOrder([filesOff, STORED_LIST])
+      [SYNC_ROUTE]: buildMcpServerListRoute([filesOff, STORED_LIST])
     })
     const user = userEvent.setup()
 
@@ -462,10 +448,10 @@ describe("McpPaneContent", () => {
     const host = startSettingsHost()
     const emailStarting = buildMcpServerList([
       ...STORED_LIST.servers.slice(0, 2),
-      buildMcpServerStatus("email", "stdio", CONNECTING_MCP_STATE, true)
+      buildBuiltInMcpServerStatus("email", CONNECTING_MCP_STATE)
     ])
     const { backend } = await startMcpPane({
-      [SYNC_ROUTE]: answerListsInOrder([emailStarting, STORED_LIST])
+      [SYNC_ROUTE]: buildMcpServerListRoute([emailStarting, STORED_LIST])
     })
     const user = userEvent.setup()
 
@@ -656,7 +642,7 @@ describe("McpPaneContent", () => {
     const user = userEvent.setup()
     useLysStore.setState({ settings: EMAIL_ON_SETTINGS })
     await waitForRenderedWork()
-    const card = await expandEmailAccountCard(user)
+    const card = await openEmailAccountCard(user)
     const displayName = within(card).getByRole("textbox", {
       name: "Display name"
     })
@@ -710,7 +696,7 @@ describe("McpPaneContent", () => {
         })
     })
     const user = userEvent.setup()
-    const card = await expandEmailAccountCard(user)
+    const card = await openEmailAccountCard(user)
 
     await user.type(within(card).getByLabelText("Password"), "wrong{Enter}")
     await waitForRenderedWork()
@@ -731,7 +717,7 @@ describe("McpPaneContent", () => {
     const user = userEvent.setup()
     useLysStore.setState({ settings: EMAIL_ON_SETTINGS })
     await waitForRenderedWork()
-    const card = await expandEmailAccountCard(user)
+    const card = await openEmailAccountCard(user)
 
     await user.click(
       within(card).getByRole("button", { name: "Remove account" })

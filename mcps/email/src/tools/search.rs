@@ -1,16 +1,18 @@
 //! `search_emails`: messages matching criteria, newest first, by pages.
 
+use std::cmp::Ordering;
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{
-    MAXIMUM_TEXT_ARGUMENT_LENGTH, ToolContext, ToolReport, ToolResult, check_text_argument,
-    imap_failure, load_folders, require_folder,
+    MAXIMUM_TEXT_ARGUMENT_LENGTH, ToolContext, ToolReport, ToolResult,
+    build_imap_failure_conversion, get_folder, load_folders, parse_text_argument,
 };
 use crate::email_id::EmailId;
 use crate::failure::ToolFailure;
 use crate::folders::{Folder, FolderRole};
-use crate::imap::{Flags, ImapSession, format_search_date, format_search_text};
+use crate::imap::{Flags, FolderAccess, ImapSession, format_search_date, format_search_text};
 use crate::message::{Headers, parse_headers};
 
 /// Messages per page.
@@ -77,7 +79,7 @@ pub struct Hit {
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - What to search for.
-pub async fn search_emails(context: &ToolContext, arguments: SearchArguments) -> ToolResult {
+pub async fn run_search_emails(context: &ToolContext, arguments: SearchArguments) -> ToolResult {
     let criteria = build_search_criteria(&arguments)?;
     let page = match arguments.page {
         None => 1,
@@ -85,13 +87,13 @@ pub async fn search_emails(context: &ToolContext, arguments: SearchArguments) ->
         Some(page) => page as usize,
     };
     if let Some(folder) = &arguments.folder {
-        check_text_argument("folder", folder, super::MAXIMUM_FOLDER_NAME_LENGTH)?;
+        parse_text_argument("folder", folder, super::MAXIMUM_FOLDER_NAME_LENGTH)?;
     }
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
     let targets: Vec<Folder> = match &arguments.folder {
         Some(name) => {
-            let folder = require_folder(&folders, name)?;
+            let folder = get_folder(&folders, name)?;
             if !folder.selectable {
                 return Err(ToolFailure::Argument(format!(
                     "{name} cannot hold messages. Use list_folders to see the folders."
@@ -108,14 +110,18 @@ pub async fn search_emails(context: &ToolContext, arguments: SearchArguments) ->
     let mut hits = Vec::new();
     let mut cut_folders = Vec::new();
     for folder in &targets {
-        let (found, cut) = collect_hits(&mut session, folder, &criteria, FOLDER_HIT_LIMIT).await?;
+        let query = HitQuery {
+            criteria: &criteria,
+            limit: FOLDER_HIT_LIMIT,
+        };
+        let (found, cut) = list_folder_hits(&mut session, folder, query).await?;
         hits.extend(found);
         if cut {
             cut_folders.push(folder.name.clone());
         }
     }
     session.close().await;
-    sort_newest_first(&mut hits);
+    hits.sort_by(calculate_hit_order);
     let total = hits.len();
     let pages = total.div_ceil(PAGE_SIZE).max(1);
     if total == 0 {
@@ -157,38 +163,47 @@ pub async fn search_emails(context: &ToolContext, arguments: SearchArguments) ->
     })
 }
 
+/// What a folder is searched for: the search keys, and how many of the
+/// newest hits to keep.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HitQuery<'a> {
+    /// The search keys.
+    pub criteria: &'a str,
+    /// Most hits to keep: the newest by UID.
+    pub limit: usize,
+}
+
 /// Searches a folder and fetches the summaries of the newest hits.
 ///
 /// # Arguments
 ///
 /// * `session` - The signed-in session.
 /// * `folder` - The folder, which must be selectable.
-/// * `criteria` - The search keys.
-/// * `limit` - Most hits to keep: the newest by UID.
+/// * `query` - The search keys and how many hits to keep.
 ///
 /// # Returns
 ///
-/// The hits, and whether more than `limit` matched.
-pub async fn collect_hits(
+/// The hits, and whether more than the query's limit matched.
+pub async fn list_folder_hits(
     session: &mut ImapSession,
     folder: &Folder,
-    criteria: &str,
-    limit: usize,
+    query: HitQuery<'_>,
 ) -> Result<(Vec<Hit>, bool), ToolFailure> {
+    let HitQuery { criteria, limit } = query;
     let selected = session
-        .select_folder(&folder.raw_name, true)
+        .open_folder(&folder.raw_name, FolderAccess::Read)
         .await
-        .map_err(imap_failure("select the folder"))?;
+        .map_err(build_imap_failure_conversion("select the folder"))?;
     let uids = session
-        .search_uids(criteria)
+        .list_matching_uids(criteria)
         .await
-        .map_err(imap_failure("search"))?;
+        .map_err(build_imap_failure_conversion("search"))?;
     let cut = uids.len() > limit;
     let newest: Vec<u32> = uids.into_iter().take(limit).collect();
     let summaries = session
-        .fetch_summaries(&newest)
+        .list_summaries(&newest)
         .await
-        .map_err(imap_failure("fetch the message summaries"))?;
+        .map_err(build_imap_failure_conversion("fetch the message summaries"))?;
     let hits = summaries
         .into_iter()
         .map(|summary| {
@@ -218,18 +233,17 @@ pub async fn collect_hits(
     Ok((hits, cut))
 }
 
-/// Sorts hits newest first, by time then by UID.
+/// Calculates the order of two hits, newest first: by time, then by UID.
 ///
 /// # Arguments
 ///
-/// * `hits` - The hits to sort.
-pub fn sort_newest_first(hits: &mut [Hit]) {
-    hits.sort_by(|left, right| {
-        right
-            .timestamp
-            .cmp(&left.timestamp)
-            .then(right.id.uid.cmp(&left.id.uid))
-    });
+/// * `left` - One hit.
+/// * `right` - The other hit.
+pub fn calculate_hit_order(left: &Hit, right: &Hit) -> Ordering {
+    right
+        .timestamp
+        .cmp(&left.timestamp)
+        .then(right.id.uid.cmp(&left.id.uid))
 }
 
 /// Formats one hit as the model reads it.
@@ -265,7 +279,7 @@ pub fn build_search_criteria(arguments: &SearchArguments) -> Result<String, Tool
         ("subject", "SUBJECT", &arguments.subject),
     ] {
         if let Some(value) = value {
-            check_text_argument(name, value, MAXIMUM_TEXT_ARGUMENT_LENGTH)?;
+            parse_text_argument(name, value, MAXIMUM_TEXT_ARGUMENT_LENGTH)?;
             if value.is_empty() {
                 return Err(ToolFailure::Argument(format!("{name} must not be empty.")));
             }
@@ -330,14 +344,18 @@ pub fn parse_day(text: &str) -> Option<(u16, u8, u8)> {
     let year = number(0..4)?;
     let month = u8::try_from(number(5..7)?).ok()?;
     let day = u8::try_from(number(8..10)?).ok()?;
-    if year < 1000 || !(1..=12).contains(&month) || day == 0 || day > days_of_month(year, month) {
+    if year < 1000
+        || !(1..=12).contains(&month)
+        || day == 0
+        || day > calculate_days_in_month(year, month)
+    {
         return None;
     }
     Some((year, month, day))
 }
 
 /// Counts the days of a month.
-fn days_of_month(year: u16, month: u8) -> u8 {
+fn calculate_days_in_month(year: u16, month: u8) -> u8 {
     match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
@@ -461,9 +479,9 @@ mod tests {
             timestamp,
             date: "2026-11-02T10:30:00Z".to_owned(),
         };
-        let mut hits = vec![build(1, 10), build(2, 30), build(3, 30), build(4, 20)];
+        let mut hits = [build(1, 10), build(2, 30), build(3, 30), build(4, 20)];
 
-        sort_newest_first(&mut hits);
+        hits.sort_by(calculate_hit_order);
 
         let uids: Vec<u32> = hits.iter().map(|hit| hit.id.uid).collect();
         assert_eq!(uids, vec![3, 2, 4, 1]);

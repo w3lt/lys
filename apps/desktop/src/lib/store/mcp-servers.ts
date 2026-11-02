@@ -458,12 +458,13 @@ function createMcpServerStore(
     }
 
     /**
-     * Applies a saved group to the running backend.
+     * Handles the save of a group: asks the running backend to apply it once
+     * it is saved.
      *
      * @param outcome - Outcome of the save.
      * @returns The same outcome.
      */
-    function syncSavedGroup(
+    function handleGroupSave(
       outcome: McpSettingsSaveOutcome
     ): McpSettingsSaveOutcome {
       if (outcome === "saved" && dependencies.isBackendRunning()) {
@@ -481,7 +482,7 @@ function createMcpServerStore(
     async function saveMcpServers(
       servers: readonly McpServerSettings[]
     ): Promise<McpSettingsSaveOutcome> {
-      return syncSavedGroup(await dependencies.saveMcpSettings(servers))
+      return handleGroupSave(await dependencies.saveMcpSettings(servers))
     }
 
     /**
@@ -495,7 +496,7 @@ function createMcpServerStore(
       serverName: BuiltInMcpServerName,
       isOn: boolean
     ): Promise<McpSettingsSaveOutcome> {
-      return syncSavedGroup(
+      return handleGroupSave(
         await dependencies.saveBuiltInMcpServerSwitch(serverName, isOn)
       )
     }

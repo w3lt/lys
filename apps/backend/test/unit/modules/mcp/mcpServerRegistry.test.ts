@@ -324,12 +324,14 @@ function buildBuiltInRead(settings: McpServerSettings): BuiltInMcpServerRead {
 const OFF: McpServerState = Object.freeze({ status: "off" })
 
 /**
- * Switches a server off in its settings.
+ * Builds a server's settings switched off.
  *
  * @param settings - Validated settings of the server.
  * @returns The same settings, switched off.
  */
-function switchOff(settings: McpServerSettings): McpServerSettings {
+function buildSwitchedOffSettings(
+  settings: McpServerSettings
+): McpServerSettings {
   return Object.freeze({ ...settings, enabled: false })
 }
 
@@ -1798,7 +1800,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     it("lists a switched-off added server as off, opens nothing for it, offers none of its tools, and answers not-connected for them", async () => {
       const harness = createRegistryHarness()
       harness.setServers([
-        switchOff(buildFakeStdioServerSettings("alpha")),
+        buildSwitchedOffSettings(buildFakeStdioServerSettings("alpha")),
         buildFakeStdioServerSettings("beta")
       ])
 
@@ -1841,7 +1843,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         harness.registry,
         buildList([buildStdioStatus("alpha", buildConnectedState(1))])
       )
-      harness.setServers([switchOff(alpha)])
+      harness.setServers([buildSwitchedOffSettings(alpha)])
 
       await harness.registry.updateServers()
 
@@ -2045,6 +2047,29 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       ])
     })
 
+    it("rejects the apply whose read of what a switched-on built-in server needs throws, applying nothing, and applies the next read", async () => {
+      const failure = new Error("Closing the settings file failed.")
+      const builtIn = createFakeBuiltInServer()
+      builtIn.readServer.mockRejectedValueOnce(failure)
+      const harness = createRegistryHarness({
+        builtInServers: [builtIn.server]
+      })
+      harness.setServers([buildFakeStdioServerSettings("alpha")], EMAIL_ON)
+
+      await expect(harness.registry.updateServers()).rejects.toBe(failure)
+
+      expect(harness.registry.listServers()).toEqual(buildList([]))
+      expect(harness.openServer).not.toHaveBeenCalled()
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([
+          buildEmailStatus(buildConnectedState(1)),
+          buildStdioStatus("alpha", buildConnectedState(1))
+        ])
+      )
+    })
+
     it("applies an added server that has a built-in server's name in its place, reporting the taken name once, until the added one is removed", async () => {
       const builtIn = createFakeBuiltInServer()
       const harness = createRegistryHarness({
@@ -2101,7 +2126,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         NEVER_ABORTED
       )
       await waitForMicrotasks()
-      harness.setServers([switchOff(alpha)])
+      harness.setServers([buildSwitchedOffSettings(alpha)])
       await harness.registry.updateServers()
 
       const outcome = await call

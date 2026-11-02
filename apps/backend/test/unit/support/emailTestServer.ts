@@ -4,6 +4,8 @@ import {
   type EmailAccount,
   type EmailPassword
 } from "@lys/share"
+import { readFile } from "node:fs/promises"
+import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { EmailServerCommand } from "../../../src/modules/mcp/builtIn/email/emailServer"
 
@@ -12,15 +14,23 @@ const FAKE_EMAIL_SERVER_PATH = fileURLToPath(
   new URL("./fakeEmailServer.ts", import.meta.url)
 )
 
-/** What the fake email server does; see the script. */
+/**
+ * What the fake email server does; see the script. It records into the
+ * folder it runs in, which a case names as the working folder of the
+ * checker or the registry that starts it.
+ */
 export type FakeEmailServerOptions = Readonly<{
-  /** Write the value of `LYS_EMAIL_ACCOUNT` to this file on start. */
-  recordFile?: string
-  /** Write the process identifier to this file on start. */
-  processIdFile?: string
-  /** Lock file the `lock` check holds. */
-  lockFile?: string
-  /** How long the `lock` check holds its lock. */
+  /**
+   * Write the value of `LYS_EMAIL_ACCOUNT` to `variable` in its folder on
+   * start; {@link readRecordedEmailVariable} reads it.
+   */
+  recordsVariable?: boolean
+  /**
+   * Write the process identifier to `pid` in its folder on start;
+   * {@link readRecordedEmailProcessId} reads it.
+   */
+  recordsProcessId?: boolean
+  /** How long the `lock` check holds `lock` in its folder. */
   holdMilliseconds?: number
 }>
 
@@ -45,6 +55,32 @@ export function buildFakeEmailServerCommand(
       JSON.stringify(options)
     ])
   })
+}
+
+/**
+ * Reads the value of `LYS_EMAIL_ACCOUNT` a fake email server recorded.
+ *
+ * @param folder - Folder the fake ran in.
+ * @returns The value, parsed as JSON.
+ * @throws If the fake recorded nothing there, or the value is not JSON.
+ */
+export async function readRecordedEmailVariable(
+  folder: string
+): Promise<unknown> {
+  return JSON.parse(await readFile(join(folder, "variable"), "utf8"))
+}
+
+/**
+ * Reads the process identifier a fake email server recorded.
+ *
+ * @param folder - Folder the fake ran in.
+ * @returns The identifier.
+ * @throws If the fake recorded nothing there yet.
+ */
+export async function readRecordedEmailProcessId(
+  folder: string
+): Promise<number> {
+  return Number(await readFile(join(folder, "pid"), "utf8"))
 }
 
 /**

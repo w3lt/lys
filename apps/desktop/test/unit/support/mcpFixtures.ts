@@ -10,6 +10,7 @@ import {
   type SkippedMcpTool
 } from "@lys/protocol"
 import type { McpServerTransport } from "@lys/share"
+import { buildJsonResponse, type BackendRoute } from "./backendFake"
 
 /** State of a server the backend is starting or reaching. */
 export const CONNECTING_MCP_STATE: McpServerState = mcpServerStateSchema.parse({
@@ -54,21 +55,34 @@ export function buildFailedMcpState(reason: McpServerFailure): McpServerState {
 }
 
 /**
- * Builds one applied server as the backend lists it.
+ * Builds one applied server the person added, as the backend lists it.
  *
  * @param name - Server name.
  * @param transport - How the backend talks to it.
  * @param state - Its connection state.
- * @param isBuiltIn - Whether Lys ships it; an added server by default.
  * @returns The listed server; {@link buildMcpServerList} validates it.
  */
 export function buildMcpServerStatus(
   name: string,
   transport: McpServerTransport,
-  state: McpServerState,
-  isBuiltIn = false
+  state: McpServerState
 ): McpServerStatus {
-  return Object.freeze({ name, transport, isBuiltIn, state })
+  return Object.freeze({ name, transport, isBuiltIn: false, state })
+}
+
+/**
+ * Builds one built-in server, which Lys ships and starts over stdio, as the
+ * backend lists it.
+ *
+ * @param name - Server name.
+ * @param state - Its connection state.
+ * @returns The listed server; {@link buildMcpServerList} validates it.
+ */
+export function buildBuiltInMcpServerStatus(
+  name: string,
+  state: McpServerState
+): McpServerStatus {
+  return Object.freeze({ name, transport: "stdio", isBuiltIn: true, state })
 }
 
 /**
@@ -100,4 +114,22 @@ export function buildMcpServerNotFoundProblem(
     serverName,
     `/api/v1/mcp/servers/${serverName}/reconnect`
   )
+}
+
+/**
+ * Builds a route whose answers follow the given lists, one per request; the
+ * last list answers every later request.
+ *
+ * @param lists - Lists in answer order, at least one.
+ * @returns The route.
+ */
+export function buildMcpServerListRoute(
+  lists: readonly McpServerList[]
+): BackendRoute {
+  let answered = 0
+  return () => {
+    const list = lists[Math.min(answered, lists.length - 1)]
+    answered += 1
+    return buildJsonResponse(200, list)
+  }
 }

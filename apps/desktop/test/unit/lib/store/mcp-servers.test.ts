@@ -10,9 +10,11 @@ import {
   type BackendRoutes
 } from "../../support/backendFake"
 import {
+  buildBuiltInMcpServerStatus,
   buildConnectedMcpState,
   buildFailedMcpState,
   buildMcpServerList,
+  buildMcpServerListRoute,
   buildMcpServerNotFoundProblem,
   buildMcpServerStatus,
   CONNECTING_MCP_STATE
@@ -108,22 +110,6 @@ function answerList(list: McpServerList): BackendRoute {
  */
 function buildLoadedState(list: McpServerList) {
   return { status: "loaded", settings: list.settings, servers: list.servers }
-}
-
-/**
- * Builds a route whose answers follow the given lists, one per request; the
- * last list answers every later request.
- *
- * @param lists - Lists in answer order, at least one.
- * @returns The route.
- */
-function answerListsInOrder(lists: readonly McpServerList[]): BackendRoute {
-  let answered = 0
-  return () => {
-    const list = lists[Math.min(answered, lists.length - 1)]
-    answered += 1
-    return buildJsonResponse(200, list)
-  }
 }
 
 /**
@@ -271,7 +257,7 @@ describe("useMcpServerStore", () => {
 
     it("reads again after a failed read", async () => {
       startMcpBackend({
-        [LIST_ROUTE]: answerListsInOrder([CONNECTED_LIST])
+        [LIST_ROUTE]: buildMcpServerListRoute([CONNECTED_LIST])
       })
       const { useMcpServerStore } = await loadFreshMcpServerStore()
       useMcpServerStore.setState({
@@ -702,7 +688,7 @@ describe("useMcpServerStore", () => {
   describe("saveBuiltInMcpServerSwitch", () => {
     /** The stored servers with the email server switched on and starting. */
     const EMAIL_STARTING_LIST = buildMcpServerList([
-      buildMcpServerStatus("email", "stdio", CONNECTING_MCP_STATE, true),
+      buildBuiltInMcpServerStatus("email", CONNECTING_MCP_STATE),
       ...CONNECTED_LIST.servers
     ])
 
@@ -856,7 +842,7 @@ describe("registerMcpServerRefresh", () => {
   it("reads the list again each second while a server connects, and stops once none does", async () => {
     useFakeTimersForCase()
     const { backend } = startMcpBackend({
-      [LIST_ROUTE]: answerListsInOrder([
+      [LIST_ROUTE]: buildMcpServerListRoute([
         CONNECTING_LIST,
         CONNECTING_LIST,
         CONNECTED_LIST
@@ -982,7 +968,7 @@ describe("registerMcpServerRefresh", () => {
     startNativeHostFake({ list_tools: () => [] })
     const { readRouteKeys } = startMcpBackend({
       [TOOL_LIST_ROUTE]: () => buildJsonResponse(200, EMPTY_BACKEND_TOOL_LIST),
-      [LIST_ROUTE]: answerListsInOrder([CONNECTED_LIST, MORE_TOOLS_LIST])
+      [LIST_ROUTE]: buildMcpServerListRoute([CONNECTED_LIST, MORE_TOOLS_LIST])
     })
     const { useMcpServerStore, useToolStore } =
       await startRefresh(STOPPED_BACKEND)

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   buildEmailAccountDraft,
   EMAIL_ACCOUNT_DRAFT_FIELDS,
-  holdsEmailPresetServers,
+  hasEmailPresetServers,
   parseEmailAccountDraft,
   updateEmailAccountAddress,
   type EmailAccountDraft
@@ -82,11 +82,11 @@ describe("buildEmailAccountDraft", () => {
   })
 })
 
-describe("holdsEmailPresetServers", () => {
+describe("hasEmailPresetServers", () => {
   it("is true while both servers equal the preset's", () => {
     if (FASTMAIL === undefined) throw new Error("No Fastmail preset")
 
-    expect(holdsEmailPresetServers(SAVED_DRAFT, FASTMAIL)).toBe(true)
+    expect(hasEmailPresetServers(SAVED_DRAFT, FASTMAIL)).toBe(true)
   })
 
   it.each([
@@ -99,9 +99,9 @@ describe("holdsEmailPresetServers", () => {
   ] as const)("is false once %s differs", (_label, change) => {
     if (FASTMAIL === undefined) throw new Error("No Fastmail preset")
 
-    expect(
-      holdsEmailPresetServers({ ...SAVED_DRAFT, ...change }, FASTMAIL)
-    ).toBe(false)
+    expect(hasEmailPresetServers({ ...SAVED_DRAFT, ...change }, FASTMAIL)).toBe(
+      false
+    )
   })
 })
 

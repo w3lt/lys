@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use lettre::address::Envelope;
 use lettre::message::header::ContentType;
-use lettre::message::{Attachment, Mailbox, Message, MultiPart, SinglePart};
+use lettre::message::{Attachment, Mailbox, Message, MessageBuilder, MultiPart, SinglePart};
 
 use crate::account::Account;
 use crate::message::MessageView;
@@ -88,7 +88,7 @@ pub enum CompositionProblem {
 
 impl CompositionProblem {
     /// Returns the problem as the sentence the model reads.
-    pub fn describe(&self) -> String {
+    pub fn format_sentence(&self) -> String {
         match self {
             Self::NoRecipient => "Give at least one recipient in to, cc, or bcc.".to_owned(),
             Self::InvalidRecipient(text) => format!(
@@ -106,37 +106,79 @@ impl CompositionProblem {
     }
 }
 
-/// Builds a message from a composition.
+/// When, and as which within the process, a message is built: the parts
+/// of its `Date` field and of its identifier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MessageStamp {
+    /// The time for the `Date` field and the identifier.
+    pub now: SystemTime,
+    /// A number unique within the process at `now`, for the identifier.
+    pub sequence: u64,
+}
+
+/// Builds a message to send from a composition: its bytes leave out the
+/// `Bcc` field, which only the envelope keeps.
 ///
 /// # Arguments
 ///
 /// * `account` - The sender.
 /// * `composition` - What the message is made of.
-/// * `now` - The time for the `Date` field and the identifier.
-/// * `sequence` - A number unique within the process at `now`, for the
-///   identifier.
-/// * `keep_bcc` - Whether to keep the `Bcc` field in the bytes, as a
-///   draft needs and a sent message must not.
+/// * `stamp` - When the message is built.
 ///
 /// # Returns
 ///
 /// The message, or why it could not be built.
-pub fn compose_message(
+pub fn build_sent_message(
     account: &Account,
     composition: &Composition,
-    now: SystemTime,
-    sequence: u64,
-    keep_bcc: bool,
+    stamp: MessageStamp,
 ) -> Result<ComposedMessage, CompositionProblem> {
+    let (builder, message_id) = build_message_header(account, composition, stamp)?;
+    build_message_body(builder, composition, message_id)
+}
+
+/// Builds a draft from a composition: its bytes keep the `Bcc` field, so
+/// the stored draft still names every recipient.
+///
+/// # Arguments
+///
+/// * `account` - The sender.
+/// * `composition` - What the message is made of.
+/// * `stamp` - When the message is built.
+///
+/// # Returns
+///
+/// The draft, or why it could not be built.
+pub fn build_draft_message(
+    account: &Account,
+    composition: &Composition,
+    stamp: MessageStamp,
+) -> Result<ComposedMessage, CompositionProblem> {
+    let (builder, message_id) = build_message_header(account, composition, stamp)?;
+    build_message_body(builder.keep_bcc(), composition, message_id)
+}
+
+/// Builds the header fields of a message: sender, recipients, subject,
+/// date, identifier, and the conversation fields.
+///
+/// # Returns
+///
+/// The builder with the header fields and the message's identifier, or
+/// why a field could not be built.
+fn build_message_header(
+    account: &Account,
+    composition: &Composition,
+    stamp: MessageStamp,
+) -> Result<(MessageBuilder, String), CompositionProblem> {
     if composition.to.is_empty() && composition.cc.is_empty() && composition.bcc.is_empty() {
         return Err(CompositionProblem::NoRecipient);
     }
     let sender = build_sender(account)?;
-    let message_id = create_message_id(&account.address, now, sequence);
+    let message_id = create_message_id(&account.address, stamp);
     let mut builder = Message::builder()
         .from(sender)
         .subject(composition.subject.clone())
-        .date(now)
+        .date(stamp.now)
         .message_id(Some(format!("<{message_id}>")));
     for recipient in &composition.to {
         builder = builder.to(parse_recipient(recipient)?);
@@ -158,9 +200,21 @@ pub fn compose_message(
             .collect();
         builder = builder.references(references.join(" "));
     }
-    if keep_bcc {
-        builder = builder.keep_bcc();
-    }
+    Ok((builder, message_id))
+}
+
+/// Adds the text and the attachments to a message's header fields.
+///
+/// # Arguments
+///
+/// * `builder` - The header fields.
+/// * `composition` - The text and the attachments.
+/// * `message_id` - The message's identifier, without angle brackets.
+fn build_message_body(
+    builder: MessageBuilder,
+    composition: &Composition,
+    message_id: String,
+) -> Result<ComposedMessage, CompositionProblem> {
     let message = if composition.attachments.is_empty() {
         builder
             .header(ContentType::TEXT_PLAIN)
@@ -206,23 +260,24 @@ fn parse_recipient(text: &str) -> Result<Mailbox, CompositionProblem> {
 ///
 /// * `address` - The sender's address, whose domain the identifier is
 ///   under.
-/// * `now` - The time.
-/// * `sequence` - A number unique within the process at `now`.
+/// * `stamp` - When, and as which within the process, the message is
+///   built.
 ///
 /// # Returns
 ///
 /// The identifier without angle brackets, such as
 /// `lys-1793611800.123456789-4242-7@example.com`.
-pub fn create_message_id(address: &str, now: SystemTime, sequence: u64) -> String {
+pub fn create_message_id(address: &str, stamp: MessageStamp) -> String {
     let domain = address
         .rsplit_once('@')
         .map_or("localhost", |(_, domain)| domain);
-    let since_epoch = now.duration_since(UNIX_EPOCH).unwrap_or_default();
+    let since_epoch = stamp.now.duration_since(UNIX_EPOCH).unwrap_or_default();
     format!(
-        "lys-{}.{:09}-{}-{sequence}@{domain}",
+        "lys-{}.{:09}-{}-{}@{domain}",
         since_epoch.as_secs(),
         since_epoch.subsec_nanos(),
-        std::process::id()
+        std::process::id(),
+        stamp.sequence
     )
 }
 
@@ -338,9 +393,12 @@ mod tests {
         .expect("account")
     }
 
-    /// A fixed time for the `Date` field.
-    fn build_now() -> SystemTime {
-        UNIX_EPOCH + Duration::from_secs(1_793_611_800)
+    /// A fixed time for the `Date` field, as the message with the number.
+    fn build_stamp(sequence: u64) -> MessageStamp {
+        MessageStamp {
+            now: UNIX_EPOCH + Duration::from_secs(1_793_611_800),
+            sequence,
+        }
     }
 
     #[test]
@@ -356,10 +414,10 @@ mod tests {
             attachments: Vec::new(),
         };
 
-        let sent = compose_message(&build_account(), &composition, build_now(), 7, false)
-            .expect("message");
+        let sent =
+            build_sent_message(&build_account(), &composition, build_stamp(7)).expect("message");
         let draft =
-            compose_message(&build_account(), &composition, build_now(), 8, true).expect("draft");
+            build_draft_message(&build_account(), &composition, build_stamp(8)).expect("draft");
 
         let text = String::from_utf8(sent.bytes.clone()).expect("utf-8");
         assert!(
@@ -434,8 +492,8 @@ mod tests {
             ..Composition::default()
         };
 
-        let composed = compose_message(&build_account(), &composition, build_now(), 1, false)
-            .expect("message");
+        let composed =
+            build_sent_message(&build_account(), &composition, build_stamp(1)).expect("message");
 
         let parsed = parse_message(&composed.bytes).expect("parsed");
         assert_eq!(parsed.text.trim_end(), "See attached.");
@@ -471,24 +529,24 @@ mod tests {
         };
 
         assert_eq!(
-            compose_message(&account, &empty, build_now(), 1, false),
+            build_sent_message(&account, &empty, build_stamp(1)),
             Err(CompositionProblem::NoRecipient)
         );
         assert_eq!(
-            compose_message(&account, &bad, build_now(), 1, false),
+            build_sent_message(&account, &bad, build_stamp(1)),
             Err(CompositionProblem::InvalidRecipient(
                 "not an address".to_owned()
             ))
         );
         assert_eq!(
-            compose_message(&account, &bad_type, build_now(), 1, false),
+            build_draft_message(&account, &bad_type, build_stamp(1)),
             Err(CompositionProblem::InvalidAttachmentType(
                 "not a type".to_owned()
             ))
         );
         assert!(
             CompositionProblem::NoRecipient
-                .describe()
+                .format_sentence()
                 .starts_with("Give at least one")
         );
     }

@@ -49,6 +49,12 @@ pub struct FakeSmtpState {
 }
 
 /// The running fake.
+///
+/// Concurrency model: concurrent; the accept task, each connection's
+/// task, and the test share the state behind one mutex, held only to read
+/// or change it in memory. Resource ownership: the listener and the
+/// connection tasks belong to the test's runtime, which drops them when
+/// the test ends; the fake keeps the port and a share of the state.
 pub struct FakeSmtpServer {
     /// The port it listens on, on 127.0.0.1.
     pub port: u16,
@@ -67,16 +73,19 @@ impl FakeSmtpServer {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("a free port");
         let port = listener.local_addr().expect("the address").port();
         let state = Arc::new(Mutex::new(FakeSmtpState::default()));
-        let shared = Arc::clone(&state);
+        let setup = ConnectionSetup {
+            mode,
+            acceptor,
+            state: Arc::clone(&state),
+        };
         tokio::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else {
                     break;
                 };
-                let state = Arc::clone(&shared);
-                let acceptor = acceptor.clone();
+                let setup = setup.clone();
                 tokio::spawn(async move {
-                    handle_connection(stream, mode, acceptor, state).await;
+                    handle_connection(stream, setup).await;
                 });
             }
         });
@@ -84,12 +93,12 @@ impl FakeSmtpServer {
     }
 
     /// The mails accepted so far.
-    pub fn mails(&self) -> Vec<SentMail> {
+    pub fn list_mails(&self) -> Vec<SentMail> {
         self.state.lock().expect("the state").mails.clone()
     }
 
     /// Refuses a recipient from now on.
-    pub fn refuse_recipient(&self, address: &str) {
+    pub fn add_refused_recipient(&self, address: &str) {
         self.state
             .lock()
             .expect("the state")
@@ -98,14 +107,20 @@ impl FakeSmtpServer {
     }
 }
 
-/// Serves one connection in the mode.
-async fn handle_connection(
-    stream: TcpStream,
+/// What serving one connection needs.
+#[derive(Clone)]
+struct ConnectionSetup {
+    /// How the fake protects its connections.
     mode: SmtpMode,
+    /// The TLS acceptor, for the TLS modes.
     acceptor: Option<TlsAcceptor>,
+    /// The fake's state, shared with the test.
     state: Arc<Mutex<FakeSmtpState>>,
-) {
-    match mode {
+}
+
+/// Serves one connection in the setup's mode.
+async fn handle_connection(stream: TcpStream, setup: ConnectionSetup) {
+    match setup.mode {
         SmtpMode::Silent => {
             let mut reader = BufReader::new(stream);
             let mut line = String::new();
@@ -118,141 +133,243 @@ async fn handle_connection(
             }
         }
         SmtpMode::Tls => {
-            let Some(acceptor) = acceptor else {
+            let Some(acceptor) = &setup.acceptor else {
                 return;
             };
             if let Ok(tls) = acceptor.accept(stream).await {
-                run_session(tls, mode, true, state).await;
+                Session::new(tls, &setup, true).handle_commands().await;
             }
         }
         SmtpMode::StartTls => {
-            if let Some(plain) = run_session(stream, mode, false, Arc::clone(&state)).await {
-                let Some(acceptor) = acceptor else {
+            if let Some(plain) = Session::new(stream, &setup, false).handle_commands().await {
+                let Some(acceptor) = &setup.acceptor else {
                     return;
                 };
                 if let Ok(tls) = acceptor.accept(plain).await {
-                    run_session(tls, mode, true, state).await;
+                    Session::new(tls, &setup, true).handle_commands().await;
                 }
             }
         }
         SmtpMode::StartTlsRefused | SmtpMode::Plain => {
-            run_session(stream, mode, false, state).await;
+            Session::new(stream, &setup, false).handle_commands().await;
         }
     }
 }
 
-/// Runs the dialogue until QUIT, the end of the stream, or an accepted
-/// STARTTLS, which hands the stream back for the upgrade.
-async fn run_session<S>(
-    stream: S,
+/// What a session does after one command.
+enum Step {
+    /// Reads the next command.
+    Next,
+    /// Hands the stream back for the TLS upgrade.
+    StartTls,
+    /// Ends the session.
+    End,
+}
+
+/// One connection's dialogue, and the mail being sent on it.
+///
+/// Owned by the task that serves the connection, which runs it once.
+struct Session<S> {
+    /// The connection.
+    reader: BufReader<S>,
+    /// How the fake protects its connections.
     mode: SmtpMode,
+    /// Whether TLS protects this connection already.
     secured: bool,
+    /// The fake's state, shared with the test.
     state: Arc<Mutex<FakeSmtpState>>,
-) -> Option<S>
+    /// The envelope sender of the mail being sent.
+    from: String,
+    /// The accepted envelope recipients of the mail being sent.
+    recipients: Vec<String>,
+}
+
+impl<S> Session<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let mut reader = BufReader::new(stream);
-    if !secured || mode == SmtpMode::Tls {
-        write(&mut reader, "220 localhost ESMTP fake\r\n").await;
+    /// Starts a dialogue on a connection, with no mail being sent.
+    ///
+    /// # Arguments
+    ///
+    /// * `stream` - The connection.
+    /// * `setup` - The fake's mode and state.
+    /// * `secured` - Whether TLS protects the connection already.
+    fn new(stream: S, setup: &ConnectionSetup, secured: bool) -> Self {
+        Self {
+            reader: BufReader::new(stream),
+            mode: setup.mode,
+            secured,
+            state: Arc::clone(&setup.state),
+            from: String::new(),
+            recipients: Vec::new(),
+        }
     }
-    let mut from = String::new();
-    let mut recipients = Vec::new();
-    loop {
-        let mut line = String::new();
-        let Ok(count) = reader.read_line(&mut line).await else {
-            return None;
+
+    /// Runs the dialogue until QUIT, the end of the stream, or an accepted
+    /// STARTTLS, which hands the stream back for the upgrade.
+    async fn handle_commands(mut self) -> Option<S> {
+        if !self.secured || self.mode == SmtpMode::Tls {
+            send_line(&mut self.reader, "220 localhost ESMTP fake\r\n").await;
+        }
+        loop {
+            let line = read_command_line(&mut self.reader).await?;
+            self.state
+                .lock()
+                .expect("the state")
+                .commands
+                .push(line.clone());
+            match self.handle_command(&line).await {
+                Step::Next => {}
+                Step::StartTls => return Some(self.reader.into_inner()),
+                Step::End => return None,
+            }
+        }
+    }
+
+    /// Answers one command line.
+    async fn handle_command(&mut self, line: &str) -> Step {
+        let (verb, rest) = line.split_once(' ').unwrap_or((line, ""));
+        match verb.to_ascii_uppercase().as_str() {
+            "EHLO" => self.handle_ehlo().await,
+            "HELO" => self.send_reply("250 localhost\r\n").await,
+            "STARTTLS" => self.handle_starttls().await,
+            "AUTH" => self.handle_auth(rest).await,
+            "MAIL" => self.handle_mail(rest).await,
+            "RCPT" => self.handle_rcpt(rest).await,
+            "DATA" => self.handle_data().await,
+            "NOOP" | "RSET" => self.send_reply("250 2.0.0 OK\r\n").await,
+            "QUIT" => {
+                self.send_reply("221 2.0.0 Bye\r\n").await;
+                Step::End
+            }
+            _ => self.send_reply("500 5.5.1 Command unrecognized\r\n").await,
+        }
+    }
+
+    /// Writes an answer, after which the session reads the next command.
+    async fn send_reply(&mut self, text: &str) -> Step {
+        send_line(&mut self.reader, text).await;
+        Step::Next
+    }
+
+    /// Whether the fake offers STARTTLS on this connection.
+    fn is_starttls_offered(&self) -> bool {
+        self.mode == SmtpMode::StartTls && !self.secured
+    }
+
+    /// Answers EHLO with the extensions, STARTTLS while it is offered.
+    async fn handle_ehlo(&mut self) -> Step {
+        let mut answer = String::from("250-localhost Hello\r\n");
+        if self.is_starttls_offered() {
+            answer.push_str("250-STARTTLS\r\n");
+        }
+        answer.push_str("250-AUTH PLAIN LOGIN\r\n250 8BITMIME\r\n");
+        self.send_reply(&answer).await
+    }
+
+    /// Answers STARTTLS: an upgrade while it is offered, else a refusal.
+    async fn handle_starttls(&mut self) -> Step {
+        if !self.is_starttls_offered() {
+            return self.send_reply("454 4.7.0 TLS not available\r\n").await;
+        }
+        send_line(&mut self.reader, "220 2.0.0 Ready to start TLS\r\n").await;
+        Step::StartTls
+    }
+
+    /// Answers AUTH: accepted for the test account's credentials.
+    async fn handle_auth(&mut self, rest: &str) -> Step {
+        let answer = if read_authentication(&mut self.reader, rest).await {
+            "235 2.7.0 Authentication successful\r\n"
+        } else {
+            "535 5.7.8 Authentication credentials invalid\r\n"
         };
+        self.send_reply(answer).await
+    }
+
+    /// Answers MAIL, starting a new mail from the sender.
+    async fn handle_mail(&mut self, rest: &str) -> Step {
+        self.from = parse_path_address(rest);
+        self.recipients.clear();
+        self.send_reply("250 2.1.0 OK\r\n").await
+    }
+
+    /// Answers RCPT, adding the recipient unless the fake refuses it.
+    async fn handle_rcpt(&mut self, rest: &str) -> Step {
+        let address = parse_path_address(rest);
+        let refused = self
+            .state
+            .lock()
+            .expect("the state")
+            .refused_recipients
+            .contains(&address);
+        if refused {
+            return self.send_reply("550 5.1.1 User unknown\r\n").await;
+        }
+        self.recipients.push(address);
+        self.send_reply("250 2.1.5 OK\r\n").await
+    }
+
+    /// Answers DATA: reads the message and records the mail; the session
+    /// ends when the stream ends before the message does.
+    async fn handle_data(&mut self) -> Step {
+        send_line(&mut self.reader, "354 End data with <CR><LF>.<CR><LF>\r\n").await;
+        let Some(bytes) = read_data(&mut self.reader).await else {
+            return Step::End;
+        };
+        self.state.lock().expect("the state").mails.push(SentMail {
+            from: self.from.clone(),
+            to: self.recipients.clone(),
+            bytes,
+        });
+        self.send_reply("250 2.0.0 OK: queued\r\n").await
+    }
+}
+
+/// Reads one command line without its line break.
+///
+/// # Returns
+///
+/// The line, or `None` once the stream ended or failed.
+async fn read_command_line<S>(reader: &mut BufReader<S>) -> Option<String>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let mut line = String::new();
+    let count = reader.read_line(&mut line).await.ok()?;
+    if count == 0 {
+        return None;
+    }
+    Some(line.trim_end_matches(['\r', '\n']).to_owned())
+}
+
+/// Reads the lines of DATA up to the line that holds only a dot, without
+/// the dot each line starting with one was stuffed with.
+///
+/// # Returns
+///
+/// The message, or `None` once the stream ended or failed first.
+async fn read_data<S>(reader: &mut BufReader<S>) -> Option<Vec<u8>>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let mut bytes = Vec::new();
+    loop {
+        let mut data_line = String::new();
+        let count = reader.read_line(&mut data_line).await.ok()?;
         if count == 0 {
             return None;
         }
-        let line = line.trim_end_matches(['\r', '\n']).to_owned();
-        state.lock().expect("the state").commands.push(line.clone());
-        let (verb, rest) = line.split_once(' ').unwrap_or((line.as_str(), ""));
-        match verb.to_ascii_uppercase().as_str() {
-            "EHLO" => {
-                let mut answer = String::from("250-localhost Hello\r\n");
-                if mode == SmtpMode::StartTls && !secured {
-                    answer.push_str("250-STARTTLS\r\n");
-                }
-                answer.push_str("250-AUTH PLAIN LOGIN\r\n250 8BITMIME\r\n");
-                write(&mut reader, &answer).await;
-            }
-            "HELO" => write(&mut reader, "250 localhost\r\n").await,
-            "STARTTLS" => {
-                if mode == SmtpMode::StartTls && !secured {
-                    write(&mut reader, "220 2.0.0 Ready to start TLS\r\n").await;
-                    return Some(reader.into_inner());
-                }
-                write(&mut reader, "454 4.7.0 TLS not available\r\n").await;
-            }
-            "AUTH" => {
-                let accepted = authenticate(&mut reader, rest).await;
-                if accepted {
-                    write(&mut reader, "235 2.7.0 Authentication successful\r\n").await;
-                } else {
-                    write(
-                        &mut reader,
-                        "535 5.7.8 Authentication credentials invalid\r\n",
-                    )
-                    .await;
-                }
-            }
-            "MAIL" => {
-                from = extract_address(rest);
-                recipients.clear();
-                write(&mut reader, "250 2.1.0 OK\r\n").await;
-            }
-            "RCPT" => {
-                let address = extract_address(rest);
-                let refused = state
-                    .lock()
-                    .expect("the state")
-                    .refused_recipients
-                    .contains(&address);
-                if refused {
-                    write(&mut reader, "550 5.1.1 User unknown\r\n").await;
-                } else {
-                    recipients.push(address);
-                    write(&mut reader, "250 2.1.5 OK\r\n").await;
-                }
-            }
-            "DATA" => {
-                write(&mut reader, "354 End data with <CR><LF>.<CR><LF>\r\n").await;
-                let mut bytes = Vec::new();
-                loop {
-                    let mut data_line = String::new();
-                    let Ok(count) = reader.read_line(&mut data_line).await else {
-                        return None;
-                    };
-                    if count == 0 {
-                        return None;
-                    }
-                    if data_line == ".\r\n" {
-                        break;
-                    }
-                    let unstuffed = data_line.strip_prefix('.').unwrap_or(&data_line);
-                    bytes.extend_from_slice(unstuffed.as_bytes());
-                }
-                state.lock().expect("the state").mails.push(SentMail {
-                    from: from.clone(),
-                    to: recipients.clone(),
-                    bytes,
-                });
-                write(&mut reader, "250 2.0.0 OK: queued\r\n").await;
-            }
-            "NOOP" | "RSET" => write(&mut reader, "250 2.0.0 OK\r\n").await,
-            "QUIT" => {
-                write(&mut reader, "221 2.0.0 Bye\r\n").await;
-                return None;
-            }
-            _ => write(&mut reader, "500 5.5.1 Command unrecognized\r\n").await,
+        if data_line == ".\r\n" {
+            return Some(bytes);
         }
+        let unstuffed = data_line.strip_prefix('.').unwrap_or(&data_line);
+        bytes.extend_from_slice(unstuffed.as_bytes());
     }
 }
 
 /// Runs AUTH PLAIN or AUTH LOGIN and tells whether the credentials match.
-async fn authenticate<S>(reader: &mut BufReader<S>, rest: &str) -> bool
+async fn read_authentication<S>(reader: &mut BufReader<S>, rest: &str) -> bool
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -260,7 +377,7 @@ where
     match mechanism.to_ascii_uppercase().as_str() {
         "PLAIN" => {
             let encoded = if initial.is_empty() {
-                write(reader, "334 \r\n").await;
+                send_line(reader, "334 \r\n").await;
                 read_line(reader).await
             } else {
                 initial.to_owned()
@@ -270,11 +387,11 @@ where
             parts.len() == 3 && parts[1] == USER_NAME.as_bytes() && parts[2] == PASSWORD.as_bytes()
         }
         "LOGIN" => {
-            write(reader, "334 VXNlcm5hbWU6\r\n").await;
+            send_line(reader, "334 VXNlcm5hbWU6\r\n").await;
             let user = STANDARD
                 .decode(read_line(reader).await.trim())
                 .unwrap_or_default();
-            write(reader, "334 UGFzc3dvcmQ6\r\n").await;
+            send_line(reader, "334 UGFzc3dvcmQ6\r\n").await;
             let password = STANDARD
                 .decode(read_line(reader).await.trim())
                 .unwrap_or_default();
@@ -295,7 +412,7 @@ where
 }
 
 /// Writes text, ignoring a closed connection.
-async fn write<S>(reader: &mut BufReader<S>, text: &str)
+async fn send_line<S>(reader: &mut BufReader<S>, text: &str)
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -304,7 +421,7 @@ where
 }
 
 /// Extracts the address of `FROM:<a@b>` or `TO:<a@b> ...`.
-fn extract_address(rest: &str) -> String {
+fn parse_path_address(rest: &str) -> String {
     rest.split_once('<')
         .and_then(|(_, after)| after.split_once('>'))
         .map(|(address, _)| address.to_owned())

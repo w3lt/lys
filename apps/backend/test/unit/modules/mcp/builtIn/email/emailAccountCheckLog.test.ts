@@ -11,14 +11,16 @@ import {
 const COMMON_FIELDS = ["time", "pid", "hostname"] as const
 
 /**
- * Logs one event with the backend's logger and reads the one line written.
+ * Gets the fields of the one line the backend's logger writes for an event.
  *
  * @param event - Event to log.
  * @returns The line's fields, without the time and process fields every
  * line has.
  * @throws When the logger wrote no line or more than one.
  */
-function logEvent(event: EmailAccountCheckEvent): Record<string, unknown> {
+function getLoggedFields(
+  event: EmailAccountCheckEvent
+): Record<string, unknown> {
   const destination = new CapturedLogDestination()
   handleEmailAccountCheckEvent(createBackendLogger(destination), event)
   const records = destination.records
@@ -34,7 +36,7 @@ function logEvent(event: EmailAccountCheckEvent): Record<string, unknown> {
 describe("handleEmailAccountCheckEvent", () => {
   it("logs a report with both sign-ins' outcomes", () => {
     expect(
-      logEvent({
+      getLoggedFields({
         kind: "checked",
         imap: { status: "failed", reason: "wrong-password" },
         smtp: { status: "accepted" }
@@ -48,7 +50,7 @@ describe("handleEmailAccountCheckEvent", () => {
   })
 
   it("warns of a missing email server", () => {
-    expect(logEvent({ kind: "server-missing" })).toEqual({
+    expect(getLoggedFields({ kind: "server-missing" })).toEqual({
       level: "warn",
       msg: "The email server is not installed, so the email account could not be checked; build.sh installs it"
     })
@@ -59,7 +61,7 @@ describe("handleEmailAccountCheckEvent", () => {
       code: "EACCES"
     })
 
-    const fields = logEvent({
+    const fields = getLoggedFields({
       kind: "server-failed",
       failure: { kind: "start-failed", error }
     })
@@ -86,7 +88,7 @@ describe("handleEmailAccountCheckEvent", () => {
   ] as const)(
     "logs a server that did not report as an error: %o",
     (failure) => {
-      expect(logEvent({ kind: "server-failed", failure })).toEqual({
+      expect(getLoggedFields({ kind: "server-failed", failure })).toEqual({
         level: "error",
         failure,
         msg: "The email server's account check failed"
@@ -96,7 +98,7 @@ describe("handleEmailAccountCheckEvent", () => {
 
   it("warns of a check the closing backend ended", () => {
     expect(
-      logEvent({ kind: "server-failed", failure: { kind: "closed" } })
+      getLoggedFields({ kind: "server-failed", failure: { kind: "closed" } })
     ).toEqual({
       level: "warn",
       failure: { kind: "closed" },

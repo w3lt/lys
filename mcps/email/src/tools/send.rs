@@ -6,14 +6,14 @@ use std::time::SystemTime;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::read::fetch_view;
+use super::read::get_message_view;
 use super::{
-    MAXIMUM_TEXT_ARGUMENT_LENGTH, ToolContext, ToolReport, ToolResult, check_text_argument,
-    imap_failure, load_folders,
+    MAXIMUM_TEXT_ARGUMENT_LENGTH, ToolContext, ToolReport, ToolResult,
+    build_imap_failure_conversion, load_folders, parse_text_argument,
 };
 use crate::compose::{
-    ComposedMessage, Composition, build_forward_attachments, build_forward_body,
-    build_forward_subject, build_reply_references, build_reply_subject, compose_message,
+    ComposedMessage, Composition, MessageStamp, build_forward_attachments, build_forward_body,
+    build_forward_subject, build_reply_references, build_reply_subject, build_sent_message,
 };
 use crate::email_id::parse_email_id;
 use crate::failure::{Protocol, ToolFailure};
@@ -72,7 +72,7 @@ pub enum SentCopy {
 
 impl SentCopy {
     /// Returns the sentence the model reads.
-    pub fn describe(&self) -> String {
+    pub fn format_sentence(&self) -> String {
         match self {
             Self::KeptByServer => "The server keeps a copy of sent mail.".to_owned(),
             Self::Saved(folder) => format!("A copy was saved in {folder}."),
@@ -88,21 +88,18 @@ impl SentCopy {
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - The message.
-pub async fn send_email(context: &ToolContext, arguments: MessageArguments) -> ToolResult {
-    check_message_arguments(&arguments)?;
+pub async fn run_send_email(context: &ToolContext, arguments: MessageArguments) -> ToolResult {
+    parse_message_arguments(&arguments)?;
     let mut session = None;
     let composition = build_composition(context, &mut session, &arguments).await?;
-    let now = SystemTime::now();
-    let composed = compose_message(
-        &context.account,
-        &composition,
-        now,
-        context.next_sequence(),
-        false,
-    )
-    .map_err(|problem| ToolFailure::Argument(problem.describe()))?;
+    let stamp = MessageStamp {
+        now: SystemTime::now(),
+        sequence: context.create_message_sequence(),
+    };
+    let composed = build_sent_message(&context.account, &composition, stamp)
+        .map_err(|problem| ToolFailure::Argument(problem.format_sentence()))?;
     send_composed(context, &composed).await?;
-    let copy = keep_sent_copy(context, &mut session, &composed.bytes).await;
+    let copy = offer_sent_copy(context, &mut session, &composed.bytes).await;
     if let Some(session) = session {
         session.close().await;
     }
@@ -114,23 +111,29 @@ pub async fn send_email(context: &ToolContext, arguments: MessageArguments) -> T
             format_optional_list("Cc", &composition.cc),
             format_optional_list("Bcc", &composition.bcc),
             composition.subject,
-            copy.describe()
+            copy.format_sentence()
         ),
         log: format!(
             "send: {} recipient(s), {} attachment(s), copy {}",
             composed.envelope.to().len(),
             composition.attachments.len(),
-            describe_copy_for_log(&copy)
+            format_copy_for_log(&copy)
         ),
     })
 }
 
-/// Checks the rules of the message fields.
+/// Parses the message fields against their rules.
 ///
 /// # Arguments
 ///
 /// * `arguments` - The fields.
-pub fn check_message_arguments(arguments: &MessageArguments) -> Result<(), ToolFailure> {
+///
+/// # Returns
+///
+/// The fields, or the first rule they break as the model reads it.
+pub fn parse_message_arguments(
+    arguments: &MessageArguments,
+) -> Result<&MessageArguments, ToolFailure> {
     for (name, recipients) in [
         ("to", &arguments.to),
         ("cc", &arguments.cc),
@@ -142,10 +145,10 @@ pub fn check_message_arguments(arguments: &MessageArguments) -> Result<(), ToolF
             )));
         }
         for recipient in recipients {
-            check_text_argument(name, recipient, MAXIMUM_TEXT_ARGUMENT_LENGTH)?;
+            parse_text_argument(name, recipient, MAXIMUM_TEXT_ARGUMENT_LENGTH)?;
         }
     }
-    check_text_argument("subject", &arguments.subject, MAXIMUM_TEXT_ARGUMENT_LENGTH)?;
+    parse_text_argument("subject", &arguments.subject, MAXIMUM_TEXT_ARGUMENT_LENGTH)?;
     if arguments.body.chars().count() > MAXIMUM_BODY_LENGTH {
         return Err(ToolFailure::Argument(format!(
             "body must be at most {MAXIMUM_BODY_LENGTH} characters."
@@ -156,7 +159,7 @@ pub fn check_message_arguments(arguments: &MessageArguments) -> Result<(), ToolF
             "Give reply_to_id or forward_id, not both.".to_owned(),
         ));
     }
-    Ok(())
+    Ok(arguments)
 }
 
 /// Builds the composition of the fields: a plain message, a reply with
@@ -195,7 +198,7 @@ pub async fn build_composition(
         None => session.insert(context.open_imap().await?),
     };
     let folders = load_folders(opened).await?;
-    let (_, original) = fetch_view(opened, &folders, &id).await?;
+    let (_, original) = get_message_view(opened, &folders, &id).await?;
     if arguments.reply_to_id.is_some() {
         if composition.to.is_empty() && composition.cc.is_empty() && composition.bcc.is_empty() {
             let sender = if original.headers.reply_to.is_empty() {
@@ -249,7 +252,7 @@ pub async fn send_composed(
         })
 }
 
-/// Saves a copy of a sent message in the Sent folder, unless the server
+/// Offers a copy of a sent message to the Sent folder, unless the server
 /// keeps one; a failure is reported, never raised, as the message is sent.
 ///
 /// # Arguments
@@ -257,7 +260,11 @@ pub async fn send_composed(
 /// * `context` - The account and trust.
 /// * `session` - The IMAP session, opened here when none is open yet.
 /// * `bytes` - The message as sent.
-pub async fn keep_sent_copy(
+///
+/// # Returns
+///
+/// What became of the copy.
+pub async fn offer_sent_copy(
     context: &ToolContext,
     session: &mut Option<ImapSession>,
     bytes: &[u8],
@@ -285,7 +292,7 @@ async fn save_sent_copy(
     let Some(sent) = find_role_folder(&folders, FolderRole::Sent) else {
         return Ok(SentCopy::NoFolder);
     };
-    append_copy(opened, sent, bytes).await?;
+    save_read_copy(opened, sent, bytes).await?;
     Ok(SentCopy::Saved(sent.name.clone()))
 }
 
@@ -296,15 +303,15 @@ async fn save_sent_copy(
 /// * `session` - The signed-in session.
 /// * `folder` - The Sent folder.
 /// * `bytes` - The message as sent.
-pub async fn append_copy(
+pub async fn save_read_copy(
     session: &mut ImapSession,
     folder: &Folder,
     bytes: &[u8],
 ) -> Result<(), ToolFailure> {
     session
-        .append_message(&folder.raw_name, SENT_FLAGS, bytes)
+        .save_message(&folder.raw_name, SENT_FLAGS, bytes)
         .await
-        .map_err(imap_failure("save the copy"))
+        .map_err(build_imap_failure_conversion("save the copy"))
 }
 
 /// Formats a recipient list as a line, or nothing when it is empty.
@@ -317,7 +324,7 @@ pub fn format_optional_list(name: &str, recipients: &[String]) -> String {
 }
 
 /// Names what became of the copy, for the log.
-pub fn describe_copy_for_log(copy: &SentCopy) -> &'static str {
+pub fn format_copy_for_log(copy: &SentCopy) -> &'static str {
     match copy {
         SentCopy::KeptByServer => "kept by the server",
         SentCopy::Saved(_) => "saved",
@@ -352,21 +359,21 @@ mod tests {
             ..fine.clone()
         };
 
-        assert_eq!(check_message_arguments(&fine), Ok(()));
+        assert_eq!(parse_message_arguments(&fine), Ok(&fine));
         assert_eq!(
-            check_message_arguments(&both),
+            parse_message_arguments(&both),
             Err(ToolFailure::Argument(
                 "Give reply_to_id or forward_id, not both.".to_owned()
             ))
         );
         assert_eq!(
-            check_message_arguments(&many),
+            parse_message_arguments(&many),
             Err(ToolFailure::Argument(
                 "cc must hold at most 50 recipients.".to_owned()
             ))
         );
         assert_eq!(
-            check_message_arguments(&broken),
+            parse_message_arguments(&broken),
             Err(ToolFailure::Argument(
                 "subject must not contain line breaks or control characters.".to_owned()
             ))
@@ -376,10 +383,10 @@ mod tests {
     #[test]
     fn describes_what_became_of_the_copy() {
         assert_eq!(
-            SentCopy::Saved("Sent".to_owned()).describe(),
+            SentCopy::Saved("Sent".to_owned()).format_sentence(),
             "A copy was saved in Sent."
         );
-        assert_eq!(describe_copy_for_log(&SentCopy::NoFolder), "no folder");
+        assert_eq!(format_copy_for_log(&SentCopy::NoFolder), "no folder");
         assert_eq!(format_optional_list("Cc", &[]), "");
         assert_eq!(
             format_optional_list("Cc", &["a@x".to_owned(), "b@x".to_owned()]),

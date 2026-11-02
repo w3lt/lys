@@ -2,7 +2,7 @@ import { checkEmailAccountApiResponseSchema } from "@lys/protocol"
 import { emailPasswordSchema } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import { createStore } from "zustand/vanilla"
-import { checkEmailAccount } from "@/lib/apis/http/email"
+import { sendEmailAccountCheck } from "@/lib/apis/http/email"
 import {
   createEmailSettingsSlice,
   type EmailSettingsSlice
@@ -77,7 +77,7 @@ function createEmailStore() {
     ...createEmailSettingsSlice(set, get, {
       saveEmailAccountSettings: settingsGroupSaves.saveEmailAccountSettings,
       sendEmailAccountCheck: (body) =>
-        checkEmailAccount({ backendUrl: FIXTURE_BACKEND_URL }, body)
+        sendEmailAccountCheck({ backendUrl: FIXTURE_BACKEND_URL }, body)
     })
   }))
 }

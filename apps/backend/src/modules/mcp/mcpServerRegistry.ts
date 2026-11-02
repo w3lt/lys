@@ -444,10 +444,10 @@ export default class McpServerRegistry {
     if (this.#isClosed) return
     switch (read.status) {
       case "read": {
-        const plan = await this.#planServers(read.settings)
+        const plan = await this.#createSettingsPlan(read.settings)
         if (this.#isClosed) return
         this.#settingsStatus = "applied"
-        this.#applyPlan(plan)
+        this.#updateEntries(plan)
         return
       }
       case "invalid":
@@ -465,36 +465,41 @@ export default class McpServerRegistry {
   }
 
   /**
-   * Plans what each server of a settings group that passed its rules is to
-   * do, reading what each built-in server the group switches on needs.
+   * Creates the plan of a settings group that passed its rules: what each
+   * server is to do, reading what each built-in server it switches on needs.
    *
    * @param settings - The group.
    * @returns The built-in servers whose names are free, in their fixed
    * order, then the group's servers in its order, and the names of the
    * built-in servers an added server took.
+   * @throws The first failure, in the built-in servers' order, of a read
+   * of what one needs; every read has ended by then.
    */
-  async #planServers(settings: McpSettings): Promise<SettingsPlan> {
+  async #createSettingsPlan(settings: McpSettings): Promise<SettingsPlan> {
     const addedNames = new Set(settings.servers.map((server) => server.name))
-    const servers: ServerPlan[] = []
-    const takenBuiltInNames = new Set<string>()
-    for (const builtIn of this.#dependencies.builtInServers) {
-      if (addedNames.has(builtIn.name)) takenBuiltInNames.add(builtIn.name)
-      else
-        servers.push(
-          await planBuiltInServer(
-            builtIn,
-            settings.builtIn[builtIn.name].enabled
-          )
-        )
-    }
-    for (const server of settings.servers) servers.push(planAddedServer(server))
-    return Object.freeze({ servers: Object.freeze(servers), takenBuiltInNames })
+    const { builtInServers } = this.#dependencies
+    const builtInPlans = await createBuiltInServerPlans(
+      builtInServers.filter((builtIn) => !addedNames.has(builtIn.name)),
+      settings
+    )
+    const takenBuiltInNames = new Set(
+      builtInServers
+        .map((builtIn) => builtIn.name)
+        .filter((name) => addedNames.has(name))
+    )
+    const addedPlans = settings.servers.map((server) =>
+      buildAddedServerPlan(server)
+    )
+    return Object.freeze({
+      servers: Object.freeze([...builtInPlans, ...addedPlans]),
+      takenBuiltInNames
+    })
   }
 
   /**
-   * Applies a plan: keeps each running server whose settings did not
-   * change, stops the others, and starts, switches off, or reports each
-   * planned server.
+   * Updates the applied servers to a plan: keeps each running server whose
+   * settings did not change, stops the others, and starts, switches off, or
+   * reports each planned server.
    *
    * @param plan - What each server is to do.
    * @remarks Stops every session it does not keep before it starts any, so
@@ -502,7 +507,7 @@ export default class McpServerRegistry {
    * their settings. Reports each stopped session with why, each built-in
    * server that newly cannot start, and each built-in name newly taken.
    */
-  #applyPlan(plan: SettingsPlan): void {
+  #updateEntries(plan: SettingsPlan): void {
     const previousEntries = this.#entries
     const keptEntries = new Map<string, ServerEntry>()
     for (const server of plan.servers) {
@@ -529,7 +534,7 @@ export default class McpServerRegistry {
         keptEntries.get(server.name) ??
           this.#startServer(server, previousEntries.get(server.name))
       )
-    this.#reportTakenNames(plan.takenBuiltInNames)
+    this.#updateTakenBuiltInNames(plan.takenBuiltInNames)
   }
 
   /**
@@ -584,12 +589,12 @@ export default class McpServerRegistry {
   }
 
   /**
-   * Reports each built-in name an added server newly took, and remembers
-   * the taken names for the next apply.
+   * Updates the names of the built-in servers an added server took,
+   * reporting each name newly taken; the next apply compares with them.
    *
    * @param takenNames - Names of the built-in servers an added server took.
    */
-  #reportTakenNames(takenNames: ReadonlySet<string>): void {
+  #updateTakenBuiltInNames(takenNames: ReadonlySet<string>): void {
     for (const serverName of takenNames)
       if (!this.#takenBuiltInNames.has(serverName))
         this.#dependencies.reportEvent({
@@ -677,24 +682,52 @@ export default class McpServerRegistry {
 }
 
 /**
- * Plans what one built-in server is to do.
+ * Creates the plan of each built-in server whose name is free.
+ *
+ * @param builtIns - The servers, in their fixed order.
+ * @param settings - The settings group that switches each one on or off.
+ * @returns Each server's plan, in the order given.
+ * @throws The first failure, in the order given, of a read of what a
+ * switched-on server needs.
+ * @remarks Reads what the switched-on servers need at the same time, and
+ * settles only once every read has ended, so no read outlives the apply
+ * that started it.
+ */
+async function createBuiltInServerPlans(
+  builtIns: readonly BuiltInMcpServer[],
+  settings: McpSettings
+): Promise<readonly ServerPlan[]> {
+  const outcomes = await Promise.allSettled(
+    builtIns.map((builtIn) =>
+      settings.builtIn[builtIn.name].enabled
+        ? createBuiltInServerPlan(builtIn)
+        : buildOffBuiltInServerPlan(builtIn)
+    )
+  )
+  const plans: ServerPlan[] = []
+  for (const outcome of outcomes) {
+    if (outcome.status === "rejected") throw outcome.reason
+    plans.push(outcome.value)
+  }
+  return plans
+}
+
+/**
+ * Creates the plan of one built-in server the settings group switches on,
+ * reading what it needs.
  *
  * @param server - The built-in server.
- * @param isSwitchedOn - Whether the settings group switches it on.
- * @returns Off while it is switched off; else what its read found: a
- * start with the settings it built, or why it cannot start.
+ * @returns A start with the settings its read built, or why it cannot
+ * start.
+ * @throws The read's failure.
  */
-async function planBuiltInServer(
-  server: BuiltInMcpServer,
-  isSwitchedOn: boolean
+async function createBuiltInServerPlan(
+  server: BuiltInMcpServer
 ): Promise<ServerPlan> {
-  const { name, transport } = server
-  if (!isSwitchedOn)
-    return Object.freeze({ name, transport, isBuiltIn: true, run: OFF_PLAN })
   const read = await server.readServer()
   return Object.freeze({
-    name,
-    transport,
+    name: server.name,
+    transport: server.transport,
     isBuiltIn: true,
     run:
       read.status === "read"
@@ -704,12 +737,27 @@ async function planBuiltInServer(
 }
 
 /**
- * Plans what one added server is to do.
+ * Builds the plan of one built-in server the settings group switches off.
+ *
+ * @param server - The built-in server.
+ * @returns Off.
+ */
+function buildOffBuiltInServerPlan(server: BuiltInMcpServer): ServerPlan {
+  return Object.freeze({
+    name: server.name,
+    transport: server.transport,
+    isBuiltIn: true,
+    run: OFF_PLAN
+  })
+}
+
+/**
+ * Builds the plan of one added server.
  *
  * @param settings - Its validated settings.
  * @returns A start with its settings while it is switched on, else off.
  */
-function planAddedServer(settings: McpServerSettings): ServerPlan {
+function buildAddedServerPlan(settings: McpServerSettings): ServerPlan {
   return Object.freeze({
     name: settings.name,
     transport: settings.transport,
@@ -734,13 +782,27 @@ function findUnchangedEntry(
   server: ServerPlan
 ): ServerEntry | undefined {
   const entry = entries.get(server.name)
-  return entry !== undefined &&
-    entry.isBuiltIn === server.isBuiltIn &&
-    entry.run.status === "running" &&
-    server.run.status === "start" &&
-    isDeepStrictEqual(entry.run.settings, server.run.settings)
+  return entry?.isBuiltIn === server.isBuiltIn &&
+    hasEqualSettings(entry.run, server.run)
     ? entry
     : undefined
+}
+
+/**
+ * Answers whether a server's running session opens the settings its plan
+ * starts it with.
+ *
+ * @param run - What the server does now.
+ * @param plannedRun - What its plan from the group just read is to do.
+ * @returns True when both are a session and a start with deeply equal
+ * settings; false when either is off or unable to start.
+ */
+function hasEqualSettings(run: ServerRun, plannedRun: PlannedRun): boolean {
+  return (
+    run.status === "running" &&
+    plannedRun.status === "start" &&
+    isDeepStrictEqual(run.settings, plannedRun.settings)
+  )
 }
 
 /**
@@ -757,8 +819,7 @@ function findStopReason(
   entry: ServerEntry,
   server: ServerPlan | undefined
 ): StopReason {
-  if (server === undefined || server.isBuiltIn !== entry.isBuiltIn)
-    return "removed"
+  if (server?.isBuiltIn !== entry.isBuiltIn) return "removed"
   return server.run.status === "off" ? "switched-off" : "changed"
 }
 

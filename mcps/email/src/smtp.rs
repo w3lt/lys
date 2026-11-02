@@ -81,7 +81,7 @@ pub fn build_smtp_transport(
             .tls(tls)
             .credentials(Credentials::new(
                 account.user_name.clone(),
-                account.password.expose().to_owned(),
+                account.password.as_str().to_owned(),
             ))
             .timeout(Some(EXCHANGE_LIMIT))
             .build(),
@@ -94,7 +94,7 @@ fn build_parameters(
     server_name: &str,
 ) -> Result<lettre::transport::smtp::client::TlsParameters, SignInFailure> {
     trust.build_smtp_parameters(server_name).map_err(|error| {
-        crate::log::log_line(&format!(
+        crate::log::send_log_line(&format!(
             "smtp: the TLS configuration could not be built: {error}"
         ));
         SignInFailure::ProtocolError
@@ -107,14 +107,14 @@ fn build_parameters(
 ///
 /// * `transport` - The transport to check.
 /// * `limit` - Longest the whole check may take.
-pub async fn check_smtp_sign_in(
+pub async fn offer_transport_sign_in(
     transport: &SmtpTransport,
     limit: Duration,
 ) -> Result<(), SignInFailure> {
     match timeout(limit, transport.test_connection()).await {
         Ok(Ok(true)) => Ok(()),
         Ok(Ok(false)) => Err(SignInFailure::ProtocolError),
-        Ok(Err(error)) => Err(classify_sign_in_error(&error)),
+        Ok(Err(error)) => Err(calculate_sign_in_failure(&error)),
         Err(_) => Err(SignInFailure::TimedOut),
     }
 }
@@ -133,7 +133,7 @@ pub async fn send_message(
 ) -> Result<(), SmtpFailure> {
     match timeout(SEND_LIMIT, transport.send_raw(envelope, bytes)).await {
         Ok(Ok(_)) => Ok(()),
-        Ok(Err(error)) => Err(classify_send_error(&error)),
+        Ok(Err(error)) => Err(calculate_send_failure(&error)),
         Err(_) => Err(SmtpFailure::Unconfirmed),
     }
 }
@@ -148,7 +148,7 @@ pub async fn send_message(
 /// except the client-side failure for a server without STARTTLS, which is
 /// `EncryptionNotOffered`; a connection that could not be opened is
 /// `Unreachable`.
-fn classify_sign_in_error(error: &SmtpError) -> SignInFailure {
+fn calculate_sign_in_failure(error: &SmtpError) -> SignInFailure {
     if error.is_timeout() {
         return SignInFailure::TimedOut;
     }
@@ -179,7 +179,7 @@ fn classify_sign_in_error(error: &SmtpError) -> SignInFailure {
 }
 
 /// Classifies lettre's error met while sending.
-fn classify_send_error(error: &SmtpError) -> SmtpFailure {
+fn calculate_send_failure(error: &SmtpError) -> SmtpFailure {
     if error.is_timeout() {
         return SmtpFailure::Unconfirmed;
     }
@@ -190,7 +190,7 @@ fn classify_send_error(error: &SmtpError) -> SmtpFailure {
                 text: format_source(error),
             }
         }
-        _ => SmtpFailure::SignIn(classify_sign_in_error(error)),
+        _ => SmtpFailure::SignIn(calculate_sign_in_failure(error)),
     }
 }
 

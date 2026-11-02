@@ -10,18 +10,18 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::send::{
-    MessageArguments, append_copy, build_composition, check_message_arguments,
-    describe_copy_for_log, format_optional_list, send_composed,
+    MessageArguments, build_composition, format_copy_for_log, format_optional_list,
+    parse_message_arguments, save_read_copy, send_composed,
 };
 use super::{
-    ToolContext, ToolReport, ToolResult, imap_failure, load_folders, require_role_folder,
-    select_id_folder,
+    ToolContext, ToolReport, ToolResult, build_imap_failure_conversion, get_role_folder,
+    load_folders,
 };
-use crate::compose::{ComposedMessage, compose_message};
+use crate::compose::{ComposedMessage, MessageStamp, build_draft_message};
 use crate::email_id::{EmailId, parse_email_id};
 use crate::failure::ToolFailure;
 use crate::folders::{Folder, FolderRole};
-use crate::imap::{ImapSession, format_search_text};
+use crate::imap::{FolderAccess, ImapSession, Summary, format_search_text};
 use crate::message::format_addresses;
 
 /// The flags a draft is stored with.
@@ -71,7 +71,7 @@ pub struct DraftIdArguments {
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - The draft's fields.
-pub async fn save_draft(context: &ToolContext, arguments: SaveDraftArguments) -> ToolResult {
+pub async fn run_save_draft(context: &ToolContext, arguments: SaveDraftArguments) -> ToolResult {
     let message = MessageArguments {
         to: arguments.to,
         cc: arguments.cc,
@@ -81,7 +81,7 @@ pub async fn save_draft(context: &ToolContext, arguments: SaveDraftArguments) ->
         reply_to_id: arguments.reply_to_id,
         forward_id: arguments.forward_id,
     };
-    check_message_arguments(&message)?;
+    parse_message_arguments(&message)?;
     let replaced = arguments
         .draft_id
         .as_deref()
@@ -89,37 +89,36 @@ pub async fn save_draft(context: &ToolContext, arguments: SaveDraftArguments) ->
         .transpose()?;
     let mut session = Some(context.open_imap().await?);
     let composition = build_composition(context, &mut session, &message).await?;
-    let composed = compose_message(
-        &context.account,
-        &composition,
-        SystemTime::now(),
-        context.next_sequence(),
-        true,
-    )
-    .map_err(|problem| ToolFailure::Argument(problem.describe()))?;
+    let stamp = MessageStamp {
+        now: SystemTime::now(),
+        sequence: context.create_message_sequence(),
+    };
+    let composed = build_draft_message(&context.account, &composition, stamp)
+        .map_err(|problem| ToolFailure::Argument(problem.format_sentence()))?;
     let mut session = session.take().expect("the session was opened above");
     let folders = load_folders(&mut session).await?;
-    let drafts = require_role_folder(&folders, FolderRole::Drafts)?.clone();
+    let drafts = get_role_folder(&folders, FolderRole::Drafts)?.clone();
     if let Some(replaced) = &replaced {
-        check_in_drafts(replaced, &drafts)?;
-        select_id_folder(&mut session, &folders, replaced, true).await?;
-        require_message(&mut session, replaced.uid).await?;
+        open_draft_folder(&mut session, &drafts, replaced).await?;
+        find_message_summary(&mut session, replaced.uid)
+            .await?
+            .ok_or(ToolFailure::StaleId)?;
     }
     session
-        .append_message(&drafts.raw_name, DRAFT_FLAGS, &composed.bytes)
+        .save_message(&drafts.raw_name, DRAFT_FLAGS, &composed.bytes)
         .await
-        .map_err(imap_failure("save the draft"))?;
+        .map_err(build_imap_failure_conversion("save the draft"))?;
     let selected = session
-        .select_folder(&drafts.raw_name, false)
+        .open_folder(&drafts.raw_name, FolderAccess::Change)
         .await
-        .map_err(imap_failure("select the Drafts folder"))?;
+        .map_err(build_imap_failure_conversion("select the Drafts folder"))?;
     let uids = session
-        .search_uids(&format!(
+        .list_matching_uids(&format!(
             "HEADER MESSAGE-ID {}",
             format_search_text(&composed.message_id)
         ))
         .await
-        .map_err(imap_failure("find the saved draft"))?;
+        .map_err(build_imap_failure_conversion("find the saved draft"))?;
     let id = uids.first().map(|uid| EmailId {
         uid: *uid,
         uid_validity: selected.uid_validity,
@@ -129,7 +128,7 @@ pub async fn save_draft(context: &ToolContext, arguments: SaveDraftArguments) ->
         session
             .delete_message(replaced.uid)
             .await
-            .map_err(imap_failure("delete the replaced draft"))?;
+            .map_err(build_imap_failure_conversion("delete the replaced draft"))?;
     }
     session.close().await;
     let text = match &id {
@@ -166,19 +165,18 @@ pub async fn save_draft(context: &ToolContext, arguments: SaveDraftArguments) ->
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - Which draft.
-pub async fn send_draft(context: &ToolContext, arguments: DraftIdArguments) -> ToolResult {
+pub async fn run_send_draft(context: &ToolContext, arguments: DraftIdArguments) -> ToolResult {
     let id = parse_email_id(&arguments.draft_id)?;
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
-    let drafts = require_role_folder(&folders, FolderRole::Drafts)?.clone();
-    check_in_drafts(&id, &drafts)?;
-    select_id_folder(&mut session, &folders, &id, false).await?;
+    let drafts = get_role_folder(&folders, FolderRole::Drafts)?.clone();
+    open_draft_folder(&mut session, &drafts, &id).await?;
     let fetched = session
-        .fetch_message(id.uid)
+        .find_message(id.uid)
         .await
-        .map_err(imap_failure("fetch the draft"))?
+        .map_err(build_imap_failure_conversion("fetch the draft"))?
         .ok_or(ToolFailure::StaleId)?;
-    let prepared = prepare_draft(&context.account.address, &fetched.bytes)?;
+    let prepared = parse_stored_draft(&context.account.address, &fetched.bytes)?;
     send_composed(context, &prepared.message).await?;
     let copy = if context.account.server_keeps_sent_copy {
         super::send::SentCopy::KeptByServer
@@ -187,7 +185,7 @@ pub async fn send_draft(context: &ToolContext, arguments: DraftIdArguments) -> T
             .iter()
             .find(|folder| folder.role == Some(FolderRole::Sent))
         {
-            Some(sent) => match append_copy(&mut session, sent, &prepared.message.bytes).await {
+            Some(sent) => match save_read_copy(&mut session, sent, &prepared.message.bytes).await {
                 Ok(()) => super::send::SentCopy::Saved(sent.name.clone()),
                 Err(failure) => super::send::SentCopy::Failed(failure.to_string()),
             },
@@ -195,14 +193,14 @@ pub async fn send_draft(context: &ToolContext, arguments: DraftIdArguments) -> T
         }
     };
     let deleted = match session
-        .select_folder(&drafts.raw_name, false)
+        .open_folder(&drafts.raw_name, FolderAccess::Change)
         .await
-        .map_err(imap_failure("select the Drafts folder"))
+        .map_err(build_imap_failure_conversion("select the Drafts folder"))
     {
         Ok(_) => session
             .delete_message(id.uid)
             .await
-            .map_err(imap_failure("delete the sent draft")),
+            .map_err(build_imap_failure_conversion("delete the sent draft")),
         Err(failure) => Err(failure),
     };
     session.close().await;
@@ -215,12 +213,12 @@ pub async fn send_draft(context: &ToolContext, arguments: DraftIdArguments) -> T
             "Sent draft {id}.\nTo: {}\nSubject: {}\n{}\n{deletion}",
             prepared.recipients.join(", "),
             prepared.subject,
-            copy.describe()
+            copy.format_sentence()
         ),
         log: format!(
             "draft: sent to {} recipient(s), copy {}, deleted {}",
             prepared.message.envelope.to().len(),
-            describe_copy_for_log(&copy),
+            format_copy_for_log(&copy),
             deleted.is_ok()
         ),
     })
@@ -232,18 +230,19 @@ pub async fn send_draft(context: &ToolContext, arguments: DraftIdArguments) -> T
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - Which draft.
-pub async fn delete_draft(context: &ToolContext, arguments: DraftIdArguments) -> ToolResult {
+pub async fn run_delete_draft(context: &ToolContext, arguments: DraftIdArguments) -> ToolResult {
     let id = parse_email_id(&arguments.draft_id)?;
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
-    let drafts = require_role_folder(&folders, FolderRole::Drafts)?.clone();
-    check_in_drafts(&id, &drafts)?;
-    select_id_folder(&mut session, &folders, &id, false).await?;
-    require_message(&mut session, id.uid).await?;
+    let drafts = get_role_folder(&folders, FolderRole::Drafts)?.clone();
+    open_draft_folder(&mut session, &drafts, &id).await?;
+    find_message_summary(&mut session, id.uid)
+        .await?
+        .ok_or(ToolFailure::StaleId)?;
     session
         .delete_message(id.uid)
         .await
-        .map_err(imap_failure("delete the draft"))?;
+        .map_err(build_imap_failure_conversion("delete the draft"))?;
     session.close().await;
     Ok(ToolReport {
         text: format!("Draft {id} deleted."),
@@ -275,7 +274,7 @@ pub struct PreparedDraft {
 ///
 /// The message to send, or why it cannot be sent: no recipient that is
 /// an address, or a sender address lettre refuses.
-pub fn prepare_draft(sender: &str, bytes: &[u8]) -> Result<PreparedDraft, ToolFailure> {
+pub fn parse_stored_draft(sender: &str, bytes: &[u8]) -> Result<PreparedDraft, ToolFailure> {
     let parsed = MessageParser::default()
         .parse(bytes)
         .ok_or_else(|| ToolFailure::Argument("The draft is not a message.".to_owned()))?;
@@ -338,25 +337,59 @@ pub fn prepare_draft(sender: &str, bytes: &[u8]) -> Result<PreparedDraft, ToolFa
     })
 }
 
-/// Checks that an id is in the Drafts folder.
-fn check_in_drafts(id: &EmailId, drafts: &Folder) -> Result<(), ToolFailure> {
-    if id.folder == drafts.name {
-        Ok(())
-    } else {
-        Err(ToolFailure::NotInDrafts)
+/// Opens the Drafts folder for changes at a draft id.
+///
+/// # Arguments
+///
+/// * `session` - The signed-in session.
+/// * `drafts` - The Drafts folder.
+/// * `id` - The draft's id.
+///
+/// # Returns
+///
+/// Nothing when Drafts is open at the id; `NotInDrafts` for an id of
+/// another folder; `StaleId` when Drafts cannot be opened or its
+/// UIDVALIDITY changed.
+async fn open_draft_folder(
+    session: &mut ImapSession,
+    drafts: &Folder,
+    id: &EmailId,
+) -> Result<(), ToolFailure> {
+    if !is_in_drafts(id, drafts) {
+        return Err(ToolFailure::NotInDrafts);
     }
-}
-
-/// Checks that the selected folder still holds the message.
-async fn require_message(session: &mut ImapSession, uid: u32) -> Result<(), ToolFailure> {
-    let summaries = session
-        .fetch_summaries(&[uid])
+    if !drafts.selectable {
+        return Err(ToolFailure::StaleId);
+    }
+    let opened = session
+        .open_folder(&drafts.raw_name, FolderAccess::Change)
         .await
-        .map_err(imap_failure("fetch the message summary"))?;
-    if summaries.is_empty() {
+        .map_err(build_imap_failure_conversion("select the Drafts folder"))?;
+    if opened.uid_validity != id.uid_validity {
         return Err(ToolFailure::StaleId);
     }
     Ok(())
+}
+
+/// Tells whether an id is of the Drafts folder.
+fn is_in_drafts(id: &EmailId, drafts: &Folder) -> bool {
+    id.folder == drafts.name
+}
+
+/// Finds the summary of a message of the open folder.
+///
+/// # Returns
+///
+/// The summary, or `None` when the folder no longer holds the message.
+async fn find_message_summary(
+    session: &mut ImapSession,
+    uid: u32,
+) -> Result<Option<Summary>, ToolFailure> {
+    let summaries = session
+        .list_summaries(&[uid])
+        .await
+        .map_err(build_imap_failure_conversion("fetch the message summary"))?;
+    Ok(summaries.into_iter().next())
 }
 
 #[cfg(test)]
@@ -367,7 +400,7 @@ mod tests {
     fn prepares_a_draft_with_every_recipient_in_the_envelope_and_no_bcc_field() {
         let draft = b"From: A Person <person@example.com>\r\nTo: Jane <jane@example.com>, Team: a@example.com;\r\nCc: cc@example.com\r\nBcc: hidden@example.com\r\nSubject: Hi\r\nMessage-ID: <one@example.com>\r\nContent-Type: text/plain\r\n\r\nHello\r\n";
 
-        let prepared = prepare_draft("person@example.com", draft).expect("prepared");
+        let prepared = parse_stored_draft("person@example.com", draft).expect("prepared");
 
         let text = String::from_utf8(prepared.message.bytes.clone()).expect("utf-8");
         assert!(!text.contains("hidden"), "{text}");
@@ -412,7 +445,7 @@ mod tests {
         let draft = b"From: person@example.com\r\nTo: nobody\r\nSubject: Hi\r\n\r\nHello\r\n";
 
         assert_eq!(
-            prepare_draft("person@example.com", draft),
+            parse_stored_draft("person@example.com", draft),
             Err(ToolFailure::Argument(
                 "The draft has no recipient that is an email address. Save it again with one."
                     .to_owned()
@@ -438,10 +471,7 @@ mod tests {
             ..inside.clone()
         };
 
-        assert_eq!(check_in_drafts(&inside, &drafts), Ok(()));
-        assert_eq!(
-            check_in_drafts(&outside, &drafts),
-            Err(ToolFailure::NotInDrafts)
-        );
+        assert!(is_in_drafts(&inside, &drafts));
+        assert!(!is_in_drafts(&outside, &drafts));
     }
 }

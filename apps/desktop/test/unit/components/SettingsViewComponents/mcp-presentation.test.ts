@@ -81,6 +81,7 @@ import {
   buildConnectedMcpState,
   buildFailedMcpState,
   buildMcpServerList,
+  buildBuiltInMcpServerStatus,
   buildMcpServerStatus,
   CONNECTING_MCP_STATE,
   OFF_MCP_STATE
@@ -121,12 +122,12 @@ function buildLoadedMcpList(
 }
 
 /**
- * Lists a saved server as the pane does.
+ * Builds the entry of a saved server as the pane lists it.
  *
  * @param settings - Saved settings of the server.
  * @returns The added server.
  */
-function listAdded(settings: McpServerSettings): McpListedServer {
+function buildAddedListedServer(settings: McpServerSettings): McpListedServer {
   return { kind: "added", settings }
 }
 
@@ -145,7 +146,7 @@ function buildAppliedRowFacts(
   return {
     isBackendRunning: true,
     list: buildLoadedMcpList([status]),
-    server: listAdded(server)
+    server: buildAddedListedServer(server)
   }
 }
 
@@ -160,7 +161,7 @@ function buildEmailRowFacts(
   server: McpListedServer,
   state: McpServerState
 ): McpServerRowFacts {
-  const status = buildMcpServerStatus("email", "stdio", state, true)
+  const status = buildBuiltInMcpServerStatus("email", state)
   return {
     isBackendRunning: true,
     list: buildLoadedMcpList([status]),
@@ -260,8 +261,8 @@ const EMAIL_SERVER_WITHOUT_ACCOUNT: McpListedServer = Object.freeze({
 
 /** Listed servers by transport, for the cases that vary only the transport. */
 const SERVER_BY_TRANSPORT = Object.freeze({
-  stdio: listAdded(COMMAND_SERVER),
-  http: listAdded(URL_SERVER)
+  stdio: buildAddedListedServer(COMMAND_SERVER),
+  http: buildAddedListedServer(URL_SERVER)
 })
 
 /** Two tools of the command server whose token estimates differ. */
@@ -325,8 +326,8 @@ describe("listed servers", () => {
       listMcpServers({ mcp: STORED_MCP_SETTINGS, email: STORED_EMAIL_SETTINGS })
     ).toEqual([
       { ...EMAIL_SERVER, isOn: false },
-      listAdded(STORED_MCP_SETTINGS.servers[0]),
-      listAdded(STORED_MCP_SETTINGS.servers[1])
+      buildAddedListedServer(STORED_MCP_SETTINGS.servers[0]),
+      buildAddedListedServer(STORED_MCP_SETTINGS.servers[1])
     ])
   })
 
@@ -348,7 +349,7 @@ describe("listed servers", () => {
   })
 
   it("names, keys, and tells the transport and switch of each kind", () => {
-    const added = listAdded({ ...URL_SERVER, enabled: false })
+    const added = buildAddedListedServer({ ...URL_SERVER, enabled: false })
 
     expect(getMcpListedServerName(added)).toBe("notes")
     expect(getMcpListedServerName(EMAIL_SERVER)).toBe("email")
@@ -357,16 +358,16 @@ describe("listed servers", () => {
     expect(getMcpListedServerTransport(added)).toBe("http")
     expect(getMcpListedServerTransport(EMAIL_SERVER)).toBe("stdio")
     expect(isMcpListedServerOn(added)).toBe(false)
-    expect(isMcpListedServerOn(listAdded(URL_SERVER))).toBe(true)
+    expect(isMcpListedServerOn(buildAddedListedServer(URL_SERVER))).toBe(true)
     expect(isMcpListedServerOn(EMAIL_SERVER)).toBe(true)
     expect(isMcpListedServerOn({ ...EMAIL_SERVER, isOn: false })).toBe(false)
   })
 
   it.each([
-    ["an added server", listAdded(COMMAND_SERVER), true],
+    ["an added server", buildAddedListedServer(COMMAND_SERVER), true],
     [
       "an added server that is off",
-      listAdded({ ...COMMAND_SERVER, enabled: false }),
+      buildAddedListedServer({ ...COMMAND_SERVER, enabled: false }),
       true
     ],
     [
@@ -405,16 +406,18 @@ describe("listed servers", () => {
 describe("formatMcpServerTarget", () => {
   it("shows a command with its arguments, never its environment", () => {
     expect(
-      formatMcpServerTarget(listAdded(STORED_MCP_SETTINGS.servers[0]))
+      formatMcpServerTarget(
+        buildAddedListedServer(STORED_MCP_SETTINGS.servers[0])
+      )
     ).toBe(
       "/opt/homebrew/bin/npx -y @modelcontextprotocol/server-filesystem /tmp"
     )
   })
 
   it("shows a command without arguments alone", () => {
-    expect(formatMcpServerTarget(listAdded(BARE_COMMAND_SERVER))).toBe(
-      "/usr/local/bin/bare"
-    )
+    expect(
+      formatMcpServerTarget(buildAddedListedServer(BARE_COMMAND_SERVER))
+    ).toBe("/usr/local/bin/bare")
   })
 
   it("says what a server Lys ships does", () => {
@@ -431,13 +434,13 @@ describe("formatMcpServerTarget", () => {
       arguments: ["--root", "/Users/me/My Files", 'say "hi"']
     })
 
-    expect(formatMcpServerTarget(listAdded(server))).toBe(
+    expect(formatMcpServerTarget(buildAddedListedServer(server))).toBe(
       'uvx --root "/Users/me/My Files" "say \\"hi\\""'
     )
   })
 
   it("shows a URL, never its headers", () => {
-    expect(formatMcpServerTarget(listAdded(URL_SERVER))).toBe(
+    expect(formatMcpServerTarget(buildAddedListedServer(URL_SERVER))).toBe(
       "https://mcp.example.test/notes"
     )
   })
@@ -454,7 +457,7 @@ describe("formatMcpServerTarget", () => {
   ])("hides the query of %s, which can hold a key", (url, target) => {
     const server = parseMcpServer({ name: "keyed", transport: "http", url })
 
-    expect(formatMcpServerTarget(listAdded(server))).toBe(target)
+    expect(formatMcpServerTarget(buildAddedListedServer(server))).toBe(target)
   })
 })
 
@@ -498,7 +501,7 @@ describe("formatMcpServerStatus", () => {
         formatMcpServerStatus({
           isBackendRunning: true,
           list,
-          server: listAdded(COMMAND_SERVER)
+          server: buildAddedListedServer(COMMAND_SERVER)
         })
       ).toEqual({
         condition: "idle",
@@ -537,7 +540,7 @@ describe("formatMcpServerStatus", () => {
     expect(
       formatMcpServerStatus({
         ...buildAppliedRowFacts(COMMAND_SERVER, buildConnectedMcpState(2)),
-        server: listAdded({ ...COMMAND_SERVER, enabled: false })
+        server: buildAddedListedServer({ ...COMMAND_SERVER, enabled: false })
       })
     ).toEqual({
       condition: "off",
@@ -1174,13 +1177,13 @@ describe("calculateConnectedMcpServerCount", () => {
   const servers = [
     EMAIL_SERVER,
     ...[COMMAND_SERVER, URL_SERVER, OPEN_URL_SERVER, BARE_COMMAND_SERVER].map(
-      listAdded
+      buildAddedListedServer
     )
   ]
 
   /** Applied servers: one listed server per state, one no longer saved. */
   const list = buildLoadedMcpList([
-    buildMcpServerStatus("email", "stdio", buildConnectedMcpState(5), true),
+    buildBuiltInMcpServerStatus("email", buildConnectedMcpState(5)),
     buildMcpServerStatus("github", "stdio", buildConnectedMcpState(2)),
     buildMcpServerStatus("notes", "http", CONNECTING_MCP_STATE),
     buildMcpServerStatus("local", "http", buildFailedMcpState("unreachable")),

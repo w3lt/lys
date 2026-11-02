@@ -46,7 +46,7 @@ impl SignInFailure {
     }
 
     /// Returns the failure as a clause for a sentence to the model.
-    pub fn describe(self) -> &'static str {
+    pub fn format_clause(self) -> &'static str {
         match self {
             Self::WrongPassword => "the user name or password was refused",
             Self::Unreachable => "the host could not be reached",
@@ -217,7 +217,7 @@ impl fmt::Display for ToolFailure {
                 formatter,
                 "Signing in to the {} server failed: {}. Check the email account in Settings → MCP.",
                 protocol.name(),
-                failure.describe()
+                failure.format_clause()
             ),
             Self::ImapRefused { operation, text } => {
                 write!(formatter, "The IMAP server refused to {operation}: {text}.")
@@ -306,7 +306,7 @@ mod tests {
         for failure in failures {
             let json = serde_json::to_string(&failure).expect("json");
             assert_eq!(json, format!("\"{}\"", failure.name()));
-            assert!(!failure.describe().is_empty());
+            assert!(!failure.format_clause().is_empty());
         }
     }
 

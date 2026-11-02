@@ -5,12 +5,12 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{
-    ToolContext, ToolReport, ToolResult, check_folder_name_argument, imap_failure, load_folders,
-    require_folder,
+    ToolContext, ToolReport, ToolResult, build_imap_failure_conversion, get_changeable_folder,
+    load_folders, parse_folder_name_argument,
 };
 use crate::failure::ToolFailure;
-use crate::folder_name::encode_folder_name;
-use crate::folders::{Folder, find_folder};
+use crate::folder_name::build_encoded_folder_name;
+use crate::folders::find_folder;
 
 /// What `manage_folder` does.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -42,7 +42,7 @@ pub struct FolderArguments {
 /// # Arguments
 ///
 /// * `context` - The account and trust.
-pub async fn list_folders(context: &ToolContext) -> ToolResult {
+pub async fn run_list_folders(context: &ToolContext) -> ToolResult {
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
     let mut lines = Vec::with_capacity(folders.len());
@@ -53,9 +53,9 @@ pub async fn list_folders(context: &ToolContext) -> ToolResult {
         }
         if folder.selectable {
             let count = session
-                .count_messages(&folder.raw_name)
+                .get_message_count(&folder.raw_name)
                 .await
-                .map_err(imap_failure("count the messages"))?;
+                .map_err(build_imap_failure_conversion("count the messages"))?;
             line.push_str(&format!(
                 ": {count} {}",
                 if count == 1 { "message" } else { "messages" }
@@ -82,10 +82,10 @@ pub async fn list_folders(context: &ToolContext) -> ToolResult {
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - What to do with which folder.
-pub async fn manage_folder(context: &ToolContext, arguments: FolderArguments) -> ToolResult {
-    check_folder_name_argument("name", &arguments.name)?;
+pub async fn run_manage_folder(context: &ToolContext, arguments: FolderArguments) -> ToolResult {
+    parse_folder_name_argument("name", &arguments.name)?;
     if let Some(new_name) = &arguments.new_name {
-        check_folder_name_argument("new_name", new_name)?;
+        parse_folder_name_argument("new_name", new_name)?;
     }
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
@@ -95,9 +95,9 @@ pub async fn manage_folder(context: &ToolContext, arguments: FolderArguments) ->
                 return Err(ToolFailure::FolderExists(arguments.name));
             }
             session
-                .create_folder(&encode_folder_name(&arguments.name))
+                .create_folder(&build_encoded_folder_name(&arguments.name))
                 .await
-                .map_err(imap_failure("create the folder"))?;
+                .map_err(build_imap_failure_conversion("create the folder"))?;
             ToolReport {
                 text: format!("Folder {} created.", arguments.name),
                 log: "folder: created".to_owned(),
@@ -107,28 +107,26 @@ pub async fn manage_folder(context: &ToolContext, arguments: FolderArguments) ->
             let new_name = arguments.new_name.ok_or_else(|| {
                 ToolFailure::Argument("new_name is required to rename a folder.".to_owned())
             })?;
-            let folder = require_folder(&folders, &arguments.name)?;
-            refuse_role_folder(folder)?;
+            let folder = get_changeable_folder(&folders, &arguments.name)?;
             if find_folder(&folders, &new_name).is_some() {
                 return Err(ToolFailure::FolderExists(new_name));
             }
             session
-                .rename_folder(&folder.raw_name, &encode_folder_name(&new_name))
+                .update_folder_name(&folder.raw_name, &build_encoded_folder_name(&new_name))
                 .await
-                .map_err(imap_failure("rename the folder"))?;
+                .map_err(build_imap_failure_conversion("rename the folder"))?;
             ToolReport {
                 text: format!("Folder {} renamed to {new_name}.", folder.name),
                 log: "folder: renamed".to_owned(),
             }
         }
         FolderAction::Delete => {
-            let folder = require_folder(&folders, &arguments.name)?;
-            refuse_role_folder(folder)?;
+            let folder = get_changeable_folder(&folders, &arguments.name)?;
             if folder.selectable {
                 let count = session
-                    .count_messages(&folder.raw_name)
+                    .get_message_count(&folder.raw_name)
                     .await
-                    .map_err(imap_failure("count the messages"))?;
+                    .map_err(build_imap_failure_conversion("count the messages"))?;
                 if count > 0 {
                     return Err(ToolFailure::FolderNotEmpty(folder.name.clone()));
                 }
@@ -136,7 +134,7 @@ pub async fn manage_folder(context: &ToolContext, arguments: FolderArguments) ->
             session
                 .delete_folder(&folder.raw_name)
                 .await
-                .map_err(imap_failure("delete the folder"))?;
+                .map_err(build_imap_failure_conversion("delete the folder"))?;
             ToolReport {
                 text: format!("Folder {} deleted.", folder.name),
                 log: "folder: deleted".to_owned(),
@@ -147,46 +145,9 @@ pub async fn manage_folder(context: &ToolContext, arguments: FolderArguments) ->
     Ok(report)
 }
 
-/// Refuses to change a folder that has a role.
-fn refuse_role_folder(folder: &Folder) -> Result<(), ToolFailure> {
-    match folder.role {
-        Some(role) => Err(ToolFailure::RoleFolder {
-            name: folder.name.clone(),
-            role,
-        }),
-        None => Ok(()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::folders::FolderRole;
-
-    #[test]
-    fn refuses_role_folders_only() {
-        let inbox = Folder {
-            name: "INBOX".to_owned(),
-            raw_name: "INBOX".to_owned(),
-            role: Some(FolderRole::Inbox),
-            selectable: true,
-        };
-        let projects = Folder {
-            name: "Projects".to_owned(),
-            raw_name: "Projects".to_owned(),
-            role: None,
-            selectable: true,
-        };
-
-        assert_eq!(
-            refuse_role_folder(&inbox),
-            Err(ToolFailure::RoleFolder {
-                name: "INBOX".to_owned(),
-                role: FolderRole::Inbox
-            })
-        );
-        assert_eq!(refuse_role_folder(&projects), Ok(()));
-    }
 
     #[test]
     fn parses_the_action_names() {

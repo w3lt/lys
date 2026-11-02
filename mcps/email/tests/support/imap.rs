@@ -7,7 +7,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWrite
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsAcceptor;
 
-use super::{PASSWORD, USER_NAME, format_internal_date, now_timestamp, parse_search_date};
+use super::{PASSWORD, USER_NAME, format_internal_date, get_current_timestamp, parse_search_date};
 
 /// How the fake protects its connections.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,6 +48,17 @@ impl FakeMessage {
     }
 }
 
+/// A message to add to a folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NewMessage<'a> {
+    /// The message (RFC 5322).
+    pub bytes: Vec<u8>,
+    /// Its flags, such as `\Seen`.
+    pub flags: &'a [&'a str],
+    /// When it arrived, as seconds since the Unix epoch.
+    pub timestamp: i64,
+}
+
 /// One folder.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FakeFolder {
@@ -79,7 +90,7 @@ impl FakeFolder {
     }
 
     /// Whether the folder can be selected.
-    pub fn selectable(&self) -> bool {
+    pub fn is_selectable(&self) -> bool {
         !self
             .attributes
             .iter()
@@ -105,7 +116,7 @@ pub struct FakeMailbox {
 
 impl FakeMailbox {
     /// A mailbox without folders.
-    pub fn empty() -> Self {
+    pub fn create_empty() -> Self {
         Self {
             folders: Vec::new(),
             commands: Vec::new(),
@@ -117,8 +128,8 @@ impl FakeMailbox {
 
     /// The usual folders: INBOX, Sent, Drafts, Trash, an All Mail view, a
     /// plain Projects folder, and a parent that cannot hold messages.
-    pub fn standard() -> Self {
-        let mut mailbox = Self::empty();
+    pub fn create_standard() -> Self {
+        let mut mailbox = Self::create_empty();
         mailbox.folders = vec![
             FakeFolder::new("INBOX", &["\\HasNoChildren"], 1001),
             FakeFolder::new("Sent", &["\\HasNoChildren", "\\Sent"], 1002),
@@ -136,37 +147,41 @@ impl FakeMailbox {
     /// # Returns
     ///
     /// The message's UID.
-    pub fn add_message(
-        &mut self,
-        folder: &str,
-        bytes: Vec<u8>,
-        flags: &[&str],
-        timestamp: i64,
-    ) -> u32 {
-        let folder = self.folder_mut(folder).expect("the folder exists");
+    pub fn add_message(&mut self, folder: &str, message: NewMessage<'_>) -> u32 {
+        let folder = self.find_folder_mut(folder).expect("the folder exists");
         let uid = folder.next_uid;
         folder.next_uid += 1;
         folder.messages.push(FakeMessage {
             uid,
-            flags: flags.iter().map(|flag| (*flag).to_owned()).collect(),
-            timestamp,
-            bytes,
+            flags: message
+                .flags
+                .iter()
+                .map(|flag| (*flag).to_owned())
+                .collect(),
+            timestamp: message.timestamp,
+            bytes: message.bytes,
         });
         uid
     }
 
     /// Finds a folder by name.
-    pub fn folder(&self, name: &str) -> Option<&FakeFolder> {
+    pub fn find_folder(&self, name: &str) -> Option<&FakeFolder> {
         self.folders.iter().find(|folder| folder.name == name)
     }
 
     /// Finds a folder by name, to change it.
-    pub fn folder_mut(&mut self, name: &str) -> Option<&mut FakeFolder> {
+    pub fn find_folder_mut(&mut self, name: &str) -> Option<&mut FakeFolder> {
         self.folders.iter_mut().find(|folder| folder.name == name)
     }
 }
 
 /// The running fake.
+///
+/// Concurrency model: concurrent; the accept task, each connection's
+/// task, and the test share the mailbox behind one mutex, held only to
+/// read or change it in memory. Resource ownership: the listener and the
+/// connection tasks belong to the test's runtime, which drops them when
+/// the test ends; the fake keeps the port and a share of the mailbox.
 pub struct FakeImapServer {
     /// The port it listens on, on 127.0.0.1.
     pub port: u16,
@@ -190,16 +205,19 @@ impl FakeImapServer {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("a free port");
         let port = listener.local_addr().expect("the address").port();
         let state = Arc::new(Mutex::new(mailbox));
-        let shared = Arc::clone(&state);
+        let setup = ConnectionSetup {
+            mode,
+            acceptor,
+            state: Arc::clone(&state),
+        };
         tokio::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else {
                     break;
                 };
-                let state = Arc::clone(&shared);
-                let acceptor = acceptor.clone();
+                let setup = setup.clone();
                 tokio::spawn(async move {
-                    handle_connection(stream, mode, acceptor, state).await;
+                    handle_connection(stream, setup).await;
                 });
             }
         });
@@ -207,34 +225,50 @@ impl FakeImapServer {
     }
 
     /// The commands received so far.
-    pub fn commands(&self) -> Vec<String> {
+    pub fn list_commands(&self) -> Vec<String> {
         self.state.lock().expect("the state").commands.clone()
     }
 
     /// The messages of a folder.
-    pub fn messages(&self, folder: &str) -> Vec<FakeMessage> {
+    pub fn list_messages(&self, folder: &str) -> Vec<FakeMessage> {
         self.state
             .lock()
             .expect("the state")
-            .folder(folder)
+            .find_folder(folder)
             .map(|folder| folder.messages.clone())
             .unwrap_or_default()
     }
 
-    /// Runs a closure over the state.
-    pub fn with_state<T>(&self, change: impl FnOnce(&mut FakeMailbox) -> T) -> T {
-        change(&mut self.state.lock().expect("the state"))
+    /// Finds a folder by name, as a copy.
+    pub fn find_folder(&self, name: &str) -> Option<FakeFolder> {
+        self.state
+            .lock()
+            .expect("the state")
+            .find_folder(name)
+            .cloned()
+    }
+
+    /// Changes the state, as a server whose mailbox changed between two
+    /// calls.
+    pub fn update_state(&self, change: impl FnOnce(&mut FakeMailbox)) {
+        change(&mut self.state.lock().expect("the state"));
     }
 }
 
-/// Serves one connection in the mode.
-async fn handle_connection(
-    stream: TcpStream,
+/// What every connection of the fake shares.
+#[derive(Clone)]
+struct ConnectionSetup {
+    /// How the fake protects its connections.
     mode: ImapMode,
+    /// The TLS acceptor, for the TLS modes.
     acceptor: Option<TlsAcceptor>,
+    /// The folders, the messages, and what the fake has seen.
     state: Arc<Mutex<FakeMailbox>>,
-) {
-    match mode {
+}
+
+/// Serves one connection in the setup's mode.
+async fn handle_connection(stream: TcpStream, setup: ConnectionSetup) {
+    match setup.mode {
         ImapMode::Silent => {
             let mut reader = BufReader::new(stream);
             let mut line = String::new();
@@ -252,313 +286,462 @@ async fn handle_connection(
             let _ = stream.shutdown().await;
         }
         ImapMode::Tls => {
-            let Some(acceptor) = acceptor else {
+            let Some(acceptor) = &setup.acceptor else {
                 return;
             };
             if let Ok(tls) = acceptor.accept(stream).await {
-                run_session(tls, mode, true, state).await;
+                handle_session_commands(tls, &setup, true).await;
             }
         }
         ImapMode::StartTls => {
-            if let Some(plain) = run_session(stream, mode, false, Arc::clone(&state)).await {
-                let Some(acceptor) = acceptor else {
+            if let Some(plain) = handle_session_commands(stream, &setup, false).await {
+                let Some(acceptor) = &setup.acceptor else {
                     return;
                 };
                 if let Ok(tls) = acceptor.accept(plain).await {
-                    run_session(tls, mode, true, state).await;
+                    handle_session_commands(tls, &setup, true).await;
                 }
             }
         }
         ImapMode::StartTlsRefused | ImapMode::Plain => {
-            run_session(stream, mode, false, state).await;
+            handle_session_commands(stream, &setup, false).await;
         }
     }
 }
 
-/// Runs the dialogue until LOGOUT, the end of the stream, or an accepted
-/// STARTTLS, which hands the stream back for the upgrade.
-async fn run_session<S>(
-    stream: S,
+/// One session over one connection: what it knows about the connection,
+/// and the folder it has open.
+///
+/// Owned by the task that serves the connection, which handles its
+/// commands one at a time.
+struct Session {
+    /// How the fake protects its connections.
     mode: ImapMode,
+    /// Whether TLS protects this connection already.
     secured: bool,
-    state: Arc<Mutex<FakeMailbox>>,
-) -> Option<S>
+    /// The capabilities it advertises.
+    capabilities: String,
+    /// The name of the folder SELECT or EXAMINE opened, if any.
+    selected: Option<String>,
+}
+
+/// One command a client sent.
+struct Command {
+    /// Its tag.
+    tag: String,
+    /// Its name in capitals; for `UID <name>`, the name after `UID`.
+    name: String,
+    /// Whether it came as `UID <name>`.
+    by_uid: bool,
+    /// Its arguments, as [`tokenize`] splits them.
+    arguments: Vec<String>,
+    /// The literals it carried, in order.
+    literals: Vec<Vec<u8>>,
+}
+
+/// What a session does after one command.
+enum Step {
+    /// Writes the answer and reads the next command.
+    Answer(Vec<u8>),
+    /// Writes the line and hands the stream back for the TLS upgrade.
+    StartTls(String),
+    /// Writes the lines and ends the session.
+    Logout(String),
+}
+
+/// Handles the session's commands until LOGOUT, the end of the stream,
+/// or an accepted STARTTLS, which hands the stream back for the upgrade.
+///
+/// # Arguments
+///
+/// * `stream` - The connection.
+/// * `setup` - The mode and the mailbox.
+/// * `secured` - Whether TLS protects the connection already.
+async fn handle_session_commands<S>(stream: S, setup: &ConnectionSetup, secured: bool) -> Option<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let mut reader = BufReader::new(stream);
-    let capabilities = capabilities(mode, secured, &state);
-    if !secured || mode == ImapMode::Tls {
-        write(
+    let mut session = Session {
+        mode: setup.mode,
+        secured,
+        capabilities: format_capabilities(setup.mode, secured, &setup.state),
+        selected: None,
+    };
+    if !secured || setup.mode == ImapMode::Tls {
+        send_line(
             &mut reader,
-            &format!("* OK [CAPABILITY {capabilities}] Fake ready\r\n"),
+            &format!("* OK [CAPABILITY {}] Fake ready\r\n", session.capabilities),
         )
         .await;
     }
-    let mut selected: Option<String> = None;
     loop {
         let (text, literals) = read_command(&mut reader).await?;
-        state.lock().expect("the state").commands.push(text.clone());
-        let tokens = tokenize(&text);
-        let Some(tag) = tokens.first().cloned() else {
+        setup
+            .state
+            .lock()
+            .expect("the state")
+            .commands
+            .push(text.clone());
+        let Some(command) = parse_command(&text, literals) else {
             continue;
         };
-        let mut command = tokens
-            .get(1)
-            .map(|token| token.to_ascii_uppercase())
-            .unwrap_or_default();
-        let mut arguments: Vec<String> = tokens.iter().skip(2).cloned().collect();
-        let by_uid = command == "UID";
-        if by_uid {
-            command = arguments
-                .first()
-                .map(|token| token.to_ascii_uppercase())
-                .unwrap_or_default();
-            arguments.remove(0);
-        }
-        let answer: Vec<u8> = match command.as_str() {
-            "CAPABILITY" => {
-                format!("* CAPABILITY {capabilities}\r\n{tag} OK Capability completed\r\n")
-                    .into_bytes()
+        let step = {
+            let mut mailbox = setup.state.lock().expect("the state");
+            session.handle_command(&command, &mut mailbox)
+        };
+        match step {
+            Step::Answer(answer) => send_bytes(&mut reader, &answer).await,
+            Step::StartTls(line) => {
+                send_line(&mut reader, &line).await;
+                return Some(reader.into_inner());
             }
-            "NOOP" => format!("{tag} OK Noop completed\r\n").into_bytes(),
-            "STARTTLS" => {
-                if mode == ImapMode::StartTls && !secured {
-                    write(
-                        &mut reader,
-                        &format!("{tag} OK Begin TLS negotiation now\r\n"),
-                    )
-                    .await;
-                    return Some(reader.into_inner());
-                }
-                format!("{tag} NO STARTTLS is not available\r\n").into_bytes()
-            }
-            "LOGIN" => {
-                if arguments.first().is_some_and(|user| user == USER_NAME)
-                    && arguments
-                        .get(1)
-                        .is_some_and(|password| password == PASSWORD)
-                {
-                    format!("{tag} OK [CAPABILITY {capabilities}] Logged in\r\n").into_bytes()
-                } else {
-                    format!("{tag} NO [AUTHENTICATIONFAILED] Authentication failed.\r\n")
-                        .into_bytes()
-                }
-            }
-            "LOGOUT" => {
-                write(
-                    &mut reader,
-                    &format!("* BYE Logging out\r\n{tag} OK Logout completed\r\n"),
-                )
-                .await;
+            Step::Logout(lines) => {
+                send_line(&mut reader, &lines).await;
                 return None;
             }
-            "LIST" => {
-                let state = state.lock().expect("the state");
-                let mut answer = String::new();
-                for folder in &state.folders {
-                    answer.push_str(&format!(
-                        "* LIST ({}) \"{}\" \"{}\"\r\n",
-                        folder.attributes.join(" "),
-                        state.delimiter,
-                        folder.name
-                    ));
-                }
-                answer.push_str(&format!("{tag} OK List completed\r\n"));
-                answer.into_bytes()
-            }
-            "STATUS" => {
-                let state = state.lock().expect("the state");
-                match arguments.first().and_then(|name| state.folder(name)) {
-                    Some(folder) if folder.selectable() => format!(
-                        "* STATUS \"{}\" (MESSAGES {})\r\n{tag} OK Status completed\r\n",
-                        folder.name,
-                        folder.messages.len()
-                    )
-                    .into_bytes(),
-                    _ => format!("{tag} NO Mailbox doesn't exist\r\n").into_bytes(),
-                }
-            }
-            "SELECT" | "EXAMINE" => {
-                let state = state.lock().expect("the state");
-                match arguments.first().and_then(|name| state.folder(name)) {
-                    Some(folder) if folder.selectable() => {
-                        selected = Some(folder.name.clone());
-                        let access = if command == "SELECT" {
-                            "READ-WRITE"
-                        } else {
-                            "READ-ONLY"
-                        };
-                        format!(
-                            "* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)\r\n* OK [PERMANENTFLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft \\*)] Flags permitted.\r\n* {} EXISTS\r\n* 0 RECENT\r\n* OK [UIDVALIDITY {}] UIDs valid\r\n* OK [UIDNEXT {}] Predicted next UID\r\n{tag} OK [{access}] {} completed\r\n",
-                            folder.messages.len(),
-                            folder.uid_validity,
-                            folder.next_uid,
-                            if command == "SELECT" { "Select" } else { "Examine" }
-                        )
-                        .into_bytes()
-                    }
-                    Some(_) => format!("{tag} NO Mailbox is not selectable\r\n").into_bytes(),
-                    None => format!("{tag} NO Mailbox doesn't exist\r\n").into_bytes(),
-                }
-            }
-            "CREATE" => {
-                let mut state = state.lock().expect("the state");
-                match arguments.first() {
-                    Some(name) if state.folder(name).is_some() => {
-                        format!("{tag} NO Mailbox already exists\r\n").into_bytes()
-                    }
-                    Some(name) => {
-                        let uid_validity = state.next_uid_validity;
-                        state.next_uid_validity += 1;
-                        let folder = FakeFolder::new(name, &["\\HasNoChildren"], uid_validity);
-                        state.folders.push(folder);
-                        format!("{tag} OK Create completed\r\n").into_bytes()
-                    }
-                    None => format!("{tag} BAD Missing name\r\n").into_bytes(),
-                }
-            }
-            "DELETE" => {
-                let mut state = state.lock().expect("the state");
-                match arguments
-                    .first()
-                    .and_then(|name| state.folders.iter().position(|folder| &folder.name == name))
-                {
-                    Some(index) => {
-                        state.folders.remove(index);
-                        format!("{tag} OK Delete completed\r\n").into_bytes()
-                    }
-                    None => format!("{tag} NO Mailbox doesn't exist\r\n").into_bytes(),
-                }
-            }
-            "RENAME" => {
-                let mut state = state.lock().expect("the state");
-                match (arguments.first().cloned(), arguments.get(1).cloned()) {
-                    (Some(old), Some(new)) => match state.folder_mut(&old) {
-                        Some(folder) => {
-                            folder.name = new;
-                            format!("{tag} OK Rename completed\r\n").into_bytes()
-                        }
-                        None => format!("{tag} NO Mailbox doesn't exist\r\n").into_bytes(),
-                    },
-                    _ => format!("{tag} BAD Missing names\r\n").into_bytes(),
-                }
-            }
-            "SEARCH" => {
-                let state = state.lock().expect("the state");
-                match selected.as_deref().and_then(|name| state.folder(name)) {
-                    Some(folder) => match search(folder, &arguments) {
-                        Ok(uids) => {
-                            let listed: Vec<String> =
-                                uids.iter().map(ToString::to_string).collect();
-                            format!(
-                                "* SEARCH{}{}\r\n{tag} OK Search completed\r\n",
-                                if listed.is_empty() { "" } else { " " },
-                                listed.join(" ")
-                            )
-                            .into_bytes()
-                        }
-                        Err(problem) => format!("{tag} BAD {problem}\r\n").into_bytes(),
-                    },
-                    None => format!("{tag} BAD No mailbox selected\r\n").into_bytes(),
-                }
-            }
-            "FETCH" => {
-                let mut state = state.lock().expect("the state");
-                match selected
-                    .as_deref()
-                    .and_then(|name| state.folders.iter().position(|folder| folder.name == name))
-                {
-                    Some(index) => fetch(&mut state.folders[index], &arguments, &tag),
-                    None => format!("{tag} BAD No mailbox selected\r\n").into_bytes(),
-                }
-            }
-            "STORE" => {
-                let mut state = state.lock().expect("the state");
-                match selected
-                    .as_deref()
-                    .and_then(|name| state.folders.iter().position(|folder| folder.name == name))
-                {
-                    Some(index) => store(&mut state.folders[index], &arguments, &tag),
-                    None => format!("{tag} BAD No mailbox selected\r\n").into_bytes(),
-                }
-            }
-            "EXPUNGE" | "CLOSE" => {
-                let mut state = state.lock().expect("the state");
-                match selected
-                    .as_deref()
-                    .and_then(|name| state.folders.iter().position(|folder| folder.name == name))
-                {
-                    Some(index) => {
-                        let folder = &mut state.folders[index];
-                        let only: Option<Vec<u32>> = if by_uid {
-                            arguments.first().map(|set| parse_set(set, folder))
-                        } else {
-                            None
-                        };
-                        let mut answer = String::new();
-                        let mut position = 0;
-                        while position < folder.messages.len() {
-                            let message = &folder.messages[position];
-                            let chosen = only.as_ref().is_none_or(|set| set.contains(&message.uid));
-                            if chosen && message.has_flag("\\Deleted") {
-                                folder.messages.remove(position);
-                                if command == "EXPUNGE" {
-                                    answer.push_str(&format!("* {} EXPUNGE\r\n", position + 1));
-                                }
-                            } else {
-                                position += 1;
-                            }
-                        }
-                        if command == "CLOSE" {
-                            selected = None;
-                        }
-                        answer.push_str(&format!(
-                            "{tag} OK {} completed\r\n",
-                            if command == "CLOSE" {
-                                "Close"
-                            } else {
-                                "Expunge"
-                            }
-                        ));
-                        answer.into_bytes()
-                    }
-                    None => format!("{tag} BAD No mailbox selected\r\n").into_bytes(),
-                }
-            }
-            "APPEND" => {
-                let mut state = state.lock().expect("the state");
-                let flags: Vec<&str> = arguments
-                    .iter()
-                    .find(|token| token.starts_with('('))
-                    .map(|token| token.trim_matches(['(', ')']).split_whitespace().collect())
-                    .unwrap_or_default();
-                match (arguments.first().cloned(), literals.last().cloned()) {
-                    (Some(name), Some(bytes)) => match state.folder(&name) {
-                        Some(_) => {
-                            let uid = state.add_message(&name, bytes, &flags, now_timestamp());
-                            let uid_validity =
-                                state.folder(&name).expect("the folder").uid_validity;
-                            format!(
-                                "{tag} OK [APPENDUID {uid_validity} {uid}] Append completed\r\n"
-                            )
-                            .into_bytes()
-                        }
-                        None => {
-                            format!("{tag} NO [TRYCREATE] Mailbox doesn't exist\r\n").into_bytes()
-                        }
-                    },
-                    _ => format!("{tag} BAD Missing name or message\r\n").into_bytes(),
-                }
-            }
-            _ => format!("{tag} BAD Error in IMAP command: Unknown command\r\n").into_bytes(),
-        };
-        write_bytes(&mut reader, &answer).await;
+        }
     }
 }
 
+/// Splits a command's text into its tag, name, and arguments.
+///
+/// # Returns
+///
+/// The command, or `None` for a line without a tag, which the session
+/// skips.
+fn parse_command(text: &str, literals: Vec<Vec<u8>>) -> Option<Command> {
+    let mut tokens = parse_tokens(text).into_iter();
+    let tag = tokens.next()?;
+    let mut name = tokens
+        .next()
+        .map(|token| token.to_ascii_uppercase())
+        .unwrap_or_default();
+    let mut arguments: Vec<String> = tokens.collect();
+    let by_uid = name == "UID";
+    if by_uid {
+        name = arguments
+            .first()
+            .map(|token| token.to_ascii_uppercase())
+            .unwrap_or_default();
+        arguments.remove(0);
+    }
+    Some(Command {
+        tag,
+        name,
+        by_uid,
+        arguments,
+        literals,
+    })
+}
+
+impl Session {
+    /// Handles one command over the mailbox, which it may change.
+    fn handle_command(&mut self, command: &Command, mailbox: &mut FakeMailbox) -> Step {
+        let tag = &command.tag;
+        let selected = &mut self.selected;
+        match command.name.as_str() {
+            "CAPABILITY" => Step::Answer(
+                format!(
+                    "* CAPABILITY {}\r\n{tag} OK Capability completed\r\n",
+                    self.capabilities
+                )
+                .into_bytes(),
+            ),
+            "NOOP" => Step::Answer(format!("{tag} OK Noop completed\r\n").into_bytes()),
+            "STARTTLS" => handle_starttls(tag, self.mode, self.secured),
+            "LOGIN" => Step::Answer(handle_login(command, &self.capabilities)),
+            "LOGOUT" => Step::Logout(format!(
+                "* BYE Logging out\r\n{tag} OK Logout completed\r\n"
+            )),
+            "LIST" => Step::Answer(handle_list(tag, mailbox)),
+            "STATUS" => Step::Answer(handle_status(command, mailbox)),
+            "SELECT" | "EXAMINE" => Step::Answer(handle_select(command, mailbox, selected)),
+            "CREATE" => Step::Answer(handle_create(command, mailbox)),
+            "DELETE" => Step::Answer(handle_delete(command, mailbox)),
+            "RENAME" => Step::Answer(handle_rename(command, mailbox)),
+            "SEARCH" => Step::Answer(handle_search(command, mailbox, selected.as_deref())),
+            "FETCH" => Step::Answer(handle_fetch(command, mailbox, selected.as_deref())),
+            "STORE" => Step::Answer(handle_store(command, mailbox, selected.as_deref())),
+            "EXPUNGE" | "CLOSE" => Step::Answer(handle_expunge(command, mailbox, selected)),
+            "APPEND" => Step::Answer(handle_append(command, mailbox)),
+            _ => Step::Answer(
+                format!("{tag} BAD Error in IMAP command: Unknown command\r\n").into_bytes(),
+            ),
+        }
+    }
+}
+
+/// Answers STARTTLS: an upgrade while the fake offers it on a plain
+/// connection, else a refusal.
+fn handle_starttls(tag: &str, mode: ImapMode, secured: bool) -> Step {
+    if mode == ImapMode::StartTls && !secured {
+        return Step::StartTls(format!("{tag} OK Begin TLS negotiation now\r\n"));
+    }
+    Step::Answer(format!("{tag} NO STARTTLS is not available\r\n").into_bytes())
+}
+
+/// Answers LOGIN: accepted for the test account's user name and password.
+fn handle_login(command: &Command, capabilities: &str) -> Vec<u8> {
+    let tag = &command.tag;
+    let arguments = &command.arguments;
+    let accepted = arguments.first().is_some_and(|user| user == USER_NAME)
+        && arguments
+            .get(1)
+            .is_some_and(|password| password == PASSWORD);
+    if accepted {
+        format!("{tag} OK [CAPABILITY {capabilities}] Logged in\r\n").into_bytes()
+    } else {
+        format!("{tag} NO [AUTHENTICATIONFAILED] Authentication failed.\r\n").into_bytes()
+    }
+}
+
+/// Answers LIST with every folder, in listing order.
+fn handle_list(tag: &str, mailbox: &FakeMailbox) -> Vec<u8> {
+    let mut answer = String::new();
+    for folder in &mailbox.folders {
+        answer.push_str(&format!(
+            "* LIST ({}) \"{}\" \"{}\"\r\n",
+            folder.attributes.join(" "),
+            mailbox.delimiter,
+            folder.name
+        ));
+    }
+    answer.push_str(&format!("{tag} OK List completed\r\n"));
+    answer.into_bytes()
+}
+
+/// Answers STATUS with the number of messages of a folder that can hold
+/// them.
+fn handle_status(command: &Command, mailbox: &FakeMailbox) -> Vec<u8> {
+    let tag = &command.tag;
+    match command
+        .arguments
+        .first()
+        .and_then(|name| mailbox.find_folder(name))
+    {
+        Some(folder) if folder.is_selectable() => format!(
+            "* STATUS \"{}\" (MESSAGES {})\r\n{tag} OK Status completed\r\n",
+            folder.name,
+            folder.messages.len()
+        )
+        .into_bytes(),
+        _ => format!("{tag} NO Mailbox doesn't exist\r\n").into_bytes(),
+    }
+}
+
+/// Answers SELECT or EXAMINE, selecting a folder that can hold messages.
+fn handle_select(
+    command: &Command,
+    mailbox: &FakeMailbox,
+    selected: &mut Option<String>,
+) -> Vec<u8> {
+    let tag = &command.tag;
+    match command
+        .arguments
+        .first()
+        .and_then(|name| mailbox.find_folder(name))
+    {
+        Some(folder) if folder.is_selectable() => {
+            *selected = Some(folder.name.clone());
+            let (access, verb) = if command.name == "SELECT" {
+                ("READ-WRITE", "Select")
+            } else {
+                ("READ-ONLY", "Examine")
+            };
+            format!(
+                "* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)\r\n* OK [PERMANENTFLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft \\*)] Flags permitted.\r\n* {} EXISTS\r\n* 0 RECENT\r\n* OK [UIDVALIDITY {}] UIDs valid\r\n* OK [UIDNEXT {}] Predicted next UID\r\n{tag} OK [{access}] {verb} completed\r\n",
+                folder.messages.len(),
+                folder.uid_validity,
+                folder.next_uid,
+            )
+            .into_bytes()
+        }
+        Some(_) => format!("{tag} NO Mailbox is not selectable\r\n").into_bytes(),
+        None => format!("{tag} NO Mailbox doesn't exist\r\n").into_bytes(),
+    }
+}
+
+/// Answers CREATE, adding an empty folder of a new name.
+fn handle_create(command: &Command, mailbox: &mut FakeMailbox) -> Vec<u8> {
+    let tag = &command.tag;
+    match command.arguments.first() {
+        Some(name) if mailbox.find_folder(name).is_some() => {
+            format!("{tag} NO Mailbox already exists\r\n").into_bytes()
+        }
+        Some(name) => {
+            let uid_validity = mailbox.next_uid_validity;
+            mailbox.next_uid_validity += 1;
+            let folder = FakeFolder::new(name, &["\\HasNoChildren"], uid_validity);
+            mailbox.folders.push(folder);
+            format!("{tag} OK Create completed\r\n").into_bytes()
+        }
+        None => format!("{tag} BAD Missing name\r\n").into_bytes(),
+    }
+}
+
+/// Answers DELETE, removing a folder that exists.
+fn handle_delete(command: &Command, mailbox: &mut FakeMailbox) -> Vec<u8> {
+    let tag = &command.tag;
+    match command.arguments.first().and_then(|name| {
+        mailbox
+            .folders
+            .iter()
+            .position(|folder| &folder.name == name)
+    }) {
+        Some(index) => {
+            mailbox.folders.remove(index);
+            format!("{tag} OK Delete completed\r\n").into_bytes()
+        }
+        None => format!("{tag} NO Mailbox doesn't exist\r\n").into_bytes(),
+    }
+}
+
+/// Answers RENAME, giving a folder that exists its new name.
+fn handle_rename(command: &Command, mailbox: &mut FakeMailbox) -> Vec<u8> {
+    let tag = &command.tag;
+    let (Some(old), Some(new)) = (command.arguments.first(), command.arguments.get(1)) else {
+        return format!("{tag} BAD Missing names\r\n").into_bytes();
+    };
+    match mailbox.find_folder_mut(old) {
+        Some(folder) => {
+            folder.name = new.clone();
+            format!("{tag} OK Rename completed\r\n").into_bytes()
+        }
+        None => format!("{tag} NO Mailbox doesn't exist\r\n").into_bytes(),
+    }
+}
+
+/// Answers SEARCH over the selected folder with the UIDs that match.
+fn handle_search(command: &Command, mailbox: &FakeMailbox, selected: Option<&str>) -> Vec<u8> {
+    let tag = &command.tag;
+    let Some(folder) = selected.and_then(|name| mailbox.find_folder(name)) else {
+        return format_no_mailbox_reply(tag);
+    };
+    match list_search_matches(folder, &command.arguments) {
+        Ok(uids) => {
+            let listed: Vec<String> = uids.iter().map(ToString::to_string).collect();
+            format!(
+                "* SEARCH{}{}\r\n{tag} OK Search completed\r\n",
+                if listed.is_empty() { "" } else { " " },
+                listed.join(" ")
+            )
+            .into_bytes()
+        }
+        Err(problem) => format!("{tag} BAD {problem}\r\n").into_bytes(),
+    }
+}
+
+/// Answers FETCH over the selected folder.
+fn handle_fetch(command: &Command, mailbox: &mut FakeMailbox, selected: Option<&str>) -> Vec<u8> {
+    match selected.and_then(|name| mailbox.find_folder_mut(name)) {
+        Some(folder) => handle_folder_fetch(folder, &command.arguments, &command.tag),
+        None => format_no_mailbox_reply(&command.tag),
+    }
+}
+
+/// Answers STORE over the selected folder.
+fn handle_store(command: &Command, mailbox: &mut FakeMailbox, selected: Option<&str>) -> Vec<u8> {
+    match selected.and_then(|name| mailbox.find_folder_mut(name)) {
+        Some(folder) => handle_folder_store(folder, &command.arguments, &command.tag),
+        None => format_no_mailbox_reply(&command.tag),
+    }
+}
+
+/// Answers EXPUNGE or CLOSE: removes the selected folder's messages marked
+/// `\Deleted`, only those of the UID set for `UID EXPUNGE`; EXPUNGE
+/// reports each removal, and CLOSE also ends the selection.
+fn handle_expunge(
+    command: &Command,
+    mailbox: &mut FakeMailbox,
+    selected: &mut Option<String>,
+) -> Vec<u8> {
+    let tag = &command.tag;
+    let Some(folder) = selected
+        .as_deref()
+        .and_then(|name| mailbox.find_folder_mut(name))
+    else {
+        return format_no_mailbox_reply(tag);
+    };
+    let only: Option<Vec<u32>> = if command.by_uid {
+        command.arguments.first().map(|set| parse_set(set, folder))
+    } else {
+        None
+    };
+    let removed = remove_deleted_messages(folder, only.as_deref());
+    let is_close = command.name == "CLOSE";
+    let mut answer = String::new();
+    if !is_close {
+        for position in removed {
+            answer.push_str(&format!("* {position} EXPUNGE\r\n"));
+        }
+    }
+    if is_close {
+        *selected = None;
+    }
+    let verb = if is_close { "Close" } else { "Expunge" };
+    answer.push_str(&format!("{tag} OK {verb} completed\r\n"));
+    answer.into_bytes()
+}
+
+/// Removes a folder's messages marked `\Deleted`, only those whose UID is
+/// in the set when one is given.
+///
+/// # Returns
+///
+/// The message sequence number of each removed message at the time it was
+/// removed, in removal order, as EXPUNGE reports them.
+fn remove_deleted_messages(folder: &mut FakeFolder, only: Option<&[u32]>) -> Vec<usize> {
+    let mut removed = Vec::new();
+    let mut position = 0;
+    while position < folder.messages.len() {
+        let message = &folder.messages[position];
+        let chosen = only.is_none_or(|set| set.contains(&message.uid));
+        if chosen && message.has_flag("\\Deleted") {
+            folder.messages.remove(position);
+            removed.push(position + 1);
+        } else {
+            position += 1;
+        }
+    }
+    removed
+}
+
+/// Answers APPEND: stores the literal in a folder that exists, with the
+/// flags of the parenthesized group.
+fn handle_append(command: &Command, mailbox: &mut FakeMailbox) -> Vec<u8> {
+    let tag = &command.tag;
+    let flags: Vec<&str> = command
+        .arguments
+        .iter()
+        .find(|token| token.starts_with('('))
+        .map(|token| token.trim_matches(['(', ')']).split_whitespace().collect())
+        .unwrap_or_default();
+    let (Some(name), Some(bytes)) = (command.arguments.first(), command.literals.last()) else {
+        return format!("{tag} BAD Missing name or message\r\n").into_bytes();
+    };
+    if mailbox.find_folder(name).is_none() {
+        return format!("{tag} NO [TRYCREATE] Mailbox doesn't exist\r\n").into_bytes();
+    }
+    let uid = mailbox.add_message(
+        name,
+        NewMessage {
+            bytes: bytes.clone(),
+            flags: &flags,
+            timestamp: get_current_timestamp(),
+        },
+    );
+    let uid_validity = mailbox.find_folder(name).expect("the folder").uid_validity;
+    format!("{tag} OK [APPENDUID {uid_validity} {uid}] Append completed\r\n").into_bytes()
+}
+
+/// The answer to a command that needs a selected folder while none is.
+fn format_no_mailbox_reply(tag: &str) -> Vec<u8> {
+    format!("{tag} BAD No mailbox selected\r\n").into_bytes()
+}
+
 /// The capabilities advertised in the state.
-fn capabilities(mode: ImapMode, secured: bool, state: &Arc<Mutex<FakeMailbox>>) -> String {
+fn format_capabilities(mode: ImapMode, secured: bool, state: &Arc<Mutex<FakeMailbox>>) -> String {
     let mut capabilities = vec!["IMAP4rev1", "LITERAL+"];
     if state.lock().expect("the state").uid_plus {
         capabilities.push("UIDPLUS");
@@ -582,15 +765,15 @@ where
     }
     let mut text = line.trim_end_matches(['\r', '\n']).to_owned();
     let mut literals = Vec::new();
-    while let Some((length, synchronizing)) = trailing_literal(&text) {
+    while let Some((length, synchronizing)) = parse_trailing_literal(&text) {
         let cut = text.rfind('{')?;
         text.truncate(cut);
         if synchronizing {
-            write(reader, "+ OK\r\n").await;
+            send_line(reader, "+ OK\r\n").await;
         }
         let mut bytes = vec![0; length];
         reader.read_exact(&mut bytes).await.ok()?;
-        text.push_str(&quote(&String::from_utf8_lossy(&bytes)));
+        text.push_str(&format_quoted(&String::from_utf8_lossy(&bytes)));
         literals.push(bytes);
         let mut rest = String::new();
         reader.read_line(&mut rest).await.ok()?;
@@ -600,7 +783,7 @@ where
 }
 
 /// Finds a literal marker, `{n}` or `{n+}`, at the end of the text.
-fn trailing_literal(text: &str) -> Option<(usize, bool)> {
+fn parse_trailing_literal(text: &str) -> Option<(usize, bool)> {
     let inner = text.strip_suffix('}')?;
     let start = inner.rfind('{')?;
     let marker = &inner[start + 1..];
@@ -615,81 +798,124 @@ fn trailing_literal(text: &str) -> Option<(usize, bool)> {
 }
 
 /// Quotes a string as IMAP writes it.
-fn quote(text: &str) -> String {
+fn format_quoted(text: &str) -> String {
     format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 /// Splits a command into tokens: atoms, the contents of quoted strings,
 /// and parenthesized groups kept whole.
-fn tokenize(text: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
+fn parse_tokens(text: &str) -> Vec<String> {
+    let mut tokenizer = Tokenizer::default();
     let mut characters = text.chars();
-    let mut parentheses = 0;
-    let mut brackets = 0;
-    let mut quoted = false;
     while let Some(character) = characters.next() {
-        let nested = parentheses > 0 || brackets > 0;
-        if quoted {
-            match character {
-                '\\' => {
-                    if let Some(next) = characters.next() {
-                        if nested {
-                            current.push('\\');
-                        }
-                        current.push(next);
-                    }
-                }
-                '"' => {
-                    quoted = false;
-                    if nested {
-                        current.push('"');
-                    } else {
-                        tokens.push(std::mem::take(&mut current));
-                    }
-                }
-                _ => current.push(character),
-            }
-            continue;
+        if tokenizer.quoted {
+            tokenizer.read_quoted(character, &mut characters);
+        } else {
+            tokenizer.read_plain(character);
         }
+    }
+    tokenizer.list_tokens()
+}
+
+/// What [`tokenize`] has read of a command so far.
+///
+/// Owned by one [`tokenize`] call, which feeds it one character at a time.
+#[derive(Default)]
+struct Tokenizer {
+    /// The tokens ended so far.
+    tokens: Vec<String>,
+    /// The token being read.
+    current: String,
+    /// How many parentheses are open; negative after a stray `)`.
+    parentheses: i32,
+    /// How many brackets are open; negative after a stray `]`.
+    brackets: i32,
+    /// Whether a quoted string is being read.
+    quoted: bool,
+}
+
+impl Tokenizer {
+    /// Whether the text read so far is inside a parenthesized or bracketed
+    /// group, which keeps its quotes and spaces.
+    fn is_nested(&self) -> bool {
+        self.parentheses > 0 || self.brackets > 0
+    }
+
+    /// Ends the token being read.
+    fn add_token(&mut self) {
+        self.tokens.push(std::mem::take(&mut self.current));
+    }
+
+    /// Reads one character of a quoted string: a backslash takes the next
+    /// character with it, and a quote ends the string.
+    fn read_quoted(&mut self, character: char, characters: &mut std::str::Chars<'_>) {
+        let nested = self.is_nested();
+        match character {
+            '\\' => {
+                if let Some(next) = characters.next() {
+                    if nested {
+                        self.current.push('\\');
+                    }
+                    self.current.push(next);
+                }
+            }
+            '"' => {
+                self.quoted = false;
+                if nested {
+                    self.current.push('"');
+                } else {
+                    self.add_token();
+                }
+            }
+            _ => self.current.push(character),
+        }
+    }
+
+    /// Reads one character outside a quoted string.
+    fn read_plain(&mut self, character: char) {
+        let nested = self.is_nested();
         match character {
             '"' => {
-                quoted = true;
+                self.quoted = true;
                 if nested {
-                    current.push('"');
+                    self.current.push('"');
                 }
             }
             '(' => {
-                parentheses += 1;
-                current.push(character);
+                self.parentheses += 1;
+                self.current.push(character);
             }
             ')' => {
-                parentheses -= 1;
-                current.push(character);
-                if parentheses == 0 && brackets == 0 {
-                    tokens.push(std::mem::take(&mut current));
+                self.parentheses -= 1;
+                self.current.push(character);
+                if self.parentheses == 0 && self.brackets == 0 {
+                    self.add_token();
                 }
             }
             '[' => {
-                brackets += 1;
-                current.push(character);
+                self.brackets += 1;
+                self.current.push(character);
             }
             ']' => {
-                brackets -= 1;
-                current.push(character);
+                self.brackets -= 1;
+                self.current.push(character);
             }
             ' ' if !nested => {
-                if !current.is_empty() {
-                    tokens.push(std::mem::take(&mut current));
+                if !self.current.is_empty() {
+                    self.add_token();
                 }
             }
-            _ => current.push(character),
+            _ => self.current.push(character),
         }
     }
-    if !current.is_empty() {
-        tokens.push(current);
+
+    /// Ends the last token, if any, and returns every token in order.
+    fn list_tokens(mut self) -> Vec<String> {
+        if !self.current.is_empty() {
+            self.add_token();
+        }
+        self.tokens
     }
-    tokens
 }
 
 /// Parses a UID set such as `1,3:5,*`.
@@ -740,7 +966,7 @@ fn parse_header_fields(bytes: &[u8]) -> Vec<(String, String)> {
 
 /// The raw lines of the header fields with the names, each with its
 /// folded continuation lines, followed by an empty line.
-fn header_subset(bytes: &[u8], names: &[String]) -> Vec<u8> {
+fn build_header_subset(bytes: &[u8], names: &[String]) -> Vec<u8> {
     let text = String::from_utf8_lossy(bytes);
     let header = text.split("\r\n\r\n").next().unwrap_or_default();
     let mut subset = String::new();
@@ -763,20 +989,21 @@ fn header_subset(bytes: &[u8], names: &[String]) -> Vec<u8> {
 }
 
 /// Searches the folder with the keys, answering UIDs in ascending order.
-fn search(folder: &FakeFolder, keys: &[String]) -> Result<Vec<u32>, String> {
-    let mut start = 0;
-    if keys
+fn list_search_matches(folder: &FakeFolder, keys: &[String]) -> Result<Vec<u32>, String> {
+    let start = if keys
         .first()
         .is_some_and(|key| key.eq_ignore_ascii_case("CHARSET"))
     {
-        start = 2;
-    }
+        2
+    } else {
+        0
+    };
     let mut uids = Vec::new();
     for message in &folder.messages {
-        let mut index = start;
+        let mut cursor = SearchKeys { keys, index: start };
         let mut matched = true;
-        while index < keys.len() {
-            matched &= evaluate(keys, &mut index, message, folder)?;
+        while cursor.index < keys.len() {
+            matched &= cursor.calculate_next_match(message, folder)?;
         }
         if matched {
             uids.push(message.uid);
@@ -785,89 +1012,103 @@ fn search(folder: &FakeFolder, keys: &[String]) -> Result<Vec<u32>, String> {
     Ok(uids)
 }
 
-/// Evaluates one search key, advancing the index past it.
-fn evaluate(
-    keys: &[String],
-    index: &mut usize,
-    message: &FakeMessage,
-    folder: &FakeFolder,
-) -> Result<bool, String> {
-    let key = keys
-        .get(*index)
-        .ok_or("a key is missing")?
-        .to_ascii_uppercase();
-    *index += 1;
-    let mut argument = || -> Result<String, String> {
-        let value = keys
-            .get(*index)
+/// A position in the keys of a SEARCH command.
+struct SearchKeys<'a> {
+    /// The keys.
+    keys: &'a [String],
+    /// The index of the next key.
+    index: usize,
+}
+
+impl SearchKeys<'_> {
+    /// Reads the next key's argument, advancing past it.
+    fn read_argument(&mut self, key: &str) -> Result<String, String> {
+        let value = self
+            .keys
+            .get(self.index)
             .cloned()
             .ok_or(format!("{key} needs an argument"))?;
-        *index += 1;
+        self.index += 1;
         Ok(value)
-    };
-    let fields = parse_header_fields(&message.bytes);
-    let field_contains = |name: &str, needle: &str| {
-        fields
-            .iter()
-            .filter(|(field, _)| field == name)
-            .any(|(_, value)| value.to_lowercase().contains(&needle.to_lowercase()))
-    };
-    let days = message.timestamp.div_euclid(86_400);
-    Ok(match key.as_str() {
-        "ALL" => true,
-        "SEEN" => message.has_flag("\\Seen"),
-        "UNSEEN" => !message.has_flag("\\Seen"),
-        "FLAGGED" => message.has_flag("\\Flagged"),
-        "UNFLAGGED" => !message.has_flag("\\Flagged"),
-        "DELETED" => message.has_flag("\\Deleted"),
-        "UNDELETED" => !message.has_flag("\\Deleted"),
-        "DRAFT" => message.has_flag("\\Draft"),
-        "UNDRAFT" => !message.has_flag("\\Draft"),
-        "ANSWERED" => message.has_flag("\\Answered"),
-        "UNANSWERED" => !message.has_flag("\\Answered"),
-        "TEXT" => {
-            let needle = argument()?.to_lowercase();
-            String::from_utf8_lossy(&message.bytes)
-                .to_lowercase()
-                .contains(&needle)
-        }
-        "BODY" => {
-            let needle = argument()?.to_lowercase();
-            let text = String::from_utf8_lossy(&message.bytes);
-            text.split_once("\r\n\r\n")
-                .map(|(_, body)| body.to_lowercase().contains(&needle))
-                .unwrap_or(false)
-        }
-        "FROM" | "TO" | "CC" | "SUBJECT" => {
-            let needle = argument()?;
-            field_contains(&key.to_ascii_lowercase(), &needle)
-        }
-        "HEADER" => {
-            let name = argument()?.to_ascii_lowercase();
-            let needle = argument()?;
-            field_contains(&name, &needle)
-        }
-        "SINCE" => days >= parse_search_date(&argument()?).ok_or("a bad date")?,
-        "BEFORE" => days < parse_search_date(&argument()?).ok_or("a bad date")?,
-        "ON" => days == parse_search_date(&argument()?).ok_or("a bad date")?,
-        "OR" => {
-            let left = evaluate(keys, index, message, folder)?;
-            let right = evaluate(keys, index, message, folder)?;
-            left || right
-        }
-        "NOT" => !evaluate(keys, index, message, folder)?,
-        "UID" => parse_set(&argument()?, folder).contains(&message.uid),
-        _ => return Err(format!("unknown search key {key}")),
-    })
+    }
+
+    /// Calculates whether the message matches the next search key,
+    /// advancing past the key and its arguments.
+    fn calculate_next_match(
+        &mut self,
+        message: &FakeMessage,
+        folder: &FakeFolder,
+    ) -> Result<bool, String> {
+        let key = self
+            .keys
+            .get(self.index)
+            .ok_or("a key is missing")?
+            .to_ascii_uppercase();
+        self.index += 1;
+        let fields = parse_header_fields(&message.bytes);
+        let field_contains = |name: &str, needle: &str| {
+            fields
+                .iter()
+                .filter(|(field, _)| field == name)
+                .any(|(_, value)| value.to_lowercase().contains(&needle.to_lowercase()))
+        };
+        let days = message.timestamp.div_euclid(86_400);
+        Ok(match key.as_str() {
+            "ALL" => true,
+            "SEEN" => message.has_flag("\\Seen"),
+            "UNSEEN" => !message.has_flag("\\Seen"),
+            "FLAGGED" => message.has_flag("\\Flagged"),
+            "UNFLAGGED" => !message.has_flag("\\Flagged"),
+            "DELETED" => message.has_flag("\\Deleted"),
+            "UNDELETED" => !message.has_flag("\\Deleted"),
+            "DRAFT" => message.has_flag("\\Draft"),
+            "UNDRAFT" => !message.has_flag("\\Draft"),
+            "ANSWERED" => message.has_flag("\\Answered"),
+            "UNANSWERED" => !message.has_flag("\\Answered"),
+            "TEXT" => {
+                let needle = self.read_argument(&key)?.to_lowercase();
+                String::from_utf8_lossy(&message.bytes)
+                    .to_lowercase()
+                    .contains(&needle)
+            }
+            "BODY" => {
+                let needle = self.read_argument(&key)?.to_lowercase();
+                let text = String::from_utf8_lossy(&message.bytes);
+                text.split_once("\r\n\r\n")
+                    .map(|(_, body)| body.to_lowercase().contains(&needle))
+                    .unwrap_or(false)
+            }
+            "FROM" | "TO" | "CC" | "SUBJECT" => {
+                let needle = self.read_argument(&key)?;
+                field_contains(&key.to_ascii_lowercase(), &needle)
+            }
+            "HEADER" => {
+                let name = self.read_argument(&key)?.to_ascii_lowercase();
+                let needle = self.read_argument(&key)?;
+                field_contains(&name, &needle)
+            }
+            "SINCE" => days >= parse_search_date(&self.read_argument(&key)?).ok_or("a bad date")?,
+            "BEFORE" => days < parse_search_date(&self.read_argument(&key)?).ok_or("a bad date")?,
+            "ON" => days == parse_search_date(&self.read_argument(&key)?).ok_or("a bad date")?,
+            "OR" => {
+                let left = self.calculate_next_match(message, folder)?;
+                let right = self.calculate_next_match(message, folder)?;
+                left || right
+            }
+            "NOT" => !self.calculate_next_match(message, folder)?,
+            "UID" => parse_set(&self.read_argument(&key)?, folder).contains(&message.uid),
+            _ => return Err(format!("unknown search key {key}")),
+        })
+    }
 }
 
 /// Answers a FETCH of the set with the items.
-fn fetch(folder: &mut FakeFolder, arguments: &[String], tag: &str) -> Vec<u8> {
+fn handle_folder_fetch(folder: &mut FakeFolder, arguments: &[String], tag: &str) -> Vec<u8> {
     let (Some(set), Some(items)) = (arguments.first(), arguments.get(1)) else {
         return format!("{tag} BAD Missing set or items\r\n").into_bytes();
     };
     let uids = parse_set(set, folder);
-    let items = tokenize(items.trim_start_matches('(').trim_end_matches(')'));
+    let items = parse_tokens(items.trim_start_matches('(').trim_end_matches(')'));
     let mut answer = Vec::new();
     for position in 0..folder.messages.len() {
         if !uids.contains(&folder.messages[position].uid) {
@@ -892,7 +1133,7 @@ fn fetch(folder: &mut FakeFolder, arguments: &[String], tag: &str) -> Vec<u8> {
                         .split_whitespace()
                         .map(str::to_owned)
                         .collect();
-                    header_subset(&message.bytes, &names)
+                    build_header_subset(&message.bytes, &names)
                 } else {
                     return format!("{tag} BAD Unsupported section\r\n").into_bytes();
                 };
@@ -936,7 +1177,7 @@ fn fetch(folder: &mut FakeFolder, arguments: &[String], tag: &str) -> Vec<u8> {
 }
 
 /// Answers a STORE of flags on the set.
-fn store(folder: &mut FakeFolder, arguments: &[String], tag: &str) -> Vec<u8> {
+fn handle_folder_store(folder: &mut FakeFolder, arguments: &[String], tag: &str) -> Vec<u8> {
     let (Some(set), Some(item), Some(list)) =
         (arguments.first(), arguments.get(1), arguments.get(2))
     else {
@@ -982,15 +1223,15 @@ fn store(folder: &mut FakeFolder, arguments: &[String], tag: &str) -> Vec<u8> {
 }
 
 /// Writes text, ignoring a closed connection.
-async fn write<S>(reader: &mut BufReader<S>, text: &str)
+async fn send_line<S>(reader: &mut BufReader<S>, text: &str)
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    write_bytes(reader, text.as_bytes()).await;
+    send_bytes(reader, text.as_bytes()).await;
 }
 
 /// Writes bytes, ignoring a closed connection.
-async fn write_bytes<S>(reader: &mut BufReader<S>, bytes: &[u8])
+async fn send_bytes<S>(reader: &mut BufReader<S>, bytes: &[u8])
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {

@@ -4,30 +4,42 @@ mod support;
 
 use email::failure::ToolFailure;
 use email::folders::FolderRole;
-use email::tools::folders::{FolderAction, FolderArguments, list_folders, manage_folder};
+use email::tools::folders::{FolderAction, FolderArguments, run_list_folders, run_manage_folder};
 
 use support::imap::FakeMailbox;
 use support::{TestMessage, start_stack};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn lists_folders_with_roles_and_counts() {
-    let mut mailbox = FakeMailbox::standard();
+    let mut mailbox = FakeMailbox::create_standard();
     for number in 1..=2 {
-        let message = TestMessage::new("Hi", "x", &format!("{number}@example.com"), number);
-        mailbox.add_message("INBOX", message.build(), &[], number);
+        let message = TestMessage {
+            subject: "Hi".to_owned(),
+            body: "x".to_owned(),
+            message_id: format!("{number}@example.com"),
+            timestamp: number,
+            ..TestMessage::default()
+        };
+        mailbox.add_message("INBOX", message.build_new_message(&[]));
     }
-    let sent = TestMessage::new("Sent", "x", "s@example.com", 3);
-    mailbox.add_message("Sent", sent.build(), &["\\Seen"], 3);
+    let sent = TestMessage {
+        subject: "Sent".to_owned(),
+        body: "x".to_owned(),
+        message_id: "s@example.com".to_owned(),
+        timestamp: 3,
+        ..TestMessage::default()
+    };
+    mailbox.add_message("Sent", sent.build_new_message(&["\\Seen"]));
     let stack = start_stack(mailbox, false).await;
 
-    let report = list_folders(&stack.context).await.expect("the folders");
+    let report = run_list_folders(&stack.context).await.expect("the folders");
 
     assert_eq!(
         report.text,
         "- INBOX (Inbox): 2 messages\n- Sent (Sent): 1 message\n- Drafts (Drafts): 0 messages\n- Trash (Trash): 0 messages\n- All Mail (All): 0 messages\n- Projects: 0 messages\n- [Gmail]: cannot hold messages"
     );
     assert_eq!(report.log, "folders: 7 listed");
-    let commands = stack.imap.commands();
+    let commands = stack.imap.list_commands();
     assert!(
         commands
             .iter()
@@ -44,9 +56,9 @@ async fn lists_folders_with_roles_and_counts() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
-    let stack = start_stack(FakeMailbox::standard(), false).await;
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
 
-    let created = manage_folder(
+    let created = run_manage_folder(
         &stack.context,
         FolderArguments {
             action: FolderAction::Create,
@@ -56,8 +68,8 @@ async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
     )
     .await
     .expect("created");
-    let listed = list_folders(&stack.context).await.expect("the folders");
-    let renamed = manage_folder(
+    let listed = run_list_folders(&stack.context).await.expect("the folders");
+    let renamed = run_manage_folder(
         &stack.context,
         FolderArguments {
             action: FolderAction::Rename,
@@ -67,7 +79,7 @@ async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
     )
     .await
     .expect("renamed");
-    let deleted = manage_folder(
+    let deleted = run_manage_folder(
         &stack.context,
         FolderArguments {
             action: FolderAction::Delete,
@@ -86,7 +98,7 @@ async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
     );
     assert_eq!(renamed.text, "Folder Grüße renamed to Archive 2026.");
     assert_eq!(deleted.text, "Folder Archive 2026 deleted.");
-    let commands = stack.imap.commands();
+    let commands = stack.imap.list_commands();
     assert!(
         commands
             .iter()
@@ -105,21 +117,23 @@ async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
             .any(|command| command.ends_with("DELETE \"Archive 2026\"")),
         "{commands:?}"
     );
-    assert!(
-        stack
-            .imap
-            .with_state(|state| state.folder("Archive 2026").is_none())
-    );
+    assert!(stack.imap.find_folder("Archive 2026").is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_role_folders_taken_names_missing_folders_and_folders_that_hold_messages() {
-    let mut mailbox = FakeMailbox::standard();
-    let message = TestMessage::new("Plan", "x", "p@example.com", 1);
-    mailbox.add_message("Projects", message.build(), &[], 1);
+    let mut mailbox = FakeMailbox::create_standard();
+    let message = TestMessage {
+        subject: "Plan".to_owned(),
+        body: "x".to_owned(),
+        message_id: "p@example.com".to_owned(),
+        timestamp: 1,
+        ..TestMessage::default()
+    };
+    mailbox.add_message("Projects", message.build_new_message(&[]));
     let stack = start_stack(mailbox, false).await;
     let change = |action: FolderAction, name: &str, new_name: Option<&str>| {
-        manage_folder(
+        run_manage_folder(
             &stack.context,
             FolderArguments {
                 action,
@@ -171,7 +185,7 @@ async fn refuses_role_folders_taken_names_missing_folders_and_folders_that_hold_
             "name must be a folder name without whitespace at its edges.".to_owned()
         ))
     );
-    assert!(!stack.imap.commands().iter().any(|command| {
+    assert!(!stack.imap.list_commands().iter().any(|command| {
         command.contains(" CREATE ") || command.contains(" RENAME ") || command.contains(" DELETE ")
     }));
 }

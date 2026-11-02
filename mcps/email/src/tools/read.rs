@@ -6,12 +6,15 @@ use std::collections::HashSet;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::search::{Hit, collect_hits, sort_newest_first};
-use super::{ToolContext, ToolReport, ToolResult, imap_failure, load_folders, select_id_folder};
+use super::search::{Hit, HitQuery, calculate_hit_order, list_folder_hits};
+use super::{
+    ToolContext, ToolReport, ToolResult, build_imap_failure_conversion, load_folders,
+    open_id_folder,
+};
 use crate::email_id::{EmailId, parse_email_id};
 use crate::failure::{ConnectionFailure, Protocol, ToolFailure};
 use crate::folders::{Folder, FolderRole};
-use crate::imap::{FetchedMessage, Flags, ImapSession, format_search_text};
+use crate::imap::{FetchedMessage, Flags, FolderAccess, ImapSession, format_search_text};
 use crate::message::{MessageView, format_size, parse_message};
 
 /// Most messages a conversation shows: the newest ones.
@@ -47,13 +50,13 @@ pub struct AttachmentArguments {
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - Which message.
-pub async fn read_email(context: &ToolContext, arguments: IdArguments) -> ToolResult {
+pub async fn run_read_email(context: &ToolContext, arguments: IdArguments) -> ToolResult {
     let id = parse_email_id(&arguments.id)?;
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
-    let (fetched, view) = fetch_view(&mut session, &folders, &id).await?;
+    let (fetched, view) = get_message_view(&mut session, &folders, &id).await?;
     session.close().await;
-    let text = format_view(&id, fetched.flags, &view, None);
+    let text = format_message_view(&id, fetched.flags, &view);
     Ok(ToolReport {
         text,
         log: format!(
@@ -70,12 +73,12 @@ pub async fn read_email(context: &ToolContext, arguments: IdArguments) -> ToolRe
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - Which message.
-pub async fn read_conversation(context: &ToolContext, arguments: IdArguments) -> ToolResult {
+pub async fn run_read_conversation(context: &ToolContext, arguments: IdArguments) -> ToolResult {
     let id = parse_email_id(&arguments.id)?;
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
-    let (_, view) = fetch_view(&mut session, &folders, &id).await?;
-    let identifiers = collect_identifiers(&view);
+    let (_, view) = get_message_view(&mut session, &folders, &id).await?;
+    let identifiers = list_conversation_identifiers(&view);
     let mut hits = Vec::new();
     let mut seen_identifiers = HashSet::new();
     if let Some(criteria) = build_conversation_criteria(&identifiers) {
@@ -83,8 +86,11 @@ pub async fn read_conversation(context: &ToolContext, arguments: IdArguments) ->
             .iter()
             .filter(|folder| folder.selectable && folder.role != Some(FolderRole::All))
         {
-            let (found, _) =
-                collect_hits(&mut session, folder, &criteria, CONVERSATION_LIMIT).await?;
+            let query = HitQuery {
+                criteria: &criteria,
+                limit: CONVERSATION_LIMIT,
+            };
+            let (found, _) = list_folder_hits(&mut session, folder, query).await?;
             for hit in found {
                 let new = match &hit.headers.message_id {
                     Some(message_id) => seen_identifiers.insert(message_id.clone()),
@@ -109,7 +115,7 @@ pub async fn read_conversation(context: &ToolContext, arguments: IdArguments) ->
                 .unwrap_or_else(|| "unknown".to_owned()),
         });
     }
-    sort_newest_first(&mut hits);
+    hits.sort_by(calculate_hit_order);
     let total = hits.len();
     hits.truncate(CONVERSATION_LIMIT);
     hits.reverse();
@@ -128,25 +134,20 @@ pub async fn read_conversation(context: &ToolContext, arguments: IdArguments) ->
                 .find(|folder| folder.name == hit.id.folder)
                 .ok_or(ToolFailure::StaleId)?;
             session
-                .select_folder(&folder.raw_name, true)
+                .open_folder(&folder.raw_name, FolderAccess::Read)
                 .await
-                .map_err(imap_failure("select the folder"))?;
+                .map_err(build_imap_failure_conversion("select the folder"))?;
             current_folder = Some(hit.id.folder.clone());
         }
         let fetched = session
-            .fetch_message(hit.id.uid)
+            .find_message(hit.id.uid)
             .await
-            .map_err(imap_failure("fetch the message"))?;
+            .map_err(build_imap_failure_conversion("fetch the message"))?;
         text.push_str("\n\n----\n");
         match fetched {
             Some(fetched) => {
                 let view = parse_view(&fetched)?;
-                text.push_str(&format_view(
-                    &hit.id,
-                    fetched.flags,
-                    &view,
-                    Some(CONVERSATION_TEXT_LIMIT),
-                ));
+                text.push_str(&format_conversation_entry(&hit.id, fetched.flags, &view));
             }
             None => text.push_str(&format!(
                 "id {}\n[This message was removed while the conversation was read.]",
@@ -167,11 +168,14 @@ pub async fn read_conversation(context: &ToolContext, arguments: IdArguments) ->
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - Which message and which attachment.
-pub async fn read_attachment(context: &ToolContext, arguments: AttachmentArguments) -> ToolResult {
+pub async fn run_read_attachment(
+    context: &ToolContext,
+    arguments: AttachmentArguments,
+) -> ToolResult {
     let id = parse_email_id(&arguments.id)?;
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
-    let (_, view) = fetch_view(&mut session, &folders, &id).await?;
+    let (_, view) = get_message_view(&mut session, &folders, &id).await?;
     session.close().await;
     let attachment = view
         .attachments
@@ -217,16 +221,16 @@ pub async fn read_attachment(context: &ToolContext, arguments: AttachmentArgumen
 ///
 /// The fetched message and its view, or `StaleId` when the id no longer
 /// names a message.
-pub async fn fetch_view(
+pub async fn get_message_view(
     session: &mut ImapSession,
     folders: &[Folder],
     id: &EmailId,
 ) -> Result<(FetchedMessage, MessageView), ToolFailure> {
-    select_id_folder(session, folders, id, true).await?;
+    open_id_folder(session, folders, id).await?;
     let fetched = session
-        .fetch_message(id.uid)
+        .find_message(id.uid)
         .await
-        .map_err(imap_failure("fetch the message"))?
+        .map_err(build_imap_failure_conversion("fetch the message"))?
         .ok_or(ToolFailure::StaleId)?;
     let view = parse_view(&fetched)?;
     Ok((fetched, view))
@@ -241,21 +245,47 @@ fn parse_view(fetched: &FetchedMessage) -> Result<MessageView, ToolFailure> {
     })
 }
 
-/// Formats a message as the model reads it.
+/// Formats a message as `read_email` shows it: the header fields, the
+/// flags, the attachments, and the whole text.
 ///
 /// # Arguments
 ///
 /// * `id` - The message's id.
 /// * `flags` - Its flags.
 /// * `view` - The message.
-/// * `text_limit` - Most characters of the text to show, when inside a
-///   conversation.
-pub fn format_view(
-    id: &EmailId,
-    flags: Flags,
-    view: &MessageView,
-    text_limit: Option<usize>,
-) -> String {
+pub fn format_message_view(id: &EmailId, flags: Flags, view: &MessageView) -> String {
+    let mut text = format_view_heading(id, flags, view);
+    text.push_str(view.text.trim_end());
+    text
+}
+
+/// Formats a message as a conversation shows it: as `read_email` does,
+/// with the text cut at [`CONVERSATION_TEXT_LIMIT`] characters.
+///
+/// # Arguments
+///
+/// * `id` - The message's id.
+/// * `flags` - Its flags.
+/// * `view` - The message.
+fn format_conversation_entry(id: &EmailId, flags: Flags, view: &MessageView) -> String {
+    let mut text = format_view_heading(id, flags, view);
+    text.push_str(&format_cut_text(
+        id,
+        view.text.trim_end(),
+        CONVERSATION_TEXT_LIMIT,
+    ));
+    text
+}
+
+/// Formats the part of a message before its text: the header fields,
+/// the flags, the folder, and the attachments, then an empty line.
+///
+/// # Arguments
+///
+/// * `id` - The message's id.
+/// * `flags` - Its flags.
+/// * `view` - The message.
+fn format_view_heading(id: &EmailId, flags: Flags, view: &MessageView) -> String {
     let headers = &view.headers;
     let mut text = format!("id {id}\nFrom: {}\nTo: {}\n", headers.from, headers.to);
     if !headers.cc.is_empty() {
@@ -307,22 +337,31 @@ pub fn format_view(
         text.push_str("[The text was converted from HTML.]\n");
     }
     text.push('\n');
-    let body = view.text.trim_end();
-    match text_limit.and_then(|limit| body.char_indices().nth(limit)) {
-        Some((end, _)) => {
-            text.push_str(&body[..end]);
-            text.push_str(&format!(
-                "\n[The text was cut. Use read_email with id {id} for the whole message.]"
-            ));
-        }
-        None => text.push_str(body),
-    }
     text
+}
+
+/// Formats a message's text cut at `limit` characters, with a note that
+/// names the id to read the whole message by; a text that is not longer
+/// stays whole.
+///
+/// # Arguments
+///
+/// * `id` - The message's id.
+/// * `body` - The text.
+/// * `limit` - Most characters to show.
+fn format_cut_text(id: &EmailId, body: &str, limit: usize) -> String {
+    match body.char_indices().nth(limit) {
+        Some((end, _)) => format!(
+            "{}\n[The text was cut. Use read_email with id {id} for the whole message.]",
+            &body[..end]
+        ),
+        None => body.to_owned(),
+    }
 }
 
 /// Collects the identifiers a conversation is searched by: the message's
 /// own, the ones it replies to, and the ones it references.
-fn collect_identifiers(view: &MessageView) -> Vec<String> {
+fn list_conversation_identifiers(view: &MessageView) -> Vec<String> {
     let headers = &view.headers;
     let mut identifiers: Vec<String> = Vec::new();
     for identifier in headers
@@ -392,7 +431,7 @@ mod tests {
         let view = parse_message(b"Message-ID: <one@example.com>\r\nIn-Reply-To: <zero@example.com>\r\nReferences: <minus@example.com> <zero@example.com> <one@example.com>\r\n\r\nx").expect("message");
 
         assert_eq!(
-            collect_identifiers(&view),
+            list_conversation_identifiers(&view),
             vec!["one@example.com", "zero@example.com", "minus@example.com"]
         );
     }
@@ -406,16 +445,18 @@ mod tests {
             folder: "INBOX".to_owned(),
         };
 
-        let whole = format_view(&id, Flags::default(), &view, None);
-        let cut = format_view(&id, Flags::default(), &view, Some(5));
+        let whole = format_message_view(&id, Flags::default(), &view);
+        let cut = format_cut_text(&id, "Hello there", 5);
+        let short = format_cut_text(&id, "Hello", 5);
 
         assert_eq!(
             whole,
             "id 12.345.INBOX\nFrom: Jane <jane@example.com>\nTo: person@example.com\nCc: cc@example.com\nReply-To: reply@example.com\nDate: 2026-11-02T10:30:00Z\nSubject: Hello\nMessage-ID: <one@example.com>\nIn-Reply-To: <zero@example.com>\nFlags: unread\nFolder: INBOX\nAttachments: 1\n  #1 data.csv (text/csv, 3 B)\n\nHello there, this is the text."
         );
-        assert!(
-            cut.ends_with("\n\nHello\n[The text was cut. Use read_email with id 12.345.INBOX for the whole message.]"),
-            "{cut}"
+        assert_eq!(
+            cut,
+            "Hello\n[The text was cut. Use read_email with id 12.345.INBOX for the whole message.]"
         );
+        assert_eq!(short, "Hello");
     }
 }

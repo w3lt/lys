@@ -12,13 +12,15 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
 use crate::failure::ToolFailure;
-use crate::log::log_line;
+use crate::log::send_log_line;
 use crate::tools::drafts::{DraftIdArguments, SaveDraftArguments};
 use crate::tools::folders::FolderArguments;
 use crate::tools::read::{AttachmentArguments, IdArguments};
 use crate::tools::search::SearchArguments;
 use crate::tools::send::MessageArguments;
-use crate::tools::{ToolContext, ToolResult, cut_result_text, drafts, folders, read, search, send};
+use crate::tools::{
+    ToolContext, ToolResult, drafts, folders, format_result_text, read, search, send,
+};
 
 /// Longest one tool call may take as a whole.
 pub const CALL_LIMIT: Duration = Duration::from_secs(240);
@@ -30,6 +32,12 @@ pub const SERVER_NAME: &str = "lys-email";
 const INSTRUCTIONS: &str = "Reads, searches, sends, and files the person's email over their own account. Message ids come from search_emails and read_email and look like 12.345.INBOX; an id is valid until the folder changes, then search again. Reading never marks a message as read. Sending and deleting are permanent.";
 
 /// The MCP server over the account's mail servers.
+///
+/// Concurrency model: concurrent; the MCP service may run several calls at
+/// once, each through a shared reference, and the only state they change
+/// is the context's atomic sequence counter. Resource ownership: owns the
+/// context and the tool list; it keeps no connection, as each call opens
+/// and closes its own.
 #[derive(Debug)]
 pub struct EmailServer {
     /// The account and trust every call works with.
@@ -52,69 +60,20 @@ impl EmailServer {
         }
     }
 
-    /// Runs one call under the cancellation token and the time limit,
-    /// logs its outcome, and answers the model.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The tool's name, for the log.
-    /// * `token` - Cancelled when the client cancels the request.
-    /// * `call` - The call.
-    async fn run<F>(&self, name: &str, token: CancellationToken, call: F) -> CallToolResult
-    where
-        F: Future<Output = ToolResult>,
-    {
-        self.run_within(name, token, CALL_LIMIT, call).await
-    }
-
-    /// Runs one call as [`Self::run`] does, under the given time limit.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The tool's name, for the log.
-    /// * `token` - Cancelled when the client cancels the request.
-    /// * `limit` - Longest the call may take.
-    /// * `call` - The call.
-    async fn run_within<F>(
-        &self,
-        name: &str,
-        token: CancellationToken,
-        limit: Duration,
-        call: F,
-    ) -> CallToolResult
-    where
-        F: Future<Output = ToolResult>,
-    {
-        let outcome = tokio::select! {
-            () = token.cancelled() => Err(ToolFailure::Cancelled),
-            finished = timeout(limit, call) => finished.unwrap_or(Err(ToolFailure::TimedOut)),
-        };
-        match outcome {
-            Ok(report) => {
-                log_line(&format!("tool {name}: done ({})", report.log));
-                CallToolResult::success(vec![ContentBlock::text(cut_result_text(report.text))])
-            }
-            Err(failure) => {
-                log_line(&format!("tool {name}: failed ({})", failure.class()));
-                CallToolResult::error(vec![ContentBlock::text(failure.to_string())])
-            }
-        }
-    }
-
     #[tool(
         name = "search_emails",
         description = "Finds messages, newest first, 20 per page. Searches one folder, or every folder when none is given. Give text, from, to, subject, since, before, unread, or flagged to narrow the search; every argument is optional. Each hit shows its id for read_email.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
-    async fn search_emails(
+    async fn run_search_emails(
         &self,
         Parameters(arguments): Parameters<SearchArguments>,
         token: CancellationToken,
     ) -> CallToolResult {
-        self.run(
+        run_tool_call(
             "search_emails",
             token,
-            search::search_emails(&self.context, arguments),
+            search::run_search_emails(&self.context, arguments),
         )
         .await
     }
@@ -124,15 +83,15 @@ impl EmailServer {
         description = "Reads one message by id: its header fields, flags, text, and the list of its attachments. Does not mark it as read.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
-    async fn read_email(
+    async fn run_read_email(
         &self,
         Parameters(arguments): Parameters<IdArguments>,
         token: CancellationToken,
     ) -> CallToolResult {
-        self.run(
+        run_tool_call(
             "read_email",
             token,
-            read::read_email(&self.context, arguments),
+            read::run_read_email(&self.context, arguments),
         )
         .await
     }
@@ -142,15 +101,15 @@ impl EmailServer {
         description = "Reads the whole conversation a message belongs to, oldest first, found through its Message-ID, In-Reply-To, and References fields in every folder; at most 50 messages, each cut to 3,000 characters of text.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
-    async fn read_conversation(
+    async fn run_read_conversation(
         &self,
         Parameters(arguments): Parameters<IdArguments>,
         token: CancellationToken,
     ) -> CallToolResult {
-        self.run(
+        run_tool_call(
             "read_conversation",
             token,
-            read::read_conversation(&self.context, arguments),
+            read::run_read_conversation(&self.context, arguments),
         )
         .await
     }
@@ -160,15 +119,15 @@ impl EmailServer {
         description = "Reads one attachment of a message as text: plain text, HTML, CSV, JSON, XML, and the like. Other kinds, such as PDF or images, cannot be read.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
-    async fn read_attachment(
+    async fn run_read_attachment(
         &self,
         Parameters(arguments): Parameters<AttachmentArguments>,
         token: CancellationToken,
     ) -> CallToolResult {
-        self.run(
+        run_tool_call(
             "read_attachment",
             token,
-            read::read_attachment(&self.context, arguments),
+            read::run_read_attachment(&self.context, arguments),
         )
         .await
     }
@@ -178,9 +137,13 @@ impl EmailServer {
         description = "Lists every folder of the account with its role (Inbox, Sent, Drafts, Trash, Junk, Archive, All) and how many messages it holds.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
-    async fn list_folders(&self, token: CancellationToken) -> CallToolResult {
-        self.run("list_folders", token, folders::list_folders(&self.context))
-            .await
+    async fn run_list_folders(&self, token: CancellationToken) -> CallToolResult {
+        run_tool_call(
+            "list_folders",
+            token,
+            folders::run_list_folders(&self.context),
+        )
+        .await
     }
 
     #[tool(
@@ -193,15 +156,15 @@ impl EmailServer {
             open_world_hint = true
         )
     )]
-    async fn manage_folder(
+    async fn run_manage_folder(
         &self,
         Parameters(arguments): Parameters<FolderArguments>,
         token: CancellationToken,
     ) -> CallToolResult {
-        self.run(
+        run_tool_call(
             "manage_folder",
             token,
-            folders::manage_folder(&self.context, arguments),
+            folders::run_manage_folder(&self.context, arguments),
         )
         .await
     }
@@ -216,15 +179,15 @@ impl EmailServer {
             open_world_hint = true
         )
     )]
-    async fn send_email(
+    async fn run_send_email(
         &self,
         Parameters(arguments): Parameters<MessageArguments>,
         token: CancellationToken,
     ) -> CallToolResult {
-        self.run(
+        run_tool_call(
             "send_email",
             token,
-            send::send_email(&self.context, arguments),
+            send::run_send_email(&self.context, arguments),
         )
         .await
     }
@@ -239,15 +202,15 @@ impl EmailServer {
             open_world_hint = true
         )
     )]
-    async fn save_draft(
+    async fn run_save_draft(
         &self,
         Parameters(arguments): Parameters<SaveDraftArguments>,
         token: CancellationToken,
     ) -> CallToolResult {
-        self.run(
+        run_tool_call(
             "save_draft",
             token,
-            drafts::save_draft(&self.context, arguments),
+            drafts::run_save_draft(&self.context, arguments),
         )
         .await
     }
@@ -262,15 +225,15 @@ impl EmailServer {
             open_world_hint = true
         )
     )]
-    async fn send_draft(
+    async fn run_send_draft(
         &self,
         Parameters(arguments): Parameters<DraftIdArguments>,
         token: CancellationToken,
     ) -> CallToolResult {
-        self.run(
+        run_tool_call(
             "send_draft",
             token,
-            drafts::send_draft(&self.context, arguments),
+            drafts::run_send_draft(&self.context, arguments),
         )
         .await
     }
@@ -285,15 +248,15 @@ impl EmailServer {
             open_world_hint = true
         )
     )]
-    async fn delete_draft(
+    async fn run_delete_draft(
         &self,
         Parameters(arguments): Parameters<DraftIdArguments>,
         token: CancellationToken,
     ) -> CallToolResult {
-        self.run(
+        run_tool_call(
             "delete_draft",
             token,
-            drafts::delete_draft(&self.context, arguments),
+            drafts::run_delete_draft(&self.context, arguments),
         )
         .await
     }
@@ -308,26 +271,73 @@ impl ServerHandler for EmailServer {
     }
 }
 
+/// Runs one tool call under the cancellation token and [`CALL_LIMIT`],
+/// logs its outcome, and answers the model.
+///
+/// # Arguments
+///
+/// * `name` - The tool's name, for the log.
+/// * `token` - Cancelled when the client cancels the request.
+/// * `call` - The call.
+async fn run_tool_call<F>(name: &str, token: CancellationToken, call: F) -> CallToolResult
+where
+    F: Future<Output = ToolResult>,
+{
+    let outcome = run_tool_call_within(token, CALL_LIMIT, call).await;
+    handle_tool_call_outcome(name, outcome)
+}
+
+/// Runs one tool call until it finishes, the token is cancelled, or the
+/// limit passes, whichever comes first.
+///
+/// # Arguments
+///
+/// * `token` - Cancelled when the client cancels the request.
+/// * `limit` - Longest the call may take.
+/// * `call` - The call.
+///
+/// # Returns
+///
+/// The call's outcome, `Cancelled`, or `TimedOut`.
+async fn run_tool_call_within<F>(token: CancellationToken, limit: Duration, call: F) -> ToolResult
+where
+    F: Future<Output = ToolResult>,
+{
+    tokio::select! {
+        () = token.cancelled() => Err(ToolFailure::Cancelled),
+        finished = timeout(limit, call) => finished.unwrap_or(Err(ToolFailure::TimedOut)),
+    }
+}
+
+/// Handles a finished tool call: logs its outcome and answers the model,
+/// with a long result cut.
+///
+/// # Arguments
+///
+/// * `name` - The tool's name, for the log.
+/// * `outcome` - What the call did.
+fn handle_tool_call_outcome(name: &str, outcome: ToolResult) -> CallToolResult {
+    match outcome {
+        Ok(report) => {
+            send_log_line(&format!("tool {name}: done ({})", report.log));
+            CallToolResult::success(vec![ContentBlock::text(format_result_text(report.text))])
+        }
+        Err(failure) => {
+            send_log_line(&format!("tool {name}: failed ({})", failure.class()));
+            CallToolResult::error(vec![ContentBlock::text(failure.to_string())])
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::future::pending;
 
     use super::*;
-    use crate::account::parse_account_variable;
     use crate::tools::ToolReport;
-    use crate::trust::Trust;
-
-    /// Builds a server over an account that is never connected to.
-    fn build_server() -> EmailServer {
-        let account = parse_account_variable(
-            "{\"address\":\"person@example.com\",\"displayName\":\"\",\"userName\":\"person\",\"password\":\"synthetic-7f3a\",\"imap\":{\"host\":\"localhost\",\"port\":1,\"security\":\"plain\"},\"smtp\":{\"host\":\"localhost\",\"port\":1,\"security\":\"plain\"},\"serverKeepsSentCopy\":false}",
-        )
-        .expect("account");
-        EmailServer::new(ToolContext::new(account, Trust::of_platform()))
-    }
 
     /// The text of a result's first content block.
-    fn text_of(result: &CallToolResult) -> String {
+    fn get_first_text(result: &CallToolResult) -> String {
         result
             .content
             .first()
@@ -338,47 +348,43 @@ mod tests {
 
     #[tokio::test]
     async fn answers_a_cancelled_call_a_timed_out_call_and_a_long_result() {
-        let server = build_server();
         let cancelled = CancellationToken::new();
         cancelled.cancel();
 
-        let after_cancel = server
-            .run("read_email", cancelled, pending::<ToolResult>())
-            .await;
-        let after_limit = server
-            .run_within(
-                "read_email",
+        let after_cancel = run_tool_call("read_email", cancelled, pending::<ToolResult>()).await;
+        let after_limit = handle_tool_call_outcome(
+            "read_email",
+            run_tool_call_within(
                 CancellationToken::new(),
                 Duration::from_millis(10),
                 pending::<ToolResult>(),
             )
-            .await;
-        let long = server
-            .run("read_email", CancellationToken::new(), async {
-                Ok(ToolReport {
-                    text: "x".repeat(crate::tools::RESULT_LIMIT + 5),
-                    log: "test".to_owned(),
-                })
+            .await,
+        );
+        let long = run_tool_call("read_email", CancellationToken::new(), async {
+            Ok(ToolReport {
+                text: "x".repeat(crate::tools::RESULT_LIMIT + 5),
+                log: "test".to_owned(),
             })
-            .await;
-        let failed = server
-            .run("read_email", CancellationToken::new(), async {
-                Err(ToolFailure::StaleId)
-            })
-            .await;
+        })
+        .await;
+        let failed = run_tool_call("read_email", CancellationToken::new(), async {
+            Err(ToolFailure::StaleId)
+        })
+        .await;
 
         assert_eq!(after_cancel.is_error, Some(true));
-        assert_eq!(text_of(&after_cancel), "The call was cancelled.");
+        assert_eq!(get_first_text(&after_cancel), "The call was cancelled.");
         assert_eq!(after_limit.is_error, Some(true));
         assert_eq!(
-            text_of(&after_limit),
+            get_first_text(&after_limit),
             "The call did not finish within 240 seconds and was stopped."
         );
         assert_ne!(long.is_error, Some(true));
-        assert!(text_of(&long).ends_with(crate::tools::CUT_NOTE));
+        assert!(get_first_text(&long).ends_with(crate::tools::CUT_NOTE));
         assert_eq!(failed.is_error, Some(true));
         assert_eq!(
-            text_of(&failed),
+            get_first_text(&failed),
             "That message id is no longer valid. Search again."
         );
     }

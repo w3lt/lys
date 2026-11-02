@@ -15,7 +15,7 @@ use std::io::{self, Write};
 /// # Arguments
 ///
 /// * `line` - The text of the line, without a line break.
-pub fn log_line(line: &str) {
+pub fn send_log_line(line: &str) {
     let stderr = io::stderr();
     let mut handle = stderr.lock();
     let _ = writeln!(handle, "{line}");

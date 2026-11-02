@@ -4,8 +4,8 @@
 use std::process::ExitCode;
 
 use email::account::{ACCOUNT_VARIABLE_NAME, parse_account_variable, read_account_variable};
-use email::check::run_account_check;
-use email::log::log_line;
+use email::check::offer_account_sign_ins;
+use email::log::send_log_line;
 use email::server::EmailServer;
 use email::tools::ToolContext;
 use email::trust::Trust;
@@ -33,28 +33,28 @@ async fn main() -> ExitCode {
         [] => Command::Serve,
         [argument] if argument == "check" => Command::Check,
         _ => {
-            log_line("usage: email [check]");
+            send_log_line("usage: email [check]");
             return ExitCode::from(USAGE_EXIT_CODE);
         }
     };
     let account = match read_account_variable().and_then(|text| parse_account_variable(&text)) {
         Ok(account) => account,
         Err(problem) => {
-            log_line(&format!("{ACCOUNT_VARIABLE_NAME}: {problem}"));
+            send_log_line(&format!("{ACCOUNT_VARIABLE_NAME}: {problem}"));
             return ExitCode::from(ACCOUNT_EXIT_CODE);
         }
     };
-    let trust = Trust::of_platform();
+    let trust = Trust::create_platform();
     match command {
         Command::Check => {
-            let report = run_account_check(&account, &trust).await;
+            let report = offer_account_sign_ins(&account, &trust).await;
             match serde_json::to_string(&report) {
                 Ok(json) => {
                     println!("{json}");
                     ExitCode::SUCCESS
                 }
                 Err(error) => {
-                    log_line(&format!("check: the report could not be written: {error}"));
+                    send_log_line(&format!("check: the report could not be written: {error}"));
                     ExitCode::FAILURE
                 }
             }
@@ -64,18 +64,18 @@ async fn main() -> ExitCode {
             let running = match server.serve(rmcp::transport::stdio()).await {
                 Ok(running) => running,
                 Err(error) => {
-                    log_line(&format!("server: starting failed: {error}"));
+                    send_log_line(&format!("server: starting failed: {error}"));
                     return ExitCode::FAILURE;
                 }
             };
-            log_line("server: serving MCP over stdio");
+            send_log_line("server: serving MCP over stdio");
             match running.waiting().await {
                 Ok(reason) => {
-                    log_line(&format!("server: stopped ({reason:?})"));
+                    send_log_line(&format!("server: stopped ({reason:?})"));
                     ExitCode::SUCCESS
                 }
                 Err(error) => {
-                    log_line(&format!("server: stopped with a failure: {error}"));
+                    send_log_line(&format!("server: stopped with a failure: {error}"));
                     ExitCode::FAILURE
                 }
             }

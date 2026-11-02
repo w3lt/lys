@@ -30,7 +30,7 @@ const HTTP_OK_STATUS = 200
  * has another media type or an outcome that does not match the shared
  * schema; the decoding failure is kept as its cause.
  */
-export async function checkEmailAccount(
+export async function sendEmailAccountCheck(
   connection: EmailApiConnection,
   body: CheckEmailAccountApiRequestBody
 ): Promise<CheckEmailAccountApiResponse> {

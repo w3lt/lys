@@ -9,7 +9,7 @@ use tokio::time::timeout;
 use crate::account::Account;
 use crate::failure::SignInFailure;
 use crate::imap::open_imap_session;
-use crate::smtp::{build_smtp_transport, check_smtp_sign_in};
+use crate::smtp::{build_smtp_transport, offer_transport_sign_in};
 use crate::trust::Trust;
 
 /// Longest one sign-in of the check may take as a whole.
@@ -53,8 +53,11 @@ pub struct CheckReport {
 ///
 /// * `account` - The account to check.
 /// * `trust` - Which server certificates are accepted.
-pub async fn run_account_check(account: &Account, trust: &Trust) -> CheckReport {
-    let (imap, smtp) = tokio::join!(check_imap(account, trust), check_smtp(account, trust));
+pub async fn offer_account_sign_ins(account: &Account, trust: &Trust) -> CheckReport {
+    let (imap, smtp) = tokio::join!(
+        offer_imap_sign_in(account, trust),
+        offer_smtp_sign_in(account, trust)
+    );
     CheckReport {
         imap: imap.into(),
         smtp: smtp.into(),
@@ -62,26 +65,18 @@ pub async fn run_account_check(account: &Account, trust: &Trust) -> CheckReport 
 }
 
 /// Signs in to the IMAP server and logs out.
-async fn check_imap(account: &Account, trust: &Trust) -> Result<(), SignInFailure> {
-    let session = timeout(
-        CHECK_LIMIT,
-        open_imap_session(
-            &account.imap,
-            &account.user_name,
-            account.password.expose(),
-            trust,
-        ),
-    )
-    .await
-    .map_err(|_| SignInFailure::TimedOut)??;
+async fn offer_imap_sign_in(account: &Account, trust: &Trust) -> Result<(), SignInFailure> {
+    let session = timeout(CHECK_LIMIT, open_imap_session(account, trust))
+        .await
+        .map_err(|_| SignInFailure::TimedOut)??;
     session.close().await;
     Ok(())
 }
 
 /// Signs in to the SMTP server and disconnects.
-async fn check_smtp(account: &Account, trust: &Trust) -> Result<(), SignInFailure> {
+async fn offer_smtp_sign_in(account: &Account, trust: &Trust) -> Result<(), SignInFailure> {
     let transport = build_smtp_transport(account, trust)?;
-    check_smtp_sign_in(&transport, CHECK_LIMIT).await
+    offer_transport_sign_in(&transport, CHECK_LIMIT).await
 }
 
 #[cfg(test)]

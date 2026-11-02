@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 use support::imap::{FakeImapServer, FakeMailbox, ImapMode};
 use support::smtp::{FakeSmtpServer, SmtpMode};
-use support::{SecurityName, TestMessage, build_account_json};
+use support::{SecurityName, TestMessage, TestServers, build_account_json};
 
 /// The note a cut result ends with.
 const CUT_NOTE: &str = "\n\n[The result was cut at 20,000 characters.]";
@@ -42,7 +42,7 @@ struct Dialogue {
 
 /// Runs the binary over stdio, sends the messages, closes its input, and
 /// collects the answers to the requests among them.
-fn run_dialogue(variable: String, messages: Vec<Value>) -> Dialogue {
+fn send_dialogue_messages(variable: String, messages: Vec<Value>) -> Dialogue {
     let mut child = Command::new(env!("CARGO_BIN_EXE_email"))
         .env("LYS_EMAIL_ACCOUNT", variable)
         .stdin(Stdio::piped())
@@ -74,23 +74,32 @@ fn run_dialogue(variable: String, messages: Vec<Value>) -> Dialogue {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
-    let mut mailbox = FakeMailbox::standard();
-    let short = TestMessage::new("Short", "Short body.", "short@example.com", 1_793_611_800);
-    let long = TestMessage::new(
-        "Long",
-        &"y".repeat(25_000),
-        "long@example.com",
-        1_793_611_900,
-    );
-    mailbox.add_message("INBOX", short.build(), &[], short.timestamp);
-    mailbox.add_message("INBOX", long.build(), &[], long.timestamp);
+    let mut mailbox = FakeMailbox::create_standard();
+    let short = TestMessage {
+        subject: "Short".to_owned(),
+        body: "Short body.".to_owned(),
+        message_id: "short@example.com".to_owned(),
+        timestamp: 1_793_611_800,
+        ..TestMessage::default()
+    };
+    let long = TestMessage {
+        subject: "Long".to_owned(),
+        body: "y".repeat(25_000),
+        message_id: "long@example.com".to_owned(),
+        timestamp: 1_793_611_900,
+        ..TestMessage::default()
+    };
+    mailbox.add_message("INBOX", short.build_new_message(&[]));
+    mailbox.add_message("INBOX", long.build_new_message(&[]));
     let imap = FakeImapServer::start(mailbox, ImapMode::Plain, None).await;
     let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
     let variable = build_account_json(
-        imap.port,
-        SecurityName::Plain,
-        smtp.port,
-        SecurityName::Plain,
+        TestServers {
+            imap_port: imap.port,
+            imap_security: SecurityName::Plain,
+            smtp_port: smtp.port,
+            smtp_security: SecurityName::Plain,
+        },
         false,
     );
     let messages = vec![
@@ -103,7 +112,7 @@ async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
         json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "search_emails", "arguments": {"page": 0}}}),
     ];
 
-    let dialogue = tokio::task::spawn_blocking(move || run_dialogue(variable, messages))
+    let dialogue = tokio::task::spawn_blocking(move || send_dialogue_messages(variable, messages))
         .await
         .expect("the dialogue ends");
 

@@ -3,18 +3,20 @@
 
 mod support;
 
-use email::check::{CheckOutcome, run_account_check};
+use email::check::{CheckOutcome, offer_account_sign_ins};
 use email::failure::SignInFailure;
 use email::trust::Trust;
 
 use support::imap::{FakeImapServer, FakeMailbox, ImapMode};
 use support::smtp::{FakeSmtpServer, SmtpMode};
 use support::tls::TestAuthority;
-use support::{SecurityName, build_account, build_account_json, build_account_json_for};
+use support::{
+    SecurityName, TestServers, build_account, build_account_json, build_account_json_for,
+};
 
 /// Runs the binary with the arguments and the variable, off the runtime's
 /// threads, and gives its output.
-async fn run_binary(arguments: &[&str], variable: Option<&str>) -> std::process::Output {
+async fn read_binary_output(arguments: &[&str], variable: Option<&str>) -> std::process::Output {
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_email"));
     command.args(arguments);
     match variable {
@@ -26,25 +28,46 @@ async fn run_binary(arguments: &[&str], variable: Option<&str>) -> std::process:
         .expect("the task finishes")
 }
 
-/// Runs the check against fakes in the modes, with the trust of the
-/// authority.
-async fn check(
-    authority: &TestAuthority,
-    imap_mode: ImapMode,
+/// How the two fakes of a check behave, and how the account reaches
+/// each.
+#[derive(Clone, Copy, Debug)]
+struct FakeModes {
+    /// How the IMAP fake behaves.
+    imap: ImapMode,
+    /// How the account reaches the IMAP fake.
     imap_security: SecurityName,
-    smtp_mode: SmtpMode,
+    /// How the SMTP fake behaves.
+    smtp: SmtpMode,
+    /// How the account reaches the SMTP fake.
     smtp_security: SecurityName,
+}
+
+/// Starts fakes in the modes and offers both sign-ins to them, with the
+/// trust of the authority.
+///
+/// # Returns
+///
+/// The IMAP and the SMTP outcome.
+async fn offer_sign_ins_to_fakes(
+    authority: &TestAuthority,
+    modes: FakeModes,
 ) -> (CheckOutcome, CheckOutcome) {
     let imap = FakeImapServer::start(
-        FakeMailbox::standard(),
-        imap_mode,
+        FakeMailbox::create_standard(),
+        modes.imap,
         Some(authority.build_acceptor()),
     )
     .await;
-    let smtp = FakeSmtpServer::start(smtp_mode, Some(authority.build_acceptor())).await;
-    let account = build_account(imap.port, imap_security, smtp.port, smtp_security, false);
-    let trust = Trust::with_extra_roots(vec![authority.root.clone()]);
-    let report = run_account_check(&account, &trust).await;
+    let smtp = FakeSmtpServer::start(modes.smtp, Some(authority.build_acceptor())).await;
+    let servers = TestServers {
+        imap_port: imap.port,
+        imap_security: modes.imap_security,
+        smtp_port: smtp.port,
+        smtp_security: modes.smtp_security,
+    };
+    let account = build_account(servers, false);
+    let trust = Trust::create_with_extra_roots(vec![authority.root.clone()]);
+    let report = offer_account_sign_ins(&account, &trust).await;
     (report.imap, report.smtp)
 }
 
@@ -52,28 +75,34 @@ async fn check(
 async fn accepts_both_sign_ins_over_tls_and_starttls() {
     let authority = TestAuthority::new();
 
-    let over_tls = check(
+    let over_tls = offer_sign_ins_to_fakes(
         &authority,
-        ImapMode::Tls,
-        SecurityName::Tls,
-        SmtpMode::Tls,
-        SecurityName::Tls,
+        FakeModes {
+            imap: ImapMode::Tls,
+            imap_security: SecurityName::Tls,
+            smtp: SmtpMode::Tls,
+            smtp_security: SecurityName::Tls,
+        },
     )
     .await;
-    let over_starttls = check(
+    let over_starttls = offer_sign_ins_to_fakes(
         &authority,
-        ImapMode::StartTls,
-        SecurityName::StartTls,
-        SmtpMode::StartTls,
-        SecurityName::StartTls,
+        FakeModes {
+            imap: ImapMode::StartTls,
+            imap_security: SecurityName::StartTls,
+            smtp: SmtpMode::StartTls,
+            smtp_security: SecurityName::StartTls,
+        },
     )
     .await;
-    let plain = check(
+    let plain = offer_sign_ins_to_fakes(
         &authority,
-        ImapMode::Plain,
-        SecurityName::Plain,
-        SmtpMode::Plain,
-        SecurityName::Plain,
+        FakeModes {
+            imap: ImapMode::Plain,
+            imap_security: SecurityName::Plain,
+            smtp: SmtpMode::Plain,
+            smtp_security: SecurityName::Plain,
+        },
     )
     .await;
 
@@ -89,25 +118,27 @@ async fn accepts_both_sign_ins_over_tls_and_starttls() {
 async fn reports_a_wrong_password_on_each_server() {
     let authority = TestAuthority::new();
     let imap = FakeImapServer::start(
-        FakeMailbox::standard(),
+        FakeMailbox::create_standard(),
         ImapMode::Tls,
         Some(authority.build_acceptor()),
     )
     .await;
     let smtp = FakeSmtpServer::start(SmtpMode::Tls, Some(authority.build_acceptor())).await;
     let json = build_account_json(
-        imap.port,
-        SecurityName::Tls,
-        smtp.port,
-        SecurityName::Tls,
+        TestServers {
+            imap_port: imap.port,
+            imap_security: SecurityName::Tls,
+            smtp_port: smtp.port,
+            smtp_security: SecurityName::Tls,
+        },
         false,
     )
     .replace(support::PASSWORD, "another-synthetic-value");
     let account = email::account::parse_account_variable(&json).expect("account");
 
-    let report = run_account_check(
+    let report = offer_account_sign_ins(
         &account,
-        &Trust::with_extra_roots(vec![authority.root.clone()]),
+        &Trust::create_with_extra_roots(vec![authority.root.clone()]),
     )
     .await;
 
@@ -133,11 +164,19 @@ async fn reports_servers_that_cannot_be_reached() {
         .expect("a port");
     let port = closed.local_addr().expect("the address").port();
     drop(closed);
-    let account = build_account(port, SecurityName::Tls, port, SecurityName::Tls, false);
+    let account = build_account(
+        TestServers {
+            imap_port: port,
+            imap_security: SecurityName::Tls,
+            smtp_port: port,
+            smtp_security: SecurityName::Tls,
+        },
+        false,
+    );
 
-    let report = run_account_check(
+    let report = offer_account_sign_ins(
         &account,
-        &Trust::with_extra_roots(vec![authority.root.clone()]),
+        &Trust::create_with_extra_roots(vec![authority.root.clone()]),
     )
     .await;
 
@@ -160,23 +199,25 @@ async fn reports_certificates_the_trust_refuses() {
     let authority = TestAuthority::new();
     let other = TestAuthority::new();
     let imap = FakeImapServer::start(
-        FakeMailbox::standard(),
+        FakeMailbox::create_standard(),
         ImapMode::Tls,
         Some(other.build_acceptor()),
     )
     .await;
     let smtp = FakeSmtpServer::start(SmtpMode::StartTls, Some(other.build_acceptor())).await;
     let account = build_account(
-        imap.port,
-        SecurityName::Tls,
-        smtp.port,
-        SecurityName::StartTls,
+        TestServers {
+            imap_port: imap.port,
+            imap_security: SecurityName::Tls,
+            smtp_port: smtp.port,
+            smtp_security: SecurityName::StartTls,
+        },
         false,
     );
 
-    let report = run_account_check(
+    let report = offer_account_sign_ins(
         &account,
-        &Trust::with_extra_roots(vec![authority.root.clone()]),
+        &Trust::create_with_extra_roots(vec![authority.root.clone()]),
     )
     .await;
 
@@ -198,12 +239,14 @@ async fn reports_certificates_the_trust_refuses() {
 async fn reports_servers_that_do_not_offer_starttls() {
     let authority = TestAuthority::new();
 
-    let outcome = check(
+    let outcome = offer_sign_ins_to_fakes(
         &authority,
-        ImapMode::StartTlsRefused,
-        SecurityName::StartTls,
-        SmtpMode::StartTlsRefused,
-        SecurityName::StartTls,
+        FakeModes {
+            imap: ImapMode::StartTlsRefused,
+            imap_security: SecurityName::StartTls,
+            smtp: SmtpMode::StartTlsRefused,
+            smtp_security: SecurityName::StartTls,
+        },
     )
     .await;
 
@@ -224,12 +267,14 @@ async fn reports_servers_that_do_not_offer_starttls() {
 async fn reports_a_server_that_speaks_something_else() {
     let authority = TestAuthority::new();
 
-    let outcome = check(
+    let outcome = offer_sign_ins_to_fakes(
         &authority,
-        ImapMode::Garbage,
-        SecurityName::Plain,
-        SmtpMode::Plain,
-        SecurityName::Plain,
+        FakeModes {
+            imap: ImapMode::Garbage,
+            imap_security: SecurityName::Plain,
+            smtp: SmtpMode::Plain,
+            smtp_security: SecurityName::Plain,
+        },
     )
     .await;
 
@@ -245,18 +290,20 @@ async fn reports_a_server_that_speaks_something_else() {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_check_subcommand_prints_one_json_line_and_exits_0() {
     let authority = TestAuthority::new();
-    let imap = FakeImapServer::start(FakeMailbox::standard(), ImapMode::Plain, None).await;
+    let imap = FakeImapServer::start(FakeMailbox::create_standard(), ImapMode::Plain, None).await;
     let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
     drop(authority);
     let json = build_account_json(
-        imap.port,
-        SecurityName::Plain,
-        smtp.port,
-        SecurityName::Plain,
+        TestServers {
+            imap_port: imap.port,
+            imap_security: SecurityName::Plain,
+            smtp_port: smtp.port,
+            smtp_security: SecurityName::Plain,
+        },
         false,
     );
 
-    let output = run_binary(&["check"], Some(&json)).await;
+    let output = read_binary_output(&["check"], Some(&json)).await;
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(
@@ -269,21 +316,23 @@ async fn the_check_subcommand_prints_one_json_line_and_exits_0() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_to_start_without_a_usable_account_and_names_the_rule_only() {
-    let missing = run_binary(&["check"], None).await;
-    let plain_remote = run_binary(
+    let missing = read_binary_output(&["check"], None).await;
+    let plain_remote = read_binary_output(
         &["check"],
         Some(&build_account_json_for(
             "mail.example.com",
-            143,
-            SecurityName::Plain,
-            587,
-            SecurityName::StartTls,
+            TestServers {
+                imap_port: 143,
+                imap_security: SecurityName::Plain,
+                smtp_port: 587,
+                smtp_security: SecurityName::StartTls,
+            },
             false,
         )),
     )
     .await;
-    let not_json = run_binary(&[], Some("{not json")).await;
-    let bad_arguments = run_binary(&["serve"], None).await;
+    let not_json = read_binary_output(&[], Some("{not json")).await;
+    let bad_arguments = read_binary_output(&["serve"], None).await;
 
     assert_eq!(missing.status.code(), Some(2));
     assert_eq!(

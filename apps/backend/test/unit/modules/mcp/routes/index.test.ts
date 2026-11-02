@@ -30,6 +30,7 @@ import registerMcpRoutes from "../../../../../src/modules/mcp/routes"
 import {
   buildEmailAccount,
   buildFakeEmailServerCommand,
+  readRecordedEmailProcessId,
   readRecordedEmailVariable,
   SYNTHETIC_EMAIL_PASSWORD
 } from "../../../support/emailTestServer"
@@ -794,6 +795,58 @@ describe("registerMcpRoutes", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         {
           kind: "server-failed",
           failure: { kind: "start-failed", error: expect.any(Error) }
+        }
+      ])
+    })
+
+    it("answers busy at once to a check sent while another runs, and the running check answers its outcome", async () => {
+      const folder = await createCaseFolder()
+      const { app, checkEvents } = await createMcpRouteApp(
+        await createSettingsFilePath(),
+        {
+          emailServerCommand: buildFakeEmailServerCommand({
+            recordsProcessId: true,
+            holdMilliseconds: 1000
+          }),
+          workingDirectory: folder
+        }
+      )
+      const running = app.inject({
+        method: "POST",
+        url: ACCOUNT_CHECK_URL,
+        payload: {
+          account: buildEmailAccount("lock@example.com"),
+          password: SYNTHETIC_EMAIL_PASSWORD
+        }
+      })
+      await vi.waitFor(async () => {
+        await readRecordedEmailProcessId(folder)
+      }, STATE_WAIT)
+
+      const refused = await app.inject({
+        method: "POST",
+        url: ACCOUNT_CHECK_URL,
+        payload: ACCEPTED_CHECK
+      })
+
+      expect(refused.statusCode).toBe(200)
+      expect(refused.json()).toEqual({ status: "unavailable", reason: "busy" })
+      expect(
+        checkEmailAccountApiResponseSchema.safeParse(refused.json()).success
+      ).toBe(true)
+      expect(refused.body).not.toContain("7f3a")
+      const response = await running
+      expect(response.json()).toEqual({
+        status: "checked",
+        imap: { status: "accepted" },
+        smtp: { status: "accepted" }
+      })
+      expect(checkEvents).toEqual([
+        { kind: "busy" },
+        {
+          kind: "checked",
+          imap: { status: "accepted" },
+          smtp: { status: "accepted" }
         }
       ])
     })

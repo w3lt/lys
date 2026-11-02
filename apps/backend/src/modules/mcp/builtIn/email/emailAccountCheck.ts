@@ -100,6 +100,13 @@ export type EmailAccountCheckEvent =
       kind: "server-missing"
     }>
   | Readonly<{
+      /**
+       * A check was asked for while another ran, so it was answered `busy`
+       * without running.
+       */
+      kind: "busy"
+    }>
+  | Readonly<{
       /** The email server ran, or was to run, but did not report. */
       kind: "server-failed"
       /** Why. */
@@ -180,6 +187,12 @@ const SERVER_FAILED: CheckEmailAccountApiResponse = Object.freeze({
   reason: "server-failed"
 })
 
+/** Answer when another check runs. */
+const BUSY: CheckEmailAccountApiResponse = Object.freeze({
+  status: "unavailable",
+  reason: "busy"
+})
+
 /** Failure of a check the closed checker did not run, or killed. */
 const CLOSED_FAILURE: EmailServerRunFailure = Object.freeze({ kind: "closed" })
 
@@ -194,15 +207,14 @@ const CLOSED_FAILURE: EmailServerRunFailure = Object.freeze({ kind: "closed" })
  * ownership: owns the run of the check running now until it ends, which
  * kills its process at the time limit, and stops it on {@link close}; a
  * check that runs when the backend is killed ends by itself at the email
- * server's own limits. Concurrency model: serialized; checks queue and run
- * one after another in call order, so at most one email server process runs
- * for checks. {@link close} is idempotent.
+ * server's own limits. Concurrency model: one check at a time, without a
+ * queue; a check asked for while another runs is answered `busy` at once
+ * and keeps neither the account nor the password, so at most one email
+ * server process runs for checks. {@link close} is idempotent.
  */
 export default class EmailAccountChecker {
   /** Borrowed command, folder, time limit, and reporter. */
   readonly #dependencies: EmailAccountCheckerDependencies
-  /** Settles once every check asked for so far ended. */
-  #checks: Promise<unknown>
   /** Run of the check running now, if any; owned. */
   #runningCheck: EmailServerCheckRun | undefined
   /** Whether {@link close} was called. */
@@ -216,58 +228,31 @@ export default class EmailAccountChecker {
    */
   public constructor(dependencies: EmailAccountCheckerDependencies) {
     this.#dependencies = dependencies
-    this.#checks = Promise.resolve()
     this.#runningCheck = undefined
     this.#isClosed = false
   }
 
   /**
    * Signs in to the account's IMAP and SMTP servers through the email
-   * server, once the checks asked for before ended.
+   * server, unless another check runs.
    *
    * @param account - Account to sign in with.
    * @param password - Its password.
    * @returns The outcome of both sign-ins, or why no sign-in was tried:
-   * `server-missing` when the email server's executable is not there, and
-   * `server-failed` when it could not be started, ended without a report,
-   * did not end within the time limit, or the checker is closed. It never
+   * `busy`, at once, when another check runs; `server-missing` when the
+   * email server's executable is not there; and `server-failed` when it
+   * could not be started, ended without a report, did not end within the
+   * time limit, or the checker is closed, even while a check runs. It never
    * rejects.
-   * @remarks Each run is reported to the log by its outcome, without the
-   * account or the password.
+   * @remarks Each run is reported to the log by its outcome, and so is a
+   * check answered `busy`, without the account or the password.
    */
-  public sendCheck(
-    account: EmailAccount,
-    password: EmailPassword
-  ): Promise<CheckEmailAccountApiResponse> {
-    const check = this.#checks.then(() => this.#sendCheckNow(account, password))
-    this.#checks = Promise.allSettled([check])
-    return check
-  }
-
-  /**
-   * Kills the running check, if any, and runs no later check.
-   *
-   * @returns A promise that settles once every check asked for so far
-   * ended; every later call does the same.
-   */
-  public async close(): Promise<void> {
-    this.#isClosed = true
-    await this.#runningCheck?.stop()
-    await this.#checks
-  }
-
-  /**
-   * Sends one check to a new email server process now.
-   *
-   * @param account - Account to sign in with.
-   * @param password - Its password.
-   * @returns The answer as {@link sendCheck} describes.
-   */
-  async #sendCheckNow(
+  public async sendCheck(
     account: EmailAccount,
     password: EmailPassword
   ): Promise<CheckEmailAccountApiResponse> {
     if (this.#isClosed) return this.#handleFailedRun(CLOSED_FAILURE)
+    if (this.#runningCheck !== undefined) return this.#handleBusyCheck()
     const check = EmailServerCheckRun.start({
       serverCommand: this.#dependencies.serverCommand,
       workingDirectory: this.#dependencies.workingDirectory,
@@ -287,6 +272,28 @@ export default class EmailAccountChecker {
       case "exited":
         return this.#handleExit(run)
     }
+  }
+
+  /**
+   * Kills the running check, if any, and runs no later check.
+   *
+   * @returns A promise that settles once the check running now, if any,
+   * ended; every later call does the same.
+   */
+  public async close(): Promise<void> {
+    this.#isClosed = true
+    await this.#runningCheck?.stop()
+  }
+
+  /**
+   * Answers a check asked for while another runs: reports it, and answers
+   * `busy` without running it.
+   *
+   * @returns The `busy` answer.
+   */
+  #handleBusyCheck(): CheckEmailAccountApiResponse {
+    this.#dependencies.reportEvent({ kind: "busy" })
+    return BUSY
   }
 
   /**

@@ -56,6 +56,13 @@ describe("handleEmailAccountCheckEvent", () => {
     })
   })
 
+  it("warns of a check refused while another ran", () => {
+    expect(getLoggedFields({ kind: "busy" })).toEqual({
+      level: "warn",
+      msg: "An email account check was refused because another check is running"
+    })
+  })
+
   it("logs a server that could not be started as an error with Node's error", () => {
     const error = Object.assign(new Error("spawn /opt/lys/email EACCES"), {
       code: "EACCES"

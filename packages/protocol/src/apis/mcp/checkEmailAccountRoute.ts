@@ -49,11 +49,16 @@ export type EmailServerCheck = z.infer<typeof emailServerCheckSchema>
 
 /**
  * Validates why no sign-in was tried: the email server Lys ships is not
- * installed where the backend expects it, or it failed before it reported.
+ * installed where the backend expects it; it failed before it reported; or
+ * another check was running, so this one was refused without running.
+ *
+ * @remarks Adding a reason is a compatibility change for every consumer
+ * that branches on it.
  */
 const emailAccountCheckUnavailableReasonSchema = z.enum([
   "server-missing",
-  "server-failed"
+  "server-failed",
+  "busy"
 ])
 
 /** Why no sign-in was tried. */
@@ -124,9 +129,11 @@ const checkEmailAccountApiResponseSchemas = Object.freeze({
  * @remarks The backend runs the check through the email server Lys ships,
  * so the sign-in follows the same TLS rules the server applies; it saves
  * nothing. A check ends within about a minute and is not cancelled when
- * the client leaves. Checks run one at a time. Changing the method, path,
- * or schemas changes the transmitted compatibility contract and requires
- * coordinated consumers.
+ * the client leaves. One check runs at a time, without a queue: a check
+ * sent while another runs is answered `unavailable` with `busy` at once,
+ * without running, and can be sent again once the other ended. Changing
+ * the method, path, or schemas changes the transmitted compatibility
+ * contract and requires coordinated consumers.
  */
 export const checkEmailAccountApi = Object.freeze({
   method: "POST",

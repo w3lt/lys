@@ -16,6 +16,7 @@ import {
   type FakeEmailServerOptions
 } from "../../../../support/emailTestServer"
 import { isProcessRunning } from "../../../../support/mcpTestServers"
+import { createSettlementReader } from "../../../../support/settlement"
 
 /** Longest one check may run in a case that expects it to end. */
 const CHECK_TIMEOUT_MILLISECONDS = 10_000
@@ -358,30 +359,73 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     })
   })
 
-  it("runs one check at a time, in call order", async () => {
+  it("answers busy at once to a check asked for while another runs, starting nothing for it, and runs a check asked for once the other ended", async () => {
     const folder = await createCaseFolder()
-    const { checker } = createChecker({
-      fake: { holdMilliseconds: 300 },
+    const { checker, events } = createChecker({
+      fake: { recordsVariable: true, holdMilliseconds: 300 },
       workingDirectory: folder
     })
-    const account = buildEmailAccount("lock@example.com")
+    const accepted = {
+      status: "checked",
+      imap: { status: "accepted" },
+      smtp: { status: "accepted" }
+    }
+    const running = checker.sendCheck(
+      buildEmailAccount("lock@example.com"),
+      SYNTHETIC_EMAIL_PASSWORD
+    )
+    const runningSettlement = createSettlementReader(running)
 
-    const answers = await Promise.all([
-      checker.sendCheck(account, SYNTHETIC_EMAIL_PASSWORD),
-      checker.sendCheck(account, SYNTHETIC_EMAIL_PASSWORD)
-    ])
+    const refused = await checker.sendCheck(
+      buildEmailAccount("accepted@example.com"),
+      SYNTHETIC_EMAIL_PASSWORD
+    )
 
-    expect(answers).toEqual([
-      {
-        status: "checked",
-        imap: { status: "accepted" },
-        smtp: { status: "accepted" }
-      },
-      {
-        status: "checked",
-        imap: { status: "accepted" },
-        smtp: { status: "accepted" }
-      }
+    expect(refused).toEqual({ status: "unavailable", reason: "busy" })
+    expect(Object.isFrozen(refused)).toBe(true)
+    expect(runningSettlement()).toBe("pending")
+    expect(events).toEqual([{ kind: "busy" }])
+    expect(await running).toEqual(accepted)
+    expect(await readRecordedEmailVariable(folder)).toMatchObject({
+      address: "lock@example.com"
+    })
+    expect(
+      await checker.sendCheck(
+        buildEmailAccount("accepted@example.com"),
+        SYNTHETIC_EMAIL_PASSWORD
+      )
+    ).toEqual(accepted)
+  })
+
+  it("answers a check asked for while the checker closes as closed, not busy", async () => {
+    const folder = await createCaseFolder()
+    const { checker, events } = createChecker({
+      fake: { recordsProcessId: true },
+      workingDirectory: folder
+    })
+    const running = checker.sendCheck(
+      buildEmailAccount("hang@example.com"),
+      SYNTHETIC_EMAIL_PASSWORD
+    )
+    await vi.waitFor(async () => {
+      await readRecordedEmailProcessId(folder)
+    })
+
+    const closing = checker.close()
+    const later = await checker.sendCheck(
+      buildEmailAccount("accepted@example.com"),
+      SYNTHETIC_EMAIL_PASSWORD
+    )
+    await closing
+
+    expect(later).toEqual({ status: "unavailable", reason: "server-failed" })
+    expect(await running).toEqual({
+      status: "unavailable",
+      reason: "server-failed"
+    })
+    expect(events).toEqual([
+      { kind: "server-failed", failure: { kind: "closed" } },
+      { kind: "server-failed", failure: { kind: "closed" } }
     ])
   })
 

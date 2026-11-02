@@ -13,11 +13,11 @@ const CHECK_FAILED_MESSAGE = "The email server's account check failed"
  * @param logger - Backend logger, borrowed for the call.
  * @param event - Event the checker reported.
  * @remarks A report is information with both sign-ins' outcomes; a missing
- * email server is a warning; a check the closing checker ended is a
- * warning; every other failure to report is an error with how the server
- * ended and its own error lines, or, when it could not be started, with
- * Node's error, which can name the command. No entry holds the account or
- * the password.
+ * email server is a warning; a check refused while another ran is a
+ * warning; a check the closing checker ended is a warning; every other
+ * failure to report is an error with how the server ended and its own
+ * error lines, or, when it could not be started, with Node's error, which
+ * can name the command. No entry holds the account or the password.
  */
 export function handleEmailAccountCheckEvent(
   logger: FastifyBaseLogger,
@@ -33,6 +33,11 @@ export function handleEmailAccountCheckEvent(
     case "server-missing":
       logger.warn(
         "The email server is not installed, so the email account could not be checked; build.sh installs it"
+      )
+      return
+    case "busy":
+      logger.warn(
+        "An email account check was refused because another check is running"
       )
       return
     case "server-failed":

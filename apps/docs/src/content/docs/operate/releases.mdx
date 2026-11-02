@@ -52,8 +52,10 @@ The script stops at the first failing step. In order, it:
    Swift toolchain is missing. Nothing is installed yet, so a machine that
    cannot build vmo keeps its current install.
 3. Builds the email MCP server Lys ships in release with
-   `cargo build --release --manifest-path mcps/email/Cargo.toml`. It stops
-   first when `cargo` is missing, again before anything is installed.
+   `cargo build --release --locked --manifest-path mcps/email/Cargo.toml`,
+   which uses the versions `mcps/email/Cargo.lock` records and stops when the
+   lock file no longer matches the manifest. It stops first when `cargo` is
+   missing, again before anything is installed.
 4. Runs `pnpm run backend:build`, which bundles the backend into
    `apps/backend/dist/backend.mjs` and copies its prompt files beside it.
 5. Creates `$LYS_HOME/runtime`, using `${LYS_HOME:-$HOME/.lys}`.

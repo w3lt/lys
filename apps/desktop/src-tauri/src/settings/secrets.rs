@@ -2,6 +2,7 @@ use std::fmt;
 
 use serde::de::Error;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Most characters an API key may have, inclusive. Matches
 /// `MAXIMUM_API_KEY_LENGTH` in `@lys/share`, which the renderer and the
@@ -12,6 +13,9 @@ const API_KEY_MAX_LENGTH: usize = 256;
 /// have, inclusive. Matches `MAXIMUM_EMAIL_PASSWORD_LENGTH` in `@lys/share`,
 /// which the renderer and the backend check.
 const EMAIL_PASSWORD_MAX_LENGTH: usize = 1024;
+
+/// Rule of an email password, as an error message.
+const EMAIL_PASSWORD_RULE: &str = "an email password must be text of 1 to 1024 characters, without line breaks or other control characters";
 
 #[derive(Clone, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
@@ -105,19 +109,21 @@ impl<'de> Deserialize<'de> for EmailPassword {
     ///
     /// # Errors
     ///
-    /// Returns the deserializer's error when the input is not a string or not
-    /// a valid password. The error never contains the value.
+    /// Returns the deserializer's error when the input cannot be read as
+    /// JSON, such as a string with an invalid escape, and an error naming the
+    /// password rule when the value is not a string or not a valid password.
+    /// The error never contains the value: the deserializer's own error for a
+    /// value of another type quotes a number or a switch, so it is replaced.
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = String::deserialize(deserializer)?;
+        let password = match Value::deserialize(deserializer)? {
+            Value::String(value) => Self::new(value),
+            _ => None,
+        };
 
-        Self::new(value).ok_or_else(|| {
-            D::Error::custom(
-                "an email password must be 1 to 1024 characters, without line breaks or other control characters",
-            )
-        })
+        password.ok_or_else(|| D::Error::custom(EMAIL_PASSWORD_RULE))
     }
 }
 
@@ -145,7 +151,15 @@ pub struct SecretsSettings {
 
 #[cfg(test)]
 mod tests {
-    use super::{ApiKey, EmailPassword};
+    use super::{ApiKey, EmailPassword, SecretsSettings};
+
+    /// Reads `text` as the `secrets` group, as the settings file is read,
+    /// and returns the text of the error it fails with.
+    fn get_secrets_failure(text: &str) -> String {
+        serde_json::from_str::<SecretsSettings>(text)
+            .expect_err("an unusable secrets group")
+            .to_string()
+    }
 
     #[test]
     fn accepts_visible_ascii_keys_from_one_to_256_characters() {
@@ -198,6 +212,31 @@ mod tests {
         ] {
             assert!(EmailPassword::new(value.clone()).is_none(), "{value:?}");
         }
+    }
+
+    #[test]
+    fn refuses_a_saved_password_that_is_not_valid_text_by_its_rule_without_quoting_it() {
+        for (stored, value) in [
+            ("12345678", "12345678"),
+            ("-87654321", "87654321"),
+            ("1234.5678", "1234.5678"),
+            ("true", "true"),
+            ("[\"synthetic-password-7f3a\"]", "synthetic"),
+            ("{\"password\":\"synthetic-password-7f3a\"}", "synthetic"),
+            ("\"synthetic\\npassword\"", "synthetic"),
+        ] {
+            let failure = get_secrets_failure(&format!("{{\"emailPassword\":{stored}}}"));
+
+            assert!(failure.contains("an email password must be"), "{failure}");
+            assert!(!failure.contains(value), "{failure}");
+        }
+    }
+
+    #[test]
+    fn keeps_the_json_reader_s_reason_for_a_password_that_is_not_valid_json() {
+        let failure = get_secrets_failure("{\"emailPassword\":\"synthetic\\qpassword\"}");
+
+        assert!(failure.contains("invalid escape"), "{failure}");
     }
 
     #[test]

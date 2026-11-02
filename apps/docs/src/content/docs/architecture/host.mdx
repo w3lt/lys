@@ -288,10 +288,13 @@ it, owner-only. The rename itself is not synced to the directory, so it is not
 promised to survive a power loss. When `settings.json` is a symbolic link, the rename replaces the
 link with a regular file, and the file it pointed to stops receiving saves.
 
-The document and each of its groups are read from a JSON object only
-(`src/settings/json.rs`): an array in their place makes loading fail, as it
-does in the `@lys/share` schemas the backend reads the file with, so both
-sides judge a file the same way. A missing group takes its defaults.
+The document, each of its groups, and each object inside a group, such as a
+provider's server or a model's load settings, are read from a JSON object
+only (`src/settings/json.rs`): an array in their place makes loading fail, as
+it does in the `@lys/share` schemas the backend reads the file with, so both
+sides judge a file the same way. The objects are read as the JSON reader
+reads them, so a load error still names the line and column where reading
+stopped. A missing group takes its defaults.
 
 The `secrets` group holds the Tavily API key as plain text, validated on load
 (1 to 256 visible ASCII characters); an invalid key makes loading fail. Its

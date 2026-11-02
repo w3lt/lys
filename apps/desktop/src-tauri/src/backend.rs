@@ -702,10 +702,10 @@ fn spawn_prod_backend_process(
 ///
 /// # Errors
 ///
-/// Returns an error when the development backend directory cannot be resolved,
-/// process state cannot be locked, an earlier backend's MCP server process
-/// group list cannot be deleted, the child cannot be spawned, or the child
-/// cannot be inspected.
+/// Returns an error when the development backend directory or the
+/// development email server path cannot be resolved, process state cannot be
+/// locked, an earlier backend's MCP server process group list cannot be
+/// deleted, the child cannot be spawned, or the child cannot be inspected.
 fn spawn_backend_process(
     backend: &Backend,
     lys_home: &LysHome,
@@ -730,8 +730,9 @@ fn spawn_backend_process(
 /// # Errors
 ///
 /// Returns an error when status inspection, process-state locking, development
-/// backend directory resolution, deleting an earlier backend's MCP server
-/// process group list, spawning, or post-spawn inspection fails.
+/// backend directory or email server path resolution, deleting an earlier
+/// backend's MCP server process group list, spawning, or post-spawn
+/// inspection fails.
 pub fn start_backend(
     backend: State<'_, Backend>,
     lys_home: State<'_, LysHome>,

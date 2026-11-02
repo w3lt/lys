@@ -548,7 +548,7 @@ describe("EmailAccountCard", () => {
     })
 
     expect(sentCopy).toHaveAccessibleDescription(
-      "Gmail, Outlook, and Yahoo file sent mail themselves. Off makes Lys file the copy in Sent."
+      "Gmail and Yahoo file sent mail themselves. Off makes Lys file the copy in Sent."
     )
     await user.click(sentCopy)
 

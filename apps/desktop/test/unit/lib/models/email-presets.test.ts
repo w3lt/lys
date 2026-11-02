@@ -5,9 +5,6 @@ describe("findEmailPreset", () => {
   it.each([
     ["ada@gmail.com", "Gmail"],
     ["ada@googlemail.com", "Gmail"],
-    ["ada@outlook.com", "Outlook"],
-    ["ada@hotmail.com", "Outlook"],
-    ["ada@live.com", "Outlook"],
     ["ada@icloud.com", "iCloud"],
     ["ada@me.com", "iCloud"],
     ["ada@mac.com", "iCloud"],
@@ -43,14 +40,12 @@ describe("findEmailPreset", () => {
     })
   })
 
-  it("holds the published servers of Outlook with STARTTLS for sending", () => {
-    expect(findEmailPreset("ada@outlook.com")).toEqual({
-      name: "Outlook",
-      imap: { host: "outlook.office365.com", port: 993, security: "tls" },
-      smtp: { host: "smtp-mail.outlook.com", port: 587, security: "starttls" },
-      serverKeepsSentCopy: true
-    })
-  })
+  it.each(["ada@outlook.com", "ada@hotmail.com", "ada@live.com"])(
+    "has no preset for %s, whose servers refuse a password sign-in",
+    (address) => {
+      expect(findEmailPreset(address)).toBeUndefined()
+    }
+  )
 
   it("knows iCloud does not file sent mail itself", () => {
     expect(findEmailPreset("ada@icloud.com")).toMatchObject({

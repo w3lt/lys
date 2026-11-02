@@ -65,7 +65,7 @@ export const EMAIL_PASSWORD_KEPT_NOTE =
 
 /** Note under the Sent copy switch. */
 export const EMAIL_SENT_COPY_NOTE =
-  "Gmail, Outlook, and Yahoo file sent mail themselves. Off makes Lys file the copy in Sent."
+  "Gmail and Yahoo file sent mail themselves. Off makes Lys file the copy in Sent."
 
 /** Question asked before removing the account. */
 export const EMAIL_ACCOUNT_REMOVAL_QUESTION =

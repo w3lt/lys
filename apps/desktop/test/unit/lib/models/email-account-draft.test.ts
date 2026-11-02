@@ -119,15 +119,15 @@ describe("updateEmailAccountAddress", () => {
   it("replaces the servers of the previous preset when the address moves to another provider", () => {
     const gmail = updateEmailAccountAddress(EMPTY_DRAFT, "ada@gmail.com")
 
-    expect(updateEmailAccountAddress(gmail, "ada@outlook.com")).toMatchObject({
-      address: "ada@outlook.com",
-      imap: { host: "outlook.office365.com" },
+    expect(updateEmailAccountAddress(gmail, "ada@icloud.com")).toMatchObject({
+      address: "ada@icloud.com",
+      imap: { host: "imap.mail.me.com" },
       smtp: {
-        host: "smtp-mail.outlook.com",
+        host: "smtp.mail.me.com",
         port: "587",
         security: "starttls"
       },
-      serverKeepsSentCopy: true
+      serverKeepsSentCopy: false
     })
   })
 
@@ -147,9 +147,9 @@ describe("updateEmailAccountAddress", () => {
     const gmail = updateEmailAccountAddress(EMPTY_DRAFT, "ada@gmail.com")
     const changed = { ...gmail, smtp: { ...gmail.smtp, port: "587" } }
 
-    expect(updateEmailAccountAddress(changed, "ada@outlook.com")).toEqual({
+    expect(updateEmailAccountAddress(changed, "ada@yahoo.com")).toEqual({
       ...changed,
-      address: "ada@outlook.com"
+      address: "ada@yahoo.com"
     })
   })
 

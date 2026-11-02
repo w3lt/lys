@@ -20,22 +20,6 @@ const GMAIL_PRESET: EmailPreset = Object.freeze({
   serverKeepsSentCopy: true
 })
 
-/** Outlook.com, Hotmail, and Live addresses. */
-const OUTLOOK_PRESET: EmailPreset = Object.freeze({
-  name: "Outlook",
-  imap: Object.freeze({
-    host: "outlook.office365.com",
-    port: 993,
-    security: "tls"
-  }),
-  smtp: Object.freeze({
-    host: "smtp-mail.outlook.com",
-    port: 587,
-    security: "starttls"
-  }),
-  serverKeepsSentCopy: true
-})
-
 /** iCloud Mail addresses, including the older me.com and mac.com domains. */
 const ICLOUD_PRESET: EmailPreset = Object.freeze({
   name: "iCloud",
@@ -84,14 +68,14 @@ const FASTMAIL_PRESET: EmailPreset = Object.freeze({
  * Presets by the lowercase domain of the address.
  *
  * @remarks Taken from the providers' published server settings; a provider
- * that changes them needs a new entry here.
+ * that changes them needs a new entry here. Only providers that accept a
+ * password or an app password over IMAP and SMTP have one: Outlook.com,
+ * Hotmail, and Live accept only an OAuth sign-in there, which Lys does not
+ * offer.
  */
 const EMAIL_PRESETS_BY_DOMAIN: ReadonlyMap<string, EmailPreset> = new Map([
   ["gmail.com", GMAIL_PRESET],
   ["googlemail.com", GMAIL_PRESET],
-  ["outlook.com", OUTLOOK_PRESET],
-  ["hotmail.com", OUTLOOK_PRESET],
-  ["live.com", OUTLOOK_PRESET],
   ["icloud.com", ICLOUD_PRESET],
   ["me.com", ICLOUD_PRESET],
   ["mac.com", ICLOUD_PRESET],

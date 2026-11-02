@@ -23,6 +23,14 @@ const CHECK_TIMEOUT_MILLISECONDS = 10_000
 /** Longest one case may run; a case starts a check process. */
 const CASE_TIMEOUT_MILLISECONDS = 30_000
 
+/**
+ * Whether the tests run on macOS, where Node throws as it starts an
+ * executable file that is not a program (`ENOEXEC`). On Linux, libuv
+ * starts a command through glibc's `execvp`, which runs such a file with
+ * `/bin/sh` instead.
+ */
+const IS_MACOS = process.platform === "darwin"
+
 /** Every reason a sign-in can fail for. */
 const FAILURE_REASONS: readonly EmailServerCheckFailure[] = [
   "wrong-password",
@@ -219,6 +227,38 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         failure: { error: { code: "ENOTDIR" } }
       })
       expect(JSON.stringify(events)).not.toContain("7f3a")
+    }
+  )
+
+  it.runIf(IS_MACOS)(
+    "answers server-failed with Node's error when Node throws as it starts an executable file that is not a program",
+    async () => {
+      const folder = await createCaseFolder()
+      const path = join(folder, "email")
+      await writeFile(path, "not a program")
+      await chmod(path, 0o755)
+      const { checker, events } = createChecker({
+        serverCommand: { command: path, arguments: [] }
+      })
+
+      const answer = await checker.sendCheck(
+        buildEmailAccount("accepted@example.com"),
+        SYNTHETIC_EMAIL_PASSWORD
+      )
+
+      expect(answer).toEqual({
+        status: "unavailable",
+        reason: "server-failed"
+      })
+      expect(events).toEqual([
+        {
+          kind: "server-failed",
+          failure: { kind: "start-failed", error: expect.any(Error) }
+        }
+      ])
+      expect(events[0]).toMatchObject({
+        failure: { error: { code: "ENOEXEC" } }
+      })
     }
   )
 

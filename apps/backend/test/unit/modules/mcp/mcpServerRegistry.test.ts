@@ -2181,6 +2181,62 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         }
       ])
     })
+
+    it("ends an HTTP server's session when it is switched off while a call runs, tells the model the server was stopped, and lists it as off without tools", async () => {
+      const server = await startFakeMcpHttpServer(
+        answerToolCallsWith(() => {
+          // The call is never answered, so only the switch-off ends it.
+        })
+      )
+      const harness = createRegistryHarness()
+      const remote = buildHttpServerSettings("remote", server.url)
+      harness.setServers([remote])
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildHttpStatus("remote", buildConnectedState(1))])
+      )
+      const call = findTool(harness.registry, "mcp__remote__echo").sendToolCall(
+        { text: "x" },
+        NEVER_ABORTED
+      )
+      await vi.waitFor(() => {
+        expect(
+          server.receivedRequests.map((request) => request.rpcMethod)
+        ).toContain("tools/call")
+      }, STATE_WAIT)
+      harness.setServers([buildSwitchedOffSettings(remote)])
+
+      await harness.registry.updateServers()
+      const outcome = await call
+      await waitForRegistryClose(
+        findOpenedConnection(harness.openedConnections, "remote")
+      )
+
+      expect(outcome).toEqual({
+        status: "failed",
+        content:
+          "The call of mcp__remote__echo failed: the MCP server remote was stopped while the call ran: it was switched off, changed, or removed in Settings → MCP."
+      })
+      expect(
+        server.receivedRequests.filter((request) => request.method === "DELETE")
+      ).toEqual([
+        expect.objectContaining({
+          headers: expect.objectContaining({ "mcp-session-id": "test-session" })
+        })
+      ])
+      expect(harness.registry.listServers()).toEqual(
+        buildList([buildHttpStatus("remote", OFF)])
+      )
+      expect(harness.registry.listToolDefinitions()).toEqual([])
+      expect(harness.registry.findTurnTool("mcp__remote__echo")).toEqual({
+        status: "not-connected"
+      })
+      expect(filterEvents(harness.events, "server-stopped")).toEqual([
+        { kind: "server-stopped", serverName: "remote", reason: "switched-off" }
+      ])
+      expect(filterEvents(harness.events, "session-end-failed")).toEqual([])
+    })
   })
 
   describe("close", () => {

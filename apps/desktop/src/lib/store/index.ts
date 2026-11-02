@@ -190,6 +190,24 @@ const initialState: LysState = {
 }
 
 /**
+ * Gets the readiness to publish for the backend after a failed start or
+ * stop.
+ *
+ * @returns `exited` once the host owns no running backend process;
+ * `unresponsive` while one runs or its status cannot be read, so Stop
+ * stays offered as the recovery path.
+ */
+async function getBackendReadinessAfterFailure(): Promise<
+  "exited" | "unresponsive"
+> {
+  try {
+    return (await getBackendStatus()).running ? "unresponsive" : "exited"
+  } catch {
+    return "unresponsive"
+  }
+}
+
+/**
  * Zustand hook and store for application view, settings, backend and vmo
  * lifecycles, and the model provider's status.
  *
@@ -211,24 +229,6 @@ const initialState: LysState = {
  * re-reads the provider status. Every load sends the stored load
  * configuration of the model being loaded.
  */
-/**
- * Gets the readiness to publish for the backend after a failed start or
- * stop.
- *
- * @returns `exited` once the host owns no running backend process;
- * `unresponsive` while one runs or its status cannot be read, so Stop
- * stays offered as the recovery path.
- */
-async function getBackendReadinessAfterFailure(): Promise<
-  "exited" | "unresponsive"
-> {
-  try {
-    return (await getBackendStatus()).running ? "unresponsive" : "exited"
-  } catch {
-    return "unresponsive"
-  }
-}
-
 export const useLysStore = create<LysStore>()((set, get) => {
   const settingsGroupSaves = createSettingsGroupSaves()
 

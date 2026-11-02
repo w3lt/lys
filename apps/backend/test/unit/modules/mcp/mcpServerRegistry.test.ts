@@ -1473,6 +1473,41 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         )
       ).resolves.toMatchObject({ status: "succeeded" })
     })
+
+    it("tells the model the server was restarted or reconnected when a reconnect stops its session while a call runs", async () => {
+      const harness = createRegistryHarness()
+      harness.setServers([
+        buildFakeStdioServerSettings("alpha", { tools: [ECHO_TOOL, SLOW_TOOL] })
+      ])
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("alpha", buildConnectedState(2))])
+      )
+      const call = findTool(harness.registry, "mcp__alpha__slow").sendToolCall(
+        {},
+        NEVER_ABORTED
+      )
+      await waitForMicrotasks()
+
+      expect(harness.registry.openServerAgain("alpha")).toBe("reconnecting")
+      const outcome = await call
+
+      expect(outcome).toEqual({
+        status: "failed",
+        content:
+          "The call of mcp__alpha__slow failed: the MCP server alpha was stopped while the call ran: it was restarted or reconnected in Settings → MCP."
+      })
+      expect(filterEvents(harness.events, "tool-call-failed")).toEqual([
+        {
+          kind: "tool-call-failed",
+          serverName: "alpha",
+          serverToolName: "slow",
+          failure: { kind: "closed" },
+          unknownError: undefined
+        }
+      ])
+    })
   })
 
   describe("tool lookup", () => {
@@ -2268,6 +2303,41 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       expect(harness.registry.listServers()).toEqual(buildList([]))
       expect(harness.openServer).not.toHaveBeenCalled()
       await expect(harness.registry.close()).resolves.toBeUndefined()
+    })
+
+    it("tells the model Lys was shutting down when closing stops a session while a call runs", async () => {
+      const harness = createRegistryHarness()
+      harness.setServers([
+        buildFakeStdioServerSettings("alpha", { tools: [ECHO_TOOL, SLOW_TOOL] })
+      ])
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("alpha", buildConnectedState(2))])
+      )
+      const call = findTool(harness.registry, "mcp__alpha__slow").sendToolCall(
+        {},
+        NEVER_ABORTED
+      )
+      await waitForMicrotasks()
+
+      await harness.registry.close()
+      const outcome = await call
+
+      expect(outcome).toEqual({
+        status: "failed",
+        content:
+          "The call of mcp__alpha__slow failed: the MCP server alpha was stopped while the call ran, because Lys was shutting down."
+      })
+      expect(filterEvents(harness.events, "tool-call-failed")).toEqual([
+        {
+          kind: "tool-call-failed",
+          serverName: "alpha",
+          serverToolName: "slow",
+          failure: { kind: "closed" },
+          unknownError: undefined
+        }
+      ])
     })
   })
 })

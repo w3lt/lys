@@ -147,3 +147,14 @@ export type McpServerEvent =
       /** What was thrown, when Lys could not tell what it was. */
       unknownError: unknown
     }>
+
+/**
+ * Why a server's session was stopped: the settings just applied switched the
+ * server off, changed it, or no longer name it, the reasons a
+ * `server-stopped` event carries; the person restarted or reconnected the
+ * server; or Lys is shutting down.
+ */
+export type McpServerStopReason =
+  | Extract<McpServerEvent, { kind: "server-stopped" }>["reason"]
+  | "reconnected"
+  | "shut-down"

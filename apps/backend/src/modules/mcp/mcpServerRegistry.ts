@@ -10,7 +10,7 @@ import {
 import { isDeepStrictEqual } from "node:util"
 import type { McpSettingsRead } from "../../infrastructure/settings/mcpSettingsFile"
 import type { McpToolCallArguments } from "./mcpServerConnection"
-import type { McpServerEvent } from "./mcpServerEvent"
+import type { McpServerEvent, McpServerStopReason } from "./mcpServerEvent"
 import McpServerSession, {
   buildCallNotSentEvent,
   buildServerNotConnectedOutcome,
@@ -309,14 +309,15 @@ export default class McpServerRegistry {
    * {@link close}; `off` when the server is switched off or cannot start,
    * so there is no session to open again.
    * @remarks The new session opens once the old one, and every other session
-   * stopped before, released its server.
+   * stopped before, released its server. A call running on the old session
+   * fails, telling the model the server was restarted or reconnected.
    */
   public openServerAgain(serverName: string): McpServerReconnection {
     const entry = this.#entries.get(serverName)
     if (entry === undefined) return "not-found"
     if (entry.run.status !== "running") return "off"
     const { settings } = entry.run
-    this.#stopSession(entry.run.session)
+    this.#stopSession(entry.run.session, "reconnected")
     this.#entries.set(
       serverName,
       Object.freeze({
@@ -406,11 +407,14 @@ export default class McpServerRegistry {
    *
    * @returns A promise that settles once every settings read, opening, and
    * close the registry started has ended; every later call does the same.
+   * @remarks A call running on a session fails, telling the model Lys was
+   * shutting down.
    */
   public async close(): Promise<void> {
     this.#isClosed = true
     for (const entry of this.#entries.values())
-      if (entry.run.status === "running") void entry.run.session.stop()
+      if (entry.run.status === "running")
+        void entry.run.session.stop("shut-down")
     this.#entries = new Map()
     await this.#settingsReads
     await this.#waitForNoTaskLeft()
@@ -520,11 +524,12 @@ export default class McpServerRegistry {
     for (const [serverName, entry] of previousEntries) {
       if (entry.run.status !== "running" || keptEntries.has(serverName))
         continue
-      this.#stopSession(entry.run.session)
+      const reason = findStopReason(entry, plannedByName.get(serverName))
+      this.#stopSession(entry.run.session, reason)
       this.#dependencies.reportEvent({
         kind: "server-stopped",
         serverName,
-        reason: findStopReason(entry, plannedByName.get(serverName))
+        reason
       })
     }
     this.#entries = new Map()
@@ -609,9 +614,10 @@ export default class McpServerRegistry {
    * until it settles, so later sessions open only after it.
    *
    * @param session - Session to stop.
+   * @param reason - Why, which a call running on the session is told.
    */
-  #stopSession(session: McpServerSession): void {
-    const release = session.stop()
+  #stopSession(session: McpServerSession, reason: McpServerStopReason): void {
+    const release = session.stop(reason)
     this.#releases.add(release)
     void release.finally(() => this.#releases.delete(release))
   }

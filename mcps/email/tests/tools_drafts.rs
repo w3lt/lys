@@ -175,7 +175,7 @@ async fn deletes_a_draft_and_refuses_ids_outside_drafts() {
     )
     .await;
 
-    assert_eq!(deleted.text, "Draft 1.1003.Drafts deleted.");
+    assert_eq!(deleted.text, "Draft 1.1003.Drafts was deleted from Drafts.");
     assert!(stack.imap.list_messages("Drafts").is_empty());
     assert_eq!(again, Err(ToolFailure::StaleId));
     assert_eq!(in_inbox, Err(ToolFailure::NotInDrafts));
@@ -195,4 +195,89 @@ async fn needs_a_drafts_folder() {
     let saved = run_save_draft(&stack.context, build_draft("Nowhere")).await;
 
     assert_eq!(saved, Err(ToolFailure::NoRoleFolder(FolderRole::Drafts)));
+}
+
+/// A standard mailbox whose server lacks UIDPLUS, with a message in
+/// Drafts that another client marked `\Deleted` and kept, `1.1003.Drafts`.
+fn build_mailbox_without_uid_plus() -> FakeMailbox {
+    let mut mailbox = FakeMailbox::create_standard();
+    mailbox.uid_plus = false;
+    mailbox.add_message(
+        "Drafts",
+        NewMessage {
+            bytes: b"Subject: Kept by another client\r\n\r\nx".to_vec(),
+            flags: &["\\Deleted"],
+            timestamp: 0,
+        },
+    );
+    mailbox
+}
+
+/// The clause that says a draft is only marked as deleted.
+const MARKED_ONLY: &str = "is marked as deleted but stays in Drafts until the folder is expunged, as the server cannot remove one message on its own";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_uidplus_delete_draft_only_marks_the_draft() {
+    let stack = start_stack(build_mailbox_without_uid_plus(), false).await;
+    let id = save(&stack, build_draft("Gone")).await;
+
+    let deleted = run_delete_draft(&stack.context, DraftIdArguments { draft_id: id })
+        .await
+        .expect("marked");
+
+    assert_eq!(deleted.text, format!("Draft 2.1003.Drafts {MARKED_ONLY}."));
+    assert_eq!(deleted.log, "draft: marked as deleted");
+    let drafts = stack.imap.list_messages("Drafts");
+    assert_eq!(drafts.len(), 2);
+    assert!(drafts.iter().all(|draft| draft.has_flag("\\Deleted")));
+    let commands = stack.imap.list_commands();
+    assert!(
+        !commands.iter().any(|command| command.contains("EXPUNGE")),
+        "{commands:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_uidplus_send_draft_and_save_draft_only_mark_the_old_draft() {
+    let stack = start_stack(build_mailbox_without_uid_plus(), false).await;
+    let first = save(&stack, build_draft("First")).await;
+
+    let replaced = run_save_draft(
+        &stack.context,
+        SaveDraftArguments {
+            draft_id: Some(first),
+            ..build_draft("Second")
+        },
+    )
+    .await
+    .expect("saved");
+    let sent = run_send_draft(
+        &stack.context,
+        DraftIdArguments {
+            draft_id: "3.1003.Drafts".to_owned(),
+        },
+    )
+    .await
+    .expect("sent");
+
+    assert!(
+        replaced.text.contains(&format!(
+            "It replaces draft 2.1003.Drafts, which {MARKED_ONLY}."
+        )),
+        "{}",
+        replaced.text
+    );
+    assert!(
+        sent.text.ends_with(&format!("\nThe draft {MARKED_ONLY}.")),
+        "{}",
+        sent.text
+    );
+    let drafts = stack.imap.list_messages("Drafts");
+    assert_eq!(drafts.len(), 3);
+    assert!(drafts.iter().all(|draft| draft.has_flag("\\Deleted")));
+    let commands = stack.imap.list_commands();
+    assert!(
+        !commands.iter().any(|command| command.contains("EXPUNGE")),
+        "{commands:?}"
+    );
 }

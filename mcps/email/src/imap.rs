@@ -155,6 +155,18 @@ pub struct FetchedMessage {
     pub bytes: Vec<u8>,
 }
 
+/// What deleting one message did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Deletion {
+    /// The message was marked `\Deleted` and expunged by its UID: it is
+    /// gone.
+    Removed,
+    /// The message was only marked `\Deleted`: the server lacks UIDPLUS,
+    /// so it cannot expunge one message on its own, and expunging the
+    /// folder would also remove every other message marked `\Deleted`.
+    MarkedOnly,
+}
+
 /// How a folder is opened.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FolderAccess {
@@ -470,23 +482,27 @@ impl ImapSession {
     }
 
     /// Deletes one message of the selected folder: marks it `\Deleted`
-    /// and expunges it, by UID when the server supports UIDPLUS and with
-    /// the folder's `EXPUNGE` otherwise, which also removes other messages
-    /// already marked `\Deleted`.
+    /// and, when the server supports UIDPLUS, expunges it by its UID. No
+    /// other message is ever expunged, so a server without UIDPLUS keeps
+    /// the message, marked, until something expunges the folder.
     ///
     /// # Arguments
     ///
     /// * `uid` - The message's UID.
-    pub async fn delete_message(&mut self, uid: u32) -> Result<(), ImapFailure> {
+    ///
+    /// # Returns
+    ///
+    /// Whether the message is gone or only marked, or why a command
+    /// failed; a refused expunge leaves the message marked.
+    pub async fn delete_message(&mut self, uid: u32) -> Result<Deletion, ImapFailure> {
         let supports_uid_plus = self.find_uid_plus().await?;
         let mark = format!("UID STORE {uid} +FLAGS.SILENT (\\Deleted)");
         run_status_command(&mut self.session, &mark).await?;
-        let expunge = if supports_uid_plus {
-            format!("UID EXPUNGE {uid}")
-        } else {
-            "EXPUNGE".to_owned()
-        };
-        run_status_command(&mut self.session, &expunge).await
+        if !supports_uid_plus {
+            return Ok(Deletion::MarkedOnly);
+        }
+        run_status_command(&mut self.session, &format!("UID EXPUNGE {uid}")).await?;
+        Ok(Deletion::Removed)
     }
 
     /// Creates a folder.

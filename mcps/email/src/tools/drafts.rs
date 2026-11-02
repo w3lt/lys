@@ -21,7 +21,7 @@ use crate::compose::{ComposedMessage, MessageStamp, build_draft_message};
 use crate::email_id::{EmailId, parse_email_id};
 use crate::failure::ToolFailure;
 use crate::folders::{Folder, FolderRole};
-use crate::imap::{FolderAccess, ImapSession, Summary, format_search_text};
+use crate::imap::{Deletion, FolderAccess, ImapSession, Summary, format_search_text};
 use crate::message::format_addresses;
 
 /// The flags a draft is stored with.
@@ -124,23 +124,30 @@ pub async fn run_save_draft(context: &ToolContext, arguments: SaveDraftArguments
         uid_validity: selected.uid_validity,
         folder: drafts.name.clone(),
     });
-    if let Some(replaced) = &replaced {
-        session
-            .delete_message(replaced.uid)
-            .await
-            .map_err(build_imap_failure_conversion("delete the replaced draft"))?;
-    }
+    let replacement = match &replaced {
+        Some(replaced) => {
+            let deletion = session
+                .delete_message(replaced.uid)
+                .await
+                .map_err(build_imap_failure_conversion("delete the replaced draft"))?;
+            format!(
+                "\nIt replaces draft {replaced}, which {}.",
+                format_deletion_clause(deletion, &drafts.name)
+            )
+        }
+        None => String::new(),
+    };
     session.close().await;
     let text = match &id {
         Some(id) => format!(
-            "Draft saved as {id}.\nTo: {}\n{}{}Subject: {}\nSend it with send_draft, replace it with save_draft and this draft_id, or delete it with delete_draft.",
+            "Draft saved as {id}.\nTo: {}\n{}{}Subject: {}{replacement}\nSend it with send_draft, replace it with save_draft and this draft_id, or delete it with delete_draft.",
             composition.to.join(", "),
             format_optional_list("Cc", &composition.cc),
             format_optional_list("Bcc", &composition.bcc),
             composition.subject
         ),
         None => format!(
-            "Draft saved in {}, but the server did not report its id. Search that folder to find it.",
+            "Draft saved in {}, but the server did not report its id. Search that folder to find it.{replacement}",
             drafts.name
         ),
     };
@@ -205,7 +212,10 @@ pub async fn run_send_draft(context: &ToolContext, arguments: DraftIdArguments) 
     };
     session.close().await;
     let deletion = match &deleted {
-        Ok(()) => format!("The draft was deleted from {}.", drafts.name),
+        Ok(deletion) => format!(
+            "The draft {}.",
+            format_deletion_clause(*deletion, &drafts.name)
+        ),
         Err(failure) => format!("The draft is still in {}: {failure}", drafts.name),
     };
     Ok(ToolReport {
@@ -219,7 +229,7 @@ pub async fn run_send_draft(context: &ToolContext, arguments: DraftIdArguments) 
             "draft: sent to {} recipient(s), copy {}, deleted {}",
             prepared.message.envelope.to().len(),
             format_copy_for_log(&copy),
-            deleted.is_ok()
+            deleted == Ok(Deletion::Removed)
         ),
     })
 }
@@ -239,15 +249,37 @@ pub async fn run_delete_draft(context: &ToolContext, arguments: DraftIdArguments
     find_message_summary(&mut session, id.uid)
         .await?
         .ok_or(ToolFailure::StaleId)?;
-    session
+    let deletion = session
         .delete_message(id.uid)
         .await
         .map_err(build_imap_failure_conversion("delete the draft"))?;
     session.close().await;
     Ok(ToolReport {
-        text: format!("Draft {id} deleted."),
-        log: "draft: deleted".to_owned(),
+        text: format!(
+            "Draft {id} {}.",
+            format_deletion_clause(deletion, &drafts.name)
+        ),
+        log: match deletion {
+            Deletion::Removed => "draft: deleted".to_owned(),
+            Deletion::MarkedOnly => "draft: marked as deleted".to_owned(),
+        },
     })
+}
+
+/// Formats what deleting a draft did, as the end of a sentence whose
+/// subject is the draft.
+///
+/// # Arguments
+///
+/// * `deletion` - What the deletion did.
+/// * `drafts` - The Drafts folder's name.
+fn format_deletion_clause(deletion: Deletion, drafts: &str) -> String {
+    match deletion {
+        Deletion::Removed => format!("was deleted from {drafts}"),
+        Deletion::MarkedOnly => format!(
+            "is marked as deleted but stays in {drafts} until the folder is expunged, as the server cannot remove one message on its own"
+        ),
+    }
 }
 
 /// A stored draft made ready to send.

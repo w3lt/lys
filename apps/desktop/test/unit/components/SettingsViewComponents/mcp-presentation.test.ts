@@ -13,6 +13,7 @@ import {
 import { describe, expect, it } from "vitest"
 import {
   canAddMcpServer,
+  canSwitchMcpServer,
   calculateConnectedMcpServerCount,
   findMcpPaneRetry,
   findMcpServerApproval,
@@ -39,11 +40,16 @@ import {
   formatSkippedMcpToolName,
   formatSkippedMcpToolReason,
   getMcpEntryListPresentation,
+  getMcpListedServerKey,
+  getMcpListedServerName,
+  getMcpListedServerTransport,
   getMcpTransportPresentation,
+  isMcpListedServerOn,
   listMcpDraftProblems,
   listMcpPaneNotes,
   listMcpServerConfiguration,
   listMcpServerTools,
+  listMcpServers,
   listSkippedMcpTools,
   MCP_BACKEND_STOPPED_NOTE,
   MCP_EMPTY_LIST_NOTE,
@@ -53,6 +59,7 @@ import {
   MCP_SERVER_TRANSPORTS,
   MCP_TOOL_CHIPS_NOTE,
   MCP_TOOL_LIST_CUT_NOTE,
+  type McpListedServer,
   type McpPaneFacts,
   type McpServerRowFacts
 } from "@/components/SettingsViewComponents/mcp-presentation"
@@ -75,9 +82,13 @@ import {
   buildFailedMcpState,
   buildMcpServerList,
   buildMcpServerStatus,
-  CONNECTING_MCP_STATE
+  CONNECTING_MCP_STATE,
+  OFF_MCP_STATE
 } from "../../support/mcpFixtures"
-import { STORED_MCP_SETTINGS } from "../../support/settingsFixtures"
+import {
+  STORED_EMAIL_SETTINGS,
+  STORED_MCP_SETTINGS
+} from "../../support/settingsFixtures"
 import {
   buildBackendToolDefinition,
   buildMcpToolDefinition,
@@ -110,6 +121,16 @@ function buildLoadedMcpList(
 }
 
 /**
+ * Lists a saved server as the pane does.
+ *
+ * @param settings - Saved settings of the server.
+ * @returns The added server.
+ */
+function listAdded(settings: McpServerSettings): McpListedServer {
+  return { kind: "added", settings }
+}
+
+/**
  * Builds the facts of a saved server the running backend applied.
  *
  * @param server - Saved settings of the server.
@@ -121,6 +142,25 @@ function buildAppliedRowFacts(
   state: McpServerState
 ): McpServerRowFacts {
   const status = buildMcpServerStatus(server.name, server.transport, state)
+  return {
+    isBackendRunning: true,
+    list: buildLoadedMcpList([status]),
+    server: listAdded(server)
+  }
+}
+
+/**
+ * Builds the facts of the email server the running backend lists.
+ *
+ * @param server - The email server as the pane lists it.
+ * @param state - State the backend reports for it.
+ * @returns Facts whose loaded list holds only that server, as built in.
+ */
+function buildEmailRowFacts(
+  server: McpListedServer,
+  state: McpServerState
+): McpServerRowFacts {
+  const status = buildMcpServerStatus("email", "stdio", state, true)
   return {
     isBackendRunning: true,
     list: buildLoadedMcpList([status]),
@@ -202,6 +242,28 @@ const OPEN_URL_SERVER = parseMcpServer({
   url: "http://localhost:3845/mcp"
 })
 
+/** The email server Lys ships, switched on, its name free, with a saved account. */
+const EMAIL_SERVER: McpListedServer = Object.freeze({
+  kind: "built-in",
+  name: "email",
+  isOn: true,
+  isNameTaken: false,
+  isReady: true
+})
+
+/** The email server switched off while no account is saved. */
+const EMAIL_SERVER_WITHOUT_ACCOUNT: McpListedServer = Object.freeze({
+  ...EMAIL_SERVER,
+  isOn: false,
+  isReady: false
+})
+
+/** Listed servers by transport, for the cases that vary only the transport. */
+const SERVER_BY_TRANSPORT = Object.freeze({
+  stdio: listAdded(COMMAND_SERVER),
+  http: listAdded(URL_SERVER)
+})
+
 /** Two tools of the command server whose token estimates differ. */
 const GITHUB_SEARCH = buildMcpToolDefinition("github", "search")
 const GITHUB_ISSUES = buildMcpToolDefinition("github", "issues", {
@@ -257,16 +319,107 @@ describe("transports", () => {
   })
 })
 
+describe("listed servers", () => {
+  it("lists the servers Lys ships first, each with its switch, whether its name is taken, and whether it is ready, then the added servers", () => {
+    expect(
+      listMcpServers({ mcp: STORED_MCP_SETTINGS, email: STORED_EMAIL_SETTINGS })
+    ).toEqual([
+      { ...EMAIL_SERVER, isOn: false },
+      listAdded(STORED_MCP_SETTINGS.servers[0]),
+      listAdded(STORED_MCP_SETTINGS.servers[1])
+    ])
+  })
+
+  it("marks the email server as not ready without a saved account, and its name as taken by an added server", () => {
+    const servers = listMcpServers({
+      mcp: {
+        servers: [{ ...BARE_COMMAND_SERVER, name: "email" }],
+        builtIn: { email: { enabled: true } }
+      },
+      email: { account: null }
+    })
+
+    expect(servers[0]).toEqual({
+      ...EMAIL_SERVER,
+      isNameTaken: true,
+      isReady: false
+    })
+    expect(Object.isFrozen(servers)).toBe(true)
+  })
+
+  it("names, keys, and tells the transport and switch of each kind", () => {
+    const added = listAdded({ ...URL_SERVER, enabled: false })
+
+    expect(getMcpListedServerName(added)).toBe("notes")
+    expect(getMcpListedServerName(EMAIL_SERVER)).toBe("email")
+    expect(getMcpListedServerKey(added)).toBe("added:notes")
+    expect(getMcpListedServerKey(EMAIL_SERVER)).toBe("built-in:email")
+    expect(getMcpListedServerTransport(added)).toBe("http")
+    expect(getMcpListedServerTransport(EMAIL_SERVER)).toBe("stdio")
+    expect(isMcpListedServerOn(added)).toBe(false)
+    expect(isMcpListedServerOn(listAdded(URL_SERVER))).toBe(true)
+    expect(isMcpListedServerOn(EMAIL_SERVER)).toBe(true)
+    expect(isMcpListedServerOn({ ...EMAIL_SERVER, isOn: false })).toBe(false)
+  })
+
+  it.each([
+    ["an added server", listAdded(COMMAND_SERVER), true],
+    [
+      "an added server that is off",
+      listAdded({ ...COMMAND_SERVER, enabled: false }),
+      true
+    ],
+    [
+      "the email server with an account",
+      { ...EMAIL_SERVER, isOn: false },
+      true
+    ],
+    [
+      "the email server that is on without an account",
+      { ...EMAIL_SERVER, isReady: false },
+      true
+    ],
+    [
+      "the email server that is on while its name is taken",
+      { ...EMAIL_SERVER, isNameTaken: true },
+      true
+    ],
+    [
+      "the email server off without an account",
+      EMAIL_SERVER_WITHOUT_ACCOUNT,
+      false
+    ],
+    [
+      "the email server off while its name is taken",
+      { ...EMAIL_SERVER, isOn: false, isNameTaken: true },
+      false
+    ]
+  ] as const)(
+    "answers whether %s can be switched: %s",
+    (_, server, canSwitch) => {
+      expect(canSwitchMcpServer(server)).toBe(canSwitch)
+    }
+  )
+})
+
 describe("formatMcpServerTarget", () => {
   it("shows a command with its arguments, never its environment", () => {
-    expect(formatMcpServerTarget(STORED_MCP_SETTINGS.servers[0])).toBe(
+    expect(
+      formatMcpServerTarget(listAdded(STORED_MCP_SETTINGS.servers[0]))
+    ).toBe(
       "/opt/homebrew/bin/npx -y @modelcontextprotocol/server-filesystem /tmp"
     )
   })
 
   it("shows a command without arguments alone", () => {
-    expect(formatMcpServerTarget(BARE_COMMAND_SERVER)).toBe(
+    expect(formatMcpServerTarget(listAdded(BARE_COMMAND_SERVER))).toBe(
       "/usr/local/bin/bare"
+    )
+  })
+
+  it("says what a server Lys ships does", () => {
+    expect(formatMcpServerTarget(EMAIL_SERVER)).toBe(
+      "Reads, searches, and sends your email over IMAP and SMTP."
     )
   })
 
@@ -278,13 +431,13 @@ describe("formatMcpServerTarget", () => {
       arguments: ["--root", "/Users/me/My Files", 'say "hi"']
     })
 
-    expect(formatMcpServerTarget(server)).toBe(
+    expect(formatMcpServerTarget(listAdded(server))).toBe(
       'uvx --root "/Users/me/My Files" "say \\"hi\\""'
     )
   })
 
   it("shows a URL, never its headers", () => {
-    expect(formatMcpServerTarget(URL_SERVER)).toBe(
+    expect(formatMcpServerTarget(listAdded(URL_SERVER))).toBe(
       "https://mcp.example.test/notes"
     )
   })
@@ -301,7 +454,7 @@ describe("formatMcpServerTarget", () => {
   ])("hides the query of %s, which can hold a key", (url, target) => {
     const server = parseMcpServer({ name: "keyed", transport: "http", url })
 
-    expect(formatMcpServerTarget(server)).toBe(target)
+    expect(formatMcpServerTarget(listAdded(server))).toBe(target)
   })
 })
 
@@ -345,7 +498,7 @@ describe("formatMcpServerStatus", () => {
         formatMcpServerStatus({
           isBackendRunning: true,
           list,
-          server: COMMAND_SERVER
+          server: listAdded(COMMAND_SERVER)
         })
       ).toEqual({
         condition: "idle",
@@ -357,11 +510,13 @@ describe("formatMcpServerStatus", () => {
   )
 
   it.each([
-    { server: COMMAND_SERVER, button: "Start" },
-    { server: URL_SERVER, button: "Connect" }
-  ])(
-    "says a saved $server.transport server the backend did not apply is not applied, naming its $button button",
-    ({ server, button }) => {
+    { transport: "stdio", button: "Start" },
+    { transport: "http", button: "Connect" }
+  ] as const)(
+    "says a saved $transport server the backend did not apply is not applied, naming its $button button",
+    ({ transport, button }) => {
+      const server = SERVER_BY_TRANSPORT[transport]
+
       expect(
         formatMcpServerStatus({
           isBackendRunning: true,
@@ -374,7 +529,138 @@ describe("formatMcpServerStatus", () => {
         heading: "Not applied",
         detail: `${button} applies the saved servers.`
       })
-      expect(formatMcpReconnectLabel(server.transport, "idle")).toBe(button)
+      expect(formatMcpReconnectLabel(server, "idle")).toBe(button)
+    }
+  )
+
+  it("says an added server that is switched off is off, before any state the backend reports", () => {
+    expect(
+      formatMcpServerStatus({
+        ...buildAppliedRowFacts(COMMAND_SERVER, buildConnectedMcpState(2)),
+        server: listAdded({ ...COMMAND_SERVER, enabled: false })
+      })
+    ).toEqual({
+      condition: "off",
+      chip: "off",
+      heading: "Off",
+      detail: "Switched off. Its tools are not offered to the agents."
+    })
+  })
+
+  it("says a server the backend lists as off is off", () => {
+    expect(
+      formatMcpServerStatus(buildAppliedRowFacts(COMMAND_SERVER, OFF_MCP_STATE))
+    ).toEqual({
+      condition: "off",
+      chip: "off",
+      heading: "Off",
+      detail: "Switched off. Its tools are not offered to the agents."
+    })
+  })
+
+  it("says what the email server needs while it is off without an account, whether or not the backend runs", () => {
+    const needsNote = "Needs an email account. Add one below."
+
+    expect(
+      formatMcpServerStatus({
+        isBackendRunning: false,
+        list: { status: "idle" },
+        server: EMAIL_SERVER_WITHOUT_ACCOUNT
+      })
+    ).toEqual({
+      condition: "off",
+      chip: "off",
+      heading: "Off",
+      detail: needsNote
+    })
+    expect(
+      formatMcpServerStatus(
+        buildEmailRowFacts(EMAIL_SERVER_WITHOUT_ACCOUNT, OFF_MCP_STATE)
+      ).detail
+    ).toBe(needsNote)
+  })
+
+  it("says the email server is off once an account is saved", () => {
+    expect(
+      formatMcpServerStatus(
+        buildEmailRowFacts({ ...EMAIL_SERVER, isOn: false }, OFF_MCP_STATE)
+      )
+    ).toEqual({
+      condition: "off",
+      chip: "off",
+      heading: "Off",
+      detail: "Switched off. Its tools are not offered to the agents."
+    })
+  })
+
+  it("says an added server took the email server's name, before anything else", () => {
+    const expected = {
+      condition: "idle",
+      chip: "name taken",
+      heading: "Name taken",
+      detail:
+        "An added server has this name. Rename or remove it to use the built-in server."
+    }
+
+    expect(
+      formatMcpServerStatus(
+        buildEmailRowFacts(
+          { ...EMAIL_SERVER, isNameTaken: true },
+          buildConnectedMcpState(5)
+        )
+      )
+    ).toEqual(expected)
+    expect(
+      formatMcpServerStatus({
+        isBackendRunning: false,
+        list: { status: "idle" },
+        server: { ...EMAIL_SERVER, isOn: false, isNameTaken: true }
+      })
+    ).toEqual(expected)
+  })
+
+  it("says the email server is running and counts its tools", () => {
+    expect(
+      formatMcpServerStatus(
+        buildEmailRowFacts(EMAIL_SERVER, buildConnectedMcpState(5))
+      )
+    ).toEqual({
+      condition: "connected",
+      chip: "",
+      heading: "Running",
+      detail: "5 tools listed"
+    })
+    expect(
+      formatMcpServerStatus(
+        buildEmailRowFacts(EMAIL_SERVER, CONNECTING_MCP_STATE)
+      )
+    ).toMatchObject({ condition: "connecting", heading: "Starting" })
+  })
+
+  it.each([
+    ["account-missing", "Needs an email account. Add one below."],
+    [
+      "account-invalid",
+      "The saved email account is not usable. Save it again below."
+    ],
+    [
+      "start-failed",
+      "Lys couldn't start its email server. Run build.sh to install it."
+    ],
+    ["timed-out", "The server didn't answer within 2 minutes."]
+  ] as const)(
+    "says why the email server failed: %s",
+    (reason: McpServerFailure, detail) => {
+      expect(
+        formatMcpServerStatus(
+          buildEmailRowFacts(EMAIL_SERVER, buildFailedMcpState(reason))
+        )
+      ).toEqual({
+        condition: "failed",
+        chip: "failed",
+        heading: "Failed",
+        detail
+      })
     }
   )
 
@@ -529,13 +815,26 @@ describe("formatMcpReconnectLabel", () => {
     ["stdio", "connected", "Restart"],
     ["http", "connected", "Reconnect"],
     ["stdio", "connecting", "Restart"],
-    ["http", "connecting", "Reconnect"]
+    ["http", "connecting", "Reconnect"],
+    ["stdio", "off", ""],
+    ["http", "off", ""]
   ] as const)(
     "labels the button of a %s server that is %s: %s",
     (transport, condition, label) => {
-      expect(formatMcpReconnectLabel(transport, condition)).toBe(label)
+      expect(
+        formatMcpReconnectLabel(SERVER_BY_TRANSPORT[transport], condition)
+      ).toBe(label)
     }
   )
+
+  it("labels the email server's button like a local program's, and offers none while its name is taken", () => {
+    expect(formatMcpReconnectLabel(EMAIL_SERVER, "failed")).toBe("Retry")
+    expect(formatMcpReconnectLabel(EMAIL_SERVER, "connected")).toBe("Restart")
+    expect(formatMcpReconnectLabel(EMAIL_SERVER, "idle")).toBe("Start")
+    expect(
+      formatMcpReconnectLabel({ ...EMAIL_SERVER, isNameTaken: true }, "idle")
+    ).toBe("")
+  })
 })
 
 describe("listMcpServerTools", () => {
@@ -621,6 +920,16 @@ describe("formatMcpServerToolMeta", () => {
 })
 
 describe("formatMcpServerToolsNote", () => {
+  it("says nothing is listed while the server is off, whatever the tool list holds", () => {
+    expect(
+      formatMcpServerToolsNote({
+        condition: "off",
+        toolList: buildLoadedToolList([GITHUB_SEARCH]),
+        skippedToolCount: 0
+      })
+    ).toBe("Nothing is listed while it is off.")
+  })
+
   /** Tool list read without any tool of the server. */
   const loadedToolList = buildLoadedToolList([NOTES_SEARCH])
 
@@ -861,24 +1170,35 @@ describe("formatMcpServerRemovalQuestion", () => {
 })
 
 describe("calculateConnectedMcpServerCount", () => {
-  /** Saved servers in list order. */
+  /** Listed servers: the email server, then the saved servers in list order. */
   const servers = [
-    COMMAND_SERVER,
-    URL_SERVER,
-    OPEN_URL_SERVER,
-    BARE_COMMAND_SERVER
+    EMAIL_SERVER,
+    ...[COMMAND_SERVER, URL_SERVER, OPEN_URL_SERVER, BARE_COMMAND_SERVER].map(
+      listAdded
+    )
   ]
 
-  /** Applied servers: one saved server per state, one no longer saved. */
+  /** Applied servers: one listed server per state, one no longer saved. */
   const list = buildLoadedMcpList([
+    buildMcpServerStatus("email", "stdio", buildConnectedMcpState(5), true),
     buildMcpServerStatus("github", "stdio", buildConnectedMcpState(2)),
     buildMcpServerStatus("notes", "http", CONNECTING_MCP_STATE),
     buildMcpServerStatus("local", "http", buildFailedMcpState("unreachable")),
     buildMcpServerStatus("old", "stdio", buildConnectedMcpState(1))
   ])
 
-  it("counts only the saved servers the backend reports connected", () => {
-    expect(calculateConnectedMcpServerCount(servers, list, true)).toBe(1)
+  it("counts only the listed servers the backend reports connected", () => {
+    expect(calculateConnectedMcpServerCount(servers, list, true)).toBe(2)
+  })
+
+  it("never counts the email server while an added server has its name, whatever the backend lists under it", () => {
+    const [email, ...added] = servers
+    const nameTaken = { ...EMAIL_SERVER, isNameTaken: true }
+
+    expect(
+      calculateConnectedMcpServerCount([nameTaken, ...added], list, true)
+    ).toBe(1)
+    expect(email).toEqual(EMAIL_SERVER)
   })
 
   it("counts nothing while the backend is not running, whatever a list read before says", () => {
@@ -899,18 +1219,7 @@ describe("calculateConnectedMcpServerCount", () => {
 })
 
 describe("formatMcpServerListMeta", () => {
-  it("says none yet without servers", () => {
-    expect(
-      formatMcpServerListMeta({
-        serverCount: 0,
-        connectedCount: 0,
-        connectedTools: [],
-        toolSwitches: new Map()
-      })
-    ).toBe("none yet")
-  })
-
-  it("counts the saved servers while their states are not known", () => {
+  it("counts the listed servers while their states are not known, one in the singular", () => {
     expect(
       formatMcpServerListMeta({
         serverCount: 2,
@@ -918,7 +1227,15 @@ describe("formatMcpServerListMeta", () => {
         connectedTools: undefined,
         toolSwitches: new Map()
       })
-    ).toBe("2 saved")
+    ).toBe("2 servers")
+    expect(
+      formatMcpServerListMeta({
+        serverCount: 1,
+        connectedCount: undefined,
+        connectedTools: undefined,
+        toolSwitches: new Map()
+      })
+    ).toBe("1 server")
   })
 
   it("counts the connected servers alone while the tools are not read", () => {
@@ -1372,9 +1689,9 @@ describe("formatMcpServerJsonMessage", () => {
 })
 
 describe("pane notes", () => {
-  it("describes the empty list, the paste field, and the tool chips", () => {
+  it("describes the list without added servers, the paste field, and the tool chips", () => {
     expect(MCP_EMPTY_LIST_NOTE).toBe(
-      "No servers yet. Each one gives the agents more tools: your issue tracker, a database, a repository. Add one by the command that starts it, or by its URL."
+      "No added servers yet. Each one gives the agents more tools: your issue tracker, a database, a repository. Add one by the command that starts it, or by its URL."
     )
     expect(MCP_SERVER_JSON_HINT).toBe(
       "claude_desktop_config.json, .cursor/mcp.json or a single server object"

@@ -678,6 +678,7 @@ describe("parseMcpServerDraft", () => {
       server: {
         name: "files",
         transport: "stdio",
+        enabled: true,
         command: "/opt/homebrew/bin/npx",
         arguments: ["-y", "@modelcontextprotocol/server-filesystem"],
         environment: [{ name: "LOG_LEVEL", value: "debug" }]
@@ -702,6 +703,7 @@ describe("parseMcpServerDraft", () => {
       server: {
         name: "notes",
         transport: "http",
+        enabled: true,
         url: "https://mcp.example.test/notes",
         headers: [
           { name: "Authorization", value: "Bearer fixture-0000" },

@@ -1,4 +1,10 @@
-import type { McpServerName, McpServerSettings } from "@lys/share"
+import {
+  BUILT_IN_MCP_SERVER_NAMES,
+  type EmailAccount,
+  type EmailPassword,
+  type McpServerName,
+  type McpServerSettings
+} from "@lys/share"
 import {
   useEffect,
   useReducer,
@@ -10,6 +16,10 @@ import {
 import { Button } from "@/components/ui/button"
 import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
 import { useLysStore } from "@/lib/store"
+import type {
+  EmailAccountRemovalOutcome,
+  EmailAccountSaveOutcome
+} from "@/lib/store/email-settings"
 import {
   useMcpServerStore,
   type McpServerListState
@@ -17,6 +27,7 @@ import {
 import type { ToolApproval } from "@/lib/store/tool-settings"
 import { useToolStore } from "@/lib/store/tools"
 
+import EmailAccountCard from "./EmailAccountCard"
 import { McpServerEditor, type McpEditorTarget } from "./McpServerEditor"
 import {
   McpServerSection,
@@ -27,7 +38,10 @@ import { ToolApprovalSaveFeedback } from "./ToolApprovalSaveFeedback"
 import {
   findMcpPaneRetry,
   formatMcpToolOfferWarning,
+  isMcpListedServerOn,
   listMcpPaneNotes,
+  listMcpServers,
+  type McpListedServer,
   type McpPaneNote
 } from "./mcp-presentation"
 
@@ -135,10 +149,10 @@ function calculateMcpListView(
  * Builds the server list after saving one server.
  *
  * @param servers - Saved servers, in list order.
- * @param server - Server to save.
+ * @param server - Server to save, as the editor built it: switched on.
  * @param editor - Editor the server comes from.
- * @returns The list with the edited server replaced in place, or the new
- * server added at the end.
+ * @returns The list with the edited server replaced in place, keeping its
+ * saved switch, or the new server added at the end.
  */
 function buildServersWithSaved(
   servers: readonly McpServerSettings[],
@@ -150,29 +164,51 @@ function buildServersWithSaved(
       return [...servers, server]
     case "server":
       return servers.map((saved) =>
-        saved.name === editor.server.name ? server : saved
+        saved.name === editor.server.name
+          ? { ...server, enabled: saved.enabled }
+          : saved
       )
   }
 }
 
 /**
- * Lists the names of the saved servers other than the one being edited.
+ * Builds the server list after switching one added server on or off.
+ *
+ * @param servers - Saved servers, in list order.
+ * @param serverName - Name of the server.
+ * @param isOn - Whether the backend connects it.
+ * @returns The list with that server's switch replaced in place.
+ */
+function buildServersWithSwitch(
+  servers: readonly McpServerSettings[],
+  serverName: McpServerName,
+  isOn: boolean
+): readonly McpServerSettings[] {
+  return servers.map((saved) =>
+    saved.name === serverName ? { ...saved, enabled: isOn } : saved
+  )
+}
+
+/**
+ * Lists the names a server being edited may not take: those of the
+ * servers Lys ships, and of the saved servers other than the one being
+ * edited.
  *
  * @param servers - Saved servers.
  * @param editor - Editor the names are checked for.
- * @returns The names a new or renamed server may not take.
+ * @returns The names a new or renamed server may not take; a saved server
+ * that has a built-in server's name must be renamed to be saved again.
  */
 function listOtherServerNames(
   servers: readonly McpServerSettings[],
   editor: McpEditorTarget
 ): ReadonlySet<string> {
   const names = servers.map((server) => server.name)
-  switch (editor.kind) {
-    case "new":
-      return new Set(names)
-    case "server":
-      return new Set(names.filter((name) => name !== editor.server.name))
-  }
+  const otherNames =
+    editor.kind === "new"
+      ? names
+      : names.filter((name) => name !== editor.server.name)
+  return new Set([...BUILT_IN_MCP_SERVER_NAMES, ...otherNames])
 }
 
 /** Properties accepted by {@link McpPaneStatus}. */
@@ -232,8 +268,8 @@ function McpPaneStatus({ notes, onRetry }: McpPaneStatusProps): ReactElement {
 }
 
 /**
- * Warns, while servers are saved, when their tools are not offered to the
- * model, with a way to the Tools pane.
+ * Warns, while a server is switched on, when its tools are not offered to
+ * the model, with a way to the Tools pane.
  *
  * @remarks The tool store owns whether tool calls are on, and the
  * application store owns the model state and which settings pane is shown;
@@ -282,20 +318,22 @@ type McpServerListViewProps = {
 }
 
 /**
- * Presents the saved servers with their states, tools, and actions.
+ * Presents the servers Lys ships and the added servers with their states,
+ * switches, tools, and actions.
  *
- * @remarks The application store owns the saved servers, their save, and
- * the tool switches and approvals, which it saves as each changes; the MCP
- * server store owns the reconnect and the save that applies the list; the
- * tool store owns the list of tools. The parent owns the list's states,
- * which server's details are shown, which editor opens, and the focus
- * target. A server's approval sets every listed tool of the server. A
- * server is removed once its removal is saved, which the parent is told
- * with the server's name.
+ * @remarks The application store owns the `mcp` and `email` groups, their
+ * saves, and the tool switches and approvals, which it saves as each
+ * changes; the MCP server store owns the reconnect and the saves that apply
+ * the group; the tool store owns the list of tools. The parent owns the
+ * list's states, which server's details are shown, which editor opens, and
+ * the focus target. A server's switch is saved into the group: an added
+ * server's own switch, or the switch of a server Lys ships. A server's
+ * approval sets every listed tool of the server. A server is removed once
+ * its removal is saved, which the parent is told with the server's name.
+ * The email server's panel is the account card.
  * @param props - Backend status, the list, expansion, focus, and the
  * parent-owned changes.
- * @returns The warning, when one is due, and the section of the saved
- * servers.
+ * @returns The warning, when one is due, and the section of the servers.
  */
 function McpServerListView({
   isBackendRunning,
@@ -306,7 +344,8 @@ function McpServerListView({
   onOpenEditor,
   onRemoveServerComplete
 }: McpServerListViewProps): ReactElement {
-  const servers = useLysStore((state) => state.settings.mcp.servers)
+  const mcp = useLysStore((state) => state.settings.mcp)
+  const email = useLysStore((state) => state.settings.email)
   const isSaving = useLysStore(
     (state) => state.mcpSettingsSave.status === "saving"
   )
@@ -318,17 +357,37 @@ function McpServerListView({
     (state) => state.sendMcpServerReconnect
   )
   const saveMcpServers = useMcpServerStore((state) => state.saveMcpServers)
+  const saveBuiltInMcpServerSwitch = useMcpServerStore(
+    (state) => state.saveBuiltInMcpServerSwitch
+  )
+  const servers = listMcpServers({ mcp, email })
 
   /**
-   * Removes one server and, once saved, tells the parent.
+   * Removes one added server and, once saved, tells the parent.
    *
    * @param serverName - Name of the server to remove.
    */
   async function handleRemoveServer(serverName: McpServerName): Promise<void> {
     const outcome = await saveMcpServers(
-      servers.filter((server) => server.name !== serverName)
+      mcp.servers.filter((server) => server.name !== serverName)
     )
     if (outcome === "saved") onRemoveServerComplete(serverName)
+  }
+
+  /**
+   * Saves one server's switch into the group, which the store applies.
+   *
+   * @param server - Listed server.
+   * @param isOn - Whether the backend connects it.
+   */
+  function handleServerOnChange(server: McpListedServer, isOn: boolean): void {
+    if (server.kind === "added") {
+      void saveMcpServers(
+        buildServersWithSwitch(mcp.servers, server.settings.name, isOn)
+      )
+    } else {
+      void saveBuiltInMcpServerSwitch(server.name, isOn)
+    }
   }
 
   /**
@@ -346,8 +405,9 @@ function McpServerListView({
 
   return (
     <>
-      {servers.length === 0 ? null : <McpToolOfferNotice />}
+      {servers.some(isMcpListedServerOn) ? <McpToolOfferNotice /> : null}
       <McpServerSection
+        builtInPanels={{ email: <EmailAccountCardView /> }}
         expandedServerName={expandedServerName}
         focusTarget={focusTarget}
         isBackendRunning={isBackendRunning}
@@ -360,6 +420,7 @@ function McpServerListView({
           void sendMcpServerReconnect(serverName)
         }
         onRemoveServer={(serverName) => void handleRemoveServer(serverName)}
+        onServerOnChange={handleServerOnChange}
         onToolApprovalChange={handleToolApprovalChange}
         onToolOnChange={updateToolOn}
         servers={servers}
@@ -367,6 +428,86 @@ function McpServerListView({
         toolSettings={toolSettings}
       />
     </>
+  )
+}
+
+/**
+ * Presents the email account card and saves, checks, and removes the
+ * account.
+ *
+ * @remarks The application store owns the saved account and password, the
+ * save, the check, the email server's switch, and the backend's status; the
+ * MCP server store owns the switch's save and the sync that applies the
+ * group. Saving signs in through the backend first, which the store does;
+ * once the account is saved while the email server is on, the backend is
+ * asked to apply the group, so the server starts again with the account.
+ * Removing switches the email server off first, because the server cannot
+ * run without an account, and removes nothing when that save fails.
+ * @returns The account card.
+ */
+function EmailAccountCardView(): ReactElement {
+  const savedAccount = useLysStore((state) => state.settings.email.account)
+  const savedPassword = useLysStore(
+    (state) => state.settings.secrets.emailPassword
+  )
+  const isEmailServerOn = useLysStore(
+    (state) => state.settings.mcp.builtIn.email.enabled
+  )
+  const saveState = useLysStore((state) => state.emailAccountSave)
+  const checkState = useLysStore((state) => state.emailAccountCheck)
+  const isBackendRunning = useLysStore(
+    (state) => state.backendServerInfo.status === "running"
+  )
+  const saveEmailAccount = useLysStore((state) => state.saveEmailAccount)
+  const removeEmailAccount = useLysStore((state) => state.removeEmailAccount)
+  const saveBuiltInMcpServerSwitch = useMcpServerStore(
+    (state) => state.saveBuiltInMcpServerSwitch
+  )
+  const sendMcpServerSync = useMcpServerStore(
+    (state) => state.sendMcpServerSync
+  )
+
+  /**
+   * Saves the account and, once saved while the email server is on, asks
+   * the backend to apply the group.
+   *
+   * @param account - Valid account.
+   * @param password - Its password.
+   * @returns The save outcome.
+   */
+  async function handleSaveEmailAccount(
+    account: EmailAccount,
+    password: EmailPassword
+  ): Promise<EmailAccountSaveOutcome> {
+    const outcome = await saveEmailAccount(account, password)
+    if (outcome === "saved" && isEmailServerOn) void sendMcpServerSync()
+    return outcome
+  }
+
+  /**
+   * Switches the email server off when it is on, then removes the account.
+   *
+   * @returns The removal outcome, or `failed` when the switch could not be
+   * saved, in which case the account stays.
+   */
+  async function handleRemoveEmailAccount(): Promise<EmailAccountRemovalOutcome> {
+    if (isEmailServerOn) {
+      const outcome = await saveBuiltInMcpServerSwitch("email", false)
+      if (outcome !== "saved") return "failed"
+    }
+    return removeEmailAccount()
+  }
+
+  return (
+    <EmailAccountCard
+      checkState={checkState}
+      isBackendRunning={isBackendRunning}
+      onRemoveEmailAccount={handleRemoveEmailAccount}
+      onSaveEmailAccount={handleSaveEmailAccount}
+      savedAccount={savedAccount}
+      savedPassword={savedPassword}
+      saveState={saveState}
+    />
   )
 }
 

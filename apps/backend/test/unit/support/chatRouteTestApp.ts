@@ -1,3 +1,4 @@
+import { mcpSettingsSchema } from "@lys/share"
 import type { FastifyInstance, LightMyRequestResponse } from "fastify"
 import { validatorCompiler } from "fastify-type-provider-zod"
 import { mkdtempSync, rmSync } from "node:fs"
@@ -241,13 +242,14 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     Promise.resolve(
       Object.freeze({
         status: "read",
-        settings: Object.freeze({ servers: Object.freeze([]) })
+        settings: mcpSettingsSchema.parse({})
       })
     )
   )
   const { processGroups } = createOwnedMcpServerProcessGroups()
   const mcpServerRegistry = new McpServerRegistry({
     readSettings: readMcpSettings,
+    builtInServers: [],
     openServer: (settings, context) =>
       openMcpServer(settings, context, MCP_TEST_OPENING_TIMEOUT_MILLISECONDS),
     workingDirectory: process.cwd(),

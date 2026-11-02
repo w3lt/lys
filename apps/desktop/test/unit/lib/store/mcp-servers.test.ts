@@ -661,6 +661,7 @@ describe("useMcpServerStore", () => {
       })
 
       expect(useLysStore.getState().settings.mcp).toEqual({
+        ...STORED_MCP_SETTINGS,
         servers: onlyFiles
       })
       expect(
@@ -690,6 +691,68 @@ describe("useMcpServerStore", () => {
 
       await expect(
         useMcpServerStore.getState().saveMcpServers([])
+      ).resolves.toBe("failed")
+      await waitForMicrotasks()
+
+      expect(backend.requests).toEqual([])
+      expect(useLysStore.getState().settings.mcp).toEqual(STORED_MCP_SETTINGS)
+    })
+  })
+
+  describe("saveBuiltInMcpServerSwitch", () => {
+    /** The stored servers with the email server switched on and starting. */
+    const EMAIL_STARTING_LIST = buildMcpServerList([
+      buildMcpServerStatus("email", "stdio", CONNECTING_MCP_STATE, true),
+      ...CONNECTED_LIST.servers
+    ])
+
+    it("saves the switch, then asks the running backend to apply the group", async () => {
+      const host = startSettingsHost()
+      const { readRouteKeys } = startMcpBackend({
+        [SYNC_ROUTE]: answerList(EMAIL_STARTING_LIST)
+      })
+      const { useMcpServerStore, useLysStore } = await loadFreshMcpServerStore()
+
+      await expect(
+        useMcpServerStore.getState().saveBuiltInMcpServerSwitch("email", true)
+      ).resolves.toBe("saved")
+      await vi.waitFor(() => {
+        expect(useMcpServerStore.getState().list).toEqual(
+          buildLoadedState(EMAIL_STARTING_LIST)
+        )
+      })
+
+      expect(useLysStore.getState().settings.mcp).toEqual({
+        ...STORED_MCP_SETTINGS,
+        builtIn: { email: { enabled: true } }
+      })
+      expect(
+        host.commands.filter((invoked) => invoked.command === "save_settings")
+      ).toHaveLength(1)
+      expect(readRouteKeys()).toEqual([SYNC_ROUTE])
+    })
+
+    it("asks nothing of a backend that is not running", async () => {
+      startSettingsHost()
+      const { backend } = startMcpBackend({})
+      const { useMcpServerStore } =
+        await loadFreshMcpServerStore(STOPPED_BACKEND)
+
+      await expect(
+        useMcpServerStore.getState().saveBuiltInMcpServerSwitch("email", true)
+      ).resolves.toBe("saved")
+      await waitForMicrotasks()
+
+      expect(backend.requests).toEqual([])
+    })
+
+    it("asks nothing of the backend when the save failed", async () => {
+      startSettingsHost(() => Promise.reject("Disk full"))
+      const { backend } = startMcpBackend({})
+      const { useMcpServerStore, useLysStore } = await loadFreshMcpServerStore()
+
+      await expect(
+        useMcpServerStore.getState().saveBuiltInMcpServerSwitch("email", true)
       ).resolves.toBe("failed")
       await waitForMicrotasks()
 

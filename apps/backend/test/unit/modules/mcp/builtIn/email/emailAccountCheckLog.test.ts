@@ -1,0 +1,106 @@
+import { describe, expect, it } from "vitest"
+import { createBackendLogger } from "../../../../../../src/log"
+import type { EmailAccountCheckEvent } from "../../../../../../src/modules/mcp/builtIn/email/emailAccountCheck"
+import { handleEmailAccountCheckEvent } from "../../../../../../src/modules/mcp/builtIn/email/emailAccountCheckLog"
+import {
+  CapturedLogDestination,
+  type CapturedLogRecord
+} from "../../../../support/fastifyTestApp"
+
+/** Fields every backend log line has, whatever was logged. */
+const COMMON_FIELDS = ["time", "pid", "hostname"] as const
+
+/**
+ * Logs one event with the backend's logger and reads the one line written.
+ *
+ * @param event - Event to log.
+ * @returns The line's fields, without the time and process fields every
+ * line has.
+ * @throws When the logger wrote no line or more than one.
+ */
+function logEvent(event: EmailAccountCheckEvent): Record<string, unknown> {
+  const destination = new CapturedLogDestination()
+  handleEmailAccountCheckEvent(createBackendLogger(destination), event)
+  const records = destination.records
+  if (records.length !== 1)
+    throw new Error(`Expected one log line, got ${records.length}`)
+  const fields: Record<string, unknown> = {
+    ...(records[0] as CapturedLogRecord)
+  }
+  for (const name of COMMON_FIELDS) delete fields[name]
+  return fields
+}
+
+describe("handleEmailAccountCheckEvent", () => {
+  it("logs a report with both sign-ins' outcomes", () => {
+    expect(
+      logEvent({
+        kind: "checked",
+        imap: { status: "failed", reason: "wrong-password" },
+        smtp: { status: "accepted" }
+      })
+    ).toEqual({
+      level: "info",
+      imap: { status: "failed", reason: "wrong-password" },
+      smtp: { status: "accepted" },
+      msg: "Email account check ran"
+    })
+  })
+
+  it("warns of a missing email server", () => {
+    expect(logEvent({ kind: "server-missing" })).toEqual({
+      level: "warn",
+      msg: "The email server is not installed, so the email account could not be checked; build.sh installs it"
+    })
+  })
+
+  it("logs a server that could not be started as an error with Node's error", () => {
+    const error = Object.assign(new Error("spawn /opt/lys/email EACCES"), {
+      code: "EACCES"
+    })
+
+    const fields = logEvent({
+      kind: "server-failed",
+      failure: { kind: "start-failed", error }
+    })
+
+    expect(fields).toMatchObject({
+      level: "error",
+      failure: { kind: "start-failed" },
+      err: { message: "spawn /opt/lys/email EACCES", code: "EACCES" },
+      msg: "The email server's account check failed"
+    })
+  })
+
+  it.each([
+    [{ kind: "timed-out" }],
+    [
+      {
+        kind: "exited",
+        exitCode: 1,
+        signal: null,
+        errorLines: ["unexpected failure: boom"]
+      }
+    ],
+    [{ kind: "unreadable-output", errorLines: [] }]
+  ] as const)(
+    "logs a server that did not report as an error: %o",
+    (failure) => {
+      expect(logEvent({ kind: "server-failed", failure })).toEqual({
+        level: "error",
+        failure,
+        msg: "The email server's account check failed"
+      })
+    }
+  )
+
+  it("warns of a check the closing backend ended", () => {
+    expect(
+      logEvent({ kind: "server-failed", failure: { kind: "closed" } })
+    ).toEqual({
+      level: "warn",
+      failure: { kind: "closed" },
+      msg: "The email account check was ended because the backend is closing"
+    })
+  })
+})

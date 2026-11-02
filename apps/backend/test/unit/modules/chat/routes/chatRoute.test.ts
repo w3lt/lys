@@ -13,6 +13,7 @@ import {
   CALIGINIA_AGENT_CODE,
   MAXIMUM_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
+  mcpSettingsSchema,
   type McpServerSettings
 } from "@lys/share"
 import type { LightMyRequestResponse } from "fastify"
@@ -1297,7 +1298,7 @@ describe("updateFastifyWithChatRoute", () => {
     ): Promise<void> {
       testApp.readMcpSettings.mockResolvedValue({
         status: "read",
-        settings: { servers: [settings] }
+        settings: mcpSettingsSchema.parse({ servers: [settings] })
       })
       await testApp.app.mcpServerRegistry.updateServers()
       await vi.waitFor(

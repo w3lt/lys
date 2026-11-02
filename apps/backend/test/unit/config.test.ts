@@ -28,6 +28,7 @@ const VALID_RAW_CONFIG = Object.freeze({
   settingsFilePath: "/test-home/lys/settings.json",
   attachmentsDirectoryPath: "/test-home/lys/attachments",
   mcpProcessGroupsFilePath: "/test-home/lys/mcp-process-groups",
+  emailServerPath: "/test-home/lys/runtime/email/email",
   vmoHost: "127.0.0.1",
   vmoPort: 8080,
   caliginiaSystemPrompt: "Fixture Caliginia prompt",
@@ -107,6 +108,8 @@ describe("loadBackendConfig", () => {
   })
 
   it("resolves the shared endpoints, the Lys home paths, vmo's endpoint, every prompt, and the fixed title limits", () => {
+    vi.stubEnv("LYS_EMAIL_SERVER_PATH", undefined)
+
     expect(loadBackendConfig()).toEqual({
       backendHost: BACKEND_HOST,
       backendPort: BACKEND_PORT,
@@ -114,6 +117,7 @@ describe("loadBackendConfig", () => {
       settingsFilePath: "/test-home/lys/settings.json",
       attachmentsDirectoryPath: "/test-home/lys/attachments",
       mcpProcessGroupsFilePath: "/test-home/lys/mcp-process-groups",
+      emailServerPath: "/test-home/lys/runtime/email/email",
       vmoHost: "127.0.0.1",
       vmoPort: 8080,
       caliginiaSystemPrompt: "Fixture Caliginia prompt",
@@ -122,6 +126,31 @@ describe("loadBackendConfig", () => {
       titleGenerationMaxAttempts: 3,
       generatedTitleMaxLength: 100
     })
+  })
+
+  it("takes the email server path from LYS_EMAIL_SERVER_PATH when it is set", () => {
+    vi.stubEnv(
+      "LYS_EMAIL_SERVER_PATH",
+      "/workspace/mcps/email/target/debug/email"
+    )
+
+    expect(loadBackendConfig().emailServerPath).toBe(
+      "/workspace/mcps/email/target/debug/email"
+    )
+  })
+
+  it("falls back to the Lys home email server when LYS_EMAIL_SERVER_PATH is empty", () => {
+    vi.stubEnv("LYS_EMAIL_SERVER_PATH", "")
+
+    expect(loadBackendConfig().emailServerPath).toBe(
+      "/test-home/lys/runtime/email/email"
+    )
+  })
+
+  it("rejects a relative LYS_EMAIL_SERVER_PATH, naming the key", () => {
+    vi.stubEnv("LYS_EMAIL_SERVER_PATH", "mcps/email/target/debug/email")
+
+    expect(() => loadBackendConfig()).toThrow(/emailServerPath/u)
   })
 
   it("returns a frozen snapshot", () => {
@@ -295,6 +324,26 @@ describe("backendConfigSchema", () => {
       "a relative MCP process groups file path",
       { ...VALID_RAW_CONFIG, mcpProcessGroupsFilePath: "mcp-process-groups" },
       "mcpProcessGroupsFilePath"
+    ],
+    [
+      "a relative email server path",
+      { ...VALID_RAW_CONFIG, emailServerPath: "email" },
+      "emailServerPath"
+    ],
+    [
+      "an email server path with a trailing space",
+      { ...VALID_RAW_CONFIG, emailServerPath: "/opt/lys/email " },
+      "emailServerPath"
+    ],
+    [
+      "an email server path with a line break",
+      { ...VALID_RAW_CONFIG, emailServerPath: "/opt/lys/em\nail" },
+      "emailServerPath"
+    ],
+    [
+      "an email server path longer than a command may be",
+      { ...VALID_RAW_CONFIG, emailServerPath: `/${"e".repeat(1024)}` },
+      "emailServerPath"
     ],
     ["a vmo port of 0", { ...VALID_RAW_CONFIG, vmoPort: 0 }, "vmoPort"],
     [

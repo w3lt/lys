@@ -16,6 +16,11 @@ export const CONNECTING_MCP_STATE: McpServerState = mcpServerStateSchema.parse({
   status: "connecting"
 })
 
+/** State of a server the group switches off, which the backend lists without starting. */
+export const OFF_MCP_STATE: McpServerState = mcpServerStateSchema.parse({
+  status: "off"
+})
+
 /**
  * Builds the state of a connected server.
  *
@@ -54,14 +59,16 @@ export function buildFailedMcpState(reason: McpServerFailure): McpServerState {
  * @param name - Server name.
  * @param transport - How the backend talks to it.
  * @param state - Its connection state.
+ * @param isBuiltIn - Whether Lys ships it; an added server by default.
  * @returns The listed server; {@link buildMcpServerList} validates it.
  */
 export function buildMcpServerStatus(
   name: string,
   transport: McpServerTransport,
-  state: McpServerState
+  state: McpServerState,
+  isBuiltIn = false
 ): McpServerStatus {
-  return Object.freeze({ name, transport, state })
+  return Object.freeze({ name, transport, isBuiltIn, state })
 }
 
 /**

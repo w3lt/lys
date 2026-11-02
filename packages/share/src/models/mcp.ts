@@ -30,6 +30,20 @@ export const MAXIMUM_MCP_SETTINGS_BYTES = MAXIMUM_SETTINGS_FILE_BYTES / 2
 /** Most characters an MCP server name may have, inclusive. */
 export const MAXIMUM_MCP_SERVER_NAME_LENGTH = 20
 
+/**
+ * Names of the MCP servers Lys ships, in the order Settings lists them:
+ * `email`, the server that reads and sends the person's email.
+ *
+ * @remarks Each has its own switch in the `mcp` settings group's
+ * `builtIn` field and is never counted toward
+ * {@link MAXIMUM_MCP_SERVER_COUNT}. Adding one is a compatibility change
+ * for the settings file and for every consumer that branches on the names.
+ */
+export const BUILT_IN_MCP_SERVER_NAMES = Object.freeze(["email"] as const)
+
+/** Name of one MCP server Lys ships. */
+export type BuiltInMcpServerName = (typeof BUILT_IN_MCP_SERVER_NAMES)[number]
+
 /** Most characters, counted as Unicode code points, of a stdio command. */
 export const MAXIMUM_MCP_COMMAND_LENGTH = 1024
 
@@ -275,6 +289,13 @@ export const mcpServerTransportSchema = z.enum(["stdio", "http"])
 export type McpServerTransport = z.infer<typeof mcpServerTransportSchema>
 
 /**
+ * Validates the switch of a server the person added: whether Lys connects
+ * to it. An omitted switch is on, so a settings file written before the
+ * switch existed keeps every server on.
+ */
+const mcpServerSwitchSchema = z.boolean().default(true)
+
+/**
  * Validates the settings of a server Lys starts as a command and talks to
  * over its standard input and output. The output is frozen; unknown fields
  * are rejected.
@@ -285,6 +306,8 @@ const mcpStdioServerSettingsSchema = z
     name: mcpServerNameSchema,
     /** Lys starts the server and talks to it over stdio. */
     transport: mcpServerTransportSchema.extract(["stdio"]),
+    /** Whether the server is switched on; omitted means on. */
+    enabled: mcpServerSwitchSchema,
     /** Program to run, found through `PATH` unless it is a path. */
     command: mcpCommandSchema,
     /** Arguments in order; omitted means none. */
@@ -428,6 +451,8 @@ const mcpHttpServerSettingsSchema = z
     name: mcpServerNameSchema,
     /** Lys sends MCP requests to the URL over Streamable HTTP. */
     transport: mcpServerTransportSchema.extract(["http"]),
+    /** Whether the server is switched on; omitted means on. */
+    enabled: mcpServerSwitchSchema,
     /** Endpoint of the server. */
     url: mcpServerUrlSchema,
     /** Headers sent with every request, each name once ignoring case; omitted means none. */
@@ -473,17 +498,49 @@ function calculateCompactJsonBytes(group: unknown): number {
 }
 
 /**
- * Validates the `mcp` settings group: the MCP servers Lys connects to, each
- * name once, in the order Settings lists them, taking at most
- * {@link MAXIMUM_MCP_SETTINGS_BYTES} together. The output is frozen;
+ * Validates the switch of one MCP server Lys ships. The output is frozen;
  * unknown fields are rejected.
  *
- * @remarks An omitted list means no server. The desktop host is the only
- * writer of the group; the backend only reads it.
+ * @remarks An omitted switch is off: a built-in server runs only once the
+ * person switched it on.
+ */
+const builtInMcpServerSettingsSchema = z
+  .strictObject({
+    /** Whether Lys starts the server; omitted means off. */
+    enabled: z.boolean().default(false)
+  })
+  .readonly()
+
+/**
+ * Validates the switches of the MCP servers Lys ships, one field per name
+ * in {@link BUILT_IN_MCP_SERVER_NAMES}. The output is frozen; unknown
+ * fields are rejected.
+ *
+ * @remarks An omitted server is off.
+ */
+export const builtInMcpSettingsSchema = z
+  .strictObject({
+    /** The email server's switch. */
+    email: builtInMcpServerSettingsSchema.prefault({})
+  })
+  .readonly()
+
+/** Switches of the MCP servers Lys ships. */
+export type BuiltInMcpSettings = z.infer<typeof builtInMcpSettingsSchema>
+
+/**
+ * Validates the `mcp` settings group: the MCP servers the person added,
+ * each name once, in the order Settings lists them, taking at most
+ * {@link MAXIMUM_MCP_SETTINGS_BYTES} together with the switches of the
+ * servers Lys ships. The output is frozen; unknown fields are rejected.
+ *
+ * @remarks An omitted list means no added server, and omitted switches
+ * mean every built-in server off. The desktop host is the only writer of
+ * the group; the backend only reads it.
  */
 export const mcpSettingsSchema = z
   .strictObject({
-    /** Servers in list order. */
+    /** Servers the person added, in list order. */
     servers: z
       .array(mcpServerSettingsSchema)
       .max(MAXIMUM_MCP_SERVER_COUNT)
@@ -492,7 +549,9 @@ export const mcpSettingsSchema = z
         "Each MCP server has its own name."
       )
       .default([])
-      .readonly()
+      .readonly(),
+    /** Switches of the servers Lys ships. */
+    builtIn: builtInMcpSettingsSchema.prefault({})
   })
   .refine(
     (group) => calculateCompactJsonBytes(group) <= MAXIMUM_MCP_SETTINGS_BYTES,
@@ -503,8 +562,23 @@ export const mcpSettingsSchema = z
 /** The `mcp` settings group. */
 export type McpSettings = z.infer<typeof mcpSettingsSchema>
 
+/** The `mcp` settings group before validation, its omitted parts allowed. */
+export type McpSettingsCandidate = z.input<typeof mcpSettingsSchema>
+
 /** Start of every name the model calls an MCP tool by. */
 export const MCP_TOOL_NAME_PREFIX = "mcp__"
+
+/**
+ * Answers whether a name is one of the MCP servers Lys ships.
+ *
+ * @param name - Server name to inspect.
+ * @returns True when {@link BUILT_IN_MCP_SERVER_NAMES} holds it.
+ */
+export function isBuiltInMcpServerName(
+  name: string
+): name is BuiltInMcpServerName {
+  return (BUILT_IN_MCP_SERVER_NAMES as readonly string[]).includes(name)
+}
 
 /**
  * Builds the start of the names the model calls one server's tools by.

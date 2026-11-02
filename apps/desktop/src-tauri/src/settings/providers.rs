@@ -13,14 +13,7 @@
 use serde::de::Error;
 use serde::{Deserialize, Serialize};
 
-/// Most characters a host name may have, inclusive. Matches
-/// `MAXIMUM_HOST_NAME_LENGTH` in `@lys/share`, which the renderer and the
-/// backend check.
-const HOST_NAME_MAX_LENGTH: usize = 253;
-
-/// Most characters one host name label may have, inclusive. Matches
-/// `MAXIMUM_HOST_LABEL_LENGTH` in `@lys/share`.
-const HOST_LABEL_MAX_LENGTH: usize = 63;
+use super::host_name::is_host_name;
 
 /// Most digits a port may have. A five-digit port is still checked against
 /// the highest TCP port.
@@ -50,27 +43,6 @@ impl ProviderAddress {
 
         is_valid.then_some(Self(value))
     }
-}
-
-/// Reports whether `host` is a host name under the provider address rule.
-fn is_host_name(host: &str) -> bool {
-    !host.is_empty() && host.len() <= HOST_NAME_MAX_LENGTH && host.split('.').all(is_host_label)
-}
-
-/// Reports whether `label` is one host name label: 1 to 63 ASCII letters,
-/// digits, or hyphens, starting and ending with a letter or digit.
-fn is_host_label(label: &str) -> bool {
-    let bytes = label.as_bytes();
-    let (Some(first), Some(last)) = (bytes.first(), bytes.last()) else {
-        return false;
-    };
-
-    label.len() <= HOST_LABEL_MAX_LENGTH
-        && first.is_ascii_alphanumeric()
-        && last.is_ascii_alphanumeric()
-        && bytes
-            .iter()
-            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
 }
 
 /// Reports whether `port` is a decimal TCP port from 1 to 65535 without a

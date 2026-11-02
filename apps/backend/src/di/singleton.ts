@@ -31,6 +31,7 @@ import { buildLlmChatEndpoint } from "../modules/llm/llmProviderAccess"
 import { findLlmProviderAccess } from "../infrastructure/settings/llmProviderSettingsFile"
 import ToolApprovalService from "../modules/toolApproval/toolApprovalService"
 import { readJustRunToolNames } from "../infrastructure/settings/justRunToolsFile"
+import { readEmailAccount } from "../infrastructure/settings/emailAccountFile"
 import { readMcpSettings } from "../infrastructure/settings/mcpSettingsFile"
 import { readTavilyApiKey } from "../infrastructure/settings/tavilyApiKeyFile"
 import type { BuiltInToolEntry } from "../modules/tool/builtIn/builtInTool"
@@ -40,6 +41,14 @@ import {
 } from "../modules/tool/builtIn/builtInTools"
 import type { PageRenderingFailureReporters } from "../modules/tool/builtIn/web/pageRendering"
 import WebSearchToolProvider from "../modules/tool/builtIn/web/webSearchToolProvider"
+import EmailAccountChecker, {
+  EMAIL_ACCOUNT_CHECK_TIMEOUT_MILLISECONDS,
+  type EmailAccountCheckEvent
+} from "../modules/mcp/builtIn/email/emailAccountCheck"
+import {
+  buildEmailServerCommand,
+  createEmailMcpServer
+} from "../modules/mcp/builtIn/email/emailServer"
 import type { McpServerEvent } from "../modules/mcp/mcpServerEvent"
 import McpServerProcessGroups from "../modules/mcp/mcpServerProcessGroups"
 import McpServerRegistry from "../modules/mcp/mcpServerRegistry"
@@ -109,6 +118,11 @@ export type SingletonLogReporters = Readonly<{
    * backend left running.
    */
   reportMcpProcessGroupsSaveFailure: (failure: Error) => void
+  /**
+   * Receives the outcome of each email account check and why a check did
+   * not report, without the account or the password.
+   */
+  reportEmailAccountCheckEvent: (event: EmailAccountCheckEvent) => void
 }>
 
 /** Production factories used when the composition root supplies no substitutes. */
@@ -175,6 +189,11 @@ export type SingletonServices = Readonly<{
    */
   mcpServerProcessGroups: McpServerProcessGroups
   /**
+   * Checks of email accounts through the email server Lys ships, one at a
+   * time; the bundle's cleanup kills the running check.
+   */
+  emailAccountChecker: EmailAccountChecker
+  /**
    * Attachment files of every conversation, under the attachments
    * directory; it owns nothing to release.
    */
@@ -185,7 +204,7 @@ export type SingletonServices = Readonly<{
 
 /**
  * Services that run, find, and approve tools; only the MCP server registry
- * owns resources.
+ * and the email account checker own resources.
  */
 type ToolServices = Pick<
   SingletonServices,
@@ -194,6 +213,7 @@ type ToolServices = Pick<
   | "toolApprovalService"
   | "mcpServerRegistry"
   | "mcpServerProcessGroups"
+  | "emailAccountChecker"
 >
 
 /** Services that keep their data in the shared database and own nothing. */
@@ -212,12 +232,15 @@ type DatabaseServices = Pick<
  * provider from, the title-generation prompt and title length limit given to
  * the chat service, the built-in agents' system prompts given to the agent service,
  * vmo's host and port given to the read-page tool, the attachments
- * directory given to the attachment file store, and the MCP process groups
- * file given to the holder of the MCP servers' process groups.
+ * directory given to the attachment file store, the MCP process groups
+ * file given to the holder of the MCP servers' process groups, and the
+ * email server's path given to the built-in email server and the email
+ * account checker.
  * @param logReporters - Receive, for logging, the LLM runtime failures that
  * no caller observes, the causes of read failures the model learns only by
- * kind, the LM Studio SDK's messages, the MCP servers' events, and the
- * failures to save their process groups file.
+ * kind, the LM Studio SDK's messages, the MCP servers' events, the
+ * failures to save their process groups file, and the email account
+ * checks.
  * @param factories - Service factories owned by the composition root.
  * @returns A promise resolving to the frozen bundle of owned services. No
  * service reads the active provider or contacts it during creation; the
@@ -238,10 +261,11 @@ type DatabaseServices = Pick<
  * service, the LLM service, and the history reader; they read nothing at
  * creation and own nothing to release.
  * The web search tool provider, the built-in tools, the tool approval
- * service, the MCP server registry, and the attachment file store are
- * created last; they read and contact nothing at creation. Only the MCP
- * server registry owns resources, the connections it opens later; the
- * bundle's cleanup closes it first.
+ * service, the MCP server registry, the email account checker, and the
+ * attachment file store are created last; they read and contact nothing at
+ * creation. Only the MCP server registry and the email account checker own
+ * resources, the connections and the check process they open later; the
+ * bundle's cleanup closes them first, the checker before the registry.
  * Creation stops at the first failure. The database is not part of the
  * returned bundle: the bundle's cleanup closes it last, after the chat
  * service and the LLM runtime service.
@@ -287,6 +311,7 @@ export async function createSingletonServices(
     )
     const toolServices = createToolServices(config, logReporters)
     serviceLifetime.defer(() => toolServices.mcpServerRegistry.close())
+    serviceLifetime.defer(() => toolServices.emailAccountChecker.close())
 
     return Object.freeze({
       chatService,
@@ -394,17 +419,18 @@ function createAgentServices(
  * Creates the services that run, find, and approve tools.
  *
  * @param config - Settings file the web search key, the Just run choices,
- * and the MCP servers are read from, vmo's host and port given to the
- * read-page tool, and the file the MCP servers' process groups are saved
- * to.
+ * the MCP servers, and the email account are read from, vmo's host and
+ * port given to the read-page tool, the file the MCP servers' process
+ * groups are saved to, and the path of the email server Lys ships.
  * @param logReporters - Receive the causes of read failures the model
- * learns only by kind, the MCP servers' events, and the failures to save
- * their process groups file.
+ * learns only by kind, the MCP servers' events, the failures to save
+ * their process groups file, and the email account checks.
  * @returns The web search tool provider, every built-in tool, the tool
  * approval service, the MCP server registry, whose stdio servers start in
- * the person's home folder, and the holder of those servers' process
- * groups, which the registry borrows; they read and contact nothing at
- * creation.
+ * the person's home folder and whose only built-in server is the email
+ * server, the holder of those servers' process groups, which the registry
+ * borrows, and the email account checker, which runs the same email
+ * server; they read and contact nothing at creation.
  */
 function createToolServices(
   config: BackendConfig,
@@ -413,6 +439,7 @@ function createToolServices(
     | "pageRendering"
     | "reportMcpServerEvent"
     | "reportMcpProcessGroupsSaveFailure"
+    | "reportEmailAccountCheckEvent"
   >
 ): ToolServices {
   const webSearchToolProvider = new WebSearchToolProvider(
@@ -431,20 +458,32 @@ function createToolServices(
     config.mcpProcessGroupsFilePath,
     logReporters.reportMcpProcessGroupsSaveFailure
   )
+  const emailServerCommand = buildEmailServerCommand(config.emailServerPath)
   const mcpServerRegistry = new McpServerRegistry({
     readSettings: () => readMcpSettings(config.settingsFilePath),
+    builtInServers: [
+      createEmailMcpServer(emailServerCommand, () =>
+        readEmailAccount(config.settingsFilePath)
+      )
+    ],
     openServer: (settings, context) =>
       openMcpServer(settings, context, MCP_SERVER_OPENING_TIMEOUT_MILLISECONDS),
     workingDirectory: homedir(),
     processGroups: mcpServerProcessGroups,
     reportEvent: logReporters.reportMcpServerEvent
   })
+  const emailAccountChecker = new EmailAccountChecker({
+    serverCommand: emailServerCommand,
+    timeoutMilliseconds: EMAIL_ACCOUNT_CHECK_TIMEOUT_MILLISECONDS,
+    reportEvent: logReporters.reportEmailAccountCheckEvent
+  })
   return {
     builtInTools,
     webSearchToolProvider,
     toolApprovalService,
     mcpServerRegistry,
-    mcpServerProcessGroups
+    mcpServerProcessGroups,
+    emailAccountChecker
   }
 }
 

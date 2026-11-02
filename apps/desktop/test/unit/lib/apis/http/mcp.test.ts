@@ -129,6 +129,7 @@ describe("listMcpServers", () => {
               {
                 name: "notes",
                 transport: "http",
+                isBuiltIn: false,
                 state: {
                   status: "connected",
                   toolCount,

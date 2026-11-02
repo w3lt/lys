@@ -1,7 +1,17 @@
 import type { McpServerState, SkippedMcpTool } from "@lys/protocol"
-import type { McpServerSettings, McpToolDefinition } from "@lys/share"
+import type {
+  McpServerName,
+  McpServerSettings,
+  McpToolDefinition
+} from "@lys/share"
 import { ChevronRight } from "lucide-react"
-import { useId, useState, type KeyboardEvent, type ReactElement } from "react"
+import {
+  useId,
+  useState,
+  type KeyboardEvent,
+  type ReactElement,
+  type ReactNode
+} from "react"
 
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -19,10 +29,12 @@ import {
   formatMcpServerToolsNote,
   formatSkippedMcpToolName,
   formatSkippedMcpToolReason,
+  getMcpListedServerName,
   listMcpServerConfiguration,
   listSkippedMcpTools,
   MCP_TOOL_CHIPS_NOTE,
   MCP_TOOL_LIST_CUT_NOTE,
+  type McpListedServer,
   type McpServerStatusPresentation
 } from "./mcp-presentation"
 import { findToolApproval, formatToolApprovalLabel } from "./tool-presentation"
@@ -116,8 +128,8 @@ function McpSkippedToolItem({ tool }: McpSkippedToolItemProps): ReactElement {
 
 /** Properties accepted by {@link McpServerStatusLine}. */
 type McpServerStatusLineProps = {
-  /** Saved settings of the server. */
-  readonly server: McpServerSettings
+  /** The listed server. */
+  readonly server: McpListedServer
   /** The server's state. */
   readonly status: McpServerStatusPresentation
   /** Whether the backend is running, which connecting the server needs. */
@@ -134,7 +146,8 @@ type McpServerStatusLineProps = {
  * status, so a change of the state while the details are shown is announced
  * once. The button reads Retry, Restart, Reconnect, Start, or Connect for
  * the state and the transport, is named by its text and the server, and is
- * disabled while the backend is not running.
+ * disabled while the backend is not running; it is absent while the server
+ * is switched off, or while an added server has a built-in server's name.
  * @param props - Server, state, backend status, and the reconnect request.
  * @returns The status line.
  */
@@ -144,7 +157,8 @@ function McpServerStatusLine({
   isBackendRunning,
   onReconnect
 }: McpServerStatusLineProps): ReactElement {
-  const label = formatMcpReconnectLabel(server.transport, status.condition)
+  const serverName = getMcpListedServerName(server)
+  const label = formatMcpReconnectLabel(server, status.condition)
 
   return (
     <div className="settings-view__mcp-status-line">
@@ -155,7 +169,7 @@ function McpServerStatusLine({
         role="status"
       >
         <span className="settings-view__mcp-status-heading">
-          <span className="sr-only">{server.name}: </span>
+          <span className="sr-only">{serverName}: </span>
           {status.heading}
         </span>
         {status.detail === "" ? null : (
@@ -167,16 +181,18 @@ function McpServerStatusLine({
           </span>
         )}
       </div>
-      <Button
-        aria-label={`${label} ${server.name}`}
-        disabled={!isBackendRunning}
-        onClick={onReconnect}
-        size="sm"
-        type="button"
-        variant="outline"
-      >
-        {label}
-      </Button>
+      {label === "" ? null : (
+        <Button
+          aria-label={`${label} ${serverName}`}
+          disabled={!isBackendRunning}
+          onClick={onReconnect}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          {label}
+        </Button>
+      )}
     </div>
   )
 }
@@ -224,8 +240,8 @@ function McpToolChip({
 
 /** Properties accepted by {@link McpServerToolSection}. */
 type McpServerToolSectionProps = {
-  /** Saved settings of the server. */
-  readonly server: McpServerSettings
+  /** Name of the server, which names its tool list and skipped tools. */
+  readonly serverName: McpServerName
   /** The server's listed tools, in the backend's order. */
   readonly tools: readonly McpToolDefinition[]
   /** Why no tool is shown, shown while the server lists none. */
@@ -252,7 +268,7 @@ type McpServerToolSectionProps = {
  * @returns The tools section.
  */
 function McpServerToolSection({
-  server,
+  serverName,
   tools,
   emptyNote,
   skippedToolsState,
@@ -274,7 +290,7 @@ function McpServerToolSection({
       ) : (
         <>
           <ul
-            aria-label={`Tools of ${server.name}`}
+            aria-label={`Tools of ${serverName}`}
             className="settings-view__mcp-tools"
           >
             {tools.map((tool) => (
@@ -292,7 +308,7 @@ function McpServerToolSection({
         </>
       )}
       {skippedToolsState === undefined ? null : (
-        <McpSkippedTools serverName={server.name} state={skippedToolsState} />
+        <McpSkippedTools serverName={serverName} state={skippedToolsState} />
       )}
     </section>
   )
@@ -564,12 +580,56 @@ function McpServerDetailActions({
   )
 }
 
+/** Properties accepted by {@link McpAddedServerDetails}. */
+type McpAddedServerDetailsProps = {
+  /** Saved settings of the server. */
+  readonly server: McpServerSettings
+  /** Whether a save of the servers runs. */
+  readonly isSaving: boolean
+  /** Whether the Edit button takes focus when it is attached. */
+  readonly isEditFocusedOnAttach: boolean
+  /** Requests that the parent open the server's editor. */
+  readonly onEdit: () => void
+  /** Requests that the parent remove the server. */
+  readonly onRemove: () => void
+}
+
+/**
+ * Presents what only an added server has in its details: its
+ * configuration and its Remove and Edit actions.
+ *
+ * @remarks The parent owns the settings and both actions; the component
+ * owns no state of its own. Values that can be secrets are never shown.
+ * @param props - Server, the save, focus, and the actions.
+ * @returns The configuration section and the actions.
+ */
+export function McpAddedServerDetails({
+  server,
+  isSaving,
+  isEditFocusedOnAttach,
+  onEdit,
+  onRemove
+}: McpAddedServerDetailsProps): ReactElement {
+  return (
+    <>
+      <McpServerConfiguration server={server} />
+      <McpServerDetailActions
+        isEditFocusedOnAttach={isEditFocusedOnAttach}
+        isSaving={isSaving}
+        onEdit={onEdit}
+        onRemove={onRemove}
+        server={server}
+      />
+    </>
+  )
+}
+
 /** Properties accepted by {@link McpServerDetails}. */
 export type McpServerDetailsProps = {
   /** Identifier of the details, which the row's toggle controls. */
   readonly detailsId: string
-  /** Saved settings of the server. */
-  readonly server: McpServerSettings
+  /** The listed server. */
+  readonly server: McpListedServer
   /** The server's state. */
   readonly status: McpServerStatusPresentation
   /** The server's listed tools, in the backend's order. */
@@ -582,16 +642,8 @@ export type McpServerDetailsProps = {
   readonly toolSettings: ToolSettings
   /** Whether the backend is running. */
   readonly isBackendRunning: boolean
-  /** Whether a save of the servers runs. */
-  readonly isSaving: boolean
-  /** Whether the Edit button takes focus when it is attached. */
-  readonly isEditFocusedOnAttach: boolean
   /** Requests that the parent connect the server again. */
   readonly onReconnect: () => void
-  /** Requests that the parent open the server's editor. */
-  readonly onEdit: () => void
-  /** Requests that the parent remove the server. */
-  readonly onRemove: () => void
   /** Proposes switching one tool on or off. */
   readonly onToolOnChange: (toolName: string, isOn: boolean) => void
   /** Proposes one approval for several tools. */
@@ -599,20 +651,25 @@ export type McpServerDetailsProps = {
     toolNames: readonly string[],
     approval: ToolApproval
   ) => void
+  /**
+   * What follows the approval row: an added server's configuration and
+   * actions, or a built-in server's own panel.
+   */
+  readonly children: ReactNode
 }
 
 /**
- * Presents the details of one server: its state and the button that
- * connects it again, its tools, whether they ask before running, its
- * configuration, and its Remove and Edit actions.
+ * Presents the details every server has: its state and the button that
+ * connects it again, its tools, and whether they ask before running,
+ * followed by what the parent adds for its kind.
  *
- * @remarks The parent owns the settings, the state, the tools, the choices
- * about them, and every action; the details own no state of their own. They
- * carry the identifier the row's toggle controls. A tool's chip proposes its
- * switch; the approval proposes one approval for every listed tool. Values
- * that can be secrets are never shown.
- * @param props - Server, state, tools, choices, backend status, the save,
- * focus, and the actions.
+ * @remarks The parent owns the server, the state, the tools, the choices
+ * about them, every action, and what follows; the details own no state of
+ * their own. They carry the identifier the row's toggle controls. A tool's
+ * chip proposes its switch; the approval proposes one approval for every
+ * listed tool.
+ * @param props - Server, state, tools, choices, backend status, the
+ * actions, and what follows.
  * @returns The details region.
  */
 export function McpServerDetails({
@@ -624,13 +681,10 @@ export function McpServerDetails({
   skippedToolsState,
   toolSettings,
   isBackendRunning,
-  isSaving,
-  isEditFocusedOnAttach,
   onReconnect,
-  onEdit,
-  onRemove,
   onToolOnChange,
-  onToolApprovalChange
+  onToolApprovalChange,
+  children
 }: McpServerDetailsProps): ReactElement {
   const toolsNote = formatMcpServerToolsNote({
     condition: status.condition,
@@ -649,7 +703,7 @@ export function McpServerDetails({
       <McpServerToolSection
         emptyNote={toolsNote}
         onToolOnChange={onToolOnChange}
-        server={server}
+        serverName={getMcpListedServerName(server)}
         skippedToolsState={skippedToolsState}
         toolSwitches={toolSettings.switches}
         tools={tools}
@@ -664,14 +718,7 @@ export function McpServerDetails({
         }
         tools={tools}
       />
-      <McpServerConfiguration server={server} />
-      <McpServerDetailActions
-        isEditFocusedOnAttach={isEditFocusedOnAttach}
-        isSaving={isSaving}
-        onEdit={onEdit}
-        onRemove={onRemove}
-        server={server}
-      />
+      {children}
     </div>
   )
 }

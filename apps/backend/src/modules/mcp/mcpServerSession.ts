@@ -12,6 +12,7 @@ import type McpServerProcessGroups from "./mcpServerProcessGroups"
 import type { McpToolCatalog } from "./mcpToolCatalog"
 import {
   formatMcpServerNotConnected,
+  formatMcpServerStopped,
   formatMcpToolCallFailure,
   formatMcpToolNoLongerListed,
   formatMcpToolResult,
@@ -257,7 +258,10 @@ export default class McpServerSession {
    * cancelled.
    * @returns The server's result; or a failed outcome when the server is not
    * connected, no longer lists the tool under the same server name, or the
-   * request failed, each of which is also reported.
+   * request failed, each of which is also reported. A request that fails
+   * once {@link stop} was called, such as when the session's owner applied
+   * changed settings while the call ran, tells the model the server was
+   * stopped.
    * @throws Only once the signal aborted.
    */
   public async sendToolCall(
@@ -293,7 +297,11 @@ export default class McpServerSession {
         failure,
         unknownError: failure.kind === "unknown" ? error : undefined
       })
-      return buildFailedOutcome(formatMcpToolCallFailure(subject, failure))
+      return buildFailedOutcome(
+        this.#isStopped
+          ? formatMcpServerStopped(subject)
+          : formatMcpToolCallFailure(subject, failure)
+      )
     }
   }
 

@@ -34,6 +34,9 @@ export {
 } from "./agent"
 export {
   createMcpServerNotFoundProblem,
+  createMcpServerOffProblem,
   mcpServerNotFoundProblemSchema,
-  type McpServerNotFoundProblem
+  mcpServerOffProblemSchema,
+  type McpServerNotFoundProblem,
+  type McpServerOffProblem
 } from "./mcp"

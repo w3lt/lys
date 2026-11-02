@@ -149,6 +149,17 @@ export function formatMcpServerNotConnected(
 }
 
 /**
+ * Formats the sentence that says the tool's server was stopped while a
+ * call ran on it.
+ *
+ * @param subject - The call's server and tool.
+ * @returns A sentence for the model.
+ */
+export function formatMcpServerStopped(subject: McpToolCallSubject): string {
+  return `The call of ${subject.toolName} failed: the MCP server ${subject.serverName} was stopped while the call ran: it was switched off, changed, or removed in Settings → MCP.`
+}
+
+/**
  * Formats the sentence that says the tool's server no longer lists the
  * tool when a call was to run.
  *

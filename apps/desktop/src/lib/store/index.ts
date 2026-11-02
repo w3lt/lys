@@ -23,6 +23,10 @@ import {
 } from "./location-settings"
 import { createMcpSettingsSlice, type McpSettingsSlice } from "./mcp-settings"
 import {
+  createEmailSettingsSlice,
+  type EmailSettingsSlice
+} from "./email-settings"
+import {
   createSecretsSettingsSlice,
   type SecretsSettingsSlice
 } from "./secrets-settings"
@@ -48,6 +52,7 @@ import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
 import { getBackendStatus, startBackend, stopBackend } from "../apis"
 import { getVmoStatus } from "@/lib/apis/tauri/vmo"
 import { sendWebSearchKeyCheck } from "../apis/http/tools"
+import { checkEmailAccount } from "../apis/http/email"
 import { isLoadConfigurationSettingsEqual } from "../models/model-load-configuration"
 
 /** Top-level view selected by the application store. */
@@ -164,6 +169,7 @@ type LysStore = LysState &
   ProviderSettingsSlice &
   LocationSettingsSlice &
   McpSettingsSlice &
+  EmailSettingsSlice &
   ToolSettingsSlice &
   RuntimeAutoStartSettingsSlice &
   VmoRuntimeSlice &
@@ -190,9 +196,9 @@ const initialState: LysState = {
  * @remarks Initialization and process actions are application-owned
  * asynchronous transitions. Tauri errors propagate from the returned promises;
  * settings are edited in memory by setSettings, and tool approvals by
- * updateToolApproval. The secrets, location, and MCP server slices save
- * their group only on an explicit request and change the store's copy once
- * the file holds it. The generation, load configuration, tool-settings, and
+ * updateToolApproval. The secrets, location, MCP server, and email account
+ * slices save their group only on an explicit request and change the
+ * store's copy once the file holds it. The generation, load configuration, tool-settings, and
  * runtime-autostart slices own automatic saves and retain their completion or
  * failure state across pane changes; the store runs every group's writes one at a time, so
  * one group's save never writes back another group's older value. A saved
@@ -339,6 +345,11 @@ export const useLysStore = create<LysStore>()((set, get) => {
     }),
     ...createMcpSettingsSlice(set, get, {
       saveMcpSettings: settingsGroupSaves.saveMcpSettings
+    }),
+    ...createEmailSettingsSlice(set, get, {
+      saveEmailAccountSettings: settingsGroupSaves.saveEmailAccountSettings,
+      sendEmailAccountCheck: (body) =>
+        checkEmailAccount({ backendUrl: get().backendUrl }, body)
     }),
     ...createModelSlice(set, get, {
       getConnection: () => ({

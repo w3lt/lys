@@ -1,5 +1,9 @@
 import type { McpServerList } from "@lys/protocol"
-import type { McpServerName, McpServerSettings } from "@lys/share"
+import type {
+  BuiltInMcpServerName,
+  McpServerName,
+  McpServerSettings
+} from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import {
@@ -112,6 +116,20 @@ type McpServerStoreActions = {
     servers: readonly McpServerSettings[]
   ) => Promise<McpSettingsSaveOutcome>
   /**
+   * Saves the switch of one MCP server Lys ships and, once it is saved
+   * while the backend runs, asks the backend to apply it.
+   *
+   * @param serverName - Name of the built-in server.
+   * @param isOn - Whether the backend starts the server.
+   * @returns The save outcome, once the save settled; it never rejects. The
+   * request to apply the group is handled like
+   * {@link McpServerStoreActions.saveMcpServers}'s.
+   */
+  saveBuiltInMcpServerSwitch: (
+    serverName: BuiltInMcpServerName,
+    isOn: boolean
+  ) => Promise<McpSettingsSaveOutcome>
+  /**
    * Forgets the list and any failure, as when the backend stops; an answer
    * still in flight is discarded, so a reconnect answered later applies
    * nothing either, and a later read joins no action started before.
@@ -132,9 +150,14 @@ type McpServerStoreDependencies = {
   readonly sendMcpServerReconnectRequest: (
     serverName: McpServerName
   ) => Promise<ReconnectMcpServerResult>
-  /** Saves the MCP group through the application store; never rejects. */
+  /** Saves the added servers through the application store; never rejects. */
   readonly saveMcpSettings: (
     servers: readonly McpServerSettings[]
+  ) => Promise<McpSettingsSaveOutcome>
+  /** Saves a built-in server's switch through the application store; never rejects. */
+  readonly saveBuiltInMcpServerSwitch: (
+    serverName: BuiltInMcpServerName,
+    isOn: boolean
   ) => Promise<McpSettingsSaveOutcome>
   /** Answers whether the backend is running now. */
   readonly isBackendRunning: () => boolean
@@ -435,6 +458,21 @@ function createMcpServerStore(
     }
 
     /**
+     * Applies a saved group to the running backend.
+     *
+     * @param outcome - Outcome of the save.
+     * @returns The same outcome.
+     */
+    function syncSavedGroup(
+      outcome: McpSettingsSaveOutcome
+    ): McpSettingsSaveOutcome {
+      if (outcome === "saved" && dependencies.isBackendRunning()) {
+        void sendMcpServerSync()
+      }
+      return outcome
+    }
+
+    /**
      * Implements {@link McpServerStoreActions.saveMcpServers}.
      *
      * @param servers - Servers to save.
@@ -443,11 +481,23 @@ function createMcpServerStore(
     async function saveMcpServers(
       servers: readonly McpServerSettings[]
     ): Promise<McpSettingsSaveOutcome> {
-      const outcome = await dependencies.saveMcpSettings(servers)
-      if (outcome === "saved" && dependencies.isBackendRunning()) {
-        void sendMcpServerSync()
-      }
-      return outcome
+      return syncSavedGroup(await dependencies.saveMcpSettings(servers))
+    }
+
+    /**
+     * Implements {@link McpServerStoreActions.saveBuiltInMcpServerSwitch}.
+     *
+     * @param serverName - Name of the built-in server.
+     * @param isOn - Whether the backend starts it.
+     * @returns The save outcome.
+     */
+    async function saveBuiltInMcpServerSwitch(
+      serverName: BuiltInMcpServerName,
+      isOn: boolean
+    ): Promise<McpSettingsSaveOutcome> {
+      return syncSavedGroup(
+        await dependencies.saveBuiltInMcpServerSwitch(serverName, isOn)
+      )
     }
 
     /** Implements {@link McpServerStoreActions.resetMcpServers}. */
@@ -466,6 +516,7 @@ function createMcpServerStore(
       sendMcpServerSync,
       sendMcpServerReconnect,
       saveMcpServers,
+      saveBuiltInMcpServerSwitch,
       resetMcpServers
     }
   }
@@ -498,6 +549,8 @@ export const useMcpServerStore: UseBoundStore<StoreApi<McpServerStore>> =
       ),
     saveMcpSettings: (servers) =>
       useLysStore.getState().saveMcpServers(servers),
+    saveBuiltInMcpServerSwitch: (serverName, isOn) =>
+      useLysStore.getState().saveBuiltInMcpServerSwitch(serverName, isOn),
     isBackendRunning: () =>
       useLysStore.getState().backendServerInfo.status === "running"
   })

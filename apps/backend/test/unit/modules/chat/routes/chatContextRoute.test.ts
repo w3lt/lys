@@ -1,5 +1,9 @@
 import { chatContextApi } from "@lys/protocol"
-import type { BuiltInAgent, McpServerSettings } from "@lys/share"
+import {
+  mcpSettingsSchema,
+  type BuiltInAgent,
+  type McpServerSettings
+} from "@lys/share"
 import { serializerCompiler } from "fastify-type-provider-zod"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -147,13 +151,14 @@ async function createChatContextRouteApp() {
     Promise.resolve(
       Object.freeze({
         status: "read",
-        settings: Object.freeze({ servers: Object.freeze([]) })
+        settings: mcpSettingsSchema.parse({})
       })
     )
   )
   const { processGroups } = createOwnedMcpServerProcessGroups()
   const mcpServerRegistry = new McpServerRegistry({
     readSettings: readMcpSettings,
+    builtInServers: [],
     openServer: (settings, context) => openMcpServer(settings, context, 10_000),
     workingDirectory: process.cwd(),
     processGroups,
@@ -234,7 +239,7 @@ async function applyMcpServer(
 ): Promise<void> {
   testApp.readMcpSettings.mockResolvedValue({
     status: "read",
-    settings: { servers: [settings] }
+    settings: mcpSettingsSchema.parse({ servers: [settings] })
   })
   await testApp.app.mcpServerRegistry.updateServers()
   await vi.waitFor(

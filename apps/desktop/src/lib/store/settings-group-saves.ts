@@ -1,6 +1,7 @@
-import type { McpSettings } from "@lys/share"
+import type { EmailAccount, EmailPassword, McpSettings } from "@lys/share"
 
 import {
+  saveEmailAccountSettings,
   saveGenerationSettings,
   saveLoadConfigurationSettings,
   saveLocationSettings,
@@ -87,11 +88,24 @@ export type SettingsGroupSaves = {
   /**
    * Saves the MCP group after every save sent earlier has settled.
    *
-   * @param mcp - MCP servers to persist.
+   * @param mcp - MCP servers and switches to persist.
    * @returns Resolves after the settings file is written, and rejects with
    * the native load or save rejection.
    */
   readonly saveMcpSettings: (mcp: McpSettings) => Promise<void>
+  /**
+   * Saves the email account and its password, in one write, after every
+   * save sent earlier has settled.
+   *
+   * @param account - Account to persist, or null to remove the saved one.
+   * @param password - Its password, or null to remove the saved one.
+   * @returns Resolves after the settings file is written, and rejects with
+   * the native load or save rejection.
+   */
+  readonly saveEmailAccountSettings: (
+    account: EmailAccount | null,
+    password: EmailPassword | null
+  ) => Promise<void>
   /**
    * Saves the two startup switches of the runtime group after every save
    * sent earlier has settled.
@@ -168,6 +182,10 @@ export function createSettingsGroupSaves(): SettingsGroupSaves {
       saveSettingsGroupInOrder(() => saveLocationSettings(location)),
     saveMcpSettings: (mcp) =>
       saveSettingsGroupInOrder(() => saveMcpSettings(mcp)),
+    saveEmailAccountSettings: (account, password) =>
+      saveSettingsGroupInOrder(() =>
+        saveEmailAccountSettings(account, password)
+      ),
     saveRuntimeAutoStartSettings: (autoStart) =>
       saveSettingsGroupInOrder(() => saveRuntimeAutoStartSettings(autoStart))
   }

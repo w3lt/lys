@@ -141,6 +141,7 @@ describe("createMcpSettingsSlice", () => {
     expect(whileWriting.settings.mcp).toEqual(STORED_MCP_SETTINGS)
     expect(store.getState().mcpSettingsSave).toEqual({ status: "saved" })
     expect(store.getState().settings.mcp).toEqual({
+      ...STORED_MCP_SETTINGS,
       servers: SERVERS_WITH_ADDED
     })
     expect(Object.isFrozen(store.getState().settings.mcp.servers)).toBe(true)
@@ -148,7 +149,7 @@ describe("createMcpSettingsSlice", () => {
       {
         newSettings: {
           ...STORED_SETTINGS_DOCUMENT,
-          mcp: { servers: SERVERS_WITH_ADDED }
+          mcp: { ...STORED_MCP_SETTINGS, servers: SERVERS_WITH_ADDED }
         }
       }
     ])
@@ -165,7 +166,10 @@ describe("createMcpSettingsSlice", () => {
     writes[0]?.resolve(null)
     await save
 
-    expect(store.getState().settings.mcp).toEqual({ servers: [ADDED_SERVER] })
+    expect(store.getState().settings.mcp).toEqual({
+      ...STORED_MCP_SETTINGS,
+      servers: [ADDED_SERVER]
+    })
   })
 
   it("keeps the saved servers and reports a failed save without the host's detail", async () => {
@@ -214,6 +218,7 @@ describe("createMcpSettingsSlice", () => {
     expect(second).toBe("busy")
     expect(listSettingsWrites(host.commands)).toHaveLength(1)
     expect(store.getState().settings.mcp).toEqual({
+      ...STORED_MCP_SETTINGS,
       servers: SERVERS_WITH_ADDED
     })
   })
@@ -231,6 +236,107 @@ describe("createMcpSettingsSlice", () => {
     writes[1]?.resolve(null)
 
     await expect(retry).resolves.toBe("saved")
-    expect(store.getState().settings.mcp).toEqual({ servers: [] })
+    expect(store.getState().settings.mcp).toEqual({
+      ...STORED_MCP_SETTINGS,
+      servers: []
+    })
+  })
+
+  it("keeps the built-in switches as saved when the added servers are saved", async () => {
+    const { host, writes } = startControlledSettingsHost()
+    const store = createMcpStore()
+    store.setState({
+      settings: {
+        ...STORED_SETTINGS,
+        mcp: { ...STORED_MCP_SETTINGS, builtIn: { email: { enabled: true } } }
+      }
+    })
+
+    const save = store.getState().saveMcpServers([ADDED_SERVER])
+    await waitForMicrotasks()
+    writes[0]?.resolve(null)
+    await save
+
+    expect(store.getState().settings.mcp).toEqual({
+      servers: [ADDED_SERVER],
+      builtIn: { email: { enabled: true } }
+    })
+    expect(listSettingsWrites(host.commands)).toEqual([
+      {
+        newSettings: {
+          ...STORED_SETTINGS_DOCUMENT,
+          mcp: {
+            servers: [ADDED_SERVER],
+            builtIn: { email: { enabled: true } }
+          }
+        }
+      }
+    ])
+  })
+
+  describe("saveBuiltInMcpServerSwitch", () => {
+    it("saves the switch of a server Lys ships, keeping the added servers", async () => {
+      const { host, writes } = startControlledSettingsHost()
+      const store = createMcpStore()
+
+      const save = store.getState().saveBuiltInMcpServerSwitch("email", true)
+      await waitForMicrotasks()
+      const whileWriting = store.getState()
+      writes[0]?.resolve(null)
+
+      await expect(save).resolves.toBe("saved")
+      expect(whileWriting.mcpSettingsSave).toEqual({ status: "saving" })
+      expect(whileWriting.settings.mcp).toEqual(STORED_MCP_SETTINGS)
+      expect(store.getState().settings.mcp).toEqual({
+        servers: STORED_MCP_SETTINGS.servers,
+        builtIn: { email: { enabled: true } }
+      })
+      expect(listSettingsWrites(host.commands)).toEqual([
+        {
+          newSettings: {
+            ...STORED_SETTINGS_DOCUMENT,
+            mcp: {
+              servers: STORED_MCP_SETTINGS.servers,
+              builtIn: { email: { enabled: true } }
+            }
+          }
+        }
+      ])
+    })
+
+    it("keeps the saved switch and reports a failed save", async () => {
+      const { writes } = startControlledSettingsHost()
+      const store = createMcpStore()
+
+      const save = store.getState().saveBuiltInMcpServerSwitch("email", true)
+      await waitForMicrotasks()
+      writes[0]?.reject("Disk full")
+
+      await expect(save).resolves.toBe("failed")
+      expect(store.getState().mcpSettingsSave).toEqual({
+        status: "failed",
+        error: "Lys couldn't write the MCP servers to its settings file."
+      })
+      expect(store.getState().settings.mcp).toEqual(STORED_MCP_SETTINGS)
+    })
+
+    it("answers busy without writing while a save of the added servers runs", async () => {
+      const { host, writes } = startControlledSettingsHost()
+      const store = createMcpStore()
+
+      const first = store.getState().saveMcpServers(SERVERS_WITH_ADDED)
+      await waitForMicrotasks()
+      const second = await store
+        .getState()
+        .saveBuiltInMcpServerSwitch("email", true)
+      writes[0]?.resolve(null)
+      await first
+
+      expect(second).toBe("busy")
+      expect(listSettingsWrites(host.commands)).toHaveLength(1)
+      expect(store.getState().settings.mcp.builtIn).toEqual(
+        STORED_MCP_SETTINGS.builtIn
+      )
+    })
   })
 })

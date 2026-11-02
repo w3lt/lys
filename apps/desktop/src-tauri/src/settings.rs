@@ -6,7 +6,10 @@
 //! defaults; saving never creates it.
 
 pub mod commands;
+pub mod email;
 pub mod generation;
+pub mod host_name;
+pub mod json_object;
 pub mod load_configuration;
 pub mod location;
 pub mod mcp;
@@ -15,6 +18,7 @@ pub mod runtime;
 pub mod secrets;
 pub mod tools;
 
+use email::EmailSettings;
 use generation::GenerationSettings;
 use load_configuration::LoadConfigurationSettings;
 use location::LocationSettings;
@@ -46,16 +50,18 @@ static TEMPORARY_FILE_COUNT: AtomicU64 = AtomicU64::new(0);
 /// Complete persisted Lys settings value.
 ///
 /// The private fields group runtime, generation, load configuration, secrets,
-/// tools, location, MCP server, and provider settings in the serialized JSON
-/// representation while keeping those groups behind the settings module's API
-/// boundary. A missing group takes that group's defaults; the load
-/// configuration group's default is empty, the secrets group's default holds
-/// no key, the tools group's default puts no tool on Just run and saves no
-/// tool switch, the location group's default saves no location, the MCP
-/// group's default lists no server, and the providers group's default is LM
-/// Studio at its default address. A group the value does not hold, such as
-/// the `model` group of files written before the local context estimate was
-/// removed, is ignored when loading and left out of the next save.
+/// tools, location, MCP server, provider, and email settings in the
+/// serialized JSON representation while keeping those groups behind the
+/// settings module's API boundary. A missing group takes that group's
+/// defaults; the load configuration group's default is empty, the secrets
+/// group's default holds no key and no password, the tools group's default
+/// puts no tool on Just run and saves no tool switch, the location group's
+/// default saves no location, the MCP group's default lists no server and
+/// switches every server Lys ships off, the providers group's default is LM
+/// Studio at its default address, and the email group's default saves no
+/// account. A group the value does not hold, such as the `model` group of
+/// files written before the local context estimate was removed, is ignored
+/// when loading and left out of the next save.
 pub struct LysSettings {
     /// Process settings and default-model selection in the `runtime` object.
     runtime: RunTimeSettings,
@@ -74,6 +80,8 @@ pub struct LysSettings {
     /// Provider every request goes to and the servers' addresses, in the
     /// `providers` object.
     providers: ProvidersSettings,
+    /// Email account the person saved, in the `email` object.
+    email: EmailSettings,
 }
 
 impl LysSettings {
@@ -342,7 +350,9 @@ mod tests {
 
     /// Stored settings whose load configuration has a hand-written default
     /// and one model's settings, with saved Tavily, Ollama, and Groq API keys,
-    /// a location, two MCP servers, and Groq as the active provider.
+    /// a location, two MCP servers of which one is switched off, the built-in
+    /// email server switched on, Groq as the active provider, and an email
+    /// account with its password.
     fn get_complete_settings() -> Value {
         let mut settings = get_settings_without_load_configuration();
         settings["loadConfiguration"] = json!({
@@ -355,35 +365,54 @@ mod tests {
             "switches": { "read_page": true, "search_files": false }
         });
         settings["location"] = json!({ "city": "Lyon", "region": null, "country": "France" });
-        settings["mcp"] = json!({ "servers": [
-            {
-                "name": "files",
-                "transport": "stdio",
-                "command": "/opt/homebrew/bin/npx",
-                "arguments": ["-y", "@modelcontextprotocol/server-filesystem"],
-                "environment": [{ "name": "LOG_LEVEL", "value": "env-synthetic-value" }]
-            },
-            {
-                "name": "docs",
-                "transport": "http",
-                "url": "https://mcp.example.com/mcp",
-                "headers": [{ "name": "Authorization", "value": "Bearer header-synthetic-value" }]
-            }
-        ] });
+        settings["mcp"] = json!({
+            "servers": [
+                {
+                    "name": "files",
+                    "transport": "stdio",
+                    "command": "/opt/homebrew/bin/npx",
+                    "arguments": ["-y", "@modelcontextprotocol/server-filesystem"],
+                    "environment": [{ "name": "LOG_LEVEL", "value": "env-synthetic-value" }],
+                    "enabled": true
+                },
+                {
+                    "name": "docs",
+                    "transport": "http",
+                    "url": "https://mcp.example.com/mcp",
+                    "headers": [{ "name": "Authorization", "value": "Bearer header-synthetic-value" }],
+                    "enabled": false
+                }
+            ],
+            "builtIn": { "email": { "enabled": true } }
+        });
         settings["secrets"]["ollamaApiKey"] = json!("ollama-synthetic-0123456789");
         settings["secrets"]["groqApiKey"] = json!("gsk_synthetic_0123456789");
+        settings["secrets"]["emailPassword"] = json!("email-synthetic-password");
         settings["providers"] = json!({
             "active": "groq",
             "lmStudio": { "address": "studio-box.local:1234" },
             "ollama": { "address": null }
         });
+        settings["email"] = json!({ "account": {
+            "address": "person@example.com",
+            "displayName": "A Person",
+            "userName": "person@example.com",
+            "imap": { "host": "imap.example.com", "port": 993, "security": "tls" },
+            "smtp": { "host": "smtp.example.com", "port": 587, "security": "starttls" },
+            "serverKeepsSentCopy": true
+        } });
 
         settings
     }
 
-    /// Secrets group of a settings file without a saved key.
+    /// Secrets group of a settings file without a saved key or password.
     fn get_empty_secrets() -> Value {
-        json!({ "tavilyApiKey": null, "ollamaApiKey": null, "groqApiKey": null })
+        json!({
+            "tavilyApiKey": null,
+            "ollamaApiKey": null,
+            "groqApiKey": null,
+            "emailPassword": null
+        })
     }
 
     /// Providers group of a settings file that chose no provider: LM Studio
@@ -407,9 +436,15 @@ mod tests {
         json!({ "city": null, "region": null, "country": null })
     }
 
-    /// MCP group of a settings file that lists no server.
+    /// MCP group of a settings file that lists no server and switches every
+    /// server Lys ships off.
     fn get_empty_mcp() -> Value {
-        json!({ "servers": [] })
+        json!({ "servers": [], "builtIn": { "email": { "enabled": false } } })
+    }
+
+    /// Email group of a settings file without a saved account.
+    fn get_empty_email() -> Value {
+        json!({ "account": null })
     }
 
     /// Reads the settings file at `path` as JSON.
@@ -449,6 +484,7 @@ mod tests {
         assert_eq!(stored["location"], get_empty_location());
         assert_eq!(stored["mcp"], get_empty_mcp());
         assert_eq!(stored["providers"], get_default_providers());
+        assert_eq!(stored["email"], get_empty_email());
     }
 
     #[test]
@@ -476,6 +512,7 @@ mod tests {
         expected["location"] = get_empty_location();
         expected["mcp"] = get_empty_mcp();
         expected["providers"] = get_default_providers();
+        expected["email"] = get_empty_email();
         assert_eq!(get_settings_json(&settings), expected);
         assert_eq!(
             fs::read_to_string(&path).expect("read the settings file"),
@@ -587,6 +624,24 @@ mod tests {
         newer_mcp_field["mcp"]["enabled"] = json!(true);
         let mut newer_server_field = get_complete_settings();
         newer_server_field["mcp"]["servers"][1]["timeoutSeconds"] = json!(30);
+        let mut null_built_in = get_complete_settings();
+        null_built_in["mcp"]["builtIn"] = Value::Null;
+        let mut unknown_built_in_server = get_complete_settings();
+        unknown_built_in_server["mcp"]["builtIn"]["github"] = json!({ "enabled": true });
+        let mut text_server_switch = get_complete_settings();
+        text_server_switch["mcp"]["servers"][0]["enabled"] = json!("on");
+        let mut null_email = get_settings_without_load_configuration();
+        null_email["email"] = Value::Null;
+        let mut padded_display_name = get_complete_settings();
+        padded_display_name["email"]["account"]["displayName"] = json!("A Person ");
+        let mut plain_remote_imap = get_complete_settings();
+        plain_remote_imap["email"]["account"]["imap"]["security"] = json!("plain");
+        let mut newer_email_field = get_complete_settings();
+        newer_email_field["email"]["signature"] = json!("Regards");
+        let mut newer_account_field = get_complete_settings();
+        newer_account_field["email"]["account"]["signature"] = json!("Regards");
+        let mut control_character_password = get_complete_settings();
+        control_character_password["secrets"]["emailPassword"] = json!("email-synthetic\n");
         let lone_surrogate = get_complete_settings()
             .to_string()
             .replace("env-synthetic-value", "env-synthetic-value\\ud800");
@@ -609,6 +664,15 @@ mod tests {
             newer_location_field.to_string(),
             newer_mcp_field.to_string(),
             newer_server_field.to_string(),
+            null_built_in.to_string(),
+            unknown_built_in_server.to_string(),
+            text_server_switch.to_string(),
+            null_email.to_string(),
+            padded_display_name.to_string(),
+            plain_remote_imap.to_string(),
+            newer_email_field.to_string(),
+            newer_account_field.to_string(),
+            control_character_password.to_string(),
             lone_surrogate,
             String::from("{ not json"),
         ];
@@ -738,6 +802,30 @@ mod tests {
             !debug_output.contains("header-synthetic-value"),
             "{debug_output}"
         );
+    }
+
+    #[test]
+    fn reads_the_saved_email_account_and_hides_it_and_its_password_from_debug_output() {
+        let directory = TestDirectory::create("settings-email");
+        let path = directory.create_file("settings.json", get_complete_settings().to_string());
+
+        let settings = load_settings_file(&path).expect("settings with an email account");
+
+        let settings_json = get_settings_json(&settings);
+        assert_eq!(settings_json["email"], get_complete_settings()["email"]);
+        assert_eq!(
+            settings_json["secrets"]["emailPassword"],
+            json!("email-synthetic-password")
+        );
+        let debug_output = format!("{settings:?}");
+        for personal in [
+            "person@example.com",
+            "A Person",
+            "imap.example.com",
+            "email-synthetic",
+        ] {
+            assert!(!debug_output.contains(personal), "{debug_output}");
+        }
     }
 
     #[test]

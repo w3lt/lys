@@ -1,4 +1,5 @@
 import type {
+  BuiltInMcpServerName,
   McpServerName,
   McpServerSettings,
   McpServerTransport,
@@ -10,35 +11,47 @@ import {
   useLayoutEffect,
   useRef,
   type ReactElement,
+  type ReactNode,
   type RefObject
 } from "react"
 
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
 import type { McpServerListState } from "@/lib/store/mcp-servers"
 import type { ToolSettings } from "@/lib/store/settings"
 import type { ToolApproval } from "@/lib/store/tool-settings"
 import { isToolOn, type ToolListState } from "@/lib/store/tools"
 
 import {
+  McpAddedServerDetails,
   McpServerDetails,
   type ConnectedMcpServerState
 } from "./McpServerDetails"
 import { isDocumentFocusLost } from "./focus-target"
 import {
   canAddMcpServer,
+  canSwitchMcpServer,
   calculateConnectedMcpServerCount,
   findMcpServerStatus,
   formatMcpServerListMeta,
   formatMcpServerStatus,
   formatMcpServerTarget,
   formatMcpServerToolCount,
+  getMcpListedServerKey,
+  getMcpListedServerName,
+  getMcpListedServerTransport,
   getMcpTransportPresentation,
+  isMcpListedServerOn,
   listMcpServerTools,
   MCP_EMPTY_LIST_NOTE,
   MCP_SERVER_LIMIT_NOTE,
   MCP_SERVER_TRANSPORTS,
+  type McpListedServer,
   type McpServerStatusPresentation
 } from "./mcp-presentation"
+
+/** The panel each server Lys ships adds to its details, by name. */
+type BuiltInMcpServerPanels = Readonly<Record<BuiltInMcpServerName, ReactNode>>
 
 /**
  * Request that a control of the server list receive focus.
@@ -120,12 +133,14 @@ export function McpToolOfferWarning({
 
 /** Properties accepted by {@link McpServerTitle}. */
 type McpServerTitleProps = {
-  /** Saved settings of the server. */
-  readonly server: McpServerSettings
+  /** The listed server. */
+  readonly server: McpListedServer
   /** The server's state. */
   readonly status: McpServerStatusPresentation
   /** Identifier the name takes. */
   readonly nameId: string
+  /** Identifier the built-in tag takes, for a server Lys ships. */
+  readonly builtInTagId: string
   /** Identifier the transport tag takes. */
   readonly transportId: string
   /** Identifier the state takes. */
@@ -133,7 +148,8 @@ type McpServerTitleProps = {
 }
 
 /**
- * Presents a server's name, its transport tag, and its state.
+ * Presents a server's name, a tag when Lys ships it, its transport tag,
+ * and its state.
  *
  * @remarks The parent owns every value; the title owns no state. A state
  * other than connected shows as a tag; otherwise the state's heading is
@@ -145,20 +161,28 @@ function McpServerTitle({
   server,
   status,
   nameId,
+  builtInTagId,
   transportId,
   stateId
 }: McpServerTitleProps): ReactElement {
+  const transport = getMcpListedServerTransport(server)
+
   return (
     <span className="settings-view__mcp-title">
       <span className="settings-view__mcp-name" id={nameId}>
-        {server.name}
+        {getMcpListedServerName(server)}
       </span>
+      {server.kind === "built-in" ? (
+        <span className="settings-view__mcp-built-in-tag" id={builtInTagId}>
+          built-in
+        </span>
+      ) : null}
       <span
         className="settings-view__mcp-transport-tag"
-        data-transport={server.transport}
+        data-transport={transport}
         id={transportId}
       >
-        {getMcpTransportPresentation(server.transport).tag}
+        {getMcpTransportPresentation(transport).tag}
       </span>
       {status.chip === "" ? (
         <span className="sr-only" id={stateId}>
@@ -179,12 +203,14 @@ function McpServerTitle({
 
 /** Properties accepted by {@link McpServerToggle}. */
 type McpServerToggleProps = {
-  /** Saved settings of the server. */
-  readonly server: McpServerSettings
+  /** The listed server. */
+  readonly server: McpListedServer
   /** The server's state. */
   readonly status: McpServerStatusPresentation
   /** Identifier of the name, which names the server's list item. */
   readonly nameId: string
+  /** Identifier of the state, which also describes the server's switch. */
+  readonly stateId: string
   /** How many tools the row says the server lists, or empty. */
   readonly toolCount: string
   /** Whether the server's details are shown. */
@@ -201,38 +227,43 @@ type McpServerToggleProps = {
  *
  * @remarks The parent owns whether the details are shown; the toggle owns no
  * state. It exposes `aria-expanded` and controls the details while they are
- * shown. It shows the server's name, transport tag, a tag for a state other
- * than connected, what it runs or reaches, and how many tools it lists; a
- * dot shows the state by colour, and the state's heading is also read out
- * when no tag shows it. The toggle is named by the server's name and
- * described by the transport, the state, the target, and the tool count.
- * Values that can be secrets are never shown.
- * @param props - Server, state, name identifier, tool count, expansion, and
- * the proposal.
+ * shown. It shows the server's name, a tag when Lys ships it, its transport
+ * tag, a tag for a state other than connected, what it runs, reaches, or
+ * does, and how many tools it lists; a dot shows the state by colour, and
+ * the state's heading is also read out when no tag shows it. The toggle is
+ * named by the server's name and described by the built-in tag when there
+ * is one, the transport, the state, the target, and the tool count. Values
+ * that can be secrets are never shown.
+ * @param props - Server, state, name and state identifiers, tool count,
+ * expansion, and the proposal.
  * @returns The toggle button.
  */
 function McpServerToggle({
   server,
   status,
   nameId,
+  stateId,
   toolCount,
   isExpanded,
   detailsId,
   onIsExpandedChange
 }: McpServerToggleProps): ReactElement {
+  const builtInTagId = useId()
   const transportId = useId()
-  const stateId = useId()
   const targetId = useId()
   const countId = useId()
-  const descriptionIds = [transportId, stateId, targetId]
+  const descriptionIds = [
+    server.kind === "built-in" ? builtInTagId : undefined,
+    transportId,
+    stateId,
+    targetId,
+    toolCount === "" ? undefined : countId
+  ].filter((id) => id !== undefined)
 
   return (
     <button
       aria-controls={isExpanded ? detailsId : undefined}
-      aria-describedby={(toolCount === ""
-        ? descriptionIds
-        : [...descriptionIds, countId]
-      ).join(" ")}
+      aria-describedby={descriptionIds.join(" ")}
       aria-expanded={isExpanded}
       aria-labelledby={nameId}
       className="settings-view__mcp-toggle"
@@ -247,6 +278,7 @@ function McpServerToggle({
       />
       <span className="settings-view__mcp-lines">
         <McpServerTitle
+          builtInTagId={builtInTagId}
           nameId={nameId}
           server={server}
           stateId={stateId}
@@ -266,8 +298,8 @@ function McpServerToggle({
 
 /** Properties accepted by {@link McpServerRow}. */
 type McpServerRowProps = {
-  /** Saved settings of the server. */
-  readonly server: McpServerSettings
+  /** The listed server. */
+  readonly server: McpListedServer
   /** Lifecycle of the list of applied servers. */
   readonly list: McpServerListState
   /** Lifecycle of the tool list. */
@@ -280,16 +312,20 @@ type McpServerRowProps = {
   readonly isSaving: boolean
   /** Whether the server's details are shown. */
   readonly isExpanded: boolean
-  /** Whether the Edit button takes focus when it is attached. */
+  /** Whether an added server's Edit button takes focus when it is attached. */
   readonly isEditFocusedOnAttach: boolean
+  /** The panel each server Lys ships adds to its details. */
+  readonly builtInPanels: BuiltInMcpServerPanels
   /** Proposes showing or hiding the server's details. */
   readonly onIsExpandedChange: (isExpanded: boolean) => void
+  /** Proposes switching the server on or off. */
+  readonly onServerOnChange: (server: McpListedServer, isOn: boolean) => void
   /** Requests that the parent connect the server again. */
   readonly onReconnect: () => void
-  /** Requests that the parent open the server's editor. */
-  readonly onEdit: () => void
-  /** Requests that the parent remove the server. */
-  readonly onRemove: () => void
+  /** Requests that the parent open one added server's editor. */
+  readonly onEditServer: (server: McpServerSettings) => void
+  /** Requests that the parent remove one added server. */
+  readonly onRemoveServer: (serverName: McpServerName) => void
   /** Proposes switching one tool on or off. */
   readonly onToolOnChange: (toolName: string, isOn: boolean) => void
   /** Proposes one approval for several tools. */
@@ -300,16 +336,21 @@ type McpServerRowProps = {
 }
 
 /**
- * Presents one saved server: its summary, which shows or hides its details,
- * and the details while shown.
+ * Presents one listed server: its summary, which shows or hides its
+ * details, its switch, and the details while shown.
  *
- * @remarks The parent owns the settings, the lists, the choices about tools,
+ * @remarks The parent owns the server, the lists, the choices about tools,
  * whether the details are shown, and every action; the row owns no state of
- * its own. The item is named by the server's name. The server's tools are
- * the listed tools of its connected server; the row counts those that are
- * on.
+ * its own. The item is named by the server's name. The switch is named by
+ * the server's name followed by `on`, described by the server's state, and
+ * disabled while a save runs or while a server Lys ships cannot be switched
+ * on: while an added server has its name, or while it lacks what it needs.
+ * The server's tools are the listed tools of its connected server; the row
+ * counts those that are on. An added server's details end with its
+ * configuration and actions; the details of a server Lys ships end with its
+ * own panel.
  * @param props - Server, lists, tool choices, backend status, the save,
- * expansion, focus, and the actions.
+ * expansion, focus, the panels, and the actions.
  * @returns One list item.
  */
 function McpServerRow({
@@ -321,18 +362,22 @@ function McpServerRow({
   isSaving,
   isExpanded,
   isEditFocusedOnAttach,
+  builtInPanels,
   onIsExpandedChange,
+  onServerOnChange,
   onReconnect,
-  onEdit,
-  onRemove,
+  onEditServer,
+  onRemoveServer,
   onToolOnChange,
   onToolApprovalChange
 }: McpServerRowProps): ReactElement {
   const nameId = useId()
+  const stateId = useId()
   const detailsId = useId()
+  const serverName = getMcpListedServerName(server)
   const status = formatMcpServerStatus({ isBackendRunning, list, server })
-  const tools = listMcpServerTools(toolList, server.name, status.condition)
-  const skippedToolsState = findSkippedToolsState(list, server.name)
+  const tools = listMcpServerTools(toolList, serverName, status.condition)
+  const skippedToolsState = findSkippedToolsState(list, serverName)
   const onCount = tools.filter((tool) =>
     isToolOn(toolSettings.switches, tool)
   ).length
@@ -343,24 +388,31 @@ function McpServerRow({
       className="settings-view__mcp-row"
       data-expanded={isExpanded ? "" : undefined}
     >
-      <McpServerToggle
-        detailsId={detailsId}
-        nameId={nameId}
-        isExpanded={isExpanded}
-        onIsExpandedChange={onIsExpandedChange}
-        server={server}
-        status={status}
-        toolCount={formatMcpServerToolCount(onCount, tools.length)}
-      />
+      <div className="settings-view__mcp-row-line">
+        <McpServerToggle
+          detailsId={detailsId}
+          nameId={nameId}
+          isExpanded={isExpanded}
+          onIsExpandedChange={onIsExpandedChange}
+          server={server}
+          stateId={stateId}
+          status={status}
+          toolCount={formatMcpServerToolCount(onCount, tools.length)}
+        />
+        <Switch
+          aria-describedby={stateId}
+          aria-label={`${serverName} on`}
+          checked={isMcpListedServerOn(server)}
+          disabled={isSaving || !canSwitchMcpServer(server)}
+          onCheckedChange={(isOn) => onServerOnChange(server, isOn)}
+          size="lg"
+        />
+      </div>
       {isExpanded ? (
         <McpServerDetails
           detailsId={detailsId}
           isBackendRunning={isBackendRunning}
-          isEditFocusedOnAttach={isEditFocusedOnAttach}
-          isSaving={isSaving}
-          onEdit={onEdit}
           onReconnect={onReconnect}
-          onRemove={onRemove}
           onToolApprovalChange={onToolApprovalChange}
           onToolOnChange={onToolOnChange}
           server={server}
@@ -369,7 +421,19 @@ function McpServerRow({
           toolSettings={toolSettings}
           toolList={toolList}
           tools={tools}
-        />
+        >
+          {server.kind === "added" ? (
+            <McpAddedServerDetails
+              isEditFocusedOnAttach={isEditFocusedOnAttach}
+              isSaving={isSaving}
+              onEdit={() => onEditServer(server.settings)}
+              onRemove={() => onRemoveServer(server.settings.name)}
+              server={server.settings}
+            />
+          ) : (
+            builtInPanels[server.name]
+          )}
+        </McpServerDetails>
       ) : null}
     </li>
   )
@@ -382,14 +446,14 @@ type McpServerKindChoicesProps = {
 }
 
 /**
- * Says that no server is saved and offers adding a local program or a
+ * Says that no server is added yet and offers adding a local program or a
  * remote server.
  *
  * @remarks The parent opens the editor; the component owns no state. Each
  * choice is a button named by its kind and tag, with an example of what
  * such a server runs or reaches, in the editor's order of transports.
  * @param props - The request to add a server.
- * @returns The empty state.
+ * @returns The note and the choices.
  */
 function McpServerKindChoices({
   onAddServer
@@ -465,7 +529,7 @@ function McpServerKindChoice({
 /**
  * Lists the tools of the connected servers.
  *
- * @param servers - Saved servers.
+ * @param servers - Listed servers.
  * @param list - Lifecycle of the list of applied servers.
  * @param toolList - Lifecycle of the tool list.
  * @param isBackendRunning - Whether the backend is running.
@@ -473,7 +537,7 @@ function McpServerKindChoice({
  * tool list is not read.
  */
 function listConnectedMcpTools(
-  servers: readonly McpServerSettings[],
+  servers: readonly McpListedServer[],
   list: McpServerListState,
   toolList: ToolListState,
   isBackendRunning: boolean
@@ -485,7 +549,11 @@ function listConnectedMcpTools(
       list,
       server
     })
-    return listMcpServerTools(toolList, server.name, condition)
+    return listMcpServerTools(
+      toolList,
+      getMcpListedServerName(server),
+      condition
+    )
   })
 }
 
@@ -543,8 +611,11 @@ function McpServerListHeading({
 
 /** Properties accepted by {@link McpServerRows}. */
 type McpServerRowsProps = {
-  /** Saved servers, in list order; at least one. */
-  readonly servers: readonly McpServerSettings[]
+  /**
+   * Listed servers: those Lys ships first, then the added ones in list
+   * order; at least one.
+   */
+  readonly servers: readonly McpListedServer[]
   /** Lifecycle of the list of applied servers. */
   readonly list: McpServerListState
   /** Lifecycle of the tool list. */
@@ -557,17 +628,21 @@ type McpServerRowsProps = {
   readonly isSaving: boolean
   /** Name of the server whose details are shown, or null when none is. */
   readonly expandedServerName: McpServerName | null
-  /** Name of the server whose Edit button takes focus, or null. */
+  /** Name of the added server whose Edit button takes focus, or null. */
   readonly focusedServerName: McpServerName | null
+  /** The panel each server Lys ships adds to its details. */
+  readonly builtInPanels: BuiltInMcpServerPanels
   /** Proposes showing one server's details, or none with null. */
   readonly onExpandedServerNameChange: (
     serverName: McpServerName | null
   ) => void
+  /** Proposes switching one server on or off. */
+  readonly onServerOnChange: (server: McpListedServer, isOn: boolean) => void
   /** Requests that the parent connect one server again. */
   readonly onReconnectServer: (serverName: McpServerName) => void
-  /** Requests that the parent open one saved server's editor. */
+  /** Requests that the parent open one added server's editor. */
   readonly onEditServer: (server: McpServerSettings) => void
-  /** Requests that the parent remove one server. */
+  /** Requests that the parent remove one added server. */
   readonly onRemoveServer: (serverName: McpServerName) => void
   /** Proposes switching one tool on or off. */
   readonly onToolOnChange: (toolName: string, isOn: boolean) => void
@@ -579,13 +654,15 @@ type McpServerRowsProps = {
 }
 
 /**
- * Lists the saved servers, each with its row.
+ * Lists the servers, each with its row.
  *
  * @remarks The parent owns every value and action; the list owns no state.
- * Servers keep the saved order and are keyed by name; at most one shows its
- * details. The list is named MCP servers.
+ * Servers keep the listed order and are keyed by kind and name; the
+ * details shown are those of the server with the chosen name, so while an
+ * added server has a built-in server's name both show. The list is named
+ * MCP servers.
  * @param props - Servers, lists, tool choices, backend status, the save,
- * expansion, focus, and the parent-owned actions.
+ * expansion, focus, the panels, and the parent-owned actions.
  * @returns The list of servers.
  */
 function McpServerRows({
@@ -597,7 +674,9 @@ function McpServerRows({
   isSaving,
   expandedServerName,
   focusedServerName,
+  builtInPanels,
   onExpandedServerNameChange,
+  onServerOnChange,
   onReconnectServer,
   onEditServer,
   onRemoveServer,
@@ -606,27 +685,34 @@ function McpServerRows({
 }: McpServerRowsProps): ReactElement {
   return (
     <ul aria-label="MCP servers" className="settings-view__mcp-list">
-      {servers.map((server) => (
-        <McpServerRow
-          isBackendRunning={isBackendRunning}
-          isEditFocusedOnAttach={server.name === focusedServerName}
-          isExpanded={server.name === expandedServerName}
-          isSaving={isSaving}
-          key={server.name}
-          list={list}
-          onEdit={() => onEditServer(server)}
-          onIsExpandedChange={(isExpanded) =>
-            onExpandedServerNameChange(isExpanded ? server.name : null)
-          }
-          onReconnect={() => onReconnectServer(server.name)}
-          onRemove={() => onRemoveServer(server.name)}
-          onToolApprovalChange={onToolApprovalChange}
-          onToolOnChange={onToolOnChange}
-          server={server}
-          toolList={toolList}
-          toolSettings={toolSettings}
-        />
-      ))}
+      {servers.map((server) => {
+        const serverName = getMcpListedServerName(server)
+        return (
+          <McpServerRow
+            builtInPanels={builtInPanels}
+            isBackendRunning={isBackendRunning}
+            isEditFocusedOnAttach={
+              server.kind === "added" && serverName === focusedServerName
+            }
+            isExpanded={serverName === expandedServerName}
+            isSaving={isSaving}
+            key={getMcpListedServerKey(server)}
+            list={list}
+            onEditServer={onEditServer}
+            onIsExpandedChange={(isExpanded) =>
+              onExpandedServerNameChange(isExpanded ? serverName : null)
+            }
+            onReconnect={() => onReconnectServer(serverName)}
+            onRemoveServer={onRemoveServer}
+            onServerOnChange={onServerOnChange}
+            onToolApprovalChange={onToolApprovalChange}
+            onToolOnChange={onToolOnChange}
+            server={server}
+            toolList={toolList}
+            toolSettings={toolSettings}
+          />
+        )
+      })}
     </ul>
   )
 }
@@ -642,17 +728,17 @@ export type McpServerSectionProps = Omit<
   readonly onAddServer: (transport: McpServerTransport) => void
 }
 
-/** Facts the meta line of the saved servers is drawn from. */
+/** Facts the meta line of the servers is drawn from. */
 type McpServerSectionMetaFacts = Pick<
   McpServerSectionProps,
   "servers" | "list" | "toolList" | "toolSettings" | "isBackendRunning"
 >
 
 /**
- * Formats the meta line beside the heading of the saved servers.
+ * Formats the meta line beside the heading of the servers.
  *
  * @param facts - Servers, lists, tool choices, and backend status.
- * @returns How many servers are saved and connected, and what their tools
+ * @returns How many servers are listed and connected, and what their tools
  * that are on cost per request.
  */
 function formatMcpServerSectionMeta(facts: McpServerSectionMetaFacts): string {
@@ -704,24 +790,25 @@ function useAddServerFocus(
 }
 
 /**
- * Presents the saved servers and the action that adds one.
+ * Presents the servers Lys ships and the added servers, and the action
+ * that adds one.
  *
  * @remarks The parent owns the servers, the lists, the tool choices, which
- * server's details are shown, the focus target, and every action; the
- * section owns no state. In the layout phase after it receives a new
- * request for Add server, it moves focus to Add server while focus is lost,
- * as after the focused row was removed, also while it stays mounted; it
- * never takes focus from a control that still holds it, such as another
- * server's toggle the person moved to while a removal was saved. The
- * heading's meta says how many servers are connected and what their tools
- * that are on cost per request. Without servers the section offers the two
- * kinds of server instead of a list.
- * Add server, which adds a local program, is disabled once the most servers
- * the settings allow are saved, which a note then says, and while a save
- * runs. The section is named by its heading.
+ * server's details are shown, the focus target, the panels, and every
+ * action; the section owns no state. In the
+ * layout phase after it receives a new request for Add server, it moves
+ * focus to Add server while focus is lost, as after the focused row was
+ * removed, also while it stays mounted; it never takes focus from a control
+ * that still holds it, such as another server's toggle the person moved to
+ * while a removal was saved. The heading's meta says how many servers are
+ * listed and connected and what their tools that are on cost per request.
+ * While no server is added, the section offers the two kinds of server
+ * under the list. Add server, which adds a local program, is disabled once
+ * the most added servers the settings allow are saved, which a note then
+ * says, and while a save runs. The section is named by its heading.
  * @param props - Servers, lists, tool choices, backend status, the save,
- * expansion, focus, and the parent-owned actions.
- * @returns The section of the saved servers.
+ * expansion, focus, the panels, and the parent-owned actions.
+ * @returns The section of the servers.
  */
 export function McpServerSection({
   servers,
@@ -732,8 +819,10 @@ export function McpServerSection({
   isSaving,
   expandedServerName,
   focusTarget,
+  builtInPanels,
   onAddServer,
   onExpandedServerNameChange,
+  onServerOnChange,
   onReconnectServer,
   onEditServer,
   onRemoveServer,
@@ -742,6 +831,7 @@ export function McpServerSection({
 }: McpServerSectionProps): ReactElement {
   const headingId = useId()
   const addServerRef = useAddServerFocus(focusTarget)
+  const addedCount = servers.filter((server) => server.kind === "added").length
   const meta = formatMcpServerSectionMeta({
     servers,
     list,
@@ -755,33 +845,34 @@ export function McpServerSection({
       <McpServerListHeading
         addServerRef={addServerRef}
         headingId={headingId}
-        isAddDisabled={isSaving || !canAddMcpServer(servers.length)}
+        isAddDisabled={isSaving || !canAddMcpServer(addedCount)}
         meta={meta}
         onAddServer={onAddServer}
       />
-      {servers.length === 0 ? (
+      <McpServerRows
+        builtInPanels={builtInPanels}
+        expandedServerName={expandedServerName}
+        focusedServerName={
+          focusTarget.kind === "server" ? focusTarget.serverName : null
+        }
+        isBackendRunning={isBackendRunning}
+        isSaving={isSaving}
+        list={list}
+        onEditServer={onEditServer}
+        onExpandedServerNameChange={onExpandedServerNameChange}
+        onReconnectServer={onReconnectServer}
+        onRemoveServer={onRemoveServer}
+        onServerOnChange={onServerOnChange}
+        onToolApprovalChange={onToolApprovalChange}
+        onToolOnChange={onToolOnChange}
+        servers={servers}
+        toolList={toolList}
+        toolSettings={toolSettings}
+      />
+      {addedCount === 0 ? (
         <McpServerKindChoices onAddServer={onAddServer} />
-      ) : (
-        <McpServerRows
-          expandedServerName={expandedServerName}
-          focusedServerName={
-            focusTarget.kind === "server" ? focusTarget.serverName : null
-          }
-          isBackendRunning={isBackendRunning}
-          isSaving={isSaving}
-          list={list}
-          onEditServer={onEditServer}
-          onExpandedServerNameChange={onExpandedServerNameChange}
-          onReconnectServer={onReconnectServer}
-          onRemoveServer={onRemoveServer}
-          onToolApprovalChange={onToolApprovalChange}
-          onToolOnChange={onToolOnChange}
-          servers={servers}
-          toolList={toolList}
-          toolSettings={toolSettings}
-        />
-      )}
-      {canAddMcpServer(servers.length) ? null : (
+      ) : null}
+      {canAddMcpServer(addedCount) ? null : (
         <p className="settings-view__note">{MCP_SERVER_LIMIT_NOTE}</p>
       )}
     </section>

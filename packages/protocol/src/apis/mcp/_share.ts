@@ -1,4 +1,5 @@
 import {
+  BUILT_IN_MCP_SERVER_NAMES,
   hasDistinctValues,
   MAXIMUM_MCP_SERVER_COUNT,
   MAXIMUM_MCP_SERVER_TOOL_NAME_LENGTH,
@@ -29,7 +30,10 @@ export const MAXIMUM_MCP_SERVER_TOOL_COUNT = 128
  * `http-error`: the server answered another HTTP error or a redirect, which
  * Lys refuses. `protocol-error`: the server's answers are not valid MCP or
  * longer than the backend reads, or it answered the connection or the tool
- * list with an error. Adding a reason is a compatibility change for every
+ * list with an error. `account-missing` and `account-invalid`, for the
+ * built-in email server only: it was not started because no email account
+ * is saved, or because the saved account or its password fails its rules
+ * or could not be read. Adding a reason is a compatibility change for every
  * consumer that branches on it.
  */
 export const mcpServerFailureSchema = z.enum([
@@ -39,7 +43,9 @@ export const mcpServerFailureSchema = z.enum([
   "unauthorized",
   "unreachable",
   "http-error",
-  "protocol-error"
+  "protocol-error",
+  "account-missing",
+  "account-invalid"
 ])
 
 /** Why an MCP server is not connected. */
@@ -95,11 +101,14 @@ export type SkippedMcpTool = z.infer<typeof skippedMcpToolSchema>
  * are listed and `skippedTools` read but not listed, together at most
  * {@link MAXIMUM_MCP_SERVER_TOOL_COUNT}, and `isToolListCut` says the server
  * has tools past that. `failed`: the server is not connected and why;
- * Reconnect or a changed setting tries again.
+ * Reconnect or a changed setting tries again. `off`: the person switched
+ * the server off, so the backend neither starts nor reaches it, and offers
+ * none of its tools; switching it on connects it.
  */
 export const mcpServerStateSchema = z
   .discriminatedUnion("status", [
     z.strictObject({ status: z.literal("connecting") }),
+    z.strictObject({ status: z.literal("off") }),
     z
       .strictObject({
         status: z.literal("connected"),
@@ -131,11 +140,20 @@ export const mcpServerStateSchema = z
 export type McpServerState = z.infer<typeof mcpServerStateSchema>
 
 /**
+ * Most servers the backend lists, inclusive: every server the person may
+ * add and every server Lys ships.
+ */
+const MAXIMUM_LISTED_MCP_SERVER_COUNT =
+  MAXIMUM_MCP_SERVER_COUNT + BUILT_IN_MCP_SERVER_NAMES.length
+
+/**
  * Validates one applied MCP server and its state, without its settings. The
  * output is frozen; unknown fields are rejected.
  *
  * @remarks It never carries a command, an argument, an environment
- * variable, a URL, or a header, which can hold secrets.
+ * variable, a URL, or a header, which can hold secrets. `isBuiltIn` tells
+ * a server Lys ships from one the person added; when an added server has a
+ * built-in server's name, only the added one is listed.
  */
 const mcpServerStatusSchema = z
   .strictObject({
@@ -143,6 +161,8 @@ const mcpServerStatusSchema = z
     name: mcpServerNameSchema,
     /** How the backend talks to it. */
     transport: mcpServerTransportSchema,
+    /** Whether Lys ships the server, rather than the person having added it. */
+    isBuiltIn: z.boolean(),
     /** Its connection state. */
     state: mcpServerStateSchema
   })
@@ -160,16 +180,17 @@ export type McpServerStatus = z.infer<typeof mcpServerStatusSchema>
  * no group, which means no server; `invalid` when the group failed its
  * rules; `unreadable` when the settings file could not be read as a JSON
  * object. After `invalid` or `unreadable` the backend keeps the servers it
- * applied before, which `servers` lists, in the group's order.
+ * applied before, which `servers` lists: the servers Lys ships first, in
+ * their fixed order, then the added servers in the group's order.
  */
 export const mcpServerListSchema = z
   .strictObject({
     /** Outcome of the last read of the `mcp` settings group. */
     settings: z.enum(["applied", "invalid", "unreadable"]),
-    /** Applied servers in the group's order, each name once. */
+    /** Built-in servers, then the added servers in the group's order, each name once. */
     servers: z
       .array(mcpServerStatusSchema)
-      .max(MAXIMUM_MCP_SERVER_COUNT)
+      .max(MAXIMUM_LISTED_MCP_SERVER_COUNT)
       .refine(
         (servers) => hasDistinctValues(servers.map((server) => server.name)),
         "The backend lists each MCP server once."
@@ -190,6 +211,7 @@ export type McpServerList = z.infer<typeof mcpServerListSchema>
  * request with a JSON body needs a CORS preflight, which the backend refuses
  * for every origin but the desktop's, and a body sent without a preflight,
  * such as a form or plain text, fails this schema before anything starts.
+ * The email account check requires a JSON body for the same reason.
  */
 export const mcpServerActionBodySchema = z.strictObject({}).readonly()
 

@@ -7,6 +7,7 @@ import {
 } from "@lys/protocol"
 import {
   mcpSettingsSchema,
+  type BuiltInMcpSettings,
   type McpEnvironmentVariable,
   type McpServerSettings
 } from "@lys/share"
@@ -30,6 +31,8 @@ import {
 } from "../../../../src/modules/mcp/mcpServerOpening"
 import type { McpServerEvent } from "../../../../src/modules/mcp/mcpServerEvent"
 import McpServerRegistry, {
+  type BuiltInMcpServer,
+  type BuiltInMcpServerRead,
   type TurnMcpTool
 } from "../../../../src/modules/mcp/mcpServerRegistry"
 import {
@@ -197,6 +200,8 @@ type RegistryHarnessOptions = Readonly<{
   readSettings?: (testEnded: Promise<void>) => Promise<McpSettingsRead>
   /** Folder the stdio servers start in; {@link WORKING_DIRECTORY} when omitted. */
   workingDirectory?: string
+  /** Servers Lys ships; none when omitted. */
+  builtInServers?: readonly BuiltInMcpServer[]
 }>
 
 /** A registry under test, what it was given, and what it reported. */
@@ -220,8 +225,13 @@ type RegistryHarness = Readonly<{
    * Makes every later read return these servers, parsed anew on each read.
    *
    * @param servers - Servers in settings order.
+   * @param builtIn - Switches of the built-in servers; every one off when
+   * omitted.
    */
-  setServers: (servers: readonly McpServerSettings[]) => void
+  setServers: (
+    servers: readonly McpServerSettings[],
+    builtIn?: BuiltInMcpSettings
+  ) => void
   /**
    * Makes every later read return this outcome.
    *
@@ -242,15 +252,97 @@ type RegistryHarness = Readonly<{
  * file reader does, so equal settings are never the same objects.
  *
  * @param servers - Servers in settings order.
+ * @param builtIn - Switches of the built-in servers; every one off when
+ * omitted.
  * @returns A `read` outcome.
  */
 function buildSettingsRead(
-  servers: readonly McpServerSettings[]
+  servers: readonly McpServerSettings[],
+  builtIn?: BuiltInMcpSettings
 ): McpSettingsRead {
   return Object.freeze({
     status: "read",
-    settings: mcpSettingsSchema.parse(JSON.parse(JSON.stringify({ servers })))
+    settings: mcpSettingsSchema.parse(
+      JSON.parse(JSON.stringify({ servers, builtIn }))
+    )
   })
+}
+
+/** Switches that switch the built-in email server on. */
+const EMAIL_ON: BuiltInMcpSettings = Object.freeze({
+  email: Object.freeze({ enabled: true })
+})
+
+/** A recorded built-in email server, and what its reads return. */
+type FakeBuiltInServer = Readonly<{
+  /** The server, over stdio, named `email`. */
+  server: BuiltInMcpServer
+  /** Records every read. */
+  readServer: MockInstance<() => Promise<BuiltInMcpServerRead>>
+  /**
+   * Makes every later read return this outcome.
+   *
+   * @param read - Outcome of each read.
+   */
+  setRead: (read: BuiltInMcpServerRead) => void
+}>
+
+/**
+ * Creates a built-in email server whose reads return what the case sets.
+ *
+ * @param read - Outcome of each read until the case sets another; a start
+ * with the fake stdio server named `email` when omitted.
+ * @returns The server and its recorded reads.
+ */
+function createFakeBuiltInServer(
+  read: BuiltInMcpServerRead = buildBuiltInRead(
+    buildFakeStdioServerSettings("email")
+  )
+): FakeBuiltInServer {
+  let nextRead = read
+  const readServer = vi.fn(() => Promise.resolve(nextRead))
+  return Object.freeze({
+    server: Object.freeze({ name: "email", transport: "stdio", readServer }),
+    readServer,
+    setRead: (next) => {
+      nextRead = next
+    }
+  })
+}
+
+/**
+ * Builds the read of a built-in server that can start.
+ *
+ * @param settings - Settings it starts with.
+ * @returns A `read` outcome.
+ */
+function buildBuiltInRead(settings: McpServerSettings): BuiltInMcpServerRead {
+  return Object.freeze({ status: "read", settings })
+}
+
+/** State the list reports for a server that is switched off. */
+const OFF: McpServerState = Object.freeze({ status: "off" })
+
+/**
+ * Switches a server off in its settings.
+ *
+ * @param settings - Validated settings of the server.
+ * @returns The same settings, switched off.
+ */
+function switchOff(settings: McpServerSettings): McpServerSettings {
+  return Object.freeze({ ...settings, enabled: false })
+}
+
+/**
+ * Builds the status of the built-in email server.
+ *
+ * @param state - Its state.
+ * @returns The status the list reports.
+ */
+function buildEmailStatus(
+  state: McpServerState
+): McpServerList["servers"][number] {
+  return { name: "email", transport: "stdio", isBuiltIn: true, state }
 }
 
 /**
@@ -335,6 +427,7 @@ function createRegistryHarness(
   const { processGroups } = createOwnedMcpServerProcessGroups()
   const registry = new McpServerRegistry({
     readSettings,
+    builtInServers: options.builtInServers ?? [],
     openServer,
     workingDirectory: options.workingDirectory ?? WORKING_DIRECTORY,
     processGroups,
@@ -350,8 +443,8 @@ function createRegistryHarness(
     readSettings,
     openServer,
     openedConnections,
-    setServers: (servers) => {
-      nextRead = () => buildSettingsRead(servers)
+    setServers: (servers, builtIn) => {
+      nextRead = () => buildSettingsRead(servers, builtIn)
     },
     setSettingsRead: (read) => {
       nextRead = () => read
@@ -404,7 +497,7 @@ function buildStdioStatus(
   name: string,
   state: McpServerState
 ): McpServerList["servers"][number] {
-  return { name, transport: "stdio", state }
+  return { name, transport: "stdio", isBuiltIn: false, state }
 }
 
 /**
@@ -418,7 +511,7 @@ function buildHttpStatus(
   name: string,
   state: McpServerState
 ): McpServerList["servers"][number] {
-  return { name, transport: "http", state }
+  return { name, transport: "http", isBuiltIn: false, state }
 }
 
 /**
@@ -1698,6 +1791,335 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       expect(harness.registry.listServers()).toEqual(
         buildList([buildStdioStatus("alpha", buildConnectedState(2))])
       )
+    })
+  })
+
+  describe("switches and built-in servers", () => {
+    it("lists a switched-off added server as off, opens nothing for it, offers none of its tools, and answers not-connected for them", async () => {
+      const harness = createRegistryHarness()
+      harness.setServers([
+        switchOff(buildFakeStdioServerSettings("alpha")),
+        buildFakeStdioServerSettings("beta")
+      ])
+
+      await harness.registry.updateServers()
+
+      expect(harness.registry.listServers()).toEqual(
+        buildList([
+          buildStdioStatus("alpha", OFF),
+          buildStdioStatus("beta", CONNECTING)
+        ])
+      )
+      expect(
+        harness.openServer.mock.calls.map(([settings]) => settings.name)
+      ).toEqual(["beta"])
+      await waitForServerList(
+        harness.registry,
+        buildList([
+          buildStdioStatus("alpha", OFF),
+          buildStdioStatus("beta", buildConnectedState(1))
+        ])
+      )
+      expect(
+        harness.registry
+          .listToolDefinitions()
+          .map((definition) => definition.name)
+      ).toEqual(["mcp__beta__echo"])
+      expect(harness.registry.findTurnTool("mcp__alpha__echo")).toEqual({
+        status: "not-connected"
+      })
+      expect(harness.registry.openServerAgain("alpha")).toBe("off")
+      expect(harness.openServer).toHaveBeenCalledTimes(1)
+    })
+
+    it("stops a connected server's session when it is switched off, reporting it, and opens it again once it is switched on", async () => {
+      const harness = createRegistryHarness()
+      const alpha = buildFakeStdioServerSettings("alpha")
+      harness.setServers([alpha])
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("alpha", buildConnectedState(1))])
+      )
+      harness.setServers([switchOff(alpha)])
+
+      await harness.registry.updateServers()
+
+      expect(harness.registry.listServers()).toEqual(
+        buildList([buildStdioStatus("alpha", OFF)])
+      )
+      expect(
+        findOpenedConnection(harness.openedConnections, "alpha").close
+      ).toHaveBeenCalledTimes(1)
+      expect(filterEvents(harness.events, "server-stopped")).toEqual([
+        { kind: "server-stopped", serverName: "alpha", reason: "switched-off" }
+      ])
+      harness.setServers([alpha])
+      await harness.registry.updateServers()
+      expect(harness.registry.listServers()).toEqual(
+        buildList([buildStdioStatus("alpha", CONNECTING)])
+      )
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("alpha", buildConnectedState(1))])
+      )
+      expect(harness.openServer).toHaveBeenCalledTimes(2)
+    })
+
+    it("reports a stopped session as removed when the settings no longer name its server, and as changed when they change it", async () => {
+      const harness = createRegistryHarness()
+      harness.setServers([
+        buildFakeStdioServerSettings("alpha"),
+        buildFakeStdioServerSettings("beta")
+      ])
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([
+          buildStdioStatus("alpha", buildConnectedState(1)),
+          buildStdioStatus("beta", buildConnectedState(1))
+        ])
+      )
+      harness.setServers([
+        buildFakeStdioServerSettings("beta", { tools: [ECHO_TOOL, FAIL_TOOL] })
+      ])
+
+      await harness.registry.updateServers()
+
+      expect(filterEvents(harness.events, "server-stopped")).toEqual([
+        { kind: "server-stopped", serverName: "alpha", reason: "removed" },
+        { kind: "server-stopped", serverName: "beta", reason: "changed" }
+      ])
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("beta", buildConnectedState(2))])
+      )
+    })
+
+    it("lists a built-in server first, off, without reading what it needs, while it is switched off", async () => {
+      const builtIn = createFakeBuiltInServer()
+      const harness = createRegistryHarness({
+        builtInServers: [builtIn.server]
+      })
+      harness.setServers([buildFakeStdioServerSettings("alpha")])
+
+      await harness.registry.updateServers()
+
+      expect(harness.registry.listServers()).toEqual(
+        buildList([
+          buildEmailStatus(OFF),
+          buildStdioStatus("alpha", CONNECTING)
+        ])
+      )
+      expect(builtIn.readServer).not.toHaveBeenCalled()
+      expect(harness.registry.findTurnTool("mcp__email__echo")).toEqual({
+        status: "not-connected"
+      })
+      expect(harness.registry.openServerAgain("email")).toBe("off")
+      await waitForServerList(
+        harness.registry,
+        buildList([
+          buildEmailStatus(OFF),
+          buildStdioStatus("alpha", buildConnectedState(1))
+        ])
+      )
+      expect(
+        harness.openServer.mock.calls.map(([settings]) => settings.name)
+      ).toEqual(["alpha"])
+    })
+
+    it("opens a switched-on built-in server with the settings its read builds, and keeps its session while a later read builds equal settings", async () => {
+      const builtIn = createFakeBuiltInServer()
+      const harness = createRegistryHarness({
+        builtInServers: [builtIn.server]
+      })
+      harness.setServers([], EMAIL_ON)
+
+      await harness.registry.updateServers()
+
+      expect(harness.registry.listServers()).toEqual(
+        buildList([buildEmailStatus(CONNECTING)])
+      )
+      expect(
+        harness.openServer.mock.calls.map(([settings]) => settings)
+      ).toEqual([buildFakeStdioServerSettings("email")])
+      await waitForServerList(
+        harness.registry,
+        buildList([buildEmailStatus(buildConnectedState(1))])
+      )
+      expect(
+        harness.registry
+          .listToolDefinitions()
+          .map((definition) => definition.name)
+      ).toEqual(["mcp__email__echo"])
+      await harness.registry.updateServers()
+      expect(builtIn.readServer).toHaveBeenCalledTimes(2)
+      expect(harness.openServer).toHaveBeenCalledTimes(1)
+      expect(harness.registry.listServers()).toEqual(
+        buildList([buildEmailStatus(buildConnectedState(1))])
+      )
+      expect(filterEvents(harness.events, "server-stopped")).toEqual([])
+    })
+
+    it("stops a built-in server's session as changed when its read builds other settings, and opens them", async () => {
+      const builtIn = createFakeBuiltInServer()
+      const harness = createRegistryHarness({
+        builtInServers: [builtIn.server]
+      })
+      harness.setServers([], EMAIL_ON)
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildEmailStatus(buildConnectedState(1))])
+      )
+      builtIn.setRead(
+        buildBuiltInRead(
+          buildFakeStdioServerSettings("email", {
+            tools: [ECHO_TOOL, FAIL_TOOL]
+          })
+        )
+      )
+
+      await harness.registry.updateServers()
+
+      expect(filterEvents(harness.events, "server-stopped")).toEqual([
+        { kind: "server-stopped", serverName: "email", reason: "changed" }
+      ])
+      await waitForServerList(
+        harness.registry,
+        buildList([buildEmailStatus(buildConnectedState(2))])
+      )
+      expect(harness.openServer).toHaveBeenCalledTimes(2)
+    })
+
+    it("lists a switched-on built-in server as failed while its read finds no usable account, reporting each new reason once, and stops its session", async () => {
+      const builtIn = createFakeBuiltInServer({ status: "account-missing" })
+      const harness = createRegistryHarness({
+        builtInServers: [builtIn.server]
+      })
+      harness.setServers([], EMAIL_ON)
+
+      await harness.registry.updateServers()
+      await harness.registry.updateServers()
+
+      expect(harness.registry.listServers()).toEqual(
+        buildList([buildEmailStatus(buildFailedState("account-missing"))])
+      )
+      expect(harness.openServer).not.toHaveBeenCalled()
+      expect(harness.registry.openServerAgain("email")).toBe("off")
+      expect(harness.registry.findTurnTool("mcp__email__echo")).toEqual({
+        status: "not-connected"
+      })
+      expect(filterEvents(harness.events, "built-in-unusable")).toEqual([
+        {
+          kind: "built-in-unusable",
+          serverName: "email",
+          reason: "account-missing"
+        }
+      ])
+      builtIn.setRead(buildBuiltInRead(buildFakeStdioServerSettings("email")))
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildEmailStatus(buildConnectedState(1))])
+      )
+      builtIn.setRead({ status: "account-invalid" })
+      await harness.registry.updateServers()
+      expect(harness.registry.listServers()).toEqual(
+        buildList([buildEmailStatus(buildFailedState("account-invalid"))])
+      )
+      expect(filterEvents(harness.events, "server-stopped")).toEqual([
+        { kind: "server-stopped", serverName: "email", reason: "changed" }
+      ])
+      expect(filterEvents(harness.events, "built-in-unusable")).toEqual([
+        {
+          kind: "built-in-unusable",
+          serverName: "email",
+          reason: "account-missing"
+        },
+        {
+          kind: "built-in-unusable",
+          serverName: "email",
+          reason: "account-invalid"
+        }
+      ])
+    })
+
+    it("applies an added server that has a built-in server's name in its place, reporting the taken name once, until the added one is removed", async () => {
+      const builtIn = createFakeBuiltInServer()
+      const harness = createRegistryHarness({
+        builtInServers: [builtIn.server]
+      })
+      harness.setServers(
+        [
+          buildFakeStdioServerSettings("email", {
+            tools: [ECHO_TOOL, FAIL_TOOL]
+          })
+        ],
+        EMAIL_ON
+      )
+
+      await harness.registry.updateServers()
+      await harness.registry.updateServers()
+
+      expect(harness.registry.listServers()).toEqual(
+        buildList([buildStdioStatus("email", CONNECTING)])
+      )
+      expect(builtIn.readServer).not.toHaveBeenCalled()
+      expect(filterEvents(harness.events, "built-in-name-taken")).toEqual([
+        { kind: "built-in-name-taken", serverName: "email" }
+      ])
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("email", buildConnectedState(2))])
+      )
+      harness.setServers([], EMAIL_ON)
+      await harness.registry.updateServers()
+      expect(filterEvents(harness.events, "server-stopped")).toEqual([
+        { kind: "server-stopped", serverName: "email", reason: "removed" }
+      ])
+      await waitForServerList(
+        harness.registry,
+        buildList([buildEmailStatus(buildConnectedState(1))])
+      )
+      expect(harness.openServer).toHaveBeenCalledTimes(2)
+    })
+
+    it("tells the model the server was stopped when its session is stopped while a call runs, and reports the failed call", async () => {
+      const harness = createRegistryHarness()
+      const alpha = buildFakeStdioServerSettings("alpha", {
+        tools: [ECHO_TOOL, SLOW_TOOL]
+      })
+      harness.setServers([alpha])
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("alpha", buildConnectedState(2))])
+      )
+      const call = findTool(harness.registry, "mcp__alpha__slow").sendToolCall(
+        {},
+        NEVER_ABORTED
+      )
+      await waitForMicrotasks()
+      harness.setServers([switchOff(alpha)])
+      await harness.registry.updateServers()
+
+      const outcome = await call
+
+      expect(outcome).toEqual({
+        status: "failed",
+        content:
+          "The call of mcp__alpha__slow failed: the MCP server alpha was stopped while the call ran: it was switched off, changed, or removed in Settings → MCP."
+      })
+      expect(filterEvents(harness.events, "tool-call-failed")).toEqual([
+        {
+          kind: "tool-call-failed",
+          serverName: "alpha",
+          serverToolName: "slow",
+          failure: { kind: "closed" },
+          unknownError: undefined
+        }
+      ])
     })
   })
 

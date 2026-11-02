@@ -22,6 +22,14 @@ fi
 swift build -c release --package-path apps/vmo
 VMO_BUILD_DIR=$(swift build -c release --package-path apps/vmo --show-bin-path)
 
+# Step 2b: Build the email MCP server Lys ships, in release. It needs the Rust
+# toolchain; the backend starts it from $LYS_HOME/runtime/email/email.
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "Lys needs the Rust toolchain (cargo) to build its email MCP server." >&2
+  exit 1
+fi
+cargo build --release --manifest-path mcps/email/Cargo.toml
+
 # Step 3: Build backend
 pnpm run backend:build
 
@@ -146,6 +154,13 @@ rm -rf "$VMO_DIR"
 mkdir -p "$VMO_DIR"
 cp "$VMO_BUILD_DIR/vmo" "$VMO_DIR/vmo"
 codesign --force --sign - --entitlements apps/vmo/vmo.entitlements "$VMO_DIR/vmo"
+
+# Step 8c. Install the email MCP server to $LYS_HOME/runtime/email, where the
+# backend starts it
+EMAIL_DIR="$LYS_HOME/runtime/email"
+rm -rf "$EMAIL_DIR"
+mkdir -p "$EMAIL_DIR"
+cp mcps/email/target/release/email "$EMAIL_DIR/email"
 
 # Step 9. Build the desktop app
 pnpm run desktop:build:ci

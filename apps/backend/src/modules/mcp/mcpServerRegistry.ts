@@ -1,12 +1,16 @@
-import type { McpServerList } from "@lys/protocol"
+import type { McpServerList, McpServerState } from "@lys/protocol"
 import {
   MCP_TOOL_NAME_PREFIX,
+  type BuiltInMcpServerName,
   type McpServerSettings,
+  type McpServerTransport,
+  type McpSettings,
   type McpToolDefinition
 } from "@lys/share"
 import { isDeepStrictEqual } from "node:util"
 import type { McpSettingsRead } from "../../infrastructure/settings/mcpSettingsFile"
 import type { McpToolCallArguments } from "./mcpServerConnection"
+import type { McpServerEvent } from "./mcpServerEvent"
 import McpServerSession, {
   buildCallNotSentEvent,
   buildServerNotConnectedOutcome,
@@ -14,14 +18,56 @@ import McpServerSession, {
 } from "./mcpServerSession"
 import type { McpToolCallOutcome } from "./mcpToolResult"
 
+/** Why a built-in server that is switched on cannot start. */
+export type BuiltInMcpServerProblem = Extract<
+  McpServerEvent,
+  { kind: "built-in-unusable" }
+>["reason"]
+
+/** What reading what a built-in server needs found. */
+export type BuiltInMcpServerRead =
+  | Readonly<{
+      /** The server can start. */
+      status: "read"
+      /** Validated settings it starts with, named as the server is. */
+      settings: McpServerSettings
+    }>
+  | Readonly<{
+      /** No account is saved for the server. */
+      status: "account-missing"
+    }>
+  | Readonly<{
+      /** The saved account or its password fails its rules or could not be read. */
+      status: "account-invalid"
+    }>
+
 /**
- * What the registry borrows for its lifetime: the settings reader, and the
- * opener, working folder, process group holder, and reporter every server's
- * session borrows.
+ * One server Lys ships, which the person switches on in the `mcp` settings
+ * group rather than adds.
+ */
+export type BuiltInMcpServer = Readonly<{
+  /** Name it is listed under; an added server of the same name takes its place. */
+  name: BuiltInMcpServerName
+  /** How the backend talks to it, reported while it is off or cannot start. */
+  transport: McpServerTransport
+  /**
+   * Reads what the server needs, such as a saved account, and builds the
+   * settings it starts with; called each time the settings are applied
+   * with the server switched on and its name free.
+   */
+  readServer: () => Promise<BuiltInMcpServerRead>
+}>
+
+/**
+ * What the registry borrows for its lifetime: the settings reader, the
+ * servers Lys ships, and the opener, working folder, process group holder,
+ * and reporter every server's session borrows.
  */
 export type McpServerRegistryDependencies = Readonly<{
   /** Reads the `mcp` group from the settings file again. */
   readSettings: () => Promise<McpSettingsRead>
+  /** Servers Lys ships, in the order they are listed, each name once. */
+  builtInServers: readonly BuiltInMcpServer[]
 }> &
   Omit<McpServerSessionDependencies, "addTask">
 
@@ -55,7 +101,7 @@ export type McpTurnToolLookup =
       tool: TurnMcpTool
     }>
   | Readonly<{
-      /** The tool's server is applied but not connected now. */
+      /** The tool's server is applied but not connected now, or switched off. */
       status: "not-connected"
     }>
   | Readonly<{
@@ -63,16 +109,88 @@ export type McpTurnToolLookup =
       status: "unknown"
     }>
 
-/** Outcome of asking one server to connect again. */
-export type McpServerReconnection = "reconnecting" | "not-found"
+/**
+ * Outcome of asking one server to connect again: `reconnecting` once a new
+ * session was started, `not-found` when no applied server has the name,
+ * `off` when the server is switched off or, for a built-in server, cannot
+ * start.
+ */
+export type McpServerReconnection = "reconnecting" | "not-found" | "off"
 
-/** One applied server: the settings it was applied with and its session. */
+/** What one applied server does now. */
+type ServerRun =
+  | Readonly<{
+      /** A session opens the server or holds its connection or failure. */
+      status: "running"
+      /** Validated settings the session opens. */
+      settings: McpServerSettings
+      /** The session. */
+      session: McpServerSession
+    }>
+  | Readonly<{
+      /** The person switched the server off; nothing runs. */
+      status: "off"
+    }>
+  | Readonly<{
+      /** The built-in server is switched on but cannot start. */
+      status: "unusable"
+      /** Why. */
+      reason: BuiltInMcpServerProblem
+    }>
+
+/** One applied server. */
 type ServerEntry = Readonly<{
-  /** Validated settings it was applied with. */
-  settings: McpServerSettings
-  /** The session that opens it now. */
-  session: McpServerSession
+  /** Name it is listed under. */
+  name: string
+  /** How the backend talks to it. */
+  transport: McpServerTransport
+  /** Whether Lys ships it. */
+  isBuiltIn: boolean
+  /** What it does now. */
+  run: ServerRun
 }>
+
+/** What one server of a settings group just read is to do. */
+type PlannedRun =
+  | Readonly<{
+      /** Open it in a session. */
+      status: "start"
+      /** Validated settings to open it with. */
+      settings: McpServerSettings
+    }>
+  | Readonly<{
+      /** Keep it off. */
+      status: "off"
+    }>
+  | Readonly<{
+      /** Report that the built-in server cannot start. */
+      status: "unusable"
+      /** Why. */
+      reason: BuiltInMcpServerProblem
+    }>
+
+/** One server of a settings group just read, and what it is to do. */
+type ServerPlan = Readonly<{
+  /** Name it is listed under. */
+  name: string
+  /** How the backend talks to it. */
+  transport: McpServerTransport
+  /** Whether Lys ships it. */
+  isBuiltIn: boolean
+  /** What it is to do. */
+  run: PlannedRun
+}>
+
+/** A settings group just read, as the registry is to apply it. */
+type SettingsPlan = Readonly<{
+  /** Each server in the order it is listed, each name once. */
+  servers: readonly ServerPlan[]
+  /** Names of the built-in servers an added server took. */
+  takenBuiltInNames: ReadonlySet<string>
+}>
+
+/** Why a session was stopped as settings were applied. */
+type StopReason = Extract<McpServerEvent, { kind: "server-stopped" }>["reason"]
 
 /** Outcome of the last read of the settings group. */
 type SettingsStatus = McpServerList["settings"]
@@ -80,14 +198,32 @@ type SettingsStatus = McpServerList["settings"]
 /** Lookup of a name no applied server has. */
 const UNKNOWN_TOOL: McpTurnToolLookup = Object.freeze({ status: "unknown" })
 
+/** Lookup of a tool whose server is switched off or cannot start. */
+const NOT_CONNECTED_TOOL: McpTurnToolLookup = Object.freeze({
+  status: "not-connected"
+})
+
+/** Run of a server that is switched off. */
+const OFF_RUN: ServerRun = Object.freeze({ status: "off" })
+
+/** Plan of a server that is to stay off. */
+const OFF_PLAN: PlannedRun = Object.freeze({ status: "off" })
+
+/** State the list reports for a server that is switched off. */
+const OFF_STATE: McpServerState = Object.freeze({ status: "off" })
+
 /**
- * Owns the MCP servers the settings file names, one session each, for the
- * backend's lifetime.
+ * Owns the MCP servers the settings file names and the servers Lys ships,
+ * one session each while it is switched on, for the backend's lifetime.
  *
  * @remarks {@link updateServers} reads the `mcp` group and applies it: a
- * new or changed server gets a new session, an unchanged one keeps its
- * session, with its connection or failure, and a removed one's session is
- * stopped. Opening runs in the background; the list reports each server as
+ * new or changed server that is switched on gets a new session, an
+ * unchanged one keeps its session, with its connection or failure, and a
+ * removed or switched-off one's session is stopped. A built-in server comes
+ * first in the list; while it is switched on, each apply reads what it
+ * needs, such as a saved account, and starts it in a session, or lists it
+ * as failed when it cannot start; an added server of its name takes its
+ * place. Opening runs in the background; the list reports each server as
  * connecting until its opening ends. Nothing reconnects by itself:
  * {@link openServerAgain} or a changed setting starts a new session. Every new
  * session opens only once every session the registry stopped before it
@@ -106,12 +242,14 @@ const UNKNOWN_TOOL: McpTurnToolLookup = Object.freeze({ status: "unknown" })
  */
 export default class McpServerRegistry {
   /**
-   * Borrowed settings reader, opener, working folder, process group holder,
-   * and reporter.
+   * Borrowed settings reader, built-in servers, opener, working folder,
+   * process group holder, and reporter.
    */
   readonly #dependencies: McpServerRegistryDependencies
-  /** Applied servers in the settings group's order. */
+  /** Applied servers in list order: the built-in ones, then the group's. */
   #entries: Map<string, ServerEntry>
+  /** Names of the built-in servers an added server took at the last apply. */
+  #takenBuiltInNames: ReadonlySet<string>
   /** Outcome of the last read of the settings group. */
   #settingsStatus: SettingsStatus
   /** Settles once every settings read asked for so far was applied. */
@@ -129,13 +267,15 @@ export default class McpServerRegistry {
   /**
    * Creates a registry with no server.
    *
-   * @param dependencies - Settings reader, opener, working folder, process
-   * group holder, and reporter, borrowed for the registry's lifetime.
+   * @param dependencies - Settings reader, built-in servers, opener,
+   * working folder, process group holder, and reporter, borrowed for the
+   * registry's lifetime.
    * @remarks Reads, starts, and contacts nothing.
    */
   public constructor(dependencies: McpServerRegistryDependencies) {
     this.#dependencies = dependencies
     this.#entries = new Map()
+    this.#takenBuiltInNames = new Set()
     this.#settingsStatus = "applied"
     this.#settingsReads = Promise.resolve()
     this.#tasks = new Set()
@@ -144,7 +284,8 @@ export default class McpServerRegistry {
   }
 
   /**
-   * Reads the `mcp` settings group again and applies it.
+   * Reads the `mcp` settings group again, and what each built-in server
+   * it switches on needs, and applies them.
    *
    * @returns A promise that settles once the group was read and applied;
    * the servers it opens are still connecting then.
@@ -163,25 +304,39 @@ export default class McpServerRegistry {
    * one.
    *
    * @param serverName - Name of the server, compared exactly.
-   * @returns `reconnecting` once the new session was started, or `not-found`
+   * @returns `reconnecting` once the new session was started; `not-found`
    * when no applied server has the name, which is always the case after
-   * {@link close}.
+   * {@link close}; `off` when the server is switched off or cannot start,
+   * so there is no session to open again.
    * @remarks The new session opens once the old one, and every other session
    * stopped before, released its server.
    */
   public openServerAgain(serverName: string): McpServerReconnection {
     const entry = this.#entries.get(serverName)
     if (entry === undefined) return "not-found"
-    this.#stopSession(entry.session)
-    this.#startSession(entry.settings)
+    if (entry.run.status !== "running") return "off"
+    const { settings } = entry.run
+    this.#stopSession(entry.run.session)
+    this.#entries.set(
+      serverName,
+      Object.freeze({
+        ...entry,
+        run: Object.freeze({
+          status: "running",
+          settings,
+          session: this.#startSession(settings)
+        })
+      })
+    )
     return "reconnecting"
   }
 
   /**
    * Lists the applied servers and their states.
    *
-   * @returns A frozen list in the settings group's order, with the outcome
-   * of the last settings read; it carries no setting.
+   * @returns A frozen list, the built-in servers first in their fixed
+   * order, then the added servers in the settings group's order, with the
+   * outcome of the last settings read; it carries no setting.
    */
   public listServers(): McpServerList {
     return Object.freeze({
@@ -189,9 +344,10 @@ export default class McpServerRegistry {
       servers: Object.freeze(
         [...this.#entries.values()].map((entry) =>
           Object.freeze({
-            name: entry.settings.name,
-            transport: entry.settings.transport,
-            state: entry.session.reportedState
+            name: entry.name,
+            transport: entry.transport,
+            isBuiltIn: entry.isBuiltIn,
+            state: buildReportedState(entry.run)
           })
         )
       )
@@ -201,13 +357,15 @@ export default class McpServerRegistry {
   /**
    * Lists the tools of every connected server.
    *
-   * @returns A frozen list in the settings group's order, each server's
-   * tools in its own order.
+   * @returns A frozen list in list order, each server's tools in its own
+   * order; a server that is switched off offers none.
    */
   public listToolDefinitions(): readonly McpToolDefinition[] {
     return Object.freeze(
       [...this.#entries.values()].flatMap((entry) =>
-        entry.session.listToolDefinitions()
+        entry.run.status === "running"
+          ? entry.run.session.listToolDefinitions()
+          : []
       )
     )
   }
@@ -218,16 +376,17 @@ export default class McpServerRegistry {
    * @param toolName - Model-facing name of the tool, such as
    * `mcp__files__read`.
    * @returns `found` when the named server is connected and lists the tool;
-   * `not-connected` when the server is applied but connecting or failed;
-   * `unknown` otherwise. A found tool's calls run on the server's session as
-   * it is when each call runs.
+   * `not-connected` when the server is applied but connecting, failed,
+   * switched off, or unable to start; `unknown` otherwise. A found tool's
+   * calls run on the server's session as it is when each call runs.
    */
   public findTurnTool(toolName: string): McpTurnToolLookup {
     const serverName = findMcpServerName(toolName)
     const entry =
       serverName === undefined ? undefined : this.#entries.get(serverName)
     if (entry === undefined) return UNKNOWN_TOOL
-    const lookup = entry.session.findTool(toolName)
+    if (entry.run.status !== "running") return NOT_CONNECTED_TOOL
+    const lookup = entry.run.session.findTool(toolName)
     if (lookup.status !== "found") return lookup
     const { definition } = lookup
     return Object.freeze({
@@ -250,7 +409,8 @@ export default class McpServerRegistry {
    */
   public async close(): Promise<void> {
     this.#isClosed = true
-    for (const entry of this.#entries.values()) void entry.session.stop()
+    for (const entry of this.#entries.values())
+      if (entry.run.status === "running") void entry.run.session.stop()
     this.#entries = new Map()
     await this.#settingsReads
     await this.#waitForNoTaskLeft()
@@ -272,7 +432,8 @@ export default class McpServerRegistry {
   }
 
   /**
-   * Reads the settings group and applies what it holds.
+   * Reads the settings group, and what each built-in server it switches on
+   * needs, and applies what they hold.
    *
    * @returns A promise that settles once the read was applied.
    * @throws Only when closing the settings file fails.
@@ -282,10 +443,13 @@ export default class McpServerRegistry {
     const read = await this.#dependencies.readSettings()
     if (this.#isClosed) return
     switch (read.status) {
-      case "read":
+      case "read": {
+        const plan = await this.#planServers(read.settings)
+        if (this.#isClosed) return
         this.#settingsStatus = "applied"
-        this.#updateSessions(read.settings.servers)
+        this.#applyPlan(plan)
         return
+      }
       case "invalid":
         this.#settingsStatus = "invalid"
         this.#dependencies.reportEvent({
@@ -301,28 +465,138 @@ export default class McpServerRegistry {
   }
 
   /**
-   * Applies the servers of a settings group that passed its rules.
+   * Plans what each server of a settings group that passed its rules is to
+   * do, reading what each built-in server the group switches on needs.
    *
-   * @param servers - Validated servers in the group's order, each name once.
+   * @param settings - The group.
+   * @returns The built-in servers whose names are free, in their fixed
+   * order, then the group's servers in its order, and the names of the
+   * built-in servers an added server took.
+   */
+  async #planServers(settings: McpSettings): Promise<SettingsPlan> {
+    const addedNames = new Set(settings.servers.map((server) => server.name))
+    const servers: ServerPlan[] = []
+    const takenBuiltInNames = new Set<string>()
+    for (const builtIn of this.#dependencies.builtInServers) {
+      if (addedNames.has(builtIn.name)) takenBuiltInNames.add(builtIn.name)
+      else
+        servers.push(
+          await planBuiltInServer(
+            builtIn,
+            settings.builtIn[builtIn.name].enabled
+          )
+        )
+    }
+    for (const server of settings.servers) servers.push(planAddedServer(server))
+    return Object.freeze({ servers: Object.freeze(servers), takenBuiltInNames })
+  }
+
+  /**
+   * Applies a plan: keeps each running server whose settings did not
+   * change, stops the others, and starts, switches off, or reports each
+   * planned server.
+   *
+   * @param plan - What each server is to do.
    * @remarks Stops every session it does not keep before it starts any, so
    * each new session waits for all of them, such as when two servers swap
-   * their settings.
+   * their settings. Reports each stopped session with why, each built-in
+   * server that newly cannot start, and each built-in name newly taken.
    */
-  #updateSessions(servers: readonly McpServerSettings[]): void {
+  #applyPlan(plan: SettingsPlan): void {
     const previousEntries = this.#entries
     const keptEntries = new Map<string, ServerEntry>()
-    for (const settings of servers) {
-      const entry = findUnchangedEntry(previousEntries, settings)
-      if (entry !== undefined) keptEntries.set(settings.name, entry)
+    for (const server of plan.servers) {
+      const entry = findUnchangedEntry(previousEntries, server)
+      if (entry !== undefined) keptEntries.set(server.name, entry)
     }
-    for (const [serverName, entry] of previousEntries)
-      if (!keptEntries.has(serverName)) this.#stopSession(entry.session)
+    const plannedByName = new Map(
+      plan.servers.map((server) => [server.name, server])
+    )
+    for (const [serverName, entry] of previousEntries) {
+      if (entry.run.status !== "running" || keptEntries.has(serverName))
+        continue
+      this.#stopSession(entry.run.session)
+      this.#dependencies.reportEvent({
+        kind: "server-stopped",
+        serverName,
+        reason: findStopReason(entry, plannedByName.get(serverName))
+      })
+    }
     this.#entries = new Map()
-    for (const settings of servers) {
-      const entry = keptEntries.get(settings.name)
-      if (entry === undefined) this.#startSession(settings)
-      else this.#entries.set(settings.name, entry)
+    for (const server of plan.servers)
+      this.#entries.set(
+        server.name,
+        keptEntries.get(server.name) ??
+          this.#startServer(server, previousEntries.get(server.name))
+      )
+    this.#reportTakenNames(plan.takenBuiltInNames)
+  }
+
+  /**
+   * Starts, switches off, or reports one planned server.
+   *
+   * @param server - The plan.
+   * @param previousEntry - The server's entry before the apply, if any.
+   * @returns The server's new entry.
+   * @remarks A built-in server that cannot start is reported once per
+   * reason: not again while a later apply finds the same reason.
+   */
+  #startServer(
+    server: ServerPlan,
+    previousEntry: ServerEntry | undefined
+  ): ServerEntry {
+    const { name, transport, isBuiltIn } = server
+    switch (server.run.status) {
+      case "start": {
+        const { settings } = server.run
+        return Object.freeze({
+          name,
+          transport,
+          isBuiltIn,
+          run: Object.freeze({
+            status: "running",
+            settings,
+            session: this.#startSession(settings)
+          })
+        })
+      }
+      case "off":
+        return Object.freeze({ name, transport, isBuiltIn, run: OFF_RUN })
+      case "unusable": {
+        const { reason } = server.run
+        if (
+          previousEntry?.run.status !== "unusable" ||
+          previousEntry.run.reason !== reason
+        )
+          this.#dependencies.reportEvent({
+            kind: "built-in-unusable",
+            serverName: name,
+            reason
+          })
+        return Object.freeze({
+          name,
+          transport,
+          isBuiltIn,
+          run: Object.freeze({ status: "unusable", reason })
+        })
+      }
     }
+  }
+
+  /**
+   * Reports each built-in name an added server newly took, and remembers
+   * the taken names for the next apply.
+   *
+   * @param takenNames - Names of the built-in servers an added server took.
+   */
+  #reportTakenNames(takenNames: ReadonlySet<string>): void {
+    for (const serverName of takenNames)
+      if (!this.#takenBuiltInNames.has(serverName))
+        this.#dependencies.reportEvent({
+          kind: "built-in-name-taken",
+          serverName
+        })
+    this.#takenBuiltInNames = takenNames
   }
 
   /**
@@ -338,13 +612,14 @@ export default class McpServerRegistry {
   }
 
   /**
-   * Starts a session that opens one server, and records it as the server's.
+   * Starts a session that opens one server.
    *
    * @param settings - Validated settings of the server.
+   * @returns The session, which the caller records as the server's.
    * @remarks The opening waits until every session stopped so far released
    * its server; it starts at once when none is releasing.
    */
-  #startSession(settings: McpServerSettings): void {
+  #startSession(settings: McpServerSettings): McpServerSession {
     const session = new McpServerSession(settings, {
       openServer: this.#dependencies.openServer,
       workingDirectory: this.#dependencies.workingDirectory,
@@ -352,12 +627,12 @@ export default class McpServerRegistry {
       reportEvent: this.#dependencies.reportEvent,
       addTask: (task) => this.#addTask(task)
     })
-    this.#entries.set(settings.name, Object.freeze({ settings, session }))
     const previousRelease =
       this.#releases.size === 0
         ? undefined
         : Promise.all(this.#releases).then(() => undefined)
     this.#addTask(session.open(previousRelease))
+    return session
   }
 
   /**
@@ -378,8 +653,8 @@ export default class McpServerRegistry {
    * @param callArguments - Arguments whose shape the backend checked.
    * @param abortSignal - Stops the call.
    * @returns The server's result, or why the call failed, such as the
-   * server not being applied any more, which is reported as a call that was
-   * not sent.
+   * server not being applied or switched on any more, which is reported as
+   * a call that was not sent.
    * @throws Only once the signal aborted.
    */
   #sendToolCall(
@@ -388,8 +663,12 @@ export default class McpServerRegistry {
     abortSignal: AbortSignal
   ): Promise<McpToolCallOutcome> {
     const entry = this.#entries.get(definition.server)
-    if (entry !== undefined)
-      return entry.session.sendToolCall(definition, callArguments, abortSignal)
+    if (entry?.run.status === "running")
+      return entry.run.session.sendToolCall(
+        definition,
+        callArguments,
+        abortSignal
+      )
     this.#dependencies.reportEvent(
       buildCallNotSentEvent(definition, "server-not-connected")
     )
@@ -398,21 +677,107 @@ export default class McpServerRegistry {
 }
 
 /**
- * Finds the applied entry a server keeps under new settings.
+ * Plans what one built-in server is to do.
+ *
+ * @param server - The built-in server.
+ * @param isSwitchedOn - Whether the settings group switches it on.
+ * @returns Off while it is switched off; else what its read found: a
+ * start with the settings it built, or why it cannot start.
+ */
+async function planBuiltInServer(
+  server: BuiltInMcpServer,
+  isSwitchedOn: boolean
+): Promise<ServerPlan> {
+  const { name, transport } = server
+  if (!isSwitchedOn)
+    return Object.freeze({ name, transport, isBuiltIn: true, run: OFF_PLAN })
+  const read = await server.readServer()
+  return Object.freeze({
+    name,
+    transport,
+    isBuiltIn: true,
+    run:
+      read.status === "read"
+        ? Object.freeze({ status: "start", settings: read.settings })
+        : Object.freeze({ status: "unusable", reason: read.status })
+  })
+}
+
+/**
+ * Plans what one added server is to do.
+ *
+ * @param settings - Its validated settings.
+ * @returns A start with its settings while it is switched on, else off.
+ */
+function planAddedServer(settings: McpServerSettings): ServerPlan {
+  return Object.freeze({
+    name: settings.name,
+    transport: settings.transport,
+    isBuiltIn: false,
+    run: settings.enabled
+      ? Object.freeze({ status: "start", settings })
+      : OFF_PLAN
+  })
+}
+
+/**
+ * Finds the running entry a planned server keeps.
  *
  * @param entries - Applied servers by name.
- * @param settings - The server's settings in the group just read.
- * @returns The entry of the same name whose settings are equal, or undefined
- * when the server is new or its settings changed.
+ * @param server - The server's plan from the group just read.
+ * @returns The entry of the same name and origin whose session opens equal
+ * settings, or undefined when the server is new, changed, switched off, or
+ * unable to start.
  */
 function findUnchangedEntry(
   entries: ReadonlyMap<string, ServerEntry>,
-  settings: McpServerSettings
+  server: ServerPlan
 ): ServerEntry | undefined {
-  const entry = entries.get(settings.name)
-  return entry !== undefined && isDeepStrictEqual(entry.settings, settings)
+  const entry = entries.get(server.name)
+  return entry !== undefined &&
+    entry.isBuiltIn === server.isBuiltIn &&
+    entry.run.status === "running" &&
+    server.run.status === "start" &&
+    isDeepStrictEqual(entry.run.settings, server.run.settings)
     ? entry
     : undefined
+}
+
+/**
+ * Finds why a running server's session is stopped by an apply.
+ *
+ * @param entry - The running server.
+ * @param server - Its plan from the group just read, if the group names
+ * it.
+ * @returns `removed` when the group no longer names it, or an added server
+ * took the built-in server's name; `switched-off` when the group switches
+ * it off; `changed` otherwise.
+ */
+function findStopReason(
+  entry: ServerEntry,
+  server: ServerPlan | undefined
+): StopReason {
+  if (server === undefined || server.isBuiltIn !== entry.isBuiltIn)
+    return "removed"
+  return server.run.status === "off" ? "switched-off" : "changed"
+}
+
+/**
+ * Builds the state the server list reports for what a server does now.
+ *
+ * @param run - What it does now.
+ * @returns Its session's reported state, `off`, or `failed` with why the
+ * built-in server cannot start.
+ */
+function buildReportedState(run: ServerRun): McpServerState {
+  switch (run.status) {
+    case "running":
+      return run.session.reportedState
+    case "off":
+      return OFF_STATE
+    case "unusable":
+      return Object.freeze({ status: "failed", reason: run.reason })
+  }
 }
 
 /**

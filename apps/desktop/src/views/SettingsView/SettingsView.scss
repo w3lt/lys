@@ -1406,9 +1406,18 @@
   );
 }
 
+/* The summary button and the switch share the row; the switch stays out of the button. */
+.settings-view__mcp-row-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-right: 10px;
+}
+
 .settings-view__mcp-toggle {
   display: grid;
-  width: 100%;
+  min-width: 0;
+  flex: 1;
   min-height: 44px;
   align-items: center;
   gap: 12px;
@@ -1469,6 +1478,12 @@
   background: var(--app-status-danger);
 }
 
+/* A switched-off server keeps its place but loses its light. */
+.settings-view__mcp-dot[data-condition="off"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--app-border-strong);
+}
+
 .settings-view__mcp-lines {
   display: flex;
   min-width: 0;
@@ -1492,6 +1507,20 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--app-text-strong);
+}
+
+/* Lys ships the server: a plain tag, so the transport tag keeps its colour. */
+.settings-view__mcp-built-in-tag {
+  flex: none;
+  padding: 2px 7px;
+  border: 1px solid var(--app-border-strong);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
 }
 
 /* stdio is violet and http is cyan; the tag's word says which. */
@@ -1531,6 +1560,11 @@
 .settings-view__mcp-state-tag[data-condition="failed"] {
   border-color: var(--app-border-danger);
   color: var(--app-text-danger);
+}
+
+.settings-view__mcp-state-tag[data-condition="off"] {
+  border-color: var(--app-border-strong);
+  color: var(--app-text-muted);
 }
 
 /* The command or URL is what the server runs or reaches, so it reads as text to check. */
@@ -2652,7 +2686,8 @@ legend.settings-view__mcp-field-label {
 }
 
 .settings-view__secret-card,
-.settings-view__location-card {
+.settings-view__location-card,
+.settings-view__email-card {
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -2665,7 +2700,8 @@ legend.settings-view__mcp-field-label {
 .settings-view__secret-card-header,
 .settings-view__secret-label-line,
 .settings-view__secret-footer,
-.settings-view__location-footer {
+.settings-view__location-footer,
+.settings-view__email-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2735,7 +2771,8 @@ legend.settings-view__mcp-field-label {
 }
 
 .settings-view__secret-status,
-.settings-view__location-status {
+.settings-view__location-status,
+.settings-view__email-status {
   margin: 0;
   color: var(--app-text-muted);
   font-family: var(--font-mono);
@@ -2773,7 +2810,8 @@ legend.settings-view__mcp-field-label {
   }
 }
 
-.settings-view__location-field-error {
+.settings-view__location-field-error,
+.settings-view__email-field-error {
   margin: 0;
   color: var(--app-text-danger);
   font-family: var(--font-mono);
@@ -2781,10 +2819,96 @@ legend.settings-view__mcp-field-label {
   line-height: 1.45;
 }
 
-.settings-view__secret-actions {
+.settings-view__secret-actions,
+.settings-view__email-actions {
   display: flex;
   flex: none;
   gap: 6px;
+}
+
+/* Email account */
+
+/* The fields are a fieldset, so a running check disables them all at once. */
+.settings-view__email-fields {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.settings-view__email-fields:disabled {
+  opacity: 0.7;
+}
+
+.settings-view__email-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 6px;
+
+  label {
+    font-size: 12px;
+  }
+}
+
+.settings-view__email-field-note {
+  margin: 0;
+  color: var(--app-text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* IMAP beside SMTP where the card is wide enough; each is its own group. */
+.settings-view__email-servers {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.settings-view__email-server {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  margin: 0;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 8px;
+
+  legend {
+    padding: 0 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--app-text-muted);
+  }
+}
+
+.settings-view__email-security {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  > span {
+    font-size: 12px;
+  }
+}
+
+.settings-view__email-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-view__email-switch-label {
+  font-size: 13px;
+  color: var(--app-text);
 }
 
 /* Providers */

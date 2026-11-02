@@ -1,7 +1,9 @@
 import {
   mcpSettingsSchema,
+  type BuiltInMcpServerName,
   type McpServerSettings,
-  type McpSettings
+  type McpSettings,
+  type McpSettingsCandidate
 } from "@lys/share"
 import type { StoreApi } from "zustand"
 
@@ -22,24 +24,25 @@ export type McpSettingsSaveState =
     }
 
 /**
- * Outcome of one save request: `saved` once the file holds the servers,
- * `failed` when the save failed, and `busy` when another save of the servers
+ * Outcome of one save request: `saved` once the file holds the group,
+ * `failed` when the save failed, and `busy` when another save of the group
  * was still running, so nothing was saved.
  */
 export type McpSettingsSaveOutcome = "saved" | "failed" | "busy"
 
-/** MCP server settings state and its command. */
+/** MCP server settings state and its commands. */
 export type McpSettingsSlice = {
   /** Latest save outcome, retained across pane unmounts. */
   readonly mcpSettingsSave: McpSettingsSaveState
   /**
-   * Saves the whole list of MCP servers, replacing the saved one.
+   * Saves the whole list of added MCP servers, replacing the saved one and
+   * keeping the switches of the servers Lys ships as they are.
    * @param servers - Servers in list order, each one validated by the shared
    * server schema, each name once, at most the shared server count.
    * @returns `saved` after the settings file holds the new list and the
    * store does too, `failed` when the save failed or the list breaks a rule
    * of the whole group, such as its size, or `busy` without saving while
-   * another save of the servers runs. It never rejects.
+   * another save of the group runs. It never rejects.
    * @remarks Saving does not apply the servers: the backend reads the group
    * when it starts or when the desktop asks it to apply the group again. A
    * list the group's rules refuse is never written, and the failure names
@@ -47,6 +50,21 @@ export type McpSettingsSlice = {
    */
   readonly saveMcpServers: (
     servers: readonly McpServerSettings[]
+  ) => Promise<McpSettingsSaveOutcome>
+  /**
+   * Saves the switch of one MCP server Lys ships, keeping the added servers
+   * as they are.
+   * @param serverName - Name of the built-in server.
+   * @param isOn - Whether the backend starts the server.
+   * @returns `saved` after the settings file holds the switch and the store
+   * does too, `failed` when the save failed, or `busy` without saving while
+   * another save of the group runs. It never rejects.
+   * @remarks Saving does not apply the switch: the backend reads the group
+   * when it starts or when the desktop asks it to apply the group again.
+   */
+  readonly saveBuiltInMcpServerSwitch: (
+    serverName: BuiltInMcpServerName,
+    isOn: boolean
   ) => Promise<McpSettingsSaveOutcome>
 }
 
@@ -110,15 +128,15 @@ export function createMcpSettingsSlice(
   dependencies: McpSettingsDependencies
 ): McpSettingsSlice {
   /**
-   * Implements {@link McpSettingsSlice.saveMcpServers}.
-   * @param servers - Servers to save.
+   * Checks a candidate group with the shared rules and saves it.
+   * @param candidate - The group as the shared `mcp` group schema reads it.
    * @returns The save outcome.
    */
-  async function saveMcpServers(
-    servers: readonly McpServerSettings[]
+  async function saveMcpGroup(
+    candidate: McpSettingsCandidate
   ): Promise<McpSettingsSaveOutcome> {
     if (get().mcpSettingsSave.status === "saving") return "busy"
-    const parsed = mcpSettingsSchema.safeParse({ servers })
+    const parsed = mcpSettingsSchema.safeParse(candidate)
     if (!parsed.success) {
       set({
         mcpSettingsSave: buildRefusedSave(parsed.error.issues[0]?.message)
@@ -140,5 +158,37 @@ export function createMcpSettingsSlice(
     return "saved"
   }
 
-  return { mcpSettingsSave: IDLE_SAVE, saveMcpServers }
+  /**
+   * Implements {@link McpSettingsSlice.saveMcpServers}.
+   * @param servers - Servers to save.
+   * @returns The save outcome.
+   */
+  function saveMcpServers(
+    servers: readonly McpServerSettings[]
+  ): Promise<McpSettingsSaveOutcome> {
+    return saveMcpGroup({ servers, builtIn: get().settings.mcp.builtIn })
+  }
+
+  /**
+   * Implements {@link McpSettingsSlice.saveBuiltInMcpServerSwitch}.
+   * @param serverName - Name of the built-in server.
+   * @param isOn - Whether the backend starts it.
+   * @returns The save outcome.
+   */
+  function saveBuiltInMcpServerSwitch(
+    serverName: BuiltInMcpServerName,
+    isOn: boolean
+  ): Promise<McpSettingsSaveOutcome> {
+    const { servers, builtIn } = get().settings.mcp
+    return saveMcpGroup({
+      servers,
+      builtIn: { ...builtIn, [serverName]: { enabled: isOn } }
+    })
+  }
+
+  return {
+    mcpSettingsSave: IDLE_SAVE,
+    saveMcpServers,
+    saveBuiltInMcpServerSwitch
+  }
 }

@@ -78,8 +78,8 @@ type Stream = Box<dyn AsyncStream>;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ImapFailure {
     /// The server refused the command (`NO` or `BAD`): its response code
-    /// and text as the server wrote them, a longer text than
-    /// [`REFUSAL_TEXT_LIMIT`] characters cut there with an ellipsis.
+    /// and text as the server wrote them, a longer text than 500
+    /// characters cut there with an ellipsis.
     Refused(String),
     /// The connection ended, answered something unreadable, or timed out.
     Connection(ConnectionFailure),

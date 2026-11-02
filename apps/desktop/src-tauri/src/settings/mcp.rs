@@ -41,10 +41,13 @@ use internationalized_host::is_accepted_host;
 /// `MAXIMUM_MCP_SERVER_COUNT` in `@lys/share`.
 const SERVER_MAX_COUNT: usize = 16;
 
-/// Most bytes the group may take, inclusive: the UTF-8 bytes of the group
-/// written as compact JSON. Matches `MAXIMUM_MCP_SETTINGS_BYTES` in
-/// `@lys/share`, half of the settings file the backend reads, so the group,
-/// the indentation this host writes, and the other groups fit in it.
+/// Most bytes the servers of the group may take, inclusive: the UTF-8 bytes
+/// of the group written as compact JSON with every list, but without the
+/// switches, each server's `enabled` field and the `builtIn` object, so that
+/// a group written before the switches existed measures as it did then.
+/// Matches `MAXIMUM_MCP_SETTINGS_BYTES` in `@lys/share`, half of the settings
+/// file the backend reads, so the group, its switches, the indentation this
+/// host writes, and the other groups fit in it.
 const SETTINGS_MAX_BYTES: usize = 512 * 1024;
 
 /// Most characters a server name may have, inclusive. Matches
@@ -127,8 +130,8 @@ const SERVER_SHAPE_ERROR: &str = "an MCP server must be an object whose transpor
 /// missing `builtIn` object means every server Lys ships is off. The group,
 /// the list, and the object may not be `null`, and unknown fields are
 /// rejected. It holds at most 16 servers, each name once, in the order
-/// Settings lists them, which take at most 512 KiB together with the
-/// switches as compact JSON.
+/// Settings lists them, which take at most 512 KiB together as compact JSON,
+/// not counting the switches.
 pub struct McpSettings {
     /// Servers in list order.
     servers: Vec<McpServer>,
@@ -145,8 +148,8 @@ impl<'de> Deserialize<'de> for McpSettings {
     ///
     /// Returns the deserializer's error when the input is not an object with
     /// only a `servers` list and a `builtIn` object, a server or a switch
-    /// breaks a rule, or the group holds more than 16 servers or two with one
-    /// name.
+    /// breaks a rule, the group holds more than 16 servers or two with one
+    /// name, or the servers take more than 512 KiB without their switches.
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -178,8 +181,8 @@ impl TryFrom<StoredMcpSettings> for McpSettings {
     /// # Errors
     ///
     /// Returns a message without any value when there are more than 16
-    /// servers, two share a name, or the group takes more than 512 KiB as
-    /// compact JSON.
+    /// servers, two share a name, or the servers take more than 512 KiB as
+    /// compact JSON without their switches.
     fn try_from(stored: StoredMcpSettings) -> Result<Self, Self::Error> {
         if stored.servers.len() > SERVER_MAX_COUNT {
             return Err("the mcp group may hold at most 16 servers");
@@ -200,11 +203,29 @@ impl TryFrom<StoredMcpSettings> for McpSettings {
 }
 
 impl McpSettings {
-    /// Reports whether the group takes at most [`SETTINGS_MAX_BYTES`] as
-    /// compact JSON, as it is written with every list and switch filled in.
+    /// Reports whether the servers take at most [`SETTINGS_MAX_BYTES`]: the
+    /// group as compact JSON with every list filled in, but without the
+    /// switches.
     fn is_within_size_limit(&self) -> bool {
-        serde_json::to_vec(self).is_ok_and(|bytes| bytes.len() <= SETTINGS_MAX_BYTES)
+        calculate_servers_bytes_without_switches(&self.servers)
+            .is_some_and(|bytes| bytes <= SETTINGS_MAX_BYTES)
     }
+}
+
+/// Calculates the bytes [`SETTINGS_MAX_BYTES`] counts: `{"servers":[…]}` as
+/// compact JSON with every list filled in, without each server's `enabled`
+/// field, as `mcpSettingsSchema` in `@lys/share` counts them.
+///
+/// Returns `None` when the servers cannot be written as JSON.
+fn calculate_servers_bytes_without_switches(servers: &[McpServer]) -> Option<usize> {
+    let mut written_servers = serde_json::to_value(servers).ok()?;
+    for written_server in written_servers.as_array_mut()? {
+        written_server.as_object_mut()?.remove("enabled");
+    }
+
+    serde_json::to_vec(&serde_json::json!({ "servers": written_servers }))
+        .ok()
+        .map(|bytes| bytes.len())
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -823,11 +844,12 @@ mod tests {
         serde_json::to_vec(value).expect("serialize").len()
     }
 
-    /// Returns an `mcp` group that takes exactly `bytes` as compact JSON with
-    /// every switch written: the most stdio servers, each with the most
-    /// one-character arguments and the most variables, whose values take the
-    /// remaining bytes in list order.
-    fn build_group_of_bytes(bytes: usize) -> Value {
+    /// Returns an `mcp` group as the host wrote it before the switches
+    /// existed, every list written but no `enabled` field and no `builtIn`
+    /// object, that takes exactly `bytes` as compact JSON: the most stdio
+    /// servers, each with the most one-character arguments and the most
+    /// variables, whose values take the remaining bytes in list order.
+    fn build_unswitched_group_of_bytes(bytes: usize) -> Value {
         let mut servers: Vec<Value> = (0..SERVER_MAX_COUNT)
             .map(|server_index| {
                 let environment: Vec<Value> = (0..ENVIRONMENT_VARIABLE_MAX_COUNT)
@@ -838,15 +860,11 @@ mod tests {
                     "transport": "stdio",
                     "command": "c",
                     "arguments": vec!["a"; COMMAND_ARGUMENT_MAX_COUNT],
-                    "environment": environment,
-                    "enabled": true
+                    "environment": environment
                 })
             })
             .collect();
-        let mut remaining = bytes
-            - calculate_compact_json_bytes(
-                &json!({ "servers": servers, "builtIn": get_built_in_off() }),
-            );
+        let mut remaining = bytes - calculate_compact_json_bytes(&json!({ "servers": servers }));
         for server in &mut servers {
             for variable in server["environment"].as_array_mut().expect("variables") {
                 let length = remaining.min(ENVIRONMENT_VALUE_MAX_LENGTH);
@@ -855,7 +873,19 @@ mod tests {
             }
         }
 
-        json!({ "servers": servers, "builtIn": get_built_in_off() })
+        json!({ "servers": servers })
+    }
+
+    /// Returns `group` with every switch written, as the host writes it:
+    /// `server_switch` on each server and every server Lys ships off.
+    fn build_switched_group(group: &Value, server_switch: bool) -> Value {
+        let mut switched_group = group.clone();
+        for server in switched_group["servers"].as_array_mut().expect("servers") {
+            server["enabled"] = json!(server_switch);
+        }
+        switched_group["builtIn"] = get_built_in_off();
+
+        switched_group
     }
 
     /// Groups that the host and `mcpSettingsSchema` in `@lys/share` must judge
@@ -1021,21 +1051,46 @@ mod tests {
     }
 
     #[test]
-    fn accepts_a_group_of_512_kib_and_rejects_one_byte_more() {
-        let group = build_group_of_bytes(SETTINGS_MAX_BYTES);
-        let too_large_group = build_group_of_bytes(SETTINGS_MAX_BYTES + 1);
+    fn accepts_a_group_written_before_the_switches_of_512_kib_and_rejects_one_byte_more() {
+        let group = build_unswitched_group_of_bytes(SETTINGS_MAX_BYTES);
+        let too_large_group = build_unswitched_group_of_bytes(SETTINGS_MAX_BYTES + 1);
 
         let settings = parse_mcp_settings(group.clone()).expect("a group at the limit");
         let failure = parse_mcp_settings(too_large_group).expect_err("a group past the limit");
 
         assert_eq!(calculate_compact_json_bytes(&group), 512 * 1024);
+        assert_eq!(
+            serde_json::to_value(&settings).expect("serialize"),
+            build_switched_group(&group, true)
+        );
+        assert!(failure.to_string().contains("512 KiB"), "{failure}");
+    }
+
+    #[test]
+    fn leaves_every_switch_out_of_the_512_kib_and_rejects_one_byte_more() {
+        let group =
+            build_switched_group(&build_unswitched_group_of_bytes(SETTINGS_MAX_BYTES), false);
+        let too_large_group = build_switched_group(
+            &build_unswitched_group_of_bytes(SETTINGS_MAX_BYTES + 1),
+            false,
+        );
+        let switch_bytes = SERVER_MAX_COUNT * r#","enabled":false"#.len()
+            + r#","builtIn":{"email":{"enabled":false}}"#.len();
+
+        let settings = parse_mcp_settings(group.clone()).expect("a group at the limit");
+        let failure = parse_mcp_settings(too_large_group).expect_err("a group past the limit");
+
+        assert_eq!(
+            calculate_compact_json_bytes(&group),
+            512 * 1024 + switch_bytes
+        );
         assert_eq!(serde_json::to_value(&settings).expect("serialize"), group);
         assert!(failure.to_string().contains("512 KiB"), "{failure}");
     }
 
     #[test]
     fn counts_the_group_in_utf8_bytes_not_in_characters() {
-        let mut group = build_group_of_bytes(SETTINGS_MAX_BYTES);
+        let mut group = build_unswitched_group_of_bytes(SETTINGS_MAX_BYTES);
         group["servers"][0]["environment"][0]["value"] =
             json!("é".repeat(ENVIRONMENT_VALUE_MAX_LENGTH / 2 + 1));
         let characters = group.to_string().chars().count();

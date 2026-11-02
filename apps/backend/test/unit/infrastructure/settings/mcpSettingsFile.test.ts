@@ -156,7 +156,10 @@ function buildLargestSettingsText(mcp: unknown): string {
   return `${JSON.stringify(settings, null, 2)}\n`
 }
 
-/** One stdio server of {@link buildMcpGroupOfBytes}, with every list written. */
+/**
+ * One stdio server of {@link buildUnswitchedMcpGroupOfBytes}, with every
+ * list written and no switch.
+ */
 type FilledStdioServer = {
   /** Server name, distinct in the group. */
   name: string
@@ -168,30 +171,45 @@ type FilledStdioServer = {
   arguments: string[]
   /** The most variables; the builder fills their values to size. */
   environment: { name: string; value: string }[]
-  /** Always on, as the desktop writes an unswitched server. */
-  enabled: true
 }
 
-/** The group {@link buildMcpGroupOfBytes} builds, with every switch written. */
-type FilledMcpGroup = {
+/**
+ * The group {@link buildUnswitchedMcpGroupOfBytes} builds, as the desktop
+ * host wrote it before the switches existed: every list written, but no
+ * `enabled` field and no `builtIn` object.
+ */
+type UnswitchedMcpGroup = {
   /** The most servers. */
   servers: FilledStdioServer[]
+}
+
+/** One server of {@link SwitchedMcpGroup}, with its switch written. */
+type SwitchedStdioServer = FilledStdioServer & {
+  /** Whether the server is switched on. */
+  enabled: boolean
+}
+
+/** The group {@link buildSwitchedMcpGroup} builds, with every switch written. */
+type SwitchedMcpGroup = {
+  /** The servers of the unswitched group, each with its switch. */
+  servers: SwitchedStdioServer[]
   /** Every server Lys ships off. */
   builtIn: typeof BUILT_IN_OFF
 }
 
 /**
- * Builds an `mcp` group that takes exactly a number of bytes as compact
- * JSON with every switch written: the most stdio servers, each with the
- * most one-character arguments and the most environment variables, whose
- * values take the remaining bytes in list order. Its many short entries
- * make the host's indentation add as much as a group of that size can get.
+ * Builds an `mcp` group as the desktop host wrote it before the switches
+ * existed, with every list but no switch, that takes exactly a number of
+ * bytes as compact JSON: the most stdio servers, each with the most
+ * one-character arguments and the most environment variables, whose values
+ * take the remaining bytes in list order. Its many short entries make the
+ * host's indentation add as much as a group of that size can get.
  *
  * @param bytes - UTF-8 bytes of the group's compact JSON; at least the bytes
  * of the group with empty values, at most those with full values.
  * @returns The group, which a new call builds anew.
  */
-function buildMcpGroupOfBytes(bytes: number): FilledMcpGroup {
+function buildUnswitchedMcpGroupOfBytes(bytes: number): UnswitchedMcpGroup {
   const servers = Array.from(
     { length: MAXIMUM_MCP_SERVER_COUNT },
     (_, serverIndex): FilledStdioServer => ({
@@ -205,11 +223,10 @@ function buildMcpGroupOfBytes(bytes: number): FilledMcpGroup {
       environment: Array.from(
         { length: MAXIMUM_MCP_ENVIRONMENT_VARIABLE_COUNT },
         (_, variableIndex) => ({ name: `V${variableIndex}`, value: "" })
-      ),
-      enabled: true
+      )
     })
   )
-  const group: FilledMcpGroup = { servers, builtIn: BUILT_IN_OFF }
+  const group: UnswitchedMcpGroup = { servers }
   let remaining = bytes - Buffer.byteLength(JSON.stringify(group))
   for (const variable of servers.flatMap((server) => server.environment)) {
     const length = Math.min(remaining, MAXIMUM_MCP_ENVIRONMENT_VALUE_LENGTH)
@@ -217,6 +234,24 @@ function buildMcpGroupOfBytes(bytes: number): FilledMcpGroup {
     remaining -= length
   }
   return group
+}
+
+/**
+ * Builds a group with every switch written, as the desktop host writes it:
+ * each server switched as `enabled` says, and every server Lys ships off.
+ *
+ * @param group - Group whose servers get their switch; it is not changed.
+ * @param enabled - Switch of every server.
+ * @returns The switched group, whose servers share their lists with `group`.
+ */
+function buildSwitchedMcpGroup(
+  group: UnswitchedMcpGroup,
+  enabled: boolean
+): SwitchedMcpGroup {
+  return {
+    servers: group.servers.map((server) => ({ ...server, enabled })),
+    builtIn: BUILT_IN_OFF
+  }
 }
 
 /** Problem of a group past {@link MAXIMUM_MCP_SETTINGS_BYTES}. */
@@ -699,13 +734,16 @@ describe("readMcpSettings", () => {
     })
   })
 
-  it("reads a group of exactly the MCP size limit in a file the host writes with its other groups at their largest", async () => {
-    const group = buildMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES)
+  it("reads a group whose servers take exactly the MCP size limit without their switches, with every switch written, in a file the host writes with its other groups at their largest", async () => {
+    const unswitchedGroup = buildUnswitchedMcpGroupOfBytes(
+      MAXIMUM_MCP_SETTINGS_BYTES
+    )
+    const group = buildSwitchedMcpGroup(unswitchedGroup, false)
     const text = buildLargestSettingsText(group)
 
     const read = await readMcpSettings(await writeSettingsFile(text))
 
-    expect(Buffer.byteLength(JSON.stringify(group))).toBe(
+    expect(Buffer.byteLength(JSON.stringify(unswitchedGroup))).toBe(
       MAXIMUM_MCP_SETTINGS_BYTES
     )
     expect(Buffer.byteLength(text)).toBeLessThanOrEqual(
@@ -714,18 +752,48 @@ describe("readMcpSettings", () => {
     expect(read).toEqual({ status: "read", settings: group })
   })
 
-  it("reports a group one byte over the MCP size limit as invalid", async () => {
-    const group = buildMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES + 1)
+  it("reads a group written before the switches existed of exactly the MCP size limit, filling in every switch", async () => {
+    const group = buildUnswitchedMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES)
 
     const read = await readMcpSettings(
       await writeSettingsFile(buildSettingsText(group))
     )
 
-    expect(read).toEqual({ status: "invalid", problems: [GROUP_SIZE_PROBLEM] })
+    expect(read).toEqual({
+      status: "read",
+      settings: buildSwitchedMcpGroup(group, true)
+    })
   })
 
+  it.each([
+    [
+      "written before the switches existed",
+      () => buildUnswitchedMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES + 1)
+    ],
+    [
+      "with every switch written",
+      () =>
+        buildSwitchedMcpGroup(
+          buildUnswitchedMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES + 1),
+          false
+        )
+    ]
+  ])(
+    "reports a group %s one byte over the MCP size limit as invalid",
+    async (_label, buildGroup) => {
+      const read = await readMcpSettings(
+        await writeSettingsFile(buildSettingsText(buildGroup()))
+      )
+
+      expect(read).toEqual({
+        status: "invalid",
+        problems: [GROUP_SIZE_PROBLEM]
+      })
+    }
+  )
+
   it("counts the group's size in UTF-8 bytes, not in characters", async () => {
-    const group = buildMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES)
+    const group = buildUnswitchedMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES)
     const [firstVariable] = group.servers[0]?.environment ?? []
     if (firstVariable === undefined) throw new Error("Expected a variable")
     firstVariable.value = "é".repeat(

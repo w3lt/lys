@@ -17,13 +17,17 @@ const BYTES_PER_KIBIBYTE = 1024
 export const MAXIMUM_MCP_SERVER_COUNT = 16
 
 /**
- * Most bytes the `mcp` settings group may take, inclusive: the UTF-8 bytes
- * of the group written as compact JSON, with every omitted list filled in.
+ * Most bytes the servers of the `mcp` settings group may take, inclusive:
+ * the UTF-8 bytes of the group written as compact JSON with every omitted
+ * list filled in, but without the switches, each server's `enabled` field
+ * and the `builtIn` object.
  *
  * @remarks Half of {@link MAXIMUM_SETTINGS_FILE_BYTES}, so that the group,
- * the indentation the desktop host adds when it writes the file, and the
- * other groups fit in the file the backend reads. The per-field limits
- * alone allow a group of several mebibytes.
+ * its switches, the indentation the desktop host adds when it writes the
+ * file, and the other groups fit in the file the backend reads. The
+ * switches take a few hundred bytes at most and are left out so that a
+ * group written before they existed measures as it did then. The per-field
+ * limits alone allow a group of several mebibytes.
  */
 export const MAXIMUM_MCP_SETTINGS_BYTES = MAXIMUM_SETTINGS_FILE_BYTES / 2
 
@@ -487,14 +491,33 @@ export type McpServerSettings = z.infer<typeof mcpServerSettingsSchema>
 export type McpServerSettingsCandidate = z.input<typeof mcpServerSettingsSchema>
 
 /**
- * Calculates the bytes a settings group takes as compact JSON.
+ * Leaves each server's switch out of the JSON text that
+ * {@link calculateServersBytesWithoutSwitches} measures.
  *
- * @param group - Parsed group, free of lone surrogates.
- * @returns The UTF-8 bytes of its JSON text without indentation, which the
- * desktop host measures alike.
+ * @param key - Name of the property being written, or index of the item.
+ * @param value - Value being written.
+ * @returns `undefined`, which leaves the property out, for an `enabled`
+ * property, the only property of that name a server holds; the value
+ * otherwise.
  */
-function calculateCompactJsonBytes(group: unknown): number {
-  return calculateUtf8ByteLength(JSON.stringify(group))
+function omitServerSwitch(key: string, value: unknown): unknown {
+  return key === "enabled" ? undefined : value
+}
+
+/**
+ * Calculates the bytes {@link MAXIMUM_MCP_SETTINGS_BYTES} counts: the
+ * group's servers as `{"servers":[…]}` in compact JSON, without each
+ * server's `enabled` switch.
+ *
+ * @param servers - Parsed servers, every list filled in, free of lone
+ * surrogates.
+ * @returns The UTF-8 bytes of the JSON text, which the desktop host
+ * measures alike.
+ */
+function calculateServersBytesWithoutSwitches(
+  servers: readonly McpServerSettings[]
+): number {
+  return calculateUtf8ByteLength(JSON.stringify({ servers }, omitServerSwitch))
 }
 
 /**
@@ -531,8 +554,9 @@ export type BuiltInMcpSettings = z.infer<typeof builtInMcpSettingsSchema>
 /**
  * Validates the `mcp` settings group: the MCP servers the person added,
  * each name once, in the order Settings lists them, taking at most
- * {@link MAXIMUM_MCP_SETTINGS_BYTES} together with the switches of the
- * servers Lys ships. The output is frozen; unknown fields are rejected.
+ * {@link MAXIMUM_MCP_SETTINGS_BYTES} together, not counting their switches,
+ * and the switches of the servers Lys ships. The output is frozen; unknown
+ * fields are rejected.
  *
  * @remarks An omitted list means no added server, and omitted switches
  * mean every built-in server off. The desktop host is the only writer of
@@ -554,7 +578,9 @@ export const mcpSettingsSchema = z
     builtIn: builtInMcpSettingsSchema.prefault({})
   })
   .refine(
-    (group) => calculateCompactJsonBytes(group) <= MAXIMUM_MCP_SETTINGS_BYTES,
+    (group) =>
+      calculateServersBytesWithoutSwitches(group.servers) <=
+      MAXIMUM_MCP_SETTINGS_BYTES,
     `The MCP servers take at most ${MAXIMUM_MCP_SETTINGS_BYTES / BYTES_PER_KIBIBYTE} KiB of settings together.`
   )
   .readonly()

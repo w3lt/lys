@@ -768,6 +768,42 @@ describe("McpPaneContent", () => {
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, ACCOUNT_CHECK_ROUTE])
   })
 
+  it("shows the refusal of a new check after a failed write, not the write's failure", async () => {
+    startSettingsHost(() => Promise.reject("Disk full"))
+    let checks = 0
+    await startMcpPane({
+      [ACCOUNT_CHECK_ROUTE]: () => {
+        checks += 1
+        return buildJsonResponse(
+          200,
+          checks === 1
+            ? ACCEPTED_ACCOUNT_CHECK
+            : {
+                status: "checked",
+                imap: { status: "accepted" },
+                smtp: { status: "failed", reason: "wrong-password" }
+              }
+        )
+      }
+    })
+    const user = userEvent.setup()
+    const card = await openEmailAccountCard(user)
+    const password = within(card).getByLabelText("Password")
+
+    await user.type(password, "new-app-password{Enter}")
+    await waitForRenderedWork()
+    const afterFailedWrite = within(card).getByRole("status").textContent
+    await user.type(password, "2{Enter}")
+    await waitForRenderedWork()
+
+    expect(afterFailedWrite).toBe(
+      "Lys couldn't write the email account to its settings file."
+    )
+    expect(within(card).getByRole("status")).toHaveTextContent(
+      "IMAP: accepted · SMTP: the user name or password was refused"
+    )
+  })
+
   it("removes the account and its password after confirming, switching the email server off first", async () => {
     const host = startSettingsHost()
     const { backend, useLysStore } = await startMcpPane({

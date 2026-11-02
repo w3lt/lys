@@ -279,6 +279,40 @@ describe("createEmailSettingsSlice", () => {
       expect(store.getState().settings.secrets).toEqual(STORED_SETTINGS.secrets)
     })
 
+    it("forgets a failed write once a new check starts, so a refusal of the new check is the outcome", async () => {
+      startNativeHostFake({
+        load_settings: () => STORED_SETTINGS_DOCUMENT,
+        save_settings: () => Promise.reject("Disk full")
+      })
+      let checks = 0
+      startBackendFake({
+        [ACCOUNT_CHECK_ROUTE]: () => {
+          checks += 1
+          return buildJsonResponse(
+            200,
+            checks === 1 ? ACCEPTED_CHECK : REFUSED_CHECK
+          )
+        }
+      })
+      const store = createEmailStore()
+      await store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+      const afterFailedWrite = store.getState().emailAccountSave
+
+      await expect(
+        store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+      ).resolves.toBe("refused")
+
+      expect(afterFailedWrite).toEqual({
+        status: "failed",
+        error: "Lys couldn't write the email account to its settings file."
+      })
+      expect(store.getState().emailAccountSave).toEqual({ status: "idle" })
+      expect(store.getState().emailAccountCheck).toEqual({
+        status: "checked",
+        outcome: REFUSED_CHECK
+      })
+    })
+
     it("answers busy without checking or writing while another save's check runs", async () => {
       const { host, writes } = startControlledSettingsHost()
       const accountCheck = createControlledRoute()

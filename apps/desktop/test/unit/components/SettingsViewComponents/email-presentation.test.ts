@@ -270,6 +270,38 @@ describe("formatEmailAccountMessage", () => {
     ).toEqual(UNSAVED_LINE)
   })
 
+  it.each([
+    [
+      "a failed save",
+      {
+        saveState: { status: "failed", error: "Lys couldn't write." },
+        checkState: buildChecked(ACCEPTED_CHECK)
+      }
+    ],
+    [
+      "a refusal",
+      {
+        checkState: buildChecked({
+          status: "checked",
+          imap: { status: "accepted" },
+          smtp: { status: "failed", reason: "wrong-password" }
+        })
+      }
+    ]
+  ] as const)(
+    "shows the saved address once the fields are edited back to the saved values after %s",
+    (_label, outcome) => {
+      expect(
+        formatEmailAccountMessage({
+          ...SUBMITTED_INPUT,
+          ...outcome,
+          draftParse: { status: "unchanged" },
+          isEditedSinceSubmit: true
+        })
+      ).toEqual(SAVED_LINE)
+    }
+  )
+
   it("reports that the check could not be asked", () => {
     expect(
       formatEmailAccountMessage({

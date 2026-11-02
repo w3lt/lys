@@ -813,6 +813,52 @@ describe("McpPaneContent", () => {
     expect(useLysStore.getState().settings.secrets.emailPassword).toBeNull()
   })
 
+  it("disables the removal while the switch is written, and keeps the account, saying why, when the email server cannot be switched off", async () => {
+    const switchWrite = createControlledPromise<null>()
+    const host = startSettingsHost(() => switchWrite.promise)
+    const { backend, useLysStore } = await startMcpPane()
+    const user = userEvent.setup()
+    useLysStore.setState({ settings: EMAIL_ON_SETTINGS })
+    await waitForRenderedWork()
+    const card = await openEmailAccountCard(user)
+
+    await user.click(
+      within(card).getByRole("button", { name: "Remove account" })
+    )
+    await user.click(
+      within(card).getByRole("button", { name: "Remove the email account" })
+    )
+    await waitForRenderedWork()
+
+    expect(
+      within(card).getByRole("button", { name: "Remove the email account" })
+    ).toBeDisabled()
+    expect(
+      within(card).getByRole("button", { name: "Keep the email account" })
+    ).toBeDisabled()
+    expect(within(card).getByRole("status")).toHaveTextContent("Saving…")
+    switchWrite.reject("Disk full")
+    await waitForRenderedWork()
+
+    expect(listWrittenDocuments(host.commands)).toEqual([
+      STORED_SETTINGS_DOCUMENT
+    ])
+    expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE])
+    expect(within(card).getByRole("status")).toHaveTextContent(
+      "Lys couldn't switch the email server off, so the account wasn't removed."
+    )
+    expect(within(card).getByRole("textbox", { name: "Address" })).toHaveValue(
+      STORED_EMAIL_ACCOUNT.address
+    )
+    expect(
+      within(card).getByRole("button", { name: "Remove account" })
+    ).toHaveFocus()
+    expect(getServerSwitch("email")).toBeChecked()
+    expect(useLysStore.getState().settings.email.account).toEqual(
+      STORED_EMAIL_ACCOUNT
+    )
+  })
+
   it("shows one server's state, tools, approval, and configuration at a time, never a secret", async () => {
     startSettingsHost()
     await startMcpPane()

@@ -1,12 +1,13 @@
 import { checkEmailAccountApiResponseSchema } from "@lys/protocol"
 import { emailPasswordSchema } from "@lys/share"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createStore } from "zustand/vanilla"
 import { sendEmailAccountCheck } from "@/lib/apis/http/email"
 import {
   createEmailSettingsSlice,
   type EmailSettingsSlice
 } from "@/lib/store/email-settings"
+import type { McpSettingsSaveOutcome } from "@/lib/store/mcp-settings"
 import type { LysSettings } from "@/lib/store/settings"
 import { createSettingsGroupSaves } from "@/lib/store/settings-group-saves"
 import {
@@ -24,6 +25,7 @@ import {
 } from "../../support/settlement"
 import {
   STORED_EMAIL_ACCOUNT,
+  STORED_MCP_SETTINGS,
   STORED_SETTINGS,
   STORED_SETTINGS_DOCUMENT
 } from "../../support/settingsFixtures"
@@ -63,17 +65,40 @@ const UNAVAILABLE_CHECK = checkEmailAccountApiResponseSchema.parse({
   reason: "server-missing"
 })
 
+/** Stored settings with the email server switched on. */
+const EMAIL_ON_SETTINGS: LysSettings = Object.freeze({
+  ...STORED_SETTINGS,
+  mcp: { ...STORED_MCP_SETTINGS, builtIn: { email: { enabled: true } } }
+})
+
+/** Why a removal kept the account because the server stayed on. */
+const SWITCH_OFF_FAILURE =
+  "Lys couldn't switch the email server off, so the account wasn't removed."
+
 /**
- * Creates a store holding the stored settings, with a saved account.
+ * Builds a spy for the capability a removal switches the email server off
+ * with.
  *
+ * @param outcome - What saving the switch answers; `saved` by default.
+ * @returns The spy.
+ */
+function createSwitchOffSpy(outcome: McpSettingsSaveOutcome = "saved") {
+  return vi.fn(() => Promise.resolve(outcome))
+}
+
+/**
+ * Creates a store holding a saved account.
+ *
+ * @param settings - Settings the store starts with; the stored settings,
+ * with the email server off, by default.
  * @returns A store owning one email slice, whose saves run through the
  * application's settings-group saves over the native host and whose checks
  * reach the fake backend through the real HTTP wrapper.
  */
-function createEmailStore() {
+function createEmailStore(settings: LysSettings = STORED_SETTINGS) {
   const settingsGroupSaves = createSettingsGroupSaves()
   return createStore<EmailStore>()((set, get) => ({
-    settings: STORED_SETTINGS,
+    settings,
     ...createEmailSettingsSlice(set, get, {
       saveEmailAccountSettings: settingsGroupSaves.saveEmailAccountSettings,
       sendEmailAccountCheck: (body) =>
@@ -285,7 +310,7 @@ describe("createEmailSettingsSlice", () => {
       })
       const store = createEmailStore()
 
-      const removal = store.getState().removeEmailAccount()
+      const removal = store.getState().removeEmailAccount(createSwitchOffSpy())
       await waitForMicrotasks()
       const save = await store
         .getState()
@@ -300,20 +325,22 @@ describe("createEmailSettingsSlice", () => {
   })
 
   describe("removeEmailAccount", () => {
-    it("removes the account and the password in one write and resets the check", async () => {
+    it("removes the account and the password in one write and resets the check, leaving the switch of a server that is off alone", async () => {
       const { host, writes } = startControlledSettingsHost()
       startBackendFake({
         [ACCOUNT_CHECK_ROUTE]: () => buildJsonResponse(200, REFUSED_CHECK)
       })
       const store = createEmailStore()
       await store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+      const switchEmailServerOff = createSwitchOffSpy()
 
-      const removal = store.getState().removeEmailAccount()
+      const removal = store.getState().removeEmailAccount(switchEmailServerOff)
       await waitForMicrotasks()
       const whileWriting = store.getState().emailAccountSave
       writes[0]?.resolve(null)
 
       await expect(removal).resolves.toBe("saved")
+      expect(switchEmailServerOff).not.toHaveBeenCalled()
       expect(whileWriting).toEqual({ status: "saving" })
       expect(store.getState().emailAccountCheck).toEqual({ status: "idle" })
       expect(store.getState().emailAccountSave).toEqual({ status: "saved" })
@@ -340,7 +367,7 @@ describe("createEmailSettingsSlice", () => {
       const { writes } = startControlledSettingsHost()
       const store = createEmailStore()
 
-      const removal = store.getState().removeEmailAccount()
+      const removal = store.getState().removeEmailAccount(createSwitchOffSpy())
       await waitForMicrotasks()
       writes[0]?.reject("EACCES: /Users/someone/.lys/settings.json")
 
@@ -362,14 +389,76 @@ describe("createEmailSettingsSlice", () => {
 
       const save = store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
       await waitForMicrotasks()
-      const removal = await store.getState().removeEmailAccount()
+      const switchEmailServerOff = createSwitchOffSpy()
+      const removal = await store
+        .getState()
+        .removeEmailAccount(switchEmailServerOff)
       await waitForMicrotasks()
       writes[0]?.resolve(null)
       await save
 
       expect(removal).toBe("busy")
+      expect(switchEmailServerOff).not.toHaveBeenCalled()
       expect(listSettingsWrites(host.commands)).toHaveLength(1)
       expect(store.getState().settings.email).toEqual({ account: NEW_ACCOUNT })
     })
+
+    it("switches the email server off first while it is on, saving until the account is removed too", async () => {
+      const { host, writes } = startControlledSettingsHost()
+      const store = createEmailStore(EMAIL_ON_SETTINGS)
+      const switchOff = createControlledPromise<McpSettingsSaveOutcome>()
+      const switchEmailServerOff = vi.fn(() => switchOff.promise)
+
+      const removal = store.getState().removeEmailAccount(switchEmailServerOff)
+      await waitForMicrotasks()
+      const whileSwitching = store.getState().emailAccountSave
+      const writesWhileSwitching = listSettingsWrites(host.commands).length
+      const secondRemoval = await store
+        .getState()
+        .removeEmailAccount(createSwitchOffSpy())
+      const save = await store
+        .getState()
+        .saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+      switchOff.resolve("saved")
+      await waitForMicrotasks()
+      const whileWriting = store.getState().emailAccountSave
+      writes[0]?.resolve(null)
+
+      await expect(removal).resolves.toBe("saved")
+      expect(switchEmailServerOff).toHaveBeenCalledTimes(1)
+      expect(whileSwitching).toEqual({ status: "saving" })
+      expect(writesWhileSwitching).toBe(0)
+      expect(secondRemoval).toBe("busy")
+      expect(save).toBe("busy")
+      expect(whileWriting).toEqual({ status: "saving" })
+      expect(store.getState().emailAccountSave).toEqual({ status: "saved" })
+      expect(store.getState().settings.email).toEqual({ account: null })
+      expect(listSettingsWrites(host.commands)).toHaveLength(1)
+    })
+
+    it.each(["failed", "busy"] as const)(
+      "keeps the account and says why when switching the email server off answers %s, writing nothing",
+      async (outcome) => {
+        const host = startNativeHostFake({
+          load_settings: () => STORED_SETTINGS_DOCUMENT,
+          save_settings: () => null
+        })
+        const store = createEmailStore(EMAIL_ON_SETTINGS)
+
+        await expect(
+          store.getState().removeEmailAccount(createSwitchOffSpy(outcome))
+        ).resolves.toBe("failed")
+
+        expect(store.getState().emailAccountSave).toEqual({
+          status: "failed",
+          error: SWITCH_OFF_FAILURE
+        })
+        expect(store.getState().settings.email).toEqual(STORED_SETTINGS.email)
+        expect(store.getState().settings.secrets).toEqual(
+          STORED_SETTINGS.secrets
+        )
+        expect(listSettingsWrites(host.commands)).toEqual([])
+      }
+    )
   })
 })

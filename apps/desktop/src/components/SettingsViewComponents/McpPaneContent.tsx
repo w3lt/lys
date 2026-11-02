@@ -436,22 +436,21 @@ function McpServerListView({
  * account.
  *
  * @remarks The application store owns the saved account and password, the
- * save, the check, the email server's switch, and the backend's status; the
- * MCP server store owns the switch's save and the sync that applies the
- * group. Saving signs in through the backend first, which the store does;
- * once the account is saved while the email server is on, the backend is
- * asked to apply the group, so the server starts again with the account.
- * Removing switches the email server off first, because the server cannot
- * run without an account, and removes nothing when that save fails.
+ * save, the check, the removal, the email server's switch, and the
+ * backend's status; the MCP server store owns the switch's save and the
+ * sync that applies the group. Saving signs in through the backend first,
+ * which the store does; once the account is saved while the email server
+ * is on, the backend is asked to apply the group, so the server starts
+ * again with the account. The store's removal switches the email server
+ * off first, because the server cannot run without an account, through the
+ * MCP server store's switch save, which has the backend apply it, and
+ * removes nothing when that save fails.
  * @returns The account card.
  */
 function EmailAccountCardView(): ReactElement {
   const savedAccount = useLysStore((state) => state.settings.email.account)
   const savedPassword = useLysStore(
     (state) => state.settings.secrets.emailPassword
-  )
-  const isEmailServerOn = useLysStore(
-    (state) => state.settings.mcp.builtIn.email.enabled
   )
   const saveState = useLysStore((state) => state.emailAccountSave)
   const checkState = useLysStore((state) => state.emailAccountCheck)
@@ -490,17 +489,14 @@ function EmailAccountCardView(): ReactElement {
   }
 
   /**
-   * Switches the email server off when it is on, then removes the account.
+   * Removes the account, switching the email server off first while it is
+   * on.
    *
-   * @returns The removal outcome, or `failed` when the switch could not be
-   * saved, in which case the account stays.
+   * @returns The removal outcome: `failed` when the switch or the removal
+   * could not be saved, in which case the account stays.
    */
-  async function handleRemoveEmailAccount(): Promise<EmailAccountRemovalOutcome> {
-    if (isEmailServerOn) {
-      const outcome = await saveBuiltInMcpServerSwitch("email", false)
-      if (outcome !== "saved") return "failed"
-    }
-    return removeEmailAccount()
+  function handleRemoveEmailAccount(): Promise<EmailAccountRemovalOutcome> {
+    return removeEmailAccount(() => saveBuiltInMcpServerSwitch("email", false))
   }
 
   return (

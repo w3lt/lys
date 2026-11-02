@@ -5,6 +5,7 @@ import type {
 import type { EmailAccount, EmailPassword, EmailSettings } from "@lys/share"
 import type { StoreApi } from "zustand"
 
+import type { McpSettingsSaveOutcome } from "./mcp-settings"
 import type { LysSettings, SecretsSettings } from "./settings"
 
 /** Lifecycle of the latest save or removal of the email account. */
@@ -44,8 +45,9 @@ export type EmailAccountSaveOutcome = "saved" | "refused" | "failed" | "busy"
 
 /**
  * Outcome of one removal: `saved` once the file holds no account and no
- * password, `failed` when the removal failed, and `busy` when another save
- * or removal was still running, so nothing was removed.
+ * password, `failed` when the email server could not be switched off or the
+ * removal failed, so the account stays, and `busy` when another save or
+ * removal was still running, so nothing was removed.
  */
 export type EmailAccountRemovalOutcome = "saved" | "failed" | "busy"
 
@@ -75,14 +77,25 @@ export type EmailSettingsSlice = {
     password: EmailPassword
   ) => Promise<EmailAccountSaveOutcome>
   /**
-   * Removes the saved account and its password together.
+   * Switches the email server off while it is on, then removes the saved
+   * account and its password together.
+   * @param switchEmailServerOff - Saves the email server's switch as off
+   * and has the running backend apply it; called only while the switch is
+   * on, and expected never to reject.
    * @returns `saved` after the settings file holds neither and the store
-   * does too, `failed` when the removal failed, or `busy` without removing
-   * while another save or removal runs. It never rejects.
-   * @remarks A removal resets the check, so an outcome of the removed
-   * account is no longer shown.
+   * does too; `failed` when the switch's save did not answer `saved`, such
+   * as while another save of the MCP group runs, or when the removal
+   * failed, in which case the account stays; or `busy` without switching or
+   * removing while another save or removal runs. It never rejects.
+   * @remarks The email server cannot run without an account, so it is
+   * switched off before the account goes. The save state is `saving` from
+   * the switch's save until the removal settled, so no other save or
+   * removal starts meanwhile. A removal resets the check, so an outcome of
+   * the removed account is no longer shown.
    */
-  readonly removeEmailAccount: () => Promise<EmailAccountRemovalOutcome>
+  readonly removeEmailAccount: (
+    switchEmailServerOff: () => Promise<McpSettingsSaveOutcome>
+  ) => Promise<EmailAccountRemovalOutcome>
 }
 
 /** Narrow application state borrowed by the email slice. */
@@ -120,6 +133,13 @@ const SAVED: EmailAccountSaveState = Object.freeze({ status: "saved" })
 const SAVE_FAILED: EmailAccountSaveState = Object.freeze({
   status: "failed",
   error: "Lys couldn't write the email account to its settings file."
+})
+
+/** Save state after a removal that kept the account, because the email server stayed on. */
+const SWITCH_OFF_FAILED: EmailAccountSaveState = Object.freeze({
+  status: "failed",
+  error:
+    "Lys couldn't switch the email server off, so the account wasn't removed."
 })
 
 /** Check state before any check, or after a removal. */
@@ -261,10 +281,23 @@ export function createEmailSettingsSlice(
     return await saveAccountWithPassword(account, password)
   }
 
-  /** Implements {@link EmailSettingsSlice.removeEmailAccount}. */
-  async function removeEmailAccount(): Promise<EmailAccountRemovalOutcome> {
+  /**
+   * Implements {@link EmailSettingsSlice.removeEmailAccount}.
+   * @param switchEmailServerOff - Saves the email server's switch as off.
+   * @returns The removal outcome.
+   */
+  async function removeEmailAccount(
+    switchEmailServerOff: () => Promise<McpSettingsSaveOutcome>
+  ): Promise<EmailAccountRemovalOutcome> {
     if (isBusy()) return "busy"
-    set({ emailAccountCheck: IDLE_CHECK })
+    set({ emailAccountCheck: IDLE_CHECK, emailAccountSave: SAVING })
+    if (get().settings.mcp.builtIn.email.enabled) {
+      const switchOutcome = await switchEmailServerOff()
+      if (switchOutcome !== "saved") {
+        set({ emailAccountSave: SWITCH_OFF_FAILED })
+        return "failed"
+      }
+    }
     return await saveAccountWithPassword(null, null)
   }
 

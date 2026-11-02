@@ -96,6 +96,11 @@ type EmailTextFieldProps = {
   readonly fieldRef: EmailFieldRef
   /** Proposes new text for the field. */
   readonly onTextChange: (text: string) => void
+  /**
+   * Proposes discarding the card's edit on Escape; omitted while there is no
+   * edit, which leaves Escape its native action.
+   */
+  readonly onDiscardEdit?: () => void
 }
 
 /** Properties accepted by {@link EmailPasswordField}. */
@@ -116,6 +121,11 @@ type EmailPasswordFieldProps = {
   readonly onTextChange: (text: string) => void
   /** Proposes showing or hiding the password. */
   readonly onIsPasswordShownChange: (isPasswordShown: boolean) => void
+  /**
+   * Proposes discarding the card's edit on Escape; omitted while there is no
+   * edit, which leaves Escape its native action.
+   */
+  readonly onDiscardEdit?: () => void
 }
 
 /** Properties accepted by {@link EmailServerFields}. */
@@ -134,6 +144,11 @@ type EmailServerFieldsProps = {
   readonly portRef: EmailFieldRef
   /** Proposes new fields for the server. */
   readonly onServerChange: (server: EmailServerDraft) => void
+  /**
+   * Proposes discarding the card's edit on Escape in the host or port;
+   * omitted while there is no edit, which leaves Escape its native action.
+   */
+  readonly onDiscardEdit?: () => void
 }
 
 /** Properties accepted by {@link EmailAccountFooter}. */
@@ -173,13 +188,34 @@ const NO_PROBLEMS: EmailAccountDraftProblems = Object.freeze({})
 const PASSWORD_PLACEHOLDER = "••••••••"
 
 /**
+ * Handles a key press in one of the card's inputs by proposing to discard
+ * the card's edit when the key is Escape.
+ *
+ * @param event - Key press in an input; an Escape that ends text
+ * composition is ignored.
+ * @param onDiscardEdit - Proposes discarding the card's edit; undefined
+ * while there is no edit, which leaves Escape its native action.
+ */
+function handleFieldKeyDown(
+  event: KeyboardEvent<HTMLInputElement>,
+  onDiscardEdit: (() => void) | undefined
+): void {
+  if (event.key !== "Escape" || event.nativeEvent.isComposing) return
+  if (onDiscardEdit === undefined) return
+
+  event.preventDefault()
+  onDiscardEdit()
+}
+
+/**
  * Presents one labelled text field of the account and, when its text
  * breaks a rule, what to change.
  *
  * @remarks The card owns the text; the field owns no state or effects. The
  * input is described by its problem, when it has one, then by the note
- * when there is one.
- * @param props - Label, identifiers, text, problem, ref, and the proposal.
+ * when there is one. Escape in the input proposes discarding the card's
+ * edit, except an Escape that ends text composition.
+ * @param props - Label, identifiers, text, problem, ref, and the proposals.
  * @returns The field.
  */
 function EmailTextField({
@@ -191,7 +227,8 @@ function EmailTextField({
   autoComplete,
   inputMode,
   fieldRef,
-  onTextChange
+  onTextChange,
+  onDiscardEdit
 }: EmailTextFieldProps): ReactElement {
   const problemId = `${fieldId}-problem`
   const descriptionIds = [
@@ -211,6 +248,7 @@ function EmailTextField({
         id={fieldId}
         inputMode={inputMode}
         onChange={(event) => onTextChange(event.target.value)}
+        onKeyDown={(event) => handleFieldKeyDown(event, onDiscardEdit)}
         ref={fieldRef}
         spellCheck={false}
         type="text"
@@ -232,7 +270,8 @@ function EmailTextField({
  * @remarks The card owns the text and whether the password is shown; the
  * field owns no state or effects. It starts empty; while a password is
  * saved, bullets stand for it and a note says an empty field keeps it. The
- * saved password is never put in the field.
+ * saved password is never put in the field. Escape in the input proposes
+ * discarding the card's edit, except an Escape that ends text composition.
  * @param props - Identifier, text, problem, saved state, shown state, ref,
  * and the proposals.
  * @returns The field.
@@ -245,7 +284,8 @@ function EmailPasswordField({
   isPasswordShown,
   fieldRef,
   onTextChange,
-  onIsPasswordShownChange
+  onIsPasswordShownChange,
+  onDiscardEdit
 }: EmailPasswordFieldProps): ReactElement {
   const problemId = `${fieldId}-problem`
   const noteId = `${fieldId}-note`
@@ -266,6 +306,7 @@ function EmailPasswordField({
           autoComplete="off"
           id={fieldId}
           onChange={(event) => onTextChange(event.target.value)}
+          onKeyDown={(event) => handleFieldKeyDown(event, onDiscardEdit)}
           placeholder={hasSavedPassword ? PASSWORD_PLACEHOLDER : undefined}
           ref={fieldRef}
           spellCheck={false}
@@ -304,9 +345,10 @@ function EmailPasswordField({
  * @remarks The card owns the fields; the group owns no state or effects.
  * It is a group named by its legend, such as `IMAP server`. The security
  * is a single-choice toggle group named Security; pressing the chosen way
- * again proposes nothing.
+ * again proposes nothing. Escape in the host or port proposes discarding
+ * the card's edit.
  * @param props - Side, identifiers, fields, problems, refs, and the
- * proposal.
+ * proposals.
  * @returns The group of fields.
  */
 function EmailServerFields({
@@ -316,7 +358,8 @@ function EmailServerFields({
   problems,
   hostRef,
   portRef,
-  onServerChange
+  onServerChange,
+  onDiscardEdit
 }: EmailServerFieldsProps): ReactElement {
   const securityLabelId = `${fieldIdPrefix}-security`
 
@@ -338,6 +381,7 @@ function EmailServerFields({
         fieldId={`${fieldIdPrefix}-host`}
         fieldRef={hostRef}
         label="Host"
+        onDiscardEdit={onDiscardEdit}
         onTextChange={(host) => onServerChange({ ...server, host })}
         problem={problems[`${side}Host`]}
         text={server.host}
@@ -348,6 +392,7 @@ function EmailServerFields({
         fieldRef={portRef}
         inputMode="numeric"
         label="Port"
+        onDiscardEdit={onDiscardEdit}
         onTextChange={(port) => onServerChange({ ...server, port })}
         problem={problems[`${side}Port`]}
         text={server.port}
@@ -552,10 +597,10 @@ function useEmailFieldHosts() {
  * runs, and the backend runs; Save is disabled while nothing differs, while
  * a save runs, or while the backend is not running, which the status line
  * says. What a tried save found shows until the fields are edited again.
- * Escape in a field discards the edit. A save that succeeded resets the
- * edit unless the person changed the fields while it ran. After a removal
- * succeeds, focus moves to the address field, because Remove leaves. The
- * status line is a polite live region.
+ * Escape in an input discards the edit while there is one. A save that
+ * succeeded resets the edit unless the person changed the fields while it
+ * ran. After a removal succeeds, focus moves to the address field, because
+ * Remove leaves. The status line is a polite live region.
  * @param props - Saved account and password, save and check state, backend
  * status, and the requests.
  * @returns The card.
@@ -582,6 +627,7 @@ export default function EmailAccountCard({
   const statusId = `${cardId}-status`
   const presetId = `${cardId}-preset`
   const draft = editedDraft ?? buildEmailAccountDraft(savedAccount)
+  const isEdited = editedDraft !== null
   const draftParse = parseEmailAccountDraft(draft, savedAccount, savedPassword)
   const problems =
     hasSubmitted && draftParse.status === "invalid"
@@ -664,18 +710,6 @@ export default function EmailAccountCard({
   }
 
   /**
-   * Discards the edit on an Escape that does not end text composition.
-   *
-   * @param event - Key pressed in the form.
-   */
-  function handleFormKeyDown(event: KeyboardEvent<HTMLFormElement>): void {
-    if (event.key !== "Escape" || event.nativeEvent.isComposing) return
-    if (editedDraft === null) return
-    event.preventDefault()
-    resetEdit()
-  }
-
-  /**
    * Confirms the removal, or ends the confirmation keeping the account,
    * after which Remove account takes focus back.
    *
@@ -718,7 +752,6 @@ export default function EmailAccountCard({
     <form
       aria-labelledby={`${cardId}-name`}
       className="settings-view__email-card"
-      onKeyDown={handleFormKeyDown}
       onSubmit={handleSubmitAccount}
     >
       <div className="settings-view__identity-lines">
@@ -732,6 +765,7 @@ export default function EmailAccountCard({
           fieldRef={buildFieldRef("address")}
           label="Address"
           noteId={presetNote === "" ? undefined : presetId}
+          onDiscardEdit={isEdited ? resetEdit : undefined}
           onTextChange={(address) =>
             updateDraft(updateEmailAccountAddress(draft, address))
           }
@@ -748,6 +782,7 @@ export default function EmailAccountCard({
           fieldId={`${cardId}-display-name`}
           fieldRef={buildFieldRef("displayName")}
           label="Display name"
+          onDiscardEdit={isEdited ? resetEdit : undefined}
           onTextChange={(displayName) => updateDraft({ ...draft, displayName })}
           problem={problems.displayName}
           text={draft.displayName}
@@ -757,6 +792,7 @@ export default function EmailAccountCard({
           fieldId={`${cardId}-user-name`}
           fieldRef={buildFieldRef("userName")}
           label="User name"
+          onDiscardEdit={isEdited ? resetEdit : undefined}
           onTextChange={(userName) => updateDraft({ ...draft, userName })}
           problem={problems.userName}
           text={draft.userName}
@@ -766,6 +802,7 @@ export default function EmailAccountCard({
           fieldRef={buildFieldRef("password")}
           hasSavedPassword={savedPassword !== null}
           isPasswordShown={isPasswordShown}
+          onDiscardEdit={isEdited ? resetEdit : undefined}
           onIsPasswordShownChange={setIsPasswordShown}
           onTextChange={(password) => updateDraft({ ...draft, password })}
           problem={problems.password}
@@ -775,6 +812,7 @@ export default function EmailAccountCard({
           <EmailServerFields
             fieldIdPrefix={`${cardId}-imap`}
             hostRef={buildFieldRef("imapHost")}
+            onDiscardEdit={isEdited ? resetEdit : undefined}
             onServerChange={(imap) => updateDraft({ ...draft, imap })}
             portRef={buildFieldRef("imapPort")}
             problems={problems}
@@ -784,6 +822,7 @@ export default function EmailAccountCard({
           <EmailServerFields
             fieldIdPrefix={`${cardId}-smtp`}
             hostRef={buildFieldRef("smtpHost")}
+            onDiscardEdit={isEdited ? resetEdit : undefined}
             onServerChange={(smtp) => updateDraft({ ...draft, smtp })}
             portRef={buildFieldRef("smtpPort")}
             problems={problems}
@@ -812,7 +851,7 @@ export default function EmailAccountCard({
         hasSavedAccount={savedAccount !== null}
         isBusy={isBusy}
         isConfirmingRemoval={isConfirmingRemoval}
-        isEdited={editedDraft !== null}
+        isEdited={isEdited}
         isSaveDisabled={
           draftParse.status === "unchanged" || isBusy || !isBackendRunning
         }

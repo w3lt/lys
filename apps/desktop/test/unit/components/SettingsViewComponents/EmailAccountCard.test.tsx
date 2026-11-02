@@ -454,6 +454,50 @@ describe("EmailAccountCard", () => {
     expect(getSaveButton()).toBeEnabled()
   })
 
+  it.each<[string, () => HTMLElement, string]>([
+    ["the address", () => getField("Address"), "ada@fastmail.com"],
+    ["the display name", () => getField("Display name"), "Ada Fixture"],
+    ["the user name", () => getField("User name"), "ada@fastmail.com"],
+    ["the password", getPasswordField, ""],
+    [
+      "the IMAP host",
+      () => getServerField("IMAP server", "Host"),
+      "imap.fastmail.com"
+    ],
+    ["the IMAP port", () => getServerField("IMAP server", "Port"), "993"],
+    [
+      "the SMTP host",
+      () => getServerField("SMTP server", "Host"),
+      "smtp.fastmail.com"
+    ],
+    ["the SMTP port", () => getServerField("SMTP server", "Port"), "465"]
+  ])(
+    "discards the edit on Escape in %s",
+    async (_label, getInput, savedText) => {
+      startEmailAccountCard()
+      const user = userEvent.setup()
+
+      await user.type(getInput(), "7")
+      const isNotPrevented = fireEvent.keyDown(getInput(), { key: "Escape" })
+
+      expect(isNotPrevented).toBe(false)
+      expect(getInput()).toHaveValue(savedText)
+      expect(getSaveButton()).toBeDisabled()
+    }
+  )
+
+  it("leaves Escape its native action while nothing is edited", () => {
+    startEmailAccountCard()
+
+    const isNotPrevented = fireEvent.keyDown(getField("Display name"), {
+      key: "Escape"
+    })
+
+    expect(isNotPrevented).toBe(true)
+    expect(getField("Display name")).toHaveValue("Ada Fixture")
+    expect(getSaveButton()).toBeDisabled()
+  })
+
   it("changes how a server is reached with its security choices, and proposes nothing when the chosen way is pressed again", async () => {
     startEmailAccountCard()
     const user = userEvent.setup()

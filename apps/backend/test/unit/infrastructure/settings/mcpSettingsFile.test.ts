@@ -119,6 +119,7 @@ function buildLargestSettingsText(mcp: unknown): string {
     { length: MAXIMUM_OFFERED_BACKEND_TOOL_COUNT },
     (_, index) => String(index).padStart(64, "t")
   )
+  const serverHost = `${"h".repeat(63)}.${"h".repeat(63)}.${"h".repeat(63)}.${"h".repeat(61)}`
   const settings = {
     runtime: {
       autoStartBackend: true,
@@ -147,8 +148,8 @@ function buildLargestSettingsText(mcp: unknown): string {
         address: `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(61)}`,
         displayName: "n".repeat(100),
         userName: "u".repeat(254),
-        imap: { host: "h".repeat(253), port: 65535, security: "starttls" },
-        smtp: { host: "h".repeat(253), port: 65535, security: "starttls" },
+        imap: { host: serverHost, port: 65535, security: "starttls" },
+        smtp: { host: serverHost, port: 65535, security: "starttls" },
         serverKeepsSentCopy: false
       }
     }

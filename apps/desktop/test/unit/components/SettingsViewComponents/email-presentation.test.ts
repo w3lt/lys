@@ -320,7 +320,8 @@ describe("formatEmailAccountMessage", () => {
       "server-missing",
       "Lys couldn't start its email server to check the account. Run build.sh to install it."
     ],
-    ["server-failed", "Lys's email server failed while checking the account."]
+    ["server-failed", "Lys's email server failed while checking the account."],
+    ["busy", "Another account check is still running. Try again in a minute."]
   ])(
     "says why no sign-in was tried when the email server is %s",
     (reason, text) => {

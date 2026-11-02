@@ -102,7 +102,8 @@ const EMAIL_SERVER_CHECK_FAILURE_TEXTS = Object.freeze({
 const EMAIL_CHECK_UNAVAILABLE_TEXTS = Object.freeze({
   "server-missing":
     "Lys couldn't start its email server to check the account. Run build.sh to install it.",
-  "server-failed": "Lys's email server failed while checking the account."
+  "server-failed": "Lys's email server failed while checking the account.",
+  busy: "Another account check is still running. Try again in a minute."
 } satisfies Readonly<Record<EmailAccountCheckUnavailableReason, string>>)
 
 /** Line shown while no account is saved and nothing is edited. */

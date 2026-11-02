@@ -209,7 +209,9 @@ struct StoredAccount {
 #[serde(deny_unknown_fields)]
 struct StoredServer {
     host: String,
-    port: u16,
+    /// The port as any JSON number, as the shared rules read it: `993.0`
+    /// and `9.93e2` are the port 993.
+    port: f64,
     security: String,
 }
 
@@ -294,12 +296,12 @@ fn parse_server(stored: StoredServer, name: &'static str) -> Result<MailServer, 
             _ => "smtp.host is a host name or an IPv6 address in brackets",
         }));
     }
-    if stored.port == 0 {
+    let Some(port) = parse_port(stored.port) else {
         return Err(AccountProblem::Rule(match name {
-            "imap" => "imap.port is 1 to 65535",
-            _ => "smtp.port is 1 to 65535",
+            "imap" => "imap.port is a whole number from 1 to 65535",
+            _ => "smtp.port is a whole number from 1 to 65535",
         }));
-    }
+    };
     let Some(security) = Security::parse(&stored.security) else {
         return Err(AccountProblem::Rule(match name {
             "imap" => "imap.security is tls, starttls, or plain",
@@ -314,9 +316,24 @@ fn parse_server(stored: StoredServer, name: &'static str) -> Result<MailServer, 
     }
     Ok(MailServer {
         host: stored.host,
-        port: stored.port,
+        port,
         security,
     })
+}
+
+/// Parses a port: a whole number from 1 to 65535, however the JSON writes
+/// it.
+///
+/// # Returns
+///
+/// The port, or `None` for a fraction or a number outside that range.
+fn parse_port(number: f64) -> Option<u16> {
+    if number.fract() != 0.0 || !(1.0..=f64::from(u16::MAX)).contains(&number) {
+        return None;
+    }
+    // The check above leaves a whole number that `u16` holds, so the cast
+    // keeps its value.
+    Some(number as u16)
 }
 
 /// Whether the text is an email address by the shared rule.
@@ -519,6 +536,42 @@ mod tests {
         }
     }
 
+    /// Parses the account whose IMAP port is written as the JSON number.
+    fn parse_with_imap_port(port: &str) -> Result<Account, AccountProblem> {
+        parse_account_variable(&build_variable(
+            "imap",
+            &format!("{{\"host\":\"imap.example.com\",\"port\":{port},\"security\":\"tls\"}}"),
+        ))
+    }
+
+    #[test]
+    fn reads_a_port_written_as_any_whole_number_from_1_to_65535_and_refuses_the_rest() {
+        for (written, port) in [
+            ("993", 993),
+            ("993.0", 993),
+            ("9.93e2", 993),
+            ("1", 1),
+            ("65535", 65_535),
+            ("6.5535E4", 65_535),
+        ] {
+            let account = parse_with_imap_port(written).expect(written);
+            assert_eq!(account.imap.port, port, "{written}");
+        }
+        for written in ["993.5", "0", "0.0", "65536", "65535.5", "-993", "1e10"] {
+            assert_eq!(
+                parse_with_imap_port(written).map(|_| ()),
+                Err(AccountProblem::Rule(
+                    "imap.port is a whole number from 1 to 65535"
+                )),
+                "{written}"
+            );
+        }
+        assert_eq!(
+            parse_with_imap_port("\"993\"").map(|_| ()),
+            Err(AccountProblem::NotAnAccount)
+        );
+    }
+
     #[test]
     fn allows_a_plain_connection_to_the_machine_itself_and_an_ipv6_host() {
         for host in ["localhost", "127.0.0.1", "[::1]", "LOCALHOST"] {
@@ -550,8 +603,8 @@ mod tests {
                 .starts_with("is not the account")
         );
         assert_eq!(
-            AccountProblem::Rule("imap.port is 1 to 65535").to_string(),
-            "breaks a rule: imap.port is 1 to 65535"
+            AccountProblem::Rule("imap.port is a whole number from 1 to 65535").to_string(),
+            "breaks a rule: imap.port is a whole number from 1 to 65535"
         );
     }
 }

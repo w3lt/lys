@@ -415,6 +415,11 @@ describe("EmailAccountCard", () => {
 
       expect(getPasswordField()).toBeDisabled()
       expect(getPasswordField()).toHaveValue("")
+      const sentCopy = screen.getByRole("switch", {
+        name: "Server keeps a copy of sent mail"
+      })
+      expect(sentCopy).toHaveAttribute("aria-disabled", "true")
+      expect(sentCopy).toHaveAttribute("tabindex", "-1")
       expect(getSaveButton()).toBeDisabled()
       expect(
         within(getCard()).getByRole("button", { name: "Remove account" })

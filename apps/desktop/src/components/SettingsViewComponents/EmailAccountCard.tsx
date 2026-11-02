@@ -842,6 +842,7 @@ export default function EmailAccountCard({
             aria-describedby={`${cardId}-sent-copy-note`}
             aria-label="Server keeps a copy of sent mail"
             checked={draft.serverKeepsSentCopy}
+            disabled={isBusy}
             onCheckedChange={(serverKeepsSentCopy) =>
               updateDraft({ ...draft, serverKeepsSentCopy })
             }

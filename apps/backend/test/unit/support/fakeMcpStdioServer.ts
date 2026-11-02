@@ -1,7 +1,11 @@
 // A minimal MCP server over stdio for tests, run directly by Node, which
-// strips its types: `node fakeMcpStdioServer.ts '<options JSON>'`. It speaks
-// newline-delimited JSON-RPC and imports only Node's own modules.
+// strips its types: `node fakeMcpStdioServer.ts '<options JSON>'`, or with
+// the options JSON in `LYS_FAKE_MCP_OPTIONS` when started by the fake
+// launcher. It speaks newline-delimited JSON-RPC and imports only Node's own
+// modules.
 import { rmSync, writeFileSync } from "node:fs"
+import { spawn } from "node:child_process"
+import { createServer } from "node:net"
 import { join } from "node:path"
 import { createInterface } from "node:readline"
 
@@ -25,6 +29,23 @@ type FakeServerOptions = {
   holdLock?: boolean
   /** Wait this long after standard input closes before exiting. */
   shutdownDelayMilliseconds?: number
+  /** Keep running after standard input closes, until a signal ends it. */
+  ignoreClosedInput?: boolean
+  /** Keep running when `SIGTERM` arrives. */
+  ignoreSigterm?: boolean
+  /**
+   * Listen on this loopback port while running, as a server that runs one
+   * copy at a time, which the system frees however the process ends: exit
+   * with code 3 after `port taken by another copy` on standard error when
+   * another process listens on it.
+   */
+  holdPort?: number
+  /**
+   * Start a helper process that keeps none of the server's standard streams,
+   * ignores `SIGTERM`, and runs until killed; write `helper pid <id>` to
+   * standard error.
+   */
+  startHelper?: boolean
 }
 
 /** One JSON-RPC message the server received. */
@@ -37,7 +58,9 @@ type ReceivedMessage = {
 /** Identifier of the request being answered; absent for a notification. */
 type RequestId = number | string | undefined
 
-const options = JSON.parse(process.argv[2] ?? "{}") as FakeServerOptions
+const options = JSON.parse(
+  process.argv[2] ?? process.env.LYS_FAKE_MCP_OPTIONS ?? "{}"
+) as FakeServerOptions
 
 /**
  * Sends one JSON-RPC message.
@@ -167,6 +190,38 @@ function holdLock(): void {
 }
 
 /**
+ * Listens on a loopback port for the life of the process; another process
+ * listening on it ends this one with code 3, after `port taken by another
+ * copy` on standard error.
+ *
+ * @param port - Port to hold.
+ */
+function holdPort(port: number): void {
+  const server = createServer()
+  server.on("error", () => {
+    process.stderr.write("port taken by another copy\n")
+    process.exit(3)
+  })
+  server.listen(port, "127.0.0.1")
+}
+
+/**
+ * Starts a helper process in the server's process group that holds none of
+ * its standard streams and ignores `SIGTERM`, and reports its identifier.
+ */
+function startHelper(): void {
+  const helper = spawn(
+    process.execPath,
+    [
+      "-e",
+      "process.on('SIGTERM', () => undefined); setInterval(() => undefined, 60000)"
+    ],
+    { stdio: "ignore" }
+  )
+  process.stderr.write(`helper pid ${helper.pid}\n`)
+}
+
+/**
  * Handles one message the client sent.
  *
  * @param message - Parsed message.
@@ -221,6 +276,10 @@ if (options.reportEnvironment !== undefined) {
 }
 if (options.exitOnStart !== undefined) process.exit(options.exitOnStart)
 if (options.holdLock === true) holdLock()
+if (options.holdPort !== undefined) holdPort(options.holdPort)
+if (options.ignoreSigterm === true) process.on("SIGTERM", () => undefined)
+if (options.ignoreClosedInput === true) setInterval(() => undefined, 60_000)
+if (options.startHelper === true) startHelper()
 const input = createInterface({ input: process.stdin })
 input.on("line", (line) => {
   handleMessage(JSON.parse(line) as ReceivedMessage)

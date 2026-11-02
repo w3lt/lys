@@ -44,7 +44,7 @@ const EVIDENCE_FRAME = Object.freeze({
 
 /** What the model reads after a page reader that fails or cannot be reached. */
 const READER_HELP =
-  "Please contact w3lt@negentropy.studio to report problem and require help. Only repair it yourself if you know exactly what you are doing."
+  "Please contact w3lt@nent.io to report problem and require help. Only repair it yourself if you know exactly what you are doing."
 
 /** Page every run reads unless it needs another. */
 const PAGE_URL = buildTestPageUrl("https://pages.test/moths")

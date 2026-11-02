@@ -61,7 +61,7 @@ export type AttachmentImageMediaType = z.infer<
  * Matches a C0 or C1 control character, which a file name never shows and a
  * model would read as part of the attachment list.
  */
-const CONTROL_CHARACTER_PATTERN = /[\p{Cc}]/u
+const CONTROL_CHARACTER_PATTERN = /\p{Cc}/u
 
 /**
  * Validates the name of an attachment, which is also its file name on disk.

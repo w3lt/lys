@@ -69,6 +69,18 @@ export type McpServerEvent =
       line: string
     }>
   | Readonly<{
+      /**
+       * An HTTP server did not end its session when its connection closed
+       * and asked it to; the close went on, and the server ends the session
+       * at its own time limit.
+       */
+      kind: "session-end-failed"
+      /** Name of the server. */
+      serverName: string
+      /** Why: an HTTP error of the answer's status, or what was thrown. */
+      error: unknown
+    }>
+  | Readonly<{
       /** Closing a server's connection failed. */
       kind: "close-failed"
       /** Name of the server. */

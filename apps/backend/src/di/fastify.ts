@@ -33,8 +33,8 @@ type SingletonServicePluginOptions = {
  * first request already sees every configured server, connecting; the
  * servers connect in the background and never delay listening. The
  * services' failures that no caller observes, the messages of the LM
- * Studio SDK, and the MCP servers' events are logged through the
- * application's logger.
+ * Studio SDK, the MCP servers' events, and the failures to save their
+ * process groups file are logged through the application's logger.
  */
 const singletonPlugin: FastifyPluginAsync<
   SingletonServicePluginOptions
@@ -67,6 +67,12 @@ const singletonPlugin: FastifyPluginAsync<
     lmStudioSdk: new PinoLmStudioSdkLogger(app.log),
     reportMcpServerEvent: (event) => {
       handleMcpServerEvent(app.log, event)
+    },
+    reportMcpProcessGroupsSaveFailure: (failure) => {
+      app.log.error(
+        { err: failure },
+        "The MCP servers' process groups file could not be saved; if the backend is killed, the desktop may not end every MCP server"
+      )
     }
   })
 
@@ -114,6 +120,10 @@ function registerSingletonServices(
   app.decorate("webSearchToolProvider", singletonServices.webSearchToolProvider)
   app.decorate("toolApprovalService", singletonServices.toolApprovalService)
   app.decorate("mcpServerRegistry", singletonServices.mcpServerRegistry)
+  app.decorate(
+    "mcpServerProcessGroups",
+    singletonServices.mcpServerProcessGroups
+  )
   app.decorate("attachmentFileStore", singletonServices.attachmentFileStore)
 }
 

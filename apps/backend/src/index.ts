@@ -1,5 +1,6 @@
 import { loadBackendConfig, loadBackendLogsDirectoryPath } from "./config"
 import { buildApp } from "./app"
+import { registerBackendStopHandlers } from "./processStop"
 import {
   BackendLogDestination,
   createBackendLogger,
@@ -20,6 +21,12 @@ registerProcessLogging(process, logger)
 
 const config = loadBackendConfig()
 const app = await buildApp({ config, logger })
+registerBackendStopHandlers({
+  backendProcess: process,
+  exitProcess: (code) => process.exit(code),
+  logger,
+  stopEveryMcpServerProcess: () => app.mcpServerProcessGroups.stopEveryGroup()
+})
 
 await app.listen({
   host: config.backendHost,

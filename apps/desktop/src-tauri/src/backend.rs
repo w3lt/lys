@@ -558,13 +558,32 @@ fn get_dev_email_server_path() -> Result<PathBuf, String> {
         .join("mcps/email/target/debug/email"))
 }
 
+/// Builds the command of the backend development script: `pnpm run dev`
+/// launched from `backend_dir` in its own Unix process group, with
+/// `LYS_HOME` set to `lys_home` so the backend uses the host's Lys home, and
+/// `LYS_EMAIL_SERVER_PATH` set to `email_server_path`.
+fn build_backend_dev_script_command(
+    backend_dir: &Path,
+    lys_home: &LysHome,
+    email_server_path: &Path,
+) -> Command {
+    let mut command = Command::new("pnpm");
+    command
+        .args(["run", "dev"])
+        .current_dir(backend_dir)
+        .env("LYS_HOME", lys_home.as_path())
+        .env("LYS_EMAIL_SERVER_PATH", email_server_path)
+        .process_group(0);
+
+    command
+}
+
 /// Starts the backend development script in its own Unix process group.
 ///
-/// The direct child is the `pnpm run dev` process launched from `backend_dir`,
-/// with `LYS_HOME` set to `lys_home` so the backend uses the host's Lys home,
-/// and `LYS_EMAIL_SERVER_PATH` set to `email_server_path`. The caller stores
-/// that child in [`Backend`] and, while it is still running, later waits for
-/// it after killing the process group.
+/// The direct child is the `pnpm run dev` process that
+/// [`build_backend_dev_script_command`] describes. The caller stores that
+/// child in [`Backend`] and, while it is still running, later waits for it
+/// after killing the process group.
 ///
 /// # Errors
 ///
@@ -574,12 +593,7 @@ fn run_backend_dev_script(
     lys_home: &LysHome,
     email_server_path: &Path,
 ) -> Result<Child, String> {
-    Command::new("pnpm")
-        .args(["run", "dev"])
-        .current_dir(backend_dir)
-        .env("LYS_HOME", lys_home.as_path())
-        .env("LYS_EMAIL_SERVER_PATH", email_server_path)
-        .process_group(0)
+    build_backend_dev_script_command(backend_dir, lys_home, email_server_path)
         .spawn()
         .map_err(|err| format!("Failed to spawn backend process: {err}"))
 }
@@ -775,6 +789,8 @@ pub fn get_backend_status(backend: State<'_, Backend>) -> Result<BackendProcessS
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::BTreeMap,
+        ffi::OsStr,
         fs,
         os::unix::{fs::PermissionsExt, process::ExitStatusExt},
         path::{Path, PathBuf},
@@ -790,9 +806,9 @@ mod tests {
     };
 
     use super::{
-        delete_mcp_process_group_list, format_list_line_problems, get_dev_email_server_path,
-        parse_mcp_server_group, spawn_prod_backend_process, Backend, CommandExt,
-        LIST_LINE_PROBLEM_LIMIT,
+        build_backend_dev_script_command, delete_mcp_process_group_list, format_list_line_problems,
+        get_dev_email_server_path, parse_mcp_server_group, spawn_prod_backend_process, Backend,
+        CommandExt, LIST_LINE_PROBLEM_LIMIT,
     };
     use crate::{tools::test_directory::TestDirectory, utils::lys_home::LysHome};
 
@@ -1350,7 +1366,7 @@ mod tests {
         });
         assert_eq!(
             fs::read_to_string(&seen_path).unwrap(),
-            lys_home.email_executable_path().to_string_lossy()
+            case.path().join("runtime/email/email").to_string_lossy()
         );
     }
 
@@ -1360,6 +1376,42 @@ mod tests {
 
         assert!(path.is_absolute(), "{path:?}");
         assert!(path.ends_with("mcps/email/target/debug/email"), "{path:?}");
+        let email_crate_dir = path.ancestors().nth(3).unwrap();
+        assert!(
+            email_crate_dir.join("Cargo.toml").is_file(),
+            "{email_crate_dir:?}"
+        );
+    }
+
+    #[test]
+    fn the_development_command_runs_the_backend_script_with_the_lys_home_and_the_email_server() {
+        let lys_home = LysHome::from_test_directory(Path::new("/home/person/.lys"));
+
+        let command = build_backend_dev_script_command(
+            Path::new("/repository/apps/backend"),
+            &lys_home,
+            Path::new("/repository/mcps/email/target/debug/email"),
+        );
+
+        assert_eq!(command.get_program(), "pnpm");
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["run", "dev"]);
+        assert_eq!(
+            command.get_current_dir(),
+            Some(Path::new("/repository/apps/backend"))
+        );
+        assert_eq!(
+            command.get_envs().collect::<BTreeMap<_, _>>(),
+            BTreeMap::from([
+                (
+                    OsStr::new("LYS_EMAIL_SERVER_PATH"),
+                    Some(OsStr::new("/repository/mcps/email/target/debug/email"))
+                ),
+                (
+                    OsStr::new("LYS_HOME"),
+                    Some(OsStr::new("/home/person/.lys"))
+                ),
+            ])
+        );
     }
 
     #[test]

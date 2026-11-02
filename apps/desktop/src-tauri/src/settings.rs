@@ -50,16 +50,16 @@ static TEMPORARY_FILE_COUNT: AtomicU64 = AtomicU64::new(0);
 /// The private fields group runtime, generation, load configuration, secrets,
 /// tools, location, MCP server, and provider settings in the serialized JSON
 /// representation while keeping those groups behind the settings module's API
-/// boundary. The value and each group are read from a JSON object only, as
-/// the `@lys/share` schemas read them: an array in their place is refused. A
-/// missing group takes that group's defaults; the load configuration group's
-/// default is empty, the secrets group's default holds no key, the tools
-/// group's default puts no tool on Just run and saves no tool switch, the
-/// location group's default saves no location, the MCP group's default lists
-/// no server, and the providers group's default is LM Studio at its default
-/// address. A group the value does not hold, such as the `model` group of
-/// files written before the local context estimate was removed, is ignored
-/// when loading and left out of the next save.
+/// boundary. The value, each group, and each object inside a group are read
+/// from a JSON object only, as the `@lys/share` schemas read them: an array in
+/// their place is refused. A missing group takes that group's defaults; the
+/// load configuration group's default is empty, the secrets group's default
+/// holds no key, the tools group's default puts no tool on Just run and saves
+/// no tool switch, the location group's default saves no location, the MCP
+/// group's default lists no server, and the providers group's default is LM
+/// Studio at its default address. A group the value does not hold, such as the
+/// `model` group of files written before the local context estimate was
+/// removed, is ignored when loading and left out of the next save.
 pub struct LysSettings {
     /// Process settings and default-model selection in the `runtime` object.
     runtime: RunTimeSettings,
@@ -497,6 +497,23 @@ mod tests {
         serde_json::to_value(settings).expect("settings that serialize")
     }
 
+    /// Loads `stored_text` from a settings file of its own, and checks that
+    /// loading fails and leaves the file as it was.
+    ///
+    /// Returns the load failure's message.
+    fn assert_loading_fails_without_rewriting(stored_text: &str) -> String {
+        let directory = TestDirectory::create("settings-unusable");
+        let path = directory.create_file("settings.json", stored_text);
+
+        let failure = load_settings_file(&path).expect_err("an unusable settings file");
+
+        assert_eq!(
+            fs::read_to_string(&path).expect("read the settings file"),
+            stored_text
+        );
+        failure
+    }
+
     /// Lists the names of the temporary files in `directory`.
     fn list_temporary_file_names(directory: &Path) -> Vec<String> {
         fs::read_dir(directory)
@@ -660,26 +677,6 @@ mod tests {
         newer_mcp_field["mcp"]["enabled"] = json!(true);
         let mut newer_server_field = get_complete_settings();
         newer_server_field["mcp"]["servers"][1]["timeoutSeconds"] = json!(30);
-        let mut runtime_list = get_complete_settings();
-        runtime_list["runtime"] = json!([false, false, "qwen/qwen3-8b", "http://127.0.0.1:23456"]);
-        let mut generation_list = get_complete_settings();
-        generation_list["generation"] = json!([0.2, 512]);
-        let mut load_configuration_list = get_complete_settings();
-        load_configuration_list["loadConfiguration"] = json!([{}, {}]);
-        let mut secrets_list = get_complete_settings();
-        secrets_list["secrets"] = json!(["tvly-synthetic-0123456789"]);
-        let mut empty_secrets_list = get_complete_settings();
-        empty_secrets_list["secrets"] = json!([]);
-        let mut tools_list = get_complete_settings();
-        tools_list["tools"] = json!([[], {}]);
-        let mut location_list = get_complete_settings();
-        location_list["location"] = json!(["Paris", null, null]);
-        let mut empty_location_list = get_complete_settings();
-        empty_location_list["location"] = json!([]);
-        let mut mcp_list = get_complete_settings();
-        mcp_list["mcp"] = json!([[]]);
-        let mut providers_list = get_complete_settings();
-        providers_list["providers"] = json!(["groq", { "address": null }, { "address": null }]);
         let lone_surrogate = get_complete_settings()
             .to_string()
             .replace("env-synthetic-value", "env-synthetic-value\\ud800");
@@ -702,20 +699,8 @@ mod tests {
             newer_location_field.to_string(),
             newer_mcp_field.to_string(),
             newer_server_field.to_string(),
-            runtime_list.to_string(),
-            generation_list.to_string(),
-            load_configuration_list.to_string(),
-            secrets_list.to_string(),
-            empty_secrets_list.to_string(),
-            tools_list.to_string(),
-            location_list.to_string(),
-            empty_location_list.to_string(),
-            mcp_list.to_string(),
-            providers_list.to_string(),
             lone_surrogate,
             String::from("{ not json"),
-            String::from("[]"),
-            String::from("null"),
         ];
 
         for stored_text in unusable_files {
@@ -729,6 +714,51 @@ mod tests {
                 fs::read_to_string(&path).expect("read the settings file"),
                 stored_text
             );
+        }
+    }
+
+    #[test]
+    fn fails_when_the_document_or_an_object_in_it_is_not_a_json_object_without_rewriting_it() {
+        // Each pointer names an object of the complete settings (`~1` escapes
+        // the `/` of a model key); an array in its place is refused.
+        let arrays_in_place_of_objects = [
+            (
+                "/runtime",
+                json!([false, false, "qwen/qwen3-8b", "http://127.0.0.1:23456"]),
+            ),
+            ("/generation", json!([0.2, 512])),
+            ("/loadConfiguration", json!([{}, {}])),
+            ("/loadConfiguration/default", json!([4096])),
+            ("/loadConfiguration/models/qwen~1qwen3-8b", json!([16384])),
+            ("/secrets", json!(["tvly-synthetic-0123456789"])),
+            ("/secrets", json!([])),
+            ("/tools", json!([[], {}])),
+            ("/location", json!(["Paris", null, null])),
+            ("/location", json!([])),
+            ("/mcp", json!([[]])),
+            (
+                "/providers",
+                json!(["groq", { "address": null }, { "address": null }]),
+            ),
+            ("/providers/lmStudio", json!(["10.0.0.5:1234"])),
+            ("/providers/ollama", json!([null])),
+        ];
+        let mut unusable_files: Vec<String> = arrays_in_place_of_objects
+            .into_iter()
+            .map(|(pointer, array)| {
+                let mut settings = get_complete_settings();
+                *settings
+                    .pointer_mut(pointer)
+                    .expect("an object of the settings") = array;
+                settings.to_string()
+            })
+            .collect();
+        unusable_files.extend([String::from("[]"), String::from("null")]);
+
+        for stored_text in unusable_files {
+            let failure = assert_loading_fails_without_rewriting(&stored_text);
+
+            assert!(failure.starts_with("Failed to parse "), "{failure}");
         }
     }
 

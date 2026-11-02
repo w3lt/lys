@@ -11,6 +11,8 @@ use std::{collections::BTreeMap, num::NonZeroU32};
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use super::json::{parse_json_object, parse_keyed_json_objects};
+
 /// Deserializes a setting that is present in the input.
 ///
 /// Used for optional settings, so that an explicit `null` is rejected rather
@@ -79,16 +81,18 @@ pub struct ModelLoadConfiguration {
 /// Load settings persisted under the `loadConfiguration` JSON object.
 ///
 /// A missing part is empty, and so is a missing group, which a settings file
-/// written before load settings existed lacks. Neither part may be `null`.
-/// Model keys are stored in ascending order, so that saving unchanged
-/// settings rewrites the same text.
+/// written before load settings existed lacks. Neither part may be `null`,
+/// and every load configuration is read from a JSON object only, as
+/// `@lys/share` reads it. Model keys are stored in ascending order, so that
+/// saving unchanged settings rewrites the same text.
 pub struct LoadConfigurationSettings {
     /// Settings for every model that has none of its own, in the `default`
     /// object. Empty unless a person writes settings into it; the committed
     /// default is never copied here.
-    #[serde(rename = "default")]
+    #[serde(rename = "default", deserialize_with = "parse_json_object")]
     default_configuration: ModelLoadConfiguration,
     /// Settings each model has of its own, keyed by the model's key.
+    #[serde(deserialize_with = "parse_keyed_json_objects")]
     models: BTreeMap<String, ModelLoadConfiguration>,
 }
 

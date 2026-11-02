@@ -7,6 +7,8 @@
 //! shape is read from an object first so that both sides judge a settings
 //! file the same way.
 
+use std::collections::BTreeMap;
+
 use serde::de::{DeserializeOwned, Error};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
@@ -45,12 +47,39 @@ where
         .collect()
 }
 
+/// Reads a JSON object whose values are JSON objects into stored shapes by
+/// key, refusing any value that is not a JSON object, as
+/// [`parse_json_object`] does for one.
+///
+/// # Errors
+///
+/// Returns the deserializer's error when the input is not a JSON object of
+/// JSON objects, and the shape's error when an object does not match it.
+pub(super) fn parse_keyed_json_objects<'de, D, T>(
+    deserializer: D,
+) -> Result<BTreeMap<String, T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: DeserializeOwned,
+{
+    BTreeMap::<String, Map<String, Value>>::deserialize(deserializer)?
+        .into_iter()
+        .map(|(key, object)| {
+            T::deserialize(Value::Object(object))
+                .map(|shape| (key, shape))
+                .map_err(D::Error::custom)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use serde::Deserialize;
     use serde_json::json;
 
-    use super::{parse_json_object, parse_json_objects};
+    use std::collections::BTreeMap;
+
+    use super::{parse_json_object, parse_json_objects, parse_keyed_json_objects};
 
     #[derive(Debug, PartialEq, Eq, Deserialize)]
     #[serde(default)]
@@ -115,6 +144,36 @@ mod tests {
         ] {
             assert!(
                 parse_json_objects::<_, Shape>(value.clone()).is_err(),
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn reads_objects_by_key_and_refuses_any_other_value() {
+        let shapes: BTreeMap<String, Shape> =
+            parse_keyed_json_objects(json!({ "a": { "name": "stored" }, "b": {} }))
+                .expect("objects");
+        assert_eq!(
+            shapes,
+            BTreeMap::from([
+                (
+                    "a".to_string(),
+                    Shape {
+                        name: "stored".to_string()
+                    }
+                ),
+                ("b".to_string(), Shape::default()),
+            ])
+        );
+
+        for value in [
+            json!({ "a": ["stored"] }),
+            json!({ "a": { "name": "a" }, "b": null }),
+            json!([{ "name": "a" }]),
+        ] {
+            assert!(
+                parse_keyed_json_objects::<_, Shape>(value.clone()).is_err(),
                 "{value}"
             );
         }

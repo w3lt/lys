@@ -18,7 +18,13 @@ const BASE: i64 = 1_793_611_800;
 /// A message with an HTML body and two attachments, to forward.
 const REPORT: &str = "From: Jane Doe <jane@example.com>\r\nTo: person@example.com\r\nDate: Mon, 2 Nov 2026 12:00:00 +0000\r\nSubject: Report\r\nMessage-ID: <report@example.com>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nPlease find the report attached.\r\n--b\r\nContent-Type: text/csv; name=\"data.csv\"\r\nContent-Disposition: attachment; filename=\"data.csv\"\r\n\r\na,b\r\n1,2\r\n--b\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--b--\r\n";
 
-/// Starts the stack with one message from Jane in INBOX and the report.
+/// A message whose sender's name needs quotes and whose Reply-To asks for
+/// replies to go to two other mailboxes.
+const REDIRECTED: &str = "From: \"Doe, Jane\" <jane@example.com>\r\nReply-To: a@example.com, Team <b@example.com>\r\nTo: person@example.com\r\nDate: Mon, 2 Nov 2026 12:05:00 +0000\r\nSubject: Plans\r\nMessage-ID: <plans@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nWhat do you think?\r\n";
+
+/// Starts the stack with one message from Jane in INBOX, `1.1001.INBOX`,
+/// the report, `2.1001.INBOX`, and the redirected message,
+/// `3.1001.INBOX`.
 async fn start_with_originals(server_keeps_sent_copy: bool) -> Stack {
     let mut mailbox = FakeMailbox::create_standard();
     let original = TestMessage {
@@ -37,7 +43,29 @@ async fn start_with_originals(server_keeps_sent_copy: bool) -> Stack {
             timestamp: BASE + 60,
         },
     );
+    mailbox.add_message(
+        "INBOX",
+        NewMessage {
+            bytes: REDIRECTED.as_bytes().to_vec(),
+            flags: &[],
+            timestamp: BASE + 120,
+        },
+    );
     start_stack(mailbox, server_keeps_sent_copy).await
+}
+
+/// Asserts that nothing reached the SMTP server.
+fn assert_nothing_sent(stack: &Stack) {
+    assert!(stack.smtp.list_mails().is_empty());
+    assert!(
+        stack
+            .smtp
+            .state
+            .lock()
+            .expect("the state")
+            .commands
+            .is_empty()
+    );
 }
 
 /// A message to Jane with the subject and body.
@@ -144,10 +172,10 @@ async fn keeps_no_copy_when_the_server_keeps_one() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn replies_in_the_conversation_to_the_sender_by_default() {
+async fn refuses_a_reply_that_leaves_out_its_recipients_or_subject() {
     let stack = start_with_originals(false).await;
 
-    let report = run_send_email(
+    let to_jane = run_send_email(
         &stack.context,
         MessageArguments {
             body: "Thanks!".to_owned(),
@@ -155,41 +183,127 @@ async fn replies_in_the_conversation_to_the_sender_by_default() {
             ..MessageArguments::default()
         },
     )
+    .await;
+    let redirected = run_send_email(
+        &stack.context,
+        MessageArguments {
+            subject: "Re: Plans".to_owned(),
+            body: "Sounds good.".to_owned(),
+            reply_to_id: Some("3.1001.INBOX".to_owned()),
+            ..MessageArguments::default()
+        },
+    )
+    .await;
+    let untitled = run_send_email(
+        &stack.context,
+        MessageArguments {
+            subject: " ".to_owned(),
+            reply_to_id: Some("3.1001.INBOX".to_owned()),
+            ..build_message_to_jane("", "Sounds good.")
+        },
+    )
+    .await;
+
+    assert_eq!(
+        to_jane,
+        Err(ToolFailure::Argument(
+            "A reply needs its recipients in to, cc, or bcc. The message replied to is from [\"Jane Doe <jane@example.com>\"]. A reply needs a subject, such as \"Re: Hello\".".to_owned()
+        ))
+    );
+    assert_eq!(
+        redirected,
+        Err(ToolFailure::Argument(
+            "A reply needs its recipients in to, cc, or bcc. The message replied to is from [\"\\\"Doe, Jane\\\" <jane@example.com>\"] and asks for replies to go to [\"a@example.com\", \"Team <b@example.com>\"].".to_owned()
+        ))
+    );
+    assert_eq!(
+        untitled,
+        Err(ToolFailure::Argument(
+            "A reply needs a subject, such as \"Re: Plans\".".to_owned()
+        ))
+    );
+    assert_nothing_sent(&stack);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn replies_in_the_conversation_to_exactly_the_recipients_given() {
+    let stack = start_with_originals(false).await;
+
+    let report = run_send_email(
+        &stack.context,
+        MessageArguments {
+            to: vec!["\"Doe, Jane\" <jane@example.com>".to_owned()],
+            cc: vec![
+                "a@example.com".to_owned(),
+                "Team <b@example.com>".to_owned(),
+            ],
+            subject: "Re: Plans".to_owned(),
+            body: "Sounds good.".to_owned(),
+            reply_to_id: Some("3.1001.INBOX".to_owned()),
+            ..MessageArguments::default()
+        },
+    )
     .await
     .expect("sent");
 
     assert!(
-        report
-            .text
-            .contains("\nTo: Jane Doe <jane@example.com>\nSubject: Re: Hello\n"),
+        report.text.contains(
+            "\nTo: \"Doe, Jane\" <jane@example.com>\nCc: a@example.com, Team <b@example.com>\nSubject: Re: Plans\n"
+        ),
         "{}",
         report.text
     );
     let mails = stack.smtp.list_mails();
     assert_eq!(mails.len(), 1);
-    assert_eq!(mails[0].to, vec!["jane@example.com"]);
+    assert_eq!(
+        mails[0].to,
+        vec!["jane@example.com", "a@example.com", "b@example.com"]
+    );
     let text = String::from_utf8_lossy(&mails[0].bytes);
-    assert!(text.contains("Subject: Re: Hello\r\n"), "{text}");
+    assert!(text.contains("Subject: Re: Plans\r\n"), "{text}");
     assert!(
-        text.contains("In-Reply-To: <orig@example.com>\r\n"),
+        text.contains("In-Reply-To: <plans@example.com>\r\n"),
         "{text}"
     );
     assert!(
-        text.contains("References: <orig@example.com>\r\n"),
+        text.contains("References: <plans@example.com>\r\n"),
         "{text}"
     );
-    assert!(text.contains("Thanks!"), "{text}");
+    assert!(text.contains("Sounds good."), "{text}");
     let commands = stack.imap.list_commands();
     assert!(
         commands
             .iter()
-            .any(|command| command.ends_with("UID FETCH 1 (UID FLAGS BODY.PEEK[])")),
+            .any(|command| command.ends_with("UID FETCH 3 (UID FLAGS BODY.PEEK[])")),
         "{commands:?}"
     );
     assert!(
         !commands.iter().any(|command| command.contains("STORE")),
         "{commands:?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_a_forward_that_leaves_out_its_recipients_or_subject() {
+    let stack = start_with_originals(false).await;
+
+    let forwarded = run_send_email(
+        &stack.context,
+        MessageArguments {
+            body: "FYI".to_owned(),
+            forward_id: Some("2.1001.INBOX".to_owned()),
+            ..MessageArguments::default()
+        },
+    )
+    .await;
+
+    assert_eq!(
+        forwarded,
+        Err(ToolFailure::Argument(
+            "A forward needs its recipients in to, cc, or bcc. A forward needs a subject, such as \"Fwd: Report\".".to_owned()
+        ))
+    );
+    assert_nothing_sent(&stack);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -200,6 +314,7 @@ async fn forwards_the_original_text_and_attachments() {
         &stack.context,
         MessageArguments {
             to: vec!["colleague@example.com".to_owned()],
+            subject: "Fwd: Report".to_owned(),
             body: "FYI".to_owned(),
             forward_id: Some("2.1001.INBOX".to_owned()),
             ..MessageArguments::default()
@@ -329,15 +444,6 @@ async fn refuses_arguments_that_break_a_rule_before_connecting() {
             "not an address is not an email address. Give addresses as name@example.com or Name <name@example.com>.".to_owned()
         ))
     );
-    assert!(stack.smtp.list_mails().is_empty());
-    assert!(
-        stack
-            .smtp
-            .state
-            .lock()
-            .expect("the state")
-            .commands
-            .is_empty()
-    );
+    assert_nothing_sent(&stack);
     assert!(stack.imap.list_commands().is_empty());
 }

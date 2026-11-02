@@ -6,6 +6,7 @@
 //! sequence number, under the address's domain, so a saved draft can be
 //! found again by it.
 
+use std::fmt::Write;
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -14,7 +15,7 @@ use lettre::message::header::ContentType;
 use lettre::message::{Attachment, Mailbox, Message, MessageBuilder, MultiPart, SinglePart};
 
 use crate::account::Account;
-use crate::message::MessageView;
+use crate::message::{MessageView, ParsedMailbox};
 
 /// The prefix a reply's subject gets, unless it has one.
 const REPLY_PREFIX: &str = "Re: ";
@@ -249,9 +250,49 @@ fn build_sender(account: &Account) -> Result<Mailbox, CompositionProblem> {
 }
 
 /// Parses a recipient the model gave.
-fn parse_recipient(text: &str) -> Result<Mailbox, CompositionProblem> {
+///
+/// # Arguments
+///
+/// * `text` - The recipient, as `name@example.com` or
+///   `Name <name@example.com>`.
+pub(crate) fn parse_recipient(text: &str) -> Result<Mailbox, CompositionProblem> {
     Mailbox::from_str(text.trim())
         .map_err(|_| CompositionProblem::InvalidRecipient(text.to_owned()))
+}
+
+/// Formats a mailbox of a fetched message as a recipient the model can
+/// give back: `Name <address>` as lettre writes it, with the name quoted
+/// when it needs to be, or the address alone when there is no name or the
+/// name does not survive that form.
+///
+/// # Arguments
+///
+/// * `mailbox` - The mailbox, as parsed.
+///
+/// # Returns
+///
+/// The recipient, which [`parse_recipient`] reads back to the same
+/// address, or `None` when the mailbox has no address lettre accepts.
+pub(crate) fn format_recipient(mailbox: &ParsedMailbox) -> Option<String> {
+    let address = lettre::Address::from_str(mailbox.address.as_deref()?).ok()?;
+    mailbox
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty() && !name.chars().any(char::is_control))
+        .and_then(|name| {
+            format_readable_mailbox(Mailbox::new(Some(name.to_owned()), address.clone()))
+        })
+        .or_else(|| format_readable_mailbox(Mailbox::new(None, address)))
+}
+
+/// Formats a mailbox as lettre writes it, when lettre reads that text
+/// back to the same mailbox.
+fn format_readable_mailbox(mailbox: Mailbox) -> Option<String> {
+    let mut text = String::new();
+    write!(text, "{mailbox}").ok()?;
+    let read_back = Mailbox::from_str(&text).ok()?;
+    (read_back == mailbox).then_some(text)
 }
 
 /// Creates a message identifier under the address's domain.
@@ -549,6 +590,59 @@ mod tests {
                 .format_sentence()
                 .starts_with("Give at least one")
         );
+    }
+
+    #[test]
+    fn formats_recipients_that_read_back_to_the_same_mailbox() {
+        let cases = [
+            (
+                Some("Jane Doe"),
+                "jane@example.com",
+                "Jane Doe <jane@example.com>",
+            ),
+            (
+                Some("Doe, Jane"),
+                "jane@example.com",
+                "\"Doe, Jane\" <jane@example.com>",
+            ),
+            (
+                Some("O'Brien \"Bob\""),
+                "bob@example.com",
+                "\"O'Brien \\\"Bob\\\"\" <bob@example.com>",
+            ),
+            (
+                Some("Jürgen Müller"),
+                "juergen@example.com",
+                "Jürgen Müller <juergen@example.com>",
+            ),
+            (
+                Some("😀 Fan"),
+                "fan@example.com",
+                "😀 Fan <fan@example.com>",
+            ),
+            (Some("  "), "a@example.com", "a@example.com"),
+            (None, "a@example.com", "a@example.com"),
+            (Some("Line\r\nBreak"), "a@example.com", "a@example.com"),
+            (Some("Bell\u{7}"), "a@example.com", "a@example.com"),
+        ];
+
+        for (name, address, expected) in cases {
+            let formatted = format_recipient(&ParsedMailbox {
+                name: name.map(str::to_owned),
+                address: Some(address.to_owned()),
+            });
+
+            assert_eq!(formatted.as_deref(), Some(expected), "{name:?}");
+            let parsed = parse_recipient(expected).expect("reads back");
+            assert_eq!(parsed.email.to_string(), address);
+        }
+        for address in [Some("nobody"), None] {
+            let mailbox = ParsedMailbox {
+                name: Some("Nobody".to_owned()),
+                address: address.map(str::to_owned),
+            };
+            assert_eq!(format_recipient(&mailbox), None, "{address:?}");
+        }
     }
 
     #[test]

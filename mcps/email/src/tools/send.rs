@@ -9,16 +9,19 @@ use serde::Deserialize;
 use super::read::get_message_view;
 use super::{
     MAXIMUM_TEXT_ARGUMENT_LENGTH, ToolContext, ToolReport, ToolResult,
-    build_imap_failure_conversion, load_folders, parse_text_argument,
+    build_imap_failure_conversion, format_list_argument, format_text_argument, load_folders,
+    parse_text_argument,
 };
 use crate::compose::{
     ComposedMessage, Composition, MessageStamp, build_forward_attachments, build_forward_body,
     build_forward_subject, build_reply_references, build_reply_subject, build_sent_message,
+    format_recipient,
 };
 use crate::email_id::parse_email_id;
 use crate::failure::{Protocol, ToolFailure};
 use crate::folders::{Folder, FolderRole, find_role_folder};
 use crate::imap::ImapSession;
+use crate::message::{MessageView, ParsedMailbox};
 use crate::smtp::{SmtpFailure, build_smtp_transport, send_message};
 
 /// Most recipients of one field.
@@ -30,11 +33,13 @@ pub const MAXIMUM_BODY_LENGTH: usize = 500_000;
 /// The flags a Sent copy is stored with.
 const SENT_FLAGS: &str = "(\\Seen)";
 
-/// The fields of a message to send or to save as a draft.
+/// The fields of a message to send or to save as a draft, as the model
+/// gives them; also a stored draft's, which `send_draft` compares with
+/// its call.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct MessageArguments {
-    /// The To recipients, each as name@example.com or Name <name@example.com>. For a reply, omitted means the sender of the replied message.
+    /// The To recipients, each as name@example.com or Name <name@example.com>. Every message, a reply or a forward too, needs at least one recipient in to, cc, or bcc; none is taken from another message.
     #[serde(default)]
     pub to: Vec<String>,
     /// The Cc recipients.
@@ -43,13 +48,13 @@ pub struct MessageArguments {
     /// The Bcc recipients.
     #[serde(default)]
     pub bcc: Vec<String>,
-    /// The subject. For a reply or a forward, omitted means the original's subject with Re: or Fwd: in front.
+    /// The subject; omitted means none, which a reply or a forward does not allow.
     #[serde(default)]
     pub subject: String,
     /// The text of the message.
     #[serde(default)]
     pub body: String,
-    /// The id of the message this replies to; sets the conversation fields.
+    /// The id of the message this replies to; sets the conversation fields, not the recipients or the subject.
     #[serde(default)]
     pub reply_to_id: Option<String>,
     /// The id of the message this forwards; its text is quoted below the body and its attachments are attached.
@@ -164,7 +169,8 @@ pub fn parse_message_arguments(
 
 /// Builds the composition of the fields: a plain message, a reply with
 /// the conversation fields of the replied message, or a forward with the
-/// forwarded message's text and attachments.
+/// forwarded message's text and attachments. The recipients and the
+/// subject are always the fields' own, so the approval shows them.
 ///
 /// # Arguments
 ///
@@ -172,6 +178,12 @@ pub fn parse_message_arguments(
 /// * `session` - The IMAP session, opened here when the message replies
 ///   to or forwards another.
 /// * `arguments` - The fields.
+///
+/// # Returns
+///
+/// The composition, or why it cannot be built; a reply or a forward
+/// without recipients or a subject is refused, naming what the original
+/// suggests.
 pub async fn build_composition(
     context: &ToolContext,
     session: &mut Option<ImapSession>,
@@ -185,12 +197,10 @@ pub async fn build_composition(
         body: arguments.body.clone(),
         ..Composition::default()
     };
-    let original_id = arguments
-        .reply_to_id
-        .as_deref()
-        .or(arguments.forward_id.as_deref());
-    let Some(original_id) = original_id else {
-        return Ok(composition);
+    let (original_id, usage) = match (&arguments.reply_to_id, &arguments.forward_id) {
+        (Some(id), _) => (id, OriginalUse::Reply),
+        (None, Some(id)) => (id, OriginalUse::Forward),
+        (None, None) => return Ok(composition),
     };
     let id = parse_email_id(original_id)?;
     let opened = match session {
@@ -199,29 +209,119 @@ pub async fn build_composition(
     };
     let folders = load_folders(opened).await?;
     let (_, original) = get_message_view(opened, &folders, &id).await?;
-    if arguments.reply_to_id.is_some() {
-        if composition.to.is_empty() && composition.cc.is_empty() && composition.bcc.is_empty() {
-            let sender = if original.headers.reply_to.is_empty() {
-                &original.headers.from
-            } else {
-                &original.headers.reply_to
-            };
-            composition.to = vec![sender.clone()];
+    if let Some(refusal) = find_left_out_fields(arguments, &original, usage) {
+        return Err(ToolFailure::Argument(refusal));
+    }
+    match usage {
+        OriginalUse::Reply => {
+            let (in_reply_to, references) = build_reply_references(&original);
+            composition.in_reply_to = in_reply_to;
+            composition.references = references;
         }
-        if composition.subject.trim().is_empty() {
-            composition.subject = build_reply_subject(&original.headers.subject);
+        OriginalUse::Forward => {
+            composition.body = build_forward_body(&arguments.body, &original);
+            composition.attachments = build_forward_attachments(&original);
         }
-        let (in_reply_to, references) = build_reply_references(&original);
-        composition.in_reply_to = in_reply_to;
-        composition.references = references;
-    } else {
-        if composition.subject.trim().is_empty() {
-            composition.subject = build_forward_subject(&original.headers.subject);
-        }
-        composition.body = build_forward_body(&arguments.body, &original);
-        composition.attachments = build_forward_attachments(&original);
     }
     Ok(composition)
+}
+
+/// What a message does with the message it is built from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OriginalUse {
+    /// It replies to it.
+    Reply,
+    /// It forwards it.
+    Forward,
+}
+
+impl OriginalUse {
+    /// Names the message as the model reads it.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Reply => "reply",
+            Self::Forward => "forward",
+        }
+    }
+
+    /// Builds the usual subject of the message from the original's.
+    fn build_subject(self, subject: &str) -> String {
+        match self {
+            Self::Reply => build_reply_subject(subject),
+            Self::Forward => build_forward_subject(subject),
+        }
+    }
+}
+
+/// Finds what a reply or a forward leaves out that it must give itself:
+/// its recipients and its subject, which no other message supplies.
+///
+/// # Arguments
+///
+/// * `arguments` - The fields.
+/// * `original` - The message replied to or forwarded.
+/// * `usage` - Whether the message replies to it or forwards it.
+///
+/// # Returns
+///
+/// The refusal the model reads: what to give, with the original's
+/// mailboxes for a reply and the usual subject; `None` when nothing is
+/// left out.
+fn find_left_out_fields(
+    arguments: &MessageArguments,
+    original: &MessageView,
+    usage: OriginalUse,
+) -> Option<String> {
+    let kind = usage.name();
+    let mut sentences = Vec::new();
+    if arguments.to.is_empty() && arguments.cc.is_empty() && arguments.bcc.is_empty() {
+        sentences.push(format!("A {kind} needs its recipients in to, cc, or bcc."));
+        if usage == OriginalUse::Reply {
+            sentences.extend(format_reply_mailboxes(original));
+        }
+    }
+    if arguments.subject.trim().is_empty() {
+        sentences.push(format!(
+            "A {kind} needs a subject, such as {}.",
+            format_text_argument(&usage.build_subject(&original.headers.subject))
+        ));
+    }
+    (!sentences.is_empty()).then(|| sentences.join(" "))
+}
+
+/// Formats who a message is from and where it asks replies to go, as
+/// recipients the model can give, so it sees a `Reply-To` that differs
+/// from the sender.
+///
+/// # Returns
+///
+/// The sentence, or `None` when the message names no mailbox to reply
+/// to.
+fn format_reply_mailboxes(original: &MessageView) -> Option<String> {
+    let from = list_recipient_arguments(&original.addresses.from);
+    let reply_to = list_recipient_arguments(&original.addresses.reply_to);
+    match (from.is_empty(), reply_to.is_empty()) {
+        (true, true) => None,
+        (false, true) => Some(format!(
+            "The message replied to is from {}.",
+            format_list_argument(&from)
+        )),
+        (true, false) => Some(format!(
+            "The message replied to asks for replies to go to {}.",
+            format_list_argument(&reply_to)
+        )),
+        (false, false) => Some(format!(
+            "The message replied to is from {} and asks for replies to go to {}.",
+            format_list_argument(&from),
+            format_list_argument(&reply_to)
+        )),
+    }
+}
+
+/// Lists mailboxes as recipients the model can give, leaving out those
+/// without an address lettre accepts.
+fn list_recipient_arguments(mailboxes: &[ParsedMailbox]) -> Vec<String> {
+    mailboxes.iter().filter_map(format_recipient).collect()
 }
 
 /// Sends a composed message over SMTP.

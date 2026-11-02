@@ -5,7 +5,8 @@ mod support;
 use email::failure::ToolFailure;
 use email::folders::FolderRole;
 use email::tools::drafts::{
-    DraftIdArguments, SaveDraftArguments, run_delete_draft, run_save_draft, run_send_draft,
+    DraftIdArguments, SaveDraftArguments, SendDraftArguments, run_delete_draft, run_save_draft,
+    run_send_draft,
 };
 
 use support::imap::{FakeFolder, FakeMailbox, NewMessage};
@@ -19,6 +20,19 @@ fn build_draft(subject: &str) -> SaveDraftArguments {
         subject: subject.to_owned(),
         body: "Not sent yet.".to_owned(),
         ..SaveDraftArguments::default()
+    }
+}
+
+/// The arguments that send the draft with the id, naming the draft's
+/// fields.
+fn build_send(draft_id: &str, draft: &SaveDraftArguments) -> SendDraftArguments {
+    SendDraftArguments {
+        draft_id: draft_id.to_owned(),
+        to: draft.to.clone(),
+        cc: draft.cc.clone(),
+        bcc: draft.bcc.clone(),
+        subject: draft.subject.clone(),
+        body: draft.body.clone(),
     }
 }
 
@@ -104,18 +118,13 @@ async fn sends_a_draft_without_its_bcc_field_keeps_a_copy_and_deletes_it() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
     let id = save(&stack, build_draft("Ready")).await;
 
-    let report = run_send_draft(
-        &stack.context,
-        DraftIdArguments {
-            draft_id: id.clone(),
-        },
-    )
-    .await
-    .expect("sent");
+    let report = run_send_draft(&stack.context, build_send(&id, &build_draft("Ready")))
+        .await
+        .expect("sent");
 
     assert_eq!(
         report.text,
-        "Sent draft 1.1003.Drafts.\nTo: Jane Doe <jane@example.com>, hidden@example.com\nSubject: Ready\nA copy was saved in Sent.\nThe draft was deleted from Drafts."
+        "Sent draft 1.1003.Drafts.\nTo: Jane Doe <jane@example.com>\nBcc: hidden@example.com\nSubject: Ready\nA copy was saved in Sent.\nThe draft was deleted from Drafts."
     );
     assert_eq!(
         report.log,
@@ -169,9 +178,7 @@ async fn deletes_a_draft_and_refuses_ids_outside_drafts() {
     .await;
     let sent_from_inbox = run_send_draft(
         &stack.context,
-        DraftIdArguments {
-            draft_id: "1.1001.INBOX".to_owned(),
-        },
+        build_send("1.1001.INBOX", &build_draft("Gone")),
     )
     .await;
 
@@ -253,9 +260,7 @@ async fn without_uidplus_send_draft_and_save_draft_only_mark_the_old_draft() {
     .expect("saved");
     let sent = run_send_draft(
         &stack.context,
-        DraftIdArguments {
-            draft_id: "3.1003.Drafts".to_owned(),
-        },
+        build_send("3.1003.Drafts", &build_draft("Second")),
     )
     .await
     .expect("sent");
@@ -279,5 +284,165 @@ async fn without_uidplus_send_draft_and_save_draft_only_mark_the_old_draft() {
     assert!(
         !commands.iter().any(|command| command.contains("EXPUNGE")),
         "{commands:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_to_send_a_draft_the_call_does_not_name_and_sends_nothing() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    let id = save(&stack, build_draft("Ready")).await;
+    let named = build_send(&id, &build_draft("Ready"));
+
+    let unnamed = run_send_draft(
+        &stack.context,
+        SendDraftArguments {
+            to: Vec::new(),
+            bcc: Vec::new(),
+            subject: String::new(),
+            body: String::new(),
+            ..named.clone()
+        },
+    )
+    .await;
+    let redirected = run_send_draft(
+        &stack.context,
+        SendDraftArguments {
+            to: vec![
+                "Jane Doe <jane@example.com>".to_owned(),
+                "attacker@example.net".to_owned(),
+            ],
+            ..named.clone()
+        },
+    )
+    .await;
+    let substituted = run_send_draft(
+        &stack.context,
+        SendDraftArguments {
+            bcc: vec!["attacker@example.net".to_owned()],
+            ..named.clone()
+        },
+    )
+    .await;
+    let rewritten = run_send_draft(
+        &stack.context,
+        SendDraftArguments {
+            body: "Not sent yet!".to_owned(),
+            ..named
+        },
+    )
+    .await;
+
+    let fields = "Its own fields are:\nto: [\"Jane Doe <jane@example.com>\"]\ncc: []\nbcc: [\"hidden@example.com\"]\nsubject: \"Ready\"\nbody: its text as read_email shows it, which the body given";
+    assert_eq!(
+        unnamed,
+        Err(ToolFailure::Argument(format!(
+            "The draft differs from this call in to, bcc, subject, body, so nothing was sent. {fields} differs from at character 1, counting a line break as one.\nCall send_draft with these to send it."
+        )))
+    );
+    assert_eq!(
+        redirected,
+        Err(ToolFailure::Argument(format!(
+            "The draft differs from this call in to, so nothing was sent. {fields} matches.\nCall send_draft with these to send it."
+        )))
+    );
+    assert_eq!(
+        substituted,
+        Err(ToolFailure::Argument(format!(
+            "The draft differs from this call in bcc, so nothing was sent. {fields} matches.\nCall send_draft with these to send it."
+        )))
+    );
+    assert_eq!(
+        rewritten,
+        Err(ToolFailure::Argument(format!(
+            "The draft differs from this call in body, so nothing was sent. {fields} differs from at character 13, counting a line break as one.\nCall send_draft with these to send it."
+        )))
+    );
+    assert!(stack.smtp.list_mails().is_empty());
+    assert!(
+        stack
+            .smtp
+            .state
+            .lock()
+            .expect("the state")
+            .commands
+            .is_empty()
+    );
+    let drafts = stack.imap.list_messages("Drafts");
+    assert_eq!(drafts.len(), 1);
+    assert!(!drafts[0].has_flag("\\Deleted"));
+    assert!(stack.imap.list_messages("Sent").is_empty());
+}
+
+/// A draft another client saved, `1.1003.Drafts`: a quoted name, a group,
+/// an encoded subject, and a Bcc field.
+const OTHER_CLIENT_DRAFT: &str = "From: A Person <person@example.com>\r\nTo: \"Doe, Jane\" <jane@example.com>, Team: a@example.com, B <b@example.com>;\r\nCc: =?UTF-8?Q?J=C3=BCrgen?= <juergen@example.com>\r\nBcc: hidden@example.com\r\nSubject: =?UTF-8?Q?Gr=C3=BC=C3=9Fe?=\r\nMessage-ID: <other@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nLine one\r\nLine two\r\n";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sends_a_draft_another_client_saved_with_the_fields_the_refusal_names() {
+    let mut mailbox = FakeMailbox::create_standard();
+    mailbox.add_message(
+        "Drafts",
+        NewMessage {
+            bytes: OTHER_CLIENT_DRAFT.as_bytes().to_vec(),
+            flags: &["\\Draft"],
+            timestamp: 0,
+        },
+    );
+    let stack = start_stack(mailbox, false).await;
+    let unnamed = SendDraftArguments {
+        draft_id: "1.1003.Drafts".to_owned(),
+        to: Vec::new(),
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        subject: String::new(),
+        body: String::new(),
+    };
+
+    let refused = run_send_draft(&stack.context, unnamed.clone()).await;
+    let sent = run_send_draft(
+        &stack.context,
+        SendDraftArguments {
+            to: vec![
+                "\"Doe, Jane\" <jane@example.com>".to_owned(),
+                "a@example.com".to_owned(),
+                "B <b@example.com>".to_owned(),
+            ],
+            cc: vec!["Jürgen <juergen@example.com>".to_owned()],
+            bcc: vec!["hidden@example.com".to_owned()],
+            subject: "Grüße".to_owned(),
+            body: "Line one\nLine two".to_owned(),
+            ..unnamed
+        },
+    )
+    .await
+    .expect("sent");
+
+    assert_eq!(
+        refused,
+        Err(ToolFailure::Argument(
+            "The draft differs from this call in to, cc, bcc, subject, body, so nothing was sent. Its own fields are:\nto: [\"\\\"Doe, Jane\\\" <jane@example.com>\", \"a@example.com\", \"B <b@example.com>\"]\ncc: [\"Jürgen <juergen@example.com>\"]\nbcc: [\"hidden@example.com\"]\nsubject: \"Grüße\"\nbody: its text as read_email shows it, which the body given differs from at character 1, counting a line break as one.\nCall send_draft with these to send it.".to_owned()
+        ))
+    );
+    assert_eq!(
+        sent.text,
+        "Sent draft 1.1003.Drafts.\nTo: \"Doe, Jane\" <jane@example.com>, a@example.com, B <b@example.com>\nCc: Jürgen <juergen@example.com>\nBcc: hidden@example.com\nSubject: Grüße\nA copy was saved in Sent.\nThe draft was deleted from Drafts."
+    );
+    let mails = stack.smtp.list_mails();
+    assert_eq!(mails.len(), 1);
+    assert_eq!(
+        mails[0].to,
+        vec![
+            "jane@example.com",
+            "a@example.com",
+            "b@example.com",
+            "juergen@example.com",
+            "hidden@example.com"
+        ]
+    );
+    let text = String::from_utf8_lossy(&mails[0].bytes);
+    assert!(!text.contains("Bcc"), "{text}");
+    assert!(
+        text.contains("Team: a@example.com, B <b@example.com>;"),
+        "{text}"
     );
 }

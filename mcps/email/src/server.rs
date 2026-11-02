@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::failure::ToolFailure;
 use crate::log::send_log_line;
-use crate::tools::drafts::{DraftIdArguments, SaveDraftArguments};
+use crate::tools::drafts::{DraftIdArguments, SaveDraftArguments, SendDraftArguments};
 use crate::tools::folders::FolderArguments;
 use crate::tools::read::{AttachmentArguments, IdArguments};
 use crate::tools::search::SearchArguments;
@@ -171,7 +171,7 @@ impl EmailServer {
 
     #[tool(
         name = "send_email",
-        description = "Sends a message from the person's account. With reply_to_id it is a reply in that conversation (the recipient and the subject default to the replied message's); with forward_id it forwards that message, quoting its text and attaching its attachments. A copy is kept in Sent. Sending is permanent.",
+        description = "Sends a message from the person's account. With reply_to_id it is a reply in that conversation; with forward_id it forwards that message, quoting its text and attaching its attachments. The recipients and the subject are always this call's own, a reply's and a forward's too. A copy is kept in Sent. Sending is permanent.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -217,7 +217,7 @@ impl EmailServer {
 
     #[tool(
         name = "send_draft",
-        description = "Sends a draft saved with save_draft, as it is stored, keeps a copy in Sent, and deletes the draft. Sending is permanent.",
+        description = "Sends a message of the Drafts folder as it is stored, keeps a copy in Sent, and deletes the draft, or only marks it as deleted on a server that cannot remove one message on its own. Give the draft's to, cc, bcc, subject, and body: it is sent only when each recipient field names the same addresses as the draft's, in any order, and the subject and the text equal its own; otherwise the answer names the draft's fields and nothing is sent. Sending is permanent.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -227,7 +227,7 @@ impl EmailServer {
     )]
     async fn run_send_draft(
         &self,
-        Parameters(arguments): Parameters<DraftIdArguments>,
+        Parameters(arguments): Parameters<SendDraftArguments>,
         token: CancellationToken,
     ) -> CallToolResult {
         run_tool_call(
@@ -240,7 +240,7 @@ impl EmailServer {
 
     #[tool(
         name = "delete_draft",
-        description = "Deletes a draft saved with save_draft. Only a message in the Drafts folder can be deleted here.",
+        description = "Deletes a message of the Drafts folder, or only marks it as deleted on a server that cannot remove one message on its own. Only a message in the Drafts folder can be deleted here.",
         annotations(
             read_only_hint = false,
             destructive_hint = true,

@@ -273,7 +273,7 @@ impl fmt::Display for ToolFailure {
             ),
             Self::FolderExists(name) => write!(formatter, "A folder named {name} already exists."),
             Self::NotInDrafts => formatter.write_str(
-                "That id is not in the Drafts folder. Only a draft saved with save_draft can be sent or deleted here.",
+                "That id is not in the Drafts folder. Only a message in the Drafts folder can be sent or deleted as a draft.",
             ),
             Self::AttachmentMissing { number, count } => match count {
                 0 => write!(formatter, "The message has no attachment, so there is no #{number}."),

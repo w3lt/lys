@@ -1,11 +1,12 @@
 //! `save_draft`, `send_draft`, and `delete_draft`: drafts kept in the
-//! Drafts folder, sent as stored.
+//! Drafts folder, sent as stored once the call names what they hold.
 
+use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::time::SystemTime;
 
 use lettre::address::{Address, Envelope};
-use mail_parser::{HeaderName, MessageParser};
+use mail_parser::{HeaderName, Message, MessageParser};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -14,15 +15,18 @@ use super::send::{
     parse_message_arguments, save_read_copy, send_composed,
 };
 use super::{
-    ToolContext, ToolReport, ToolResult, build_imap_failure_conversion, get_role_folder,
-    load_folders,
+    ToolContext, ToolReport, ToolResult, build_imap_failure_conversion, format_list_argument,
+    format_text_argument, get_role_folder, load_folders,
 };
-use crate::compose::{ComposedMessage, MessageStamp, build_draft_message};
+use crate::compose::{
+    ComposedMessage, CompositionProblem, MessageStamp, build_draft_message, format_recipient,
+    parse_recipient,
+};
 use crate::email_id::{EmailId, parse_email_id};
 use crate::failure::ToolFailure;
 use crate::folders::{Folder, FolderRole};
 use crate::imap::{Deletion, FolderAccess, ImapSession, Summary, format_search_text};
-use crate::message::format_addresses;
+use crate::message::{ParsedMailbox, build_message_view};
 
 /// The flags a draft is stored with.
 const DRAFT_FLAGS: &str = "(\\Draft)";
@@ -31,7 +35,7 @@ const DRAFT_FLAGS: &str = "(\\Draft)";
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SaveDraftArguments {
-    /// The To recipients, each as name@example.com or Name <name@example.com>.
+    /// The To recipients, each as name@example.com or Name <name@example.com>. Every draft, a reply or a forward too, needs at least one recipient in to, cc, or bcc; none is taken from another message.
     #[serde(default)]
     pub to: Vec<String>,
     /// The Cc recipients.
@@ -40,13 +44,13 @@ pub struct SaveDraftArguments {
     /// The Bcc recipients.
     #[serde(default)]
     pub bcc: Vec<String>,
-    /// The subject. For a reply or a forward, omitted means the original's subject with Re: or Fwd: in front.
+    /// The subject; omitted means none, which a reply or a forward does not allow.
     #[serde(default)]
     pub subject: String,
     /// The text of the message.
     #[serde(default)]
     pub body: String,
-    /// The id of the message the draft replies to; sets the conversation fields.
+    /// The id of the message the draft replies to; sets the conversation fields, not the recipients or the subject.
     #[serde(default)]
     pub reply_to_id: Option<String>,
     /// The id of the message the draft forwards; its text is quoted below the body and its attachments are attached.
@@ -57,11 +61,35 @@ pub struct SaveDraftArguments {
     pub draft_id: Option<String>,
 }
 
-/// The arguments of `send_draft` and `delete_draft`.
+/// The arguments of `send_draft`: the draft, and the recipients, subject,
+/// and text it must hold, which the approval then shows.
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SendDraftArguments {
+    /// The id of the draft, a message in the Drafts folder, such as 15.345.Drafts.
+    pub draft_id: String,
+    /// The draft's To recipients, each as name@example.com or Name <name@example.com>; omitted means it has none.
+    #[serde(default)]
+    pub to: Vec<String>,
+    /// The draft's Cc recipients; omitted means it has none.
+    #[serde(default)]
+    pub cc: Vec<String>,
+    /// The draft's Bcc recipients; omitted means it has none.
+    #[serde(default)]
+    pub bcc: Vec<String>,
+    /// The draft's subject; omitted means it has none.
+    #[serde(default)]
+    pub subject: String,
+    /// The draft's text as read_email shows it; omitted means it is empty.
+    #[serde(default)]
+    pub body: String,
+}
+
+/// The arguments of `delete_draft`.
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct DraftIdArguments {
-    /// The draft's id as save_draft gave it, such as 15.345.Drafts.
+    /// The id of the draft, a message in the Drafts folder, such as 15.345.Drafts.
     pub draft_id: String,
 }
 
@@ -165,25 +193,29 @@ pub async fn run_save_draft(context: &ToolContext, arguments: SaveDraftArguments
     })
 }
 
-/// Sends a stored draft as it is, keeps the Sent copy rule, and deletes
-/// the draft.
+/// Sends a stored draft as it is, once the call names its recipients,
+/// subject, and text; keeps the Sent copy rule, and deletes the draft.
 ///
 /// # Arguments
 ///
 /// * `context` - The account and trust.
-/// * `arguments` - Which draft.
-pub async fn run_send_draft(context: &ToolContext, arguments: DraftIdArguments) -> ToolResult {
+/// * `arguments` - Which draft, and what it must hold.
+///
+/// # Returns
+///
+/// The report, or the failure; when the draft's fields differ from the
+/// call's, the refusal names the draft's own and nothing is sent.
+pub async fn run_send_draft(context: &ToolContext, arguments: SendDraftArguments) -> ToolResult {
     let id = parse_email_id(&arguments.draft_id)?;
+    let given = build_compared_fields(parse_message_arguments(&build_given_fields(arguments))?)?;
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
     let drafts = get_role_folder(&folders, FolderRole::Drafts)?.clone();
-    open_draft_folder(&mut session, &drafts, &id).await?;
-    let fetched = session
-        .find_message(id.uid)
-        .await
-        .map_err(build_imap_failure_conversion("fetch the draft"))?
-        .ok_or(ToolFailure::StaleId)?;
-    let prepared = parse_stored_draft(&context.account.address, &fetched.bytes)?;
+    let bytes = load_draft(&mut session, &drafts, &id).await?;
+    let prepared = parse_stored_draft(&context.account.address, &bytes)?;
+    if let Some(refusal) = format_draft_difference(&given, &prepared) {
+        return Err(ToolFailure::Argument(refusal));
+    }
     send_composed(context, &prepared.message).await?;
     let copy = if context.account.server_keeps_sent_copy {
         super::send::SentCopy::KeptByServer
@@ -220,9 +252,11 @@ pub async fn run_send_draft(context: &ToolContext, arguments: DraftIdArguments) 
     };
     Ok(ToolReport {
         text: format!(
-            "Sent draft {id}.\nTo: {}\nSubject: {}\n{}\n{deletion}",
-            prepared.recipients.join(", "),
-            prepared.subject,
+            "Sent draft {id}.\nTo: {}\n{}{}Subject: {}\n{}\n{deletion}",
+            prepared.fields.to.join(", "),
+            format_optional_list("Cc", &prepared.fields.cc),
+            format_optional_list("Bcc", &prepared.fields.bcc),
+            prepared.fields.subject,
             copy.format_sentence()
         ),
         log: format!(
@@ -282,20 +316,143 @@ fn format_deletion_clause(deletion: Deletion, drafts: &str) -> String {
     }
 }
 
-/// A stored draft made ready to send.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PreparedDraft {
-    /// The message without its Bcc field, and its envelope with every
-    /// recipient.
-    pub message: ComposedMessage,
-    /// The To, Cc, and Bcc recipients as stored, for the report.
-    pub recipients: Vec<String>,
-    /// The subject as stored.
-    pub subject: String,
+/// The fields `send_draft` was given, as a message's fields.
+fn build_given_fields(arguments: SendDraftArguments) -> MessageArguments {
+    MessageArguments {
+        to: arguments.to,
+        cc: arguments.cc,
+        bcc: arguments.bcc,
+        subject: arguments.subject,
+        body: arguments.body,
+        reply_to_id: None,
+        forward_id: None,
+    }
 }
 
-/// Prepares a stored draft: reads its recipients into the envelope and
-/// removes its Bcc field.
+/// The names of the recipient fields, in the order
+/// [`ComparedFields::recipients`] keeps them.
+const RECIPIENT_FIELDS: [&str; 3] = ["to", "cc", "bcc"];
+
+/// A message's fields in the form `send_draft` compares them in: two
+/// messages match when each recipient field names the same addresses, in
+/// any order, and the subjects and the texts are equal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ComparedFields {
+    /// The addresses of the To, Cc, and Bcc fields, in that order, each
+    /// field's once.
+    recipients: [BTreeSet<String>; 3],
+    /// The subject without white space at its edges.
+    subject: String,
+    /// The text with LF line breaks and without white space at its end.
+    body: String,
+}
+
+/// Builds the compared form of a message's fields.
+///
+/// # Arguments
+///
+/// * `fields` - The fields, with recipients as the model gives them.
+///
+/// # Returns
+///
+/// The compared form, or the refusal of a recipient that is not an email
+/// address.
+fn build_compared_fields(fields: &MessageArguments) -> Result<ComparedFields, ToolFailure> {
+    let mut recipients: [BTreeSet<String>; 3] = Default::default();
+    for (addresses, list) in recipients
+        .iter_mut()
+        .zip([&fields.to, &fields.cc, &fields.bcc])
+    {
+        for recipient in list {
+            let mailbox = parse_recipient(recipient)
+                .map_err(|problem| ToolFailure::Argument(problem.format_sentence()))?;
+            addresses.insert(mailbox.email.to_string());
+        }
+    }
+    Ok(ComparedFields {
+        recipients,
+        subject: fields.subject.trim().to_owned(),
+        body: format_compared_text(&fields.body),
+    })
+}
+
+/// Formats a text as it is compared: CR LF line breaks as LF, and no
+/// white space at its end, as `read_email` shows a text.
+fn format_compared_text(text: &str) -> String {
+    text.replace("\r\n", "\n").trim_end().to_owned()
+}
+
+/// Formats how a call's fields differ from the draft's.
+///
+/// # Arguments
+///
+/// * `given` - The call's fields, in compared form.
+/// * `draft` - The draft.
+///
+/// # Returns
+///
+/// The refusal the model reads: the fields that differ, and the draft's
+/// own fields to give instead; `None` when every field matches.
+fn format_draft_difference(given: &ComparedFields, draft: &PreparedDraft) -> Option<String> {
+    let stored = &draft.compared;
+    let mut differing: Vec<&str> = RECIPIENT_FIELDS
+        .iter()
+        .zip(given.recipients.iter().zip(&stored.recipients))
+        .filter(|(_, (given, stored))| given != stored)
+        .map(|(name, _)| *name)
+        .collect();
+    if given.subject != stored.subject {
+        differing.push("subject");
+    }
+    if given.body != stored.body {
+        differing.push("body");
+    }
+    if differing.is_empty() {
+        return None;
+    }
+    let fields = &draft.fields;
+    Some(format!(
+        "The draft differs from this call in {}, so nothing was sent. Its own fields are:\nto: {}\ncc: {}\nbcc: {}\nsubject: {}\nbody: {}\nCall send_draft with these to send it.",
+        differing.join(", "),
+        format_list_argument(&fields.to),
+        format_list_argument(&fields.cc),
+        format_list_argument(&fields.bcc),
+        format_text_argument(&fields.subject),
+        format_body_comparison(&given.body, &stored.body)
+    ))
+}
+
+/// Formats how the body given compares with the draft's text, both in
+/// compared form.
+fn format_body_comparison(given: &str, stored: &str) -> String {
+    if given == stored {
+        return "its text as read_email shows it, which the body given matches.".to_owned();
+    }
+    let position = given
+        .chars()
+        .zip(stored.chars())
+        .position(|(given, stored)| given != stored)
+        .unwrap_or_else(|| given.chars().count().min(stored.chars().count()));
+    format!(
+        "its text as read_email shows it, which the body given differs from at character {}, counting a line break as one.",
+        position + 1
+    )
+}
+
+/// A stored draft made ready to send.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PreparedDraft {
+    /// The message without its Bcc field, and its envelope with every
+    /// recipient.
+    message: ComposedMessage,
+    /// Its recipients, subject, and text, as the model gives them.
+    fields: MessageArguments,
+    /// The same fields in compared form.
+    compared: ComparedFields,
+}
+
+/// Prepares a stored draft: reads its fields, builds its envelope from
+/// its recipients, and removes its Bcc field.
 ///
 /// # Arguments
 ///
@@ -304,31 +461,90 @@ pub struct PreparedDraft {
 ///
 /// # Returns
 ///
-/// The message to send, or why it cannot be sent: no recipient that is
-/// an address, or a sender address lettre refuses.
-pub fn parse_stored_draft(sender: &str, bytes: &[u8]) -> Result<PreparedDraft, ToolFailure> {
+/// The draft to send, or why it cannot be sent here: it is not a message,
+/// an entry of a recipient field is not an email address lettre accepts,
+/// it has no recipient, or lettre refuses the sender address.
+fn parse_stored_draft(sender: &str, bytes: &[u8]) -> Result<PreparedDraft, ToolFailure> {
     let parsed = MessageParser::default()
         .parse(bytes)
         .ok_or_else(|| ToolFailure::Argument("The draft is not a message.".to_owned()))?;
-    let mut recipients = Vec::new();
-    let mut addresses = Vec::new();
-    for list in [parsed.to(), parsed.cc(), parsed.bcc()]
+    let view = build_message_view(&parsed);
+    let fields = MessageArguments {
+        to: list_draft_recipients("To", &view.addresses.to)?,
+        cc: list_draft_recipients("Cc", &view.addresses.cc)?,
+        bcc: list_draft_recipients("Bcc", &view.addresses.bcc)?,
+        subject: view.headers.subject,
+        body: view.text,
+        reply_to_id: None,
+        forward_id: None,
+    };
+    let compared = build_compared_fields(&fields)?;
+    let envelope = build_draft_envelope(sender, &fields)?;
+    Ok(PreparedDraft {
+        message: ComposedMessage {
+            bytes: remove_bcc_fields(&parsed, bytes),
+            envelope,
+            message_id: parsed.message_id().unwrap_or_default().to_owned(),
+        },
+        fields,
+        compared,
+    })
+}
+
+/// Lists the mailboxes of a draft's recipient field as recipients the
+/// model gives.
+///
+/// # Arguments
+///
+/// * `field` - The field's name, for the refusal.
+/// * `mailboxes` - Its mailboxes.
+///
+/// # Returns
+///
+/// The recipients, or the refusal of an entry that is not an email
+/// address lettre accepts.
+fn list_draft_recipients(
+    field: &str,
+    mailboxes: &[ParsedMailbox],
+) -> Result<Vec<String>, ToolFailure> {
+    mailboxes
+        .iter()
+        .map(|mailbox| format_recipient(mailbox).ok_or_else(|| build_entry_refusal(field, mailbox)))
+        .collect()
+}
+
+/// Builds the refusal of a draft whose recipient field holds an entry
+/// that is not an email address lettre accepts.
+///
+/// # Arguments
+///
+/// * `field` - The field's name.
+/// * `mailbox` - The entry, named by its address, else by its name.
+fn build_entry_refusal(field: &str, mailbox: &ParsedMailbox) -> ToolFailure {
+    let entry = mailbox.address.as_deref().or(mailbox.name.as_deref());
+    ToolFailure::Argument(format!(
+        "The draft's {field} field holds {}, which is not an email address, so the draft cannot be sent here.",
+        format_text_argument(entry.unwrap_or_default())
+    ))
+}
+
+/// Builds the envelope of a draft: the account's address, and every
+/// recipient of its To, Cc, and Bcc fields.
+///
+/// # Arguments
+///
+/// * `sender` - The account's address.
+/// * `fields` - The draft's fields.
+fn build_draft_envelope(sender: &str, fields: &MessageArguments) -> Result<Envelope, ToolFailure> {
+    let recipients = [&fields.to, &fields.cc, &fields.bcc]
         .into_iter()
         .flatten()
-    {
-        for mailbox in list.mailboxes() {
-            if let Some(address) = mailbox.address()
-                && let Ok(address) = Address::from_str(address)
-            {
-                addresses.push(address);
-            }
-        }
-        recipients.push(format_addresses(list));
-    }
-    if addresses.is_empty() {
+        .map(|recipient| parse_recipient(recipient).map(|mailbox| mailbox.email))
+        .collect::<Result<Vec<Address>, CompositionProblem>>()
+        .map_err(|problem| ToolFailure::Argument(problem.format_sentence()))?;
+    if recipients.is_empty() {
         return Err(ToolFailure::Argument(
-            "The draft has no recipient that is an email address. Save it again with one."
-                .to_owned(),
+            "The draft has no recipient. Save it again with one.".to_owned(),
         ));
     }
     let sender_address = Address::from_str(sender).map_err(|_| {
@@ -337,9 +553,18 @@ pub fn parse_stored_draft(sender: &str, bytes: &[u8]) -> Result<PreparedDraft, T
                 .to_owned(),
         )
     })?;
-    let envelope = Envelope::new(Some(sender_address), addresses).map_err(|error| {
+    Envelope::new(Some(sender_address), recipients).map_err(|error| {
         ToolFailure::Argument(format!("The envelope could not be built: {error}."))
-    })?;
+    })
+}
+
+/// Removes the Bcc fields of a parsed message from its bytes.
+///
+/// # Arguments
+///
+/// * `parsed` - The message, parsed from the bytes.
+/// * `bytes` - The message as stored.
+fn remove_bcc_fields(parsed: &Message<'_>, bytes: &[u8]) -> Vec<u8> {
     let mut ranges: Vec<(usize, usize)> = parsed
         .headers()
         .iter()
@@ -353,20 +578,33 @@ pub fn parse_stored_draft(sender: &str, bytes: &[u8]) -> Result<PreparedDraft, T
             stripped.drain(start..end);
         }
     }
-    let message_id = parsed.message_id().unwrap_or_default().to_owned();
-    let subject = parsed.subject().unwrap_or_default().to_owned();
-    Ok(PreparedDraft {
-        message: ComposedMessage {
-            bytes: stripped,
-            envelope,
-            message_id,
-        },
-        recipients: recipients
-            .into_iter()
-            .filter(|text| !text.is_empty())
-            .collect(),
-        subject,
-    })
+    stripped
+}
+
+/// Loads a draft: opens the Drafts folder at its id and fetches it.
+///
+/// # Arguments
+///
+/// * `session` - The signed-in session.
+/// * `drafts` - The Drafts folder.
+/// * `id` - The draft's id.
+///
+/// # Returns
+///
+/// The draft as stored, or why it cannot be loaded, as
+/// [`open_draft_folder`] says, or `StaleId` when Drafts no longer holds it.
+async fn load_draft(
+    session: &mut ImapSession,
+    drafts: &Folder,
+    id: &EmailId,
+) -> Result<Vec<u8>, ToolFailure> {
+    open_draft_folder(session, drafts, id).await?;
+    let fetched = session
+        .find_message(id.uid)
+        .await
+        .map_err(build_imap_failure_conversion("fetch the draft"))?
+        .ok_or(ToolFailure::StaleId)?;
+    Ok(fetched.bytes)
 }
 
 /// Opens the Drafts folder for changes at a draft id.
@@ -461,26 +699,92 @@ mod tests {
             Some("person@example.com".to_owned())
         );
         assert_eq!(prepared.message.message_id, "one@example.com");
-        assert_eq!(prepared.subject, "Hi");
         assert_eq!(
-            prepared.recipients,
-            vec![
-                "Jane <jane@example.com>, Team: a@example.com;",
-                "cc@example.com",
-                "hidden@example.com"
-            ]
+            prepared.fields,
+            MessageArguments {
+                to: vec![
+                    "Jane <jane@example.com>".to_owned(),
+                    "a@example.com".to_owned()
+                ],
+                cc: vec!["cc@example.com".to_owned()],
+                bcc: vec!["hidden@example.com".to_owned()],
+                subject: "Hi".to_owned(),
+                body: "Hello\r\n".to_owned(),
+                reply_to_id: None,
+                forward_id: None,
+            }
         );
     }
 
     #[test]
-    fn refuses_a_draft_without_an_address() {
-        let draft = b"From: person@example.com\r\nTo: nobody\r\nSubject: Hi\r\n\r\nHello\r\n";
+    fn refuses_a_draft_with_an_entry_that_is_not_an_address_or_without_recipients() {
+        let bare_name = b"From: person@example.com\r\nTo: jane@example.com, nobody\r\nSubject: Hi\r\n\r\nHello\r\n";
+        let empty_group = b"From: person@example.com\r\nTo: undisclosed-recipients:;\r\nSubject: Hi\r\n\r\nHello\r\n";
 
         assert_eq!(
-            parse_stored_draft("person@example.com", draft),
+            parse_stored_draft("person@example.com", bare_name),
             Err(ToolFailure::Argument(
-                "The draft has no recipient that is an email address. Save it again with one."
+                "The draft's To field holds \"nobody\", which is not an email address, so the draft cannot be sent here."
                     .to_owned()
+            ))
+        );
+        assert_eq!(
+            parse_stored_draft("person@example.com", empty_group),
+            Err(ToolFailure::Argument(
+                "The draft has no recipient. Save it again with one.".to_owned()
+            ))
+        );
+    }
+
+    /// The compared form of a call's fields.
+    fn build_given(to: &[&str], subject: &str, body: &str) -> ComparedFields {
+        build_compared_fields(&MessageArguments {
+            to: to.iter().map(|recipient| (*recipient).to_owned()).collect(),
+            subject: subject.to_owned(),
+            body: body.to_owned(),
+            ..MessageArguments::default()
+        })
+        .expect("compared")
+    }
+
+    #[test]
+    fn matches_a_draft_by_addresses_in_any_order_and_by_its_text_with_any_line_breaks() {
+        let draft = parse_stored_draft(
+            "person@example.com",
+            b"From: person@example.com\r\nTo: \"Doe, Jane\" <jane@example.com>, b@example.com\r\nSubject: Hi \r\n\r\nHello\r\nthere\r\n\r\n",
+        )
+        .expect("prepared");
+
+        let reordered = build_given(&["b@example.com", "jane@example.com"], "Hi", "Hello\nthere");
+        let with_names = build_given(
+            &["\"Doe, Jane\" <jane@example.com>", "B <b@example.com>"],
+            " Hi",
+            "Hello\r\nthere\n",
+        );
+        let other_text = build_given(&["jane@example.com", "b@example.com"], "Hi", "Hello there");
+        let extra = build_given(
+            &["jane@example.com", "b@example.com", "c@example.com"],
+            "Hi",
+            "Hello\nthere",
+        );
+
+        assert_eq!(format_draft_difference(&reordered, &draft), None);
+        assert_eq!(format_draft_difference(&with_names, &draft), None);
+        assert_eq!(
+            format_draft_difference(&other_text, &draft),
+            Some("The draft differs from this call in body, so nothing was sent. Its own fields are:\nto: [\"\\\"Doe, Jane\\\" <jane@example.com>\", \"b@example.com\"]\ncc: []\nbcc: []\nsubject: \"Hi\"\nbody: its text as read_email shows it, which the body given differs from at character 6, counting a line break as one.\nCall send_draft with these to send it.".to_owned())
+        );
+        assert!(
+            format_draft_difference(&extra, &draft)
+                .is_some_and(|text| text.starts_with("The draft differs from this call in to, so")),
+        );
+        assert_eq!(
+            build_compared_fields(&MessageArguments {
+                bcc: vec!["not an address".to_owned()],
+                ..MessageArguments::default()
+            }),
+            Err(ToolFailure::Argument(
+                "not an address is not an email address. Give addresses as name@example.com or Name <name@example.com>.".to_owned()
             ))
         );
     }

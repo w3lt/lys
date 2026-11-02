@@ -9,12 +9,15 @@ use std::process::{Command, Stdio};
 
 use serde_json::{Value, json};
 
-use support::imap::{FakeImapServer, FakeMailbox, ImapMode};
+use support::imap::{FakeImapServer, FakeMailbox, ImapMode, NewMessage};
 use support::smtp::{FakeSmtpServer, SmtpMode};
 use support::{SecurityName, TestMessage, TestServers, build_account_json};
 
 /// The note a cut result ends with.
 const CUT_NOTE: &str = "\n\n[The result was cut at 20,000 characters.]";
+
+/// A draft another client saved, `1.1003.Drafts`.
+const DRAFT: &str = "From: A Person <person@example.com>\r\nTo: Jane Doe <jane@example.com>\r\nBcc: hidden@example.com\r\nSubject: Plans\r\nMessage-ID: <draft@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nSee you there.\r\n";
 
 /// The names of the tools.
 const TOOL_NAMES: [&str; 10] = [
@@ -91,6 +94,14 @@ async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
     };
     mailbox.add_message("INBOX", short.build_new_message(&[]));
     mailbox.add_message("INBOX", long.build_new_message(&[]));
+    mailbox.add_message(
+        "Drafts",
+        NewMessage {
+            bytes: DRAFT.as_bytes().to_vec(),
+            flags: &["\\Draft"],
+            timestamp: 1_793_612_000,
+        },
+    );
     let imap = FakeImapServer::start(mailbox, ImapMode::Plain, None).await;
     let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
     let variable = build_account_json(
@@ -110,6 +121,8 @@ async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
         json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "read_email", "arguments": {"id": "2.1001.INBOX"}}}),
         json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "read_email", "arguments": {"id": "nonsense"}}}),
         json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "search_emails", "arguments": {"page": 0}}}),
+        json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "send_draft", "arguments": {"draft_id": "1.1003.Drafts"}}}),
+        json!({"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": {"name": "send_draft", "arguments": {"draft_id": "1.1003.Drafts", "to": ["Jane Doe <jane@example.com>"], "bcc": ["hidden@example.com"], "subject": "Plans", "body": "See you there."}}}),
     ];
 
     let dialogue = tokio::task::spawn_blocking(move || send_dialogue_messages(variable, messages))
@@ -117,7 +130,16 @@ async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
         .expect("the dialogue ends");
 
     assert_eq!(dialogue.exit_code, Some(0), "{}", dialogue.stderr);
-    let [initialized, listed, folders, long_read, bad_id, bad_page] = dialogue.answers.as_slice()
+    let [
+        initialized,
+        listed,
+        folders,
+        long_read,
+        bad_id,
+        bad_page,
+        unshown_draft,
+        shown_draft,
+    ] = dialogue.answers.as_slice()
     else {
         panic!("{:?}", dialogue.answers);
     };
@@ -160,6 +182,35 @@ async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
         search["inputSchema"]["properties"]["page"].is_object(),
         "{search}"
     );
+    let find_tool = |name: &str| {
+        listed["result"]["tools"]
+            .as_array()
+            .expect("tools")
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .cloned()
+            .expect("the tool")
+    };
+    let send_draft = find_tool("send_draft");
+    let mut send_draft_fields: Vec<&str> = send_draft["inputSchema"]["properties"]
+        .as_object()
+        .expect("properties")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    send_draft_fields.sort_unstable();
+    assert_eq!(
+        send_draft_fields,
+        ["bcc", "body", "cc", "draft_id", "subject", "to"]
+    );
+    assert_eq!(send_draft["inputSchema"]["required"], json!(["draft_id"]));
+    let delete_draft = find_tool("delete_draft");
+    assert_eq!(
+        delete_draft["inputSchema"]["properties"]
+            .as_object()
+            .map(|properties| properties.keys().cloned().collect::<Vec<_>>()),
+        Some(vec!["draft_id".to_owned()])
+    );
     assert_ne!(folders["result"]["isError"], true, "{folders}");
     assert!(
         folders["result"]["content"][0]["text"]
@@ -182,6 +233,19 @@ async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
         bad_page["result"]["content"][0]["text"],
         "page must be 1 or more."
     );
+    assert_eq!(unshown_draft["result"]["isError"], true, "{unshown_draft}");
+    assert!(
+        unshown_draft["result"]["content"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.starts_with(
+                "The draft differs from this call in to, bcc, subject, body, so nothing was sent."
+            )),
+        "{unshown_draft}"
+    );
+    assert_ne!(shown_draft["result"]["isError"], true, "{shown_draft}");
+    let mails = smtp.list_mails();
+    assert_eq!(mails.len(), 1, "{shown_draft}");
+    assert_eq!(mails[0].to, vec!["jane@example.com", "hidden@example.com"]);
     assert!(
         dialogue.stderr.contains("server: serving MCP over stdio\n"),
         "{}",

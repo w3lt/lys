@@ -269,6 +269,30 @@ pub fn parse_folder_name_argument<'a>(name: &str, value: &'a str) -> Result<&'a 
     Ok(value)
 }
 
+/// Formats a text as the JSON string the model gives it in as an
+/// argument: quoted, with JSON's escapes.
+///
+/// # Arguments
+///
+/// * `text` - The text.
+pub(crate) fn format_text_argument(text: &str) -> String {
+    serde_json::Value::String(text.to_owned()).to_string()
+}
+
+/// Formats texts as the JSON array the model gives them in as an
+/// argument, such as `["a@example.com", "Jane <jane@example.com>"]`.
+///
+/// # Arguments
+///
+/// * `texts` - The texts, in order.
+pub(crate) fn format_list_argument(texts: &[String]) -> String {
+    let items: Vec<String> = texts
+        .iter()
+        .map(|text| format_text_argument(text))
+        .collect();
+    format!("[{}]", items.join(", "))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,6 +306,19 @@ mod tests {
         assert_eq!(
             format_result_text(long),
             format!("{}{CUT_NOTE}", "ü".repeat(RESULT_LIMIT))
+        );
+    }
+
+    #[test]
+    fn formats_texts_and_lists_as_json_arguments() {
+        assert_eq!(format_text_argument("Re: \"Hi\""), "\"Re: \\\"Hi\\\"\"");
+        assert_eq!(format_list_argument(&[]), "[]");
+        assert_eq!(
+            format_list_argument(&[
+                "a@example.com".to_owned(),
+                "\"Doe, Jane\" <j@example.com>".to_owned()
+            ]),
+            "[\"a@example.com\", \"\\\"Doe, Jane\\\" <j@example.com>\"]"
         );
     }
 

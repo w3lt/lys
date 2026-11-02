@@ -28,13 +28,13 @@ const TEXT_LIKE_SUFFIXES: [&str; 2] = ["+json", "+xml"];
 /// fetched header block.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Headers {
-    /// The `From` field, formatted.
+    /// The `From` field, formatted; empty when the message has none.
     pub from: String,
-    /// The `To` field, formatted.
+    /// The `To` field, formatted; empty when the message has none.
     pub to: String,
-    /// The `Cc` field, formatted.
+    /// The `Cc` field, formatted; empty when the message has none.
     pub cc: String,
-    /// The `Reply-To` field, formatted.
+    /// The `Reply-To` field, formatted; empty when the message has none.
     pub reply_to: String,
     /// The `Date` field as RFC 3339 text, when it parses.
     pub date: Option<String>,
@@ -65,11 +65,39 @@ pub struct Attachment {
     pub text: Option<String>,
 }
 
+/// One mailbox of an address field.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParsedMailbox {
+    /// Its display name, decoded; `None` when it has none.
+    pub name: Option<String>,
+    /// Its address; `None` when the entry names none, as a bare name does.
+    pub address: Option<String>,
+}
+
+/// The mailboxes of a message's address fields, in the order the message
+/// lists them, with the members of a group in its place; a list is empty
+/// when the message has no such field.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AddressFields {
+    /// The mailboxes of the `From` field.
+    pub from: Vec<ParsedMailbox>,
+    /// The mailboxes of the `Reply-To` field.
+    pub reply_to: Vec<ParsedMailbox>,
+    /// The mailboxes of the `To` field.
+    pub to: Vec<ParsedMailbox>,
+    /// The mailboxes of the `Cc` field.
+    pub cc: Vec<ParsedMailbox>,
+    /// The mailboxes of the `Bcc` field, which only a draft keeps.
+    pub bcc: Vec<ParsedMailbox>,
+}
+
 /// A message as the tools read it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MessageView {
     /// Its header fields.
     pub headers: Headers,
+    /// Its address fields, mailbox by mailbox.
+    pub addresses: AddressFields,
     /// Its text: the plain text body, or the HTML body as text.
     pub text: String,
     /// Whether the text came from HTML, having no plain text part.
@@ -89,7 +117,16 @@ pub struct MessageView {
 /// The message, or `None` when the bytes are not a message at all.
 pub fn parse_message(bytes: &[u8]) -> Option<MessageView> {
     let message = MessageParser::default().parse(bytes)?;
-    let headers = read_headers(&message);
+    Some(build_message_view(&message))
+}
+
+/// Builds the view of a parsed message.
+///
+/// # Arguments
+///
+/// * `message` - The message as `mail-parser` parsed it.
+pub(crate) fn build_message_view(message: &Message<'_>) -> MessageView {
+    let headers = read_headers(message);
     let (text, text_from_html) = message
         .text_body()
         .find_map(|part| match part.kind() {
@@ -108,12 +145,38 @@ pub fn parse_message(bytes: &[u8]) -> Option<MessageView> {
         .enumerate()
         .map(|(index, part)| build_attachment(index, &part))
         .collect();
-    Some(MessageView {
+    MessageView {
         headers,
+        addresses: read_address_fields(message),
         text,
         text_from_html,
         attachments,
+    }
+}
+
+/// Reads the mailboxes of the address fields.
+fn read_address_fields(message: &Message<'_>) -> AddressFields {
+    AddressFields {
+        from: list_mailboxes(message.from()),
+        reply_to: list_mailboxes(message.reply_to()),
+        to: list_mailboxes(message.to()),
+        cc: list_mailboxes(message.cc()),
+        bcc: list_mailboxes(message.bcc()),
+    }
+}
+
+/// Lists the mailboxes of an address field, the members of a group in its
+/// place, or none when the message has no such field.
+fn list_mailboxes(list: Option<AddressList<'_>>) -> Vec<ParsedMailbox> {
+    list.map(|list| {
+        list.mailboxes()
+            .map(|mailbox| ParsedMailbox {
+                name: mailbox.name().map(str::to_owned),
+                address: mailbox.address().map(str::to_owned),
+            })
+            .collect()
     })
+    .unwrap_or_default()
 }
 
 /// Parses a fetched header block.
@@ -300,6 +363,38 @@ mod tests {
         assert_eq!(message.text, "Hello there.\r\n");
         assert!(!message.text_from_html);
         assert!(message.attachments.is_empty());
+    }
+
+    /// A mailbox of a test's address field.
+    fn build_mailbox(name: Option<&str>, address: Option<&str>) -> ParsedMailbox {
+        ParsedMailbox {
+            name: name.map(str::to_owned),
+            address: address.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn lists_the_mailboxes_of_every_address_field_in_order() {
+        let message = parse_message(b"From: \"Doe, Jane\" <jane@example.com>\r\nReply-To: a@example.com, b@example.com\r\nTo: Team: c@example.com, D <d@example.com>;, nobody\r\nBcc: hidden@example.com\r\nSubject: Hi\r\n\r\nHello\r\n").expect("message");
+
+        assert_eq!(
+            message.addresses,
+            AddressFields {
+                from: vec![build_mailbox(Some("Doe, Jane"), Some("jane@example.com"))],
+                reply_to: vec![
+                    build_mailbox(None, Some("a@example.com")),
+                    build_mailbox(None, Some("b@example.com"))
+                ],
+                to: vec![
+                    build_mailbox(None, Some("c@example.com")),
+                    build_mailbox(Some("D"), Some("d@example.com")),
+                    build_mailbox(Some("nobody"), None)
+                ],
+                cc: Vec::new(),
+                bcc: vec![build_mailbox(None, Some("hidden@example.com"))],
+            }
+        );
+        assert_eq!(message.headers.from, "Doe, Jane <jane@example.com>");
     }
 
     #[test]

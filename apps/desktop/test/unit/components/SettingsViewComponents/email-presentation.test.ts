@@ -10,10 +10,12 @@ import {
   formatEmailPresetNote,
   formatEmailSecurityLabel,
   formatEmailServerSideLabel,
+  listEmailDraftProblems,
   type EmailAccountMessage
 } from "@/components/SettingsViewComponents/email-presentation"
 import {
   buildEmailAccountDraft,
+  EMAIL_ACCOUNT_DRAFT_FIELDS,
   updateEmailAccountAddress,
   type EmailAccountDraftParse
 } from "@/lib/models/email-account-draft"
@@ -168,6 +170,49 @@ describe("formatEmailPresetNote", () => {
         smtp: { ...draft.smtp, security: "starttls" }
       })
     ).toBe("Preset: Gmail · servers changed")
+  })
+})
+
+describe("listEmailDraftProblems", () => {
+  it("lists the fields with a problem in the card's order, each with its label", () => {
+    const listings = listEmailDraftProblems({
+      smtpPort: "A port is a whole number from 1 to 65535.",
+      password: "Enter the password.",
+      address: "Enter an address.",
+      imapHost: "Enter the host."
+    })
+
+    expect(listings).toEqual([
+      { field: "address", label: "Address", problem: "Enter an address." },
+      { field: "password", label: "Password", problem: "Enter the password." },
+      { field: "imapHost", label: "IMAP host", problem: "Enter the host." },
+      {
+        field: "smtpPort",
+        label: "SMTP port",
+        problem: "A port is a whole number from 1 to 65535."
+      }
+    ])
+    expect(Object.isFrozen(listings)).toBe(true)
+    expect(listEmailDraftProblems({})).toEqual([])
+  })
+
+  it("labels every field as the card shows it, naming the server of a host or port", () => {
+    const listings = listEmailDraftProblems(
+      Object.fromEntries(
+        EMAIL_ACCOUNT_DRAFT_FIELDS.map((field) => [field, "Problem."])
+      )
+    )
+
+    expect(listings.map((listing) => listing.label)).toEqual([
+      "Address",
+      "Display name",
+      "User name",
+      "Password",
+      "IMAP host",
+      "IMAP port",
+      "SMTP host",
+      "SMTP port"
+    ])
   })
 })
 

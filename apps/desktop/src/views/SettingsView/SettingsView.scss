@@ -2300,7 +2300,7 @@ legend.settings-view__mcp-field-label {
   outline-offset: 2px;
 }
 
-.settings-view__mcp-summary h3 {
+.settings-view__mcp-summary :is(h3, h4) {
   margin: 0 0 8px;
   font-family: var(--font-mono);
   font-size: 11px;

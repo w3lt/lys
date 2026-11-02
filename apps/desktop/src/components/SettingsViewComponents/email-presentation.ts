@@ -13,9 +13,12 @@ import {
 } from "@lys/share"
 
 import {
+  EMAIL_ACCOUNT_DRAFT_FIELDS,
   hasEmailPresetServers,
   type EmailAccountDraft,
+  type EmailAccountDraftField,
   type EmailAccountDraftParse,
+  type EmailAccountDraftProblems,
   type EmailServerSide
 } from "@/lib/models/email-account-draft"
 import { findEmailPreset } from "@/lib/models/email-presets"
@@ -23,6 +26,8 @@ import type {
   EmailAccountCheckState,
   EmailAccountSaveState
 } from "@/lib/store/email-settings"
+
+import type { McpDraftProblemListing } from "./mcp-presentation"
 
 /** Tone of the account card's status line. */
 type EmailTone = "muted" | "pending" | "attention" | "success" | "danger"
@@ -96,6 +101,21 @@ const EMAIL_SERVER_SIDE_LABELS = Object.freeze({
   imap: "IMAP server",
   smtp: "SMTP server"
 } satisfies Readonly<Record<EmailServerSide, string>>)
+
+/**
+ * Label of each input as the problem summary names it, with the server of
+ * a host or port; a new input must add one.
+ */
+const EMAIL_DRAFT_FIELD_LABELS = Object.freeze({
+  address: "Address",
+  displayName: "Display name",
+  userName: "User name",
+  password: "Password",
+  imapHost: "IMAP host",
+  imapPort: "IMAP port",
+  smtpHost: "SMTP host",
+  smtpPort: "SMTP port"
+} satisfies Readonly<Record<EmailAccountDraftField, string>>)
 
 /** Why a sign-in failed, by reason, as a clause; a new reason must add one. */
 const EMAIL_SERVER_CHECK_FAILURE_TEXTS = Object.freeze({
@@ -175,6 +195,25 @@ export function formatEmailSecurityLabel(security: EmailSecurity): string {
  */
 export function formatEmailServerSideLabel(side: EmailServerSide): string {
   return EMAIL_SERVER_SIDE_LABELS[side]
+}
+
+/**
+ * Lists the inputs of the account card that have a problem.
+ *
+ * @param problems - First problem of each input that has one.
+ * @returns A frozen list in the order the card shows the inputs, each with
+ * its label and problem; empty for fields without problems.
+ */
+export function listEmailDraftProblems(
+  problems: EmailAccountDraftProblems
+): readonly McpDraftProblemListing<EmailAccountDraftField>[] {
+  return Object.freeze(
+    EMAIL_ACCOUNT_DRAFT_FIELDS.flatMap((field) => {
+      const problem = problems[field]
+      if (problem === undefined) return []
+      return [{ field, label: EMAIL_DRAFT_FIELD_LABELS[field], problem }]
+    })
+  )
 }
 
 /**

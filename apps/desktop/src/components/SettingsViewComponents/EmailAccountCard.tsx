@@ -1,7 +1,9 @@
 import type { EmailAccount, EmailPassword } from "@lys/share"
 import { Eye } from "lucide-react"
 import {
+  useEffectEvent,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
@@ -15,7 +17,6 @@ import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   buildEmailAccountDraft,
-  EMAIL_ACCOUNT_DRAFT_FIELDS,
   isEmailAccountDraftDifferent,
   parseEmailAccountDraft,
   updateEmailAccountAddress,
@@ -44,8 +45,11 @@ import {
   formatEmailPresetNote,
   formatEmailSecurityLabel,
   formatEmailServerSideLabel,
+  listEmailDraftProblems,
   type EmailAccountMessage
 } from "./email-presentation"
+import type { McpDraftProblemListing } from "./mcp-presentation"
+import { McpDraftProblemSummary } from "./McpDraftProblemSummary"
 
 /** Properties accepted by {@link EmailAccountCard}. */
 type EmailAccountCardProps = {
@@ -602,18 +606,30 @@ function EmailAccountFooter({
 }
 
 /**
- * Keeps the input of each field, so a rejected save can move focus to the
- * first input with a problem and a removal to the address.
+ * Keeps the input of each field and the problem summary, so a rejected
+ * save can move focus to the only input with a problem or to the summary,
+ * a summary button to its input, and a removal to the address.
  *
  * @remarks The hook owns the inputs it is told about through the refs it
- * returns, which React attaches and detaches; it reads them only when
- * asked to move focus. It returns the same operations each render; the
- * refs it builds are new each call, which React tolerates.
- * @returns A ref builder for each field, and the handlers of a rejected
- * save and of a removed account, which move focus.
+ * returns, which React attaches and detaches, and the summary's host; it
+ * reads them only when asked to move focus. In the layout phase after each
+ * rejected save, focus moves to the summary while two or more inputs have
+ * a problem, and otherwise to the input that has one. It returns the same
+ * operations each render; the field refs it builds are new each call,
+ * which React tolerates.
+ * @param rejectedSaveCount - Reactive count of the saves the fields'
+ * problems rejected.
+ * @param problemListings - Inputs with a problem shown in the current
+ * render, in the card's order, read when focus moves.
+ * @returns A ref builder for each field, the summary's host, a focus move
+ * to one field's input, and the handler of a removed account.
  */
-function useEmailFieldHosts() {
+function useEmailFieldHosts(
+  rejectedSaveCount: number,
+  problemListings: readonly McpDraftProblemListing<EmailAccountDraftField>[]
+) {
   const hosts = useRef<EmailFieldHosts>({})
+  const summaryRef = useRef<HTMLFieldSetElement>(null)
 
   /**
    * Builds the ref that attaches one field's input.
@@ -629,27 +645,32 @@ function useEmailFieldHosts() {
   }
 
   /**
-   * Handles a save the fields' problems rejected, by moving focus to the
-   * first input with a problem, in the card's order, when it is attached.
+   * Moves focus to one field's input, when it is attached.
    *
-   * @param problems - First problem of each input that has one.
+   * @param field - The field.
    */
-  function handleRejectedSave(problems: EmailAccountDraftProblems): void {
-    const field = EMAIL_ACCOUNT_DRAFT_FIELDS.find(
-      (candidate) => problems[candidate] !== undefined
-    )
-    if (field !== undefined) hosts.current[field]?.focus()
+  function focusField(field: EmailAccountDraftField): void {
+    hosts.current[field]?.focus()
   }
+
+  const handleRejectedSave = useEffectEvent((): void => {
+    if (problemListings.length > 1) summaryRef.current?.focus()
+    else if (problemListings.length === 1) focusField(problemListings[0].field)
+  })
+
+  useLayoutEffect(() => {
+    if (rejectedSaveCount > 0) handleRejectedSave()
+  }, [rejectedSaveCount])
 
   /**
    * Handles the removal of the saved account, by moving focus to the
    * address input, when it is attached.
    */
   function handleRemovedAccount(): void {
-    hosts.current.address?.focus()
+    focusField("address")
   }
 
-  return { buildFieldRef, handleRejectedSave, handleRemovedAccount }
+  return { buildFieldRef, summaryRef, focusField, handleRemovedAccount }
 }
 
 /**
@@ -660,13 +681,16 @@ function useEmailFieldHosts() {
  * @remarks The application store owns the saved account and password, the
  * save, and the check; the card owns only the person's edit, which starts
  * from the saved account, whether the password is shown, whether a save
- * was tried and with which edit, whether the removal is being confirmed,
+ * was tried and with which edit, how many saves the fields' problems
+ * rejected, whether the removal is being confirmed,
  * and whether Remove account takes focus back after the confirmation left
  * without removing. Typing an address whose provider has a preset fills the server
  * fields and the Sent copy switch while they all still hold what an empty
  * card holds or the previous address's preset. Problems
  * show from the first Save on, each under its input, and a rejected Save
- * moves focus to the first input with a problem. Enter or Save asks the
+ * moves focus to the only input with a problem or, when several have one,
+ * to a summary above the fields that lists them, shown while two or more
+ * remain, whose buttons move focus to their input. Enter or Save asks the
  * parent to sign in and save when the fields hold a valid account that
  * differs from the saved one or a new password, no check, save, or removal
  * runs, and the backend runs; Save is disabled while nothing differs, while
@@ -698,8 +722,7 @@ export default function EmailAccountCard({
   const [isPasswordShown, setIsPasswordShown] = useState(false)
   const [isConfirmingRemoval, setIsConfirmingRemoval] = useState(false)
   const [isRemoveFocusedOnAttach, setIsRemoveFocusedOnAttach] = useState(false)
-  const { buildFieldRef, handleRejectedSave, handleRemovedAccount } =
-    useEmailFieldHosts()
+  const [rejectedSaveCount, setRejectedSaveCount] = useState(0)
   const cardId = useId()
   const statusId = `${cardId}-status`
   const presetId = `${cardId}-preset`
@@ -710,6 +733,9 @@ export default function EmailAccountCard({
     hasSubmitted && draftParse.status === "invalid"
       ? draftParse.problems
       : NO_PROBLEMS
+  const problemListings = listEmailDraftProblems(problems)
+  const { buildFieldRef, summaryRef, focusField, handleRemovedAccount } =
+    useEmailFieldHosts(rejectedSaveCount, problemListings)
   const presetNote = formatEmailPresetNote(draft)
   const isBusy =
     saveState.status === "saving" || checkState.status === "checking"
@@ -775,7 +801,7 @@ export default function EmailAccountCard({
     setSubmittedDraft(editedDraft)
     setHasSubmitted(true)
     if (draftParse.status === "invalid") {
-      handleRejectedSave(draftParse.problems)
+      setRejectedSaveCount((count) => count + 1)
       return
     }
     if (draftParse.status === "changed") {
@@ -836,6 +862,14 @@ export default function EmailAccountCard({
         <h3 id={`${cardId}-name`}>Email account</h3>
         <p>{EMAIL_ACCOUNT_NOTE}</p>
       </div>
+      {problemListings.length > 1 ? (
+        <McpDraftProblemSummary
+          headingLevel={4}
+          onSelectField={focusField}
+          problems={problemListings}
+          summaryRef={summaryRef}
+        />
+      ) : null}
       <fieldset className="settings-view__email-fields" disabled={isBusy}>
         <EmailTextField
           autoComplete="email"

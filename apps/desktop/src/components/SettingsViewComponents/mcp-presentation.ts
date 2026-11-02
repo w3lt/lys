@@ -1186,10 +1186,15 @@ export function findMcpPaneRetry(
   return facts.list.status === "failed" ? "read" : undefined
 }
 
-/** One editor field with a problem, as the problem summary lists it. */
-export type McpDraftProblemListing = {
+/**
+ * One field with a problem, as the summary of a rejected save lists it.
+ *
+ * @typeParam TField - Fields of the form the summary belongs to: the
+ * listing names one, and its button hands the same one back.
+ */
+export type McpDraftProblemListing<TField extends string> = {
   /** The field. */
-  readonly field: McpServerDraftField
+  readonly field: TField
   /** The field's label. */
   readonly label: string
   /** The field's first problem. */
@@ -1215,7 +1220,7 @@ export function formatMcpDraftFieldLabel(field: McpServerDraftField): string {
  */
 export function listMcpDraftProblems(
   problems: McpServerDraftProblems
-): readonly McpDraftProblemListing[] {
+): readonly McpDraftProblemListing<McpServerDraftField>[] {
   return Object.freeze(
     MCP_SERVER_DRAFT_FIELDS.flatMap((field) => {
       const problem = problems[field]
@@ -1226,7 +1231,8 @@ export function listMcpDraftProblems(
 }
 
 /**
- * Formats the heading of the summary of a rejected save.
+ * Formats the heading of the summary of a rejected save, which the server
+ * editor and the email account card show.
  *
  * @param count - Number of fields with a problem; the summary appears only
  * for two or more.

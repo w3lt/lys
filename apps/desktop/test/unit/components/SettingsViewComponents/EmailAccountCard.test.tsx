@@ -343,16 +343,34 @@ describe("EmailAccountCard", () => {
     expect(requests.onSaveEmailAccount).not.toHaveBeenCalled()
   })
 
-  it("marks the fields that break a rule on Save, moves focus to the first, and asks for no save", async () => {
+  it("marks the fields that break a rule on Save, moves focus to a summary that leads to each, and asks for no save", async () => {
     const { requests } = startEmptyEmailAccountCard()
     const user = userEvent.setup()
 
     await user.type(getField("Address"), "ada")
     await user.type(getField("User name"), "ada{Enter}")
 
+    const summary = within(getCard()).getByRole("group", {
+      name: "Fix 6 fields to save:"
+    })
+    expect(summary).toHaveFocus()
+    expect(
+      within(summary).getByRole("heading", { level: 4 })
+    ).toHaveTextContent("Fix 6 fields to save:")
+    expect(
+      within(summary)
+        .getAllByRole("button")
+        .map((button) => button.textContent)
+    ).toEqual([
+      expect.stringMatching(/^Address: .*address/i),
+      "Password: Enter the password.",
+      expect.stringMatching(/^IMAP host: ./),
+      "IMAP port: A port is a whole number from 1 to 65535.",
+      expect.stringMatching(/^SMTP host: ./),
+      "SMTP port: A port is a whole number from 1 to 65535."
+    ])
     expect(getField("Address")).toHaveAttribute("aria-invalid", "true")
     expect(getField("Address")).toHaveAccessibleDescription(ADDRESS_PROBLEM)
-    expect(getField("Address")).toHaveFocus()
     expect(getServerField("IMAP server", "Host")).toHaveAttribute(
       "aria-invalid",
       "true"
@@ -367,12 +385,45 @@ describe("EmailAccountCard", () => {
     expect(getStatusLine()).toHaveTextContent("Fix the marked fields to save.")
     expect(requests.onSaveEmailAccount).not.toHaveBeenCalled()
 
+    await user.click(
+      within(summary).getByRole("button", { name: /^IMAP port: / })
+    )
+
+    expect(getServerField("IMAP server", "Port")).toHaveFocus()
+
     await user.type(getField("Address"), "@gmail.com")
 
     expect(getField("Address")).not.toHaveAttribute("aria-invalid")
     expect(getField("Address")).toHaveAccessibleDescription("Preset: Gmail")
     expect(getPasswordField()).toHaveAccessibleDescription(
       "Enter the password."
+    )
+  })
+
+  it("shows the summary while two or more fields break a rule, and moves focus to the only one left on Save", async () => {
+    startEmailAccountCard()
+    const user = userEvent.setup()
+
+    await user.clear(getField("User name"))
+    await user.clear(getServerField("IMAP server", "Port"))
+    await user.click(getSaveButton())
+
+    expect(
+      within(getCard()).getByRole("group", { name: "Fix 2 fields to save:" })
+    ).toHaveFocus()
+
+    await user.type(getField("User name"), "ada")
+
+    expect(
+      within(getCard()).queryByRole("group", { name: /fields to save:$/ })
+    ).toBeNull()
+
+    await user.click(getSaveButton())
+
+    expect(getServerField("IMAP server", "Port")).toHaveFocus()
+    expect(getServerField("IMAP server", "Port")).toHaveAttribute(
+      "aria-invalid",
+      "true"
     )
   })
 

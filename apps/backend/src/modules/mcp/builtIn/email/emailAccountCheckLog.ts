@@ -16,8 +16,8 @@ const CHECK_FAILED_MESSAGE = "The email server's account check failed"
  * email server is a warning; a check the closing checker ended is a
  * warning; every other failure to report is an error with how the server
  * ended and its own error lines, or, when it could not be started, with
- * Node's error, which names the command. No entry holds the account or the
- * password.
+ * Node's error, which can name the command. No entry holds the account or
+ * the password.
  */
 export function handleEmailAccountCheckEvent(
   logger: FastifyBaseLogger,

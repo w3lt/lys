@@ -770,6 +770,34 @@ describe("registerMcpRoutes", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       })
     })
 
+    it("answers unavailable, not an HTTP error, when Node throws as it starts the email server", async () => {
+      const folder = await createCaseFolder()
+      const file = join(folder, "file")
+      await writeFile(file, "")
+      const { app, checkEvents } = await createMcpRouteApp(
+        await createSettingsFilePath(),
+        { emailServerCommand: { command: join(file, "email"), arguments: [] } }
+      )
+
+      const response = await app.inject({
+        method: "POST",
+        url: ACCOUNT_CHECK_URL,
+        payload: ACCEPTED_CHECK
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual({
+        status: "unavailable",
+        reason: "server-failed"
+      })
+      expect(checkEvents).toEqual([
+        {
+          kind: "server-failed",
+          failure: { kind: "start-failed", error: expect.any(Error) }
+        }
+      ])
+    })
+
     it.each([
       [
         "a password with a control character",

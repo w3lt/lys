@@ -185,6 +185,43 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     expect(JSON.stringify(events)).not.toContain("7f3a")
   })
 
+  it.each([
+    ["the command's path goes through a file", "command"],
+    ["the working folder is a file", "working folder"]
+  ] as const)(
+    "answers server-failed with Node's error when Node throws as it starts the server, because %s",
+    async (_label, place) => {
+      const folder = await createCaseFolder()
+      const file = join(folder, "file")
+      await writeFile(file, "")
+      const { checker, events } = createChecker(
+        place === "command"
+          ? { serverCommand: { command: join(file, "email"), arguments: [] } }
+          : { workingDirectory: file }
+      )
+
+      const answer = await checker.sendCheck(
+        buildEmailAccount("accepted@example.com"),
+        SYNTHETIC_EMAIL_PASSWORD
+      )
+
+      expect(answer).toEqual({
+        status: "unavailable",
+        reason: "server-failed"
+      })
+      expect(events).toEqual([
+        {
+          kind: "server-failed",
+          failure: { kind: "start-failed", error: expect.any(Error) }
+        }
+      ])
+      expect(events[0]).toMatchObject({
+        failure: { error: { code: "ENOTDIR" } }
+      })
+      expect(JSON.stringify(events)).not.toContain("7f3a")
+    }
+  )
+
   it("answers server-failed with the exit code and the error lines when the server ends without a report", async () => {
     const { checker, events } = createChecker()
 

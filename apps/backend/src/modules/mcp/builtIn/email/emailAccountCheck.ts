@@ -8,6 +8,7 @@ import { getDefaultEnvironment } from "@modelcontextprotocol/client/stdio"
 import { spawn, type ChildProcessByStdio } from "node:child_process"
 import type { Readable } from "node:stream"
 import * as z from "zod"
+import { isSpawnFailure } from "../../mcpError"
 import McpServerLogLines from "../../mcpServerLogLines"
 import {
   EMAIL_ACCOUNT_VARIABLE_NAME,
@@ -53,7 +54,7 @@ const checkOutputSchema = z
 export type EmailServerRunFailure =
   | Readonly<{
       kind: "start-failed"
-      /** Node's error, which names the command and the subcommand. */
+      /** Node's error, which can name the command and the subcommand. */
       error: Error
     }>
   | Readonly<{ kind: "timed-out" }>
@@ -365,14 +366,17 @@ export default class EmailAccountChecker {
  * variable added, and reads nothing from its standard input. Its standard
  * output is read up to a bound, and its standard error line by line up to
  * a bound, each line cut as a server's log line is. Resource ownership:
- * owns the process until it ends; Node kills it with `SIGKILL` once the
- * time limit passed, and {@link stop} kills it before. Concurrency model:
- * single-owner; the checker starts and stops it, and the process's events
- * reach it on the backend's event loop.
+ * owns the process, if Node started one, until it ends; Node kills it with
+ * `SIGKILL` once the time limit passed, and {@link stop} kills it before.
+ * Concurrency model: single-owner; the checker starts and stops it, and
+ * the process's events reach it on the backend's event loop.
  */
 class EmailServerCheckRun {
-  /** The check's process; owned until it ends. */
-  readonly #child: CheckChildProcess
+  /**
+   * The check's process, owned until it ends; undefined when Node threw
+   * because it could not start one.
+   */
+  readonly #child: CheckChildProcess | undefined
   /** Aborts once the time limit passed, when Node kills the process. */
   readonly #timeLimit: AbortSignal
   /** Settles once, with how the run ended. */
@@ -385,12 +389,17 @@ class EmailServerCheckRun {
   #output: string | undefined
 
   /**
-   * Keeps a process that was started, of which nothing was read yet.
+   * Keeps a process that was started, of which nothing was read yet, or
+   * no process.
    *
-   * @param child - The started process; owned from here on.
+   * @param child - The started process, owned from here on; undefined when
+   * Node threw because it could not start one.
    * @param timeLimit - Signal that aborts once the time limit passed.
    */
-  private constructor(child: CheckChildProcess, timeLimit: AbortSignal) {
+  private constructor(
+    child: CheckChildProcess | undefined,
+    timeLimit: AbortSignal
+  ) {
     this.#child = child
     this.#timeLimit = timeLimit
     this.#ending = Promise.withResolvers()
@@ -413,34 +422,40 @@ class EmailServerCheckRun {
    */
   public static start(start: EmailServerCheckStart): EmailServerCheckRun {
     const timeLimit = AbortSignal.timeout(start.timeoutMilliseconds)
-    const child = spawn(
-      start.serverCommand.command,
-      [...start.serverCommand.arguments, EMAIL_SERVER_CHECK_SUBCOMMAND],
-      {
-        cwd: start.workingDirectory,
-        env: {
-          ...getDefaultEnvironment(),
-          [EMAIL_ACCOUNT_VARIABLE_NAME]: start.accountVariableValue
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-        signal: timeLimit,
-        killSignal: "SIGKILL"
-      }
-    )
-    const run = new EmailServerCheckRun(child, timeLimit)
-    child.stdout.setEncoding("utf8")
-    child.stdout.on("data", (chunk: string) => {
+    const started = startCheckProcess(start, timeLimit)
+    if (started instanceof Error)
+      return EmailServerCheckRun.#createStartFailedRun(started, timeLimit)
+    const run = new EmailServerCheckRun(started, timeLimit)
+    started.stdout.setEncoding("utf8")
+    started.stdout.on("data", (chunk: string) => {
       run.#readOutput(chunk)
     })
-    child.stderr.on("data", (chunk: Uint8Array) => {
+    started.stderr.on("data", (chunk: Uint8Array) => {
       run.#errorLineReader.read(chunk)
     })
-    child.on("error", (error) => {
+    started.on("error", (error) => {
       run.#handleError(error)
     })
-    child.once("close", (exitCode, signal) => {
+    started.once("close", (exitCode, signal) => {
       run.#handleClose(exitCode, signal)
     })
+    return run
+  }
+
+  /**
+   * Creates a run that ended as `start-failed` without a process.
+   *
+   * @param error - The error Node threw because it could not start the
+   * process.
+   * @param timeLimit - Signal that aborts once the time limit passed.
+   * @returns The run, already ended.
+   */
+  static #createStartFailedRun(
+    error: Error,
+    timeLimit: AbortSignal
+  ): EmailServerCheckRun {
+    const run = new EmailServerCheckRun(undefined, timeLimit)
+    run.#ending.resolve(Object.freeze({ status: "start-failed", error }))
     return run
   }
 
@@ -461,7 +476,7 @@ class EmailServerCheckRun {
    * does the same.
    */
   public async stop(): Promise<void> {
-    this.#child.kill("SIGKILL")
+    this.#child?.kill("SIGKILL")
     await this.#ending.promise
   }
 
@@ -511,6 +526,44 @@ class EmailServerCheckRun {
             errorLines
           })
     )
+  }
+}
+
+/**
+ * Starts the process of one check.
+ *
+ * @param start - The command, folder, account variable, and time limit.
+ * @param timeLimit - Signal that aborts once the time limit passed, when
+ * Node kills the process with `SIGKILL`.
+ * @returns The process Node started, or the error Node threw because it
+ * could not start one, such as for a path that goes through a file
+ * (`ENOTDIR`). Node reports other failures to start, such as a missing
+ * executable, after it returned the process, as an `error` event.
+ * @throws Node's refusal of the command's arguments, such as a text that
+ * holds a NUL character.
+ */
+function startCheckProcess(
+  start: EmailServerCheckStart,
+  timeLimit: AbortSignal
+): CheckChildProcess | Error {
+  try {
+    return spawn(
+      start.serverCommand.command,
+      [...start.serverCommand.arguments, EMAIL_SERVER_CHECK_SUBCOMMAND],
+      {
+        cwd: start.workingDirectory,
+        env: {
+          ...getDefaultEnvironment(),
+          [EMAIL_ACCOUNT_VARIABLE_NAME]: start.accountVariableValue
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+        signal: timeLimit,
+        killSignal: "SIGKILL"
+      }
+    )
+  } catch (error) {
+    if (error instanceof Error && isSpawnFailure(error)) return error
+    throw error
   }
 }
 

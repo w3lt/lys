@@ -112,6 +112,11 @@ export type McpServerStatusPresentation = {
   readonly heading: string
   /** What the state means or why, or empty while there is nothing to add. */
   readonly detail: string
+  /**
+   * Label of the button that connects the server again, such as `Retry`,
+   * or empty while none is offered, because connecting cannot help.
+   */
+  readonly reconnectLabel: string
 }
 
 /** Facts a listed server's state is drawn from. */
@@ -259,8 +264,19 @@ const NAME_TAKEN_STATUS: McpServerStatusPresentation = Object.freeze({
   chip: "name taken",
   heading: "Name taken",
   detail:
-    "An added server has this name. Rename or remove it to use the built-in server."
+    "An added server has this name. Rename or remove it to use the built-in server.",
+  reconnectLabel: ""
 })
+
+/**
+ * Failures the backend refuses to reconnect a server after, because the
+ * server cannot start until its settings change: the email server's missing
+ * or unusable account, which saving an account applies again.
+ */
+const MCP_FAILURES_WITHOUT_RECONNECT: ReadonlySet<McpServerFailure> = new Set([
+  "account-missing",
+  "account-invalid"
+])
 
 /** Why a server is not connected; a new reason must add one. */
 const MCP_SERVER_FAILURE_TEXTS = Object.freeze({
@@ -569,12 +585,15 @@ function formatToolCount(count: number): string {
 function formatIdleStatus(
   facts: McpServerRowFacts
 ): McpServerStatusPresentation {
+  const { connectLabel } =
+    MCP_CONNECTION_WORDS[getMcpListedServerTransport(facts.server)]
   if (!facts.isBackendRunning) {
     return {
       condition: "idle",
       chip: "",
       heading: "Not connected",
-      detail: "Lys connects once the backend runs."
+      detail: "Lys connects once the backend runs.",
+      reconnectLabel: connectLabel
     }
   }
   if (facts.list.status === "loaded") {
@@ -582,7 +601,8 @@ function formatIdleStatus(
       condition: "idle",
       chip: "not applied",
       heading: "Not applied",
-      detail: `${formatMcpReconnectLabel(facts.server, "idle")} applies the saved servers.`
+      detail: `${connectLabel} applies the saved servers.`,
+      reconnectLabel: connectLabel
     }
   }
   return {
@@ -592,7 +612,8 @@ function formatIdleStatus(
     detail:
       facts.list.status === "failed"
         ? "Lys couldn't read the server states."
-        : "Reading the server states…"
+        : "Reading the server states…",
+    reconnectLabel: connectLabel
   }
 }
 
@@ -611,14 +632,16 @@ function formatConnectingStatus(
       condition: "connecting",
       chip: "connecting",
       heading: "Connecting",
-      detail: `waiting for initialize from ${formatMcpServerHost(server.settings.url)}`
+      detail: `waiting for initialize from ${formatMcpServerHost(server.settings.url)}`,
+      reconnectLabel: MCP_CONNECTION_WORDS.http.reconnectLabel
     }
   }
   return {
     condition: "connecting",
     chip: "starting",
     heading: "Starting",
-    detail: "started · waiting for initialize"
+    detail: "started · waiting for initialize",
+    reconnectLabel: MCP_CONNECTION_WORDS.stdio.reconnectLabel
   }
 }
 
@@ -636,12 +659,13 @@ function formatConnectedStatus(
 ): McpServerStatusPresentation {
   const listed = `${formatToolCount(state.toolCount)} listed`
   const skippedCount = state.skippedTools.length
-  const transport = getMcpListedServerTransport(server)
+  const words = MCP_CONNECTION_WORDS[getMcpListedServerTransport(server)]
   return {
     condition: "connected",
     chip: "",
-    heading: MCP_CONNECTION_WORDS[transport].connectedHeading,
-    detail: skippedCount === 0 ? listed : `${listed} · ${skippedCount} skipped`
+    heading: words.connectedHeading,
+    detail: skippedCount === 0 ? listed : `${listed} · ${skippedCount} skipped`,
+    reconnectLabel: words.reconnectLabel
   }
 }
 
@@ -657,7 +681,13 @@ function formatOffStatus(server: McpListedServer): McpServerStatusPresentation {
     server.kind === "built-in" && !server.isReady
       ? BUILT_IN_MCP_SERVER_PRESENTATIONS[server.name].needsNote
       : MCP_SERVER_OFF_DETAIL
-  return { condition: "off", chip: "off", heading: "Off", detail }
+  return {
+    condition: "off",
+    chip: "off",
+    heading: "Off",
+    detail,
+    reconnectLabel: ""
+  }
 }
 
 /**
@@ -666,7 +696,8 @@ function formatOffStatus(server: McpListedServer): McpServerStatusPresentation {
  * @param server - Listed server.
  * @param reason - Why it is not connected.
  * @returns `failed`, with why: for a server Lys ships that could not be
- * started, how to install it; otherwise the reason's text.
+ * started, how to install it; otherwise the reason's text. It offers Retry,
+ * except after a failure the backend refuses to reconnect the server after.
  */
 function formatFailedStatus(
   server: McpListedServer,
@@ -676,15 +707,22 @@ function formatFailedStatus(
     server.kind === "built-in" && reason === "start-failed"
       ? BUILT_IN_MCP_SERVER_PRESENTATIONS[server.name].startFailure
       : MCP_SERVER_FAILURE_TEXTS[reason]
-  return { condition: "failed", chip: "failed", heading: "Failed", detail }
+  return {
+    condition: "failed",
+    chip: "failed",
+    heading: "Failed",
+    detail,
+    reconnectLabel: MCP_FAILURES_WITHOUT_RECONNECT.has(reason) ? "" : "Retry"
+  }
 }
 
 /**
  * Formats a listed server's state.
  *
  * @param facts - Backend status, the list, and the server.
- * @returns Its condition, chip, heading, and detail: that an added server
- * took a built-in server's name; that the server is switched off, from its
+ * @returns Its condition, chip, heading, detail, and the label of the
+ * button that connects it again: that an added server took a built-in
+ * server's name; that the server is switched off, from its
  * saved switch or from the backend; the state the backend reports while it
  * runs and lists the server; otherwise an idle state that says why none is
  * known.
@@ -709,35 +747,6 @@ export function formatMcpServerStatus(
       return formatFailedStatus(server, state.reason)
     case "off":
       return formatOffStatus(server)
-  }
-}
-
-/**
- * Formats the label of the button that connects a server again.
- *
- * @param server - Listed server.
- * @param condition - Where the server stands.
- * @returns `Retry` after a failure; `Restart` or `Reconnect` while it is
- * connected or connecting; `Start` or `Connect` while it is idle; empty
- * while the server is switched off, or while an added server has a
- * built-in server's name, because nothing can connect it then.
- */
-export function formatMcpReconnectLabel(
-  server: McpListedServer,
-  condition: McpServerCondition
-): string {
-  if (server.kind === "built-in" && server.isNameTaken) return ""
-  const words = MCP_CONNECTION_WORDS[getMcpListedServerTransport(server)]
-  switch (condition) {
-    case "failed":
-      return "Retry"
-    case "idle":
-      return words.connectLabel
-    case "connected":
-    case "connecting":
-      return words.reconnectLabel
-    case "off":
-      return ""
   }
 }
 

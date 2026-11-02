@@ -24,6 +24,7 @@ import {
   buildFailedMcpState,
   buildMcpServerList,
   buildMcpServerListRoute,
+  buildMcpServerOffProblem,
   buildMcpServerStatus,
   CONNECTING_MCP_STATE,
   OFF_MCP_STATE
@@ -1646,6 +1647,62 @@ describe("McpPaneContent", () => {
         name: "Reconnect notes"
       })
     ).toBeInTheDocument()
+  })
+
+  it("applies the saved servers when the backend answers Retry that the server is off, and shows no failure", async () => {
+    startSettingsHost()
+    const { backend } = await startMcpPane({
+      [RECONNECT_NOTES_ROUTE]: () =>
+        buildJsonResponse(409, buildMcpServerOffProblem("notes")),
+      [SYNC_ROUTE]: answerList(
+        buildMcpServerList([
+          STORED_LIST.servers[0],
+          buildMcpServerStatus("notes", "http", CONNECTING_MCP_STATE)
+        ])
+      )
+    })
+    const user = userEvent.setup()
+    const notes = await expandServer(user, "notes")
+
+    await user.click(within(notes).getByRole("button", { name: "Retry notes" }))
+    await waitForRenderedWork()
+
+    expect(listMcpRouteKeys(backend)).toEqual([
+      LIST_ROUTE,
+      RECONNECT_NOTES_ROUTE,
+      SYNC_ROUTE
+    ])
+    expect(getPaneStatus()).toHaveTextContent("")
+    expect(within(getServerRow("notes")).getByRole("status")).toHaveTextContent(
+      /^notes: Connecting/
+    )
+  })
+
+  it("offers no Retry while the email server failed for its account, which the backend refuses to reconnect", async () => {
+    startSettingsHost()
+    const { useLysStore } = await startMcpPane({
+      [LIST_ROUTE]: answerList(
+        buildMcpServerList([
+          ...STORED_LIST.servers.slice(0, 2),
+          buildBuiltInMcpServerStatus(
+            "email",
+            buildFailedMcpState("account-invalid")
+          )
+        ])
+      )
+    })
+    const user = userEvent.setup()
+    useLysStore.setState({ settings: EMAIL_ON_SETTINGS })
+    await waitForRenderedWork()
+
+    const email = await expandServer(user, "email")
+
+    expect(within(email).getAllByRole("status")[0]).toHaveTextContent(
+      "email: FailedThe saved email account is not usable. Save it again below."
+    )
+    expect(
+      within(email).queryByRole("button", { name: "Retry email" })
+    ).toBeNull()
   })
 
   it("says a saved server the backend has not applied is not applied", async () => {

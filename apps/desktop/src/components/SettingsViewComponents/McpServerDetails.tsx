@@ -22,7 +22,6 @@ import { isToolOn, type ToolListState } from "@/lib/store/tools"
 import { handleFocusTargetAttach } from "./focus-target"
 import {
   findMcpServerApproval,
-  formatMcpReconnectLabel,
   formatMcpServerApprovalNote,
   formatMcpServerRemovalQuestion,
   formatMcpServerToolMeta,
@@ -144,10 +143,13 @@ type McpServerStatusLineProps = {
  * @remarks The parent owns the state and the reconnect; the component owns
  * no state. The heading and detail form the server's own polite, atomic
  * status, so a change of the state while the details are shown is announced
- * once. The button reads Retry, Restart, Reconnect, Start, or Connect for
- * the state and the transport, is named by its text and the server, and is
- * disabled while the backend is not running; it is absent while the server
- * is switched off, or while an added server has a built-in server's name.
+ * once. The button reads the state's label, Retry, Restart, Reconnect,
+ * Start, or Connect for the state and the transport, is named by its text
+ * and the server, and is disabled while the backend is not running; it is
+ * absent while the state offers none: while the server is switched off,
+ * while an added server has a built-in server's name, or after a failure
+ * the backend refuses to reconnect it after, such as the email server's
+ * missing account.
  * @param props - Server, state, backend status, and the reconnect request.
  * @returns The status line.
  */
@@ -158,7 +160,7 @@ function McpServerStatusLine({
   onReconnect
 }: McpServerStatusLineProps): ReactElement {
   const serverName = getMcpListedServerName(server)
-  const label = formatMcpReconnectLabel(server, status.condition)
+  const label = status.reconnectLabel
 
   return (
     <div className="settings-view__mcp-status-line">

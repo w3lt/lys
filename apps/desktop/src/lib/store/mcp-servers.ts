@@ -95,9 +95,11 @@ type McpServerStoreActions = {
    * @returns A promise that resolves after the answered list or the failure
    * is committed; it never rejects.
    * @remarks A failure shown before is cleared when the reconnect starts.
-   * When the backend has not applied a server with that name, it applies the
-   * saved group instead, which opens the server if it is saved, unless the
-   * store was reset since the reconnect started.
+   * When the backend has not applied a server with that name, or says the
+   * server is switched off or cannot start, which it answers without
+   * changing anything, it applies the saved group instead, which opens the
+   * server if it is saved and switched on, and lists its state either way,
+   * unless the store was reset since the reconnect started.
    */
   sendMcpServerReconnect: (serverName: McpServerName) => Promise<void>
   /**
@@ -417,12 +419,13 @@ function createMcpServerStore(
 
     /**
      * Asks the backend to reconnect one server and commits its answer, or
-     * applies the saved group when the backend has not applied the server.
+     * applies the saved group when the backend has not applied the server,
+     * or says it is switched off or cannot start.
      *
      * @param serverName - Name of the server to reconnect.
      * @returns A promise that resolves after the outcome is committed. A
-     * not-found answer to a reconnect that started before a reset applies
-     * nothing.
+     * not-found or off answer to a reconnect that started before a reset
+     * applies nothing.
      */
     async function sendReconnectAndUpdateList(
       serverName: McpServerName
@@ -440,7 +443,7 @@ function createMcpServerStore(
         updateActionFailure(request, failure)
         return
       }
-      if (result.status === "not-found") {
+      if (result.status !== "reconnected") {
         if (!isRequestDiscarded(request)) await sendMcpServerSync()
         return
       }

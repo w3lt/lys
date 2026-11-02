@@ -16,6 +16,7 @@ import {
   buildMcpServerList,
   buildMcpServerListRoute,
   buildMcpServerNotFoundProblem,
+  buildMcpServerOffProblem,
   buildMcpServerStatus,
   CONNECTING_MCP_STATE
 } from "../../support/mcpFixtures"
@@ -91,6 +92,22 @@ const INVALID_SETTINGS_LIST = buildMcpServerList(
   [buildMcpServerStatus("notes", "http", buildFailedMcpState("unauthorized"))],
   "invalid"
 )
+
+/**
+ * Declared problems the backend refuses a reconnect of `notes` with, each
+ * changing nothing: the server is not applied, or it is switched off or
+ * cannot start.
+ */
+const RECONNECT_REFUSALS = [
+  [
+    "has not applied the server",
+    () => buildJsonResponse(404, buildMcpServerNotFoundProblem("notes"))
+  ],
+  [
+    "says the server is switched off or cannot start",
+    () => buildJsonResponse(409, buildMcpServerOffProblem("notes"))
+  ]
+] as const
 
 /**
  * Builds a route that answers with a server list.
@@ -442,21 +459,24 @@ describe("useMcpServerStore", () => {
       }
     )
 
-    it("applies the saved servers when the backend has not applied the server", async () => {
-      const { readRouteKeys } = startMcpBackend({
-        [RECONNECT_NOTES_ROUTE]: () =>
-          buildJsonResponse(404, buildMcpServerNotFoundProblem("notes")),
-        [SYNC_ROUTE]: answerList(CONNECTING_LIST)
-      })
-      const { useMcpServerStore } = await loadFreshMcpServerStore()
+    it.each(RECONNECT_REFUSALS)(
+      "applies the saved servers when the backend %s",
+      async (_label, refusal) => {
+        const { readRouteKeys } = startMcpBackend({
+          [RECONNECT_NOTES_ROUTE]: refusal,
+          [SYNC_ROUTE]: answerList(CONNECTING_LIST)
+        })
+        const { useMcpServerStore } = await loadFreshMcpServerStore()
 
-      await useMcpServerStore.getState().sendMcpServerReconnect("notes")
+        await useMcpServerStore.getState().sendMcpServerReconnect("notes")
 
-      expect(readRouteKeys()).toEqual([RECONNECT_NOTES_ROUTE, SYNC_ROUTE])
-      expect(useMcpServerStore.getState().list).toEqual(
-        buildLoadedState(CONNECTING_LIST)
-      )
-    })
+        expect(readRouteKeys()).toEqual([RECONNECT_NOTES_ROUTE, SYNC_ROUTE])
+        expect(useMcpServerStore.getState().list).toEqual(
+          buildLoadedState(CONNECTING_LIST)
+        )
+        expect(useMcpServerStore.getState().actionFailure).toBeNull()
+      }
+    )
   })
 
   describe("answers out of order", () => {
@@ -606,28 +626,29 @@ describe("useMcpServerStore", () => {
       )
     })
 
-    it("discards a reconnect's not-found answer arriving after the reset, applying nothing", async () => {
-      const reconnectAnswer = createControlledPromise<Response>()
-      const { readRouteKeys } = startMcpBackend({
-        [RECONNECT_NOTES_ROUTE]: () => reconnectAnswer.promise,
-        [SYNC_ROUTE]: answerList(CONNECTED_LIST)
-      })
-      const { useMcpServerStore } = await loadFreshMcpServerStore()
-      const reconnect = useMcpServerStore
-        .getState()
-        .sendMcpServerReconnect("notes")
-      useMcpServerStore.getState().resetMcpServers()
+    it.each(RECONNECT_REFUSALS)(
+      "discards the answer of a reconnect arriving after the reset, applying nothing, when the backend %s",
+      async (_label, refusal) => {
+        const reconnectAnswer = createControlledPromise<Response>()
+        const { readRouteKeys } = startMcpBackend({
+          [RECONNECT_NOTES_ROUTE]: () => reconnectAnswer.promise,
+          [SYNC_ROUTE]: answerList(CONNECTED_LIST)
+        })
+        const { useMcpServerStore } = await loadFreshMcpServerStore()
+        const reconnect = useMcpServerStore
+          .getState()
+          .sendMcpServerReconnect("notes")
+        useMcpServerStore.getState().resetMcpServers()
 
-      reconnectAnswer.resolve(
-        buildJsonResponse(404, buildMcpServerNotFoundProblem("notes"))
-      )
-      await reconnect
-      await waitForMicrotasks()
+        reconnectAnswer.resolve(refusal())
+        await reconnect
+        await waitForMicrotasks()
 
-      expect(readRouteKeys()).toEqual([RECONNECT_NOTES_ROUTE])
-      expect(useMcpServerStore.getState().list).toEqual({ status: "idle" })
-      expect(useMcpServerStore.getState().actionFailure).toBeNull()
-    })
+        expect(readRouteKeys()).toEqual([RECONNECT_NOTES_ROUTE])
+        expect(useMcpServerStore.getState().list).toEqual({ status: "idle" })
+        expect(useMcpServerStore.getState().actionFailure).toBeNull()
+      }
+    )
   })
 
   describe("saveMcpServers", () => {

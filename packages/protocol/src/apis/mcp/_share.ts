@@ -100,10 +100,13 @@ export type SkippedMcpTool = z.infer<typeof skippedMcpToolSchema>
  * reading its tools. `connected`: its tools are listed; `toolCount` tools
  * are listed and `skippedTools` read but not listed, together at most
  * {@link MAXIMUM_MCP_SERVER_TOOL_COUNT}, and `isToolListCut` says the server
- * has tools past that. `failed`: the server is not connected and why;
- * Reconnect or a changed setting tries again. `off`: the person switched
- * the server off, so the backend neither starts nor reaches it, and offers
- * none of its tools; switching it on connects it.
+ * has tools past that. `failed`: the server is not connected and why; a
+ * changed setting tries again, and so does Reconnect, except after
+ * `account-missing` or `account-invalid`, which Reconnect refuses with the
+ * server-off problem until a changed setting, such as a saved email
+ * account, is applied. `off`: the person switched the server off, so the
+ * backend neither starts nor reaches it, and offers none of its tools;
+ * switching it on connects it.
  */
 export const mcpServerStateSchema = z
   .discriminatedUnion("status", [

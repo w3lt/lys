@@ -1,10 +1,12 @@
 import {
   createMcpServerNotFoundProblem,
+  createMcpServerOffProblem,
   mcpServerListSchema,
   mcpServerStateSchema,
   type McpServerFailure,
   type McpServerList,
   type McpServerNotFoundProblem,
+  type McpServerOffProblem,
   type McpServerState,
   type McpServerStatus,
   type SkippedMcpTool
@@ -111,6 +113,22 @@ export function buildMcpServerNotFoundProblem(
   serverName: string
 ): McpServerNotFoundProblem {
   return createMcpServerNotFoundProblem(
+    serverName,
+    `/api/v1/mcp/servers/${serverName}/reconnect`
+  )
+}
+
+/**
+ * Builds the problem the backend answers a reconnect of a server that is
+ * switched off, or of a built-in server without a usable account, with.
+ *
+ * @param serverName - Server the request names.
+ * @returns The declared HTTP 409 problem.
+ */
+export function buildMcpServerOffProblem(
+  serverName: string
+): McpServerOffProblem {
+  return createMcpServerOffProblem(
     serverName,
     `/api/v1/mcp/servers/${serverName}/reconnect`
   )

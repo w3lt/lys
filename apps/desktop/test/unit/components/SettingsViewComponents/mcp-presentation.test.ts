@@ -22,7 +22,6 @@ import {
   formatMcpDraftProblemSummaryHeading,
   formatMcpEditorHint,
   formatMcpEditorKind,
-  formatMcpReconnectLabel,
   formatMcpServerApprovalNote,
   formatMcpServerJsonMessage,
   formatMcpServerListMeta,
@@ -482,7 +481,8 @@ describe("formatMcpServerStatus", () => {
       condition: "idle",
       chip: "",
       heading: "Not connected",
-      detail: "Lys connects once the backend runs."
+      detail: "Lys connects once the backend runs.",
+      reconnectLabel: "Start"
     })
   })
 
@@ -507,7 +507,8 @@ describe("formatMcpServerStatus", () => {
         condition: "idle",
         chip: "",
         heading: "State unknown",
-        detail
+        detail,
+        reconnectLabel: "Start"
       })
     }
   )
@@ -530,9 +531,9 @@ describe("formatMcpServerStatus", () => {
         condition: "idle",
         chip: "not applied",
         heading: "Not applied",
-        detail: `${button} applies the saved servers.`
+        detail: `${button} applies the saved servers.`,
+        reconnectLabel: button
       })
-      expect(formatMcpReconnectLabel(server, "idle")).toBe(button)
     }
   )
 
@@ -546,7 +547,8 @@ describe("formatMcpServerStatus", () => {
       condition: "off",
       chip: "off",
       heading: "Off",
-      detail: "Switched off. Its tools are not offered to the agents."
+      detail: "Switched off. Its tools are not offered to the agents.",
+      reconnectLabel: ""
     })
   })
 
@@ -557,7 +559,8 @@ describe("formatMcpServerStatus", () => {
       condition: "off",
       chip: "off",
       heading: "Off",
-      detail: "Switched off. Its tools are not offered to the agents."
+      detail: "Switched off. Its tools are not offered to the agents.",
+      reconnectLabel: ""
     })
   })
 
@@ -574,7 +577,8 @@ describe("formatMcpServerStatus", () => {
       condition: "off",
       chip: "off",
       heading: "Off",
-      detail: needsNote
+      detail: needsNote,
+      reconnectLabel: ""
     })
     expect(
       formatMcpServerStatus(
@@ -592,7 +596,8 @@ describe("formatMcpServerStatus", () => {
       condition: "off",
       chip: "off",
       heading: "Off",
-      detail: "Switched off. Its tools are not offered to the agents."
+      detail: "Switched off. Its tools are not offered to the agents.",
+      reconnectLabel: ""
     })
   })
 
@@ -602,7 +607,8 @@ describe("formatMcpServerStatus", () => {
       chip: "name taken",
       heading: "Name taken",
       detail:
-        "An added server has this name. Rename or remove it to use the built-in server."
+        "An added server has this name. Rename or remove it to use the built-in server.",
+      reconnectLabel: ""
     }
 
     expect(
@@ -631,7 +637,8 @@ describe("formatMcpServerStatus", () => {
       condition: "connected",
       chip: "",
       heading: "Running",
-      detail: "5 tools listed"
+      detail: "5 tools listed",
+      reconnectLabel: "Restart"
     })
     expect(
       formatMcpServerStatus(
@@ -641,18 +648,13 @@ describe("formatMcpServerStatus", () => {
   })
 
   it.each([
-    ["account-missing", "Needs an email account. Add one below."],
-    [
-      "account-invalid",
-      "The saved email account is not usable. Save it again below."
-    ],
     [
       "start-failed",
       "Lys couldn't start its email server. Run build.sh to install it."
     ],
     ["timed-out", "The server didn't answer within 2 minutes."]
   ] as const)(
-    "says why the email server failed: %s",
+    "says why the email server failed: %s, and offers Retry",
     (reason: McpServerFailure, detail) => {
       expect(
         formatMcpServerStatus(
@@ -662,7 +664,31 @@ describe("formatMcpServerStatus", () => {
         condition: "failed",
         chip: "failed",
         heading: "Failed",
-        detail
+        detail,
+        reconnectLabel: "Retry"
+      })
+    }
+  )
+
+  it.each([
+    ["account-missing", "Needs an email account. Add one below."],
+    [
+      "account-invalid",
+      "The saved email account is not usable. Save it again below."
+    ]
+  ] as const)(
+    "says why the email server failed: %s, and offers no Retry, which the backend refuses until an account is saved",
+    (reason: McpServerFailure, detail) => {
+      expect(
+        formatMcpServerStatus(
+          buildEmailRowFacts(EMAIL_SERVER, buildFailedMcpState(reason))
+        )
+      ).toEqual({
+        condition: "failed",
+        chip: "failed",
+        heading: "Failed",
+        detail,
+        reconnectLabel: ""
       })
     }
   )
@@ -676,7 +702,8 @@ describe("formatMcpServerStatus", () => {
       condition: "connecting",
       chip: "starting",
       heading: "Starting",
-      detail: "started · waiting for initialize"
+      detail: "started · waiting for initialize",
+      reconnectLabel: "Restart"
     })
   })
 
@@ -702,7 +729,8 @@ describe("formatMcpServerStatus", () => {
         condition: "connecting",
         chip: "connecting",
         heading: "Connecting",
-        detail
+        detail,
+        reconnectLabel: "Reconnect"
       })
     }
   )
@@ -734,21 +762,24 @@ describe("formatMcpServerStatus", () => {
       COMMAND_SERVER,
       buildConnectedMcpState(3),
       "Running",
-      "3 tools listed"
+      "3 tools listed",
+      "Restart"
     ],
     [
       "remote server",
       URL_SERVER,
       buildConnectedMcpState(1),
       "Connected",
-      "1 tool listed"
+      "1 tool listed",
+      "Reconnect"
     ],
     [
       "remote server",
       URL_SERVER,
       buildConnectedMcpState(0),
       "Connected",
-      "0 tools listed"
+      "0 tools listed",
+      "Reconnect"
     ],
     [
       "local program",
@@ -758,14 +789,21 @@ describe("formatMcpServerStatus", () => {
         { name: "b", reason: "duplicate-name" }
       ]),
       "Running",
-      "4 tools listed · 2 skipped"
+      "4 tools listed · 2 skipped",
+      "Restart"
     ]
   ])(
     "says a connected %s is %s and counts its tools: %s",
-    (_, server, state, heading, detail) => {
+    (_, server, state, heading, detail, reconnectLabel) => {
       expect(
         formatMcpServerStatus(buildAppliedRowFacts(server, state))
-      ).toEqual({ condition: "connected", chip: "", heading, detail })
+      ).toEqual({
+        condition: "connected",
+        chip: "",
+        heading,
+        detail,
+        reconnectLabel
+      })
     }
   )
 
@@ -793,7 +831,7 @@ describe("formatMcpServerStatus", () => {
       "The server refused to connect or to list its tools, or its answer was too large or not valid MCP."
     ]
   ] as const)(
-    "says why a server failed: %s",
+    "says why a server failed: %s, and offers Retry",
     (reason: McpServerFailure, detail) => {
       expect(
         formatMcpServerStatus(
@@ -803,41 +841,11 @@ describe("formatMcpServerStatus", () => {
         condition: "failed",
         chip: "failed",
         heading: "Failed",
-        detail
+        detail,
+        reconnectLabel: "Retry"
       })
     }
   )
-})
-
-describe("formatMcpReconnectLabel", () => {
-  it.each([
-    ["stdio", "failed", "Retry"],
-    ["http", "failed", "Retry"],
-    ["stdio", "idle", "Start"],
-    ["http", "idle", "Connect"],
-    ["stdio", "connected", "Restart"],
-    ["http", "connected", "Reconnect"],
-    ["stdio", "connecting", "Restart"],
-    ["http", "connecting", "Reconnect"],
-    ["stdio", "off", ""],
-    ["http", "off", ""]
-  ] as const)(
-    "labels the button of a %s server that is %s: %s",
-    (transport, condition, label) => {
-      expect(
-        formatMcpReconnectLabel(SERVER_BY_TRANSPORT[transport], condition)
-      ).toBe(label)
-    }
-  )
-
-  it("labels the email server's button like a local program's, and offers none while its name is taken", () => {
-    expect(formatMcpReconnectLabel(EMAIL_SERVER, "failed")).toBe("Retry")
-    expect(formatMcpReconnectLabel(EMAIL_SERVER, "connected")).toBe("Restart")
-    expect(formatMcpReconnectLabel(EMAIL_SERVER, "idle")).toBe("Start")
-    expect(
-      formatMcpReconnectLabel({ ...EMAIL_SERVER, isNameTaken: true }, "idle")
-    ).toBe("")
-  })
 })
 
 describe("listMcpServerTools", () => {

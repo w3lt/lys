@@ -28,7 +28,7 @@ if ! command -v cargo >/dev/null 2>&1; then
   echo "Lys needs the Rust toolchain (cargo) to build its email MCP server." >&2
   exit 1
 fi
-cargo build --release --manifest-path mcps/email/Cargo.toml
+cargo build --release --locked --manifest-path mcps/email/Cargo.toml
 
 # Step 3: Build backend
 pnpm run backend:build

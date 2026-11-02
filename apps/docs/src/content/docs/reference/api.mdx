@@ -11,35 +11,36 @@ route definitions.
 
 ## Routes
 
-| Method   | Path                                                                              | Request body                                                                                         | Response                                                               |
-| -------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `GET`    | `/api/v1/heath`                                                                   | none                                                                                                 | `{ ok: true }`                                                         |
-| `GET`    | `/api/v1/llm/list`                                                                | none                                                                                                 | `{ llms: LlmInfo[], modelLoading: "lys" \| "provider" }`               |
-| `GET`    | `/api/v1/llm/:modelId/health`                                                     | none                                                                                                 | Loaded-state health observation                                        |
-| `POST`   | `/api/v1/llm/load`                                                                | `{ modelId: string, configuration?: ModelLoadConfiguration }`                                        | `LlmInfo`                                                              |
-| `PATCH`  | `/api/v1/llm/unload`                                                              | `{ modelId: string }`                                                                                | `204` or typed Problem Details                                         |
-| `GET`    | `/api/v1/llm/runtime`                                                             | none                                                                                                 | `{ status: "connecting" \| "connected" \| "unreachable" }`             |
-| `POST`   | `/api/v1/llm/runtime/connect`                                                     | none                                                                                                 | Settled `{ status }`, or service-busy Problem Details                  |
-| `GET`    | `/api/v1/conversations`                                                           | none; optional `query`, `cursor`, `limit` query parameters                                           | Conversation list page                                                 |
-| `GET`    | `/api/v1/conversations/:conversationId`                                           | none                                                                                                 | Conversation with ordered messages and numbered sources                |
-| `PATCH`  | `/api/v1/conversations/:conversationId`                                           | `{ title: string }`                                                                                  | Conversation metadata                                                  |
-| `DELETE` | `/api/v1/conversations/:conversationId`                                           | none                                                                                                 | Bodyless `204`                                                         |
-| `GET`    | `/api/v1/agents`                                                                  | none; optional `cursor`, `limit` query parameters                                                    | Built-in agents and a page of stored agents                            |
-| `POST`   | `/api/v1/agents`                                                                  | `{ code?, name, bio, systemPrompt }`                                                                 | `201` agent with `Location`, or `409` Problem Details                  |
-| `GET`    | `/api/v1/agents/:agentCode`                                                       | none                                                                                                 | Agent with its system prompt                                           |
-| `PATCH`  | `/api/v1/agents/:agentCode`                                                       | at least one of `{ name, bio, systemPrompt }`                                                        | Changed agent, or `409` for a built-in agent                           |
-| `DELETE` | `/api/v1/agents/:agentCode`                                                       | none                                                                                                 | Bodyless `204`, or `409` for a built-in agent                          |
-| `GET`    | `/api/v1/tools`                                                                   | none                                                                                                 | `{ tools: ToolDefinition[], unavailableTools }`                        |
-| `POST`   | `/api/v1/tools/web_search/key-check`                                              | `{}`                                                                                                 | `{ status: "accepted" \| "rejected" \| "unavailable" \| "failed", … }` |
-| `GET`    | `/api/v1/mcp/servers`                                                             | none                                                                                                 | `{ settings, servers: McpServerStatus[] }`                             |
-| `POST`   | `/api/v1/mcp/servers/sync`                                                        | `{}`                                                                                                 | The server list right after applying the `mcp` settings group          |
-| `POST`   | `/api/v1/mcp/servers/:serverName/reconnect`                                       | `{}`                                                                                                 | The server list, or `404` Problem Details                              |
-| `POST`   | `/api/v1/chat`                                                                    | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` and `attachments` | `text/event-stream`                                                    |
-| `POST`   | `/api/v1/chat/context`                                                            | `conversation`, `model`, optional `tools`                                                            | `ChatContextMeasurement`, or typed Problem Details                     |
-| `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`                 | none                                                                                                 | `text/event-stream` (reply snapshot, then live events)                 |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                   | none                                                                                                 | Bodyless `204`, or `409` Problem Details                               |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`   | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                               |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId` | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                               |
+| Method   | Path                                                                              | Request body                                                                                         | Response                                                                   |
+| -------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `GET`    | `/api/v1/heath`                                                                   | none                                                                                                 | `{ ok: true }`                                                             |
+| `GET`    | `/api/v1/llm/list`                                                                | none                                                                                                 | `{ llms: LlmInfo[], modelLoading: "lys" \| "provider" }`                   |
+| `GET`    | `/api/v1/llm/:modelId/health`                                                     | none                                                                                                 | Loaded-state health observation                                            |
+| `POST`   | `/api/v1/llm/load`                                                                | `{ modelId: string, configuration?: ModelLoadConfiguration }`                                        | `LlmInfo`                                                                  |
+| `PATCH`  | `/api/v1/llm/unload`                                                              | `{ modelId: string }`                                                                                | `204` or typed Problem Details                                             |
+| `GET`    | `/api/v1/llm/runtime`                                                             | none                                                                                                 | `{ status: "connecting" \| "connected" \| "unreachable" }`                 |
+| `POST`   | `/api/v1/llm/runtime/connect`                                                     | none                                                                                                 | Settled `{ status }`, or service-busy Problem Details                      |
+| `GET`    | `/api/v1/conversations`                                                           | none; optional `query`, `cursor`, `limit` query parameters                                           | Conversation list page                                                     |
+| `GET`    | `/api/v1/conversations/:conversationId`                                           | none                                                                                                 | Conversation with ordered messages and numbered sources                    |
+| `PATCH`  | `/api/v1/conversations/:conversationId`                                           | `{ title: string }`                                                                                  | Conversation metadata                                                      |
+| `DELETE` | `/api/v1/conversations/:conversationId`                                           | none                                                                                                 | Bodyless `204`                                                             |
+| `GET`    | `/api/v1/agents`                                                                  | none; optional `cursor`, `limit` query parameters                                                    | Built-in agents and a page of stored agents                                |
+| `POST`   | `/api/v1/agents`                                                                  | `{ code?, name, bio, systemPrompt }`                                                                 | `201` agent with `Location`, or `409` Problem Details                      |
+| `GET`    | `/api/v1/agents/:agentCode`                                                       | none                                                                                                 | Agent with its system prompt                                               |
+| `PATCH`  | `/api/v1/agents/:agentCode`                                                       | at least one of `{ name, bio, systemPrompt }`                                                        | Changed agent, or `409` for a built-in agent                               |
+| `DELETE` | `/api/v1/agents/:agentCode`                                                       | none                                                                                                 | Bodyless `204`, or `409` for a built-in agent                              |
+| `GET`    | `/api/v1/tools`                                                                   | none                                                                                                 | `{ tools: ToolDefinition[], unavailableTools }`                            |
+| `POST`   | `/api/v1/tools/web_search/key-check`                                              | `{}`                                                                                                 | `{ status: "accepted" \| "rejected" \| "unavailable" \| "failed", … }`     |
+| `GET`    | `/api/v1/mcp/servers`                                                             | none                                                                                                 | `{ settings, servers: McpServerStatus[] }`                                 |
+| `POST`   | `/api/v1/mcp/servers/sync`                                                        | `{}`                                                                                                 | The server list right after applying the `mcp` settings group              |
+| `POST`   | `/api/v1/mcp/servers/:serverName/reconnect`                                       | `{}`                                                                                                 | The server list, or `404` or `409` Problem Details                         |
+| `POST`   | `/api/v1/mcp/email/account-check`                                                 | `{ account, password }`                                                                              | `{ status: "checked", imap, smtp }` or `{ status: "unavailable", reason }` |
+| `POST`   | `/api/v1/chat`                                                                    | `conversation`, `message`, `model`, required `generationOptions`, optional `tools` and `attachments` | `text/event-stream`                                                        |
+| `POST`   | `/api/v1/chat/context`                                                            | `conversation`, `model`, optional `tools`                                                            | `ChatContextMeasurement`, or typed Problem Details                         |
+| `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`                 | none                                                                                                 | `text/event-stream` (reply snapshot, then live events)                     |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                   | none                                                                                                 | Bodyless `204`, or `409` Problem Details                                   |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`   | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                                   |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId` | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                                   |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
@@ -221,7 +222,7 @@ is stored; the backend adds those tools to a turn itself. A
 request that offers a
 backend tool that cannot run now, such as `web_search` without a usable
 Tavily API key, `read_page` while vmo is not ready, or an MCP tool whose
-server is applied but not connected, returns `409` with
+server is applied but not connected, switched off included, returns `409` with
 `urn:lys:problem:chat:backend-tool-unavailable` before anything is stored; see
 [an offered tool that cannot run](#an-offered-tool-that-cannot-run). An MCP
 tool name that no applied server lists, such as one of a removed server or a
@@ -448,8 +449,8 @@ order Settings shows them, and the listed tools that cannot run now:
 public web page through vmo, and `web_search`, which searches the web through Tavily
 (both group and access `network`). The tools of the connected
 [MCP servers](#mcp-servers) follow, server by server in the settings group's
-order, each server's tools in its own order. A server that is connecting or
-failed adds none. Availability is read again on every
+order, each server's tools in its own order. A server that is connecting,
+failed, or switched off adds none. Availability is read again on every
 request. For `web_search`, `reason` is `api-key-missing` (no Tavily API key is
 saved), `api-key-invalid` (the saved key fails the key format), or
 `settings-unreadable` (the settings file cannot be read as a settings
@@ -601,24 +602,36 @@ not end the wait yet ([#137](https://github.com/w3lt/lys/issues/137)).
 ## MCP servers
 
 The backend connects to the MCP servers that the `mcp` group of
-`settings.json` lists; see [MCP servers](/reference/configuration/#mcp-servers)
-in the configuration reference. It opens each server in the background: it
+`settings.json` lists and switches on, and to the servers Lys ships, today
+the email server, once the group switches them on; see
+[MCP servers](/reference/configuration/#mcp-servers) in the configuration
+reference and [the email server](/architecture/backend/#the-email-server).
+It opens each server in the background: it
 starts a stdio server's command, or sends the first request to a remote one,
 then reads its tools. A server's tools are listed and can be offered only
 while it is connected. Nothing reconnects by itself: Reconnect, or a changed
 setting, opens a server again, once its old connection closed, so a command
 server's old process has ended before its new one starts.
 
-`GET /api/v1/mcp/servers` lists the applied servers, in the group's order,
-with each one's state. It reads nothing and contacts no server.
+`GET /api/v1/mcp/servers` lists the applied servers: the servers Lys ships
+first, in their fixed order, each with `isBuiltIn` `true`, then the added
+servers in the group's order, with each one's state. A switched-off server
+is listed as `off`. It reads nothing and contacts no server.
 
 ```json
 {
   "settings": "applied",
   "servers": [
     {
+      "name": "email",
+      "transport": "stdio",
+      "isBuiltIn": true,
+      "state": { "status": "off" }
+    },
+    {
       "name": "files",
       "transport": "stdio",
+      "isBuiltIn": false,
       "state": {
         "status": "connected",
         "toolCount": 11,
@@ -629,6 +642,7 @@ with each one's state. It reads nothing and contacts no server.
     {
       "name": "docs",
       "transport": "http",
+      "isBuiltIn": false,
       "state": { "status": "failed", "reason": "unauthorized" }
     }
   ]
@@ -640,23 +654,26 @@ with each one's state. It reads nothing and contacts no server.
 breaks its rules; or `unreadable` when the file cannot be read as a JSON
 object. After `invalid` or `unreadable`, the backend keeps the servers it
 applied before, and `servers` lists them. The list never carries a command,
-an argument, an environment variable, a URL, or a header.
+an argument, an environment variable, a URL, a header, or the email account.
 
-| `state.status` | Other fields                                 | Meaning                                                                             |
-| -------------- | -------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `connecting`   | none                                         | The backend is starting or reaching the server and reading its tools                |
-| `connected`    | `toolCount`, `skippedTools`, `isToolListCut` | Its tools are listed; `isToolListCut` says it has more than the 128 tools Lys reads |
-| `failed`       | `reason`                                     | It is not connected; Reconnect or a changed setting tries again                     |
+| `state.status` | Other fields                                 | Meaning                                                                                            |
+| -------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `connecting`   | none                                         | The backend is starting or reaching the server and reading its tools                               |
+| `connected`    | `toolCount`, `skippedTools`, `isToolListCut` | Its tools are listed; `isToolListCut` says it has more than the 128 tools Lys reads                |
+| `failed`       | `reason`                                     | It is not connected; Reconnect or a changed setting tries again                                    |
+| `off`          | none                                         | Its switch is off, so it is neither started nor reached and lists no tool; Reconnect answers `409` |
 
-| `reason`         | Meaning                                                                                                                                                                                                                             |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `start-failed`   | The command could not be started, such as a command not found on `PATH`                                                                                                                                                             |
-| `closed`         | The process exited, or the connection ended, while connecting or later, such as a URL server that answered a call with HTTP `404`, which ends its session, or a server that sent an answer larger than 16 MiB once it was connected |
-| `timed-out`      | Connecting and reading the tools took longer than two minutes                                                                                                                                                                       |
-| `unauthorized`   | The server answered HTTP `401` or `403`; Lys does not sign in with OAuth ([#253](https://github.com/w3lt/lys/issues/253))                                                                                                           |
-| `unreachable`    | No connection could be made, such as a refused connection or an unknown host                                                                                                                                                        |
-| `http-error`     | The server answered another HTTP error, or a redirect, which Lys does not follow                                                                                                                                                    |
-| `protocol-error` | The server's answers are not valid MCP, an answer while connecting was larger than 16 MiB, or it answered the connection or the tool list with an error                                                                             |
+| `reason`          | Meaning                                                                                                                                                                                                                             |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start-failed`    | The command could not be started, such as a command not found on `PATH`                                                                                                                                                             |
+| `closed`          | The process exited, or the connection ended, while connecting or later, such as a URL server that answered a call with HTTP `404`, which ends its session, or a server that sent an answer larger than 16 MiB once it was connected |
+| `timed-out`       | Connecting and reading the tools took longer than two minutes                                                                                                                                                                       |
+| `unauthorized`    | The server answered HTTP `401` or `403`; Lys does not sign in with OAuth ([#253](https://github.com/w3lt/lys/issues/253))                                                                                                           |
+| `unreachable`     | No connection could be made, such as a refused connection or an unknown host                                                                                                                                                        |
+| `http-error`      | The server answered another HTTP error, or a redirect, which Lys does not follow                                                                                                                                                    |
+| `protocol-error`  | The server's answers are not valid MCP, an answer while connecting was larger than 16 MiB, or it answered the connection or the tool list with an error                                                                             |
+| `account-missing` | The email server Lys ships is switched on, but no email account is saved; nothing is started until one is                                                                                                                           |
+| `account-invalid` | The email server Lys ships is switched on, but the saved account or its password fails its rules or could not be read; nothing is started until it is saved again                                                                   |
 
 A connected server's tools are read once, when it connects, across at most 16
 pages of its tool list; a 16th page that names a next one fails the opening,
@@ -680,8 +697,13 @@ schema at all fails the opening, as `protocol-error`.
 `POST /api/v1/mcp/servers/sync` reads the `mcp` group again and applies it,
 then answers `200` with the list as it is right after applying. A server
 whose settings did not change keeps its connection, or its failure; a changed
-one is closed and opened again once that close ended; a removed one is closed;
-a new one is opened.
+one is closed and opened again once that close ended; a removed or
+switched-off one is closed, and a switched-off one is listed as `off`; a new
+or switched-on one is opened. A server Lys ships reads what it needs from the
+file at each apply while its switch is on, the email server the saved account
+and its password, and is opened, or listed as `failed` with
+`account-missing` or `account-invalid`; an added server with its name is
+applied in its place.
 The servers it opens are `connecting` in the answer, which does not wait for
 them. Syncs run one at a time in the order they arrive.
 
@@ -699,6 +721,20 @@ changes nothing:
   "status": 404,
   "detail": "No MCP server named docs is applied.",
   "instance": "/api/v1/mcp/servers/docs/reconnect"
+}
+```
+
+A server that is switched off, or a server Lys ships that cannot start, has
+no connection to open again: the route answers `409` with
+`urn:lys:problem:mcp:server-off` and changes nothing:
+
+```json
+{
+  "type": "urn:lys:problem:mcp:server-off",
+  "title": "MCP server cannot be opened",
+  "status": 409,
+  "detail": "The MCP server email is switched off, or has no usable email account, so it cannot be opened.",
+  "instance": "/api/v1/mcp/servers/email/reconnect"
 }
 ```
 
@@ -726,8 +762,9 @@ stopped. The model reads one of:
   and is cut at 20,000 characters with a note. A result the server marks as
   an error is stored as a failed call.
 - a sentence saying why the call failed: the server is not connected now, no
-  longer lists the tool, did not answer within five minutes, ended the
-  connection, answered with an HTTP status, could not be reached, refused the
+  longer lists the tool, was stopped while the call ran because the settings
+  switched it off, changed it, or no longer name it, did not answer within
+  five minutes, ended the connection, answered with an HTTP status, could not be reached, refused the
   call (with its message, marked as untrusted), sent an answer that is not
   valid MCP, or sent an answer larger than 16 MiB, which Lys does not read
   and which ends the connection, failing the server's other calls in flight
@@ -737,6 +774,76 @@ The backend checks only the shape of a call's arguments before it asks the
 person: a JSON object of at most 256 KiB, nesting at most 32 levels, whose
 keys follow the argument name rule and include every name the schema
 requires. The server checks the values.
+
+### The email server's tools
+
+The email server Lys ships offers ten tools, named `mcp__email__<tool>` to
+the model, each starting on Ask me. Every call opens its own connection to the
+account's IMAP or SMTP server and closes it before the call answers. A message
+id is `<uid>.<uidvalidity>.<folder>` and stays valid while the folder is not
+recreated. A call takes at most 240 seconds, connecting at most 15 and each
+exchange 30, a send 120, within the five minutes the backend gives every MCP
+call, and a result is cut at 20,000 characters, as every MCP result is.
+
+| Tool                | What it does                                                                                                                                                                                                                                                                                                                                                                                      | Limits                                                                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `search_emails`     | Finds messages, newest first, 20 per page, in one folder or, without `folder`, in every folder but an All Mail folder; `text`, `from`, `to`, `subject`, `since` and `before` as `YYYY-MM-DD`, `unread`, `flagged`, and `page` narrow it; each hit shows its id                                                                                                                                    | At most 200 hits read per folder, and the result says which folders were cut; a text argument up to 998 characters; a folder name up to 255 |
+| `read_email`        | Reads one message by id: its header fields, flags, text, and the list of its attachments, without marking it read                                                                                                                                                                                                                                                                                 |                                                                                                                                             |
+| `read_conversation` | Reads the conversation a message belongs to, oldest first, found through its Message-ID, In-Reply-To, and References fields in every folder                                                                                                                                                                                                                                                       | At most 50 messages, the newest kept, each cut to 3,000 characters of text                                                                  |
+| `read_attachment`   | Reads one attachment of a message as text                                                                                                                                                                                                                                                                                                                                                         | Text, HTML, CSV, JSON, XML, and YAML only; another kind, such as a PDF or an image, is named by `read_email` but cannot be read             |
+| `list_folders`      | Lists every folder with its role, Inbox, Sent, Drafts, Trash, Junk, Archive, or All, from the server's RFC 6154 attributes, else from its name, and how many messages it holds                                                                                                                                                                                                                    |                                                                                                                                             |
+| `manage_folder`     | Creates, renames, or deletes a folder                                                                                                                                                                                                                                                                                                                                                             | A folder with a role is neither renamed nor deleted, and a folder holding messages is not deleted                                           |
+| `send_email`        | Sends a message with `to`, `cc`, `bcc`, `subject`, and `body`; with `reply_to_id` a reply in that conversation, whose recipient and subject default to the replied message's Reply-To, else From, and `Re:` with its subject; with `forward_id` a forward quoting its text and attaching its attachments; files a copy in Sent unless the account says the server keeps one, and reports the copy | At most 50 recipients per field; a body up to 500,000 characters; sending is permanent                                                      |
+| `save_draft`        | Saves a message in Drafts without sending it, with the same fields, and with `draft_id` replaces that draft; answers the draft's id                                                                                                                                                                                                                                                               | The limits of `send_email`                                                                                                                  |
+| `send_draft`        | Sends a draft as stored, files the Sent copy the same way, and deletes the draft                                                                                                                                                                                                                                                                                                                  | Sending is permanent                                                                                                                        |
+| `delete_draft`      | Deletes a draft                                                                                                                                                                                                                                                                                                                                                                                   | Only a message in the Drafts folder                                                                                                         |
+
+The server's standard error lines, which the backend logs as
+`MCP server log line` entries, name the operation, the folder, counts, and
+the class of a failure, never the password, an address, a subject, or a body.
+
+### Email account check
+
+`POST /api/v1/mcp/email/account-check` signs in to an email account's IMAP
+and SMTP servers without saving anything; the desktop sends it before it
+saves an account. Its body is `{ account, password }`, under the rules of the
+[email account](/reference/configuration/#email-account) and its password,
+sent as `application/json`, which a page on another site cannot send without
+a CORS preflight; another body answers `400`, or `415` for a media type the
+backend cannot parse. The backend runs the `check` subcommand of the email
+server Lys ships with them, as it starts the server itself, and that
+subcommand signs in to both servers at the same time, 20 seconds each. Checks
+run one at a time, in call order, and a check that has not ended after one
+minute is killed. The route answers `200` with one of:
+
+```json
+{
+  "status": "checked",
+  "imap": { "status": "accepted" },
+  "smtp": { "status": "failed", "reason": "wrong-password" }
+}
+```
+
+```json
+{ "status": "unavailable", "reason": "server-missing" }
+```
+
+| Sign-in `reason`         | Meaning                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------- |
+| `wrong-password`         | The server refused the user name or password                                        |
+| `unreachable`            | No connection could be made to the host and port                                    |
+| `certificate-refused`    | The server's certificate is not trusted by the operating system's certificate store |
+| `encryption-not-offered` | The account asks for STARTTLS and the server does not offer it                      |
+| `timed-out`              | The server did not answer within 20 seconds                                         |
+| `protocol-error`         | The server answered something that is not IMAP or SMTP                              |
+
+| Unavailable `reason` | Meaning                                                                                                                 |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `server-missing`     | The email server is not at the path the configuration names; `build.sh` installs it                                     |
+| `server-failed`      | The email server could not be started, ended without a report, did not end within one minute, or the backend is closing |
+
+The answer never holds the account or the password, and nothing is saved:
+the desktop saves both only after both servers accepted the sign-in.
 
 ## Conversation history
 
@@ -971,7 +1078,7 @@ such tool in offer order. `toolName` and `reason` are extension members.
 
 For `page-reader-not-ready`, `detail` is "read_page is unavailable: vmo,
 Lys's page reader, is not ready." For `mcp-server-not-connected`, an offered
-MCP tool whose server is applied but connecting or failed, it is
+MCP tool whose server is applied but connecting, failed, or switched off, it is
 "mcp\_\_files\_\_read_file is unavailable: its MCP server is not connected." A
 built-in tool that cannot run is reported before an MCP tool.
 

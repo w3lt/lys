@@ -22,7 +22,8 @@ The desktop application is a Tauri app. Its checked-in build config expects:
 
 - a frontend build produced from `apps/desktop`
 - a Tauri host in `apps/desktop/src-tauri`
-- Rust tooling for Tauri development and packaging
+- Rust tooling for Tauri development and packaging, which also builds the
+  [email MCP server](#email-mcp-server)
 
 For local development, the repository root script runs `pnpm --filter
 @lys/desktop run tauri dev`.
@@ -58,6 +59,33 @@ vmo listens at `127.0.0.1:8080` and needs:
   `~/Library/Application Support/com.apple.container/kernels/vmlinux-6.18.35-197-debug`,
   so vmo does not boot its VMs on a Mac without it
   ([#200](https://github.com/w3lt/lys/issues/200))
+
+## Email MCP server
+
+The email MCP server Lys ships, in `mcps/email`, is a Rust program the backend
+starts as a stdio MCP server once it is switched on in Settings → MCP with a
+saved email account, and runs for each account check. Development builds use
+`mcps/email/target/debug/email` in the checkout recorded at host compile
+time, which `cargo build --manifest-path mcps/email/Cargo.toml` produces;
+release builds use `$LYS_HOME/runtime/email/email`, which `build.sh` builds
+in release with the Rust toolchain and installs. The desktop host names the
+file to the backend in `LYS_EMAIL_SERVER_PATH`, and the standalone
+`pnpm backend:dev` sets the same variable to the debug build unless it is
+already set. Without the file, the email server shows `failed` with
+`start-failed` once switched on, and an account check answers that the
+server is missing; nothing else needs it.
+
+At run time it needs:
+
+- network access to the account's IMAP and SMTP servers at the saved hosts
+  and ports, once per tool call and per account check; nothing is reached
+  while the server is off or no account is saved
+- the operating system's certificate store, which verifies the servers'
+  certificates through `rustls-platform-verifier`; a connection without TLS
+  is allowed only to `localhost`, `127.0.0.1`, or `[::1]`
+- its dependencies from crates.io, fetched by Cargo at build time: `rmcp`
+  (the MCP server), `async-imap`, `lettre`, `mail-parser`, `tokio`,
+  `tokio-rustls`, and `rustls-platform-verifier` among them
 
 ## Backend
 
@@ -102,8 +130,9 @@ The backend itself depends on:
   `eventsource-parser`, `jose`, and `pkce-challenge`, and needs `zod` 4,
   which the backend already uses. A command server needs its command on the machine, such as Node for
   an `npx` server, and a URL server needs network access to its address.
-  Nothing is started or reached while no server is saved in Settings → MCP;
-  see [MCP servers](/operate/configuration/#mcp-servers)
+  Nothing is started or reached while no server is saved and switched on in
+  Settings → MCP; see [MCP servers](/operate/configuration/#mcp-servers). The
+  email server Lys ships has its own section [above](#email-mcp-server)
 
 The backend's chat and model services both reach the connected provider. The
 backend opens its HTTP listener at `127.0.0.1:12345` without waiting for the

@@ -91,6 +91,9 @@ pnpm --filter @lys/backend test
 cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+cargo fmt --manifest-path mcps/email/Cargo.toml -- --check
+cargo clippy --manifest-path mcps/email/Cargo.toml --all-targets --all-features -- -D warnings
+cargo test --manifest-path mcps/email/Cargo.toml
 ```
 
 Run only checks relevant to documentation-only changes, but run affected consumer checks for shared types, protocols, schemas, workspace configuration, and package boundaries.

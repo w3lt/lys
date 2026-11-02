@@ -63,12 +63,15 @@ repository today; it is not a promise of unreleased work.
   `read_page` and `web_search`, and the tools of the connected MCP servers;
   each tool's switch and its Ask me or Just run choice are saved, and the Tool calls switch lasts for the session only.
   `read_page` is
-  off and cannot be switched on while vmo is not ready. The MCP pane adds,
-  edits, and removes MCP servers, each a local program Lys starts or a remote
-  server it reaches over Streamable HTTP, fills a new one from a pasted
-  config, shows whether each is connected, switches its tools and sets
-  whether they ask first, lists the tools Lys skipped, and reconnects one. The
-  Secrets pane saves the Tavily API key `web_search` needs, and checks it.
+  off and cannot be switched on while vmo is not ready. The MCP pane lists
+  the email server Lys ships, marked built-in, and adds, edits, and removes
+  MCP servers, each a local program Lys starts or a remote server it reaches
+  over Streamable HTTP, fills a new one from a pasted config, switches each
+  server on or off, shows whether each is connected, switches its tools and
+  sets whether they ask first, lists the tools Lys skipped, and reconnects
+  one; the email server's card saves the one email account it works with,
+  after signing in to its IMAP and SMTP servers. The Secrets pane saves the
+  Tavily API key `web_search` needs, and checks it.
 - A chat offers the switched-on tools to a model trained for tool use and
   answers its tool calls: file tools run in the desktop, `read_page` asks vmo
   to read one public web page in headless Chromium inside a micro VM, running
@@ -77,7 +80,9 @@ repository today; it is not a promise of unreleased work.
   Tavily in the backend, unavailable until a Tavily API key is saved;
   `read_page` is likewise unavailable until vmo answers its health route. An
   MCP tool runs on its server, which the backend calls while the server is
-  connected; MCP tools start on. Each call
+  switched on and connected; MCP tools start on. The email server Lys ships,
+  off until an email account is saved and its switch is on, reads, searches,
+  sends, and files mail over IMAP and SMTP. Each call
   asks the person first unless its tool is set to Just run, which the backend
   decides for every tool from the saved choices; both web tools start off. Lys's instructions do not
   give her today's date yet
@@ -91,7 +96,7 @@ repository today; it is not a promise of unreleased work.
   [attachments](/architecture/backend/#attachments).
 - Generation controls apply to future chat requests and save automatically
   through Tauri to `$LYS_HOME/settings.json`, which contains runtime, model,
-  generation, load configuration, secrets, tools, location, and MCP groups. The runtime
+  generation, load configuration, secrets, tools, location, MCP, and email groups. The runtime
   group's two startup switches are saved when changed; the other runtime
   edits remain session-only.
 - Every model load Lys starts sends that model's load configuration: context
@@ -101,8 +106,9 @@ repository today; it is not a promise of unreleased work.
 - The Composer label, send eligibility, and each chat request use the loaded
   runtime projection described in [desktop model settings](/architecture/desktop/#model-settings).
 - On macOS, `build.sh` builds the desktop app from a source checkout, builds
-  vmo in release, installs the backend runtime and vmo under
-  `$LYS_HOME/runtime`, and copies `Lys.app` to `/Applications`. See
+  vmo and the email MCP server in release, installs the backend runtime, vmo,
+  and the email server under `$LYS_HOME/runtime`, and copies `Lys.app` to
+  `/Applications`. See
   [Packaging and releases](/operate/releases/). vmo boots its VMs only on a
   Mac with the kernel described in
   [Runtime dependencies](/operate/dependencies/#vmo)

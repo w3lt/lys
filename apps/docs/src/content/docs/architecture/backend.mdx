@@ -16,27 +16,27 @@ Each module in `src/modules/` keeps its HTTP routes in `routes/` and its
 services, contracts, and domain logic at the module root. `src/di/` only wires
 the services together.
 
-| Layer                 | Implementation                    | Responsibility                                                                                                                                                                                                                                                                                                                                |
-| --------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App bootstrap         | `src/app.ts`                      | Registers CORS, SSE support, singleton services, and all routes, and logs through the logger the entry point passes, as Fastify's logger.                                                                                                                                                                                                     |
-| Logging               | `src/log.ts`                      | Creates the logger (level `info`, level names, UTC ISO-8601 times); `BackendLogDestination` writes each line to standard output and the day's file in `$LYS_HOME/logs/`; logs uncaught failures at `fatal` and Node's warnings at `warn`; keeps the backend running when an output fails.                                                     |
-| Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path and the attachments directory under `LYS_HOME`, the system and title prompts, and title limits; loads the logs directory under `LYS_HOME` on its own, before the rest.                                                                                                                   |
-| Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services, the agent service over SQLite records and the agent runtime service over it, LLM services without contacting the model provider, the built-in tools, the tool approval service, and the MCP server registry without reading the settings or starting a server. |
-| Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                                                                                                                                             |
-| Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, marks a deleted agent deleted, and searches every agent; contains no SQL.                     |
-| Agent runtime service | `src/modules/agent`               | Keeps one live agent per agent a chat or a context measurement has loaded, finds the one that answers a chat, and tells agents about themselves and each other as their roles allow; see [live agents](#live-agents).                                                                                                                         |
-| Database              | `src/infrastructure/database`     | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and runs every conversation query in `conversations/` and every agent query in `agents/`.                                                                                                                             |
-| Chat routes           | `src/modules/chat/routes`         | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                                                                                                                                                                                                                                            |
-| Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                                                        |
-| Agent routes          | `src/modules/agent/routes`        | Lists the built-in and stored agents, retrieves one, and creates, changes, and deletes stored agents; changing or deleting a built-in agent is refused.                                                                                                                                                                                       |
-| LLM routes            | `src/modules/llm/routes`          | Lists the provider's models, checks loaded-model health, loads or unloads a model, and reports or refreshes the provider connection.                                                                                                                                                                                                          |
-| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page through vmo, which loads it in a micro VM; `web_search` (`web/`) searches the web through Tavily.                                                                                                                                       |
-| Attachments           | `src/modules/attachment`          | Decodes a chat request's attachments and reads what each is from its bytes, keeps the files under the attachments directory by conversation and message, and runs `read_attachment`, the reader the backend adds to a turn itself; its calls run without approval.                                                                            |
-| Tool routes           | `src/modules/tool/routes`         | Lists the tools the backend runs: the built-in tools, then the tools of the connected MCP servers.                                                                                                                                                                                                                                            |
-| MCP servers           | `src/modules/mcp`                 | Connects to the MCP servers the `mcp` settings group names, over stdio or Streamable HTTP, lists their tools, and runs each allowed call of one on its server; see [MCP servers](#mcp-servers).                                                                                                                                               |
-| MCP routes            | `src/modules/mcp/routes`          | Lists the applied servers and their states, applies the `mcp` group again, and reconnects one server.                                                                                                                                                                                                                                         |
-| Tool approval service | `src/modules/toolApproval`        | Reads the Just run choices saved in `settings.json` once per round of tool calls and decides, for client, backend, and MCP tools alike, which calls the person must allow first; every call asks when the file cannot be read.                                                                                                                |
-| Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                                                                                                                                                     |
+| Layer                 | Implementation                    | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App bootstrap         | `src/app.ts`                      | Registers CORS, SSE support, singleton services, and all routes, and logs through the logger the entry point passes, as Fastify's logger.                                                                                                                                                                                                                                                                                                                             |
+| Logging               | `src/log.ts`                      | Creates the logger (level `info`, level names, UTC ISO-8601 times); `BackendLogDestination` writes each line to standard output and the day's file in `$LYS_HOME/logs/`; logs uncaught failures at `fatal` and Node's warnings at `warn`; keeps the backend running when an output fails.                                                                                                                                                                             |
+| Runtime config        | `src/config.ts`                   | Loads loopback host and port values, the SQLite path and the attachments directory under `LYS_HOME`, the path of the email server Lys ships, from `LYS_EMAIL_SERVER_PATH` or `runtime/email/email` under `LYS_HOME`, the system and title prompts, and title limits; loads the logs directory under `LYS_HOME` on its own, before the rest.                                                                                                                           |
+| Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services, the agent service over SQLite records and the agent runtime service over it, LLM services without contacting the model provider, the built-in tools, the tool approval service, the MCP server registry, whose only built-in server is the email server Lys ships, and the email account checker, which runs the same email server, without reading the settings or starting anything. |
+| Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                                                                                                                                                                                                                                                                     |
+| Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, marks a deleted agent deleted, and searches every agent; contains no SQL.                                                                                                                                             |
+| Agent runtime service | `src/modules/agent`               | Keeps one live agent per agent a chat or a context measurement has loaded, finds the one that answers a chat, and tells agents about themselves and each other as their roles allow; see [live agents](#live-agents).                                                                                                                                                                                                                                                 |
+| Database              | `src/infrastructure/database`     | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and runs every conversation query in `conversations/` and every agent query in `agents/`.                                                                                                                                                                                                                                                     |
+| Chat routes           | `src/modules/chat/routes`         | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                                                                                                                                                                                                                                                                                                                                                                    |
+| Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                                                                                                                                                                                |
+| Agent routes          | `src/modules/agent/routes`        | Lists the built-in and stored agents, retrieves one, and creates, changes, and deletes stored agents; changing or deleting a built-in agent is refused.                                                                                                                                                                                                                                                                                                               |
+| LLM routes            | `src/modules/llm/routes`          | Lists the provider's models, checks loaded-model health, loads or unloads a model, and reports or refreshes the provider connection.                                                                                                                                                                                                                                                                                                                                  |
+| Built-in tools        | `src/modules/tool/builtIn`        | Tools the backend runs once the desktop allows a call. `read_page` (`web/`) reads one public web page through vmo, which loads it in a micro VM; `web_search` (`web/`) searches the web through Tavily.                                                                                                                                                                                                                                                               |
+| Attachments           | `src/modules/attachment`          | Decodes a chat request's attachments and reads what each is from its bytes, keeps the files under the attachments directory by conversation and message, and runs `read_attachment`, the reader the backend adds to a turn itself; its calls run without approval.                                                                                                                                                                                                    |
+| Tool routes           | `src/modules/tool/routes`         | Lists the tools the backend runs: the built-in tools, then the tools of the connected MCP servers.                                                                                                                                                                                                                                                                                                                                                                    |
+| MCP servers           | `src/modules/mcp`                 | Connects to the MCP servers the `mcp` settings group names and switches on, and to the email server Lys ships once it is switched on, over stdio or Streamable HTTP, lists their tools, and runs each allowed call of one on its server; see [MCP servers](#mcp-servers).                                                                                                                                                                                             |
+| MCP routes            | `src/modules/mcp/routes`          | Lists the applied servers and their states, applies the `mcp` group again, reconnects one server, and checks an email account by signing in to its mail servers through the email server Lys ships.                                                                                                                                                                                                                                                                   |
+| Tool approval service | `src/modules/toolApproval`        | Reads the Just run choices saved in `settings.json` once per round of tool calls and decides, for client, backend, and MCP tools alike, which calls the person must allow first; every call asks when the file cannot be read.                                                                                                                                                                                                                                        |
+| Health route          | `src/modules/health/routes`       | Returns a simple `{ ok: true }` response.                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 ## Chat request flow
 
@@ -724,8 +724,10 @@ no live instance is working on no request, and a read never creates one.
 ## MCP servers
 
 The backend is the Model Context Protocol client of Lys: it connects to the
-servers the `mcp` group of `settings.json` names, offers their tools to the
-model, and runs each allowed call on the tool's server. It speaks MCP through
+servers the `mcp` group of `settings.json` names and switches on, and to the
+servers Lys ships, today the [email server](#the-email-server), once the
+person switches one on; it offers their tools to the model and runs each
+allowed call on the tool's server. It speaks MCP through
 the official TypeScript SDK, `@modelcontextprotocol/client`, over stdio or
 Streamable HTTP. The routes are in the
 [API reference](/reference/api/#mcp-servers), and the group's rules in the
@@ -746,9 +748,17 @@ listening.
 settings-file read (at most 1 MiB, UTF-8) and takes only the `mcp` group, and
 applies what it read in one synchronous step. Reads run one after another in
 call order. A group that passes its rules is applied server by server: a new
-server, or one whose settings changed, gets a new session; an unchanged one
-keeps its session, with its connection or its failure; a removed one's
-session is stopped. A missing file or group means no server. A group that
+server, or one whose settings changed, gets a new session while it is
+switched on; an unchanged one keeps its session, with its connection or its
+failure; a removed or switched-off one's session is stopped, and the list
+reports a switched-off server as `off`. The servers Lys ships come first, in
+their fixed order: while one is switched on, each apply reads what it needs,
+for the email server the saved account and its password, and starts it in a
+session, or lists it as `failed` with `account-missing` or `account-invalid`
+and logs a warning once per reason; an added server with a built-in server's
+name takes its place, and the built-in server is not applied until the added
+one is renamed or removed, which is logged as a warning once. A missing file
+or group means no added server and every built-in server off. A group that
 fails its rules, or a file that cannot be read as a JSON object, keeps the
 servers applied before; the list reports `invalid` or `unreadable`, and a
 warning is logged. The warning names each failed rule by its path and the
@@ -758,7 +768,9 @@ nothing else reads it after startup.
 
 `openServerAgain(name)` stops the server's session and starts a new one with the
 settings applied before, without reading the file; the new session opens once
-the old one, and every other stopped session, released its server. Nothing
+the old one, and every other stopped session, released its server. A server
+that is switched off, or a built-in server that cannot start, has no session
+to open again: the reconnect route answers `409` instead. Nothing
 reconnects by itself: a server whose connection ended stays failed until Reconnect or a
 changed setting. The registry also lists the servers and their states, lists
 the tools of every connected server, and finds one tool by its model-facing
@@ -774,7 +786,10 @@ ends by itself, such as a process that exits or a URL server that answers a
 call with HTTP 404 because it no longer knows the session, fails the session
 as `closed`.
 Stopping a session cancels its opening or closes its connection, and a
-connection an opening returns after the stop is closed at once. Closes run in
+connection an opening returns after the stop is closed at once. A call that
+is running when its session is stopped, because the settings just applied
+switched the server off, changed it, or no longer name it, fails with a
+sentence that says so, which the model reads. Closes run in
 the background, and the registry keeps each until it settles. Stopping also
 returns the session's release, which settles once its opening ended and every
 connection it led to closed, a command server's whole process group
@@ -1017,7 +1032,11 @@ caller observes to the backend log, through the reporter the composition root
 passes; each entry names the server as `mcpServer`. A settings group that
 fails its rules or cannot be read, a connection that ended, a connection error
 the SDK reports outside a request, a URL server's session that its close did
-not end, and an opening or call failure Lys can tell apart are warnings. A connection, with its tool and skipped-tool counts, and
+not end, and an opening or call failure Lys can tell apart are warnings, and
+so are a built-in server that is switched on without a usable account and a
+built-in server's name an added server took; a session stopped because the
+settings switched its server off, changed it, or no longer name it is
+information, with the reason. A connection, with its tool and skipped-tool counts, and
 each standard-error line of a stdio server are information. A failure Lys
 cannot tell apart and a failed close are errors, with what was thrown. Lys
 builds no entry from a command, an argument, an environment variable, a URL,
@@ -1025,7 +1044,81 @@ or a header. An error is logged as it was thrown, though, so its message can
 carry part of what the server answered, such as a piece of an answer that is
 not JSON; an HTTP error is logged only by its code and status, never its
 body. A stdio server's line is logged as the server wrote it; see
-[process logging](/operate/logging/#process-logging).
+[process logging](/operate/logging/#process-logging). The email account checks
+are logged by `handleEmailAccountCheckEvent`
+(`builtIn/email/emailAccountCheckLog.ts`): a report with both outcomes is
+information, a missing email server and a check the closing backend ended
+are warnings, and every other failure to report is an error with how the
+server ended and its own error lines; no entry holds the account or the
+password. See
+[email account check entries](/operate/logging/#email-account-check-entries).
+
+### The email server
+
+Lys ships one MCP server of its own, `email`, which reads, searches, sends,
+and files the person's mail over one IMAP and SMTP account. It is a Rust
+program at `mcps/email`, installed by `build.sh` as
+`$LYS_HOME/runtime/email/email` and named to the backend as `emailServerPath`,
+from `LYS_EMAIL_SERVER_PATH`, which the desktop host sets to the workspace
+build in development; see the
+[configuration reference](/reference/configuration/#lys-home-directory).
+`createEmailMcpServer` (`src/modules/mcp/builtIn/email/emailServer.ts`)
+describes it to the registry as a built-in stdio server. At each apply while
+its switch, `mcp.builtIn.email.enabled`, is on, the registry reads the saved
+account and its password with `readEmailAccount`
+(`src/infrastructure/settings/emailAccountFile.ts`), which takes only the
+`email` and `secrets` groups of `settings.json` and reports `read`,
+`missing`, `invalid`, or `unreadable`, and builds the server's settings: the
+executable as the command, no argument, and one environment variable,
+`LYS_EMAIL_ACCOUNT`, holding the account and the password as one line of
+JSON. Those settings pass the shared server rules like any command the
+backend starts, so the server runs through the same session, process group,
+log line, message line, and stop code as an added stdio server, and a
+changed account or password is a changed setting that restarts it. A
+missing account, or an account or password that fails its rules or cannot
+be read, lists the server as `failed` with `account-missing` or
+`account-invalid`, and nothing is started; a missing executable fails the
+start as `start-failed`.
+
+The server reads the variable back under the same rules, because anyone on
+the machine can start the binary with a variable of their own, then serves
+MCP over stdio with ten tools: `search_emails`, `read_email`,
+`read_conversation`, `read_attachment`, `list_folders`, `manage_folder`,
+`send_email`, `save_draft`, `send_draft`, and `delete_draft`; the
+[API reference](/reference/api/#the-email-servers-tools) says what each
+does. Every call opens its own IMAP or SMTP connection and closes it before
+answering, so nothing stays open between calls, and stopping the process
+closes every connection. A connection is protected as the account says: TLS
+from the first byte, STARTTLS before any credential, or none, which the
+rules allow only to `localhost`, `127.0.0.1`, or `[::1]`; a certificate is
+verified by the operating system's store through
+`rustls-platform-verifier`. Connecting takes at most 15 seconds and each
+exchange 30, a send 120, and a whole call 240, within the five minutes the
+backend gives every MCP call, and a result is cut at 20,000 characters, as
+the backend cuts every MCP result. The server's standard error lines, which
+the backend keeps as `MCP server log line` entries, name an operation, a
+folder, counts, and the class of a failure, never the password, an address,
+a subject, or a body.
+
+### Email account check
+
+`EmailAccountChecker` (`src/modules/mcp/builtIn/email/emailAccountCheck.ts`)
+answers `POST /api/v1/mcp/email/account-check`, which the desktop sends
+before it saves an account: it runs the email server's `check` subcommand
+with the candidate account and password in `LYS_EMAIL_ACCOUNT`, as the
+server itself is started, and the subcommand signs in to the IMAP and the
+SMTP server at the same time, within 20 seconds each, and prints one JSON
+line with both outcomes. The checker reads at most 64 KiB of that output,
+keeps up to 32 of the server's error lines for the log, runs one check at a
+time in call order, and kills a check that has not ended after one minute.
+It answers `checked` with each server's outcome, `accepted` or `failed` with
+a reason, or `unavailable` with `server-missing` when the executable is not
+where the configuration names it, or `server-failed` when it could not be
+started, ended without a report, did not end in time, or the checker is
+closing. Nothing is saved: the desktop saves the account and its password
+only after both servers accepted the sign-in. The checker owns the process of
+the running check; the singleton bundle's cleanup closes it before the
+registry, which kills a running check.
 
 ## Persistence
 
@@ -1180,41 +1273,45 @@ See the [health response contract](/reference/api/#model-health-responses).
 
 ## Failure behavior
 
-| Condition                                                                                                                            | Current behavior                                                                                                                                                                                                  |
-| ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat SSE connection closes                                                                                                           | Only that follower ends; the reply and its title keep generating and are stored.                                                                                                                                  |
-| Reply-stop request                                                                                                                   | The reply's upstream request is aborted, the reply is stored interrupted, and followers receive `interrupted`; the title task continues.                                                                          |
-| Model operation or health-check client disconnects                                                                                   | Accepted work continues until success or failure; user cancellation is unavailable.                                                                                                                               |
-| LLM runtime queue already has nine accepted operations (including connection attempts)                                               | New inventory/health/load/unload requests receive `503` with `urn:lys:problem:llm:service-busy` before acceptance.                                                                                                |
-| The provider is not connected                                                                                                        | List, load, unload, and health requests receive `503` with `urn:lys:problem:llm:runtime-unavailable` before acceptance.                                                                                           |
-| A runtime call fails and the provider stopped answering                                                                              | The runtime is released, the status becomes `unreachable`, and a rejected request receives the runtime-unavailable `503`.                                                                                         |
-| The saved provider needs a key and none is saved, or `settings.json` cannot be read                                                  | The connection attempt fails without contacting a provider, the status becomes `unreachable`, and the backend logs why without a key.                                                                             |
-| Load or unload is asked of a provider that loads its own models (Ollama, Groq)                                                       | `409` with `urn:lys:problem:llm:provider-loads-models` before any runtime call. The desktop offers neither when the list says so.                                                                                 |
-| A request resolves after a failed runtime call; the probe or release then fails                                                      | The response keeps its result; the backend logs the probe or release failure at `error`.                                                                                                                          |
-| A reply round does not fit the loaded model, or its model is not loaded                                                              | The round is not sent; the reply is stored failed and followers receive an `error` that says why.                                                                                                                 |
-| A reply round cannot be measured (provider not connected, queue full)                                                                | The round is not sent; the reply is stored failed and followers receive the general `error`.                                                                                                                      |
-| Model stream ends without a finish reason                                                                                            | The route treats it as an error and may emit `error`.                                                                                                                                                             |
-| Assistant row was deleted or already finalized                                                                                       | Late writes return false without recreating data.                                                                                                                                                                 |
-| Assistant terminal state cannot be persisted                                                                                         | The task aggregates the original and storage failures, plus a failed fallback's, and rejects; the generation logs it. No final event.                                                                             |
-| Unknown finish reason                                                                                                                | The backend throws instead of silently coercing it.                                                                                                                                                               |
-| Title generation produces no usable title                                                                                            | The task logs a warning and sends no `error` or `title` event; a later turn retries if the conversation is still untitled.                                                                                        |
-| A generated title cannot be saved                                                                                                    | The task logs an error and sends no `title` event; a later turn retries if the conversation is still untitled.                                                                                                    |
-| A stored title cannot be sent after turn start                                                                                       | That follower ends silently while generation continues; a later turn attempts reconciliation again.                                                                                                               |
-| A follower falls 4,096 events behind                                                                                                 | That follower closes without a final event while generation continues; following the reply again returns its stored state.                                                                                        |
-| A chat request's attachment is neither UTF-8 text nor a PNG, JPEG, or WebP image                                                     | The route answers `400` with `urn:lys:problem:chat:attachment-unsupported`; nothing is stored or written.                                                                                                         |
-| An image is attached for a model without vision, or for one the inventory does not list                                              | The route answers `409` with `urn:lys:problem:chat:image-needs-vision`; nothing is stored or written.                                                                                                             |
-| The provider is not connected, or the queue is full, while a chat or context request reads a model's capabilities for the first time | The route answers the runtime-unavailable or service-busy `503` problem; nothing is stored or written.                                                                                                            |
-| An attachment file cannot be written                                                                                                 | The message's folder and the files written into it are deleted, and the route rethrows; nothing is stored.                                                                                                        |
-| A turn cannot be stored after its attachment files were written                                                                      | The message's folder is deleted again and the route answers `500`; a folder that cannot be deleted fails the request with both failures.                                                                          |
-| A stored attachment's file is missing from disk                                                                                      | An image becomes a placeholder sentence in its message; a read of a text file fails with a result the model reads. The turn goes on.                                                                              |
-| A deleted conversation's attachment folder cannot be removed                                                                         | The delete still answers `204`; the backend logs the failure with its cause at `error`, and the folder stays.                                                                                                     |
-| A request offers a backend tool that is neither a built-in tool nor a tool an applied MCP server lists                               | The route answers `400`, naming every such name; nothing is stored.                                                                                                                                               |
-| A request offers a tool whose MCP server is applied but not connected                                                                | The route answers `409` with `urn:lys:problem:chat:backend-tool-unavailable` and `mcp-server-not-connected`; nothing is stored.                                                                                   |
-| An MCP server cannot be started or reached, refuses Lys, or does not finish opening within two minutes                               | The server is `failed` with its reason and its tools are not listed; the backend logs a warning, or an error with what was thrown for a failure it cannot tell apart. Reconnect or a changed setting tries again. |
-| A connected MCP server's process exits, its connection ends, or it answers a call with HTTP 404                                      | The server becomes `failed` with `closed`, its tools are no longer listed, and the backend logs a warning; a call that then runs fails with a result the model reads.                                             |
-| An MCP tool call fails before the server returns a result (five minutes passed, the connection ended, an HTTP error, a refusal)      | The call is stored `failed` with the reason the model reads, and the backend logs it; the reply goes on.                                                                                                          |
-| The `mcp` settings group fails its rules, or the settings file cannot be read, when it is applied                                    | The servers applied before are kept, the server list reports `invalid` or `unreadable`, and the backend logs a warning without any value.                                                                         |
-| Starting a turn fails for another reason                                                                                             | The route rethrows; Fastify logs it and responds `500` if no event was sent. Written rows stay.                                                                                                                   |
+| Condition                                                                                                                            | Current behavior                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Chat SSE connection closes                                                                                                           | Only that follower ends; the reply and its title keep generating and are stored.                                                                                                                                                                                   |
+| Reply-stop request                                                                                                                   | The reply's upstream request is aborted, the reply is stored interrupted, and followers receive `interrupted`; the title task continues.                                                                                                                           |
+| Model operation or health-check client disconnects                                                                                   | Accepted work continues until success or failure; user cancellation is unavailable.                                                                                                                                                                                |
+| LLM runtime queue already has nine accepted operations (including connection attempts)                                               | New inventory/health/load/unload requests receive `503` with `urn:lys:problem:llm:service-busy` before acceptance.                                                                                                                                                 |
+| The provider is not connected                                                                                                        | List, load, unload, and health requests receive `503` with `urn:lys:problem:llm:runtime-unavailable` before acceptance.                                                                                                                                            |
+| A runtime call fails and the provider stopped answering                                                                              | The runtime is released, the status becomes `unreachable`, and a rejected request receives the runtime-unavailable `503`.                                                                                                                                          |
+| The saved provider needs a key and none is saved, or `settings.json` cannot be read                                                  | The connection attempt fails without contacting a provider, the status becomes `unreachable`, and the backend logs why without a key.                                                                                                                              |
+| Load or unload is asked of a provider that loads its own models (Ollama, Groq)                                                       | `409` with `urn:lys:problem:llm:provider-loads-models` before any runtime call. The desktop offers neither when the list says so.                                                                                                                                  |
+| A request resolves after a failed runtime call; the probe or release then fails                                                      | The response keeps its result; the backend logs the probe or release failure at `error`.                                                                                                                                                                           |
+| A reply round does not fit the loaded model, or its model is not loaded                                                              | The round is not sent; the reply is stored failed and followers receive an `error` that says why.                                                                                                                                                                  |
+| A reply round cannot be measured (provider not connected, queue full)                                                                | The round is not sent; the reply is stored failed and followers receive the general `error`.                                                                                                                                                                       |
+| Model stream ends without a finish reason                                                                                            | The route treats it as an error and may emit `error`.                                                                                                                                                                                                              |
+| Assistant row was deleted or already finalized                                                                                       | Late writes return false without recreating data.                                                                                                                                                                                                                  |
+| Assistant terminal state cannot be persisted                                                                                         | The task aggregates the original and storage failures, plus a failed fallback's, and rejects; the generation logs it. No final event.                                                                                                                              |
+| Unknown finish reason                                                                                                                | The backend throws instead of silently coercing it.                                                                                                                                                                                                                |
+| Title generation produces no usable title                                                                                            | The task logs a warning and sends no `error` or `title` event; a later turn retries if the conversation is still untitled.                                                                                                                                         |
+| A generated title cannot be saved                                                                                                    | The task logs an error and sends no `title` event; a later turn retries if the conversation is still untitled.                                                                                                                                                     |
+| A stored title cannot be sent after turn start                                                                                       | That follower ends silently while generation continues; a later turn attempts reconciliation again.                                                                                                                                                                |
+| A follower falls 4,096 events behind                                                                                                 | That follower closes without a final event while generation continues; following the reply again returns its stored state.                                                                                                                                         |
+| A chat request's attachment is neither UTF-8 text nor a PNG, JPEG, or WebP image                                                     | The route answers `400` with `urn:lys:problem:chat:attachment-unsupported`; nothing is stored or written.                                                                                                                                                          |
+| An image is attached for a model without vision, or for one the inventory does not list                                              | The route answers `409` with `urn:lys:problem:chat:image-needs-vision`; nothing is stored or written.                                                                                                                                                              |
+| The provider is not connected, or the queue is full, while a chat or context request reads a model's capabilities for the first time | The route answers the runtime-unavailable or service-busy `503` problem; nothing is stored or written.                                                                                                                                                             |
+| An attachment file cannot be written                                                                                                 | The message's folder and the files written into it are deleted, and the route rethrows; nothing is stored.                                                                                                                                                         |
+| A turn cannot be stored after its attachment files were written                                                                      | The message's folder is deleted again and the route answers `500`; a folder that cannot be deleted fails the request with both failures.                                                                                                                           |
+| A stored attachment's file is missing from disk                                                                                      | An image becomes a placeholder sentence in its message; a read of a text file fails with a result the model reads. The turn goes on.                                                                                                                               |
+| A deleted conversation's attachment folder cannot be removed                                                                         | The delete still answers `204`; the backend logs the failure with its cause at `error`, and the folder stays.                                                                                                                                                      |
+| A request offers a backend tool that is neither a built-in tool nor a tool an applied MCP server lists                               | The route answers `400`, naming every such name; nothing is stored.                                                                                                                                                                                                |
+| A request offers a tool whose MCP server is applied but not connected                                                                | The route answers `409` with `urn:lys:problem:chat:backend-tool-unavailable` and `mcp-server-not-connected`; nothing is stored.                                                                                                                                    |
+| An MCP server cannot be started or reached, refuses Lys, or does not finish opening within two minutes                               | The server is `failed` with its reason and its tools are not listed; the backend logs a warning, or an error with what was thrown for a failure it cannot tell apart. Reconnect or a changed setting tries again.                                                  |
+| A connected MCP server's process exits, its connection ends, or it answers a call with HTTP 404                                      | The server becomes `failed` with `closed`, its tools are no longer listed, and the backend logs a warning; a call that then runs fails with a result the model reads.                                                                                              |
+| An MCP tool call fails before the server returns a result (five minutes passed, the connection ended, an HTTP error, a refusal)      | The call is stored `failed` with the reason the model reads, and the backend logs it; the reply goes on.                                                                                                                                                           |
+| The `mcp` settings group fails its rules, or the settings file cannot be read, when it is applied                                    | The servers applied before are kept, the server list reports `invalid` or `unreadable`, and the backend logs a warning without any value.                                                                                                                          |
+| An MCP server is switched off in Settings → MCP                                                                                      | Its session is stopped and its tools are no longer listed; a call running on it fails with a sentence saying the server was stopped, and the list reports `off`. Reconnect answers `409` with `urn:lys:problem:mcp:server-off`.                                    |
+| The built-in email server is switched on while no usable account is saved                                                            | The server is `failed` with `account-missing` or `account-invalid`, nothing is started, and the backend logs a warning once per reason; saving an account applies the group again.                                                                                 |
+| An added MCP server has the built-in email server's name                                                                             | The added server is applied and listed; the built-in server is not, and the backend logs a warning until the added server is renamed or removed.                                                                                                                   |
+| The email server's executable is missing, or an account check does not report                                                        | The server fails as `start-failed`; a check answers `unavailable` with `server-missing` or `server-failed`, and the backend logs a warning for a missing server, or an error with the server's error lines; a check that has not ended after one minute is killed. |
+| Starting a turn fails for another reason                                                                                             | The route rethrows; Fastify logs it and responds `500` if no event was sent. Written rows stay.                                                                                                                                                                    |
 
 See the [provider cancellation policy](/architecture/providers/#cancellation-policy)
 for the separate inference and model-management lifetimes.
@@ -1224,6 +1321,8 @@ for the separate inference and model-management lifetimes.
 - No Rust backend service
 - No replayable shared event bus
 - No credential-management layer
+- No OAuth sign-in to a mail provider: the email server signs in with a
+  password or an app password only
 - No OAuth sign-in for remote MCP servers
   ([#253](https://github.com/w3lt/lys/issues/253)), no HTTP+SSE transport for
   older MCP servers ([#254](https://github.com/w3lt/lys/issues/254)), and no

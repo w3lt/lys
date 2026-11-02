@@ -189,11 +189,16 @@ calls it, in `tool`.
 | `Closing an MCP server connection failed`                                                          | `error`                       | `err`                                            | Closing a connection Lys was done with failed                                                                                                                                                              |
 | `The mcp settings group fails its rules; the MCP servers applied before are kept`                  | `warn`                        | `problems`                                       | The backend read `settings.json` and the `mcp` group broke its rules                                                                                                                                       |
 | `The settings file could not be read; the MCP servers applied before are kept`                     | `warn`                        | none                                             | The backend could not read `settings.json` as a JSON object                                                                                                                                                |
+| `MCP server stopped: the settings switched it off, changed it, or no longer name it`               | `info`                        | `reason`                                         | The server's session was stopped because the settings just applied switched it off (`switched-off`), changed it (`changed`), or no longer name it (`removed`)                                              |
+| `Built-in MCP server is switched on but has no usable account; it is not started`                  | `warn`                        | `reason`                                         | The email server Lys ships is on, but no email account is saved (`account-missing`), or the account or its password fails its rules or could not be read (`account-invalid`); logged once per reason       |
+| `An added MCP server has a built-in server's name; the built-in server is not applied`             | `warn`                        | none                                             | A server in `servers` has the name of a server Lys ships, which is not applied until the added one is renamed or removed; logged once                                                                      |
 
 - `reason` is the failure reason the MCP pane shows, such as `unauthorized`;
   see [troubleshooting](/operate/troubleshooting/#an-mcp-server-shows-failed).
   For a call that was not sent, it is `server-not-connected`, which includes
-  a server the settings no longer name, or `tool-no-longer-listed`. The
+  a server the settings no longer name or switched off, or
+  `tool-no-longer-listed`. For a stopped server it is why the settings
+  stopped it, and for the email server why it has no usable account. The
   call's arguments are not logged.
   `failure` is what Lys saw, such as `{ "kind": "http-status", "status": 401 }`,
   or `{ "kind": "refused", "message": "…" }` with the server's own message,
@@ -226,6 +231,19 @@ calls it, in `tool`.
   and the texts in `err` are logged as the server, the MCP SDK, or Node wrote
   them, within the bounds above, so they can hold anything the server chose
   to print, and an error's message can name a remote server's host.
+
+### Email account check entries
+
+The backend logs each [email account check](/reference/api/#email-account-check)
+it runs through the email server Lys ships. No entry holds the account or the
+password.
+
+| Message                                                                                              | Level   | Other fields                 | When                                                                                                                                                                                                                                                     |
+| ---------------------------------------------------------------------------------------------------- | ------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Email account check ran`                                                                            | `info`  | `imap`, `smtp`               | The email server reported both sign-ins; each field is the outcome the API answers, such as `{ "status": "failed", "reason": "wrong-password" }`                                                                                                         |
+| `The email server is not installed, so the email account could not be checked; build.sh installs it` | `warn`  | none                         | The executable is not at the path the configuration names                                                                                                                                                                                                |
+| `The email account check was ended because the backend is closing`                                   | `warn`  | `failure`                    | The backend closed while a check ran, and killed it                                                                                                                                                                                                      |
+| `The email server's account check failed`                                                            | `error` | `failure`, `err` when thrown | The server could not be started (`start-failed`, with `err`), did not end within one minute (`timed-out`), ended without a report (`exited`, with how it ended and its own error lines), or printed something that is not a report (`unreadable-output`) |
 
 vmo's output is not kept in a release build
 ([#229](https://github.com/w3lt/lys/issues/229)).

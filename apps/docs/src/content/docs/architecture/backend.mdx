@@ -1104,21 +1104,22 @@ a subject, or a body.
 
 `EmailAccountChecker` (`src/modules/mcp/builtIn/email/emailAccountCheck.ts`)
 answers `POST /api/v1/mcp/email/account-check`, which the desktop sends
-before it saves an account: it runs the email server's `check` subcommand
-with the candidate account and password in `LYS_EMAIL_ACCOUNT`, as the
-server itself is started, and the subcommand signs in to the IMAP and the
-SMTP server at the same time, within 20 seconds each, and prints one JSON
-line with both outcomes. The checker reads at most 64 KiB of that output,
-keeps up to 32 of the server's error lines for the log, runs one check at a
-time in call order, and kills a check that has not ended after one minute.
-It answers `checked` with each server's outcome, `accepted` or `failed` with
-a reason, or `unavailable` with `server-missing` when the executable is not
-where the configuration names it, or `server-failed` when it could not be
-started, ended without a report, did not end in time, or the checker is
-closing. Nothing is saved: the desktop saves the account and its password
-only after both servers accepted the sign-in. The checker owns the process of
-the running check; the singleton bundle's cleanup closes it before the
-registry, which kills a running check.
+before it saves an account: it runs the email server's `check` subcommand in
+the person's home folder, with the candidate account and password in
+`LYS_EMAIL_ACCOUNT`, as the server itself is started, and the subcommand
+signs in to the IMAP and the SMTP server at the same time, within 20 seconds
+each, and prints one JSON line with both outcomes. The checker reads at most
+64 KiB of that output, keeps up to 32 of the server's error lines for the
+log, runs one check at a time in call order, and kills a check that has not
+ended after one minute. It answers `checked` with each server's outcome,
+`accepted` or `failed` with a reason, or `unavailable` with `server-missing`
+when the executable is not where the configuration names it, or
+`server-failed` when it could not be started, ended without a report, did
+not end in time, or the checker is closing. Nothing is saved: the desktop
+saves the account and its password only after both servers accepted the
+sign-in. The checker owns the run of the check running now, an
+`EmailServerCheckRun` that owns its process; the singleton bundle's cleanup
+closes the checker before the registry, which kills a running check.
 
 ## Persistence
 

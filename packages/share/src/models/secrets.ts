@@ -69,7 +69,7 @@ export type GroqApiKey = z.infer<typeof groqApiKeySchema>
  * the file. Raising it changes which settings files load and requires a
  * coordinated desktop and backend release.
  */
-export const MAXIMUM_EMAIL_PASSWORD_LENGTH = 1024
+const MAXIMUM_EMAIL_PASSWORD_LENGTH = 1024
 
 /** Finds a control character (Unicode general category Cc), such as a line break. */
 const CONTROL_CHARACTER_PATTERN = /\p{Cc}/u

@@ -91,27 +91,18 @@ export {
 export {
   emailAccountSchema,
   emailAddressSchema,
-  emailDisplayNameSchema,
   emailSecuritySchema,
-  emailServerSettingsSchema,
   emailSettingsSchema,
-  emailUserNameSchema,
-  isLoopbackEmailHost,
-  MAXIMUM_EMAIL_ADDRESS_LENGTH,
-  MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH,
-  MAXIMUM_EMAIL_USER_NAME_LENGTH,
   type EmailAccount,
   type EmailAccountCandidate,
   type EmailSecurity,
   type EmailServerSettings,
   type EmailSettings
 } from "./email"
-export { isHostName, MAXIMUM_TCP_PORT } from "./hostName"
+export { MAXIMUM_TCP_PORT } from "./hostName"
 export {
   BUILT_IN_MCP_SERVER_NAMES,
   buildMcpToolNamePrefix,
-  builtInMcpSettingsSchema,
-  isBuiltInMcpServerName,
   MAXIMUM_MCP_COMMAND_ARGUMENT_COUNT,
   MAXIMUM_MCP_COMMAND_ARGUMENT_LENGTH,
   MAXIMUM_MCP_COMMAND_LENGTH,
@@ -150,7 +141,6 @@ export {
 export {
   emailPasswordSchema,
   groqApiKeySchema,
-  MAXIMUM_EMAIL_PASSWORD_LENGTH,
   ollamaApiKeySchema,
   tavilyApiKeySchema,
   type EmailPassword,

@@ -541,7 +541,7 @@ const builtInMcpServerSettingsSchema = z
  *
  * @remarks An omitted server is off.
  */
-export const builtInMcpSettingsSchema = z
+const builtInMcpSettingsSchema = z
   .strictObject({
     /** The email server's switch. */
     email: builtInMcpServerSettingsSchema.prefault({})
@@ -593,18 +593,6 @@ export type McpSettingsCandidate = z.input<typeof mcpSettingsSchema>
 
 /** Start of every name the model calls an MCP tool by. */
 export const MCP_TOOL_NAME_PREFIX = "mcp__"
-
-/**
- * Answers whether a name is one of the MCP servers Lys ships.
- *
- * @param name - Server name to inspect.
- * @returns True when {@link BUILT_IN_MCP_SERVER_NAMES} holds it.
- */
-export function isBuiltInMcpServerName(
-  name: string
-): name is BuiltInMcpServerName {
-  return (BUILT_IN_MCP_SERVER_NAMES as readonly string[]).includes(name)
-}
 
 /**
  * Builds the start of the names the model calls one server's tools by.

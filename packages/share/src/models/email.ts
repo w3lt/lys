@@ -10,7 +10,7 @@ import { isHostName, MAXIMUM_TCP_PORT } from "./hostName"
  * file. Raising it changes which settings files load and requires a
  * coordinated desktop and backend release.
  */
-export const MAXIMUM_EMAIL_ADDRESS_LENGTH = 254
+const MAXIMUM_EMAIL_ADDRESS_LENGTH = 254
 
 /** Most characters the part of an email address before `@` may have, inclusive. */
 const MAXIMUM_EMAIL_LOCAL_PART_LENGTH = 64
@@ -19,13 +19,13 @@ const MAXIMUM_EMAIL_LOCAL_PART_LENGTH = 64
  * Most characters, counted as Unicode code points, the display name of an
  * email account may have, inclusive.
  */
-export const MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH = 100
+const MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH = 100
 
 /**
  * Most characters, counted as Unicode code points, the user name an email
  * account signs in with may have, inclusive.
  */
-export const MAXIMUM_EMAIL_USER_NAME_LENGTH = 254
+const MAXIMUM_EMAIL_USER_NAME_LENGTH = 254
 
 /** Most characters an IPv6 address in brackets may have, inclusive. */
 const MAXIMUM_BRACKETED_IPV6_LENGTH = 47
@@ -124,7 +124,7 @@ function isEmailHost(value: string): boolean {
  * @param host - Host that passed the mail server host rule.
  * @returns True for `localhost`, `127.0.0.1`, or `[::1]`, in any case.
  */
-export function isLoopbackEmailHost(host: string): boolean {
+function isLoopbackEmailHost(host: string): boolean {
   return LOOPBACK_EMAIL_HOSTS.has(host.toLowerCase())
 }
 
@@ -147,7 +147,7 @@ export const emailAddressSchema = z
  *
  * @remarks Matches the desktop host's rule. The name is personal data.
  */
-export const emailDisplayNameSchema = z
+const emailDisplayNameSchema = z
   .string()
   .refine(
     (value) => isAccountText(value, MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH),
@@ -160,7 +160,7 @@ export const emailDisplayNameSchema = z
  *
  * @remarks Matches the desktop host's rule. The name is personal data.
  */
-export const emailUserNameSchema = z
+const emailUserNameSchema = z
   .string()
   .min(1, "A user name is required.")
   .refine(
@@ -191,7 +191,7 @@ export type EmailSecurity = z.infer<typeof emailSecuritySchema>
  * `[::1]`; every other host is reached with TLS, whose certificate the
  * operating system verifies.
  */
-export const emailServerSettingsSchema = z
+const emailServerSettingsSchema = z
   .strictObject({
     /** Host name, dotted IPv4 address, or IPv6 address in brackets. */
     host: z

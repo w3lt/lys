@@ -112,6 +112,9 @@ pub struct FakeMailbox {
     pub delimiter: String,
     /// The UIDVALIDITY the next created folder gets.
     next_uid_validity: u32,
+    /// The commands the fake refuses, by name, with what it answers after
+    /// the tag.
+    refusals: Vec<(String, String)>,
 }
 
 impl FakeMailbox {
@@ -123,6 +126,7 @@ impl FakeMailbox {
             uid_plus: true,
             delimiter: "/".to_owned(),
             next_uid_validity: 2001,
+            refusals: Vec::new(),
         }
     }
 
@@ -172,6 +176,29 @@ impl FakeMailbox {
     /// Finds a folder by name, to change it.
     pub fn find_folder_mut(&mut self, name: &str) -> Option<&mut FakeFolder> {
         self.folders.iter_mut().find(|folder| folder.name == name)
+    }
+
+    /// Makes the fake refuse every command of a name instead of handling
+    /// it; a command with a synchronizing literal, such as APPEND, is
+    /// refused before its literal is sent.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The command's name in capitals; for `UID <name>`, the
+    ///   name after `UID`.
+    /// * `answer` - What the fake answers after the tag, such as
+    ///   `NO [OVERQUOTA] Quota exceeded`.
+    pub fn add_refusal(&mut self, name: &str, answer: &str) {
+        self.refusals.push((name.to_owned(), answer.to_owned()));
+    }
+
+    /// Finds what the fake answers instead of handling a command of the
+    /// name, if it refuses it.
+    fn find_refusal(&self, name: &str) -> Option<String> {
+        self.refusals
+            .iter()
+            .find(|(refused, _)| refused == name)
+            .map(|(_, answer)| answer.clone())
     }
 }
 
@@ -376,7 +403,7 @@ where
         .await;
     }
     loop {
-        let (text, literals) = read_command(&mut reader).await?;
+        let (text, literals) = read_command(&mut reader, &setup.state).await?;
         setup
             .state
             .lock()
@@ -439,6 +466,9 @@ impl Session {
     /// Handles one command over the mailbox, which it may change.
     fn handle_command(&mut self, command: &Command, mailbox: &mut FakeMailbox) -> Step {
         let tag = &command.tag;
+        if let Some(answer) = mailbox.find_refusal(&command.name) {
+            return Step::Answer(format!("{tag} {answer}\r\n").into_bytes());
+        }
         let selected = &mut self.selected;
         match command.name.as_str() {
             "CAPABILITY" => Step::Answer(
@@ -753,8 +783,17 @@ fn format_capabilities(mode: ImapMode, secured: bool, state: &Arc<Mutex<FakeMail
 }
 
 /// Reads one command, with its literals, which are shown in the text as
-/// quoted strings.
-async fn read_command<S>(reader: &mut BufReader<S>) -> Option<(String, Vec<Vec<u8>>)>
+/// quoted strings; a refused command ends before a synchronizing literal,
+/// which the client then never sends.
+///
+/// # Arguments
+///
+/// * `reader` - The connection.
+/// * `state` - The mailbox, which says which commands are refused.
+async fn read_command<S>(
+    reader: &mut BufReader<S>,
+    state: &Arc<Mutex<FakeMailbox>>,
+) -> Option<(String, Vec<Vec<u8>>)>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -769,6 +808,9 @@ where
         let cut = text.rfind('{')?;
         text.truncate(cut);
         if synchronizing {
+            if is_refused(&text, state) {
+                return Some((text, literals));
+            }
             send_line(reader, "+ OK\r\n").await;
         }
         let mut bytes = vec![0; length];
@@ -780,6 +822,17 @@ where
         text.push_str(rest.trim_end_matches(['\r', '\n']));
     }
     Some((text, literals))
+}
+
+/// Whether the fake refuses the command the text begins.
+fn is_refused(text: &str, state: &Arc<Mutex<FakeMailbox>>) -> bool {
+    parse_command(text, Vec::new()).is_some_and(|command| {
+        state
+            .lock()
+            .expect("the state")
+            .find_refusal(&command.name)
+            .is_some()
+    })
 }
 
 /// Finds a literal marker, `{n}` or `{n+}`, at the end of the text.

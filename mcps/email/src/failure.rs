@@ -103,7 +103,9 @@ pub enum ToolFailure {
     ImapRefused {
         /// What the command was to do, as a verb phrase.
         operation: &'static str,
-        /// The server's text.
+        /// The server's response code and text, such as `[OVERQUOTA]
+        /// Quota exceeded`; a longer text than 500 characters is cut there
+        /// and ends with an ellipsis.
         text: String,
     },
     /// A signed-in connection ended before the operation completed.

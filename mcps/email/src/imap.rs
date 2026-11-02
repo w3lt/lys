@@ -3,7 +3,9 @@
 //!
 //! [`open_imap_session`] connects, protects the connection as the account
 //! says, reads the greeting, signs in, and gives an [`ImapSession`] whose
-//! every command answers within [`EXCHANGE_LIMIT`] or fails. The session
+//! every command answers within [`EXCHANGE_LIMIT`] or fails. Each command
+//! is read up to its tagged status, so a `NO` or `BAD` is a failure that
+//! carries the server's code and text, never an empty answer. The session
 //! is closed with [`ImapSession::close`], which logs out; dropping it
 //! closes the socket either way. A command that ends in a time limit or a
 //! lost connection leaves the session unusable, and the tools never reuse
@@ -12,17 +14,22 @@
 //! Folder names given to commands are the server's own (modified UTF-7);
 //! [`crate::folder_name`] converts them.
 
+use std::borrow::Cow;
 use std::fmt;
 use std::io;
 use std::time::Duration;
 
 use async_imap::error::Error as ImapError;
-use async_imap::types::{Fetch, Flag, Name, NameAttribute};
+use async_imap::imap_proto::{
+    AttributeValue, Capability, MailboxDatum, MessageSection, Outcome, RequestId, Response,
+    ResponseCode, SectionPath, Status, StatusAttribute,
+};
+use async_imap::types::NameAttribute;
 use async_imap::{Client, Session};
-use futures_util::StreamExt;
-use tokio::io::{AsyncRead, AsyncWrite};
+use mail_parser::DateTime;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::time::{error::Elapsed, timeout};
+use tokio::time::timeout;
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::pki_types::ServerName;
 
@@ -50,6 +57,20 @@ const MONTH_NAMES: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
+/// Longest server text a refusal passes on, in characters (Unicode scalar
+/// values); a longer one keeps its first 500 characters and ends with an
+/// ellipsis.
+const REFUSAL_TEXT_LIMIT: usize = 500;
+
+/// A command whose connection ended or failed before its tagged status.
+const LOST: ImapFailure = ImapFailure::Connection(ConnectionFailure::Lost);
+
+/// A command the server answered with something that is not its answer.
+const UNREADABLE: ImapFailure = ImapFailure::Connection(ConnectionFailure::Unreadable);
+
+/// A command that was not answered within [`EXCHANGE_LIMIT`].
+const TIMED_OUT: ImapFailure = ImapFailure::Connection(ConnectionFailure::TimedOut);
+
 /// A stream an IMAP session runs over: TCP, or TLS over TCP.
 pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin + Send + fmt::Debug {}
 
@@ -61,7 +82,9 @@ type Stream = Box<dyn AsyncStream>;
 /// Why a command on a signed-in session did not complete.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ImapFailure {
-    /// The server refused the command with its own text (`NO` or `BAD`).
+    /// The server refused the command (`NO` or `BAD`): its response code
+    /// and text as the server wrote them, a longer text than
+    /// [`REFUSAL_TEXT_LIMIT`] characters cut there with an ellipsis.
     Refused(String),
     /// The connection ended, answered something unreadable, or timed out.
     Connection(ConnectionFailure),
@@ -319,17 +342,7 @@ impl ImapSession {
     ///
     /// The folders in the server's order, or why the listing failed.
     pub async fn list_folders(&mut self) -> Result<Vec<FolderListing>, ImapFailure> {
-        build_command_result(
-            timeout(EXCHANGE_LIMIT, async {
-                let mut names = self.session.list(Some(""), Some("*")).await?;
-                let mut listings = Vec::new();
-                while let Some(name) = names.next().await {
-                    listings.push(build_listing(&name?));
-                }
-                Ok(listings)
-            })
-            .await,
-        )
+        send_command(&mut self.session, "LIST \"\" \"*\"", read_listing).await
     }
 
     /// Counts the messages of a folder without selecting it.
@@ -337,11 +350,15 @@ impl ImapSession {
     /// # Arguments
     ///
     /// * `raw_name` - The folder's name as the server wrote it.
+    ///
+    /// # Returns
+    ///
+    /// The count, or why it is not known; an answer without the count is
+    /// unreadable.
     pub async fn get_message_count(&mut self, raw_name: &str) -> Result<u32, ImapFailure> {
-        build_command_result(
-            timeout(EXCHANGE_LIMIT, self.session.status(raw_name, "(MESSAGES)")).await,
-        )
-        .map(|mailbox| mailbox.exists)
+        let command = format!("STATUS {} (MESSAGES)", quote_folder_name(raw_name)?);
+        let counts = send_command(&mut self.session, &command, read_message_count).await?;
+        counts.last().copied().ok_or(UNREADABLE)
     }
 
     /// Opens a folder, read-only or for changes; it stays open until
@@ -361,22 +378,13 @@ impl ImapSession {
         raw_name: &str,
         access: FolderAccess,
     ) -> Result<SelectedFolder, ImapFailure> {
-        let mailbox = build_command_result(
-            timeout(EXCHANGE_LIMIT, async {
-                match access {
-                    FolderAccess::Read => self.session.examine(raw_name).await,
-                    FolderAccess::Change => self.session.select(raw_name).await,
-                }
-            })
-            .await,
-        )?;
-        let uid_validity = mailbox
-            .uid_validity
-            .ok_or(ImapFailure::Connection(ConnectionFailure::Unreadable))?;
-        Ok(SelectedFolder {
-            uid_validity,
-            exists: mailbox.exists,
-        })
+        let verb = match access {
+            FolderAccess::Read => "EXAMINE",
+            FolderAccess::Change => "SELECT",
+        };
+        let command = format!("{verb} {}", quote_folder_name(raw_name)?);
+        let facts = send_command(&mut self.session, &command, read_selection_fact).await?;
+        build_selected_folder(&facts)
     }
 
     /// Searches the selected folder.
@@ -390,10 +398,11 @@ impl ImapSession {
     ///
     /// The matching UIDs, highest first.
     pub async fn list_matching_uids(&mut self, criteria: &str) -> Result<Vec<u32>, ImapFailure> {
-        let uids =
-            build_command_result(timeout(EXCHANGE_LIMIT, self.session.uid_search(criteria)).await)?;
-        let mut uids: Vec<u32> = uids.into_iter().collect();
+        let command = format!("UID SEARCH {criteria}");
+        let answers = send_command(&mut self.session, &command, read_search_uids).await?;
+        let mut uids: Vec<u32> = answers.into_iter().flatten().collect();
         uids.sort_unstable_by(|left, right| right.cmp(left));
+        uids.dedup();
         Ok(uids)
     }
 
@@ -408,20 +417,8 @@ impl ImapSession {
         if uids.is_empty() {
             return Ok(Vec::new());
         }
-        let set = format_uid_set(uids);
-        build_command_result(
-            timeout(EXCHANGE_LIMIT, async {
-                let mut fetches = self.session.uid_fetch(&set, SUMMARY_QUERY).await?;
-                let mut summaries = Vec::new();
-                while let Some(fetch) = fetches.next().await {
-                    if let Some(summary) = build_summary(&fetch?) {
-                        summaries.push(summary);
-                    }
-                }
-                Ok(summaries)
-            })
-            .await,
-        )
+        let command = format!("UID FETCH {} {SUMMARY_QUERY}", format_uid_set(uids));
+        send_command(&mut self.session, &command, read_summary).await
     }
 
     /// Fetches one whole message of the selected folder, without marking
@@ -435,29 +432,9 @@ impl ImapSession {
     ///
     /// The message, or `None` when no message has the UID any more.
     pub async fn find_message(&mut self, uid: u32) -> Result<Option<FetchedMessage>, ImapFailure> {
-        build_command_result(
-            timeout(EXCHANGE_LIMIT, async {
-                let mut fetches = self
-                    .session
-                    .uid_fetch(uid.to_string(), MESSAGE_QUERY)
-                    .await?;
-                let mut message = None;
-                while let Some(fetch) = fetches.next().await {
-                    let fetch = fetch?;
-                    if fetch.uid == Some(uid)
-                        && let Some(body) = fetch.body()
-                    {
-                        message = Some(FetchedMessage {
-                            uid,
-                            flags: read_flags(&fetch),
-                            bytes: body.to_vec(),
-                        });
-                    }
-                }
-                Ok(message)
-            })
-            .await,
-        )
+        let command = format!("UID FETCH {uid} {MESSAGE_QUERY}");
+        let messages = send_command(&mut self.session, &command, read_fetched_message).await?;
+        Ok(messages.into_iter().find(|message| message.uid == uid))
     }
 
     /// Appends a message to a folder.
@@ -467,19 +444,29 @@ impl ImapSession {
     /// * `raw_name` - The folder's name as the server wrote it.
     /// * `flags` - The flag list, such as `(\Seen)`.
     /// * `bytes` - The message (RFC 5322).
+    ///
+    /// # Returns
+    ///
+    /// Nothing once the server stored the message, or why it did not: its
+    /// code and text when it refused the command, before or after the
+    /// message was sent.
     pub async fn save_message(
         &mut self,
         raw_name: &str,
         flags: &str,
         bytes: &[u8],
     ) -> Result<(), ImapFailure> {
-        build_command_result(
-            timeout(
-                EXCHANGE_LIMIT,
-                self.session.append(raw_name, Some(flags), None, bytes),
-            )
-            .await,
+        let command = format!(
+            "APPEND {} {flags} {{{}}}",
+            quote_folder_name(raw_name)?,
+            bytes.len()
+        );
+        timeout(
+            EXCHANGE_LIMIT,
+            send_append(&mut self.session, &command, bytes),
         )
+        .await
+        .unwrap_or(Err(TIMED_OUT))
     }
 
     /// Deletes one message of the selected folder: marks it `\Deleted`
@@ -492,37 +479,14 @@ impl ImapSession {
     /// * `uid` - The message's UID.
     pub async fn delete_message(&mut self, uid: u32) -> Result<(), ImapFailure> {
         let supports_uid_plus = self.find_uid_plus().await?;
-        let set = uid.to_string();
-        build_command_result(
-            timeout(EXCHANGE_LIMIT, async {
-                let mut stored = self
-                    .session
-                    .uid_store(&set, "+FLAGS.SILENT (\\Deleted)")
-                    .await?;
-                while let Some(fetch) = stored.next().await {
-                    fetch?;
-                }
-                Ok(())
-            })
-            .await,
-        )?;
-        build_command_result(
-            timeout(EXCHANGE_LIMIT, async {
-                if supports_uid_plus {
-                    let mut expunged = Box::pin(self.session.uid_expunge(&set).await?);
-                    while let Some(item) = expunged.next().await {
-                        item?;
-                    }
-                } else {
-                    let mut expunged = Box::pin(self.session.expunge().await?);
-                    while let Some(item) = expunged.next().await {
-                        item?;
-                    }
-                }
-                Ok(())
-            })
-            .await,
-        )
+        let mark = format!("UID STORE {uid} +FLAGS.SILENT (\\Deleted)");
+        run_status_command(&mut self.session, &mark).await?;
+        let expunge = if supports_uid_plus {
+            format!("UID EXPUNGE {uid}")
+        } else {
+            "EXPUNGE".to_owned()
+        };
+        run_status_command(&mut self.session, &expunge).await
     }
 
     /// Creates a folder.
@@ -531,7 +495,8 @@ impl ImapSession {
     ///
     /// * `raw_name` - The new folder's name as the server expects it.
     pub async fn create_folder(&mut self, raw_name: &str) -> Result<(), ImapFailure> {
-        build_command_result(timeout(EXCHANGE_LIMIT, self.session.create(raw_name)).await)
+        let command = format!("CREATE {}", quote_folder_name(raw_name)?);
+        run_status_command(&mut self.session, &command).await
     }
 
     /// Deletes a folder.
@@ -540,7 +505,8 @@ impl ImapSession {
     ///
     /// * `raw_name` - The folder's name as the server wrote it.
     pub async fn delete_folder(&mut self, raw_name: &str) -> Result<(), ImapFailure> {
-        build_command_result(timeout(EXCHANGE_LIMIT, self.session.delete(raw_name)).await)
+        let command = format!("DELETE {}", quote_folder_name(raw_name)?);
+        run_status_command(&mut self.session, &command).await
     }
 
     /// Renames a folder.
@@ -554,9 +520,12 @@ impl ImapSession {
         raw_name: &str,
         new_raw_name: &str,
     ) -> Result<(), ImapFailure> {
-        build_command_result(
-            timeout(EXCHANGE_LIMIT, self.session.rename(raw_name, new_raw_name)).await,
-        )
+        let command = format!(
+            "RENAME {} {}",
+            quote_folder_name(raw_name)?,
+            quote_folder_name(new_raw_name)?
+        );
+        run_status_command(&mut self.session, &command).await
     }
 
     /// Logs out and closes the connection; a failure to log out is logged
@@ -569,54 +538,465 @@ impl ImapSession {
         }
     }
 
-    /// Asks the server once whether it supports UIDPLUS.
+    /// Asks the server once whether it supports UIDPLUS; an answer that
+    /// does not list it, in any letter case, means it does not.
     async fn find_uid_plus(&mut self) -> Result<bool, ImapFailure> {
         if let Some(supported) = self.supports_uid_plus {
             return Ok(supported);
         }
-        let capabilities =
-            build_command_result(timeout(EXCHANGE_LIMIT, self.session.capabilities()).await)?;
-        let supported = capabilities.has_str("UIDPLUS");
+        let answers = send_command(&mut self.session, "CAPABILITY", read_uid_plus).await?;
+        let supported = answers.contains(&true);
         self.supports_uid_plus = Some(supported);
         Ok(supported)
     }
 }
 
-/// Turns a timed command's outcome into the session's contract.
-fn build_command_result<T>(
-    outcome: Result<Result<T, ImapError>, Elapsed>,
-) -> Result<T, ImapFailure> {
-    match outcome {
-        Ok(Ok(value)) => Ok(value),
-        Ok(Err(error)) => Err(calculate_command_failure(error)),
-        Err(_) => Err(ImapFailure::Connection(ConnectionFailure::TimedOut)),
+/// Sends one command and reads its answers up to its tagged status,
+/// within [`EXCHANGE_LIMIT`].
+///
+/// # Arguments
+///
+/// * `session` - The signed-in session.
+/// * `command` - The command, without its tag.
+/// * `read_answer` - Reads an untagged response the command asked for;
+///   `None` skips any other response, such as an update the server sends
+///   on its own.
+///
+/// # Returns
+///
+/// The answers in the server's order, or why the command failed: the
+/// server's code and text for `NO` or `BAD`, an ended connection, an
+/// answer that is not IMAP, or the time limit.
+async fn send_command<T>(
+    session: &mut Session<Stream>,
+    command: &str,
+    read_answer: fn(&Response<'_>) -> Option<T>,
+) -> Result<Vec<T>, ImapFailure> {
+    let exchange = async {
+        let tag = session.run_command(command).await.map_err(|_| LOST)?;
+        read_tagged_answers(session, &tag, read_answer).await
+    };
+    timeout(EXCHANGE_LIMIT, exchange)
+        .await
+        .unwrap_or(Err(TIMED_OUT))
+}
+
+/// Runs one command whose tagged status is its whole answer.
+///
+/// # Arguments
+///
+/// * `session` - The signed-in session.
+/// * `command` - The command, without its tag.
+async fn run_status_command(
+    session: &mut Session<Stream>,
+    command: &str,
+) -> Result<(), ImapFailure> {
+    send_command(session, command, |_| None::<()>)
+        .await
+        .map(drop)
+}
+
+/// Sends an APPEND: the command, the message once the server asks for it,
+/// and then reads the tagged status.
+///
+/// # Arguments
+///
+/// * `session` - The signed-in session.
+/// * `command` - The command up to the length of its message, without
+///   its tag.
+/// * `bytes` - The message.
+///
+/// # Returns
+///
+/// Nothing once the server stored the message; the server's code and text
+/// when it refused the command, before or after the message; or why the
+/// connection failed.
+async fn send_append(
+    session: &mut Session<Stream>,
+    command: &str,
+    bytes: &[u8],
+) -> Result<(), ImapFailure> {
+    let tag = session.run_command(command).await.map_err(|_| LOST)?;
+    loop {
+        let response = session
+            .read_response()
+            .await
+            .map_err(|_| LOST)?
+            .ok_or(LOST)?;
+        if matches!(response.parsed(), Response::Continue(_)) {
+            break;
+        }
+        if let Some(outcome) = calculate_tagged_outcome(response.parsed(), &tag) {
+            // A tagged OK before the message was sent answers a command
+            // that never received its message, so it is not the answer.
+            return outcome.and(Err(UNREADABLE));
+        }
+    }
+    let stream = session.get_mut();
+    stream.write_all(bytes).await.map_err(|_| LOST)?;
+    stream.write_all(b"\r\n").await.map_err(|_| LOST)?;
+    stream.flush().await.map_err(|_| LOST)?;
+    read_tagged_answers(session, &tag, |_| None::<()>)
+        .await
+        .map(drop)
+}
+
+/// Reads a command's answers up to its tagged status.
+///
+/// # Arguments
+///
+/// * `session` - The signed-in session.
+/// * `tag` - The command's tag.
+/// * `read_answer` - Reads an untagged response the command asked for.
+async fn read_tagged_answers<T>(
+    session: &mut Session<Stream>,
+    tag: &RequestId,
+    read_answer: fn(&Response<'_>) -> Option<T>,
+) -> Result<Vec<T>, ImapFailure> {
+    let mut answers = Vec::new();
+    loop {
+        let response = session
+            .read_response()
+            .await
+            .map_err(|_| LOST)?
+            .ok_or(LOST)?;
+        if let Some(outcome) = calculate_tagged_outcome(response.parsed(), tag) {
+            return outcome.map(|()| answers);
+        }
+        answers.extend(read_answer(response.parsed()));
     }
 }
 
-/// Classifies a protocol error met by a command of a signed-in session.
-fn calculate_command_failure(error: ImapError) -> ImapFailure {
-    match error {
-        ImapError::No(text) | ImapError::Bad(text) => ImapFailure::Refused(text),
-        ImapError::Append => {
-            ImapFailure::Refused("the server did not accept the message".to_owned())
-        }
-        ImapError::Io(_) | ImapError::ConnectionLost => {
-            ImapFailure::Connection(ConnectionFailure::Lost)
-        }
-        ImapError::Parse(_) | ImapError::Validate(_) => {
-            ImapFailure::Connection(ConnectionFailure::Unreadable)
-        }
-        _ => ImapFailure::Connection(ConnectionFailure::Unreadable),
+/// Calculates how a response ends the command of the tag.
+///
+/// # Returns
+///
+/// `None` for a response that is not the command's tagged status;
+/// otherwise success for `OK`, a refusal with the server's code and text
+/// for `NO` or `BAD`, and an unreadable answer for any other status.
+fn calculate_tagged_outcome(
+    response: &Response<'_>,
+    tag: &RequestId,
+) -> Option<Result<(), ImapFailure>> {
+    let Response::Done {
+        tag: done,
+        status,
+        outcome,
+    } = response
+    else {
+        return None;
+    };
+    if done != tag {
+        return None;
+    }
+    Some(match status {
+        Status::Ok => Ok(()),
+        Status::No | Status::Bad => Err(ImapFailure::Refused(format_refusal_text(outcome))),
+        Status::PreAuth | Status::Bye => Err(UNREADABLE),
+    })
+}
+
+/// Formats the text of a refusal as the server wrote it: the response
+/// code in brackets, for a code that can come with a refusal, then the
+/// server's text, at most [`REFUSAL_TEXT_LIMIT`] characters of it.
+///
+/// A code the protocol library does not know, such as `OVERQUOTA`, is
+/// part of the server's text as written.
+fn format_refusal_text(outcome: &Outcome<'_>) -> String {
+    let code = outcome.code.as_ref().and_then(format_response_code);
+    let text = match (code, outcome.information.as_deref()) {
+        (Some(code), Some(information)) => format!("[{code}] {information}"),
+        (Some(code), None) => format!("[{code}]"),
+        (None, Some(information)) => information.to_owned(),
+        (None, None) => "no reason given".to_owned(),
+    };
+    match text.char_indices().nth(REFUSAL_TEXT_LIMIT) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text,
     }
 }
 
-/// Builds a folder listing from a `LIST` response.
-fn build_listing(name: &Name) -> FolderListing {
-    FolderListing {
-        raw_name: name.name().to_owned(),
-        attributes: name.attributes().iter().map(format_attribute).collect(),
-        delimiter: name.delimiter().map(str::to_owned),
+/// Formats a response code that can come with a refusal as the protocol
+/// writes it.
+///
+/// # Returns
+///
+/// The code, or `None` for a code that only comes with an answer, such
+/// as `UIDVALIDITY`.
+fn format_response_code(code: &ResponseCode<'_>) -> Option<String> {
+    match code {
+        ResponseCode::Alert => Some("ALERT".to_owned()),
+        ResponseCode::BadCharset(None) => Some("BADCHARSET".to_owned()),
+        ResponseCode::BadCharset(Some(charsets)) => {
+            Some(format!("BADCHARSET ({})", charsets.join(" ")))
+        }
+        ResponseCode::Parse => Some("PARSE".to_owned()),
+        ResponseCode::ReadOnly => Some("READ-ONLY".to_owned()),
+        ResponseCode::ReadWrite => Some("READ-WRITE".to_owned()),
+        ResponseCode::TryCreate => Some("TRYCREATE".to_owned()),
+        ResponseCode::UidNotSticky => Some("UIDNOTSTICKY".to_owned()),
+        _ => None,
     }
+}
+
+/// Quotes a folder name for a command.
+///
+/// # Returns
+///
+/// The quoted name, or an unreadable answer for a name with a line
+/// break, which only the server's own listing can give and a quoted
+/// string cannot hold.
+fn quote_folder_name(raw_name: &str) -> Result<String, ImapFailure> {
+    if raw_name.contains(['\r', '\n']) {
+        return Err(UNREADABLE);
+    }
+    Ok(format_quoted_string(raw_name))
+}
+
+/// Formats a text without line breaks as a quoted string.
+fn format_quoted_string(text: &str) -> String {
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Reads a folder listing from a `LIST` answer.
+fn read_listing(response: &Response<'_>) -> Option<FolderListing> {
+    let Response::MailboxData(MailboxDatum::List(list)) = response else {
+        return None;
+    };
+    Some(FolderListing {
+        raw_name: list.name.to_string(),
+        attributes: list.name_attributes.iter().map(format_attribute).collect(),
+        delimiter: list.delimiter.as_deref().map(str::to_owned),
+    })
+}
+
+/// Reads the message count of a `STATUS` answer.
+fn read_message_count(response: &Response<'_>) -> Option<u32> {
+    let Response::MailboxData(MailboxDatum::Status { status, .. }) = response else {
+        return None;
+    };
+    for attribute in status {
+        if let StatusAttribute::Messages(count) = attribute {
+            return Some(*count);
+        }
+    }
+    None
+}
+
+/// What a `SELECT` or `EXAMINE` answer reports about the folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SelectionFact {
+    /// How many messages the folder holds.
+    Exists(u32),
+    /// The folder's UIDVALIDITY.
+    UidValidity(u32),
+}
+
+/// Reads a fact about the selected folder from a `SELECT` or `EXAMINE`
+/// answer.
+fn read_selection_fact(response: &Response<'_>) -> Option<SelectionFact> {
+    match response {
+        Response::MailboxData(MailboxDatum::Exists(count)) => Some(SelectionFact::Exists(*count)),
+        Response::Data {
+            status: Status::Ok,
+            outcome:
+                Outcome {
+                    code: Some(ResponseCode::UidValidity(uid_validity)),
+                    ..
+                },
+        } => Some(SelectionFact::UidValidity(*uid_validity)),
+        _ => None,
+    }
+}
+
+/// Builds what a selection reports from its facts, the last of each kind
+/// counting.
+///
+/// # Returns
+///
+/// The folder's UIDVALIDITY and message count, or an unreadable answer
+/// without UIDVALIDITY; a missing count is 0.
+fn build_selected_folder(facts: &[SelectionFact]) -> Result<SelectedFolder, ImapFailure> {
+    let mut uid_validity = None;
+    let mut exists = 0;
+    for fact in facts {
+        match fact {
+            SelectionFact::Exists(count) => exists = *count,
+            SelectionFact::UidValidity(value) => uid_validity = Some(*value),
+        }
+    }
+    Ok(SelectedFolder {
+        uid_validity: uid_validity.ok_or(UNREADABLE)?,
+        exists,
+    })
+}
+
+/// Reads the UIDs of a `SEARCH` answer.
+fn read_search_uids(response: &Response<'_>) -> Option<Vec<u32>> {
+    let Response::MailboxData(MailboxDatum::Search(uids)) = response else {
+        return None;
+    };
+    Some(uids.clone())
+}
+
+/// Reads whether a `CAPABILITY` answer lists UIDPLUS, in any letter case.
+fn read_uid_plus(response: &Response<'_>) -> Option<bool> {
+    let Response::Capabilities(capabilities) = response else {
+        return None;
+    };
+    Some(capabilities.iter().any(is_uid_plus))
+}
+
+/// Whether a capability is UIDPLUS, in any letter case.
+fn is_uid_plus(capability: &Capability<'_>) -> bool {
+    matches!(capability, Capability::Atom(name) if name.eq_ignore_ascii_case("UIDPLUS"))
+}
+
+/// The attributes of one `FETCH` answer that the tools use.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct FetchedAttributes {
+    /// The message's UID.
+    uid: Option<u32>,
+    /// Its system flags; none when the answer has no flag list.
+    flags: Flags,
+    /// Its size in bytes.
+    size: Option<u32>,
+    /// When the server received it.
+    internal_date: Option<DateTime>,
+    /// The header fields fetched.
+    header: Option<Vec<u8>>,
+    /// The whole message.
+    body: Option<Vec<u8>>,
+}
+
+/// Reads the attributes of a `FETCH` answer.
+fn read_fetched_attributes(response: &Response<'_>) -> Option<FetchedAttributes> {
+    let Response::Fetch(_, values) = response else {
+        return None;
+    };
+    let mut attributes = FetchedAttributes::default();
+    for value in values {
+        match value {
+            AttributeValue::Uid(uid) => attributes.uid = Some(*uid),
+            AttributeValue::Flags(names) => attributes.flags = read_flags(names),
+            AttributeValue::Rfc822Size(size) => attributes.size = Some(*size),
+            AttributeValue::InternalDate(text) => {
+                attributes.internal_date = parse_internal_date(text)
+            }
+            AttributeValue::BodySection {
+                section: Some(SectionPath::Full(MessageSection::Header)),
+                data: Some(data),
+                ..
+            }
+            | AttributeValue::Rfc822Header(Some(data)) => attributes.header = Some(data.to_vec()),
+            AttributeValue::BodySection {
+                section: None,
+                data: Some(data),
+                ..
+            }
+            | AttributeValue::Rfc822(Some(data)) => attributes.body = Some(data.to_vec()),
+            _ => {}
+        }
+    }
+    Some(attributes)
+}
+
+/// Reads a summary from a `FETCH` answer of [`SUMMARY_QUERY`]; an answer
+/// without a UID, such as a flag change the server reports on its own, is
+/// skipped.
+fn read_summary(response: &Response<'_>) -> Option<Summary> {
+    let attributes = read_fetched_attributes(response)?;
+    Some(Summary {
+        uid: attributes.uid?,
+        flags: attributes.flags,
+        size: attributes.size,
+        internal_date: attributes.internal_date.map(|date| date.to_rfc3339()),
+        internal_timestamp: attributes.internal_date.map(|date| date.to_timestamp()),
+        header: attributes.header.unwrap_or_default(),
+    })
+}
+
+/// Reads a whole message from a `FETCH` answer of [`MESSAGE_QUERY`]; an
+/// answer without a UID or the message is skipped.
+fn read_fetched_message(response: &Response<'_>) -> Option<FetchedMessage> {
+    let attributes = read_fetched_attributes(response)?;
+    Some(FetchedMessage {
+        uid: attributes.uid?,
+        flags: attributes.flags,
+        bytes: attributes.body?,
+    })
+}
+
+/// Reads the system flags of a flag list, in any letter case.
+fn read_flags(names: &[Cow<'_, str>]) -> Flags {
+    let mut flags = Flags::default();
+    for name in names {
+        match name.to_ascii_lowercase().as_str() {
+            "\\seen" => flags.seen = true,
+            "\\answered" => flags.answered = true,
+            "\\flagged" => flags.flagged = true,
+            "\\draft" => flags.draft = true,
+            "\\deleted" => flags.deleted = true,
+            _ => {}
+        }
+    }
+    flags
+}
+
+/// Parses an IMAP date-time, such as `02-Nov-2026 14:03:00 +0100`: the
+/// `date-time` of RFC 3501 without its quotes.
+///
+/// # Returns
+///
+/// The date, or `None` when the text is not a date-time of a real day.
+fn parse_internal_date(text: &str) -> Option<DateTime> {
+    let fields: Vec<&str> = text.split_whitespace().collect();
+    let [day, time, zone] = fields.as_slice() else {
+        return None;
+    };
+    let day: Vec<&str> = day.split('-').collect();
+    let time: Vec<&str> = time.split(':').collect();
+    let ([day, month, year], [hour, minute, second]) = (day.as_slice(), time.as_slice()) else {
+        return None;
+    };
+    let (sign, offset) = zone.split_at_checked(1)?;
+    if !matches!(sign, "+" | "-") || offset.len() != 4 {
+        return None;
+    }
+    let date = DateTime {
+        year: year.parse().ok()?,
+        month: parse_month_name(month)?,
+        day: day.parse().ok()?,
+        hour: hour.parse().ok()?,
+        minute: minute.parse().ok()?,
+        second: second.parse().ok()?,
+        tz_before_gmt: sign == "-",
+        tz_hour: offset.get(..2)?.parse().ok()?,
+        tz_minute: offset.get(2..)?.parse().ok()?,
+    };
+    is_calendar_date(&date).then_some(date)
+}
+
+/// Parses a month name as IMAP dates write it, in any letter case.
+///
+/// # Returns
+///
+/// The month, 1 to 12, or `None` for another text.
+fn parse_month_name(text: &str) -> Option<u8> {
+    let index = MONTH_NAMES
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(text))?;
+    u8::try_from(index + 1).ok()
+}
+
+/// Whether a date's fields are in range and name a day the calendar has,
+/// so that 31 November is not one.
+fn is_calendar_date(date: &DateTime) -> bool {
+    if !date.is_valid() {
+        return false;
+    }
+    let normalized = DateTime::from_timestamp(date.to_timestamp_local());
+    (normalized.year, normalized.month, normalized.day) == (date.year, date.month, date.day)
 }
 
 /// Formats a `LIST` attribute as the protocol writes it.
@@ -638,36 +1018,6 @@ fn format_attribute(attribute: &NameAttribute<'_>) -> String {
     }
 }
 
-/// Builds a summary from a `FETCH` response of [`SUMMARY_QUERY`].
-fn build_summary(fetch: &Fetch) -> Option<Summary> {
-    let uid = fetch.uid?;
-    let internal_date = fetch.internal_date();
-    Some(Summary {
-        uid,
-        flags: read_flags(fetch),
-        size: fetch.size,
-        internal_date: internal_date.map(|date| date.to_rfc3339()),
-        internal_timestamp: internal_date.map(|date| date.timestamp()),
-        header: fetch.header().map(<[u8]>::to_vec).unwrap_or_default(),
-    })
-}
-
-/// Reads the system flags of a `FETCH` response.
-fn read_flags(fetch: &Fetch) -> Flags {
-    let mut flags = Flags::default();
-    for flag in fetch.flags() {
-        match flag {
-            Flag::Seen => flags.seen = true,
-            Flag::Answered => flags.answered = true,
-            Flag::Flagged => flags.flagged = true,
-            Flag::Draft => flags.draft = true,
-            Flag::Deleted => flags.deleted = true,
-            Flag::Recent | Flag::MayCreate | Flag::Custom(_) => {}
-        }
-    }
-    flags
-}
-
 /// Formats UIDs as one `UID FETCH` set.
 fn format_uid_set(uids: &[u32]) -> String {
     uids.iter()
@@ -685,12 +1035,11 @@ fn format_uid_set(uids: &[u32]) -> String {
 /// # Returns
 ///
 /// A quoted string for ASCII text, and a non-synchronizing literal
-/// (`{n+}`, RFC 7888) for other text, which servers without LITERAL+
-/// refuse; the search then fails with the server's text.
+/// (`{n+}`, RFC 7888) for other text. A server without LITERAL+ answers
+/// such a search with `BAD`, and the search fails with the server's text.
 pub fn format_search_text(text: &str) -> String {
     if text.is_ascii() {
-        let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");
-        return format!("\"{escaped}\"");
+        return format_quoted_string(text);
     }
     format!("{{{}+}}\r\n{}", text.len(), text)
 }
@@ -741,15 +1090,7 @@ mod tests {
     }
 
     #[test]
-    fn classifies_command_errors_by_kind() {
-        assert_eq!(
-            calculate_command_failure(ImapError::No("Unknown mailbox".to_owned())),
-            ImapFailure::Refused("Unknown mailbox".to_owned())
-        );
-        assert_eq!(
-            calculate_command_failure(ImapError::ConnectionLost),
-            ImapFailure::Connection(ConnectionFailure::Lost)
-        );
+    fn classifies_sign_in_errors_by_kind() {
         assert_eq!(
             calculate_sign_in_failure(&ImapError::No("AUTHENTICATIONFAILED".to_owned())),
             SignInFailure::WrongPassword
@@ -763,6 +1104,141 @@ mod tests {
                 io::ErrorKind::UnexpectedEof
             ))),
             SignInFailure::ProtocolError
+        );
+    }
+
+    /// The outcome the tagged line ends the command `A1` with, parsed as
+    /// the session reads it.
+    fn calculate_line_outcome(line: &[u8]) -> Option<Result<(), ImapFailure>> {
+        let (_, response) = Response::parse(line).expect("an IMAP response");
+        calculate_tagged_outcome(&response, &RequestId("A1".to_owned()))
+    }
+
+    #[test]
+    fn ends_a_command_only_at_its_own_tagged_status() {
+        assert_eq!(calculate_line_outcome(b"A1 OK Done\r\n"), Some(Ok(())));
+        assert_eq!(calculate_line_outcome(b"A2 NO Other command\r\n"), None);
+        assert_eq!(calculate_line_outcome(b"* NO A warning\r\n"), None);
+        assert_eq!(calculate_line_outcome(b"* SEARCH 1 2\r\n"), None);
+        assert_eq!(
+            calculate_line_outcome(b"A1 BAD Syntax error\r\n"),
+            Some(Err(ImapFailure::Refused("Syntax error".to_owned())))
+        );
+    }
+
+    #[test]
+    fn passes_on_the_code_and_text_of_a_refusal() {
+        let cases: [(&[u8], &str); 6] = [
+            (
+                b"A1 NO [BADCHARSET (US-ASCII UTF-7)] Unsupported charset\r\n",
+                "[BADCHARSET (US-ASCII UTF-7)] Unsupported charset",
+            ),
+            (
+                b"A1 NO [BADCHARSET] No charset\r\n",
+                "[BADCHARSET] No charset",
+            ),
+            (
+                b"A1 NO [READ-ONLY] Mailbox is read-only\r\n",
+                "[READ-ONLY] Mailbox is read-only",
+            ),
+            (
+                b"A1 NO [OVERQUOTA] Quota exceeded\r\n",
+                "[OVERQUOTA] Quota exceeded",
+            ),
+            (b"A1 NO [TRYCREATE]\r\n", "[TRYCREATE]"),
+            (b"A1 NO\r\n", "no reason given"),
+        ];
+        for (line, text) in cases {
+            assert_eq!(
+                calculate_line_outcome(line),
+                Some(Err(ImapFailure::Refused(text.to_owned()))),
+                "{}",
+                String::from_utf8_lossy(line)
+            );
+        }
+    }
+
+    #[test]
+    fn cuts_a_refusal_text_after_its_limit() {
+        let at_limit = "é".repeat(REFUSAL_TEXT_LIMIT);
+        let over_limit = "é".repeat(REFUSAL_TEXT_LIMIT + 1);
+        let outcome = |text: &str| Outcome {
+            code: None,
+            information: Some(Cow::Owned(text.to_owned())),
+        };
+
+        assert_eq!(format_refusal_text(&outcome(&at_limit)), at_limit);
+        assert_eq!(
+            format_refusal_text(&outcome(&over_limit)),
+            format!("{at_limit}…")
+        );
+    }
+
+    #[test]
+    fn reads_flags_in_any_letter_case() {
+        let names = [
+            Cow::Borrowed("\\SEEN"),
+            Cow::Borrowed("\\draft"),
+            Cow::Borrowed("\\Deleted"),
+            Cow::Borrowed("$Forwarded"),
+        ];
+
+        assert_eq!(
+            read_flags(&names),
+            Flags {
+                seen: true,
+                answered: false,
+                flagged: false,
+                draft: true,
+                deleted: true
+            }
+        );
+    }
+
+    #[test]
+    fn parses_internal_dates_with_their_zone() {
+        let date = parse_internal_date("02-Nov-2026 14:03:00 +0100").expect("a date");
+        let early = parse_internal_date(" 2-Nov-2026 09:00:00 -0500").expect("a date");
+
+        assert_eq!(date.to_rfc3339(), "2026-11-02T14:03:00+01:00");
+        assert_eq!(date.to_timestamp(), 1_793_624_580);
+        assert_eq!(early.to_rfc3339(), "2026-11-02T09:00:00-05:00");
+        assert_eq!(early.to_timestamp(), 1_793_628_000);
+        assert_eq!(parse_internal_date("yesterday"), None);
+        assert_eq!(parse_internal_date("02-Foo-2026 10:00:00 +0000"), None);
+        assert_eq!(parse_internal_date("31-Nov-2026 10:00:00 +0000"), None);
+        assert_eq!(parse_internal_date("02-Nov-2026 24:00:00 +0000"), None);
+        assert_eq!(parse_internal_date("02-Nov-2026 10:00:00 0000"), None);
+        assert_eq!(parse_internal_date("02-Nov-2026 10:00:00 +0é0"), None);
+    }
+
+    #[test]
+    fn quotes_folder_names_and_refuses_line_breaks() {
+        assert_eq!(
+            quote_folder_name("Projects/\"2026\" \\ old"),
+            Ok("\"Projects/\\\"2026\\\" \\\\ old\"".to_owned())
+        );
+        assert_eq!(quote_folder_name("Bad\r\nName"), Err(UNREADABLE));
+    }
+
+    #[test]
+    fn reads_the_facts_of_a_selection() {
+        let facts = [
+            SelectionFact::Exists(3),
+            SelectionFact::UidValidity(7),
+            SelectionFact::Exists(4),
+        ];
+
+        assert_eq!(
+            build_selected_folder(&facts),
+            Ok(SelectedFolder {
+                uid_validity: 7,
+                exists: 4
+            })
+        );
+        assert_eq!(
+            build_selected_folder(&[SelectionFact::Exists(3)]),
+            Err(UNREADABLE)
         );
     }
 }

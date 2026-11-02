@@ -27,6 +27,7 @@ use crate::failure::ToolFailure;
 use crate::folders::{Folder, FolderRole};
 use crate::imap::{Deletion, FolderAccess, ImapSession, Summary, format_search_text};
 use crate::message::{ParsedMailbox, build_message_view};
+use crate::smtp::SendProgress;
 
 /// The flags a draft is stored with.
 const DRAFT_FLAGS: &str = "(\\Draft)";
@@ -200,12 +201,18 @@ pub async fn run_save_draft(context: &ToolContext, arguments: SaveDraftArguments
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - Which draft, and what it must hold.
+/// * `progress` - Records how far the send came, for the caller that may
+///   stop the call.
 ///
 /// # Returns
 ///
 /// The report, or the failure; when the draft's fields differ from the
 /// call's, the refusal names the draft's own and nothing is sent.
-pub async fn run_send_draft(context: &ToolContext, arguments: SendDraftArguments) -> ToolResult {
+pub async fn run_send_draft(
+    context: &ToolContext,
+    arguments: SendDraftArguments,
+    progress: &SendProgress,
+) -> ToolResult {
     let id = parse_email_id(&arguments.draft_id)?;
     let given = build_compared_fields(parse_message_arguments(&build_given_fields(arguments))?)?;
     let mut session = context.open_imap().await?;
@@ -216,7 +223,7 @@ pub async fn run_send_draft(context: &ToolContext, arguments: SendDraftArguments
     if let Some(refusal) = format_draft_difference(&given, &prepared) {
         return Err(ToolFailure::Argument(refusal));
     }
-    send_composed(context, &prepared.message).await?;
+    send_composed(context, &prepared.message, progress).await?;
     let copy = if context.account.server_keeps_sent_copy {
         super::send::SentCopy::KeptByServer
     } else {

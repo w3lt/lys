@@ -1,15 +1,33 @@
 //! A fake SMTP server: EHLO, STARTTLS, AUTH PLAIN and LOGIN, MAIL, RCPT,
-//! DATA, and QUIT, recording every mail it accepts.
+//! DATA, and QUIT, recording every mail it accepts, and failing a command
+//! on request by never answering it, by closing the connection, or by
+//! answering something that is not a reply.
 
+use std::fmt::Debug;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Notify;
+use tokio::time::{Instant, timeout};
 use tokio_rustls::TlsAcceptor;
 
 use super::{PASSWORD, USER_NAME};
+
+/// How many times a future may take up input its connection already has,
+/// after the fake met its fault and before the clock pauses: enough for a
+/// connection the fake accepted to finish connecting, so that only the
+/// wait the fault caused is left.
+const SETTLING_TURNS: usize = 3;
+
+/// Longest a future may wait on the paused clock before the test fails it:
+/// longer than any limit of the code under test, so that a step without a
+/// limit fails the test instead of hanging it.
+const GUARD_LIMIT: Duration = Duration::from_secs(600);
 
 /// How the fake protects its connections.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,6 +42,23 @@ pub enum SmtpMode {
     Plain,
     /// Accepts the connection and never writes.
     Silent,
+}
+
+/// The point of the dialogue where a fault strikes: a command, by its
+/// verb, or the end of a message's data, after the fake has recorded the
+/// mail.
+pub const DATA_END: &str = "DATA END";
+
+/// How the fake fails a command instead of answering it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SmtpFault {
+    /// Reads on and never answers.
+    Stall,
+    /// Closes the connection without answering.
+    Close,
+    /// Answers a line that is not an SMTP reply and closes the
+    /// connection.
+    Garbage,
 }
 
 /// A mail the fake accepted.
@@ -46,6 +81,8 @@ pub struct FakeSmtpState {
     pub refused_recipients: Vec<String>,
     /// Every command line received, in order.
     pub commands: Vec<String>,
+    /// The verbs, or [`DATA_END`], the fake fails, and how.
+    pub faults: Vec<(String, SmtpFault)>,
 }
 
 /// The running fake.
@@ -60,6 +97,9 @@ pub struct FakeSmtpServer {
     pub port: u16,
     /// Its state.
     pub state: Arc<Mutex<FakeSmtpState>>,
+    /// Notified each time a fault strikes, or a connection is accepted in
+    /// the silent mode.
+    faulted: Arc<Notify>,
 }
 
 impl FakeSmtpServer {
@@ -73,10 +113,12 @@ impl FakeSmtpServer {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("a free port");
         let port = listener.local_addr().expect("the address").port();
         let state = Arc::new(Mutex::new(FakeSmtpState::default()));
+        let faulted = Arc::new(Notify::new());
         let setup = ConnectionSetup {
             mode,
             acceptor,
             state: Arc::clone(&state),
+            faulted: Arc::clone(&faulted),
         };
         tokio::spawn(async move {
             loop {
@@ -89,12 +131,21 @@ impl FakeSmtpServer {
                 });
             }
         });
-        Self { port, state }
+        Self {
+            port,
+            state,
+            faulted,
+        }
     }
 
     /// The mails accepted so far.
     pub fn list_mails(&self) -> Vec<SentMail> {
         self.state.lock().expect("the state").mails.clone()
+    }
+
+    /// Every command line received so far, in order.
+    pub fn list_commands(&self) -> Vec<String> {
+        self.state.lock().expect("the state").commands.clone()
     }
 
     /// Refuses a recipient from now on.
@@ -104,6 +155,76 @@ impl FakeSmtpServer {
             .expect("the state")
             .refused_recipients
             .push(address.to_owned());
+    }
+
+    /// Fails the command with the verb, such as `RCPT`, or the end of a
+    /// message's data, [`DATA_END`], from now on.
+    pub fn add_fault(&self, verb: &str, fault: SmtpFault) {
+        self.state
+            .lock()
+            .expect("the state")
+            .faults
+            .push((verb.to_owned(), fault));
+    }
+
+    /// Waits until a fault has struck, or a connection was accepted in the
+    /// silent mode, since the last wait.
+    pub async fn wait_for_fault(&self) {
+        self.faulted.notified().await;
+    }
+
+    /// Runs a future until a fault strikes, or a connection was accepted
+    /// in the silent mode, and drops it there, as a stopped call drops its
+    /// work.
+    ///
+    /// # Panics
+    ///
+    /// When the future ends first.
+    pub async fn stop_at_fault<F>(&self, future: F)
+    where
+        F: Future,
+        F::Output: Debug,
+    {
+        tokio::select! {
+            () = self.wait_for_fault() => {}
+            outcome = future => panic!("the future ended before the fault: {outcome:?}"),
+        }
+    }
+
+    /// Runs a future until a fault strikes, or a connection was accepted
+    /// in the silent mode, lets it take up the input it already has, pauses
+    /// the clock, and runs it to its end.
+    ///
+    /// # Returns
+    ///
+    /// The future's output and how long it took, the paused part included.
+    ///
+    /// # Panics
+    ///
+    /// When the future ends before the clock paused, or waits on the
+    /// paused clock longer than [`GUARD_LIMIT`].
+    pub async fn run_past_fault<F>(&self, future: F) -> (F::Output, Duration)
+    where
+        F: Future,
+        F::Output: Debug,
+    {
+        let started = Instant::now();
+        tokio::pin!(future);
+        tokio::select! {
+            () = self.wait_for_fault() => {}
+            outcome = &mut future => panic!("the future ended before the fault: {outcome:?}"),
+        }
+        for _ in 0..SETTLING_TURNS {
+            tokio::select! {
+                () = tokio::task::yield_now() => {}
+                outcome = &mut future => panic!("the future ended before the clock paused: {outcome:?}"),
+            }
+        }
+        tokio::time::pause();
+        let outcome = timeout(GUARD_LIMIT, future)
+            .await
+            .expect("a limit of the code under test ends the future");
+        (outcome, started.elapsed())
     }
 }
 
@@ -116,21 +237,16 @@ struct ConnectionSetup {
     acceptor: Option<TlsAcceptor>,
     /// The fake's state, shared with the test.
     state: Arc<Mutex<FakeSmtpState>>,
+    /// Notified each time a fault strikes.
+    faulted: Arc<Notify>,
 }
 
 /// Serves one connection in the setup's mode.
 async fn handle_connection(stream: TcpStream, setup: ConnectionSetup) {
     match setup.mode {
         SmtpMode::Silent => {
-            let mut reader = BufReader::new(stream);
-            let mut line = String::new();
-            while reader
-                .read_line(&mut line)
-                .await
-                .is_ok_and(|count| count > 0)
-            {
-                line.clear();
-            }
+            setup.faulted.notify_one();
+            read_until_end(&mut BufReader::new(stream)).await;
         }
         SmtpMode::Tls => {
             let Some(acceptor) = &setup.acceptor else {
@@ -178,6 +294,8 @@ struct Session<S> {
     secured: bool,
     /// The fake's state, shared with the test.
     state: Arc<Mutex<FakeSmtpState>>,
+    /// Notified each time a fault strikes.
+    faulted: Arc<Notify>,
     /// The envelope sender of the mail being sent.
     from: String,
     /// The accepted envelope recipients of the mail being sent.
@@ -201,6 +319,7 @@ where
             mode: setup.mode,
             secured,
             state: Arc::clone(&setup.state),
+            faulted: Arc::clone(&setup.faulted),
             from: String::new(),
             recipients: Vec::new(),
         }
@@ -219,12 +338,41 @@ where
                 .expect("the state")
                 .commands
                 .push(line.clone());
-            match self.handle_command(&line).await {
+            let (verb, _) = line.split_once(' ').unwrap_or((&line, ""));
+            let step = match self.find_fault(verb) {
+                Some(fault) => self.handle_fault(fault).await,
+                None => self.handle_command(&line).await,
+            };
+            match step {
                 Step::Next => {}
                 Step::StartTls => return Some(self.reader.into_inner()),
                 Step::End => return None,
             }
         }
+    }
+
+    /// The fault the fake fails the verb, or the end of the data, with.
+    fn find_fault(&self, verb: &str) -> Option<SmtpFault> {
+        self.state
+            .lock()
+            .expect("the state")
+            .faults
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(verb))
+            .map(|(_, fault)| *fault)
+    }
+
+    /// Fails a command: never answers it, reading on until the client
+    /// closes the connection; closes the connection at once; or answers a
+    /// line that is not a reply and closes it.
+    async fn handle_fault(&mut self, fault: SmtpFault) -> Step {
+        self.faulted.notify_one();
+        match fault {
+            SmtpFault::Stall => read_until_end(&mut self.reader).await,
+            SmtpFault::Close => {}
+            SmtpFault::Garbage => send_line(&mut self.reader, "not an SMTP reply\r\n").await,
+        }
+        Step::End
     }
 
     /// Answers one command line.
@@ -322,8 +470,20 @@ where
             to: self.recipients.clone(),
             bytes,
         });
+        if let Some(fault) = self.find_fault(DATA_END) {
+            return self.handle_fault(fault).await;
+        }
         self.send_reply("250 2.0.0 OK: queued\r\n").await
     }
+}
+
+/// Reads and drops bytes, text or not, until the stream ends or fails.
+async fn read_until_end<S>(reader: &mut BufReader<S>)
+where
+    S: AsyncRead + Unpin,
+{
+    let mut buffer = [0_u8; 1024];
+    while reader.read(&mut buffer).await.is_ok_and(|count| count > 0) {}
 }
 
 /// Reads one command line without its line break.

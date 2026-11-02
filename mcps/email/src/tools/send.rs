@@ -22,7 +22,7 @@ use crate::failure::{Protocol, ToolFailure};
 use crate::folders::{Folder, FolderRole, find_role_folder};
 use crate::imap::ImapSession;
 use crate::message::{MessageView, ParsedMailbox};
-use crate::smtp::{SmtpFailure, build_smtp_transport, send_message};
+use crate::smtp::{SendProgress, SmtpFailure, open_smtp_session};
 
 /// Most recipients of one field.
 pub const MAXIMUM_RECIPIENTS: usize = 50;
@@ -93,7 +93,13 @@ impl SentCopy {
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - The message.
-pub async fn run_send_email(context: &ToolContext, arguments: MessageArguments) -> ToolResult {
+/// * `progress` - Records how far the send came, for the caller that may
+///   stop the call.
+pub async fn run_send_email(
+    context: &ToolContext,
+    arguments: MessageArguments,
+    progress: &SendProgress,
+) -> ToolResult {
     parse_message_arguments(&arguments)?;
     let mut session = None;
     let composition = build_composition(context, &mut session, &arguments).await?;
@@ -103,7 +109,7 @@ pub async fn run_send_email(context: &ToolContext, arguments: MessageArguments) 
     };
     let composed = build_sent_message(&context.account, &composition, stamp)
         .map_err(|problem| ToolFailure::Argument(problem.format_sentence()))?;
-    send_composed(context, &composed).await?;
+    send_composed(context, &composed, progress).await?;
     let copy = offer_sent_copy(context, &mut session, &composed.bytes).await;
     if let Some(session) = session {
         session.close().await;
@@ -324,32 +330,49 @@ fn list_recipient_arguments(mailboxes: &[ParsedMailbox]) -> Vec<String> {
     mailboxes.iter().filter_map(format_recipient).collect()
 }
 
-/// Sends a composed message over SMTP.
+/// Sends a composed message over an SMTP session of its own, which it
+/// closes once the server accepted the message and drops after a failure.
 ///
 /// # Arguments
 ///
 /// * `context` - The account and trust.
 /// * `composed` - The message.
-pub async fn send_composed(
+/// * `progress` - Records how far the send came, for the caller that may
+///   stop the call.
+///
+/// # Returns
+///
+/// Nothing once the server accepted the message, or why it did not.
+pub(crate) async fn send_composed(
     context: &ToolContext,
     composed: &ComposedMessage,
+    progress: &SendProgress,
 ) -> Result<(), ToolFailure> {
-    let transport = build_smtp_transport(&context.account, &context.trust).map_err(|failure| {
-        ToolFailure::SignIn {
+    let mut session = open_smtp_session(&context.account, &context.trust)
+        .await
+        .map_err(|failure| ToolFailure::SignIn {
             protocol: Protocol::Smtp,
             failure,
-        }
-    })?;
-    send_message(&transport, &composed.envelope, &composed.bytes)
+        })?;
+    session
+        .send_message(&composed.envelope, &composed.bytes, progress)
         .await
-        .map_err(|failure| match failure {
-            SmtpFailure::SignIn(failure) => ToolFailure::SignIn {
-                protocol: Protocol::Smtp,
-                failure,
-            },
-            SmtpFailure::Refused { code, text } => ToolFailure::SmtpRefused { code, text },
-            SmtpFailure::Unconfirmed => ToolFailure::SendUnconfirmed,
-        })
+        .map_err(build_send_failure)?;
+    session.close().await;
+    Ok(())
+}
+
+/// Builds the failure the model reads from why a send did not complete.
+fn build_send_failure(failure: SmtpFailure) -> ToolFailure {
+    match failure {
+        SmtpFailure::Connection(failure) => ToolFailure::Connection {
+            protocol: Protocol::Smtp,
+            failure,
+        },
+        SmtpFailure::Refused { code, text } => ToolFailure::SmtpRefused { code, text },
+        SmtpFailure::ExtensionMissing(extension) => ToolFailure::SmtpExtensionMissing(extension),
+        SmtpFailure::Unconfirmed => ToolFailure::SendUnconfirmed,
+    }
 }
 
 /// Offers a copy of a sent message to the Sent folder, unless the server

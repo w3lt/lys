@@ -16,7 +16,6 @@
 
 use std::borrow::Cow;
 use std::fmt;
-use std::io;
 use std::time::Duration;
 
 use async_imap::error::Error as ImapError;
@@ -30,17 +29,13 @@ use mail_parser::DateTime;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
-use tokio_rustls::client::TlsStream;
-use tokio_rustls::rustls::pki_types::ServerName;
 
-use crate::account::{Account, MailServer, Security};
+use crate::account::{Account, Security};
 use crate::failure::{ConnectionFailure, SignInFailure};
 use crate::folders::FolderListing;
 use crate::log::send_log_line;
-use crate::trust::{Trust, is_certificate_refusal};
-
-/// Longest a TCP connection or a TLS handshake may take.
-pub const CONNECT_LIMIT: Duration = Duration::from_secs(15);
+use crate::network::{calculate_io_sign_in_failure, open_tcp_stream, open_tls_stream};
+use crate::trust::Trust;
 
 /// Longest one command may take to be answered in full.
 pub const EXCHANGE_LIMIT: Duration = Duration::from_secs(30);
@@ -220,7 +215,7 @@ impl fmt::Debug for ImapSession {
 /// # Returns
 ///
 /// The signed-in session, or why signing in failed: the server could not
-/// be reached within [`CONNECT_LIMIT`]; the TLS handshake failed, with the
+/// be reached within 15 seconds; the TLS handshake failed, with the
 /// certificate refused or otherwise; STARTTLS was refused; the greeting,
 /// the STARTTLS answer, or the sign-in took longer than
 /// [`EXCHANGE_LIMIT`]; the credentials were refused; or the server
@@ -263,41 +258,6 @@ pub async fn open_imap_session(
     })
 }
 
-/// Opens the TCP connection within [`CONNECT_LIMIT`].
-async fn open_tcp_stream(server: &MailServer) -> Result<TcpStream, SignInFailure> {
-    match timeout(
-        CONNECT_LIMIT,
-        TcpStream::connect((server.server_name(), server.port)),
-    )
-    .await
-    {
-        Ok(Ok(stream)) => Ok(stream),
-        Ok(Err(_)) | Err(_) => Err(SignInFailure::Unreachable),
-    }
-}
-
-/// Runs the TLS handshake within [`CONNECT_LIMIT`].
-async fn open_tls_stream(
-    server: &MailServer,
-    trust: &Trust,
-    tcp: TcpStream,
-) -> Result<TlsStream<TcpStream>, SignInFailure> {
-    let connector = trust.build_imap_connector().map_err(|error| {
-        send_log_line(&format!(
-            "imap: the TLS configuration could not be built: {error}"
-        ));
-        SignInFailure::ProtocolError
-    })?;
-    let name = ServerName::try_from(server.server_name().to_owned())
-        .map_err(|_| SignInFailure::ProtocolError)?;
-    match timeout(CONNECT_LIMIT, connector.connect(name, tcp)).await {
-        Ok(Ok(tls)) => Ok(tls),
-        Ok(Err(error)) if is_certificate_refusal(&error) => Err(SignInFailure::CertificateRefused),
-        Ok(Err(error)) => Err(calculate_io_sign_in_failure(&error)),
-        Err(_) => Err(SignInFailure::TimedOut),
-    }
-}
-
 /// Reads the server's greeting within [`EXCHANGE_LIMIT`].
 async fn read_greeting<T: AsyncStream>(client: &mut Client<T>) -> Result<(), SignInFailure> {
     match timeout(EXCHANGE_LIMIT, client.read_response()).await {
@@ -333,16 +293,6 @@ fn calculate_sign_in_failure(error: &ImapError) -> SignInFailure {
         | ImapError::Parse(_)
         | ImapError::Validate(_)
         | ImapError::Append => SignInFailure::ProtocolError,
-        _ => SignInFailure::ProtocolError,
-    }
-}
-
-/// Classifies an I/O error met before the session was signed in: a
-/// timeout of the operating system is reported as such, anything else as
-/// an unreadable or ended connection.
-fn calculate_io_sign_in_failure(error: &io::Error) -> SignInFailure {
-    match error.kind() {
-        io::ErrorKind::TimedOut => SignInFailure::TimedOut,
         _ => SignInFailure::ProtocolError,
     }
 }
@@ -1078,6 +1028,8 @@ pub fn format_search_date(year: u16, month: u8, day: u8) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+
     use super::*;
 
     #[test]

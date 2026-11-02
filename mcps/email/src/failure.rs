@@ -89,6 +89,106 @@ pub enum ConnectionFailure {
     TimedOut,
 }
 
+impl ConnectionFailure {
+    /// Returns the failure's name for the log.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Lost => "lost",
+            Self::Unreadable => "unreadable",
+            Self::TimedOut => "timed-out",
+        }
+    }
+
+    /// Formats the failure as the sentence the model reads.
+    ///
+    /// # Arguments
+    ///
+    /// * `protocol` - Which server's connection ended.
+    fn format_sentence(self, protocol: Protocol) -> String {
+        let server = protocol.name();
+        match self {
+            Self::Lost => {
+                format!(
+                    "The connection to the {server} server ended before it answered. Try again."
+                )
+            }
+            Self::Unreadable => {
+                format!("The {server} server answered something Lys could not read.")
+            }
+            Self::TimedOut => format!("The {server} server did not answer in time. Try again."),
+        }
+    }
+}
+
+/// What stopped a call before it finished.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stop {
+    /// The client cancelled the call.
+    Cancelled,
+    /// The call reached its time limit.
+    TimedOut,
+}
+
+impl Stop {
+    /// Returns the stop's name for the log.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Cancelled => "cancelled",
+            Self::TimedOut => "timed-out",
+        }
+    }
+
+    /// Returns what became of the call, as a clause after "The call".
+    fn format_clause(self) -> &'static str {
+        match self {
+            Self::Cancelled => "was cancelled",
+            Self::TimedOut => "did not finish within 240 seconds and was stopped",
+        }
+    }
+}
+
+/// What a send tool sent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SentKind {
+    /// A message `send_email` composed.
+    Message,
+    /// A draft `send_draft` sent as it is stored.
+    Draft,
+}
+
+/// An SMTP extension that a message can need and a server may not offer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SmtpExtension {
+    /// SMTPUTF8 (RFC 6531), which an address with characters beyond ASCII
+    /// needs.
+    SmtpUtf8,
+    /// 8BITMIME (RFC 6152), which a message with bytes beyond ASCII needs.
+    EightBitMime,
+}
+
+impl SmtpExtension {
+    /// Returns the extension's keyword, as EHLO lists it.
+    fn name(self) -> &'static str {
+        match self {
+            Self::SmtpUtf8 => "SMTPUTF8",
+            Self::EightBitMime => "8BITMIME",
+        }
+    }
+
+    /// Formats the sentence of a server that does not offer the
+    /// extension.
+    fn format_sentence(self) -> String {
+        let need = match self {
+            Self::SmtpUtf8 => "an address with characters beyond ASCII",
+            Self::EightBitMime => "its bytes beyond ASCII",
+        };
+        format!(
+            "The SMTP server does not offer {}, which this message needs for {need}, so nothing was sent.",
+            self.name()
+        )
+    }
+}
+
 /// Why a tool call did not do what it was asked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ToolFailure {
@@ -115,16 +215,33 @@ pub enum ToolFailure {
         /// How.
         failure: ConnectionFailure,
     },
-    /// The SMTP server refused the message.
+    /// The SMTP server refused the message, its sender, or a recipient;
+    /// nothing was sent.
     SmtpRefused {
         /// The reply code, such as 550.
         code: u16,
         /// The server's text.
         text: String,
     },
-    /// The SMTP server did not confirm the send in time; the message may
-    /// have been sent.
+    /// The SMTP server does not offer an extension the message needs;
+    /// nothing was sent.
+    SmtpExtensionMissing(SmtpExtension),
+    /// The whole message was handed to the SMTP server, which did not
+    /// confirm it: the connection ended, its answer could not be read, or
+    /// it did not come in time. The message may have been sent.
     SendUnconfirmed,
+    /// The call was stopped after the whole message was handed to the SMTP
+    /// server and before the server confirmed it; the message may have
+    /// been sent.
+    StoppedUnconfirmed(Stop),
+    /// The call was stopped after the SMTP server accepted the message,
+    /// before the call's later steps finished.
+    StoppedAfterSend {
+        /// What stopped the call.
+        stop: Stop,
+        /// What was sent.
+        sent: SentKind,
+    },
     /// The whole call reached its time limit.
     TimedOut,
     /// The client cancelled the call.
@@ -183,17 +300,23 @@ impl ToolFailure {
             Self::ImapRefused { operation, .. } => {
                 format!("imap-refused-to-{}", operation.replace(' ', "-"))
             }
-            Self::Connection { protocol, failure } => format!(
-                "{}-connection-{}",
-                protocol.name().to_ascii_lowercase(),
-                match failure {
-                    ConnectionFailure::Lost => "lost",
-                    ConnectionFailure::Unreadable => "unreadable",
-                    ConnectionFailure::TimedOut => "timed-out",
-                }
-            ),
+            Self::Connection { protocol, failure } => {
+                format!(
+                    "{}-connection-{}",
+                    protocol.name().to_ascii_lowercase(),
+                    failure.name()
+                )
+            }
             Self::SmtpRefused { code, .. } => format!("smtp-refused-{code}"),
+            Self::SmtpExtensionMissing(extension) => {
+                format!(
+                    "smtp-extension-missing-{}",
+                    extension.name().to_ascii_lowercase()
+                )
+            }
             Self::SendUnconfirmed => "send-unconfirmed".to_owned(),
+            Self::StoppedUnconfirmed(stop) => format!("{}-after-hand-over", stop.name()),
+            Self::StoppedAfterSend { stop, .. } => format!("{}-after-send", stop.name()),
             Self::TimedOut => "timed-out".to_owned(),
             Self::Cancelled => "cancelled".to_owned(),
             Self::InvalidId => "invalid-id".to_owned(),
@@ -211,81 +334,150 @@ impl ToolFailure {
     }
 }
 
+/// The sentence of an id that is not a message id.
+const INVALID_ID_SENTENCE: &str =
+    "That is not a message id. Use an id from search_emails, such as 12.345.INBOX.";
+
+/// The sentence of an id that no longer names its message.
+const STALE_ID_SENTENCE: &str = "That message id is no longer valid. Search again.";
+
+/// The sentence of an id outside the Drafts folder.
+const NOT_IN_DRAFTS_SENTENCE: &str = "That id is not in the Drafts folder. Only a message in the Drafts folder can be sent or deleted as a draft.";
+
+/// What a send that may have gone out tells the model to do.
+const UNCONFIRMED_SENTENCE: &str =
+    "The message may or may not have been sent; do not send it again without asking the person.";
+
 impl fmt::Display for ToolFailure {
     /// Formats the failure as the sentence the model reads.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::SignIn { protocol, failure } => write!(
-                formatter,
-                "Signing in to the {} server failed: {}. Check the email account in Settings → MCP.",
-                protocol.name(),
-                failure.format_clause()
-            ),
+        let sentence = match self {
+            Self::SignIn { protocol, failure } => format_sign_in_sentence(*protocol, *failure),
             Self::ImapRefused { operation, text } => {
-                write!(formatter, "The IMAP server refused to {operation}: {text}.")
+                format!("The IMAP server refused to {operation}: {text}.")
             }
-            Self::Connection { protocol, failure } => match failure {
-                ConnectionFailure::Lost => write!(
-                    formatter,
-                    "The connection to the {} server ended before it answered. Try again.",
-                    protocol.name()
-                ),
-                ConnectionFailure::Unreadable => write!(
-                    formatter,
-                    "The {} server answered something Lys could not read.",
-                    protocol.name()
-                ),
-                ConnectionFailure::TimedOut => {
-                    write!(formatter, "The {} server did not answer in time. Try again.", protocol.name())
-                }
-            },
+            Self::Connection { protocol, failure } => failure.format_sentence(*protocol),
             Self::SmtpRefused { code, text } => {
-                write!(formatter, "The SMTP server refused the message ({code}): {text}.")
+                format!("The SMTP server refused the message ({code}): {text}.")
             }
-            Self::SendUnconfirmed => formatter.write_str(
-                "The SMTP server did not confirm the send in time. The message may or may not have been sent; check the Sent folder before sending it again.",
-            ),
-            Self::TimedOut => {
-                formatter.write_str("The call did not finish within 240 seconds and was stopped.")
+            Self::SmtpExtensionMissing(extension) => extension.format_sentence(),
+            Self::SendUnconfirmed => format_unconfirmed_sentence(None),
+            Self::StoppedUnconfirmed(stop) => format_unconfirmed_sentence(Some(*stop)),
+            Self::StoppedAfterSend { stop, sent } => {
+                format_stopped_after_send_sentence(*stop, *sent)
             }
-            Self::Cancelled => formatter.write_str("The call was cancelled."),
-            Self::InvalidId => formatter.write_str(
-                "That is not a message id. Use an id from search_emails, such as 12.345.INBOX.",
-            ),
-            Self::StaleId => formatter.write_str("That message id is no longer valid. Search again."),
-            Self::FolderMissing(name) => write!(
-                formatter,
-                "There is no folder named {name}. Use list_folders to see the folders."
-            ),
-            Self::NoRoleFolder(role) => write!(
-                formatter,
-                "No {} folder was found. Create one with manage_folder.",
-                role.name()
-            ),
-            Self::RoleFolder { name, role } => write!(
-                formatter,
-                "{name} is the {} folder, which cannot be renamed or deleted.",
-                role.name()
-            ),
-            Self::FolderNotEmpty(name) => write!(
-                formatter,
-                "{name} holds messages, so it cannot be deleted. Empty it first."
-            ),
-            Self::FolderExists(name) => write!(formatter, "A folder named {name} already exists."),
-            Self::NotInDrafts => formatter.write_str(
-                "That id is not in the Drafts folder. Only a message in the Drafts folder can be sent or deleted as a draft.",
-            ),
-            Self::AttachmentMissing { number, count } => match count {
-                0 => write!(formatter, "The message has no attachment, so there is no #{number}."),
-                1 => write!(formatter, "The message has one attachment, so there is no #{number}."),
-                _ => write!(formatter, "The message has {count} attachments, so there is no #{number}."),
-            },
-            Self::AttachmentNotText { name, content_type } => write!(
-                formatter,
-                "Attachment {name} is {content_type}, not text, so it cannot be read."
-            ),
-            Self::Argument(text) => formatter.write_str(text),
-        }
+            Self::TimedOut => format!("The call {}.", Stop::TimedOut.format_clause()),
+            Self::Cancelled => format!("The call {}.", Stop::Cancelled.format_clause()),
+            Self::InvalidId => INVALID_ID_SENTENCE.to_owned(),
+            Self::StaleId => STALE_ID_SENTENCE.to_owned(),
+            Self::FolderMissing(name) => format_folder_missing_sentence(name),
+            Self::NoRoleFolder(role) => format_no_role_folder_sentence(*role),
+            Self::RoleFolder { name, role } => format_role_folder_sentence(name, *role),
+            Self::FolderNotEmpty(name) => {
+                format!("{name} holds messages, so it cannot be deleted. Empty it first.")
+            }
+            Self::FolderExists(name) => format!("A folder named {name} already exists."),
+            Self::NotInDrafts => NOT_IN_DRAFTS_SENTENCE.to_owned(),
+            Self::AttachmentMissing { number, count } => {
+                format_attachment_missing_sentence(*number, *count)
+            }
+            Self::AttachmentNotText { name, content_type } => {
+                format!("Attachment {name} is {content_type}, not text, so it cannot be read.")
+            }
+            Self::Argument(text) => text.clone(),
+        };
+        formatter.write_str(&sentence)
+    }
+}
+
+/// Formats the sentence of a failed sign-in.
+///
+/// # Arguments
+///
+/// * `protocol` - Which server.
+/// * `failure` - Why it failed.
+fn format_sign_in_sentence(protocol: Protocol, failure: SignInFailure) -> String {
+    format!(
+        "Signing in to the {} server failed: {}. Check the email account in Settings → MCP.",
+        protocol.name(),
+        failure.format_clause()
+    )
+}
+
+/// Formats the sentence of a send the SMTP server did not confirm.
+///
+/// # Arguments
+///
+/// * `stop` - What stopped the call while it waited for the server's
+///   answer, or `None` when the answer did not come or could not be read.
+fn format_unconfirmed_sentence(stop: Option<Stop>) -> String {
+    match stop {
+        None => format!(
+            "The whole message was handed to the SMTP server, but the server did not confirm the send. {UNCONFIRMED_SENTENCE}"
+        ),
+        Some(stop) => format!(
+            "The call {} after the whole message was handed to the SMTP server and before the server confirmed the send. {UNCONFIRMED_SENTENCE}",
+            stop.format_clause()
+        ),
+    }
+}
+
+/// Formats the sentence of a call stopped after its send.
+///
+/// # Arguments
+///
+/// * `stop` - What stopped the call.
+/// * `sent` - What was sent.
+fn format_stopped_after_send_sentence(stop: Stop, sent: SentKind) -> String {
+    let clause = stop.format_clause();
+    match sent {
+        SentKind::Message => format!(
+            "The message was sent, but then the call {clause}, so its copy in Sent may be missing. Do not send it again."
+        ),
+        SentKind::Draft => format!(
+            "The draft was sent, but then the call {clause}, so its copy in Sent may be missing and the draft may still be in Drafts. Do not send it again; delete it instead."
+        ),
+    }
+}
+
+/// Formats the sentence of a folder name no folder has.
+fn format_folder_missing_sentence(name: &str) -> String {
+    format!("There is no folder named {name}. Use list_folders to see the folders.")
+}
+
+/// Formats the sentence of a role no folder has.
+fn format_no_role_folder_sentence(role: FolderRole) -> String {
+    format!(
+        "No {} folder was found. Create one with manage_folder.",
+        role.name()
+    )
+}
+
+/// Formats the sentence of a folder that cannot change because of its
+/// role.
+///
+/// # Arguments
+///
+/// * `name` - The folder's name.
+/// * `role` - Its role.
+fn format_role_folder_sentence(name: &str, role: FolderRole) -> String {
+    format!(
+        "{name} is the {} folder, which cannot be renamed or deleted.",
+        role.name()
+    )
+}
+
+/// Formats the sentence of a missing attachment.
+///
+/// # Arguments
+///
+/// * `number` - The number asked for.
+/// * `count` - How many attachments the message has.
+fn format_attachment_missing_sentence(number: u32, count: usize) -> String {
+    match count {
+        0 => format!("The message has no attachment, so there is no #{number}."),
+        1 => format!("The message has one attachment, so there is no #{number}."),
+        _ => format!("The message has {count} attachments, so there is no #{number}."),
     }
 }
 
@@ -347,5 +539,83 @@ mod tests {
             ToolFailure::NoRoleFolder(FolderRole::Drafts).class(),
             "no-drafts-folder"
         );
+    }
+
+    /// Each way a send can end unfinished, with the class the log gives it
+    /// and the sentence the model reads.
+    const UNFINISHED_SENDS: [(ToolFailure, &str, &str); 10] = [
+        (
+            ToolFailure::Connection {
+                protocol: Protocol::Smtp,
+                failure: ConnectionFailure::Lost,
+            },
+            "smtp-connection-lost",
+            "The connection to the SMTP server ended before it answered. Try again.",
+        ),
+        (
+            ToolFailure::Connection {
+                protocol: Protocol::Smtp,
+                failure: ConnectionFailure::Unreadable,
+            },
+            "smtp-connection-unreadable",
+            "The SMTP server answered something Lys could not read.",
+        ),
+        (
+            ToolFailure::Connection {
+                protocol: Protocol::Smtp,
+                failure: ConnectionFailure::TimedOut,
+            },
+            "smtp-connection-timed-out",
+            "The SMTP server did not answer in time. Try again.",
+        ),
+        (
+            ToolFailure::SmtpExtensionMissing(SmtpExtension::SmtpUtf8),
+            "smtp-extension-missing-smtputf8",
+            "The SMTP server does not offer SMTPUTF8, which this message needs for an address with characters beyond ASCII, so nothing was sent.",
+        ),
+        (
+            ToolFailure::SmtpExtensionMissing(SmtpExtension::EightBitMime),
+            "smtp-extension-missing-8bitmime",
+            "The SMTP server does not offer 8BITMIME, which this message needs for its bytes beyond ASCII, so nothing was sent.",
+        ),
+        (
+            ToolFailure::SendUnconfirmed,
+            "send-unconfirmed",
+            "The whole message was handed to the SMTP server, but the server did not confirm the send. The message may or may not have been sent; do not send it again without asking the person.",
+        ),
+        (
+            ToolFailure::StoppedUnconfirmed(Stop::Cancelled),
+            "cancelled-after-hand-over",
+            "The call was cancelled after the whole message was handed to the SMTP server and before the server confirmed the send. The message may or may not have been sent; do not send it again without asking the person.",
+        ),
+        (
+            ToolFailure::StoppedUnconfirmed(Stop::TimedOut),
+            "timed-out-after-hand-over",
+            "The call did not finish within 240 seconds and was stopped after the whole message was handed to the SMTP server and before the server confirmed the send. The message may or may not have been sent; do not send it again without asking the person.",
+        ),
+        (
+            ToolFailure::StoppedAfterSend {
+                stop: Stop::Cancelled,
+                sent: SentKind::Message,
+            },
+            "cancelled-after-send",
+            "The message was sent, but then the call was cancelled, so its copy in Sent may be missing. Do not send it again.",
+        ),
+        (
+            ToolFailure::StoppedAfterSend {
+                stop: Stop::TimedOut,
+                sent: SentKind::Draft,
+            },
+            "timed-out-after-send",
+            "The draft was sent, but then the call did not finish within 240 seconds and was stopped, so its copy in Sent may be missing and the draft may still be in Drafts. Do not send it again; delete it instead.",
+        ),
+    ];
+
+    #[test]
+    fn describes_each_way_a_send_ends_unfinished_by_how_far_it_came() {
+        for (failure, class, sentence) in UNFINISHED_SENDS {
+            assert_eq!(failure.class(), class);
+            assert_eq!(failure.to_string(), sentence);
+        }
     }
 }

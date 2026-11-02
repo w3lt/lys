@@ -5,6 +5,7 @@ mod support;
 
 use email::failure::{Protocol, SignInFailure, ToolFailure};
 use email::message::parse_message;
+use email::smtp::SendProgress;
 use email::tools::ToolContext;
 use email::tools::send::{MessageArguments, run_send_email};
 use email::trust::Trust;
@@ -89,6 +90,7 @@ async fn sends_a_message_and_keeps_one_read_copy_in_sent_without_the_bcc_field()
             bcc: vec!["hidden@example.com".to_owned()],
             ..build_message_to_jane("Grüße", "Hello Jane,\n\nBye.")
         },
+        &SendProgress::default(),
     )
     .await
     .expect("sent");
@@ -151,9 +153,13 @@ async fn sends_a_message_and_keeps_one_read_copy_in_sent_without_the_bcc_field()
 async fn keeps_no_copy_when_the_server_keeps_one() {
     let stack = start_with_originals(true).await;
 
-    let report = run_send_email(&stack.context, build_message_to_jane("Hi", "Hello"))
-        .await
-        .expect("sent");
+    let report = run_send_email(
+        &stack.context,
+        build_message_to_jane("Hi", "Hello"),
+        &SendProgress::default(),
+    )
+    .await
+    .expect("sent");
 
     assert!(
         report
@@ -182,6 +188,7 @@ async fn refuses_a_reply_that_leaves_out_its_recipients_or_subject() {
             reply_to_id: Some("1.1001.INBOX".to_owned()),
             ..MessageArguments::default()
         },
+        &SendProgress::default(),
     )
     .await;
     let redirected = run_send_email(
@@ -192,6 +199,7 @@ async fn refuses_a_reply_that_leaves_out_its_recipients_or_subject() {
             reply_to_id: Some("3.1001.INBOX".to_owned()),
             ..MessageArguments::default()
         },
+        &SendProgress::default(),
     )
     .await;
     let untitled = run_send_email(
@@ -201,6 +209,7 @@ async fn refuses_a_reply_that_leaves_out_its_recipients_or_subject() {
             reply_to_id: Some("3.1001.INBOX".to_owned()),
             ..build_message_to_jane("", "Sounds good.")
         },
+        &SendProgress::default(),
     )
     .await;
 
@@ -242,6 +251,7 @@ async fn replies_in_the_conversation_to_exactly_the_recipients_given() {
             reply_to_id: Some("3.1001.INBOX".to_owned()),
             ..MessageArguments::default()
         },
+        &SendProgress::default(),
     )
     .await
     .expect("sent");
@@ -294,6 +304,7 @@ async fn refuses_a_forward_that_leaves_out_its_recipients_or_subject() {
             forward_id: Some("2.1001.INBOX".to_owned()),
             ..MessageArguments::default()
         },
+        &SendProgress::default(),
     )
     .await;
 
@@ -319,6 +330,7 @@ async fn forwards_the_original_text_and_attachments() {
             forward_id: Some("2.1001.INBOX".to_owned()),
             ..MessageArguments::default()
         },
+        &SendProgress::default(),
     )
     .await
     .expect("sent");
@@ -373,9 +385,15 @@ async fn reports_a_refused_recipient_and_a_refused_sign_in_without_a_sent_copy()
             to: vec!["nobody@example.com".to_owned()],
             ..build_message_to_jane("Hi", "Hello")
         },
+        &SendProgress::default(),
     )
     .await;
-    let not_signed_in = run_send_email(&wrong_password, build_message_to_jane("Hi", "Hello")).await;
+    let not_signed_in = run_send_email(
+        &wrong_password,
+        build_message_to_jane("Hi", "Hello"),
+        &SendProgress::default(),
+    )
+    .await;
 
     match refused {
         Err(ToolFailure::SmtpRefused { code, text }) => {
@@ -406,6 +424,7 @@ async fn refuses_arguments_that_break_a_rule_before_connecting() {
             forward_id: Some("1.1001.INBOX".to_owned()),
             ..build_message_to_jane("Hi", "Hello")
         },
+        &SendProgress::default(),
     )
     .await;
     let nobody = run_send_email(
@@ -415,6 +434,7 @@ async fn refuses_arguments_that_break_a_rule_before_connecting() {
             body: "Hello".to_owned(),
             ..MessageArguments::default()
         },
+        &SendProgress::default(),
     )
     .await;
     let not_an_address = run_send_email(
@@ -423,6 +443,7 @@ async fn refuses_arguments_that_break_a_rule_before_connecting() {
             to: vec!["not an address".to_owned()],
             ..build_message_to_jane("Hi", "Hello")
         },
+        &SendProgress::default(),
     )
     .await;
 

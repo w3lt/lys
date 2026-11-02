@@ -3,15 +3,19 @@
 
 mod support;
 
+use std::time::Duration;
+
+use email::account::Account;
 use email::check::{CheckOutcome, offer_account_sign_ins};
 use email::failure::SignInFailure;
 use email::trust::Trust;
 
 use support::imap::{FakeImapServer, FakeMailbox, ImapMode};
-use support::smtp::{FakeSmtpServer, SmtpMode};
+use support::smtp::{FakeSmtpServer, SmtpFault, SmtpMode};
 use support::tls::TestAuthority;
 use support::{
-    SecurityName, TestServers, build_account, build_account_json, build_account_json_for,
+    SecurityName, TestServers, assert_about, build_account, build_account_json,
+    build_account_json_for,
 };
 
 /// Runs the binary with the arguments and the variable, off the runtime's
@@ -69,6 +73,25 @@ async fn offer_sign_ins_to_fakes(
     let trust = Trust::create_with_extra_roots(vec![authority.root.clone()]);
     let report = offer_account_sign_ins(&account, &trust).await;
     (report.imap, report.smtp)
+}
+
+/// Builds an account whose SMTP server is the plain fake and whose IMAP
+/// server is a port nothing listens on.
+async fn build_account_without_imap(smtp: &FakeSmtpServer) -> Account {
+    let closed = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port");
+    let imap_port = closed.local_addr().expect("the address").port();
+    drop(closed);
+    build_account(
+        TestServers {
+            imap_port,
+            imap_security: SecurityName::Plain,
+            smtp_port: smtp.port,
+            smtp_security: SecurityName::Plain,
+        },
+        false,
+    )
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -264,6 +287,27 @@ async fn reports_servers_that_do_not_offer_starttls() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn reports_a_tls_account_against_a_plain_text_server_as_a_protocol_error() {
+    let authority = TestAuthority::new();
+
+    let outcome = offer_sign_ins_to_fakes(
+        &authority,
+        FakeModes {
+            imap: ImapMode::Plain,
+            imap_security: SecurityName::Tls,
+            smtp: SmtpMode::Plain,
+            smtp_security: SecurityName::Tls,
+        },
+    )
+    .await;
+
+    let protocol_error = CheckOutcome::Failed {
+        reason: SignInFailure::ProtocolError,
+    };
+    assert_eq!(outcome, (protocol_error, protocol_error));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn reports_a_server_that_speaks_something_else() {
     let authority = TestAuthority::new();
 
@@ -285,6 +329,33 @@ async fn reports_a_server_that_speaks_something_else() {
         }
     );
     assert_eq!(outcome.1, CheckOutcome::Accepted);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn accepts_an_smtp_sign_in_whose_quit_fails() {
+    let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
+    smtp.add_fault("QUIT", SmtpFault::Close);
+    let account = build_account_without_imap(&smtp).await;
+
+    let report =
+        offer_account_sign_ins(&account, &Trust::create_with_extra_roots(Vec::new())).await;
+
+    assert_eq!(report.smtp, CheckOutcome::Accepted);
+}
+
+#[tokio::test]
+async fn ends_an_unanswered_quit_at_the_check_limit_and_accepts_the_sign_in() {
+    let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
+    smtp.add_fault("QUIT", SmtpFault::Stall);
+    let account = build_account_without_imap(&smtp).await;
+    let trust = Trust::create_with_extra_roots(Vec::new());
+
+    let (report, elapsed) = smtp
+        .run_past_fault(offer_account_sign_ins(&account, &trust))
+        .await;
+
+    assert_eq!(report.smtp, CheckOutcome::Accepted);
+    assert_about(elapsed, Duration::from_secs(20));
 }
 
 #[tokio::test(flavor = "multi_thread")]

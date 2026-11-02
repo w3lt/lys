@@ -28,6 +28,7 @@ pub mod folders;
 pub mod imap;
 pub mod log;
 pub mod message;
+mod network;
 pub mod server;
 pub mod smtp;
 pub mod tools;

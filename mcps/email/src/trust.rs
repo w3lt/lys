@@ -1,10 +1,10 @@
 //! Which server certificates the server accepts.
 //!
 //! Every TLS connection is verified by the operating system's certificate
-//! store through `rustls-platform-verifier`, for IMAP through the
-//! connector built here and for SMTP through lettre, which uses the same
-//! verifier. Tests add their own root certificate; the server itself adds
-//! none.
+//! store through `rustls-platform-verifier`: through the connector built
+//! here for IMAP and for SMTP protected from its first byte, and through
+//! lettre, which uses the same verifier, for SMTP's STARTTLS. Tests add
+//! their own root certificate; the server itself adds none.
 
 use std::error::Error;
 use std::io;
@@ -46,13 +46,14 @@ impl Trust {
         Self { extra_roots }
     }
 
-    /// Builds the TLS connector for IMAP connections.
+    /// Builds the TLS connector for connections protected from their first
+    /// byte, IMAP's and SMTP's, and for IMAP's STARTTLS.
     ///
     /// # Returns
     ///
     /// The connector, or the TLS library's error when the verifier or the
     /// configuration cannot be built, which no account can cause.
-    pub fn build_imap_connector(&self) -> Result<TlsConnector, TlsError> {
+    pub fn build_tls_connector(&self) -> Result<TlsConnector, TlsError> {
         let provider = Arc::new(ring::default_provider());
         let verifier = Verifier::new_with_extra_roots(
             self.extra_roots.iter().cloned(),
@@ -66,7 +67,8 @@ impl Trust {
         Ok(TlsConnector::from(Arc::new(config)))
     }
 
-    /// Builds the TLS parameters lettre verifies SMTP connections with.
+    /// Builds the TLS parameters lettre verifies an SMTP connection's
+    /// STARTTLS with.
     ///
     /// # Arguments
     ///
@@ -140,7 +142,7 @@ mod tests {
     fn builds_a_connector_and_parameters_with_an_extra_root() {
         let trust = Trust::create_with_extra_roots(Vec::new());
 
-        assert!(trust.build_imap_connector().is_ok());
+        assert!(trust.build_tls_connector().is_ok());
         assert!(trust.build_smtp_parameters("smtp.example.com").is_ok());
     }
 }

@@ -1,16 +1,18 @@
 //! The binary over standard input and output, as the backend runs it:
 //! the MCP handshake, the tool list, a call, a cut result, a failed
-//! call, and the exit on the end of input.
+//! call, a cancelled send, and the exit on the end of input.
 
 mod support;
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
 use support::imap::{FakeImapServer, FakeMailbox, ImapMode, NewMessage};
-use support::smtp::{FakeSmtpServer, SmtpMode};
+use support::smtp::{DATA_END, FakeSmtpServer, SmtpFault, SmtpMode};
 use support::{SecurityName, TestMessage, TestServers, build_account_json};
 
 /// The note a cut result ends with.
@@ -32,6 +34,10 @@ const TOOL_NAMES: [&str; 10] = [
     "send_draft",
     "send_email",
 ];
+
+/// Longest the binary may take, in real time, to log a call it was told to
+/// cancel.
+const LOG_WAIT: Duration = Duration::from_secs(30);
 
 /// What the dialogue with the binary produced.
 struct Dialogue {
@@ -73,6 +79,107 @@ fn send_dialogue_messages(variable: String, messages: Vec<Value>) -> Dialogue {
         exit_code: output.status.code(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     }
+}
+
+/// Sends each line the reader gives to the receiver, until the reader
+/// ends or the receiver is gone.
+fn forward_lines(reader: impl BufRead, sender: &mpsc::Sender<String>) {
+    for line in reader.lines().map_while(Result::ok) {
+        if sender.send(line).is_err() {
+            return;
+        }
+    }
+}
+
+/// Waits, at most [`LOG_WAIT`] in real time, for the line the binary logs
+/// for a call of the tool.
+///
+/// # Returns
+///
+/// The line.
+///
+/// # Panics
+///
+/// When no such line comes in time.
+fn wait_for_tool_line(lines: &mpsc::Receiver<String>, tool: &str) -> String {
+    let deadline = Instant::now() + LOG_WAIT;
+    let prefix = format!("tool {tool}: ");
+    loop {
+        let line = lines
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("the call is logged in time");
+        if line.starts_with(&prefix) {
+            return line;
+        }
+    }
+}
+
+/// Runs the binary over stdio, calls `send_email`, cancels the call once
+/// `released` says the fake holds the whole message, and closes its input.
+///
+/// # Returns
+///
+/// The line the binary logged for the call.
+fn read_cancelled_send_line(variable: String, released: mpsc::Receiver<()>) -> String {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_email"))
+        .env("LYS_EMAIL_ACCOUNT", variable)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary starts");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = BufReader::new(child.stdout.take().expect("stdout"));
+    let stderr = BufReader::new(child.stderr.take().expect("stderr"));
+    let (line_sender, lines) = mpsc::channel();
+    std::thread::spawn(move || forward_lines(stderr, &line_sender));
+    let initialize = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "lys-test", "version": "0"}}});
+    writeln!(stdin, "{initialize}").expect("written");
+    let mut answer = String::new();
+    stdout.read_line(&mut answer).expect("an answer");
+    let messages = [
+        json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "send_email", "arguments": {"to": ["jane@example.com"], "subject": "Hi", "body": "Hello"}}}),
+    ];
+    for message in messages {
+        writeln!(stdin, "{message}").expect("written");
+    }
+    released.recv().expect("the fake holds the message");
+    let cancel = json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 2, "reason": "The person stopped it."}});
+    writeln!(stdin, "{cancel}").expect("written");
+    let logged = wait_for_tool_line(&lines, "send_email");
+    drop(stdin);
+    child.wait().expect("the binary ends");
+    logged
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn logs_a_send_cancelled_after_the_hand_over_as_unconfirmed() {
+    let imap = FakeImapServer::start(FakeMailbox::create_standard(), ImapMode::Plain, None).await;
+    let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
+    smtp.add_fault(DATA_END, SmtpFault::Stall);
+    let variable = build_account_json(
+        TestServers {
+            imap_port: imap.port,
+            imap_security: SecurityName::Plain,
+            smtp_port: smtp.port,
+            smtp_security: SecurityName::Plain,
+        },
+        false,
+    );
+    let (release, released) = mpsc::channel();
+
+    let dialogue =
+        tokio::task::spawn_blocking(move || read_cancelled_send_line(variable, released));
+    smtp.wait_for_fault().await;
+    release.send(()).expect("the dialogue waits for the fake");
+    let logged = dialogue.await.expect("the dialogue ends");
+
+    assert_eq!(
+        logged,
+        "tool send_email: failed (cancelled-after-hand-over)"
+    );
+    assert_eq!(smtp.list_mails().len(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]

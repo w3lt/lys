@@ -8,7 +8,7 @@ pub mod imap;
 pub mod smtp;
 pub mod tls;
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use email::account::{Account, parse_account_variable};
 use email::tools::ToolContext;
@@ -68,6 +68,15 @@ pub struct TestServers {
     pub smtp_port: u16,
     /// How the SMTP fake is reached.
     pub smtp_security: SecurityName,
+}
+
+/// Asserts that a duration measured across a pause of the clock is the
+/// limit, give or take the real time that passed before the pause.
+pub fn assert_about(elapsed: Duration, limit: Duration) {
+    assert!(
+        elapsed >= limit && elapsed < limit + Duration::from_secs(1),
+        "{elapsed:?} is not about {limit:?}"
+    );
 }
 
 /// Builds the JSON of `LYS_EMAIL_ACCOUNT` for servers on localhost.

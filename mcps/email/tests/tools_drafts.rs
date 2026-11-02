@@ -4,6 +4,7 @@ mod support;
 
 use email::failure::ToolFailure;
 use email::folders::FolderRole;
+use email::smtp::SendProgress;
 use email::tools::drafts::{
     DraftIdArguments, SaveDraftArguments, SendDraftArguments, run_delete_draft, run_save_draft,
     run_send_draft,
@@ -118,9 +119,13 @@ async fn sends_a_draft_without_its_bcc_field_keeps_a_copy_and_deletes_it() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
     let id = save(&stack, build_draft("Ready")).await;
 
-    let report = run_send_draft(&stack.context, build_send(&id, &build_draft("Ready")))
-        .await
-        .expect("sent");
+    let report = run_send_draft(
+        &stack.context,
+        build_send(&id, &build_draft("Ready")),
+        &SendProgress::default(),
+    )
+    .await
+    .expect("sent");
 
     assert_eq!(
         report.text,
@@ -179,6 +184,7 @@ async fn deletes_a_draft_and_refuses_ids_outside_drafts() {
     let sent_from_inbox = run_send_draft(
         &stack.context,
         build_send("1.1001.INBOX", &build_draft("Gone")),
+        &SendProgress::default(),
     )
     .await;
 
@@ -261,6 +267,7 @@ async fn without_uidplus_send_draft_and_save_draft_only_mark_the_old_draft() {
     let sent = run_send_draft(
         &stack.context,
         build_send("3.1003.Drafts", &build_draft("Second")),
+        &SendProgress::default(),
     )
     .await
     .expect("sent");
@@ -302,6 +309,7 @@ async fn refuses_to_send_a_draft_the_call_does_not_name_and_sends_nothing() {
             body: String::new(),
             ..named.clone()
         },
+        &SendProgress::default(),
     )
     .await;
     let redirected = run_send_draft(
@@ -313,6 +321,7 @@ async fn refuses_to_send_a_draft_the_call_does_not_name_and_sends_nothing() {
             ],
             ..named.clone()
         },
+        &SendProgress::default(),
     )
     .await;
     let substituted = run_send_draft(
@@ -321,6 +330,7 @@ async fn refuses_to_send_a_draft_the_call_does_not_name_and_sends_nothing() {
             bcc: vec!["attacker@example.net".to_owned()],
             ..named.clone()
         },
+        &SendProgress::default(),
     )
     .await;
     let rewritten = run_send_draft(
@@ -329,6 +339,7 @@ async fn refuses_to_send_a_draft_the_call_does_not_name_and_sends_nothing() {
             body: "Not sent yet!".to_owned(),
             ..named
         },
+        &SendProgress::default(),
     )
     .await;
 
@@ -398,7 +409,7 @@ async fn sends_a_draft_another_client_saved_with_the_fields_the_refusal_names() 
         body: String::new(),
     };
 
-    let refused = run_send_draft(&stack.context, unnamed.clone()).await;
+    let refused = run_send_draft(&stack.context, unnamed.clone(), &SendProgress::default()).await;
     let sent = run_send_draft(
         &stack.context,
         SendDraftArguments {
@@ -413,6 +424,7 @@ async fn sends_a_draft_another_client_saved_with_the_fields_the_refusal_names() 
             body: "Line one\nLine two".to_owned(),
             ..unnamed
         },
+        &SendProgress::default(),
     )
     .await
     .expect("sent");

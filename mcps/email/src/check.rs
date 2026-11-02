@@ -4,12 +4,13 @@
 use std::time::Duration;
 
 use serde::Serialize;
-use tokio::time::timeout;
+use tokio::time::{Instant, timeout, timeout_at};
 
 use crate::account::Account;
 use crate::failure::SignInFailure;
 use crate::imap::open_imap_session;
-use crate::smtp::{build_smtp_transport, offer_transport_sign_in};
+use crate::log::send_log_line;
+use crate::smtp::open_smtp_session;
 use crate::trust::Trust;
 
 /// Longest one sign-in of the check may take as a whole.
@@ -73,10 +74,18 @@ async fn offer_imap_sign_in(account: &Account, trust: &Trust) -> Result<(), Sign
     Ok(())
 }
 
-/// Signs in to the SMTP server and disconnects.
+/// Signs in to the SMTP server and says QUIT, both within [`CHECK_LIMIT`].
+/// Once the server accepted the sign-in, a QUIT that fails or does not
+/// finish in time is logged, and the sign-in is still accepted.
 async fn offer_smtp_sign_in(account: &Account, trust: &Trust) -> Result<(), SignInFailure> {
-    let transport = build_smtp_transport(account, trust)?;
-    offer_transport_sign_in(&transport, CHECK_LIMIT).await
+    let deadline = Instant::now() + CHECK_LIMIT;
+    let session = timeout_at(deadline, open_smtp_session(account, trust))
+        .await
+        .map_err(|_| SignInFailure::TimedOut)??;
+    if timeout_at(deadline, session.close()).await.is_err() {
+        send_log_line("smtp: quit did not finish within the check's limit");
+    }
+    Ok(())
 }
 
 #[cfg(test)]

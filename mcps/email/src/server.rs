@@ -11,8 +11,9 @@ use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
-use crate::failure::ToolFailure;
+use crate::failure::{SentKind, Stop, ToolFailure};
 use crate::log::send_log_line;
+use crate::smtp::{SendProgress, SendStage};
 use crate::tools::drafts::{DraftIdArguments, SaveDraftArguments, SendDraftArguments};
 use crate::tools::folders::FolderArguments;
 use crate::tools::read::{AttachmentArguments, IdArguments};
@@ -184,12 +185,11 @@ impl EmailServer {
         Parameters(arguments): Parameters<MessageArguments>,
         token: CancellationToken,
     ) -> CallToolResult {
-        run_tool_call(
-            "send_email",
-            token,
-            send::run_send_email(&self.context, arguments),
-        )
-        .await
+        let progress = SendProgress::default();
+        let call = send::run_send_email(&self.context, arguments, &progress);
+        let outcome = run_tool_call_within(token, CALL_LIMIT, call).await;
+        let reported = calculate_send_outcome(outcome, progress.read_stage(), SentKind::Message);
+        handle_tool_call_outcome("send_email", reported)
     }
 
     #[tool(
@@ -230,12 +230,11 @@ impl EmailServer {
         Parameters(arguments): Parameters<SendDraftArguments>,
         token: CancellationToken,
     ) -> CallToolResult {
-        run_tool_call(
-            "send_draft",
-            token,
-            drafts::run_send_draft(&self.context, arguments),
-        )
-        .await
+        let progress = SendProgress::default();
+        let call = drafts::run_send_draft(&self.context, arguments, &progress);
+        let outcome = run_tool_call_within(token, CALL_LIMIT, call).await;
+        let reported = calculate_send_outcome(outcome, progress.read_stage(), SentKind::Draft);
+        handle_tool_call_outcome("send_draft", reported)
     }
 
     #[tool(
@@ -306,6 +305,35 @@ where
     tokio::select! {
         () = token.cancelled() => Err(ToolFailure::Cancelled),
         finished = timeout(limit, call) => finished.unwrap_or(Err(ToolFailure::TimedOut)),
+    }
+}
+
+/// Reports a send tool's call that was stopped by how far its send came:
+/// a stop before the end of the message was handed over sent nothing and
+/// stays as it is; a stop after it, while the server's answer was awaited,
+/// leaves the send unconfirmed; and a stop after the server accepted the
+/// message is reported as a send whose later steps may be missing.
+///
+/// # Arguments
+///
+/// * `outcome` - What the call did, `Cancelled` or `TimedOut` when it was
+///   stopped.
+/// * `stage` - How far its send came.
+/// * `sent` - What the tool sends.
+///
+/// # Returns
+///
+/// The outcome to report; any outcome but a stop is reported as it is.
+fn calculate_send_outcome(outcome: ToolResult, stage: SendStage, sent: SentKind) -> ToolResult {
+    let stop = match &outcome {
+        Err(ToolFailure::Cancelled) => Stop::Cancelled,
+        Err(ToolFailure::TimedOut) => Stop::TimedOut,
+        Ok(_) | Err(_) => return outcome,
+    };
+    match stage {
+        SendStage::NotHandedOver => outcome,
+        SendStage::HandedOver => Err(ToolFailure::StoppedUnconfirmed(stop)),
+        SendStage::Accepted => Err(ToolFailure::StoppedAfterSend { stop, sent }),
     }
 }
 
@@ -387,6 +415,59 @@ mod tests {
             get_first_text(&failed),
             "That message id is no longer valid. Search again."
         );
+    }
+
+    #[test]
+    fn reports_a_stopped_send_by_how_far_it_came() {
+        let report = || -> ToolResult {
+            Ok(ToolReport {
+                text: "Sent.".to_owned(),
+                log: "send".to_owned(),
+            })
+        };
+        let stages = [
+            SendStage::NotHandedOver,
+            SendStage::HandedOver,
+            SendStage::Accepted,
+        ];
+        for stage in stages {
+            assert_eq!(
+                calculate_send_outcome(report(), stage, SentKind::Message),
+                report()
+            );
+            assert_eq!(
+                calculate_send_outcome(Err(ToolFailure::SendUnconfirmed), stage, SentKind::Draft),
+                Err(ToolFailure::SendUnconfirmed)
+            );
+        }
+        let stops = [
+            (ToolFailure::Cancelled, Stop::Cancelled),
+            (ToolFailure::TimedOut, Stop::TimedOut),
+        ];
+        for (failure, stop) in stops {
+            assert_eq!(
+                calculate_send_outcome(
+                    Err(failure.clone()),
+                    SendStage::NotHandedOver,
+                    SentKind::Message
+                ),
+                Err(failure.clone())
+            );
+            assert_eq!(
+                calculate_send_outcome(
+                    Err(failure.clone()),
+                    SendStage::HandedOver,
+                    SentKind::Draft
+                ),
+                Err(ToolFailure::StoppedUnconfirmed(stop))
+            );
+            for sent in [SentKind::Message, SentKind::Draft] {
+                assert_eq!(
+                    calculate_send_outcome(Err(failure.clone()), SendStage::Accepted, sent),
+                    Err(ToolFailure::StoppedAfterSend { stop, sent })
+                );
+            }
+        }
     }
 
     /// The names of the tools, in the order the spec lists them.

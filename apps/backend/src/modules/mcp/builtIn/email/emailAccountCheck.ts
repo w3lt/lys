@@ -57,7 +57,11 @@ export type EmailServerRunFailure =
       /** Node's error, which can name the command and the subcommand. */
       error: Error
     }>
-  | Readonly<{ kind: "timed-out" }>
+  | Readonly<{
+      kind: "timed-out"
+      /** What it wrote to standard error before it was killed, cut to a bound. */
+      errorLines: readonly string[]
+    }>
   | Readonly<{
       kind: "exited"
       /** Exit code, or null when a signal ended the process. */
@@ -179,11 +183,6 @@ const SERVER_FAILED: CheckEmailAccountApiResponse = Object.freeze({
 /** Failure of a check the closed checker did not run, or killed. */
 const CLOSED_FAILURE: EmailServerRunFailure = Object.freeze({ kind: "closed" })
 
-/** Failure of a check whose process was killed at the time limit. */
-const TIMED_OUT_FAILURE: EmailServerRunFailure = Object.freeze({
-  kind: "timed-out"
-})
-
 /**
  * Checks email accounts by running the email server's check subcommand,
  * one check at a time.
@@ -282,7 +281,9 @@ export default class EmailAccountChecker {
       case "start-failed":
         return this.#handleStartFailure(run.error)
       case "timed-out":
-        return this.#handleFailedRun(TIMED_OUT_FAILURE)
+        return this.#handleFailedRun(
+          Object.freeze({ kind: "timed-out", errorLines: run.errorLines })
+        )
       case "exited":
         return this.#handleExit(run)
     }

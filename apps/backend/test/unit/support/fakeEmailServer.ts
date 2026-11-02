@@ -9,11 +9,12 @@
 // the account's address, read from `LYS_EMAIL_ACCOUNT`: `accepted`
 // reports both sign-ins accepted; `imap-<reason>` and `smtp-<reason>`
 // report that sign-in failed for the reason and the other accepted; `hang`
-// never ends; `crash` writes two lines to standard error and exits with
-// code 1; `garbage` prints a line that is not a report; `flood` prints far
-// more than a report; `lock` holds `lock` in its folder while it waits, as
-// a check that must run alone, and exits with code 3 when another check
-// holds it. It imports only Node's own modules and the fake stdio server.
+// writes one line to standard error and never ends; `crash` writes two
+// lines to standard error and exits with code 1; `garbage` prints a line
+// that is not a report; `flood` prints far more than a report; `lock`
+// holds `lock` in its folder while it waits, as a check that must run
+// alone, and exits with code 3 when another check holds it. It imports only
+// Node's own modules and the fake stdio server.
 import { rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { setTimeout as wait } from "node:timers/promises"
@@ -105,6 +106,7 @@ async function handleCheckCommand(address: string): Promise<void> {
     )
   switch (localPart) {
     case "hang":
+      process.stderr.write("connecting to the IMAP server\n")
       setInterval(() => undefined, 1000)
       return
     case "crash":

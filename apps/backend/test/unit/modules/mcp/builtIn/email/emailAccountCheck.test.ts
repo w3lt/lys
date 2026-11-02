@@ -288,12 +288,13 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     expect(events).toEqual([{ kind: "server-missing" }])
   })
 
-  it("kills a server that does not end within the time limit and answers server-failed", async () => {
+  it("kills a server that does not end within the time limit and answers server-failed, keeping the error lines it wrote", async () => {
     const folder = await createCaseFolder()
     const { checker, events } = createChecker({
       fake: { recordsProcessId: true },
       workingDirectory: folder,
-      timeoutMilliseconds: 500
+      // Far past the fake's start, by which it wrote its pid and its line.
+      timeoutMilliseconds: 1000
     })
 
     const answer = await checker.sendCheck(
@@ -303,7 +304,13 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     expect(answer).toEqual({ status: "unavailable", reason: "server-failed" })
     expect(events).toEqual([
-      { kind: "server-failed", failure: { kind: "timed-out" } }
+      {
+        kind: "server-failed",
+        failure: {
+          kind: "timed-out",
+          errorLines: ["connecting to the IMAP server"]
+        }
+      }
     ])
     const processId = await readRecordedEmailProcessId(folder)
     await vi.waitFor(() => {

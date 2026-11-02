@@ -75,7 +75,7 @@ describe("handleEmailAccountCheckEvent", () => {
   })
 
   it.each([
-    [{ kind: "timed-out" }],
+    [{ kind: "timed-out", errorLines: ["connecting to the IMAP server"] }],
     [
       {
         kind: "exited",

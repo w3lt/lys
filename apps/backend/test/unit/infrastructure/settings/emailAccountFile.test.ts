@@ -107,6 +107,24 @@ describe("readEmailAccount", () => {
     expect(read.status === "read" && Object.isFrozen(read.account)).toBe(true)
   })
 
+  it.each(["993.0", "9.93e2"])(
+    "reads an IMAP port written as %s as the port 993, as the desktop host does",
+    async (writtenPort) => {
+      const text = buildSettingsText(ACCOUNT, SYNTHETIC_PASSWORD).replace(
+        '"port":993,',
+        `"port":${writtenPort},`
+      )
+      expect(text).toContain(`"port":${writtenPort},`)
+      const path = await writeSettingsFile(text)
+
+      expect(await readEmailAccount(path)).toEqual({
+        status: "read",
+        account: ACCOUNT,
+        password: SYNTHETIC_PASSWORD
+      })
+    }
+  )
+
   it.each([
     ["no email group", "{}"],
     ["an empty email group", '{ "email": {} }'],

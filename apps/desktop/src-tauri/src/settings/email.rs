@@ -71,7 +71,7 @@ const HOST_RULE: &str =
     "a mail server host must be a host name, an IPv4 address, or an IPv6 address in brackets";
 
 /// Rule of a mail server port, as an error message.
-const PORT_RULE: &str = "a mail server port must be from 1 to 65535";
+const PORT_RULE: &str = "a mail server port must be a whole number from 1 to 65535";
 
 /// Rule of a mail server's security, as an error message.
 const SECURITY_RULE: &str = "a mail server security must be tls, starttls, or plain";
@@ -220,8 +220,10 @@ struct MailServer {
 struct StoredMailServer {
     /// Host text.
     host: String,
-    /// Port number; the JSON reader refuses one outside 0 to 65535.
-    port: u16,
+    /// Port number, however the JSON number is written: `993`, `993.0`, and
+    /// `9.93e2` are one number, as they are to `emailSettingsSchema` in
+    /// `@lys/share`.
+    port: f64,
     /// Security text.
     security: String,
 }
@@ -236,9 +238,7 @@ impl TryFrom<StoredMailServer> for MailServer {
     /// Returns the message of the first broken rule, without any value.
     fn try_from(stored: StoredMailServer) -> Result<Self, Self::Error> {
         let host = MailHost::new(stored.host).ok_or(HOST_RULE)?;
-        if stored.port == 0 {
-            return Err(PORT_RULE);
-        }
+        let port = parse_port(stored.port).ok_or(PORT_RULE)?;
         let security = Security::parse(&stored.security).ok_or(SECURITY_RULE)?;
         if security == Security::Plain && !host.is_loopback() {
             return Err(PLAIN_RULE);
@@ -246,7 +246,7 @@ impl TryFrom<StoredMailServer> for MailServer {
 
         Ok(Self {
             host,
-            port: stored.port,
+            port,
             security,
         })
     }
@@ -446,6 +446,20 @@ fn is_bracketed_ipv6(value: &str) -> bool {
                         character.is_ascii_hexdigit() || character == ':' || character == '.'
                     })
             })
+}
+
+/// Parses a stored port number: a whole number from 1 to 65535, however it
+/// is written, so `993.0` and `9.93e2` are the port 993.
+///
+/// Returns `None` for a fraction or a number outside that range.
+fn parse_port(number: f64) -> Option<u16> {
+    if number.fract() != 0.0 || !(1.0..=f64::from(u16::MAX)).contains(&number) {
+        return None;
+    }
+
+    // The check above proves a whole number that `u16` holds, so the cast
+    // loses nothing.
+    Some(number as u16)
 }
 
 #[cfg(test)]
@@ -776,13 +790,22 @@ mod tests {
 
     #[test]
     fn accepts_ports_from_1_to_65535_and_rejects_the_rest() {
-        for port in [1, 143, 65535] {
-            assert_account_accepted(get_account_with_imap("port", json!(port)));
+        for port in [
+            json!(1),
+            json!(143),
+            json!(65535),
+            json!(1.0),
+            json!(65535.0),
+        ] {
+            assert_account_accepted(get_account_with_imap("port", port));
         }
         for port in [
             json!(0),
             json!(65536),
             json!(-1),
+            json!(0.0),
+            json!(-0.0),
+            json!(65536.0),
             json!("993"),
             json!(993.5),
             Value::Null,
@@ -875,6 +898,14 @@ mod tests {
             ),
             (
                 get_account_with_imap("port", json!(0)),
+                "a mail server port must be",
+            ),
+            (
+                get_account_with_imap("port", json!(65536)),
+                "a mail server port must be",
+            ),
+            (
+                get_account_with_imap("port", json!(993.5)),
                 "a mail server port must be",
             ),
             (

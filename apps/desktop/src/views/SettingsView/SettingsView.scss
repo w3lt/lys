@@ -2854,6 +2854,27 @@ legend.settings-view__mcp-field-label {
   }
 }
 
+/* The label, whether the field is required, and its rule share one line. */
+.settings-view__email-field-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-view__email-field-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.settings-view__email-field-rule {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--app-text-faint);
+}
+
 .settings-view__email-field-note {
   margin: 0;
   color: var(--app-text-muted);

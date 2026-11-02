@@ -7,6 +7,7 @@ import type {
 import {
   emailAddressSchema,
   emailSecuritySchema,
+  MAXIMUM_TCP_PORT,
   type EmailAccount,
   type EmailSecurity
 } from "@lys/share"
@@ -71,6 +72,9 @@ export const EMAIL_PASSWORD_KEPT_NOTE =
 /** Note under the Sent copy switch. */
 export const EMAIL_SENT_COPY_NOTE =
   "Gmail and Yahoo file sent mail themselves. Off makes Lys file the copy in Sent."
+
+/** Rule of a port, shown beside its label before entry. */
+export const EMAIL_PORT_HINT = `1–${MAXIMUM_TCP_PORT}`
 
 /** Question asked before removing the account. */
 export const EMAIL_ACCOUNT_REMOVAL_QUESTION =

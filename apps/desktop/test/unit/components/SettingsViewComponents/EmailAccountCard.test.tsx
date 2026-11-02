@@ -221,6 +221,33 @@ describe("EmailAccountCard", () => {
     expect(getSaveButton()).toBeEnabled()
   })
 
+  it("marks the required fields and states the port range before entry", () => {
+    startEmptyEmailAccountCard()
+
+    expect(getField("Address")).toBeRequired()
+    expect(getField("Display name")).not.toBeRequired()
+    expect(getField("User name")).toBeRequired()
+    expect(getPasswordField()).toBeRequired()
+    expect(getServerField("IMAP server", "Host")).toBeRequired()
+    expect(getServerField("IMAP server", "Port")).toBeRequired()
+    expect(getServerField("IMAP server", "Port")).toHaveAccessibleDescription(
+      "1–65535"
+    )
+    expect(getServerField("SMTP server", "Host")).toBeRequired()
+    expect(getServerField("SMTP server", "Port")).toBeRequired()
+    expect(getServerField("SMTP server", "Port")).toHaveAccessibleDescription(
+      "1–65535"
+    )
+    expect(within(getCard()).getAllByText("required")).toHaveLength(7)
+  })
+
+  it("does not mark the password required while an empty field keeps the saved one", () => {
+    startEmailAccountCard()
+
+    expect(getPasswordField()).not.toBeRequired()
+    expect(within(getCard()).getAllByText("required")).toHaveLength(6)
+  })
+
   it("fills the servers from the address's preset and says which preset applies", async () => {
     startEmptyEmailAccountCard()
     const user = userEvent.setup()
@@ -331,7 +358,7 @@ describe("EmailAccountCard", () => {
       "true"
     )
     expect(getServerField("IMAP server", "Port")).toHaveAccessibleDescription(
-      "A port is a whole number from 1 to 65535."
+      "1–65535 A port is a whole number from 1 to 65535."
     )
     expect(getPasswordField()).toHaveAccessibleDescription(
       "Enter the password."

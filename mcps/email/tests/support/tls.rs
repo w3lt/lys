@@ -1,5 +1,6 @@
 //! A certificate authority of the tests: a root the trust can be told
-//! about, and server certificates for localhost signed by it.
+//! about, and server certificates for localhost signed by it, each valid
+//! from the day before the test runs to a year after it.
 
 use std::sync::Arc;
 
@@ -11,6 +12,11 @@ use tokio_rustls::TlsAcceptor;
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::rustls::crypto::ring;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+
+use super::{SECONDS_PER_DAY, calculate_civil_day, get_current_timestamp};
+
+/// Days a certificate stays valid after the day the test runs.
+const VALIDITY_DAYS: i64 = 365;
 
 /// A root certificate and the key signing server certificates with it.
 ///
@@ -40,8 +46,7 @@ impl TestAuthority {
             KeyUsagePurpose::CrlSign,
             KeyUsagePurpose::DigitalSignature,
         ];
-        params.not_before = date_time_ymd(2026, 1, 1);
-        params.not_after = date_time_ymd(2027, 12, 31);
+        update_validity_from_today(&mut params);
         params
             .distinguished_name
             .push(DnType::CommonName, "Lys test authority");
@@ -65,8 +70,7 @@ impl TestAuthority {
                 .expect("server parameters");
         params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
         params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
-        params.not_before = date_time_ymd(2026, 1, 1);
-        params.not_after = date_time_ymd(2027, 12, 31);
+        update_validity_from_today(&mut params);
         params
             .distinguished_name
             .push(DnType::CommonName, "localhost");
@@ -84,4 +88,29 @@ impl TestAuthority {
             .expect("server configuration");
         TlsAcceptor::from(Arc::new(config))
     }
+}
+
+/// Makes certificate parameters valid from the day before today, in UTC,
+/// so that a clock a little behind still accepts them, to
+/// [`VALIDITY_DAYS`] after today.
+///
+/// # Arguments
+///
+/// * `params` - The parameters to change.
+fn update_validity_from_today(params: &mut CertificateParams) {
+    let today = get_current_timestamp().div_euclid(SECONDS_PER_DAY);
+    let (year, month, day) = calculate_certificate_day(today - 1);
+    params.not_before = date_time_ymd(year, month, day);
+    let (year, month, day) = calculate_certificate_day(today + VALIDITY_DAYS);
+    params.not_after = date_time_ymd(year, month, day);
+}
+
+/// Converts days since the Unix epoch to the calendar day rcgen takes.
+///
+/// # Arguments
+///
+/// * `days` - Days since the Unix epoch.
+fn calculate_certificate_day(days: i64) -> (i32, u8, u8) {
+    let (year, month, day) = calculate_civil_day(days);
+    (i32::try_from(year).expect("a year rcgen takes"), month, day)
 }

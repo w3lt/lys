@@ -292,6 +292,9 @@ pub fn calculate_trimmed_bytes(bytes: &[u8]) -> &[u8] {
     &bytes[..end]
 }
 
+/// Seconds in one day of the Unix clock, which has no leap seconds.
+pub const SECONDS_PER_DAY: i64 = 86_400;
+
 /// Seconds since the Unix epoch, now.
 pub fn get_current_timestamp() -> i64 {
     i64::try_from(

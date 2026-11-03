@@ -153,14 +153,14 @@ function buildFailedSignIn(reason: string): unknown {
 
 /**
  * Handles the check subcommand by acting out the check the address asks
- * for.
+ * for: here one whose local part carries a reason or a number, and any
+ * other through {@link handleNamedCheckCommand}.
  *
  * @param address - Address of the account.
  */
 async function handleCheckCommand(address: string): Promise<void> {
   const accepted = { status: "accepted" }
   const localPart = address.slice(0, address.indexOf("@"))
-  if (localPart === "accepted") sendCheckReport(accepted, accepted)
   if (localPart.startsWith("imap-"))
     sendCheckReport(
       buildFailedSignIn(localPart.slice("imap-".length)),
@@ -181,7 +181,24 @@ async function handleCheckCommand(address: string): Promise<void> {
     await sendOutput(
       buildPaddedCheckReport(accepted, parseAddressNumber(localPart, "padded-"))
     )
+  await handleNamedCheckCommand(localPart, accepted)
+}
+
+/**
+ * Handles a check subcommand whose local part names the check, without a
+ * reason or a number, by acting it out.
+ *
+ * @param localPart - Local part of the account's address.
+ * @param accepted - The outcome of an accepted sign-in.
+ */
+async function handleNamedCheckCommand(
+  localPart: string,
+  accepted: unknown
+): Promise<void> {
   switch (localPart) {
+    case "accepted":
+      sendCheckReport(accepted, accepted)
+      break
     case "quit-failed":
       process.stderr.write(
         "smtp: quit did not finish within the check's limit\n"
@@ -204,17 +221,27 @@ async function handleCheckCommand(address: string): Promise<void> {
     case "flood":
       await sendOutput(`${"x".repeat(70_000)}\n`)
       break
-    case "lock": {
-      const lockPath = createLockFile()
-      await wait(options.holdMilliseconds ?? 0)
-      rmSync(lockPath)
-      sendCheckReport(accepted, accepted)
+    case "lock":
+      await sendCheckReportUnderLock(accepted)
       break
-    }
     default:
       process.stderr.write("unknown fake address\n")
       process.exit(64)
   }
+}
+
+/**
+ * Sends the report of both sign-ins accepted, and exits, once it held
+ * `lock` in its folder for `holdMilliseconds`, as a check that must run
+ * alone does; exits with code 3 when another check holds it.
+ *
+ * @param accepted - The outcome of an accepted sign-in.
+ */
+async function sendCheckReportUnderLock(accepted: unknown): Promise<void> {
+  const lockPath = createLockFile()
+  await wait(options.holdMilliseconds ?? 0)
+  rmSync(lockPath)
+  sendCheckReport(accepted, accepted)
 }
 
 /**

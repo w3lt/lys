@@ -12,16 +12,16 @@ TypeScript contract packages.
 
 ## Runtime parts
 
-| Part                      | Implementation                           | Responsibility                                                                                                                                                           |
-| ------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Desktop UI                | React in `apps/desktop/src`              | Renders chat, conversation history, and settings views, opens backend HTTP streams, and applies typed chat events to local UI state.                                     |
-| Host                      | Tauri in `apps/desktop/src-tauri/src`    | Starts and stops the backend and vmo processes, checks vmo's health, exposes native commands to the UI, and reads or writes `$LYS_HOME/settings.json`.                   |
-| Backend                   | Fastify in `apps/backend/src`            | Serves HTTP and SSE endpoints, persists conversations in SQLite, talks to the chosen model provider for model inventory and generation, and connects to the MCP servers. |
-| Page reader               | vmo, Swift in `apps/vmo`                 | Listens on `127.0.0.1:8080` and reads each page `read_page` asks for in headless Chromium inside a micro VM, which it deletes.                                           |
-| Model provider            | LM Studio, Ollama, Ollama Cloud, or Groq | Supplies the model inventory, chat completions, and title generation, and, for LM Studio, model loading; chosen in Settings → Providers.                                 |
-| MCP servers               | The person's, named in `settings.json`   | Commands the backend starts (stdio) or URLs it reaches (Streamable HTTP); each serves tools the backend lists and runs the allowed calls of them.                        |
-| Shared API contract       | `@lys/protocol`                          | Defines route paths, request and response schemas, chat SSE event variants, and file tool command schemas with Zod.                                                      |
-| Shared domain model types | `@lys/share`                             | Defines the conversation, message, metadata, agent, tool definition, and MCP server settings shapes shared between backend and desktop.                                  |
+| Part                      | Implementation                                                                               | Responsibility                                                                                                                                                                                                                               |
+| ------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop UI                | React in `apps/desktop/src`                                                                  | Renders chat, conversation history, and settings views, opens backend HTTP streams, and applies typed chat events to local UI state.                                                                                                         |
+| Host                      | Tauri in `apps/desktop/src-tauri/src`                                                        | Starts and stops the backend and vmo processes, checks vmo's health, exposes native commands to the UI, and reads or writes `$LYS_HOME/settings.json`.                                                                                       |
+| Backend                   | Fastify in `apps/backend/src`                                                                | Serves HTTP and SSE endpoints, persists conversations in SQLite, talks to the chosen model provider for model inventory and generation, and connects to the MCP servers.                                                                     |
+| Page reader               | vmo, Swift in `apps/vmo`                                                                     | Listens on `127.0.0.1:8080` and reads each page `read_page` asks for in headless Chromium inside a micro VM, which it deletes.                                                                                                               |
+| Model provider            | LM Studio, Ollama, Ollama Cloud, or Groq                                                     | Supplies the model inventory, chat completions, and title generation, and, for LM Studio, model loading; chosen in Settings → Providers.                                                                                                     |
+| MCP servers               | The person's, named in `settings.json`, and the email server Lys ships, Rust in `mcps/email` | Commands the backend starts (stdio) or URLs it reaches (Streamable HTTP), each with a switch; each serves tools the backend lists and runs the allowed calls of them. The email server reads and sends the person's mail over IMAP and SMTP. |
+| Shared API contract       | `@lys/protocol`                                                                              | Defines route paths, request and response schemas, chat SSE event variants, and file tool command schemas with Zod.                                                                                                                          |
+| Shared domain model types | `@lys/share`                                                                                 | Defines the conversation, message, metadata, agent, tool definition, MCP server settings, and email account shapes shared between backend and desktop.                                                                                       |
 
 ## Process boundary
 
@@ -29,8 +29,9 @@ The desktop UI does not call the model provider or vmo directly. It talks to the
 backend over loopback HTTP and consumes one SSE stream per chat request. The
 host starts and stops the backend and vmo as child processes, and the backend
 asks vmo over loopback HTTP for each page `read_page` reads. The backend
-starts each stdio MCP server as its own child process and reaches each remote
-one over HTTP; the desktop never talks to an MCP server.
+starts each stdio MCP server as its own child process, the email server Lys
+ships included, and reaches each remote one over HTTP; the desktop never
+talks to an MCP server, and only the email server talks to the mail servers.
 
 ```text
 React UI -> Tauri commands (process and settings lifecycle, file tools)
@@ -39,29 +40,30 @@ Fastify backend -> SQLite
 Fastify backend -> HTTP -> vmo -> micro VM (headless Chromium)
 Tauri host -> backend and vmo processes; HTTP GET /health -> vmo
 Fastify backend -> stdio MCP server processes, or Streamable HTTP -> remote MCP servers
+Email MCP server -> IMAP and SMTP -> the person's mail servers
 ```
 
 ## State ownership
 
-| State                                        | Owner                   | Notes                                                                                                        |
-| -------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Conversation, message, and agent rows        | Backend                 | Stored in `$LYS_HOME/lys_db.sqlite`.                                                                         |
-| Attachment files                             | Backend                 | Stored under `$LYS_HOME/attachments/<conversation id>/<message id>/<name>`; deleted with their conversation. |
-| Chat request lifecycle in the current window | Desktop UI              | Held in the chat Zustand store while one request is active.                                                  |
-| Past-conversations dialog                    | Desktop UI              | Held in the history Zustand store; listed conversations are read from the backend.                           |
-| Agents pane list and editor                  | Desktop UI              | Held in the agent Zustand store; agents are read from the backend.                                           |
-| Agent selected for a new conversation        | Desktop UI              | Held in the chat Zustand store until the app quits; a started conversation keeps its agent.                  |
-| Backend process status                       | Desktop UI + Tauri host | The host owns the process; the UI queries status during initialization and lifecycle actions.                |
-| vmo process status                           | Desktop UI + Tauri host | The host owns the process; the UI queries status and health during startup and lifecycle actions.            |
-| Runtime settings JSON                        | Tauri host              | Stored in `$LYS_HOME/settings.json`.                                                                         |
-| MCP server connections and their tools       | Backend                 | Held in memory by the MCP server registry, from the `mcp` settings group read at startup and on each sync.   |
-| Theme preference                             | Desktop UI              | Stored as `lys.theme` in WebView `localStorage`.                                                             |
-| Route and event schemas                      | `@lys/protocol`         | Used by both backend and desktop.                                                                            |
+| State                                        | Owner                   | Notes                                                                                                                   |
+| -------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Conversation, message, and agent rows        | Backend                 | Stored in `$LYS_HOME/lys_db.sqlite`.                                                                                    |
+| Attachment files                             | Backend                 | Stored under `$LYS_HOME/attachments/<conversation id>/<message id>/<name>`; deleted with their conversation.            |
+| Chat request lifecycle in the current window | Desktop UI              | Held in the chat Zustand store while one request is active.                                                             |
+| Past-conversations dialog                    | Desktop UI              | Held in the history Zustand store; listed conversations are read from the backend.                                      |
+| Agents pane list and editor                  | Desktop UI              | Held in the agent Zustand store; agents are read from the backend.                                                      |
+| Agent selected for a new conversation        | Desktop UI              | Held in the chat Zustand store until the app quits; a started conversation keeps its agent.                             |
+| Backend process status                       | Desktop UI + Tauri host | The host owns the process; the UI queries status during initialization and lifecycle actions.                           |
+| vmo process status                           | Desktop UI + Tauri host | The host owns the process; the UI queries status and health during startup and lifecycle actions.                       |
+| Runtime settings JSON                        | Tauri host              | Stored in `$LYS_HOME/settings.json`.                                                                                    |
+| MCP server connections and their tools       | Backend                 | Held in memory by the MCP server registry, from the `mcp` and `email` settings groups read at startup and on each sync. |
+| Theme preference                             | Desktop UI              | Stored as `lys.theme` in WebView `localStorage`.                                                                        |
+| Route and event schemas                      | `@lys/protocol`         | Used by both backend and desktop.                                                                                       |
 
 ## What this system is not
 
-- The backend is not a Rust service. Rust currently exists only in the Tauri
-  host layer.
+- The backend is not a Rust service. Rust exists in the Tauri host layer and
+  in the email MCP server, a separate process the backend starts.
 - The chat stream is not a replayable shared event bus. The current
   implementation sends SSE events directly from one HTTP request handler.
 - The current architecture does not include keychain-backed credentials,

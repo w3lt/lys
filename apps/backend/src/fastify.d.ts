@@ -10,6 +10,7 @@ import type StoredReplyParts from "./modules/conversation/replyParts"
 import type StoredConversationTurns from "./modules/conversation/turns"
 import type LlmRuntimeService from "./modules/llm/llmRuntimeService"
 import type LlmService from "./modules/llm/llmService"
+import type EmailAccountChecker from "./modules/mcp/builtIn/email/emailAccountCheck"
 import type McpServerProcessGroups from "./modules/mcp/mcpServerProcessGroups"
 import type McpServerRegistry from "./modules/mcp/mcpServerRegistry"
 import type { BuiltInToolEntry } from "./modules/tool/builtIn/builtInTool"
@@ -62,6 +63,11 @@ declare module "fastify" {
      * servers run in, which the backend ends at once when it exits.
      */
     mcpServerProcessGroups: McpServerProcessGroups
+    /**
+     * Application-scoped checks of email accounts through the email server
+     * Lys ships, one at a time.
+     */
+    emailAccountChecker: EmailAccountChecker
     /**
      * Application-scoped attachment files of every conversation, under the
      * attachments directory.

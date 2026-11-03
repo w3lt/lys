@@ -4,9 +4,12 @@
 //! order Settings shows them: a command Lys starts and talks to over its
 //! standard input and output (`stdio`), or a URL it sends requests to over
 //! Streamable HTTP (`http`). A missing group, a missing `servers` list, and a
-//! settings file written before the group existed all mean no server. The
-//! backend reads the group from the saved file and connects to each server;
-//! this module only stores it.
+//! settings file written before the group existed all mean no server. Each
+//! server has a switch, `enabled`, which is on unless the file says
+//! otherwise, and the group's `builtIn` object holds the switch of each MCP
+//! server Lys ships, which is off unless the file says otherwise. The backend
+//! reads the group from the saved file and connects to each server that is
+//! switched on; this module only stores it.
 //!
 //! Every rule matches `mcpSettingsSchema` in `@lys/share`, which the renderer
 //! and the backend check. A text with a lone surrogate, which that schema
@@ -27,21 +30,24 @@ mod internationalized_host;
 
 use std::{collections::HashSet, fmt};
 
-use serde::de::{DeserializeOwned, Error};
+use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::{Map, Value};
 use tauri::Url;
 
+use super::json_object::{parse_json_object, parse_json_objects};
 use internationalized_host::is_accepted_host;
 
 /// Most servers the group may hold, inclusive. Matches
 /// `MAXIMUM_MCP_SERVER_COUNT` in `@lys/share`.
 const SERVER_MAX_COUNT: usize = 16;
 
-/// Most bytes the group may take, inclusive: the UTF-8 bytes of the group
-/// written as compact JSON. Matches `MAXIMUM_MCP_SETTINGS_BYTES` in
-/// `@lys/share`, half of the settings file the backend reads, so the group,
-/// the indentation this host writes, and the other groups fit in it.
+/// Most bytes the servers of the group may take, inclusive: the UTF-8 bytes
+/// of the group written as compact JSON with every list, but without the
+/// switches, each server's `enabled` field and the `builtIn` object, so that
+/// a group written before the switches existed measures as it did then.
+/// Matches `MAXIMUM_MCP_SETTINGS_BYTES` in `@lys/share`, half of the settings
+/// file the backend reads, so the group, its switches, the indentation this
+/// host writes, and the other groups fit in it.
 const SETTINGS_MAX_BYTES: usize = 512 * 1024;
 
 /// Most characters a server name may have, inclusive. Matches
@@ -120,13 +126,18 @@ const SERVER_SHAPE_ERROR: &str = "an MCP server must be an object whose transpor
 #[derive(Debug, Clone, Default, Serialize)]
 /// MCP servers persisted under the `mcp` JSON object.
 ///
-/// A missing group or a missing `servers` list means no server. The group and
-/// the list may not be `null`, and unknown fields are rejected. It holds at
-/// most 16 servers, each name once, in the order Settings lists them, which
-/// take at most 512 KiB together as compact JSON.
+/// A missing group or a missing `servers` list means no server, and a
+/// missing `builtIn` object means every server Lys ships is off. The group,
+/// the list, and the object may not be `null`, and unknown fields are
+/// rejected. It holds at most 16 servers, each name once, in the order
+/// Settings lists them, which take at most 512 KiB together as compact JSON,
+/// not counting the switches.
 pub struct McpSettings {
     /// Servers in list order.
     servers: Vec<McpServer>,
+    /// Switches of the servers Lys ships.
+    #[serde(rename = "builtIn")]
+    built_in: BuiltInMcpSettings,
 }
 
 /// Deserializes the group and applies its rules.
@@ -136,8 +147,9 @@ impl<'de> Deserialize<'de> for McpSettings {
     /// # Errors
     ///
     /// Returns the deserializer's error when the input is not an object with
-    /// only a `servers` list, a server breaks a rule, or the group holds more
-    /// than 16 servers or two with one name.
+    /// only a `servers` list and a `builtIn` object, a server or a switch
+    /// breaks a rule, the group holds more than 16 servers or two with one
+    /// name, or the servers take more than 512 KiB without their switches.
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -154,6 +166,10 @@ impl<'de> Deserialize<'de> for McpSettings {
 struct StoredMcpSettings {
     /// Servers in list order, each already valid on its own.
     servers: Vec<McpServer>,
+    /// Switches of the servers Lys ships; a missing object means every one
+    /// off.
+    #[serde(rename = "builtIn", deserialize_with = "parse_json_object")]
+    built_in: BuiltInMcpSettings,
 }
 
 impl TryFrom<StoredMcpSettings> for McpSettings {
@@ -165,8 +181,8 @@ impl TryFrom<StoredMcpSettings> for McpSettings {
     /// # Errors
     ///
     /// Returns a message without any value when there are more than 16
-    /// servers, two share a name, or the group takes more than 512 KiB as
-    /// compact JSON.
+    /// servers, two share a name, or the servers take more than 512 KiB as
+    /// compact JSON without their switches.
     fn try_from(stored: StoredMcpSettings) -> Result<Self, Self::Error> {
         if stored.servers.len() > SERVER_MAX_COUNT {
             return Err("the mcp group may hold at most 16 servers");
@@ -176,6 +192,7 @@ impl TryFrom<StoredMcpSettings> for McpSettings {
         }
         let settings = Self {
             servers: stored.servers,
+            built_in: stored.built_in,
         };
         if !settings.is_within_size_limit() {
             return Err("the MCP servers may take at most 512 KiB of settings together");
@@ -186,11 +203,59 @@ impl TryFrom<StoredMcpSettings> for McpSettings {
 }
 
 impl McpSettings {
-    /// Reports whether the group takes at most [`SETTINGS_MAX_BYTES`] as
-    /// compact JSON, as it is written with every list filled in.
+    /// Reports whether the servers take at most [`SETTINGS_MAX_BYTES`]: the
+    /// group as compact JSON with every list filled in, but without the
+    /// switches.
     fn is_within_size_limit(&self) -> bool {
-        serde_json::to_vec(self).is_ok_and(|bytes| bytes.len() <= SETTINGS_MAX_BYTES)
+        calculate_servers_bytes_without_switches(&self.servers)
+            .is_some_and(|bytes| bytes <= SETTINGS_MAX_BYTES)
     }
+}
+
+/// Calculates the bytes [`SETTINGS_MAX_BYTES`] counts: `{"servers":[…]}` as
+/// compact JSON with every list filled in, without each server's `enabled`
+/// field, as `mcpSettingsSchema` in `@lys/share` counts them.
+///
+/// Returns `None` when the servers cannot be written as JSON.
+fn calculate_servers_bytes_without_switches(servers: &[McpServer]) -> Option<usize> {
+    let mut written_servers = serde_json::to_value(servers).ok()?;
+    for written_server in written_servers.as_array_mut()? {
+        written_server.as_object_mut()?.remove("enabled");
+    }
+
+    serde_json::to_vec(&serde_json::json!({ "servers": written_servers }))
+        .ok()
+        .map(|bytes| bytes.len())
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+/// Switches of the MCP servers Lys ships, one field per server, stored under
+/// the group's `builtIn` object.
+///
+/// A missing field means that server is off. The fields may not be `null`,
+/// and unknown fields are rejected: the renderer and the backend know the
+/// same servers.
+struct BuiltInMcpSettings {
+    /// Switch of the email server.
+    #[serde(deserialize_with = "parse_json_object")]
+    email: BuiltInMcpServerSettings,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+/// Switch of one MCP server Lys ships.
+///
+/// A missing switch is off. The switch may not be `null`, and unknown fields
+/// are rejected.
+struct BuiltInMcpServerSettings {
+    /// Whether Lys starts the server.
+    enabled: bool,
+}
+
+/// Returns the switch of a server the file does not switch: on.
+fn default_server_switch() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -274,6 +339,9 @@ struct StdioMcpServer {
     arguments: Vec<String>,
     /// Variables added to the default environment, each name once.
     environment: Vec<McpEnvironmentVariable>,
+    /// Whether Lys starts the server; off keeps its settings without starting
+    /// it.
+    enabled: bool,
 }
 
 #[derive(Deserialize)]
@@ -290,6 +358,9 @@ struct StoredStdioMcpServer {
     /// Variables; a missing list means none.
     #[serde(default, deserialize_with = "parse_json_objects")]
     environment: Vec<StoredNamedValue>,
+    /// Switch; a missing switch is on.
+    #[serde(default = "default_server_switch")]
+    enabled: bool,
 }
 
 impl TryFrom<StoredStdioMcpServer> for StdioMcpServer {
@@ -321,6 +392,7 @@ impl TryFrom<StoredStdioMcpServer> for StdioMcpServer {
             command: stored.command,
             arguments: stored.arguments,
             environment: build_environment(stored.environment)?,
+            enabled: stored.enabled,
         })
     }
 }
@@ -337,6 +409,9 @@ struct HttpMcpServer {
     url: String,
     /// Headers sent with every request, each name once ignoring case.
     headers: Vec<McpHeader>,
+    /// Whether Lys reaches the server; off keeps its settings without
+    /// reaching it.
+    enabled: bool,
 }
 
 #[derive(Deserialize)]
@@ -350,6 +425,9 @@ struct StoredHttpMcpServer {
     /// Headers; a missing list means none.
     #[serde(default, deserialize_with = "parse_json_objects")]
     headers: Vec<StoredNamedValue>,
+    /// Switch; a missing switch is on.
+    #[serde(default = "default_server_switch")]
+    enabled: bool,
 }
 
 impl TryFrom<StoredHttpMcpServer> for HttpMcpServer {
@@ -373,13 +451,14 @@ impl TryFrom<StoredHttpMcpServer> for HttpMcpServer {
             name,
             url: stored.url,
             headers: build_headers(stored.headers)?,
+            enabled: stored.enabled,
         })
     }
 }
 
 impl fmt::Debug for StdioMcpServer {
-    /// Writes the name, the command, the argument count, and the variables
-    /// without their values.
+    /// Writes the name, the command, the argument count, the variables
+    /// without their values, and the switch.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("StdioMcpServer")
@@ -387,13 +466,14 @@ impl fmt::Debug for StdioMcpServer {
             .field("command", &self.command)
             .field("argument_count", &self.arguments.len())
             .field("environment", &self.environment)
+            .field("enabled", &self.enabled)
             .finish()
     }
 }
 
 impl fmt::Debug for HttpMcpServer {
-    /// Writes the name, the URL without its query, and the headers without
-    /// their values.
+    /// Writes the name, the URL without its query, the headers without
+    /// their values, and the switch.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let url_without_query = self
             .url
@@ -404,6 +484,7 @@ impl fmt::Debug for HttpMcpServer {
             .field("name", &self.name)
             .field("url", &url_without_query)
             .field("headers", &self.headers)
+            .field("enabled", &self.enabled)
             .finish()
     }
 }
@@ -461,44 +542,6 @@ struct StoredNamedValue {
     name: String,
     /// Value text.
     value: String,
-}
-
-/// Reads a JSON object into a stored shape, refusing every other JSON value.
-///
-/// Serde's derived structs and tagged enums also read a JSON array as their
-/// fields in order; `mcpSettingsSchema` refuses that form, so every stored
-/// shape is read from an object first.
-///
-/// # Errors
-///
-/// Returns the deserializer's error when the input is not a JSON object, and
-/// the shape's error when the object does not match it.
-fn parse_json_object<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: Deserializer<'de>,
-    T: DeserializeOwned,
-{
-    let object = Map::<String, Value>::deserialize(deserializer)?;
-
-    T::deserialize(Value::Object(object)).map_err(D::Error::custom)
-}
-
-/// Reads a JSON array of objects into stored shapes, refusing any item that is
-/// not a JSON object, as [`parse_json_object`] does for one.
-///
-/// # Errors
-///
-/// Returns the deserializer's error when the input is not an array of JSON
-/// objects, and the shape's error when an object does not match it.
-fn parse_json_objects<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
-where
-    D: Deserializer<'de>,
-    T: DeserializeOwned,
-{
-    Vec::<Map<String, Value>>::deserialize(deserializer)?
-        .into_iter()
-        .map(|object| T::deserialize(Value::Object(object)).map_err(D::Error::custom))
-        .collect()
 }
 
 /// Parses a stored server name.
@@ -738,7 +781,8 @@ mod tests {
             "transport": "stdio",
             "command": "/opt/homebrew/bin/npx",
             "arguments": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/Notes"],
-            "environment": [{ "name": "LOG_LEVEL", "value": "warn" }]
+            "environment": [{ "name": "LOG_LEVEL", "value": "warn" }],
+            "enabled": true
         })
     }
 
@@ -748,8 +792,15 @@ mod tests {
             "name": name,
             "transport": "http",
             "url": "https://mcp.example.com/mcp",
-            "headers": [{ "name": "Authorization", "value": "Bearer synthetic-token" }]
+            "headers": [{ "name": "Authorization", "value": "Bearer synthetic-token" }],
+            "enabled": true
         })
+    }
+
+    /// Returns the `builtIn` object of a group with every server Lys ships
+    /// off, as the host writes it.
+    fn get_built_in_off() -> Value {
+        json!({ "email": { "enabled": false } })
     }
 
     /// Reads a group holding only `server`.
@@ -793,10 +844,12 @@ mod tests {
         serde_json::to_vec(value).expect("serialize").len()
     }
 
-    /// Returns an `mcp` group that takes exactly `bytes` as compact JSON: the
-    /// most stdio servers, each with the most one-character arguments and the
-    /// most variables, whose values take the remaining bytes in list order.
-    fn build_group_of_bytes(bytes: usize) -> Value {
+    /// Returns an `mcp` group as the host wrote it before the switches
+    /// existed, every list written but no `enabled` field and no `builtIn`
+    /// object, that takes exactly `bytes` as compact JSON: the most stdio
+    /// servers, each with the most one-character arguments and the most
+    /// variables, whose values take the remaining bytes in list order.
+    fn build_unswitched_group_of_bytes(bytes: usize) -> Value {
         let mut servers: Vec<Value> = (0..SERVER_MAX_COUNT)
             .map(|server_index| {
                 let environment: Vec<Value> = (0..ENVIRONMENT_VARIABLE_MAX_COUNT)
@@ -821,6 +874,18 @@ mod tests {
         }
 
         json!({ "servers": servers })
+    }
+
+    /// Returns `group` with every switch written, as the host writes it:
+    /// `server_switch` on each server and every server Lys ships off.
+    fn build_switched_group(group: &Value, server_switch: bool) -> Value {
+        let mut switched_group = group.clone();
+        for server in switched_group["servers"].as_array_mut().expect("servers") {
+            server["enabled"] = json!(server_switch);
+        }
+        switched_group["builtIn"] = get_built_in_off();
+
+        switched_group
     }
 
     /// Groups that the host and `mcpSettingsSchema` in `@lys/share` must judge
@@ -859,22 +924,26 @@ mod tests {
     }
 
     #[test]
-    fn reads_a_missing_group_list_as_no_server_and_writes_an_empty_list() {
+    fn reads_a_missing_group_list_as_no_server_and_writes_an_empty_list_with_every_built_in_server_off(
+    ) {
         let settings = parse_mcp_settings(json!({})).expect("an empty group");
 
         assert_eq!(
             serde_json::to_value(&settings).expect("serialize"),
-            json!({ "servers": [] })
+            json!({ "servers": [], "builtIn": get_built_in_off() })
         );
         assert_eq!(
             serde_json::to_value(McpSettings::default()).expect("serialize"),
-            json!({ "servers": [] })
+            json!({ "servers": [], "builtIn": get_built_in_off() })
         );
     }
 
     #[test]
     fn writes_both_transports_back_unchanged() {
-        let stored = json!({ "servers": [get_stdio_server("files"), get_http_server("docs")] });
+        let stored = json!({
+            "servers": [get_stdio_server("files"), get_http_server("docs")],
+            "builtIn": get_built_in_off()
+        });
 
         let settings = parse_mcp_settings(stored.clone()).expect("a valid group");
 
@@ -882,7 +951,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_missing_lists_of_a_server_as_empty() {
+    fn reads_missing_lists_of_a_server_as_empty_and_a_missing_switch_as_on() {
         let settings = parse_mcp_settings(json!({ "servers": [
             { "name": "files", "transport": "stdio", "command": "npx" },
             { "name": "docs", "transport": "http", "url": "https://mcp.example.com/mcp" }
@@ -891,11 +960,56 @@ mod tests {
 
         assert_eq!(
             serde_json::to_value(&settings).expect("serialize"),
-            json!({ "servers": [
-                { "name": "files", "transport": "stdio", "command": "npx", "arguments": [], "environment": [] },
-                { "name": "docs", "transport": "http", "url": "https://mcp.example.com/mcp", "headers": [] }
-            ] })
+            json!({
+                "servers": [
+                    { "name": "files", "transport": "stdio", "command": "npx", "arguments": [], "environment": [], "enabled": true },
+                    { "name": "docs", "transport": "http", "url": "https://mcp.example.com/mcp", "headers": [], "enabled": true }
+                ],
+                "builtIn": get_built_in_off()
+            })
         );
+    }
+
+    #[test]
+    fn reads_missing_built_in_switches_as_off_and_writes_every_switch_back() {
+        let stored = json!({
+            "servers": [
+                get_stdio_server_with("enabled", json!(false)),
+                get_http_server("docs")
+            ],
+            "builtIn": { "email": { "enabled": true } }
+        });
+
+        let settings = parse_mcp_settings(stored.clone()).expect("a valid group");
+        let unswitched = parse_mcp_settings(json!({ "builtIn": {} })).expect("a valid group");
+
+        assert_eq!(serde_json::to_value(&settings).expect("serialize"), stored);
+        assert_eq!(
+            serde_json::to_value(&unswitched).expect("serialize"),
+            json!({ "servers": [], "builtIn": get_built_in_off() })
+        );
+    }
+
+    #[test]
+    fn rejects_null_and_non_boolean_switches_unknown_built_in_servers_and_list_shaped_switches() {
+        for stored in [
+            json!({ "servers": [], "builtIn": null }),
+            json!({ "builtIn": [] }),
+            json!({ "builtIn": "email" }),
+            json!({ "builtIn": { "email": null } }),
+            json!({ "builtIn": { "email": [] } }),
+            json!({ "builtIn": { "email": true } }),
+            json!({ "builtIn": { "email": { "enabled": "yes" } } }),
+            json!({ "builtIn": { "email": { "enabled": null } } }),
+            json!({ "builtIn": { "email": { "enabled": 1 } } }),
+            json!({ "builtIn": { "email": { "enabled": true, "extra": 1 } } }),
+            json!({ "builtIn": { "github": { "enabled": true } } }),
+            json!({ "servers": [get_stdio_server_with("enabled", Value::Null)] }),
+            json!({ "servers": [get_stdio_server_with("enabled", json!(1))] }),
+            json!({ "servers": [get_http_server_with("enabled", json!("on"))] }),
+        ] {
+            assert!(parse_mcp_settings(stored.clone()).is_err(), "{stored}");
+        }
     }
 
     #[test]
@@ -937,21 +1051,46 @@ mod tests {
     }
 
     #[test]
-    fn accepts_a_group_of_512_kib_and_rejects_one_byte_more() {
-        let group = build_group_of_bytes(SETTINGS_MAX_BYTES);
-        let too_large_group = build_group_of_bytes(SETTINGS_MAX_BYTES + 1);
+    fn accepts_a_group_written_before_the_switches_of_512_kib_and_rejects_one_byte_more() {
+        let group = build_unswitched_group_of_bytes(SETTINGS_MAX_BYTES);
+        let too_large_group = build_unswitched_group_of_bytes(SETTINGS_MAX_BYTES + 1);
 
         let settings = parse_mcp_settings(group.clone()).expect("a group at the limit");
         let failure = parse_mcp_settings(too_large_group).expect_err("a group past the limit");
 
         assert_eq!(calculate_compact_json_bytes(&group), 512 * 1024);
+        assert_eq!(
+            serde_json::to_value(&settings).expect("serialize"),
+            build_switched_group(&group, true)
+        );
+        assert!(failure.to_string().contains("512 KiB"), "{failure}");
+    }
+
+    #[test]
+    fn leaves_every_switch_out_of_the_512_kib_and_rejects_one_byte_more() {
+        let group =
+            build_switched_group(&build_unswitched_group_of_bytes(SETTINGS_MAX_BYTES), false);
+        let too_large_group = build_switched_group(
+            &build_unswitched_group_of_bytes(SETTINGS_MAX_BYTES + 1),
+            false,
+        );
+        let switch_bytes = SERVER_MAX_COUNT * r#","enabled":false"#.len()
+            + r#","builtIn":{"email":{"enabled":false}}"#.len();
+
+        let settings = parse_mcp_settings(group.clone()).expect("a group at the limit");
+        let failure = parse_mcp_settings(too_large_group).expect_err("a group past the limit");
+
+        assert_eq!(
+            calculate_compact_json_bytes(&group),
+            512 * 1024 + switch_bytes
+        );
         assert_eq!(serde_json::to_value(&settings).expect("serialize"), group);
         assert!(failure.to_string().contains("512 KiB"), "{failure}");
     }
 
     #[test]
     fn counts_the_group_in_utf8_bytes_not_in_characters() {
-        let mut group = build_group_of_bytes(SETTINGS_MAX_BYTES);
+        let mut group = build_unswitched_group_of_bytes(SETTINGS_MAX_BYTES);
         group["servers"][0]["environment"][0]["value"] =
             json!("é".repeat(ENVIRONMENT_VALUE_MAX_LENGTH / 2 + 1));
         let characters = group.to_string().chars().count();
@@ -1252,6 +1391,7 @@ mod tests {
             "Authorization",
             "argument_count: 2",
             "https://mcp.example.com/mcp",
+            "enabled: true",
         ] {
             assert!(debug_output.contains(shown), "{debug_output}");
         }

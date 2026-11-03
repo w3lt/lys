@@ -8,7 +8,9 @@ import { backendConfigSchema } from "../../../src/config"
  * absolute placeholder under a directory that does not exist; no case opens it,
  * and neither the attachments directory nor the MCP process groups file
  * beside it is ever written: a case that starts a stdio MCP server through
- * this configuration replaces that path with one in a folder it owns.
+ * this configuration replaces that path with one in a folder it owns. The
+ * email server path names no file, so the built-in email server cannot
+ * start and no account check runs through it.
  * The LM Studio host and port are distinct from the production defaults so
  * endpoint derivation is observable. The vmo port differs from vmo's
  * production port, so no case reaches a vmo running on this machine there; a
@@ -22,6 +24,7 @@ export const TEST_BACKEND_CONFIG = backendConfigSchema.parse({
   settingsFilePath: "/nonexistent/lys-test/settings.json",
   attachmentsDirectoryPath: "/nonexistent/lys-test/attachments",
   mcpProcessGroupsFilePath: "/nonexistent/lys-test/mcp-process-groups",
+  emailServerPath: "/nonexistent/lys-test/runtime/email/email",
   vmoHost: "127.0.0.1",
   vmoPort: 18_080,
   caliginiaSystemPrompt: "Configured Caliginia prompt",

@@ -59,3 +59,59 @@ export const groqApiKeySchema = apiKeyTextSchema.brand<"GroqApiKey">()
 
 /** Groq API key that passed {@link groqApiKeySchema}; a secret. */
 export type GroqApiKey = z.infer<typeof groqApiKeySchema>
+
+/**
+ * Most characters, counted as Unicode code points, an email password may
+ * have, inclusive.
+ *
+ * @remarks The settings file never holds a longer password: the desktop
+ * host checks the same limit, in its own copy of this rule, when it loads
+ * the file. Raising it changes which settings files load and requires a
+ * coordinated desktop and backend release.
+ */
+const MAXIMUM_EMAIL_PASSWORD_LENGTH = 1024
+
+/** Finds a control character (Unicode general category Cc), such as a line break. */
+const CONTROL_CHARACTER_PATTERN = /\p{Cc}/u
+
+/** Finds a lone surrogate: half of a UTF-16 pair without the other half. */
+const LONE_SURROGATE_PATTERN = /\p{Cs}/u
+
+/**
+ * Answers whether a text follows the email password rule: 1 to
+ * {@link MAXIMUM_EMAIL_PASSWORD_LENGTH} code points, no control character,
+ * and no lone surrogate.
+ *
+ * @param value - Text to inspect, as typed.
+ * @returns True when the text is a valid password.
+ */
+function isEmailPassword(value: string): boolean {
+  const length = [...value].length
+
+  return (
+    length >= 1 &&
+    length <= MAXIMUM_EMAIL_PASSWORD_LENGTH &&
+    !CONTROL_CHARACTER_PATTERN.test(value) &&
+    !LONE_SURROGATE_PATTERN.test(value)
+  )
+}
+
+/**
+ * Validates the password, or app password, an email account signs in with,
+ * as the person typed it.
+ *
+ * @remarks Spaces are kept, because some providers show app passwords in
+ * spaced groups and accept them either way; parsing never trims or changes
+ * the password. The output is branded, so a checked password cannot stand
+ * in for other text.
+ */
+export const emailPasswordSchema = z
+  .string()
+  .refine(
+    isEmailPassword,
+    `A password is 1 to ${MAXIMUM_EMAIL_PASSWORD_LENGTH} characters, without line breaks or other control characters.`
+  )
+  .brand<"EmailPassword">()
+
+/** Email password that passed {@link emailPasswordSchema}; a secret. */
+export type EmailPassword = z.infer<typeof emailPasswordSchema>

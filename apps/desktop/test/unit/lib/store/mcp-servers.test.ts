@@ -10,10 +10,13 @@ import {
   type BackendRoutes
 } from "../../support/backendFake"
 import {
+  buildBuiltInMcpServerStatus,
   buildConnectedMcpState,
   buildFailedMcpState,
   buildMcpServerList,
+  buildMcpServerListRoute,
   buildMcpServerNotFoundProblem,
+  buildMcpServerOffProblem,
   buildMcpServerStatus,
   CONNECTING_MCP_STATE
 } from "../../support/mcpFixtures"
@@ -91,6 +94,22 @@ const INVALID_SETTINGS_LIST = buildMcpServerList(
 )
 
 /**
+ * Declared problems the backend refuses a reconnect of `notes` with, each
+ * changing nothing: the server is not applied, or it is switched off or
+ * cannot start.
+ */
+const RECONNECT_REFUSALS = [
+  [
+    "has not applied the server",
+    () => buildJsonResponse(404, buildMcpServerNotFoundProblem("notes"))
+  ],
+  [
+    "says the server is switched off or cannot start",
+    () => buildJsonResponse(409, buildMcpServerOffProblem("notes"))
+  ]
+] as const
+
+/**
  * Builds a route that answers with a server list.
  *
  * @param list - List the backend answers with.
@@ -108,22 +127,6 @@ function answerList(list: McpServerList): BackendRoute {
  */
 function buildLoadedState(list: McpServerList) {
   return { status: "loaded", settings: list.settings, servers: list.servers }
-}
-
-/**
- * Builds a route whose answers follow the given lists, one per request; the
- * last list answers every later request.
- *
- * @param lists - Lists in answer order, at least one.
- * @returns The route.
- */
-function answerListsInOrder(lists: readonly McpServerList[]): BackendRoute {
-  let answered = 0
-  return () => {
-    const list = lists[Math.min(answered, lists.length - 1)]
-    answered += 1
-    return buildJsonResponse(200, list)
-  }
 }
 
 /**
@@ -271,7 +274,7 @@ describe("useMcpServerStore", () => {
 
     it("reads again after a failed read", async () => {
       startMcpBackend({
-        [LIST_ROUTE]: answerListsInOrder([CONNECTED_LIST])
+        [LIST_ROUTE]: buildMcpServerListRoute([CONNECTED_LIST])
       })
       const { useMcpServerStore } = await loadFreshMcpServerStore()
       useMcpServerStore.setState({
@@ -456,21 +459,24 @@ describe("useMcpServerStore", () => {
       }
     )
 
-    it("applies the saved servers when the backend has not applied the server", async () => {
-      const { readRouteKeys } = startMcpBackend({
-        [RECONNECT_NOTES_ROUTE]: () =>
-          buildJsonResponse(404, buildMcpServerNotFoundProblem("notes")),
-        [SYNC_ROUTE]: answerList(CONNECTING_LIST)
-      })
-      const { useMcpServerStore } = await loadFreshMcpServerStore()
+    it.each(RECONNECT_REFUSALS)(
+      "applies the saved servers when the backend %s",
+      async (_label, refusal) => {
+        const { readRouteKeys } = startMcpBackend({
+          [RECONNECT_NOTES_ROUTE]: refusal,
+          [SYNC_ROUTE]: answerList(CONNECTING_LIST)
+        })
+        const { useMcpServerStore } = await loadFreshMcpServerStore()
 
-      await useMcpServerStore.getState().sendMcpServerReconnect("notes")
+        await useMcpServerStore.getState().sendMcpServerReconnect("notes")
 
-      expect(readRouteKeys()).toEqual([RECONNECT_NOTES_ROUTE, SYNC_ROUTE])
-      expect(useMcpServerStore.getState().list).toEqual(
-        buildLoadedState(CONNECTING_LIST)
-      )
-    })
+        expect(readRouteKeys()).toEqual([RECONNECT_NOTES_ROUTE, SYNC_ROUTE])
+        expect(useMcpServerStore.getState().list).toEqual(
+          buildLoadedState(CONNECTING_LIST)
+        )
+        expect(useMcpServerStore.getState().actionFailure).toBeNull()
+      }
+    )
   })
 
   describe("answers out of order", () => {
@@ -620,28 +626,29 @@ describe("useMcpServerStore", () => {
       )
     })
 
-    it("discards a reconnect's not-found answer arriving after the reset, applying nothing", async () => {
-      const reconnectAnswer = createControlledPromise<Response>()
-      const { readRouteKeys } = startMcpBackend({
-        [RECONNECT_NOTES_ROUTE]: () => reconnectAnswer.promise,
-        [SYNC_ROUTE]: answerList(CONNECTED_LIST)
-      })
-      const { useMcpServerStore } = await loadFreshMcpServerStore()
-      const reconnect = useMcpServerStore
-        .getState()
-        .sendMcpServerReconnect("notes")
-      useMcpServerStore.getState().resetMcpServers()
+    it.each(RECONNECT_REFUSALS)(
+      "discards the answer of a reconnect arriving after the reset, applying nothing, when the backend %s",
+      async (_label, refusal) => {
+        const reconnectAnswer = createControlledPromise<Response>()
+        const { readRouteKeys } = startMcpBackend({
+          [RECONNECT_NOTES_ROUTE]: () => reconnectAnswer.promise,
+          [SYNC_ROUTE]: answerList(CONNECTED_LIST)
+        })
+        const { useMcpServerStore } = await loadFreshMcpServerStore()
+        const reconnect = useMcpServerStore
+          .getState()
+          .sendMcpServerReconnect("notes")
+        useMcpServerStore.getState().resetMcpServers()
 
-      reconnectAnswer.resolve(
-        buildJsonResponse(404, buildMcpServerNotFoundProblem("notes"))
-      )
-      await reconnect
-      await waitForMicrotasks()
+        reconnectAnswer.resolve(refusal())
+        await reconnect
+        await waitForMicrotasks()
 
-      expect(readRouteKeys()).toEqual([RECONNECT_NOTES_ROUTE])
-      expect(useMcpServerStore.getState().list).toEqual({ status: "idle" })
-      expect(useMcpServerStore.getState().actionFailure).toBeNull()
-    })
+        expect(readRouteKeys()).toEqual([RECONNECT_NOTES_ROUTE])
+        expect(useMcpServerStore.getState().list).toEqual({ status: "idle" })
+        expect(useMcpServerStore.getState().actionFailure).toBeNull()
+      }
+    )
   })
 
   describe("saveMcpServers", () => {
@@ -661,6 +668,7 @@ describe("useMcpServerStore", () => {
       })
 
       expect(useLysStore.getState().settings.mcp).toEqual({
+        ...STORED_MCP_SETTINGS,
         servers: onlyFiles
       })
       expect(
@@ -690,6 +698,68 @@ describe("useMcpServerStore", () => {
 
       await expect(
         useMcpServerStore.getState().saveMcpServers([])
+      ).resolves.toBe("failed")
+      await waitForMicrotasks()
+
+      expect(backend.requests).toEqual([])
+      expect(useLysStore.getState().settings.mcp).toEqual(STORED_MCP_SETTINGS)
+    })
+  })
+
+  describe("saveBuiltInMcpServerSwitch", () => {
+    /** The stored servers with the email server switched on and starting. */
+    const EMAIL_STARTING_LIST = buildMcpServerList([
+      buildBuiltInMcpServerStatus("email", CONNECTING_MCP_STATE),
+      ...CONNECTED_LIST.servers
+    ])
+
+    it("saves the switch, then asks the running backend to apply the group", async () => {
+      const host = startSettingsHost()
+      const { readRouteKeys } = startMcpBackend({
+        [SYNC_ROUTE]: answerList(EMAIL_STARTING_LIST)
+      })
+      const { useMcpServerStore, useLysStore } = await loadFreshMcpServerStore()
+
+      await expect(
+        useMcpServerStore.getState().saveBuiltInMcpServerSwitch("email", true)
+      ).resolves.toBe("saved")
+      await vi.waitFor(() => {
+        expect(useMcpServerStore.getState().list).toEqual(
+          buildLoadedState(EMAIL_STARTING_LIST)
+        )
+      })
+
+      expect(useLysStore.getState().settings.mcp).toEqual({
+        ...STORED_MCP_SETTINGS,
+        builtIn: { email: { enabled: true } }
+      })
+      expect(
+        host.commands.filter((invoked) => invoked.command === "save_settings")
+      ).toHaveLength(1)
+      expect(readRouteKeys()).toEqual([SYNC_ROUTE])
+    })
+
+    it("asks nothing of a backend that is not running", async () => {
+      startSettingsHost()
+      const { backend } = startMcpBackend({})
+      const { useMcpServerStore } =
+        await loadFreshMcpServerStore(STOPPED_BACKEND)
+
+      await expect(
+        useMcpServerStore.getState().saveBuiltInMcpServerSwitch("email", true)
+      ).resolves.toBe("saved")
+      await waitForMicrotasks()
+
+      expect(backend.requests).toEqual([])
+    })
+
+    it("asks nothing of the backend when the save failed", async () => {
+      startSettingsHost(() => Promise.reject("Disk full"))
+      const { backend } = startMcpBackend({})
+      const { useMcpServerStore, useLysStore } = await loadFreshMcpServerStore()
+
+      await expect(
+        useMcpServerStore.getState().saveBuiltInMcpServerSwitch("email", true)
       ).resolves.toBe("failed")
       await waitForMicrotasks()
 
@@ -793,7 +863,7 @@ describe("registerMcpServerRefresh", () => {
   it("reads the list again each second while a server connects, and stops once none does", async () => {
     useFakeTimersForCase()
     const { backend } = startMcpBackend({
-      [LIST_ROUTE]: answerListsInOrder([
+      [LIST_ROUTE]: buildMcpServerListRoute([
         CONNECTING_LIST,
         CONNECTING_LIST,
         CONNECTED_LIST
@@ -919,7 +989,7 @@ describe("registerMcpServerRefresh", () => {
     startNativeHostFake({ list_tools: () => [] })
     const { readRouteKeys } = startMcpBackend({
       [TOOL_LIST_ROUTE]: () => buildJsonResponse(200, EMPTY_BACKEND_TOOL_LIST),
-      [LIST_ROUTE]: answerListsInOrder([CONNECTED_LIST, MORE_TOOLS_LIST])
+      [LIST_ROUTE]: buildMcpServerListRoute([CONNECTED_LIST, MORE_TOOLS_LIST])
     })
     const { useMcpServerStore, useToolStore } =
       await startRefresh(STOPPED_BACKEND)

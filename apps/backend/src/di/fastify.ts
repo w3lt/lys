@@ -3,6 +3,7 @@ import { type FastifyInstance, type FastifyPluginAsync } from "fastify"
 import type { BackendConfig } from "../config"
 import type { LlmRuntimeFailureReporters } from "../modules/llm/llmRuntimeService"
 import PinoLmStudioSdkLogger from "../modules/llm/runtimes/pinoLmStudioSdkLogger"
+import { handleEmailAccountCheckEvent } from "../modules/mcp/builtIn/email/emailAccountCheckLog"
 import { handleMcpServerEvent } from "../modules/mcp/mcpServerEventLog"
 import type { PageRenderingFailureReporters } from "../modules/tool/builtIn/web/pageRendering"
 import {
@@ -33,8 +34,9 @@ type SingletonServicePluginOptions = {
  * first request already sees every configured server, connecting; the
  * servers connect in the background and never delay listening. The
  * services' failures that no caller observes, the messages of the LM
- * Studio SDK, the MCP servers' events, and the failures to save their
- * process groups file are logged through the application's logger.
+ * Studio SDK, the MCP servers' events, the email account checks, and the
+ * failures to save their process groups file are logged through the
+ * application's logger.
  */
 const singletonPlugin: FastifyPluginAsync<
   SingletonServicePluginOptions
@@ -73,6 +75,9 @@ const singletonPlugin: FastifyPluginAsync<
         { err: failure },
         "The MCP servers' process groups file could not be saved; if the backend is killed, the desktop may not end every MCP server"
       )
+    },
+    reportEmailAccountCheckEvent: (event) => {
+      handleEmailAccountCheckEvent(app.log, event)
     }
   })
 
@@ -124,6 +129,7 @@ function registerSingletonServices(
     "mcpServerProcessGroups",
     singletonServices.mcpServerProcessGroups
   )
+  app.decorate("emailAccountChecker", singletonServices.emailAccountChecker)
   app.decorate("attachmentFileStore", singletonServices.attachmentFileStore)
 }
 

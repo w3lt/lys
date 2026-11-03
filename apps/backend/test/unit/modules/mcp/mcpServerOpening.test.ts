@@ -52,7 +52,8 @@ const SILENT_SERVER_SETTINGS: McpServerSettings = Object.freeze({
   transport: "stdio",
   command: process.execPath,
   arguments: Object.freeze(["-e", SILENT_SERVER_SCRIPT]),
-  environment: Object.freeze([])
+  environment: Object.freeze([]),
+  enabled: true
 })
 
 /**
@@ -104,7 +105,8 @@ function buildScriptServerSettings(
     transport: "stdio",
     command: process.execPath,
     arguments: Object.freeze(["-e", script]),
-    environment: Object.freeze([])
+    environment: Object.freeze([]),
+    enabled: true
   })
 }
 
@@ -128,7 +130,8 @@ const HANDSHAKE_ONLY_SERVER_SETTINGS: McpServerSettings = Object.freeze({
   transport: "stdio",
   command: process.execPath,
   arguments: Object.freeze(["-e", HANDSHAKE_ONLY_SERVER_SCRIPT]),
-  environment: Object.freeze([])
+  environment: Object.freeze([]),
+  enabled: true
 })
 
 /** Settings of a stdio server whose command no folder of `PATH` holds. */
@@ -137,7 +140,8 @@ const MISSING_COMMAND_SETTINGS: McpServerSettings = Object.freeze({
   transport: "stdio",
   command: "lys-test-missing-command-7f3a",
   arguments: Object.freeze([]),
-  environment: Object.freeze([])
+  environment: Object.freeze([]),
+  enabled: true
 })
 
 /**

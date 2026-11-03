@@ -17,18 +17,36 @@ const BYTES_PER_KIBIBYTE = 1024
 export const MAXIMUM_MCP_SERVER_COUNT = 16
 
 /**
- * Most bytes the `mcp` settings group may take, inclusive: the UTF-8 bytes
- * of the group written as compact JSON, with every omitted list filled in.
+ * Most bytes the servers of the `mcp` settings group may take, inclusive:
+ * the UTF-8 bytes of the group written as compact JSON with every omitted
+ * list filled in, but without the switches, each server's `enabled` field
+ * and the `builtIn` object.
  *
  * @remarks Half of {@link MAXIMUM_SETTINGS_FILE_BYTES}, so that the group,
- * the indentation the desktop host adds when it writes the file, and the
- * other groups fit in the file the backend reads. The per-field limits
- * alone allow a group of several mebibytes.
+ * its switches, the indentation the desktop host adds when it writes the
+ * file, and the other groups fit in the file the backend reads. The
+ * switches take a few hundred bytes at most and are left out so that a
+ * group written before they existed measures as it did then. The per-field
+ * limits alone allow a group of several mebibytes.
  */
 export const MAXIMUM_MCP_SETTINGS_BYTES = MAXIMUM_SETTINGS_FILE_BYTES / 2
 
 /** Most characters an MCP server name may have, inclusive. */
 export const MAXIMUM_MCP_SERVER_NAME_LENGTH = 20
+
+/**
+ * Names of the MCP servers Lys ships, in the order Settings lists them:
+ * `email`, the server that reads and sends the person's email.
+ *
+ * @remarks Each has its own switch in the `mcp` settings group's
+ * `builtIn` field and is never counted toward
+ * {@link MAXIMUM_MCP_SERVER_COUNT}. Adding one is a compatibility change
+ * for the settings file and for every consumer that branches on the names.
+ */
+export const BUILT_IN_MCP_SERVER_NAMES = Object.freeze(["email"] as const)
+
+/** Name of one MCP server Lys ships. */
+export type BuiltInMcpServerName = (typeof BUILT_IN_MCP_SERVER_NAMES)[number]
 
 /** Most characters, counted as Unicode code points, of a stdio command. */
 export const MAXIMUM_MCP_COMMAND_LENGTH = 1024
@@ -275,6 +293,13 @@ export const mcpServerTransportSchema = z.enum(["stdio", "http"])
 export type McpServerTransport = z.infer<typeof mcpServerTransportSchema>
 
 /**
+ * Validates the switch of a server the person added: whether Lys connects
+ * to it. An omitted switch is on, so a settings file written before the
+ * switch existed keeps every server on.
+ */
+const mcpServerSwitchSchema = z.boolean().default(true)
+
+/**
  * Validates the settings of a server Lys starts as a command and talks to
  * over its standard input and output. The output is frozen; unknown fields
  * are rejected.
@@ -285,6 +310,8 @@ const mcpStdioServerSettingsSchema = z
     name: mcpServerNameSchema,
     /** Lys starts the server and talks to it over stdio. */
     transport: mcpServerTransportSchema.extract(["stdio"]),
+    /** Whether the server is switched on; omitted means on. */
+    enabled: mcpServerSwitchSchema,
     /** Program to run, found through `PATH` unless it is a path. */
     command: mcpCommandSchema,
     /** Arguments in order; omitted means none. */
@@ -428,6 +455,8 @@ const mcpHttpServerSettingsSchema = z
     name: mcpServerNameSchema,
     /** Lys sends MCP requests to the URL over Streamable HTTP. */
     transport: mcpServerTransportSchema.extract(["http"]),
+    /** Whether the server is switched on; omitted means on. */
+    enabled: mcpServerSwitchSchema,
     /** Endpoint of the server. */
     url: mcpServerUrlSchema,
     /** Headers sent with every request, each name once ignoring case; omitted means none. */
@@ -462,28 +491,80 @@ export type McpServerSettings = z.infer<typeof mcpServerSettingsSchema>
 export type McpServerSettingsCandidate = z.input<typeof mcpServerSettingsSchema>
 
 /**
- * Calculates the bytes a settings group takes as compact JSON.
+ * Leaves each server's switch out of the JSON text that
+ * {@link calculateServersBytesWithoutSwitches} measures.
  *
- * @param group - Parsed group, free of lone surrogates.
- * @returns The UTF-8 bytes of its JSON text without indentation, which the
- * desktop host measures alike.
+ * @param key - Name of the property being written, or index of the item.
+ * @param value - Value being written.
+ * @returns `undefined`, which leaves the property out, for an `enabled`
+ * property, the only property of that name a server holds; the value
+ * otherwise.
  */
-function calculateCompactJsonBytes(group: unknown): number {
-  return calculateUtf8ByteLength(JSON.stringify(group))
+function omitServerSwitch(key: string, value: unknown): unknown {
+  return key === "enabled" ? undefined : value
 }
 
 /**
- * Validates the `mcp` settings group: the MCP servers Lys connects to, each
- * name once, in the order Settings lists them, taking at most
- * {@link MAXIMUM_MCP_SETTINGS_BYTES} together. The output is frozen;
+ * Calculates the bytes {@link MAXIMUM_MCP_SETTINGS_BYTES} counts: the
+ * group's servers as `{"servers":[…]}` in compact JSON, without each
+ * server's `enabled` switch.
+ *
+ * @param servers - Parsed servers, every list filled in, free of lone
+ * surrogates.
+ * @returns The UTF-8 bytes of the JSON text, which the desktop host
+ * measures alike.
+ */
+function calculateServersBytesWithoutSwitches(
+  servers: readonly McpServerSettings[]
+): number {
+  return calculateUtf8ByteLength(JSON.stringify({ servers }, omitServerSwitch))
+}
+
+/**
+ * Validates the switch of one MCP server Lys ships. The output is frozen;
  * unknown fields are rejected.
  *
- * @remarks An omitted list means no server. The desktop host is the only
- * writer of the group; the backend only reads it.
+ * @remarks An omitted switch is off: a built-in server runs only once the
+ * person switched it on.
+ */
+const builtInMcpServerSettingsSchema = z
+  .strictObject({
+    /** Whether Lys starts the server; omitted means off. */
+    enabled: z.boolean().default(false)
+  })
+  .readonly()
+
+/**
+ * Validates the switches of the MCP servers Lys ships, one field per name
+ * in {@link BUILT_IN_MCP_SERVER_NAMES}. The output is frozen; unknown
+ * fields are rejected.
+ *
+ * @remarks An omitted server is off.
+ */
+const builtInMcpSettingsSchema = z
+  .strictObject({
+    /** The email server's switch. */
+    email: builtInMcpServerSettingsSchema.prefault({})
+  })
+  .readonly()
+
+/** Switches of the MCP servers Lys ships. */
+export type BuiltInMcpSettings = z.infer<typeof builtInMcpSettingsSchema>
+
+/**
+ * Validates the `mcp` settings group: the MCP servers the person added,
+ * each name once, in the order Settings lists them, taking at most
+ * {@link MAXIMUM_MCP_SETTINGS_BYTES} together, not counting their switches,
+ * and the switches of the servers Lys ships. The output is frozen; unknown
+ * fields are rejected.
+ *
+ * @remarks An omitted list means no added server, and omitted switches
+ * mean every built-in server off. The desktop host is the only writer of
+ * the group; the backend only reads it.
  */
 export const mcpSettingsSchema = z
   .strictObject({
-    /** Servers in list order. */
+    /** Servers the person added, in list order. */
     servers: z
       .array(mcpServerSettingsSchema)
       .max(MAXIMUM_MCP_SERVER_COUNT)
@@ -492,16 +573,23 @@ export const mcpSettingsSchema = z
         "Each MCP server has its own name."
       )
       .default([])
-      .readonly()
+      .readonly(),
+    /** Switches of the servers Lys ships. */
+    builtIn: builtInMcpSettingsSchema.prefault({})
   })
   .refine(
-    (group) => calculateCompactJsonBytes(group) <= MAXIMUM_MCP_SETTINGS_BYTES,
+    (group) =>
+      calculateServersBytesWithoutSwitches(group.servers) <=
+      MAXIMUM_MCP_SETTINGS_BYTES,
     `The MCP servers take at most ${MAXIMUM_MCP_SETTINGS_BYTES / BYTES_PER_KIBIBYTE} KiB of settings together.`
   )
   .readonly()
 
 /** The `mcp` settings group. */
 export type McpSettings = z.infer<typeof mcpSettingsSchema>
+
+/** The `mcp` settings group before validation, its omitted parts allowed. */
+export type McpSettingsCandidate = z.input<typeof mcpSettingsSchema>
 
 /** Start of every name the model calls an MCP tool by. */
 export const MCP_TOOL_NAME_PREFIX = "mcp__"

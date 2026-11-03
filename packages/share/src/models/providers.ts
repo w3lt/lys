@@ -1,25 +1,11 @@
 import * as z from "zod"
+import { isHostName, MAXIMUM_TCP_PORT } from "./hostName"
 
 /**
  * Most characters a provider address may have, inclusive: a 253-character
  * host name, a colon, and a five-digit port.
  */
 const MAXIMUM_PROVIDER_ADDRESS_LENGTH = 259
-
-/** Highest TCP port number, inclusive. */
-const MAXIMUM_TCP_PORT = 65_535
-
-/** Most characters one host name label may have, inclusive. */
-const MAXIMUM_HOST_LABEL_LENGTH = 63
-
-/** Most characters a host name may have, inclusive. */
-const MAXIMUM_HOST_NAME_LENGTH = 253
-
-/**
- * Finds one host name label: letters, digits, and inner hyphens, which also
- * covers each part of a dotted IPv4 address.
- */
-const HOST_LABEL_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/
 
 /** Finds a decimal port without a leading zero. */
 const PORT_PATTERN = /^[1-9]\d{0,4}$/
@@ -62,23 +48,6 @@ function isProviderAddress(value: string): boolean {
   const host = value.slice(0, separator)
   const port = value.slice(separator + 1)
   return isHostName(host) && isTcpPort(port)
-}
-
-/**
- * Answers whether a text is a host name under the provider address rule.
- *
- * @param host - Host part of an address.
- * @returns True for 1 to 253 characters of valid labels separated by dots.
- */
-function isHostName(host: string): boolean {
-  if (host.length > MAXIMUM_HOST_NAME_LENGTH) return false
-  return host
-    .split(".")
-    .every(
-      (label) =>
-        label.length <= MAXIMUM_HOST_LABEL_LENGTH &&
-        HOST_LABEL_PATTERN.test(label)
-    )
 }
 
 /**

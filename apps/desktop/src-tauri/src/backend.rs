@@ -5,7 +5,10 @@
 //! dev` script; release builds start the installed Node.js runtime from the
 //! Lys home. Either child runs in its own Unix process group so shutdown can
 //! terminate it and its descendants together while the direct child is still
-//! running, and receives the host's resolved Lys home as `LYS_HOME`.
+//! running, and receives the host's resolved Lys home as `LYS_HOME` and the
+//! email MCP server it may start as `LYS_EMAIL_SERVER_PATH`: the workspace
+//! build under `mcps/email` in development, the installed one under the Lys
+//! home in release builds.
 //!
 //! A stop sends `SIGTERM` to that group first and gives it up to
 //! [`BACKEND_STOP_TIMEOUT`] to end: on `SIGTERM` the backend ends the process
@@ -534,22 +537,64 @@ fn get_backend_dir() -> Result<PathBuf, String> {
         .join("backend"))
 }
 
+/// Returns the workspace build of the email MCP server that development
+/// builds name to the backend: `mcps/email/target/debug/email` in the
+/// repository that holds this crate, which
+/// `cargo build --manifest-path mcps/email/Cargo.toml --target-dir mcps/email/target`
+/// produces from the repository root, whatever `CARGO_TARGET_DIR` says.
+///
+/// The file is not required to exist: the backend reports a missing server
+/// when it starts it or checks an account with it.
+///
+/// # Errors
+///
+/// Returns an error if the manifest path does not have the expected parent
+/// structure.
+fn get_dev_email_server_path() -> Result<PathBuf, String> {
+    Ok(Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .ok_or_else(|| String::from("Failed to resolve the repository directory"))?
+        .join("mcps/email/target/debug/email"))
+}
+
+/// Builds the command of the backend development script: `pnpm run dev`
+/// launched from `backend_dir` in its own Unix process group, with
+/// `LYS_HOME` set to `lys_home` so the backend uses the host's Lys home, and
+/// `LYS_EMAIL_SERVER_PATH` set to `email_server_path`.
+fn build_backend_dev_script_command(
+    backend_dir: &Path,
+    lys_home: &LysHome,
+    email_server_path: &Path,
+) -> Command {
+    let mut command = Command::new("pnpm");
+    command
+        .args(["run", "dev"])
+        .current_dir(backend_dir)
+        .env("LYS_HOME", lys_home.as_path())
+        .env("LYS_EMAIL_SERVER_PATH", email_server_path)
+        .process_group(0);
+
+    command
+}
+
 /// Starts the backend development script in its own Unix process group.
 ///
-/// The direct child is the `pnpm run dev` process launched from `backend_dir`,
-/// with `LYS_HOME` set to `lys_home` so the backend uses the host's Lys home.
-/// The caller stores that child in [`Backend`] and, while it is still running,
-/// later waits for it after killing the process group.
+/// The direct child is the `pnpm run dev` process that
+/// [`build_backend_dev_script_command`] describes. The caller stores that
+/// child in [`Backend`] and, while it is still running, later waits for it
+/// after killing the process group.
 ///
 /// # Errors
 ///
 /// Returns an error when the script cannot be spawned.
-fn run_backend_dev_script(backend_dir: &Path, lys_home: &LysHome) -> Result<Child, String> {
-    Command::new("pnpm")
-        .args(["run", "dev"])
-        .current_dir(backend_dir)
-        .env("LYS_HOME", lys_home.as_path())
-        .process_group(0)
+fn run_backend_dev_script(
+    backend_dir: &Path,
+    lys_home: &LysHome,
+    email_server_path: &Path,
+) -> Result<Child, String> {
+    build_backend_dev_script_command(backend_dir, lys_home, email_server_path)
         .spawn()
         .map_err(|err| format!("Failed to spawn backend process: {err}"))
 }
@@ -557,22 +602,25 @@ fn run_backend_dev_script(backend_dir: &Path, lys_home: &LysHome) -> Result<Chil
 /// Starts the development backend script and stores it as the owned child.
 ///
 /// The script runs from the repository's backend directory with `LYS_HOME`
-/// set to `lys_home`. Locking occurs before spawning so a successfully created
-/// child can always be stored, and the MCP server process group list an
-/// earlier backend left is deleted under that lock before the spawn; the
+/// set to `lys_home` and `LYS_EMAIL_SERVER_PATH` set to the workspace build of
+/// the email MCP server. Locking occurs before spawning so a successfully
+/// created child can always be stored, and the MCP server process group list
+/// an earlier backend left is deleted under that lock before the spawn; the
 /// returned status comes from a non-blocking inspection of the stored child.
 ///
 /// # Errors
 ///
-/// Returns an error when the backend directory cannot be resolved, process
-/// state cannot be locked, an earlier backend's MCP server process group list
-/// cannot be deleted, the script cannot be spawned, or the child cannot be
-/// inspected; nothing is started after a failed deletion.
+/// Returns an error when the backend directory or the email server path
+/// cannot be resolved, process state cannot be locked, an earlier backend's
+/// MCP server process group list cannot be deleted, the script cannot be
+/// spawned, or the child cannot be inspected; nothing is started after a
+/// failed deletion.
 fn spawn_dev_backend_process(
     backend: &Backend,
     lys_home: &LysHome,
 ) -> Result<BackendProcessStatus, String> {
     let backend_dir = get_backend_dir()?;
+    let email_server_path = get_dev_email_server_path()?;
 
     // Lock before spawning so we never create a process that we cannot store.
     let mut process = backend
@@ -584,7 +632,7 @@ fn spawn_dev_backend_process(
     // groups that are not its servers'.
     delete_mcp_process_group_list(&backend.mcp_process_groups_path)?;
 
-    let backend_process = run_backend_dev_script(&backend_dir, lys_home)?;
+    let backend_process = run_backend_dev_script(&backend_dir, lys_home, &email_server_path)?;
 
     *process = Some(backend_process);
 
@@ -595,13 +643,15 @@ fn spawn_dev_backend_process(
 /// Starts the installed release backend and stores it as the owned child.
 ///
 /// Runs the Node.js executable from the Lys home's runtime directory with the
-/// installed backend bundle, in its own Unix process group and with `LYS_HOME`
-/// set to `lys_home`. Locking occurs before spawning so a successfully created
-/// child can always be stored, and the MCP server process group list an
-/// earlier backend left is deleted under that lock before the spawn; the
+/// installed backend bundle, in its own Unix process group, with `LYS_HOME`
+/// set to `lys_home` and `LYS_EMAIL_SERVER_PATH` set to the email MCP server
+/// installed under it. Locking occurs before spawning so a successfully
+/// created child can always be stored, and the MCP server process group list
+/// an earlier backend left is deleted under that lock before the spawn; the
 /// returned status comes from a non-blocking inspection of the stored child. A
-/// missing backend bundle is not detected here: Node.js starts, reports the
-/// missing file, and exits.
+/// missing backend bundle or email server is not detected here: Node.js
+/// starts, reports the missing bundle, and exits, and the backend reports a
+/// missing email server when it needs it.
 ///
 /// # Errors
 ///
@@ -630,6 +680,7 @@ fn spawn_prod_backend_process(
     let backend_process = Command::new(node_executable_path)
         .arg(backend_script_path)
         .env("LYS_HOME", lys_home.as_path())
+        .env("LYS_EMAIL_SERVER_PATH", lys_home.email_executable_path())
         .process_group(0)
         .spawn()
         .map_err(|err| format!("Failed to start backend: {err}"))?;
@@ -644,17 +695,18 @@ fn spawn_prod_backend_process(
 ///
 /// Development builds run the repository's `pnpm run dev` script; release
 /// builds run the installed runtime from the Lys home. Either child receives
-/// `lys_home` as `LYS_HOME`. Locking occurs before spawning so a successfully
+/// `lys_home` as `LYS_HOME` and its build's email MCP server as
+/// `LYS_EMAIL_SERVER_PATH`. Locking occurs before spawning so a successfully
 /// created child can always be stored by this owner, and the MCP server
 /// process group list an earlier backend left is deleted first. The returned
 /// status is obtained with a non-blocking inspection of the stored child.
 ///
 /// # Errors
 ///
-/// Returns an error when the development backend directory cannot be resolved,
-/// process state cannot be locked, an earlier backend's MCP server process
-/// group list cannot be deleted, the child cannot be spawned, or the child
-/// cannot be inspected.
+/// Returns an error when the development backend directory or the
+/// development email server path cannot be resolved, process state cannot be
+/// locked, an earlier backend's MCP server process group list cannot be
+/// deleted, the child cannot be spawned, or the child cannot be inspected.
 fn spawn_backend_process(
     backend: &Backend,
     lys_home: &LysHome,
@@ -679,8 +731,9 @@ fn spawn_backend_process(
 /// # Errors
 ///
 /// Returns an error when status inspection, process-state locking, development
-/// backend directory resolution, deleting an earlier backend's MCP server
-/// process group list, spawning, or post-spawn inspection fails.
+/// backend directory or email server path resolution, deleting an earlier
+/// backend's MCP server process group list, spawning, or post-spawn
+/// inspection fails.
 pub fn start_backend(
     backend: State<'_, Backend>,
     lys_home: State<'_, LysHome>,
@@ -738,6 +791,8 @@ pub fn get_backend_status(backend: State<'_, Backend>) -> Result<BackendProcessS
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::BTreeMap,
+        ffi::OsStr,
         fs,
         os::unix::{fs::PermissionsExt, process::ExitStatusExt},
         path::{Path, PathBuf},
@@ -753,8 +808,9 @@ mod tests {
     };
 
     use super::{
-        delete_mcp_process_group_list, format_list_line_problems, parse_mcp_server_group,
-        spawn_prod_backend_process, Backend, CommandExt, LIST_LINE_PROBLEM_LIMIT,
+        build_backend_dev_script_command, delete_mcp_process_group_list, format_list_line_problems,
+        get_dev_email_server_path, parse_mcp_server_group, spawn_prod_backend_process, Backend,
+        CommandExt, LIST_LINE_PROBLEM_LIMIT,
     };
     use crate::{tools::test_directory::TestDirectory, utils::lys_home::LysHome};
 
@@ -966,12 +1022,13 @@ mod tests {
 
     /// Creates, under the Lys home `case`, a stand-in for the release Node.js
     /// executable that writes `node-saw-no-list` there when it starts while
-    /// the MCP server process group list does not exist, and exits.
+    /// the MCP server process group list does not exist, writes the email
+    /// server path it received to `node-saw-email-server-path`, and exits.
     fn create_node_stand_in(case: &TestDirectory) {
         let node = case.create_file(
             "runtime/node/bin/node",
             format!(
-                "#!/bin/sh\n[ -e \"$LYS_HOME/{MCP_PROCESS_GROUPS_FILE}\" ] || : > \"$LYS_HOME/node-saw-no-list\"\n"
+                "#!/bin/sh\n[ -e \"$LYS_HOME/{MCP_PROCESS_GROUPS_FILE}\" ] || : > \"$LYS_HOME/node-saw-no-list\"\nprintf '%s' \"$LYS_EMAIL_SERVER_PATH\" > \"$LYS_HOME/node-saw-email-server-path\"\n"
             ),
         );
         fs::set_permissions(node, fs::Permissions::from_mode(0o755))
@@ -1293,6 +1350,70 @@ mod tests {
             case.path().join("node-saw-no-list").exists()
         });
         assert!(!lys_home.mcp_process_groups_path().exists());
+    }
+
+    #[test]
+    fn a_start_names_the_installed_email_server_to_the_backend() {
+        let case = TestDirectory::create("backend-start-email-server");
+        let lys_home = LysHome::from_test_directory(case.path());
+        create_node_stand_in(&case);
+        let backend = Backend::new(lys_home.mcp_process_groups_path());
+        let _stop = BackendStopGuard(&backend);
+
+        spawn_prod_backend_process(&backend, &lys_home).unwrap();
+
+        let seen_path = case.path().join("node-saw-email-server-path");
+        wait_for_condition("the started backend saw the email server path", || {
+            fs::read_to_string(&seen_path).is_ok_and(|path| !path.is_empty())
+        });
+        assert_eq!(
+            fs::read_to_string(&seen_path).unwrap(),
+            case.path().join("runtime/email/email").to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn the_development_email_server_is_the_workspace_build() {
+        let path = get_dev_email_server_path().unwrap();
+
+        assert!(path.is_absolute(), "{path:?}");
+        assert!(path.ends_with("mcps/email/target/debug/email"), "{path:?}");
+        let email_crate_dir = path.ancestors().nth(3).unwrap();
+        assert!(
+            email_crate_dir.join("Cargo.toml").is_file(),
+            "{email_crate_dir:?}"
+        );
+    }
+
+    #[test]
+    fn the_development_command_runs_the_backend_script_with_the_lys_home_and_the_email_server() {
+        let lys_home = LysHome::from_test_directory(Path::new("/home/person/.lys"));
+
+        let command = build_backend_dev_script_command(
+            Path::new("/repository/apps/backend"),
+            &lys_home,
+            Path::new("/repository/mcps/email/target/debug/email"),
+        );
+
+        assert_eq!(command.get_program(), "pnpm");
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["run", "dev"]);
+        assert_eq!(
+            command.get_current_dir(),
+            Some(Path::new("/repository/apps/backend"))
+        );
+        assert_eq!(
+            command.get_envs().collect::<BTreeMap<_, _>>(),
+            BTreeMap::from([
+                (
+                    OsStr::new("LYS_EMAIL_SERVER_PATH"),
+                    Some(OsStr::new("/repository/mcps/email/target/debug/email"))
+                ),
+                (
+                    OsStr::new("LYS_HOME"),
+                    Some(OsStr::new("/home/person/.lys"))
+                ),
+            ])
+        );
     }
 
     #[test]

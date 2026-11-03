@@ -4,7 +4,12 @@
     "group": {},
     "accepted": true,
     "written": {
-      "servers": []
+      "servers": [],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -14,7 +19,12 @@
     },
     "accepted": true,
     "written": {
-      "servers": []
+      "servers": [],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -155,114 +165,135 @@
           "environment": [],
           "name": "s1",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "arguments": [],
           "environment": [],
           "name": "s2",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "arguments": [],
           "environment": [],
           "name": "s3",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "arguments": [],
           "environment": [],
           "name": "s4",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "arguments": [],
           "environment": [],
           "name": "s5",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "arguments": [],
           "environment": [],
           "name": "s6",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "arguments": [],
           "environment": [],
           "name": "s7",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "arguments": [],
           "environment": [],
           "name": "s8",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "arguments": [],
           "environment": [],
           "name": "s9",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "arguments": [],
           "environment": [],
           "name": "s10",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "arguments": [],
           "environment": [],
           "name": "s11",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "arguments": [],
           "environment": [],
           "name": "s12",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "arguments": [],
           "environment": [],
           "name": "s13",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "arguments": [],
           "environment": [],
           "name": "s14",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "arguments": [],
           "environment": [],
           "name": "s15",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "arguments": [],
           "environment": [],
           "name": "s16",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -418,7 +449,8 @@
           ],
           "name": "files",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         },
         {
           "headers": [
@@ -429,9 +461,15 @@
           ],
           "name": "docs",
           "transport": "http",
-          "url": "https://mcp.example.com/mcp"
+          "url": "https://mcp.example.com/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -474,9 +512,15 @@
           "environment": [],
           "name": "aaaaaaaaaaaaaaaaaaaa",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -511,9 +555,15 @@
           "environment": [],
           "name": "123",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -535,9 +585,15 @@
           "environment": [],
           "name": "a-1-b2",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -771,7 +827,7 @@
           "name": "files",
           "transport": "stdio",
           "command": "npx",
-          "enabled": true
+          "timeoutSeconds": 30
         }
       ]
     },
@@ -820,9 +876,15 @@
           "environment": [],
           "name": "files",
           "transport": "stdio",
-          "command": "x"
+          "command": "x",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -844,9 +906,15 @@
           "environment": [],
           "name": "files",
           "transport": "stdio",
-          "command": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          "command": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -881,9 +949,15 @@
           "environment": [],
           "name": "files",
           "transport": "stdio",
-          "command": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"
+          "command": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -931,9 +1005,15 @@
           "environment": [],
           "name": "files",
           "transport": "stdio",
-          "command": "/Applications/My App/bin/server"
+          "command": "/Applications/My App/bin/server",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -955,9 +1035,15 @@
           "environment": [],
           "name": "files",
           "transport": "stdio",
-          "command": "my server"
+          "command": "my server",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -979,9 +1065,15 @@
           "environment": [],
           "name": "files",
           "transport": "stdio",
-          "command": "my server"
+          "command": "my server",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -1277,9 +1369,15 @@
           "environment": [],
           "name": "files",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -1386,9 +1484,15 @@
           "environment": [],
           "name": "files",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -1441,9 +1545,15 @@
           "environment": [],
           "name": "files",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -1466,9 +1576,15 @@
           "environment": [],
           "name": "files",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -1819,9 +1935,15 @@
           ],
           "name": "files",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2001,9 +2123,15 @@
           ],
           "name": "files",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2063,9 +2191,15 @@
           ],
           "name": "files",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2224,9 +2358,15 @@
           ],
           "name": "files",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2259,9 +2399,15 @@
           ],
           "name": "files",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2313,9 +2459,15 @@
           ],
           "name": "files",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2348,9 +2500,15 @@
           ],
           "name": "files",
           "transport": "stdio",
-          "command": "npx"
+          "command": "npx",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2475,9 +2633,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://mcp.example.com:8443/mcp?team=lys"
+          "url": "https://mcp.example.com:8443/mcp?team=lys",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2498,9 +2662,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "http://localhost:3000/mcp"
+          "url": "http://localhost:3000/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2521,9 +2691,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "http://127.0.0.1:8080/mcp"
+          "url": "http://127.0.0.1:8080/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2544,9 +2720,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "http://[::1]:8080/mcp"
+          "url": "http://[::1]:8080/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2567,9 +2749,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "HTTP://LOCALHOST/mcp"
+          "url": "HTTP://LOCALHOST/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2590,9 +2778,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "http://127.1/mcp"
+          "url": "http://127.1/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2613,9 +2807,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "http://0x7f000001/mcp"
+          "url": "http://0x7f000001/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2636,9 +2836,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "http://127.0.0.1./mcp"
+          "url": "http://127.0.0.1./mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2659,9 +2865,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "http://%6c%6fcalhost/mcp"
+          "url": "http://%6c%6fcalhost/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2682,9 +2894,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "http:\\\\localhost\\mcp"
+          "url": "http:\\\\localhost\\mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2809,9 +3027,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://@mcp.example.com/mcp"
+          "url": "https://@mcp.example.com/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -2858,9 +3082,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://mcp.example.com/ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp😀"
+          "url": "https://mcp.example.com/ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp😀",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3011,9 +3241,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https:///mcp"
+          "url": "https:///mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3073,9 +3309,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://bücher.example/mcp"
+          "url": "https://bücher.example/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3096,9 +3338,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://xn--bcher-kva.example/mcp"
+          "url": "https://xn--bcher-kva.example/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3119,9 +3367,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://XN--BCHER-KVA.example/mcp"
+          "url": "https://XN--BCHER-KVA.example/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3142,9 +3396,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://MCP.XN--9CA.COM/mcp"
+          "url": "https://MCP.XN--9CA.COM/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3165,9 +3425,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://Bücher.EXAMPLE/mcp"
+          "url": "https://Bücher.EXAMPLE/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3188,9 +3454,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://mcp-2.bü-3cher.example/mcp"
+          "url": "https://mcp-2.bü-3cher.example/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3211,9 +3483,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://zażółć.gęślą.example/mcp"
+          "url": "https://zażółć.gęślą.example/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3234,9 +3512,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://παράδειγμα.δοκιμή/mcp"
+          "url": "https://παράδειγμα.δοκιμή/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3257,9 +3541,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://пример.рф/mcp"
+          "url": "https://пример.рф/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3280,9 +3570,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://例子.测试/mcp"
+          "url": "https://例子.测试/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3303,9 +3599,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://サーバー.例え.テスト/mcp"
+          "url": "https://サーバー.例え.テスト/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3326,9 +3628,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://실례.테스트/mcp"
+          "url": "https://실례.테스트/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3349,9 +3657,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://bücher.example:8443/mcp?region=eu"
+          "url": "https://bücher.example:8443/mcp?region=eu",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3372,9 +3686,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https:///bücher.example/mcp"
+          "url": "https:///bücher.example/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3395,9 +3715,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaü.example/mcp"
+          "url": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaü.example/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3860,9 +4186,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://mcp.axn--b.com/mcp"
+          "url": "https://mcp.axn--b.com/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -3883,9 +4215,15 @@
           "headers": [],
           "name": "docs",
           "transport": "http",
-          "url": "https://mcp.example.com/café"
+          "url": "https://mcp.example.com/café",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -4165,9 +4503,15 @@
           ],
           "name": "docs",
           "transport": "http",
-          "url": "https://mcp.example.com/mcp"
+          "url": "https://mcp.example.com/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -4346,9 +4690,15 @@
           ],
           "name": "docs",
           "transport": "http",
-          "url": "https://mcp.example.com/mcp"
+          "url": "https://mcp.example.com/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -4399,9 +4749,15 @@
           ],
           "name": "docs",
           "transport": "http",
-          "url": "https://mcp.example.com/mcp"
+          "url": "https://mcp.example.com/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -4718,9 +5074,15 @@
           ],
           "name": "docs",
           "transport": "http",
-          "url": "https://mcp.example.com/mcp"
+          "url": "https://mcp.example.com/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -4775,9 +5137,15 @@
           ],
           "name": "docs",
           "transport": "http",
-          "url": "https://mcp.example.com/mcp"
+          "url": "https://mcp.example.com/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -4828,9 +5196,15 @@
           ],
           "name": "docs",
           "transport": "http",
-          "url": "https://mcp.example.com/mcp"
+          "url": "https://mcp.example.com/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -4862,9 +5236,15 @@
           ],
           "name": "docs",
           "transport": "http",
-          "url": "https://mcp.example.com/mcp"
+          "url": "https://mcp.example.com/mcp",
+          "enabled": true
         }
-      ]
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
     }
   },
   {
@@ -5062,6 +5442,246 @@
           "headers": null
         }
       ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server switched off",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "enabled": false
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "arguments": [],
+          "environment": [],
+          "enabled": false
+        }
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
+    }
+  },
+  {
+    "case": "a remote server switched off",
+    "group": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "enabled": false
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "name": "docs",
+          "transport": "http",
+          "url": "https://mcp.example.com/mcp",
+          "headers": [],
+          "enabled": false
+        }
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
+    }
+  },
+  {
+    "case": "a server whose switch is not a boolean",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "enabled": "yes"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server whose switch is null",
+    "group": {
+      "servers": [
+        {
+          "name": "files",
+          "transport": "stdio",
+          "command": "npx",
+          "enabled": null
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an added server with a built-in server's name",
+    "group": {
+      "servers": [
+        {
+          "name": "email",
+          "transport": "stdio",
+          "command": "npx"
+        }
+      ]
+    },
+    "accepted": true,
+    "written": {
+      "servers": [
+        {
+          "name": "email",
+          "transport": "stdio",
+          "command": "npx",
+          "arguments": [],
+          "environment": [],
+          "enabled": true
+        }
+      ],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
+    }
+  },
+  {
+    "case": "the built-in email server switched on",
+    "group": {
+      "servers": [],
+      "builtIn": {
+        "email": {
+          "enabled": true
+        }
+      }
+    },
+    "accepted": true,
+    "written": {
+      "servers": [],
+      "builtIn": {
+        "email": {
+          "enabled": true
+        }
+      }
+    }
+  },
+  {
+    "case": "the built-in email server switched off",
+    "group": {
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
+    },
+    "accepted": true,
+    "written": {
+      "servers": [],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
+    }
+  },
+  {
+    "case": "built-in switches without the email server",
+    "group": {
+      "builtIn": {}
+    },
+    "accepted": true,
+    "written": {
+      "servers": [],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
+    }
+  },
+  {
+    "case": "a built-in switch without a value",
+    "group": {
+      "builtIn": {
+        "email": {}
+      }
+    },
+    "accepted": true,
+    "written": {
+      "servers": [],
+      "builtIn": {
+        "email": {
+          "enabled": false
+        }
+      }
+    }
+  },
+  {
+    "case": "a built-in switch that is not a boolean",
+    "group": {
+      "builtIn": {
+        "email": {
+          "enabled": 1
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a built-in switch with an unknown field",
+    "group": {
+      "builtIn": {
+        "email": {
+          "enabled": true,
+          "port": 1
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a switch for an unknown built-in server",
+    "group": {
+      "builtIn": {
+        "calendar": {
+          "enabled": true
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "null built-in switches",
+    "group": {
+      "builtIn": null
+    },
+    "accepted": false
+  },
+  {
+    "case": "a null built-in switch",
+    "group": {
+      "builtIn": {
+        "email": null
+      }
     },
     "accepted": false
   }

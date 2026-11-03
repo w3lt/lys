@@ -261,7 +261,8 @@ describe("McpServerConnection over stdio", () => {
       transport: "stdio",
       command: join(tmpdir(), "lys-test-missing-command"),
       arguments: Object.freeze(["--token", "synthetic-argument-0123"]),
-      environment: Object.freeze([])
+      environment: Object.freeze([]),
+      enabled: true
     } as const)
 
     const rejection = await captureRejection(

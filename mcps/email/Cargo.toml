@@ -1,0 +1,49 @@
+[package]
+name = "email"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-imap = { version = "0.12.0", default-features = false, features = [
+  "runtime-tokio",
+] }
+futures-util = { version = "0.3.34", default-features = false, features = [
+  "std",
+] }
+lettre = { version = "0.11.23", default-features = false, features = [
+  "smtp-transport",
+  "builder",
+  "tokio1",
+  "tokio1-rustls",
+  "ring",
+  "rustls-platform-verifier",
+] }
+mail-parser = "1.0.1"
+rmcp = { version = "3.8.0", features = [
+  "server",
+  "macros",
+  "transport-io",
+  "schemars",
+] }
+rustls-platform-verifier = "0.7.1"
+schemars = "1.2.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = [
+  "rt-multi-thread",
+  "macros",
+  "net",
+  "io-util",
+  "time",
+  "sync",
+] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = [
+  "ring",
+  "tls12",
+  "logging",
+] }
+tokio-util = "0.7.20"
+
+[dev-dependencies]
+base64 = "0.23.1"
+rcgen = "0.14.10"

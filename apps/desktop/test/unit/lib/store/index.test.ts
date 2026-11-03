@@ -253,7 +253,8 @@ describe("useLysStore", () => {
     expect(useLysStore.getState().settings.secrets).toEqual({
       tavilyApiKey: null,
       ollamaApiKey: null,
-      groqApiKey: null
+      groqApiKey: null,
+      emailPassword: null
     })
     expect(useLysStore.getState().settings.providers).toEqual({
       active: "lmStudio",

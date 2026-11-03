@@ -1,5 +1,11 @@
-import { mcpServerSettingsSchema } from "@lys/share"
+import {
+  emailAccountSchema,
+  emailPasswordSchema,
+  mcpServerSettingsSchema
+} from "@lys/share"
+import { readFileSync } from "node:fs"
 import { describe, expect, it, vi } from "vitest"
+import * as z from "zod"
 import type { EmailAccountRead } from "../../../../../../src/infrastructure/settings/emailAccountFile"
 import {
   buildEmailServerCommand,
@@ -21,28 +27,52 @@ const INSTALLED_COMMAND = buildEmailServerCommand(
   "/opt/lys/runtime/email/email"
 )
 
+/** The variable that holds the account and its password. */
+const EXPECTED_VARIABLE = Object.freeze({
+  name: EMAIL_ACCOUNT_VARIABLE_NAME,
+  value: formatEmailAccountVariable(ACCOUNT, SYNTHETIC_EMAIL_PASSWORD)
+})
+
 /** Settings the installed server starts with for the account. */
 const EXPECTED_SETTINGS = mcpServerSettingsSchema.parse({
   name: "email",
   transport: "stdio",
   command: "/opt/lys/runtime/email/email",
   arguments: [],
-  environment: [
-    {
-      name: EMAIL_ACCOUNT_VARIABLE_NAME,
-      value: JSON.stringify({
-        address: "accepted@example.com",
-        displayName: "Test Person",
-        userName: "accepted@example.com",
-        password: SYNTHETIC_EMAIL_PASSWORD,
-        imap: { host: "imap.example.com", port: 993, security: "tls" },
-        smtp: { host: "smtp.example.com", port: 465, security: "tls" },
-        serverKeepsSentCopy: false
-      })
-    }
-  ],
+  environment: [EXPECTED_VARIABLE],
   enabled: true
 })
+
+/**
+ * Validates one case of the account variables shared with the email
+ * server's tests: an account, its password, and the JSON the variable
+ * holds for them.
+ */
+const sharedAccountVariableCaseSchema = z.strictObject({
+  case: z.string(),
+  account: emailAccountSchema,
+  password: emailPasswordSchema,
+  variable: z.record(z.string(), z.unknown())
+})
+
+/**
+ * Accounts with the value of `LYS_EMAIL_ACCOUNT` the backend writes for
+ * each, which the email server's tests in `mcps/email/src/account.rs`
+ * parse.
+ */
+const SHARED_ACCOUNT_VARIABLE_CASES = z
+  .array(sharedAccountVariableCaseSchema)
+  .parse(
+    JSON.parse(
+      readFileSync(
+        new URL(
+          "../../../../../../../../packages/share/test/fixtures/email-account-variables.json",
+          import.meta.url
+        ),
+        "utf8"
+      )
+    )
+  )
 
 describe("buildEmailServerCommand", () => {
   it("runs the installed server without arguments", () => {
@@ -55,20 +85,15 @@ describe("buildEmailServerCommand", () => {
 })
 
 describe("formatEmailAccountVariable", () => {
-  it("writes the account's fields and the password as one line of JSON", () => {
-    const value = formatEmailAccountVariable(ACCOUNT, SYNTHETIC_EMAIL_PASSWORD)
+  it.each(SHARED_ACCOUNT_VARIABLE_CASES)(
+    "writes the shared variable of $case as one line of JSON",
+    ({ account, password, variable }) => {
+      const value = formatEmailAccountVariable(account, password)
 
-    expect(value).not.toContain("\n")
-    expect(JSON.parse(value)).toEqual({
-      address: "accepted@example.com",
-      displayName: "Test Person",
-      userName: "accepted@example.com",
-      password: SYNTHETIC_EMAIL_PASSWORD,
-      imap: { host: "imap.example.com", port: 993, security: "tls" },
-      smtp: { host: "smtp.example.com", port: 465, security: "tls" },
-      serverKeepsSentCopy: false
-    })
-  })
+      expect(value).not.toContain("\n")
+      expect(JSON.parse(value)).toEqual(variable)
+    }
+  )
 })
 
 describe("buildEmailServerSettings", () => {

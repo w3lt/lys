@@ -407,10 +407,53 @@ fn is_loopback_host(host: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::{Value, json};
+
     use super::*;
 
     /// Password of the test account; not a real credential.
     const SYNTHETIC_PASSWORD: &str = "correct horse battery staple";
+
+    /// Accounts with the value of `LYS_EMAIL_ACCOUNT` the backend writes for
+    /// each; the backend's tests check that it writes these values.
+    const SHARED_VARIABLES: &str =
+        include_str!("../../../packages/share/test/fixtures/email-account-variables.json");
+
+    /// One shared account variable; the account and the password the
+    /// backend writes it from are the backend's to check.
+    #[derive(Deserialize)]
+    struct SharedVariable {
+        /// What the case checks.
+        case: String,
+        /// The JSON the variable holds.
+        variable: Value,
+    }
+
+    /// Writes a server back with the variable's field names.
+    fn format_server_value(server: &MailServer) -> Value {
+        let security = match server.security {
+            Security::Tls => "tls",
+            Security::StartTls => "starttls",
+            Security::Plain => "plain",
+        };
+        json!({"host": server.host, "port": server.port, "security": security})
+    }
+
+    /// Writes an account back with the variable's field names, to compare
+    /// with the variable it was parsed from.
+    fn format_account_value(account: &Account) -> Value {
+        let imap = format_server_value(&account.imap);
+        let smtp = format_server_value(&account.smtp);
+        json!({
+            "address": account.address,
+            "displayName": account.display_name,
+            "userName": account.user_name,
+            "password": account.password.as_str(),
+            "imap": imap,
+            "smtp": smtp,
+            "serverKeepsSentCopy": account.server_keeps_sent_copy,
+        })
+    }
 
     /// Builds the JSON the backend writes, with one field replaced.
     fn build_variable(field: &str, value: &str) -> String {
@@ -587,6 +630,23 @@ mod tests {
 
         assert_eq!(account.smtp.server_name(), "2001:db8::25");
         assert_eq!(account.imap.server_name(), "imap.example.com");
+    }
+
+    #[test]
+    fn parses_each_variable_the_backend_writes_into_the_same_fields() {
+        let shared: Vec<SharedVariable> =
+            serde_json::from_str(SHARED_VARIABLES).expect("the shared variables");
+
+        assert!(!shared.is_empty());
+        for case in shared {
+            let account = parse_account_variable(&case.variable.to_string()).expect(&case.case);
+            assert_eq!(
+                format_account_value(&account),
+                case.variable,
+                "{}",
+                case.case
+            );
+        }
     }
 
     #[test]

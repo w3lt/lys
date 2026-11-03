@@ -198,6 +198,23 @@ export function formatEmailServerSideLabel(side: EmailServerSide): string {
 }
 
 /**
+ * Lists the problem of one input of the account card.
+ *
+ * @param problems - First problem of each input that has one.
+ * @param field - The input.
+ * @returns The input with its label and problem, alone; empty while the
+ * input has no problem.
+ */
+function listEmailDraftFieldProblem(
+  problems: EmailAccountDraftProblems,
+  field: EmailAccountDraftField
+): readonly McpDraftProblemListing<EmailAccountDraftField>[] {
+  const problem = problems[field]
+  if (problem === undefined) return []
+  return [{ field, label: EMAIL_DRAFT_FIELD_LABELS[field], problem }]
+}
+
+/**
  * Lists the inputs of the account card that have a problem.
  *
  * @param problems - First problem of each input that has one.
@@ -208,11 +225,9 @@ export function listEmailDraftProblems(
   problems: EmailAccountDraftProblems
 ): readonly McpDraftProblemListing<EmailAccountDraftField>[] {
   return Object.freeze(
-    EMAIL_ACCOUNT_DRAFT_FIELDS.flatMap((field) => {
-      const problem = problems[field]
-      if (problem === undefined) return []
-      return [{ field, label: EMAIL_DRAFT_FIELD_LABELS[field], problem }]
-    })
+    EMAIL_ACCOUNT_DRAFT_FIELDS.flatMap((field) =>
+      listEmailDraftFieldProblem(problems, field)
+    )
   )
 }
 

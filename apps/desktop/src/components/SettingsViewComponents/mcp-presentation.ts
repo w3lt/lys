@@ -1216,6 +1216,23 @@ export function formatMcpDraftFieldLabel(field: McpServerDraftField): string {
 }
 
 /**
+ * Lists the problem of one editor field.
+ *
+ * @param problems - First problem of each field that has one.
+ * @param field - The field.
+ * @returns The field with its label and problem, alone; empty while the
+ * field has no problem.
+ */
+function listMcpDraftFieldProblem(
+  problems: McpServerDraftProblems,
+  field: McpServerDraftField
+): readonly McpDraftProblemListing<McpServerDraftField>[] {
+  const problem = problems[field]
+  if (problem === undefined) return []
+  return [{ field, label: MCP_DRAFT_FIELD_LABELS[field], problem }]
+}
+
+/**
  * Lists the editor fields that have a problem.
  *
  * @param problems - First problem of each field that has one.
@@ -1226,11 +1243,9 @@ export function listMcpDraftProblems(
   problems: McpServerDraftProblems
 ): readonly McpDraftProblemListing<McpServerDraftField>[] {
   return Object.freeze(
-    MCP_SERVER_DRAFT_FIELDS.flatMap((field) => {
-      const problem = problems[field]
-      if (problem === undefined) return []
-      return [{ field, label: MCP_DRAFT_FIELD_LABELS[field], problem }]
-    })
+    MCP_SERVER_DRAFT_FIELDS.flatMap((field) =>
+      listMcpDraftFieldProblem(problems, field)
+    )
   )
 }
 

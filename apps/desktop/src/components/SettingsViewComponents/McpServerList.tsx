@@ -586,7 +586,17 @@ function listConnectedMcpTools(
 ): readonly McpToolDefinition[] | undefined {
   const { servers, list, toolList, isBackendRunning } = facts
   if (toolList.status !== "loaded") return undefined
-  return servers.flatMap((server) => {
+
+  /**
+   * Lists the tools of one server while it is connected.
+   *
+   * @param server - The listed server.
+   * @returns The server's tools in the backend's order while it is
+   * connected; none otherwise.
+   */
+  function listConnectedServerTools(
+    server: McpListedServer
+  ): readonly McpToolDefinition[] {
     const { condition } = formatMcpServerStatus({
       isBackendRunning,
       list,
@@ -597,7 +607,9 @@ function listConnectedMcpTools(
       getMcpListedServerName(server),
       condition
     )
-  })
+  }
+
+  return servers.flatMap(listConnectedServerTools)
 }
 
 /** Properties accepted by {@link McpServerListHeading}. */

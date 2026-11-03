@@ -14,7 +14,9 @@ use tokio_util::sync::CancellationToken;
 use crate::failure::{SentKind, Stop, ToolFailure};
 use crate::log::send_log_line;
 use crate::smtp::{SendProgress, SendStage};
-use crate::tools::drafts::{DraftIdArguments, SaveDraftArguments, SendDraftArguments};
+use crate::tools::drafts::{
+    DraftIdArguments, DraftProgress, SaveDraftArguments, SendDraftArguments,
+};
 use crate::tools::folders::FolderArguments;
 use crate::tools::read::{AttachmentArguments, IdArguments};
 use crate::tools::search::SearchArguments;
@@ -207,12 +209,11 @@ impl EmailServer {
         Parameters(arguments): Parameters<SaveDraftArguments>,
         token: CancellationToken,
     ) -> CallToolResult {
-        run_tool_call(
-            "save_draft",
-            token,
-            drafts::run_save_draft(&self.context, arguments),
-        )
-        .await
+        let progress = DraftProgress::default();
+        let call = drafts::run_save_draft(&self.context, arguments, &progress);
+        let outcome = run_tool_call_within(token, CALL_LIMIT, call).await;
+        let reported = calculate_save_outcome(outcome, progress.has_begun_storing());
+        handle_tool_call_outcome("save_draft", reported)
     }
 
     #[tool(
@@ -334,6 +335,31 @@ fn calculate_send_outcome(outcome: ToolResult, stage: SendStage, sent: SentKind)
         SendStage::NotHandedOver => outcome,
         SendStage::HandedOver => Err(ToolFailure::StoppedUnconfirmed(stop)),
         SendStage::Accepted => Err(ToolFailure::StoppedAfterSend { stop, sent }),
+    }
+}
+
+/// Reports a `save_draft` call that was stopped by whether storing its
+/// draft began: a stop before it stored nothing and stays as it is, and a
+/// stop after it may have left the draft stored.
+///
+/// # Arguments
+///
+/// * `outcome` - What the call did, `Cancelled` or `TimedOut` when it was
+///   stopped.
+/// * `storing` - Whether storing the draft began.
+///
+/// # Returns
+///
+/// The outcome to report; any outcome but a stop is reported as it is.
+fn calculate_save_outcome(outcome: ToolResult, storing: bool) -> ToolResult {
+    match outcome {
+        Err(ToolFailure::Cancelled) if storing => {
+            Err(ToolFailure::StoppedWhileSaving(Stop::Cancelled))
+        }
+        Err(ToolFailure::TimedOut) if storing => {
+            Err(ToolFailure::StoppedWhileSaving(Stop::TimedOut))
+        }
+        outcome => outcome,
     }
 }
 
@@ -467,6 +493,37 @@ mod tests {
                     Err(ToolFailure::StoppedAfterSend { stop, sent })
                 );
             }
+        }
+    }
+
+    #[test]
+    fn reports_a_stopped_save_by_whether_storing_its_draft_began() {
+        let report = || -> ToolResult {
+            Ok(ToolReport {
+                text: "Draft saved.".to_owned(),
+                log: "draft".to_owned(),
+            })
+        };
+        let stops = [
+            (ToolFailure::Cancelled, Stop::Cancelled),
+            (ToolFailure::TimedOut, Stop::TimedOut),
+        ];
+        for storing in [false, true] {
+            assert_eq!(calculate_save_outcome(report(), storing), report());
+            assert_eq!(
+                calculate_save_outcome(Err(ToolFailure::StaleId), storing),
+                Err(ToolFailure::StaleId)
+            );
+        }
+        for (failure, stop) in stops {
+            assert_eq!(
+                calculate_save_outcome(Err(failure.clone()), false),
+                Err(failure.clone())
+            );
+            assert_eq!(
+                calculate_save_outcome(Err(failure), true),
+                Err(ToolFailure::StoppedWhileSaving(stop))
+            );
         }
     }
 

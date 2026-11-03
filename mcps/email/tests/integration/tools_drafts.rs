@@ -7,8 +7,8 @@ use email::folders::FolderRole;
 use email::smtp::SendProgress;
 use email::tools::ToolResult;
 use email::tools::drafts::{
-    DraftIdArguments, SaveDraftArguments, SendDraftArguments, run_delete_draft, run_save_draft,
-    run_send_draft,
+    DraftIdArguments, DraftProgress, SaveDraftArguments, SendDraftArguments, run_delete_draft,
+    run_save_draft, run_send_draft,
 };
 
 use crate::support::imap::{FakeFolder, FakeMailbox, ImapFault, NewMessage};
@@ -76,7 +76,9 @@ fn assert_draft_kept_unsent(stack: &Stack) {
 
 /// Saves the draft and gives its id.
 async fn save(stack: &Stack, draft: SaveDraftArguments) -> String {
-    let report = run_save_draft(&stack.context, draft).await.expect("saved");
+    let report = run_save_draft(&stack.context, draft, &DraftProgress::default())
+        .await
+        .expect("saved");
     report
         .text
         .strip_prefix("Draft saved as ")
@@ -89,9 +91,13 @@ async fn save(stack: &Stack, draft: SaveDraftArguments) -> String {
 async fn saves_a_draft_with_its_bcc_field_and_answers_its_id() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
 
-    let report = run_save_draft(&stack.context, build_draft("First"))
+    let progress = DraftProgress::default();
+
+    let report = run_save_draft(&stack.context, build_draft("First"), &progress)
         .await
         .expect("saved");
+
+    assert!(progress.has_begun_storing());
 
     assert_eq!(
         report.text,
@@ -120,12 +126,14 @@ async fn replaces_a_draft_and_answers_the_new_id() {
         },
     )
     .await;
+    let stale_progress = DraftProgress::default();
     let stale = run_save_draft(
         &stack.context,
         SaveDraftArguments {
             draft_id: Some(first.clone()),
             ..build_draft("Third")
         },
+        &stale_progress,
     )
     .await;
 
@@ -136,6 +144,7 @@ async fn replaces_a_draft_and_answers_the_new_id() {
     assert_eq!(drafts[0].uid, 2);
     assert!(String::from_utf8_lossy(&drafts[0].bytes).contains("Subject: Second\r\n"));
     assert_eq!(stale, Err(ToolFailure::StaleId));
+    assert!(!stale_progress.has_begun_storing());
     let commands = stack.imap.list_commands();
     assert!(
         commands
@@ -242,9 +251,12 @@ async fn needs_a_drafts_folder() {
         .push(FakeFolder::new("INBOX", &["\\HasNoChildren"], 1));
     let stack = start_stack(mailbox, false).await;
 
-    let saved = run_save_draft(&stack.context, build_draft("Nowhere")).await;
+    let progress = DraftProgress::default();
+
+    let saved = run_save_draft(&stack.context, build_draft("Nowhere"), &progress).await;
 
     assert_eq!(saved, Err(ToolFailure::NoRoleFolder(FolderRole::Drafts)));
+    assert!(!progress.has_begun_storing());
 }
 
 /// A standard mailbox whose server lacks UIDPLUS, with a message in
@@ -298,6 +310,7 @@ async fn without_uidplus_send_draft_and_save_draft_only_mark_the_old_draft() {
             draft_id: Some(first),
             ..build_draft("Second")
         },
+        &DraftProgress::default(),
     )
     .await
     .expect("saved");
@@ -551,9 +564,13 @@ async fn answers_a_stored_draft_as_saved_when_its_id_cannot_be_found() {
         mailbox.add_refusal(refused, "NO [SERVERBUG] Not now");
         let stack = start_stack(mailbox, false).await;
 
-        let report = run_save_draft(&stack.context, build_draft("First"))
-            .await
-            .expect("saved");
+        let report = run_save_draft(
+            &stack.context,
+            build_draft("First"),
+            &DraftProgress::default(),
+        )
+        .await
+        .expect("saved");
 
         assert_eq!(
             report.text,
@@ -586,6 +603,7 @@ async fn answers_a_replacing_draft_with_its_id_when_the_old_one_cannot_be_delete
             draft_id: Some(first),
             ..build_draft("Second")
         },
+        &DraftProgress::default(),
     )
     .await
     .expect("saved");
@@ -615,6 +633,7 @@ async fn answers_a_stored_draft_as_saved_when_a_later_step_times_out() {
                 draft_id: Some(first),
                 ..build_draft("Second")
             },
+            &DraftProgress::default(),
         ))
         .await;
 
@@ -638,4 +657,32 @@ async fn answers_a_stored_draft_as_saved_when_a_later_step_times_out() {
         "draft: saved, replaced one not deleted (imap-connection-timed-out), id not found (imap-connection-timed-out)"
     );
     assert_eq!(stack.imap.list_messages("Drafts").len(), 2);
+}
+
+#[tokio::test]
+async fn answers_a_draft_whose_answer_never_came_once_all_of_it_was_sent_as_maybe_saved() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    stack
+        .imap
+        .add_fault("APPEND", ImapFault::StallAfterHandling);
+    let progress = DraftProgress::default();
+
+    let (saved, elapsed) = stack
+        .imap
+        .run_past_fault(run_save_draft(
+            &stack.context,
+            build_draft("Pending"),
+            &progress,
+        ))
+        .await;
+
+    assert_about(elapsed, Duration::from_secs(30));
+    assert_eq!(
+        saved.map_err(|failure| failure.to_string()),
+        Err(format!(
+            "{TIMED_OUT} The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again."
+        ))
+    );
+    assert_eq!(stack.imap.list_messages("Drafts").len(), 1);
+    assert!(progress.has_begun_storing());
 }

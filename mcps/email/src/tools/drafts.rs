@@ -3,6 +3,7 @@
 
 use std::collections::BTreeSet;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use lettre::address::{Address, Envelope};
@@ -25,7 +26,7 @@ use crate::compose::{
 use crate::email_id::{EmailId, parse_email_id};
 use crate::failure::ToolFailure;
 use crate::folders::{Folder, FolderRole};
-use crate::imap::{Deletion, FolderAccess, ImapSession, SearchWord, Summary};
+use crate::imap::{AppendFailure, Deletion, FolderAccess, ImapSession, SearchWord, Summary};
 use crate::message::{ParsedMailbox, build_message_view};
 use crate::smtp::SendProgress;
 
@@ -94,17 +95,51 @@ pub struct DraftIdArguments {
     pub draft_id: String,
 }
 
+/// Whether a `save_draft` call began to store its draft: set by the call
+/// as it does, and read by the caller that may stop the call, to tell
+/// whether the draft may be stored.
+///
+/// Concurrency model: shared; the call sets the flag through one shared
+/// reference while the caller holds another, and the flag is atomic, so
+/// that a call borrowing it can run on any thread. Resource ownership:
+/// holds only the flag.
+#[derive(Debug, Default)]
+pub struct DraftProgress {
+    /// Whether storing the draft began.
+    storing: AtomicBool,
+}
+
+impl DraftProgress {
+    /// Whether storing the draft began: from then on, a stopped call may
+    /// have stored it.
+    pub fn has_begun_storing(&self) -> bool {
+        self.storing.load(Ordering::SeqCst)
+    }
+
+    /// Records that storing the draft begins.
+    fn update_to_storing(&self) {
+        self.storing.store(true, Ordering::SeqCst);
+    }
+}
+
 /// Saves a draft, replacing one when asked.
 ///
 /// Once the server stored the draft, no step fails the call, as the model
 /// would save it again: finding its id and deleting the draft it replaces
-/// are reported as they went.
+/// are reported as they went. A draft whose storing was not confirmed is
+/// reported as one that may be stored.
 ///
 /// # Arguments
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - The draft's fields.
-pub async fn run_save_draft(context: &ToolContext, arguments: SaveDraftArguments) -> ToolResult {
+/// * `progress` - Records when storing the draft begins, for the caller
+///   that may stop the call.
+pub async fn run_save_draft(
+    context: &ToolContext,
+    arguments: SaveDraftArguments,
+    progress: &DraftProgress,
+) -> ToolResult {
     let message = MessageArguments {
         to: arguments.to,
         cc: arguments.cc,
@@ -132,7 +167,12 @@ pub async fn run_save_draft(context: &ToolContext, arguments: SaveDraftArguments
         Some(opened) => opened,
         None => context.open_imap().await?,
     };
-    let drafts = store_draft(&mut session, replaced.as_ref(), &composed).await?;
+    let drafts = get_draft_folder(&mut session, replaced.as_ref()).await?;
+    progress.update_to_storing();
+    session
+        .save_message(&drafts.raw_name, DRAFT_FLAGS, &composed.bytes)
+        .await
+        .map_err(build_draft_save_failure)?;
     let replacement = match replaced {
         Some(replaced) => Some(delete_replaced_draft(&mut session, replaced).await),
         None => None,
@@ -163,25 +203,23 @@ struct Replacement {
     deletion: Result<Deletion, ToolFailure>,
 }
 
-/// Stores a draft in the Drafts folder, once the draft it replaces, if
-/// any, is there: opens Drafts at that draft's id, where it stays open,
-/// and appends the new draft.
+/// Gets the Drafts folder a draft is stored in, once the draft it
+/// replaces, if any, is there: opens Drafts at that draft's id, where it
+/// stays open.
 ///
 /// # Arguments
 ///
 /// * `session` - The signed-in session.
 /// * `replaced` - The id of the draft it replaces, if any.
-/// * `composed` - The draft.
 ///
 /// # Returns
 ///
-/// The Drafts folder, or why the draft was not stored: no folder has the
+/// The Drafts folder, or why the draft is not stored: no folder has the
 /// Drafts role, the replaced draft's id fails as [`open_draft_folder`]
 /// says or names no message any more, or the server failed a command.
-async fn store_draft(
+async fn get_draft_folder(
     session: &mut ImapSession,
     replaced: Option<&EmailId>,
-    composed: &ComposedMessage,
 ) -> Result<Folder, ToolFailure> {
     let folders = load_folders(session).await?;
     let drafts = get_role_folder(&folders, FolderRole::Drafts)?.clone();
@@ -191,11 +229,16 @@ async fn store_draft(
             .await?
             .ok_or(ToolFailure::StaleId)?;
     }
-    session
-        .save_message(&drafts.raw_name, DRAFT_FLAGS, &composed.bytes)
-        .await
-        .map_err(build_imap_failure_conversion("save the draft"))?;
     Ok(drafts)
+}
+
+/// Builds the failure of a draft the server did not store, or may have
+/// stored without confirming it.
+fn build_draft_save_failure(failure: AppendFailure) -> ToolFailure {
+    match failure {
+        AppendFailure::Failed(failure) => build_imap_failure_conversion("save the draft")(failure),
+        AppendFailure::Unconfirmed(failure) => ToolFailure::DraftUnconfirmed(failure),
+    }
 }
 
 /// Deletes the draft a stored draft replaces from Drafts, which is still

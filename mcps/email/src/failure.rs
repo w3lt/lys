@@ -255,6 +255,13 @@ pub enum ToolFailure {
         /// What was sent.
         sent: SentKind,
     },
+    /// The whole draft was handed to the IMAP server, which did not confirm
+    /// that it stored it: the connection ended, its answer could not be
+    /// read, or it did not come in time. The draft may be in Drafts.
+    DraftUnconfirmed(ConnectionFailure),
+    /// A `save_draft` call was stopped once storing its draft began; the
+    /// draft may be in Drafts.
+    StoppedWhileSaving(Stop),
     /// The whole call reached its time limit.
     TimedOut,
     /// The client cancelled the call.
@@ -344,6 +351,8 @@ impl ToolFailure {
             Self::SendUnconfirmed => "send-unconfirmed".to_owned(),
             Self::StoppedUnconfirmed(stop) => format!("{}-after-hand-over", stop.name()),
             Self::StoppedAfterSend { stop, .. } => format!("{}-after-send", stop.name()),
+            Self::DraftUnconfirmed(failure) => format!("save-unconfirmed-{}", failure.name()),
+            Self::StoppedWhileSaving(stop) => format!("{}-while-saving", stop.name()),
             Self::TimedOut => "timed-out".to_owned(),
             Self::Cancelled => "cancelled".to_owned(),
             Self::InvalidId => "invalid-id".to_owned(),
@@ -376,6 +385,9 @@ const NOT_IN_DRAFTS_SENTENCE: &str = "That id is not in the Drafts folder. Only 
 const UNCONFIRMED_SENTENCE: &str =
     "The message may or may not have been sent; do not send it again without asking the person.";
 
+/// What a draft that may have been stored tells the model to do.
+const UNCONFIRMED_DRAFT_ADVICE: &str = "search that folder before saving it again.";
+
 impl fmt::Display for ToolFailure {
     /// Formats the failure as the sentence the model reads.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -394,6 +406,14 @@ impl fmt::Display for ToolFailure {
             Self::StoppedAfterSend { stop, sent } => {
                 format_stopped_after_send_sentence(*stop, *sent)
             }
+            Self::DraftUnconfirmed(failure) => format!(
+                "{} The whole draft had been handed over, so it may or may not be in the Drafts folder; {UNCONFIRMED_DRAFT_ADVICE}",
+                failure.format_fact(Protocol::Imap)
+            ),
+            Self::StoppedWhileSaving(stop) => format!(
+                "The call {} after saving the draft began, so the draft may be in the Drafts folder; {UNCONFIRMED_DRAFT_ADVICE}",
+                stop.format_clause()
+            ),
             Self::TimedOut => format!("The call {}.", Stop::TimedOut.format_clause()),
             Self::Cancelled => format!("The call {}.", Stop::Cancelled.format_clause()),
             Self::InvalidId => INVALID_ID_SENTENCE.to_owned(),
@@ -641,6 +661,39 @@ mod tests {
             "The draft was sent, but then the call did not finish within 240 seconds and was stopped, so its copy in Sent may be missing and the draft may still be in Drafts. Do not send it again; delete it instead.",
         ),
     ];
+
+    /// Each way a draft can end unconfirmed, with the class the log gives
+    /// it and the sentence the model reads.
+    const UNCONFIRMED_DRAFTS: [(ToolFailure, &str, &str); 4] = [
+        (
+            ToolFailure::DraftUnconfirmed(ConnectionFailure::Lost),
+            "save-unconfirmed-lost",
+            "The connection to the IMAP server ended before it answered. The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again.",
+        ),
+        (
+            ToolFailure::DraftUnconfirmed(ConnectionFailure::Unreadable),
+            "save-unconfirmed-unreadable",
+            "The IMAP server answered something Lys could not read. The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again.",
+        ),
+        (
+            ToolFailure::StoppedWhileSaving(Stop::Cancelled),
+            "cancelled-while-saving",
+            "The call was cancelled after saving the draft began, so the draft may be in the Drafts folder; search that folder before saving it again.",
+        ),
+        (
+            ToolFailure::StoppedWhileSaving(Stop::TimedOut),
+            "timed-out-while-saving",
+            "The call did not finish within 240 seconds and was stopped after saving the draft began, so the draft may be in the Drafts folder; search that folder before saving it again.",
+        ),
+    ];
+
+    #[test]
+    fn describes_a_draft_that_may_be_stored_without_advice_to_try_again() {
+        for (failure, class, sentence) in UNCONFIRMED_DRAFTS {
+            assert_eq!(failure.class(), class);
+            assert_eq!(failure.to_string(), sentence);
+        }
+    }
 
     #[test]
     fn describes_each_way_a_send_ends_unfinished_by_how_far_it_came() {

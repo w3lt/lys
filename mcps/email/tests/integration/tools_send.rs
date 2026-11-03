@@ -526,3 +526,29 @@ async fn reports_a_message_sent_before_its_copy_failed_as_sent() {
     assert_eq!(stack.smtp.list_mails().len(), 1);
     assert!(stack.imap.list_messages("Sent").is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reports_a_copy_whose_answer_was_lost_once_all_of_it_was_sent_as_maybe_saved() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    stack
+        .imap
+        .add_fault("APPEND", ImapFault::CloseAfterHandling);
+
+    let report = send_message(&stack, build_message_to_jane("Hi", "Hello"))
+        .await
+        .expect("sent");
+
+    assert!(
+        report.text.ends_with(
+            "\nThe copy may or may not have been saved in Sent: The connection to the IMAP server ended before it answered."
+        ),
+        "{}",
+        report.text
+    );
+    assert_eq!(
+        report.log,
+        "send: 1 recipient(s), 0 attachment(s), copy unconfirmed (imap-connection-lost)"
+    );
+    assert_eq!(stack.smtp.list_mails().len(), 1);
+    assert_eq!(stack.imap.list_messages("Sent").len(), 1);
+}

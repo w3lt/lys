@@ -91,6 +91,20 @@ pub enum ImapFailure {
     Connection(ConnectionFailure),
 }
 
+/// Why an APPEND did not store its message, or why it is not known whether
+/// it did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AppendFailure {
+    /// The server did not store the message: it refused the command, or
+    /// the command failed before all of it was sent, and a server stores
+    /// nothing of a command that did not end.
+    Failed(ImapFailure),
+    /// All of the command was sent, and then its answer was lost, could
+    /// not be read, or did not come in time: the server may have stored
+    /// the message.
+    Unconfirmed(ConnectionFailure),
+}
+
 /// One word of a search: a key or an argument as the command writes it,
 /// or a text to search for.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -454,27 +468,36 @@ impl ImapSession {
     ///
     /// # Returns
     ///
-    /// Nothing once the server stored the message, or why it did not: its
+    /// Nothing once the server stored the message; or why it did not, its
     /// code and text when it refused the command, before or after the
-    /// message was sent.
+    /// message was sent; or that it may have, when the connection failed
+    /// once all of the command was sent.
     pub async fn save_message(
         &mut self,
         raw_name: &str,
         flags: &str,
         bytes: &[u8],
-    ) -> Result<(), ImapFailure> {
+    ) -> Result<(), AppendFailure> {
+        let name = quote_folder_name(raw_name).map_err(AppendFailure::Failed)?;
         let parts = [
-            CommandPart::Written(format!("APPEND {} {flags}", quote_folder_name(raw_name)?)),
+            CommandPart::Written(format!("APPEND {name} {flags}")),
             CommandPart::Literal(bytes),
         ];
         let session = &mut self.session;
+        let mut sent = false;
         let exchange = async {
             let tag = send_command_parts(session, &parts).await?;
+            sent = true;
             read_tagged_answers(session, &tag, |_| None::<()>)
                 .await
                 .map(drop)
         };
-        run_exchange(&mut self.ended_by, exchange).await
+        match run_exchange(&mut self.ended_by, exchange).await {
+            Err(ImapFailure::Connection(failure)) if sent => {
+                Err(AppendFailure::Unconfirmed(failure))
+            }
+            outcome => outcome.map_err(AppendFailure::Failed),
+        }
     }
 
     /// Deletes one message of the selected folder: marks it `\Deleted`

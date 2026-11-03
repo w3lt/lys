@@ -20,7 +20,7 @@ use crate::compose::{
 use crate::email_id::parse_email_id;
 use crate::failure::{Protocol, ToolFailure};
 use crate::folders::{Folder, FolderRole, find_role_folder};
-use crate::imap::ImapSession;
+use crate::imap::{AppendFailure, ImapSession};
 use crate::message::{MessageView, ParsedMailbox};
 use crate::smtp::{SendProgress, SmtpFailure, open_smtp_session};
 
@@ -73,6 +73,9 @@ pub enum SentCopy {
     NoFolder,
     /// Saving the copy failed for the reason.
     Failed(ToolFailure),
+    /// The whole copy was handed to the IMAP server, which did not confirm
+    /// that it stored it, for the reason; the copy may be in Sent.
+    Unconfirmed(ToolFailure),
 }
 
 impl SentCopy {
@@ -85,6 +88,10 @@ impl SentCopy {
             Self::NoFolder => "No Sent folder was found, so no copy was saved.".to_owned(),
             Self::Failed(failure) => format!(
                 "The copy could not be saved in Sent: {}",
+                failure.format_reason()
+            ),
+            Self::Unconfirmed(failure) => format!(
+                "The copy may or may not have been saved in Sent: {}",
                 failure.format_reason()
             ),
         }
@@ -429,7 +436,8 @@ async fn save_sent_copy(
 ///
 /// # Returns
 ///
-/// The folder the copy was saved in, or that no folder has the Sent role;
+/// The folder the copy was saved in, that no folder has the Sent role, or
+/// that the server may have stored the copy without confirming it;
 /// otherwise why the server did not store the copy.
 pub(super) async fn save_copy_in_sent(
     session: &mut ImapSession,
@@ -439,11 +447,21 @@ pub(super) async fn save_copy_in_sent(
     let Some(sent) = find_role_folder(folders, FolderRole::Sent) else {
         return Ok(SentCopy::NoFolder);
     };
-    session
+    match session
         .save_message(&sent.raw_name, SENT_FLAGS, bytes)
         .await
-        .map_err(build_imap_failure_conversion("save the copy"))?;
-    Ok(SentCopy::Saved(sent.name.clone()))
+    {
+        Ok(()) => Ok(SentCopy::Saved(sent.name.clone())),
+        Err(AppendFailure::Unconfirmed(failure)) => {
+            Ok(SentCopy::Unconfirmed(ToolFailure::Connection {
+                protocol: Protocol::Imap,
+                failure,
+            }))
+        }
+        Err(AppendFailure::Failed(failure)) => {
+            Err(build_imap_failure_conversion("save the copy")(failure))
+        }
+    }
 }
 
 /// Formats a recipient list as a line, or nothing when it is empty.
@@ -462,6 +480,7 @@ pub fn format_copy_for_log(copy: &SentCopy) -> String {
         SentCopy::Saved(_) => "saved".to_owned(),
         SentCopy::NoFolder => "no folder".to_owned(),
         SentCopy::Failed(failure) => format!("failed ({})", failure.class()),
+        SentCopy::Unconfirmed(failure) => format!("unconfirmed ({})", failure.class()),
     }
 }
 
@@ -519,6 +538,18 @@ mod tests {
             "A copy was saved in Sent."
         );
         assert_eq!(format_copy_for_log(&SentCopy::NoFolder), "no folder");
+        let unconfirmed = SentCopy::Unconfirmed(ToolFailure::Connection {
+            protocol: Protocol::Imap,
+            failure: crate::failure::ConnectionFailure::TimedOut,
+        });
+        assert_eq!(
+            unconfirmed.format_sentence(),
+            "The copy may or may not have been saved in Sent: The IMAP server did not answer in time."
+        );
+        assert_eq!(
+            format_copy_for_log(&unconfirmed),
+            "unconfirmed (imap-connection-timed-out)"
+        );
         assert_eq!(format_optional_list("Cc", &[]), "");
         assert_eq!(
             format_optional_list("Cc", &["a@x".to_owned(), "b@x".to_owned()]),

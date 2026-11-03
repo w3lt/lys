@@ -4,7 +4,7 @@
 
 use email::failure::ToolFailure;
 use email::tools::drafts::{
-    DraftIdArguments, SaveDraftArguments, run_delete_draft, run_save_draft,
+    DraftIdArguments, DraftProgress, SaveDraftArguments, run_delete_draft, run_save_draft,
 };
 use email::tools::folders::{FolderAction, FolderArguments, run_list_folders, run_manage_folder};
 use email::tools::read::{IdArguments, run_read_email};
@@ -240,6 +240,7 @@ async fn an_append_refused_before_its_literal_passes_on_the_reason() {
             body: "No room.".to_owned(),
             ..SaveDraftArguments::default()
         },
+        &DraftProgress::default(),
     )
     .await;
 

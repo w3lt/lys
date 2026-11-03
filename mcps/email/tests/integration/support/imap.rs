@@ -38,9 +38,9 @@ pub enum ImapMode {
     Garbage,
 }
 
-/// How the fake fails a command instead of handling it; a command with a
-/// synchronizing literal, such as APPEND, fails before its literal is
-/// sent.
+/// How the fake fails a command: instead of handling it, when a command
+/// with a synchronizing literal, such as APPEND, fails before its literal
+/// is sent; or after handling it, instead of answering.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ImapFault {
     /// Never answers, and records each line the client sends after it as
@@ -48,6 +48,19 @@ pub enum ImapFault {
     Stall,
     /// Closes the connection without answering.
     Close,
+    /// Handles the command, its literals read and a message stored, then
+    /// stalls instead of answering, as [`Self::Stall`] does.
+    StallAfterHandling,
+    /// Handles the command, its literals read and a message stored, then
+    /// closes the connection instead of answering.
+    CloseAfterHandling,
+}
+
+impl ImapFault {
+    /// Whether the fault strikes before the command is handled.
+    fn is_before_handling(self) -> bool {
+        matches!(self, Self::Stall | Self::Close)
+    }
 }
 
 /// A message the fake removes before a command, as another client that
@@ -555,6 +568,10 @@ where
             .expect("the state")
             .find_fault(&command.name);
         if let Some(fault) = fault {
+            if !fault.is_before_handling() {
+                let mut mailbox = setup.state.lock().expect("the state");
+                drop(session.handle_command(&command, &mut mailbox));
+            }
             handle_fault(&mut reader, setup, fault).await;
             return None;
         }
@@ -592,7 +609,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     setup.faulted.notify_one();
-    if fault == ImapFault::Close {
+    if matches!(fault, ImapFault::Close | ImapFault::CloseAfterHandling) {
         return;
     }
     let mut line = String::new();
@@ -1009,12 +1026,14 @@ where
     Some((text, literals))
 }
 
-/// Whether the fake refuses or fails the command the text begins, so that
-/// it never asks for the command's literal.
+/// Whether the fake refuses the command the text begins, or fails it
+/// before handling it, so that it never asks for the command's literal.
 fn is_answered_before_literal(text: &str, state: &Arc<Mutex<FakeMailbox>>) -> bool {
     parse_command(text, Vec::new()).is_some_and(|command| {
         let mailbox = state.lock().expect("the state");
-        mailbox.find_refusal(&command.name).is_some() || mailbox.find_fault(&command.name).is_some()
+        let fault = mailbox.find_fault(&command.name);
+        mailbox.find_refusal(&command.name).is_some()
+            || fault.is_some_and(ImapFault::is_before_handling)
     })
 }
 

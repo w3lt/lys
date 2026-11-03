@@ -491,20 +491,6 @@ export type McpServerSettings = z.infer<typeof mcpServerSettingsSchema>
 export type McpServerSettingsCandidate = z.input<typeof mcpServerSettingsSchema>
 
 /**
- * Leaves each server's switch out of the JSON text that
- * {@link calculateServersBytesWithoutSwitches} measures.
- *
- * @param key - Name of the property being written, or index of the item.
- * @param value - Value being written.
- * @returns `undefined`, which leaves the property out, for an `enabled`
- * property, the only property of that name a server holds; the value
- * otherwise.
- */
-function omitServerSwitch(key: string, value: unknown): unknown {
-  return key === "enabled" ? undefined : value
-}
-
-/**
  * Calculates the bytes {@link MAXIMUM_MCP_SETTINGS_BYTES} counts: the
  * group's servers as `{"servers":[…]}` in compact JSON, without each
  * server's `enabled` switch.
@@ -513,11 +499,17 @@ function omitServerSwitch(key: string, value: unknown): unknown {
  * surrogates.
  * @returns The UTF-8 bytes of the JSON text, which the desktop host
  * measures alike.
+ * @remarks The text leaves out every property named `enabled`: a server's
+ * switch is the only property of that name a server holds.
  */
 function calculateServersBytesWithoutSwitches(
   servers: readonly McpServerSettings[]
 ): number {
-  return calculateUtf8ByteLength(JSON.stringify({ servers }, omitServerSwitch))
+  return calculateUtf8ByteLength(
+    JSON.stringify({ servers }, (key, value: unknown) =>
+      key === "enabled" ? undefined : value
+    )
+  )
 }
 
 /**

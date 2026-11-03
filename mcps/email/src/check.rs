@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use serde::Serialize;
-use tokio::time::{Instant, timeout, timeout_at};
+use tokio::time::{Instant, timeout_at};
 
 use crate::account::Account;
 use crate::failure::SignInFailure;
@@ -65,12 +65,17 @@ pub async fn offer_account_sign_ins(account: &Account, trust: &Trust) -> CheckRe
     }
 }
 
-/// Signs in to the IMAP server and logs out.
+/// Signs in to the IMAP server and logs out, both within [`CHECK_LIMIT`].
+/// Once the server accepted the sign-in, a LOGOUT that does not finish in
+/// time is logged, and the sign-in is still accepted.
 async fn offer_imap_sign_in(account: &Account, trust: &Trust) -> Result<(), SignInFailure> {
-    let session = timeout(CHECK_LIMIT, open_imap_session(account, trust))
+    let deadline = Instant::now() + CHECK_LIMIT;
+    let session = timeout_at(deadline, open_imap_session(account, trust))
         .await
         .map_err(|_| SignInFailure::TimedOut)??;
-    session.close().await;
+    if timeout_at(deadline, session.close()).await.is_err() {
+        send_log_line("imap: logout did not finish within the check's limit");
+    }
     Ok(())
 }
 

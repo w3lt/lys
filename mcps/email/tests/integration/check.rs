@@ -8,7 +8,7 @@ use email::check::{CheckOutcome, offer_account_sign_ins};
 use email::failure::SignInFailure;
 use email::trust::Trust;
 
-use crate::support::imap::{FakeImapServer, FakeMailbox, ImapMode};
+use crate::support::imap::{FakeImapServer, FakeMailbox, ImapFault, ImapMode};
 use crate::support::smtp::{FakeSmtpServer, SmtpFault, SmtpMode};
 use crate::support::tls::TestAuthority;
 use crate::support::{
@@ -356,6 +356,27 @@ async fn ends_an_unanswered_quit_at_the_check_limit_and_accepts_the_sign_in() {
         .await;
 
     assert_eq!(report.smtp, CheckOutcome::Accepted);
+    assert_about(elapsed, Duration::from_secs(20));
+}
+
+#[tokio::test]
+async fn ends_an_unanswered_logout_at_the_check_limit_and_accepts_the_sign_in() {
+    let imap = FakeImapServer::start(FakeMailbox::create_standard(), ImapMode::Plain, None).await;
+    imap.add_fault("LOGOUT", ImapFault::Stall);
+    let servers = TestServers {
+        imap_port: imap.port,
+        imap_security: SecurityName::Plain,
+        smtp_port: find_closed_port().await,
+        smtp_security: SecurityName::Plain,
+    };
+    let account = build_account(servers, false);
+    let trust = Trust::create_with_extra_roots(Vec::new());
+
+    let (report, elapsed) = imap
+        .run_past_fault(offer_account_sign_ins(&account, &trust))
+        .await;
+
+    assert_eq!(report.imap, CheckOutcome::Accepted);
     assert_about(elapsed, Duration::from_secs(20));
 }
 

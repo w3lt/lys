@@ -541,7 +541,9 @@ fn get_backend_dir() -> Result<PathBuf, String> {
 /// builds name to the backend: `mcps/email/target/debug/email` in the
 /// repository that holds this crate, which
 /// `cargo build --manifest-path mcps/email/Cargo.toml --target-dir mcps/email/target`
-/// produces from the repository root, whatever `CARGO_TARGET_DIR` says.
+/// produces from the repository root, whatever `CARGO_TARGET_DIR` says,
+/// unless a Cargo configuration sets `build.target`, which adds the
+/// target's name to the path.
 ///
 /// The file is not required to exist: the backend reports a missing server
 /// when it starts it or checks an account with it.

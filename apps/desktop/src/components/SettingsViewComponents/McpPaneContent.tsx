@@ -304,71 +304,43 @@ function McpToolOfferNotice(): ReactElement | null {
   )
 }
 
-/** Properties accepted by {@link McpServerListView}. */
-type McpServerListViewProps = {
-  /** Whether the backend is running. */
-  readonly isBackendRunning: boolean
-  /** Lifecycle of the list of applied servers. */
-  readonly list: McpServerListState
-  /**
-   * Key of the server whose details are shown, by its kind and name, or
-   * null when none is.
-   */
-  readonly expandedServerKey: string | null
-  /** Control that takes focus when the list appears. */
-  readonly focusTarget: McpServerListFocusTarget
-  /** Proposes showing one server's details, by its key, or none with null. */
-  readonly onExpandedServerKeyChange: (serverKey: string | null) => void
-  /** Requests that the parent open an editor in place of the list. */
-  readonly onOpenEditor: (editor: McpEditorTarget) => void
-  /** Reports to the parent that the removal of a server was saved. */
-  readonly onRemoveServerComplete: (serverName: McpServerName) => void
+/** Saves the server list proposes, made through the stores. */
+type McpServerListSaves = {
+  /** Removes one added server and, once the removal is saved, tells the parent. */
+  readonly handleRemoveServer: (serverName: McpServerName) => Promise<void>
+  /** Saves one server's switch into the group, which the store applies. */
+  readonly handleServerOnChange: (
+    server: McpListedServer,
+    isOn: boolean
+  ) => void
+  /** Proposes one approval for several tools, which the store saves. */
+  readonly handleToolApprovalChange: (
+    toolNames: readonly string[],
+    approval: ToolApproval
+  ) => void
 }
 
 /**
- * Presents the servers Lys ships and the added servers with their states,
- * switches, tools, and actions.
+ * Owns the saves the server list proposes: removing an added server,
+ * switching a server on or off, and one approval for several tools.
  *
- * @remarks The application store owns the `mcp` and `email` groups, their
- * saves, and the tool switches and approvals, which it saves as each
- * changes; the MCP server store owns the reconnect and the saves that apply
- * the group; the tool store owns the list of tools. The parent owns the
- * list's states, which server's details are shown, which editor opens, and
- * the focus target. A server's switch is saved into the group: an added
- * server's own switch, or the switch of a server Lys ships. A server's
- * approval sets every listed tool of the server. A server is removed once
- * its removal is saved, which the parent is told with the server's name.
- * The email server's panel is the account card.
- * @param props - Backend status, the list, expansion, focus, and the
- * parent-owned changes.
- * @returns The warning, when one is due, and the section of the servers.
+ * @remarks The application store owns the `mcp` group and the tool
+ * approvals, which it saves as each changes; the MCP server store owns the
+ * saves that apply the group. Each save starts from the group the render
+ * that built its handler read. The handlers are rebuilt on every render.
+ * @param onRemoveServerComplete - Told the server's name once a removal was
+ * saved; read from the render whose handler started the removal.
+ * @returns The handlers.
  */
-function McpServerListView({
-  isBackendRunning,
-  list,
-  expandedServerKey,
-  focusTarget,
-  onExpandedServerKeyChange,
-  onOpenEditor,
-  onRemoveServerComplete
-}: McpServerListViewProps): ReactElement {
+function useMcpServerListSaves(
+  onRemoveServerComplete: (serverName: McpServerName) => void
+): McpServerListSaves {
   const mcp = useLysStore((state) => state.settings.mcp)
-  const email = useLysStore((state) => state.settings.email)
-  const isSaving = useLysStore(
-    (state) => state.mcpSettingsSave.status === "saving"
-  )
-  const toolSettings = useLysStore((state) => state.settings.tools)
-  const updateToolOn = useLysStore((state) => state.updateToolOn)
   const updateToolApproval = useLysStore((state) => state.updateToolApproval)
-  const toolList = useToolStore((state) => state.list)
-  const sendMcpServerReconnect = useMcpServerStore(
-    (state) => state.sendMcpServerReconnect
-  )
   const saveMcpServers = useMcpServerStore((state) => state.saveMcpServers)
   const saveBuiltInMcpServerSwitch = useMcpServerStore(
     (state) => state.saveBuiltInMcpServerSwitch
   )
-  const servers = listMcpServers({ mcp, email })
 
   /**
    * Removes one added server and, once saved, tells the parent.
@@ -411,6 +383,72 @@ function McpServerListView({
     for (const toolName of toolNames) updateToolApproval(toolName, approval)
   }
 
+  return { handleRemoveServer, handleServerOnChange, handleToolApprovalChange }
+}
+
+/** Properties accepted by {@link McpServerListView}. */
+type McpServerListViewProps = {
+  /** Whether the backend is running. */
+  readonly isBackendRunning: boolean
+  /** Lifecycle of the list of applied servers. */
+  readonly list: McpServerListState
+  /**
+   * Key of the server whose details are shown, by its kind and name, or
+   * null when none is.
+   */
+  readonly expandedServerKey: string | null
+  /** Control that takes focus when the list appears. */
+  readonly focusTarget: McpServerListFocusTarget
+  /** Proposes showing one server's details, by its key, or none with null. */
+  readonly onExpandedServerKeyChange: (serverKey: string | null) => void
+  /** Requests that the parent open an editor in place of the list. */
+  readonly onOpenEditor: (editor: McpEditorTarget) => void
+  /** Reports to the parent that the removal of a server was saved. */
+  readonly onRemoveServerComplete: (serverName: McpServerName) => void
+}
+
+/**
+ * Presents the servers Lys ships and the added servers with their states,
+ * switches, tools, and actions.
+ *
+ * @remarks The application store owns the `mcp` and `email` groups, their
+ * saves, and the tool switches and approvals, which it saves as each
+ * changes; the MCP server store owns the reconnect and the saves that apply
+ * the group; the tool store owns the list of tools. The parent owns the
+ * list's states, which server's details are shown, which editor opens, and
+ * the focus target. The view saves what the list proposes through
+ * {@link useMcpServerListSaves}: a server's switch is saved into the group,
+ * an added server's own switch or the switch of a server Lys ships; a
+ * server's approval sets every listed tool of the server; and a server is
+ * removed once its removal is saved, which the parent is told with the
+ * server's name. The email server's panel is the account card.
+ * @param props - Backend status, the list, expansion, focus, and the
+ * parent-owned changes.
+ * @returns The warning, when one is due, and the section of the servers.
+ */
+function McpServerListView({
+  isBackendRunning,
+  list,
+  expandedServerKey,
+  focusTarget,
+  onExpandedServerKeyChange,
+  onOpenEditor,
+  onRemoveServerComplete
+}: McpServerListViewProps): ReactElement {
+  const mcp = useLysStore((state) => state.settings.mcp)
+  const email = useLysStore((state) => state.settings.email)
+  const isSaving = useLysStore(
+    (state) => state.mcpSettingsSave.status === "saving"
+  )
+  const toolSettings = useLysStore((state) => state.settings.tools)
+  const updateToolOn = useLysStore((state) => state.updateToolOn)
+  const toolList = useToolStore((state) => state.list)
+  const sendMcpServerReconnect = useMcpServerStore(
+    (state) => state.sendMcpServerReconnect
+  )
+  const saves = useMcpServerListSaves(onRemoveServerComplete)
+  const servers = listMcpServers({ mcp, email })
+
   return (
     <>
       {servers.some(isMcpListedServerOn) ? <McpToolOfferNotice /> : null}
@@ -427,9 +465,11 @@ function McpServerListView({
         onReconnectServer={(serverName) =>
           void sendMcpServerReconnect(serverName)
         }
-        onRemoveServer={(serverName) => void handleRemoveServer(serverName)}
-        onServerOnChange={handleServerOnChange}
-        onToolApprovalChange={handleToolApprovalChange}
+        onRemoveServer={(serverName) =>
+          void saves.handleRemoveServer(serverName)
+        }
+        onServerOnChange={saves.handleServerOnChange}
+        onToolApprovalChange={saves.handleToolApprovalChange}
         onToolOnChange={updateToolOn}
         servers={servers}
         toolList={toolList}

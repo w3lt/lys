@@ -63,7 +63,7 @@ impl EmailServer {
 
     #[tool(
         name = "search_emails",
-        description = "Finds messages, newest first, 20 per page. Searches one folder, or every folder when none is given. Give text, from, to, subject, since, before, unread, or flagged to narrow the search; every argument is optional. Each hit shows its id for read_email.",
+        description = "Finds messages, newest first, 20 per page. Searches one folder, or every folder but an All Mail view when none is given. Give text, from, to, subject, since, before, unread, or flagged to narrow the search; every argument is optional. Each page runs the search again, so mail that arrives, moves, or is deleted between two pages can repeat or skip a hit. Each hit shows its id for read_email.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn run_search_emails(

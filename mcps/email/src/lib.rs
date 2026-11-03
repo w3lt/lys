@@ -3,9 +3,11 @@
 //! The backend starts the `email` binary over stdio with the saved account
 //! and its password in the `LYS_EMAIL_ACCOUNT` environment variable, and
 //! runs `email check` to sign in to both servers before an account is saved.
-//! Every tool call opens its own IMAP or SMTP connection and closes it
-//! before answering; nothing stays open between calls, so stopping the
-//! process closes every connection.
+//! Every tool call opens at most one IMAP and one SMTP connection of its
+//! own and closes them before answering; a reply, a forward, or a send
+//! that saves a Sent copy keeps its IMAP connection open while it sends.
+//! Nothing stays open between calls, so stopping the process closes every
+//! connection.
 //!
 //! The modules follow the data path: [`account`] reads the environment,
 //! [`trust`] decides which server certificates are accepted, [`imap`] and

@@ -538,3 +538,102 @@ async fn sends_nothing_more_over_an_imap_session_whose_sent_copy_timed_out() {
     assert_eq!(stack.smtp.list_mails().len(), 1);
     assert_eq!(stack.imap.list_messages("Drafts").len(), 1);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn answers_a_stored_draft_as_saved_when_its_id_cannot_be_found() {
+    for (refused, operation) in [
+        ("SELECT", "select the Drafts folder"),
+        ("SEARCH", "find the saved draft"),
+    ] {
+        let mut mailbox = FakeMailbox::create_standard();
+        mailbox.add_refusal(refused, "NO [SERVERBUG] Not now");
+        let stack = start_stack(mailbox, false).await;
+
+        let report = run_save_draft(&stack.context, build_draft("First"))
+            .await
+            .expect("saved");
+
+        assert_eq!(
+            report.text,
+            format!(
+                "Draft saved in Drafts, but its id could not be found: The IMAP server refused to {operation}: [SERVERBUG] Not now. Search that folder to find it."
+            )
+        );
+        assert_eq!(
+            report.log,
+            format!(
+                "draft: saved, id not found (imap-refused-to-{})",
+                operation.replace(' ', "-")
+            )
+        );
+        assert_eq!(stack.imap.list_messages("Drafts").len(), 1);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn answers_a_replacing_draft_with_its_id_when_the_old_one_cannot_be_deleted() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    let first = save(&stack, build_draft("First")).await;
+    stack
+        .imap
+        .update_state(|mailbox| mailbox.add_refusal("STORE", "NO [CANNOT] Not allowed"));
+
+    let report = run_save_draft(
+        &stack.context,
+        SaveDraftArguments {
+            draft_id: Some(first),
+            ..build_draft("Second")
+        },
+    )
+    .await
+    .expect("saved");
+
+    assert_eq!(
+        report.text,
+        "Draft saved as 2.1003.Drafts.\nTo: Jane Doe <jane@example.com>\nBcc: hidden@example.com\nSubject: Second\nIt replaces draft 1.1003.Drafts, which could not be deleted and may still be in Drafts: The IMAP server refused to delete the replaced draft: [CANNOT] Not allowed. Delete it with delete_draft.\nSend it with send_draft, replace it with save_draft and this draft_id, or delete it with delete_draft."
+    );
+    assert_eq!(
+        report.log,
+        "draft: saved, replaced one not deleted (imap-refused-to-delete-the-replaced-draft), id found"
+    );
+    assert_eq!(stack.imap.list_messages("Drafts").len(), 2);
+}
+
+#[tokio::test]
+async fn answers_a_stored_draft_as_saved_when_a_later_step_times_out() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    let first = save(&stack, build_draft("First")).await;
+    stack.imap.add_fault("STORE", ImapFault::Stall);
+
+    let (saved, elapsed) = stack
+        .imap
+        .run_past_fault(run_save_draft(
+            &stack.context,
+            SaveDraftArguments {
+                draft_id: Some(first),
+                ..build_draft("Second")
+            },
+        ))
+        .await;
+
+    let commands = stack.imap.list_commands();
+    assert!(
+        commands
+            .last()
+            .is_some_and(|command| command.contains(" UID STORE 1 ")),
+        "{commands:?}"
+    );
+    assert_about(elapsed, Duration::from_secs(30));
+    let report = saved.expect("saved");
+    assert_eq!(
+        report.text,
+        format!(
+            "Draft saved in Drafts, but its id could not be found: {TIMED_OUT} Search that folder to find it.\nIt replaces draft 1.1003.Drafts, which could not be deleted and may still be in Drafts: {TIMED_OUT} Delete it with delete_draft."
+        )
+    );
+    assert_eq!(
+        report.log,
+        "draft: saved, replaced one not deleted (imap-connection-timed-out), id not found (imap-connection-timed-out)"
+    );
+    assert_eq!(stack.imap.list_messages("Drafts").len(), 2);
+}

@@ -19,8 +19,8 @@ use super::{
     format_text_argument, get_role_folder, load_folders,
 };
 use crate::compose::{
-    ComposedMessage, CompositionProblem, MessageStamp, build_draft_message, format_recipient,
-    parse_recipient,
+    ComposedMessage, Composition, CompositionProblem, MessageStamp, build_draft_message,
+    format_recipient, parse_recipient,
 };
 use crate::email_id::{EmailId, parse_email_id};
 use crate::failure::ToolFailure;
@@ -96,6 +96,10 @@ pub struct DraftIdArguments {
 
 /// Saves a draft, replacing one when asked.
 ///
+/// Once the server stored the draft, no step fails the call, as the model
+/// would save it again: finding its id and deleting the draft it replaces
+/// are reported as they went.
+///
 /// # Arguments
 ///
 /// * `context` - The account and trust.
@@ -116,7 +120,7 @@ pub async fn run_save_draft(context: &ToolContext, arguments: SaveDraftArguments
         .as_deref()
         .map(parse_email_id)
         .transpose()?;
-    let mut session = Some(context.open_imap().await?);
+    let mut session = None;
     let composition = build_composition(context, &mut session, &message).await?;
     let stamp = MessageStamp {
         now: SystemTime::now(),
@@ -124,12 +128,66 @@ pub async fn run_save_draft(context: &ToolContext, arguments: SaveDraftArguments
     };
     let composed = build_draft_message(&context.account, &composition, stamp)
         .map_err(|problem| ToolFailure::Argument(problem.format_sentence()))?;
-    let mut session = session.take().expect("the session was opened above");
-    let folders = load_folders(&mut session).await?;
+    let mut session = match session {
+        Some(opened) => opened,
+        None => context.open_imap().await?,
+    };
+    let drafts = store_draft(&mut session, replaced.as_ref(), &composed).await?;
+    let replacement = match replaced {
+        Some(replaced) => Some(delete_replaced_draft(&mut session, replaced).await),
+        None => None,
+    };
+    let id = find_saved_draft_id(&mut session, &drafts, &composed.message_id).await;
+    session.close().await;
+    let saved = SavedDraft { id, replacement };
+    Ok(build_saved_draft_report(&composition, &drafts.name, &saved))
+}
+
+/// What became of a draft once the server stored it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SavedDraft {
+    /// The draft's id; `None` when the search for it found nothing; or why
+    /// it could not be found.
+    id: Result<Option<EmailId>, ToolFailure>,
+    /// The draft it replaces and what deleting that one did, when it
+    /// replaces one.
+    replacement: Option<Replacement>,
+}
+
+/// A draft that a stored draft replaces, and what deleting it did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Replacement {
+    /// The replaced draft's id.
+    replaced: EmailId,
+    /// What deleting it did, or why that failed.
+    deletion: Result<Deletion, ToolFailure>,
+}
+
+/// Stores a draft in the Drafts folder, once the draft it replaces, if
+/// any, is there: opens Drafts at that draft's id, where it stays open,
+/// and appends the new draft.
+///
+/// # Arguments
+///
+/// * `session` - The signed-in session.
+/// * `replaced` - The id of the draft it replaces, if any.
+/// * `composed` - The draft.
+///
+/// # Returns
+///
+/// The Drafts folder, or why the draft was not stored: no folder has the
+/// Drafts role, the replaced draft's id fails as [`open_draft_folder`]
+/// says or names no message any more, or the server failed a command.
+async fn store_draft(
+    session: &mut ImapSession,
+    replaced: Option<&EmailId>,
+    composed: &ComposedMessage,
+) -> Result<Folder, ToolFailure> {
+    let folders = load_folders(session).await?;
     let drafts = get_role_folder(&folders, FolderRole::Drafts)?.clone();
-    if let Some(replaced) = &replaced {
-        open_draft_folder(&mut session, &drafts, replaced).await?;
-        find_message_summary(&mut session, replaced.uid)
+    if let Some(replaced) = replaced {
+        open_draft_folder(session, &drafts, replaced).await?;
+        find_message_summary(session, replaced.uid)
             .await?
             .ok_or(ToolFailure::StaleId)?;
     }
@@ -137,61 +195,137 @@ pub async fn run_save_draft(context: &ToolContext, arguments: SaveDraftArguments
         .save_message(&drafts.raw_name, DRAFT_FLAGS, &composed.bytes)
         .await
         .map_err(build_imap_failure_conversion("save the draft"))?;
+    Ok(drafts)
+}
+
+/// Deletes the draft a stored draft replaces from Drafts, which is still
+/// open at its id, as [`store_draft`] left it.
+///
+/// # Arguments
+///
+/// * `session` - The signed-in session.
+/// * `replaced` - The replaced draft's id.
+async fn delete_replaced_draft(session: &mut ImapSession, replaced: EmailId) -> Replacement {
+    let deletion = session
+        .delete_message(replaced.uid)
+        .await
+        .map_err(build_imap_failure_conversion("delete the replaced draft"));
+    Replacement { replaced, deletion }
+}
+
+/// Finds the id of a draft just stored: opens Drafts again, so that it
+/// lists the new draft, and searches it for the draft's Message-ID.
+///
+/// # Arguments
+///
+/// * `session` - The signed-in session.
+/// * `drafts` - The Drafts folder.
+/// * `message_id` - The draft's Message-ID, without angle brackets.
+///
+/// # Returns
+///
+/// The id, `None` when the search found no draft, or why a command
+/// failed.
+async fn find_saved_draft_id(
+    session: &mut ImapSession,
+    drafts: &Folder,
+    message_id: &str,
+) -> Result<Option<EmailId>, ToolFailure> {
     let selected = session
         .open_folder(&drafts.raw_name, FolderAccess::Change)
         .await
         .map_err(build_imap_failure_conversion("select the Drafts folder"))?;
+    let criteria = format!("HEADER MESSAGE-ID {}", format_search_text(message_id));
     let uids = session
-        .list_matching_uids(&format!(
-            "HEADER MESSAGE-ID {}",
-            format_search_text(&composed.message_id)
-        ))
+        .list_matching_uids(&criteria)
         .await
         .map_err(build_imap_failure_conversion("find the saved draft"))?;
-    let id = uids.first().map(|uid| EmailId {
+    Ok(uids.first().map(|uid| EmailId {
         uid: *uid,
         uid_validity: selected.uid_validity,
         folder: drafts.name.clone(),
-    });
-    let replacement = match &replaced {
-        Some(replaced) => {
-            let deletion = session
-                .delete_message(replaced.uid)
-                .await
-                .map_err(build_imap_failure_conversion("delete the replaced draft"))?;
-            format!(
-                "\nIt replaces draft {replaced}, which {}.",
-                format_deletion_clause(deletion, &drafts.name)
-            )
-        }
-        None => String::new(),
-    };
-    session.close().await;
-    let text = match &id {
-        Some(id) => format!(
+    }))
+}
+
+/// Builds the report of a stored draft: its id and fields, or why its id
+/// is not known, and what became of the draft it replaces; a failure is
+/// stated without advice to try again, as the draft is stored.
+///
+/// # Arguments
+///
+/// * `composition` - The draft's fields.
+/// * `drafts` - The Drafts folder's name.
+/// * `saved` - What became of the draft once it was stored.
+fn build_saved_draft_report(
+    composition: &Composition,
+    drafts: &str,
+    saved: &SavedDraft,
+) -> ToolReport {
+    let replacement = saved
+        .replacement
+        .as_ref()
+        .map(|replacement| format_replacement_line(replacement, drafts))
+        .unwrap_or_default();
+    let text = match &saved.id {
+        Ok(Some(id)) => format!(
             "Draft saved as {id}.\nTo: {}\n{}{}Subject: {}{replacement}\nSend it with send_draft, replace it with save_draft and this draft_id, or delete it with delete_draft.",
             composition.to.join(", "),
             format_optional_list("Cc", &composition.cc),
             format_optional_list("Bcc", &composition.bcc),
             composition.subject
         ),
-        None => format!(
-            "Draft saved in {}, but the server did not report its id. Search that folder to find it.{replacement}",
-            drafts.name
+        Ok(None) => format!(
+            "Draft saved in {drafts}, but the server did not report its id. Search that folder to find it.{replacement}"
+        ),
+        Err(failure) => format!(
+            "Draft saved in {drafts}, but its id could not be found: {} Search that folder to find it.{replacement}",
+            failure.format_reason()
         ),
     };
-    Ok(ToolReport {
+    ToolReport {
         text,
-        log: format!(
-            "draft: saved{}, id {}",
-            if replaced.is_some() {
-                ", replaced one"
-            } else {
-                ""
-            },
-            if id.is_some() { "found" } else { "not found" }
+        log: format_saved_draft_log(saved),
+    }
+}
+
+/// Formats what deleting the replaced draft did, as a line of the report.
+///
+/// # Arguments
+///
+/// * `replacement` - The replaced draft and what deleting it did.
+/// * `drafts` - The Drafts folder's name.
+fn format_replacement_line(replacement: &Replacement, drafts: &str) -> String {
+    let replaced = &replacement.replaced;
+    match &replacement.deletion {
+        Ok(deletion) => format!(
+            "\nIt replaces draft {replaced}, which {}.",
+            format_deletion_clause(*deletion, drafts)
         ),
-    })
+        Err(failure) => format!(
+            "\nIt replaces draft {replaced}, which could not be deleted and may still be in {drafts}: {} Delete it with delete_draft.",
+            failure.format_reason()
+        ),
+    }
+}
+
+/// Names what became of a stored draft, for the log, with the class of a
+/// step that failed.
+fn format_saved_draft_log(saved: &SavedDraft) -> String {
+    let deletion = saved
+        .replacement
+        .as_ref()
+        .map(|replacement| &replacement.deletion);
+    let replacement = match deletion {
+        None => String::new(),
+        Some(Ok(_)) => ", replaced one".to_owned(),
+        Some(Err(failure)) => format!(", replaced one not deleted ({})", failure.class()),
+    };
+    let id = match &saved.id {
+        Ok(Some(_)) => "found".to_owned(),
+        Ok(None) => "not found".to_owned(),
+        Err(failure) => format!("not found ({})", failure.class()),
+    };
+    format!("draft: saved{replacement}, id {id}")
 }
 
 /// Sends a stored draft as it is, once the call names its recipients,

@@ -22,22 +22,22 @@ pub const ACCOUNT_VARIABLE_NAME: &str = "LYS_EMAIL_ACCOUNT";
 
 /// Most bytes an email address may have, inclusive: the longest path SMTP
 /// carries.
-pub const MAXIMUM_ADDRESS_LENGTH: usize = 254;
+const MAXIMUM_ADDRESS_LENGTH: usize = 254;
 
 /// Most bytes the part of an address before `@` may have, inclusive.
 const MAXIMUM_LOCAL_PART_LENGTH: usize = 64;
 
 /// Most characters, counted as Unicode code points, a display name may
 /// have, inclusive.
-pub const MAXIMUM_DISPLAY_NAME_LENGTH: usize = 100;
+const MAXIMUM_DISPLAY_NAME_LENGTH: usize = 100;
 
 /// Most characters, counted as Unicode code points, a user name may have,
 /// inclusive.
-pub const MAXIMUM_USER_NAME_LENGTH: usize = 254;
+const MAXIMUM_USER_NAME_LENGTH: usize = 254;
 
 /// Most characters, counted as Unicode code points, a password may have,
 /// inclusive.
-pub const MAXIMUM_PASSWORD_LENGTH: usize = 1024;
+const MAXIMUM_PASSWORD_LENGTH: usize = 1024;
 
 /// Most bytes a host name may have, inclusive.
 const MAXIMUM_HOST_NAME_LENGTH: usize = 253;

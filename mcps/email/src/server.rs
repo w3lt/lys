@@ -26,10 +26,10 @@ use crate::tools::{
 };
 
 /// Longest one tool call may take as a whole.
-pub const CALL_LIMIT: Duration = Duration::from_secs(240);
+const CALL_LIMIT: Duration = Duration::from_secs(240);
 
 /// The name the server reports to the client.
-pub const SERVER_NAME: &str = "lys-email";
+const SERVER_NAME: &str = "lys-email";
 
 /// What the server tells the model about itself.
 const INSTRUCTIONS: &str = "Reads, searches, sends, and files the person's email over their own account. Message ids come from search_emails and read_email and look like 12.345.INBOX; an id is valid until the folder changes, then search again. Reading never marks a message as read. Sending and deleting are permanent.";

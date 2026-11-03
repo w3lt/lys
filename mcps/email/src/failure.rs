@@ -46,7 +46,7 @@ impl SignInFailure {
     }
 
     /// Returns the failure as a clause for a sentence to the model.
-    pub fn format_clause(self) -> &'static str {
+    fn format_clause(self) -> &'static str {
         match self {
             Self::WrongPassword => "the user name or password was refused",
             Self::Unreachable => "the host could not be reached",

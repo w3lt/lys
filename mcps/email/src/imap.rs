@@ -3,7 +3,7 @@
 //!
 //! [`open_imap_session`] connects, protects the connection as the account
 //! says, reads the greeting, signs in, and gives an [`ImapSession`] whose
-//! every command answers within [`EXCHANGE_LIMIT`] or fails. Each command
+//! every command answers within 30 seconds or fails. Each command
 //! is read up to its tagged status, so a `NO` or `BAD` is a failure that
 //! carries the server's code and text, never an empty answer. A command
 //! that ends in the time limit or a lost connection ends the session: every
@@ -44,7 +44,7 @@ use crate::network::{calculate_io_sign_in_failure, open_tcp_stream, open_tls_str
 use crate::trust::Trust;
 
 /// Longest one command may take to be answered in full.
-pub const EXCHANGE_LIMIT: Duration = Duration::from_secs(30);
+const EXCHANGE_LIMIT: Duration = Duration::from_secs(30);
 
 /// Header fields fetched for a listing, enough for a search hit, a
 /// conversation link, and a reply.
@@ -266,9 +266,9 @@ impl fmt::Debug for ImapSession {
 /// The signed-in session, or why signing in failed: the server could not
 /// be reached within 15 seconds; the TLS handshake failed, with the
 /// certificate refused or otherwise; STARTTLS was refused; the greeting,
-/// the STARTTLS answer, or the sign-in took longer than
-/// [`EXCHANGE_LIMIT`]; the credentials were refused; or the server
-/// answered something unreadable or ended the connection.
+/// the STARTTLS answer, or the sign-in took longer than 30 seconds; the
+/// credentials were refused; or the server answered something unreadable
+/// or ended the connection.
 pub async fn open_imap_session(
     account: &Account,
     trust: &Trust,
@@ -399,7 +399,7 @@ impl ImapSession {
         build_selected_folder(&facts)
     }
 
-    /// Searches the selected folder, within [`EXCHANGE_LIMIT`], unless a
+    /// Searches the selected folder, within 30 seconds, unless a
     /// command ended the session.
     ///
     /// # Arguments
@@ -457,7 +457,7 @@ impl ImapSession {
         Ok(messages.into_iter().find(|message| message.uid == uid))
     }
 
-    /// Appends a message to a folder, within [`EXCHANGE_LIMIT`], unless a
+    /// Appends a message to a folder, within 30 seconds, unless a
     /// command ended the session.
     ///
     /// # Arguments

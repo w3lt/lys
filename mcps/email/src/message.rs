@@ -225,7 +225,7 @@ fn list_identifiers(list: TextList<'_>) -> Vec<String> {
 /// # Arguments
 ///
 /// * `list` - The parsed field.
-pub fn format_addresses(list: AddressList<'_>) -> String {
+fn format_addresses(list: AddressList<'_>) -> String {
     let mut parts = Vec::new();
     for address in list.iter() {
         match address {

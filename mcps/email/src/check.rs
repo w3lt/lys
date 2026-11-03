@@ -14,7 +14,7 @@ use crate::smtp::open_smtp_session;
 use crate::trust::Trust;
 
 /// Longest one sign-in of the check may take as a whole.
-pub const CHECK_LIMIT: Duration = Duration::from_secs(20);
+const CHECK_LIMIT: Duration = Duration::from_secs(20);
 
 /// The outcome of one sign-in, as the report prints it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

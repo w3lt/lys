@@ -818,6 +818,46 @@
     }
   },
   {
+    "case": "an account whose port 587 is written with 17 significant digits, which rounds to 587",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 587.00000000000005,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 587,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
     "case": "an account that keeps no sent copy on the server",
     "group": {
       "account": {
@@ -2341,6 +2381,28 @@
         "smtp": {
           "host": "smtp.example.com",
           "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server port written with 17 significant digits, which rounds to a fraction",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465.00000000000004,
           "security": "tls"
         },
         "serverKeepsSentCopy": true

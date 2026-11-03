@@ -222,7 +222,9 @@ struct StoredMailServer {
     host: String,
     /// Port number, however the JSON number is written: `993`, `993.0`, and
     /// `9.93e2` are one number, as they are to `emailSettingsSchema` in
-    /// `@lys/share`.
+    /// `@lys/share`. serde_json's `float_roundtrip` feature reads a number
+    /// with many digits, such as `587.00000000000005`, correctly rounded, as
+    /// `JSON.parse` does.
     port: f64,
     /// Security text.
     security: String,

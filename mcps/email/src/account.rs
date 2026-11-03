@@ -210,7 +210,8 @@ struct StoredAccount {
 struct StoredServer {
     host: String,
     /// The port as any JSON number, as the shared rules read it: `993.0`
-    /// and `9.93e2` are the port 993.
+    /// and `9.93e2` are the port 993, and serde_json's `float_roundtrip`
+    /// feature rounds a number with many digits as `JSON.parse` does.
     port: f64,
     security: String,
 }

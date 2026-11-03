@@ -318,7 +318,7 @@ describe("EmailAccountCard", () => {
     startEmailAccountCard()
 
     expect(getCard()).toHaveTextContent(
-      "Lys signs in to IMAP and SMTP before saving. Gmail, iCloud, and Yahoo need an app password."
+      "Lys signs in to IMAP and SMTP before saving. Gmail, iCloud, Yahoo, and Fastmail need an app password."
     )
     expect(getField("Address")).toHaveValue("ada@fastmail.com")
     expect(getField("Address")).toHaveAccessibleDescription(
@@ -920,7 +920,7 @@ describe("EmailAccountCard", () => {
     })
 
     expect(sentCopy).toHaveAccessibleDescription(
-      "Gmail and Yahoo file sent mail themselves. Off makes Lys file the copy in Sent."
+      "On when the server files sent mail itself, as Gmail does. Off makes Lys file the copy in Sent."
     )
     await user.click(sentCopy)
 

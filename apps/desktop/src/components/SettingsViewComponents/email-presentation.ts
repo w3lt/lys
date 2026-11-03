@@ -73,7 +73,7 @@ type EmailAccountStatusInput = {
 
 /** Note under the account card's heading. */
 export const EMAIL_ACCOUNT_NOTE =
-  "Lys signs in to IMAP and SMTP before saving. Gmail, iCloud, and Yahoo need an app password."
+  "Lys signs in to IMAP and SMTP before saving. Gmail, iCloud, Yahoo, and Fastmail need an app password."
 
 /** Note of the password field while a password is saved. */
 export const EMAIL_PASSWORD_KEPT_NOTE =
@@ -81,7 +81,7 @@ export const EMAIL_PASSWORD_KEPT_NOTE =
 
 /** Note under the Sent copy switch. */
 export const EMAIL_SENT_COPY_NOTE =
-  "Gmail and Yahoo file sent mail themselves. Off makes Lys file the copy in Sent."
+  "On when the server files sent mail itself, as Gmail does. Off makes Lys file the copy in Sent."
 
 /** Rule of an address, shown beside its label before entry. */
 export const EMAIL_ADDRESS_HINT = `name@host · up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH}`

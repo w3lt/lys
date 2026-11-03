@@ -29,6 +29,7 @@ import {
   startFakeMcpHttpServer,
   type McpHttpRoute
 } from "../../support/mcpTestServers"
+import { waitForMicrotasks } from "../../support/microtasks"
 
 /** Longest a test waits for something a server process reports. */
 const EVENT_WAIT = Object.freeze({ timeout: 5000 })
@@ -787,6 +788,34 @@ describe("McpServerConnection over HTTP", () => {
     await firstClose
 
     expect(secondClose).toBe(firstClose)
+    expect(events.closedCount).toBe(0)
+  })
+
+  it("closes right after it opened without reporting the aborted event stream request as a connection error", async () => {
+    const answerOther = answerAsMcpServer()
+    const server = await startFakeMcpHttpServer((request, body, response) => {
+      // The stream request stays unanswered, as a server slow to open its
+      // stream leaves it, until the client aborts it.
+      if (request.method === "GET") return
+      answerOther(request, body, response)
+    })
+    const { context, events } = createRecordingContext()
+    const connection = await McpServerConnection.open(
+      buildHttpServerSettings("remote", server.url),
+      context
+    )
+    await vi.waitFor(
+      () =>
+        expect(
+          server.receivedRequests.map((request) => request.method)
+        ).toContain("GET"),
+      EVENT_WAIT
+    )
+
+    await connection.close()
+    await waitForMicrotasks()
+
+    expect(events.errors).toEqual([])
     expect(events.closedCount).toBe(0)
   })
 

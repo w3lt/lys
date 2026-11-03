@@ -7,6 +7,7 @@ import {
 } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
 import { createLlmProviderLoadsModelsError } from "../../../../../src/modules/llm/llmProviderLoadsModelsError"
+import { createLlmRuntimeFailureEvidence } from "../../../../../src/modules/llm/llmRuntimeFailureEvidence"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import updateFastifyWithLlmModelUnloadRoute from "../../../../../src/modules/llm/routes/unloadModelRoute"
@@ -20,6 +21,11 @@ const UNLOAD_MODEL_PATH = "/api/v1/llm/unload"
 
 /** Model key requested by every case. */
 const MODEL_KEY = "qwen/qwen3-8b"
+
+/** Lists the records of one level, in write order. */
+function listRecordsAtLevel(testApp: LlmRouteTestApp, level: string) {
+  return testApp.log.records.filter((record) => record.level === level)
+}
 
 /**
  * Sends an unload request for {@link MODEL_KEY}.
@@ -55,13 +61,13 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     ).toEqual([])
   })
 
-  it("warns about stop failures that reconciliation resolved", async () => {
+  it("warns about each stop failure that reconciliation resolved, with the failure itself", async () => {
     const testApp = createLlmRouteTestApp()
     const diagnostics = [
       {
         operation: "stop-model-instance",
-        modelIdentifier: MODEL_KEY,
-        message: "unload timed out"
+        modelIdentifier: `${MODEL_KEY}:2`,
+        evidence: createLlmRuntimeFailureEvidence(new Error("unload timed out"))
       }
     ] as const
     vi.spyOn(testApp.service, "stopLlmModelsByKey").mockResolvedValue({
@@ -73,9 +79,16 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     const response = await sendUnloadRequest(testApp)
 
     expect(response.statusCode).toBe(204)
-    expect(testApp.log.records.filter(({ level }) => level === "warn")).toEqual(
-      [expect.objectContaining({ modelKey: MODEL_KEY, diagnostics })]
-    )
+    expect(listRecordsAtLevel(testApp, "warn")).toEqual([
+      expect.objectContaining({
+        msg: "LLM model instance could not be stopped",
+        modelKey: MODEL_KEY,
+        operation: "stop-model-instance",
+        modelIdentifier: `${MODEL_KEY}:2`,
+        err: expect.objectContaining({ message: "unload timed out" })
+      })
+    ])
+    expect(listRecordsAtLevel(testApp, "error")).toEqual([])
   })
 
   it("responds with the model-not-found problem when the model is not loaded", async () => {
@@ -97,10 +110,15 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     ).toBe(true)
   })
 
-  it("responds with the runtime-unavailable problem and logs the diagnostics", async () => {
+  it("responds with the runtime-unavailable problem and logs the inventory failure with its cause, out of the body", async () => {
     const testApp = createLlmRouteTestApp()
     const diagnostics = [
-      { operation: "list-initial-model-instances", message: "socket closed" }
+      {
+        operation: "list-initial-model-instances",
+        evidence: createLlmRuntimeFailureEvidence(
+          new Error("socket closed", { cause: new Error("read ECONNRESET") })
+        )
+      }
     ] as const
     vi.spyOn(testApp.service, "stopLlmModelsByKey").mockResolvedValue({
       status: "runtime-unavailable",
@@ -118,18 +136,67 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
       llmRuntimeUnavailableProblemSchema.safeParse(response.json()).success
     ).toBe(true)
     expect(response.body).not.toContain("socket closed")
-    expect(
-      testApp.log.records.filter(({ level }) => level === "error")
-    ).toEqual([expect.objectContaining({ modelKey: MODEL_KEY, diagnostics })])
+    expect(response.body).not.toContain("ECONNRESET")
+    expect(listRecordsAtLevel(testApp, "error")).toEqual([
+      expect.objectContaining({
+        msg: "LLM runtime inventory could not be read before the model stop",
+        modelKey: MODEL_KEY,
+        operation: "list-initial-model-instances",
+        err: expect.objectContaining({
+          message: "socket closed: read ECONNRESET",
+          stack: expect.stringContaining("read ECONNRESET")
+        })
+      })
+    ])
+    expect(listRecordsAtLevel(testApp, "warn")).toEqual([])
   })
 
-  it("responds with the unload-failed problem and logs the remaining instances", async () => {
+  it("logs each diagnostic of a runtime-unavailable outcome after stop failures, in order", async () => {
     const testApp = createLlmRouteTestApp()
     const diagnostics = [
       {
         operation: "stop-model-instance",
         modelIdentifier: MODEL_KEY,
-        message: "refused"
+        evidence: createLlmRuntimeFailureEvidence(new Error("refused"))
+      },
+      {
+        operation: "list-reconciled-model-instances",
+        evidence: createLlmRuntimeFailureEvidence(new Error("socket closed"))
+      }
+    ] as const
+    vi.spyOn(testApp.service, "stopLlmModelsByKey").mockResolvedValue({
+      status: "runtime-unavailable",
+      diagnostics
+    })
+    await updateFastifyWithLlmModelUnloadRoute(testApp.app)
+
+    const response = await sendUnloadRequest(testApp)
+
+    expect(response.statusCode).toBe(503)
+    expect(listRecordsAtLevel(testApp, "error")).toEqual([
+      expect.objectContaining({
+        msg: "LLM model instance could not be stopped",
+        modelKey: MODEL_KEY,
+        operation: "stop-model-instance",
+        modelIdentifier: MODEL_KEY,
+        err: expect.objectContaining({ message: "refused" })
+      }),
+      expect.objectContaining({
+        msg: "LLM runtime inventory could not be read after the model stop",
+        modelKey: MODEL_KEY,
+        operation: "list-reconciled-model-instances",
+        err: expect.objectContaining({ message: "socket closed" })
+      })
+    ])
+  })
+
+  it("responds with the unload-failed problem and logs each stop failure, then the remaining instances", async () => {
+    const testApp = createLlmRouteTestApp()
+    const diagnostics = [
+      {
+        operation: "stop-model-instance",
+        modelIdentifier: MODEL_KEY,
+        evidence: createLlmRuntimeFailureEvidence(new Error("refused"))
       }
     ] as const
     vi.spyOn(testApp.service, "stopLlmModelsByKey").mockResolvedValue({
@@ -148,13 +215,19 @@ describe("updateFastifyWithLlmModelUnloadRoute", () => {
     expect(
       llmUnloadFailedProblemSchema.safeParse(response.json()).success
     ).toBe(true)
-    expect(
-      testApp.log.records.filter(({ level }) => level === "error")
-    ).toEqual([
+    expect(response.body).not.toContain("refused")
+    expect(listRecordsAtLevel(testApp, "error")).toEqual([
       expect.objectContaining({
+        msg: "LLM model instance could not be stopped",
         modelKey: MODEL_KEY,
-        remainingModelIdentifiers: [MODEL_KEY],
-        diagnostics
+        operation: "stop-model-instance",
+        modelIdentifier: MODEL_KEY,
+        err: expect.objectContaining({ message: "refused" })
+      }),
+      expect.objectContaining({
+        msg: "LLM model instances remain loaded after stop reconciliation",
+        modelKey: MODEL_KEY,
+        remainingModelIdentifiers: [MODEL_KEY]
       })
     ])
   })

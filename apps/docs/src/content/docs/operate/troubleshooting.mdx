@@ -98,15 +98,23 @@ The vmo card in Settings → Runtime says why:
   without the kernel described there
   ([#200](https://github.com/w3lt/lys/issues/200)).
 - **vmo stopped** right after Start: the process exited before it answered,
-  for example because it could not reach `ghcr.io` for its images; could not
-  read which `vminit` [its image store](/operate/data/#vmos-image-store)
-  holds unpacked, delete that unpack, or unpack and save the new one; could
-  not delete the images it no longer uses from the store; or, in a
-  development build, did not compile. In development, vmo's build and error
-  output appear in the terminal that runs `pnpm dev`. When every start stops
-  this way although `ghcr.io` is reachable and the disk has room for vmo's
-  images, delete `~/Library/Application Support/com.w3lt.lys-vmo` while vmo
-  is stopped; the next start downloads its images again.
+  for example because another vmo that does not answer yet holds
+  [its image store](/operate/data/#vmos-image-store), such as one started by
+  `apps/vmo/run.sh` that is still downloading its images (its error says
+  `another vmo uses the image store at …`; stop that vmo first). Another vmo
+  that answers, such as one left by a Lys that died, usually makes the card
+  show **vmo running** instead, because it answers for the new one; see
+  [A vmo or backend keeps running after Lys died](#a-vmo-or-backend-keeps-running-after-lys-died).
+  vmo also stops this way when it could not reach `ghcr.io` for its images;
+  could not delete the files of a pull an earlier vmo did not finish; could
+  not read which `vminit` the store holds unpacked, delete that unpack, or
+  unpack and save the new one; could not delete the images it no longer uses
+  from the store; or, in a development build, did not compile. In development,
+  vmo's build and error output appear in the terminal that runs `pnpm dev`.
+  When every start stops this way although `ghcr.io` is reachable and the disk
+  has room for vmo's images, delete
+  `~/Library/Application Support/com.w3lt.lys-vmo` while vmo is stopped; the
+  next start downloads its images again.
 - **Lys couldn't start vmo: Failed to run …/vmo: No such file or directory**:
   vmo is not installed. Run `build.sh`; see
   [Packaging and releases](/operate/releases/).
@@ -125,10 +133,12 @@ Lys stops vmo and the backend when it quits. When it dies without quitting,
 after a crash, Force Quit, or `kill -9`, or when a development rebuild restarts
 the desktop host, both keep running
 ([#202](https://github.com/w3lt/lys/issues/202)). The next Lys cannot start its
-own: the vmo and backend it starts cannot listen and exit. Its cards still show
-**vmo running** and **Backend running**, because the old processes answer their
-health routes, and `read_page` works through the old vmo. Stop and quitting Lys
-do not reach either old process.
+own: the vmo it starts stops at once because the old vmo holds
+[its image store](/operate/data/#vmos-image-store), and the backend it starts
+cannot listen and exits. Its cards still show **vmo running** and
+**Backend running**, because the old processes answer their health routes, and
+`read_page` works through the old vmo. Stop and quitting Lys do not reach
+either old process.
 
 To end them, find each process by its port and send it `SIGTERM`:
 

@@ -12,6 +12,7 @@ import {
 import { buildLlmInfo } from "../../support/modelFixtures"
 import {
   startNativeHostFake,
+  type NativeCommand,
   type NativeCommands
 } from "../../support/nativeHostFake"
 import {
@@ -158,12 +159,6 @@ const STATUS_FAILURE = "Failed to inspect backend process: Resource busy"
 const STOP_FAILURE =
   "Failed to terminate backend process group 4242: Operation not permitted"
 
-/**
- * Statuses from which the Runtime pane offers Start (`stopped`) or Stop
- * (`running`, `unresponsive`).
- */
-const ACTIONABLE_BACKEND_STATUSES = ["stopped", "running", "unresponsive"]
-
 /** Starts a native host whose backend process cannot be spawned. */
 function startHostFailingSpawn(): void {
   startDesktopHost(DISK_SETTINGS_DOCUMENT, {
@@ -190,30 +185,60 @@ function startHostFailingStatusAfterSpawn(): void {
   })
 }
 
-/** Native failures during a start, with the reason the start rejects with. */
+/**
+ * Native failures during a start, with the reason the start rejects with and
+ * the status published after it: `stopped` once no process remains, and
+ * `unresponsive` while one runs or its status cannot be read.
+ */
 const START_FAILURES = [
-  ["the process cannot be spawned", startHostFailingSpawn, SPAWN_FAILURE],
+  [
+    "the process cannot be spawned",
+    startHostFailingSpawn,
+    SPAWN_FAILURE,
+    "stopped"
+  ],
   [
     "the process status cannot be read while waiting for an answer",
     startHostFailingStatusAfterSpawn,
-    STATUS_FAILURE
+    STATUS_FAILURE,
+    "unresponsive"
   ]
 ] as const
 
 /**
  * Starts a running backend whose process then cannot be stopped.
  *
+ * @param getStatusAfterStop - Answers the status read after the failed stop;
+ * a process that still runs when omitted.
  * @returns The store, with the backend running.
  */
-async function startBackendFailingStop() {
+async function startBackendFailingStop(
+  getStatusAfterStop: NativeCommand = () => ({ running: true })
+) {
   startBackendFake(CONNECTED_BACKEND)
+  let hasStopFailed = false
   startDesktopHost(DISK_SETTINGS_DOCUMENT, {
-    stop_backend: () => Promise.reject(STOP_FAILURE)
+    get_backend_status: () =>
+      hasStopFailed ? getStatusAfterStop({}) : { running: true },
+    stop_backend: () => {
+      hasStopFailed = true
+      return Promise.reject(STOP_FAILURE)
+    }
   })
   const useLysStore = await loadFreshLysStore()
   await useLysStore.getState().startBackend()
   return useLysStore
 }
+
+/**
+ * Native outcomes of the status read after a failed stop, with the status
+ * published after it.
+ */
+const STATUSES_AFTER_FAILED_STOP = [
+  ["still runs", () => ({ running: true }), "unresponsive"],
+  ["is gone", () => ({ running: false }), "stopped"],
+  ["cannot be read", () => Promise.reject(STATUS_FAILURE), "unresponsive"]
+] as const
 
 /**
  * Lists the native commands the host received, in order.
@@ -523,20 +548,19 @@ describe("useLysStore", () => {
       }
     )
 
-    // Known defect (#162): the status stays `starting`, from which the
-    // Runtime pane offers neither Start nor Stop, so only restarting the app
-    // leaves it.
-    it.fails.each(START_FAILURES)(
-      "leaves a status the Runtime pane can start or stop from when %s",
-      async (_failure, startHost) => {
+    it.each(START_FAILURES)(
+      "publishes the status the process is in when %s, so Start or Stop is offered again",
+      async (_failure, startHost, _reason, status) => {
         startHost()
         const useLysStore = await loadFreshLysStore()
 
         await Promise.allSettled([useLysStore.getState().startBackend()])
 
-        expect(ACTIONABLE_BACKEND_STATUSES).toContain(
-          useLysStore.getState().backendServerInfo.status
-        )
+        expect(useLysStore.getState().backendServerInfo).toEqual({
+          status,
+          startedAt: undefined,
+          stoppedAt: status === "stopped" ? expect.any(Date) : undefined
+        })
       }
     )
 
@@ -583,19 +607,22 @@ describe("useLysStore", () => {
       )
     })
 
-    // Known defect (#162): the status stays `stopping`, from which the
-    // Runtime pane offers neither Start nor Stop, so only restarting the app
-    // leaves it.
-    it.fails(
-      "leaves a status the Runtime pane can start or stop from when the process cannot be stopped",
-      async () => {
-        const useLysStore = await startBackendFailingStop()
+    it.each(STATUSES_AFTER_FAILED_STOP)(
+      "publishes the status the process is in when it cannot be stopped and then %s, so Start or Stop is offered again",
+      async (_outcome, getStatusAfterStop, status) => {
+        const useLysStore = await startBackendFailingStop(getStatusAfterStop)
 
         await Promise.allSettled([useLysStore.getState().stopBackend()])
 
-        expect(ACTIONABLE_BACKEND_STATUSES).toContain(
-          useLysStore.getState().backendServerInfo.status
-        )
+        expect(useLysStore.getState()).toMatchObject({
+          backendServerInfo: {
+            status,
+            startedAt: expect.any(Date),
+            stoppedAt: status === "stopped" ? expect.any(Date) : undefined
+          },
+          lmStudioStatus: "unknown",
+          modelRuntime: { status: "unavailable" }
+        })
       }
     )
 

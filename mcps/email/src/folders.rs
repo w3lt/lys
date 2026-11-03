@@ -124,19 +124,7 @@ pub struct Folder {
 ///
 /// * `listings` - The server's `LIST` responses, in the server's order.
 pub fn build_folders(listings: &[FolderListing]) -> Vec<Folder> {
-    let mut folders: Vec<Folder> = listings
-        .iter()
-        .map(|listing| Folder {
-            name: parse_encoded_folder_name(&listing.raw_name),
-            raw_name: listing.raw_name.clone(),
-            role: None,
-            selectable: !listing
-                .attributes
-                .iter()
-                .any(|attribute| attribute.eq_ignore_ascii_case("\\Noselect")),
-            delimiter: listing.delimiter.clone(),
-        })
-        .collect();
+    let mut folders: Vec<Folder> = listings.iter().map(build_folder).collect();
     for role in FolderRole::ALL_ROLES {
         let by_attribute = listings.iter().position(|listing| {
             listing
@@ -158,6 +146,20 @@ pub fn build_folders(listings: &[FolderListing]) -> Vec<Folder> {
         }
     }
     folders
+}
+
+/// Builds a folder from its listing, still without a role.
+fn build_folder(listing: &FolderListing) -> Folder {
+    Folder {
+        name: parse_encoded_folder_name(&listing.raw_name),
+        raw_name: listing.raw_name.clone(),
+        role: None,
+        selectable: !listing
+            .attributes
+            .iter()
+            .any(|attribute| attribute.eq_ignore_ascii_case("\\Noselect")),
+        delimiter: listing.delimiter.clone(),
+    }
 }
 
 /// Finds the folder with the name, as the person and the model see it;

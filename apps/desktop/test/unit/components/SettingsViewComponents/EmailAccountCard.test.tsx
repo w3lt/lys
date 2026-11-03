@@ -631,6 +631,13 @@ describe("EmailAccountCard", () => {
     )
 
     expect(getServerField("IMAP server", "Port")).toHaveFocus()
+  })
+
+  it("clears the mark of a field fixed after Save, and keeps the problem of a field still broken", async () => {
+    startEmptyEmailAccountCard()
+    const user = userEvent.setup()
+    await user.type(getField("Address"), "ada")
+    await user.type(getField("User name"), "ada{Enter}")
 
     await user.type(getField("Address"), "@gmail.com")
 

@@ -54,6 +54,20 @@ import {
 } from "../../support/settingsViewFixtures"
 import { buildMcpToolDefinition } from "../../support/toolFixtures"
 
+/** What the person types into the editor of a new local program. */
+type TypedLocalProgram = Readonly<{
+  /** Text typed into Name. */
+  name: string
+  /** Text typed into Command. */
+  command: string
+  /** Text typed into Arguments. */
+  arguments: string
+  /** Name typed into the variable that add variable adds. */
+  variableName: string
+  /** Value typed into that variable. */
+  variableValue: string
+}>
+
 /** Route key of the list read. */
 const LIST_ROUTE = "GET /api/v1/mcp/servers"
 
@@ -82,6 +96,12 @@ const STORED_LIST = buildMcpServerList([
   buildMcpServerStatus("files", "stdio", buildConnectedMcpState(3)),
   buildMcpServerStatus("notes", "http", buildFailedMcpState("unauthorized")),
   buildBuiltInMcpServerStatus("email", OFF_MCP_STATE)
+])
+
+/** {@link STORED_LIST} once the command server is switched off. */
+const FILES_OFF_LIST = buildMcpServerList([
+  buildMcpServerStatus("files", "stdio", OFF_MCP_STATE),
+  ...STORED_LIST.servers.slice(1)
 ])
 
 /** What the email server's row says it does. */
@@ -343,6 +363,40 @@ async function openNewServerEditor(
 }
 
 /**
+ * Types a local program into the editor of a new server: its name, its
+ * command, and its arguments, then one environment variable, which add
+ * variable adds and focuses.
+ *
+ * @param user - User-event session of the case.
+ * @param form - The editor form.
+ * @param program - What the person types.
+ */
+async function typeLocalProgram(
+  user: ReturnType<typeof userEvent.setup>,
+  form: HTMLElement,
+  program: TypedLocalProgram
+): Promise<void> {
+  await user.type(
+    within(form).getByRole("textbox", { name: "Name" }),
+    program.name
+  )
+  await user.type(
+    within(form).getByRole("textbox", { name: "Command" }),
+    program.command
+  )
+  await user.type(
+    within(form).getByRole("textbox", { name: "Arguments" }),
+    program.arguments
+  )
+  await user.click(within(form).getByRole("button", { name: "add variable" }))
+  await user.keyboard(program.variableName)
+  await user.type(
+    within(form).getByLabelText("Value of variable 1"),
+    program.variableValue
+  )
+}
+
+/**
  * Removes one saved server through its details, confirming the removal,
  * and waits for the save.
  *
@@ -418,14 +472,10 @@ describe("McpPaneContent", () => {
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE])
   })
 
-  it("switches an added server off, which the store saves and the backend applies, and on again", async () => {
+  it("switches an added server off, which the store saves and the backend applies", async () => {
     const host = startSettingsHost()
-    const filesOff = buildMcpServerList([
-      buildMcpServerStatus("files", "stdio", OFF_MCP_STATE),
-      ...STORED_LIST.servers.slice(1)
-    ])
     const { backend } = await startMcpPane({
-      [SYNC_ROUTE]: buildMcpServerListRoute([filesOff, STORED_LIST])
+      [SYNC_ROUTE]: answerList(FILES_OFF_LIST)
     })
     const user = userEvent.setup()
 
@@ -465,6 +515,17 @@ describe("McpPaneContent", () => {
     expect(
       within(files).getByRole("button", { name: "Edit files" })
     ).toBeEnabled()
+  })
+
+  it("switches an added server on again, which the store saves and the backend applies", async () => {
+    const host = startSettingsHost()
+    const { backend } = await startMcpPane({
+      [SYNC_ROUTE]: buildMcpServerListRoute([FILES_OFF_LIST, STORED_LIST])
+    })
+    const user = userEvent.setup()
+    await user.click(getServerSwitch("files"))
+    await waitForRenderedWork()
+    const files = await expandServer(user, "files")
 
     await user.click(getServerSwitch("files"))
     await waitForRenderedWork()
@@ -544,11 +605,7 @@ describe("McpPaneContent", () => {
   it("disables every server's switch while a save of the servers runs", async () => {
     const write = createControlledPromise<unknown>()
     startSettingsHost(() => write.promise)
-    const filesOff = buildMcpServerList([
-      buildMcpServerStatus("files", "stdio", OFF_MCP_STATE),
-      ...STORED_LIST.servers.slice(1)
-    ])
-    await startMcpPane({ [SYNC_ROUTE]: answerList(filesOff) })
+    await startMcpPane({ [SYNC_ROUTE]: answerList(FILES_OFF_LIST) })
     const user = userEvent.setup()
 
     await user.click(getServerSwitch("files"))
@@ -1255,6 +1312,22 @@ describe("McpPaneContent", () => {
     expect(within(form).getByRole("textbox", { name: "URL" })).toBeRequired()
   })
 
+  it("opens the editor of a new server on a local program, with Name focused", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+
+    const form = await openNewServerEditor(user)
+
+    expect(
+      within(form).getByRole("heading", { name: "new server" })
+    ).toBeInTheDocument()
+    expect(
+      within(form).getByRole("radio", { name: "Local program" })
+    ).toBeChecked()
+    expect(within(form).getByRole("textbox", { name: "Name" })).toHaveFocus()
+  })
+
   it("adds a local program, applies the saved list, and shows the new server with Edit focused", async () => {
     const host = startSettingsHost()
     const syncedList = buildMcpServerList([
@@ -1267,31 +1340,13 @@ describe("McpPaneContent", () => {
     const user = userEvent.setup()
 
     const form = await openNewServerEditor(user)
-    expect(
-      within(form).getByRole("heading", { name: "new server" })
-    ).toBeInTheDocument()
-    expect(
-      within(form).getByRole("radio", { name: "Local program" })
-    ).toBeChecked()
-    expect(within(form).getByRole("textbox", { name: "Name" })).toHaveFocus()
-    await user.type(
-      within(form).getByRole("textbox", { name: "Name" }),
-      "tools"
-    )
-    await user.type(
-      within(form).getByRole("textbox", { name: "Command" }),
-      "/usr/bin/tools"
-    )
-    await user.type(
-      within(form).getByRole("textbox", { name: "Arguments" }),
-      '--stdio "two words"'
-    )
-    await user.click(within(form).getByRole("button", { name: "add variable" }))
-    await user.keyboard("TOKEN")
-    await user.type(
-      within(form).getByLabelText("Value of variable 1"),
-      "fixture-1111"
-    )
+    await typeLocalProgram(user, form, {
+      name: "tools",
+      command: "/usr/bin/tools",
+      arguments: '--stdio "two words"',
+      variableName: "TOKEN",
+      variableValue: "fixture-1111"
+    })
     await user.click(within(form).getByRole("button", { name: "Add server" }))
     await waitForRenderedWork()
 
@@ -1539,15 +1594,14 @@ describe("McpPaneContent", () => {
     ).toHaveAttribute("aria-invalid", "true")
   })
 
-  it("edits a remote server in place, keeping its place, its token, and saying it is unsaved meanwhile", async () => {
-    const host = startSettingsHost()
-    const { backend } = await startMcpPane({
-      [SYNC_ROUTE]: answerList(STORED_LIST)
-    })
+  it("opens a saved remote server's editor on its values, with its token hidden", async () => {
+    startSettingsHost()
+    await startMcpPane()
     const user = userEvent.setup()
 
     const notes = await expandServer(user, "notes")
     await user.click(within(notes).getByRole("button", { name: "Edit notes" }))
+
     const form = screen.getByRole("form", { name: "notes" })
     expect(
       within(form).getByRole("heading", { name: "editing · notes" })
@@ -1565,6 +1619,18 @@ describe("McpPaneContent", () => {
     expect(token).toHaveValue("fixture-0000")
     expect(token).toHaveAttribute("type", "password")
     expect(within(form).queryByLabelText("Name of header 1")).toBeNull()
+  })
+
+  it("edits a remote server in place, keeping its place, its token, and saying it is unsaved meanwhile", async () => {
+    const host = startSettingsHost()
+    const { backend } = await startMcpPane({
+      [SYNC_ROUTE]: answerList(STORED_LIST)
+    })
+    const user = userEvent.setup()
+
+    const notes = await expandServer(user, "notes")
+    await user.click(within(notes).getByRole("button", { name: "Edit notes" }))
+    const form = screen.getByRole("form", { name: "notes" })
     expect(within(form).queryByText("unsaved")).toBeNull()
     const url = within(form).getByRole("textbox", { name: "URL" })
     await user.clear(url)

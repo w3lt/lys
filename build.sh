@@ -23,12 +23,15 @@ swift build -c release --package-path apps/vmo
 VMO_BUILD_DIR=$(swift build -c release --package-path apps/vmo --show-bin-path)
 
 # Step 2b: Build the email MCP server Lys ships, in release. It needs the Rust
-# toolchain; the backend starts it from $LYS_HOME/runtime/email/email.
+# toolchain; the backend starts it from $LYS_HOME/runtime/email/email. Cargo's
+# JSON output names the binary this build produced, wherever CARGO_TARGET_DIR,
+# a Cargo configuration, or a build target put it.
 if ! command -v cargo >/dev/null 2>&1; then
   echo "Lys needs the Rust toolchain (cargo) to build its email MCP server." >&2
   exit 1
 fi
-cargo build --release --locked --manifest-path mcps/email/Cargo.toml
+EMAIL_BUILD_BINARY=$(cargo build --release --locked --manifest-path mcps/email/Cargo.toml --message-format=json-render-diagnostics |
+  jq -er 'select(.reason == "compiler-artifact" and .target.name == "email" and .executable != null) | .executable')
 
 # Step 3: Build backend
 pnpm run backend:build
@@ -160,7 +163,7 @@ codesign --force --sign - --entitlements apps/vmo/vmo.entitlements "$VMO_DIR/vmo
 EMAIL_DIR="$LYS_HOME/runtime/email"
 rm -rf "$EMAIL_DIR"
 mkdir -p "$EMAIL_DIR"
-cp mcps/email/target/release/email "$EMAIL_DIR/email"
+cp "$EMAIL_BUILD_BINARY" "$EMAIL_DIR/email"
 
 # Step 9. Build the desktop app
 pnpm run desktop:build:ci

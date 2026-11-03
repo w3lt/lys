@@ -71,6 +71,52 @@ fn calculate_hit_count(text: &str) -> usize {
     text.lines().filter(|line| line.starts_with("id ")).count()
 }
 
+/// Builds message `number` of a conversation, from 0: sent `number`
+/// minutes after the first, with the Message-ID `<name><number>@example.com`
+/// in two digits, and a reply to the one before it that also references
+/// the first.
+///
+/// # Arguments
+///
+/// * `name` - What every Message-ID of the conversation starts with.
+/// * `number` - Its place in the conversation.
+/// * `body` - Its text.
+fn build_thread_message(name: &str, number: i64, body: &str) -> TestMessage {
+    let mut message = TestMessage {
+        subject: "Re: Plan".to_owned(),
+        body: body.to_owned(),
+        message_id: format!("{name}{number:02}@example.com"),
+        timestamp: BASE + number * 60,
+        ..TestMessage::default()
+    };
+    if number > 0 {
+        message.in_reply_to = format!("{name}{:02}@example.com", number - 1);
+        message.references = format!("<{name}00@example.com>");
+    }
+    message
+}
+
+/// Reads the conversation of a message.
+///
+/// # Arguments
+///
+/// * `stack` - The running fakes and the tools' context.
+/// * `id` - The message's id.
+async fn read_conversation_text(stack: &Stack, id: &str) -> String {
+    run_read_conversation(&stack.context, IdArguments { id: id.to_owned() })
+        .await
+        .expect("the conversation")
+        .text
+}
+
+/// Lists the ids of a conversation's entries, in the order shown.
+fn list_entry_ids(text: &str) -> Vec<&str> {
+    text.split("\n\n----\nid ")
+        .skip(1)
+        .map(|entry| entry.split_once('\n').map_or(entry, |(id, _)| id))
+        .collect()
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn searches_one_folder_in_pages_newest_first_without_marking_anything() {
     let stack = start_filled_stack().await;
@@ -516,6 +562,190 @@ async fn reads_a_conversation_across_folders_oldest_first() {
     assert!(
         !commands.iter().any(|command| command.contains("STORE")),
         "{commands:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fits_the_newest_messages_of_a_long_conversation_and_says_how_many_are_left_out() {
+    let mut mailbox = FakeMailbox::create_standard();
+    let body = "x".repeat(3_500);
+    for number in 0..12 {
+        let message = build_thread_message("t", number, &body);
+        mailbox.add_message("INBOX", message.build_new_message(&[]));
+    }
+    let stack = start_stack(mailbox, false).await;
+
+    let text = read_conversation_text(&stack, "12.1001.INBOX").await;
+
+    let ids = list_entry_ids(&text);
+    let shown = ids.len();
+    let newest: Vec<String> = (13 - shown..=12)
+        .map(|uid| format!("{uid}.1001.INBOX"))
+        .collect();
+    assert_eq!(ids, newest, "{text}");
+    assert!(shown >= 5, "{text}");
+    assert!(
+        text.starts_with(&format!(
+            "The conversation has 12 messages, oldest first. Only the newest {shown} are shown; {} older ones are left out.\n\n----\n",
+            12 - shown
+        )),
+        "{text}"
+    );
+    let length = text.encode_utf16().count();
+    let shortest_entry = text
+        .split("\n\n----\n")
+        .skip(1)
+        .map(|entry| entry.encode_utf16().count())
+        .min()
+        .expect("an entry");
+    assert!(length <= 20_000, "{length}");
+    assert!(
+        length + shortest_entry > 20_000,
+        "{length} + {shortest_entry}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn shows_the_newest_message_even_when_it_alone_is_longer_than_the_result() {
+    let mut mailbox = FakeMailbox::create_standard();
+    let first = build_thread_message("t", 0, "Shall we?");
+    let mut crowded = build_thread_message("t", 1, "Yes.");
+    crowded.to = (1..=1_100)
+        .map(|number| format!("person{number}@example.com"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    mailbox.add_message("INBOX", first.build_new_message(&[]));
+    mailbox.add_message("INBOX", crowded.build_new_message(&[]));
+    let stack = start_stack(mailbox, false).await;
+
+    let text = read_conversation_text(&stack, "2.1001.INBOX").await;
+
+    assert!(
+        text.starts_with("The conversation has 2 messages, oldest first. Only the newest is shown; 1 older one is left out.\n\n----\nid 2.1001.INBOX\n"),
+        "{}",
+        &text[..300]
+    );
+    assert_eq!(list_entry_ids(&text), vec!["2.1001.INBOX"]);
+    assert!(text.encode_utf16().count() > 20_000);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn shows_at_most_the_newest_50_messages_of_a_conversation_across_folders() {
+    let mut mailbox = FakeMailbox::create_standard();
+    for number in 0..60 {
+        let folder = if number % 2 == 0 { "INBOX" } else { "Sent" };
+        let message = build_thread_message("t", number, "Short.");
+        mailbox.add_message(folder, message.build_new_message(&[]));
+    }
+    let stack = start_stack(mailbox, false).await;
+
+    let text = read_conversation_text(&stack, "30.1002.Sent").await;
+
+    assert!(
+        text.starts_with("The conversation has 60 messages, oldest first. Only the newest 50 are shown; 10 older ones are left out.\n\n----\nid 6.1001.INBOX\n"),
+        "{text}"
+    );
+    let ids = list_entry_ids(&text);
+    assert_eq!(ids.len(), 50, "{text}");
+    assert_eq!(ids.last(), Some(&"30.1002.Sent"), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn says_when_a_folder_matched_more_messages_than_a_conversation_reads() {
+    let mut mailbox = FakeMailbox::create_standard();
+    for number in 0..55 {
+        let message = build_thread_message("t", number, "Short.");
+        mailbox.add_message("INBOX", message.build_new_message(&[]));
+    }
+    let stack = start_stack(mailbox, false).await;
+
+    let text = read_conversation_text(&stack, "55.1001.INBOX").await;
+
+    assert!(
+        text.starts_with("The conversation has at least 50 messages, oldest first.\nMore than 50 messages match in INBOX; only the newest 50 of each were read, so older ones may be missing.\n\n----\nid 6.1001.INBOX\n"),
+        "{text}"
+    );
+    assert_eq!(list_entry_ids(&text).len(), 50, "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn keeps_only_messages_whose_identifiers_equal_the_conversation_ones() {
+    let mut mailbox = FakeMailbox::create_standard();
+    for (number, message_id) in [(0, "1@x.example"), (1, "11@x.example"), (2, "21@x.example")] {
+        let message = TestMessage {
+            subject: "Plan".to_owned(),
+            body: "Text.".to_owned(),
+            message_id: message_id.to_owned(),
+            timestamp: BASE + number * 60,
+            ..TestMessage::default()
+        };
+        mailbox.add_message("INBOX", message.build_new_message(&[]));
+    }
+    let reply = TestMessage {
+        subject: "Re: Plan".to_owned(),
+        body: "Yes.".to_owned(),
+        message_id: "r@x.example".to_owned(),
+        in_reply_to: "1@x.example".to_owned(),
+        timestamp: BASE + 600,
+        ..TestMessage::default()
+    };
+    mailbox.add_message("INBOX", reply.build_new_message(&[]));
+    let stack = start_stack(mailbox, false).await;
+
+    let text = read_conversation_text(&stack, "1.1001.INBOX").await;
+
+    assert!(
+        text.starts_with("The conversation has 2 messages, oldest first.\n\n----\n"),
+        "{text}"
+    );
+    assert_eq!(list_entry_ids(&text), vec!["1.1001.INBOX", "4.1001.INBOX"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn finds_a_conversation_message_archived_in_the_all_mail_view_once() {
+    let mut mailbox = FakeMailbox::create_standard();
+    let first = build_thread_message("t", 0, "Shall we?");
+    let archived = build_thread_message("t", 1, "Yes.");
+    mailbox.add_message("INBOX", first.build_new_message(&[]));
+    mailbox.add_message("All Mail", first.build_new_message(&[]));
+    mailbox.add_message("All Mail", archived.build_new_message(&["\\Seen"]));
+    let stack = start_stack(mailbox, false).await;
+
+    let text = read_conversation_text(&stack, "1.1001.INBOX").await;
+
+    assert!(
+        text.starts_with("The conversation has 2 messages, oldest first.\n\n----\n"),
+        "{text}"
+    );
+    assert_eq!(
+        list_entry_ids(&text),
+        vec!["1.1001.INBOX", "2.1005.All Mail"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn marks_a_message_removed_while_its_conversation_was_read() {
+    let mut mailbox = FakeMailbox::create_standard();
+    for number in 0..3 {
+        let message = build_thread_message("t", number, "Short.");
+        mailbox.add_message("INBOX", message.build_new_message(&[]));
+    }
+    mailbox.add_removal("UID FETCH 2 (UID FLAGS BODY.PEEK[])", "INBOX", 2);
+    let stack = start_stack(mailbox, false).await;
+
+    let text = read_conversation_text(&stack, "3.1001.INBOX").await;
+
+    assert!(
+        text.starts_with("The conversation has 3 messages, oldest first.\n\n----\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\n\n----\nid 2.1001.INBOX\n[This message was removed while the conversation was read.]\n\n----\nid 3.1001.INBOX\n"),
+        "{text}"
+    );
+    assert_eq!(
+        list_entry_ids(&text),
+        vec!["1.1001.INBOX", "2.1001.INBOX", "3.1001.INBOX"]
     );
 }
 

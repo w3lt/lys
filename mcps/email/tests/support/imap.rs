@@ -1,7 +1,8 @@
 //! A fake IMAP server: folders and messages in memory, the commands the
 //! email server sends, TLS or STARTTLS, and a log of every command; on
-//! request it refuses a command, or fails it by never answering it or by
-//! closing the connection.
+//! request it refuses a command, fails it by never answering it or by
+//! closing the connection, or removes a message before a command, as
+//! another client would.
 
 use std::fmt::Debug;
 use std::future::Future;
@@ -45,6 +46,18 @@ pub enum ImapFault {
     Stall,
     /// Closes the connection without answering.
     Close,
+}
+
+/// A message the fake removes before a command, as another client that
+/// expunged it while a call was running would.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Removal {
+    /// Text of the command line the message is removed before.
+    trigger: String,
+    /// The message's folder.
+    folder: String,
+    /// The message's UID.
+    uid: u32,
 }
 
 /// One stored message.
@@ -138,6 +151,9 @@ pub struct FakeMailbox {
     refusals: Vec<(String, String)>,
     /// The commands the fake fails, by name, and how.
     faults: Vec<(String, ImapFault)>,
+    /// The messages still to remove, each before the first command whose
+    /// line holds its trigger.
+    removals: Vec<Removal>,
 }
 
 impl FakeMailbox {
@@ -151,6 +167,7 @@ impl FakeMailbox {
             next_uid_validity: 2001,
             refusals: Vec::new(),
             faults: Vec::new(),
+            removals: Vec::new(),
         }
     }
 
@@ -214,6 +231,42 @@ impl FakeMailbox {
     ///   `NO [OVERQUOTA] Quota exceeded`.
     pub fn add_refusal(&mut self, name: &str, answer: &str) {
         self.refusals.push((name.to_owned(), answer.to_owned()));
+    }
+
+    /// Makes the fake remove a message just before it handles the first
+    /// command whose line holds a text, as another client that expunged
+    /// the message would; the fake announces no EXPUNGE response for it.
+    ///
+    /// # Arguments
+    ///
+    /// * `trigger` - Text of the command line, such as
+    ///   `UID FETCH 2 (UID FLAGS BODY.PEEK[])`.
+    /// * `folder` - The message's folder.
+    /// * `uid` - The message's UID.
+    pub fn add_removal(&mut self, trigger: &str, folder: &str, uid: u32) {
+        self.removals.push(Removal {
+            trigger: trigger.to_owned(),
+            folder: folder.to_owned(),
+            uid,
+        });
+    }
+
+    /// Removes the messages whose trigger the command line holds.
+    ///
+    /// # Arguments
+    ///
+    /// * `line` - The command line, before the fake handles it.
+    fn remove_triggered_messages(&mut self, line: &str) {
+        let (due, waiting): (Vec<Removal>, Vec<Removal>) = std::mem::take(&mut self.removals)
+            .into_iter()
+            .partition(|removal| line.contains(&removal.trigger));
+        self.removals = waiting;
+        for removal in due {
+            let folder = self
+                .find_folder_mut(&removal.folder)
+                .expect("the folder exists");
+            folder.messages.retain(|message| message.uid != removal.uid);
+        }
     }
 
     /// Finds what the fake answers instead of handling a command of the
@@ -497,6 +550,7 @@ where
         }
         let step = {
             let mut mailbox = setup.state.lock().expect("the state");
+            mailbox.remove_triggered_messages(&text);
             session.handle_command(&command, &mut mailbox)
         };
         match step {

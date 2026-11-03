@@ -99,7 +99,7 @@ impl EmailServer {
 
     #[tool(
         name = "read_conversation",
-        description = "Reads the whole conversation a message belongs to, oldest first, found through its Message-ID, In-Reply-To, and References fields in every folder; at most 50 messages, each cut to 3,000 characters of text.",
+        description = "Reads the conversation a message belongs to, oldest first, found through its Message-ID, In-Reply-To, and References fields in every folder: the newest messages that fit in the result, at most 50, each cut to 3,000 characters of text; it says how many older ones were left out.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn run_read_conversation(

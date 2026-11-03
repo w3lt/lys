@@ -24,7 +24,7 @@ export type EmailServerDraft = {
   readonly security: EmailSecurity
 }
 
-/** What the account card's fields hold. */
+/** What the account card's fields hold, and which preset filled its servers. */
 export type EmailAccountDraft = {
   /** Address as typed. */
   readonly address: string
@@ -40,6 +40,13 @@ export type EmailAccountDraft = {
   readonly smtp: EmailServerDraft
   /** Whether the SMTP server files a copy of each sent message itself. */
   readonly serverKeepsSentCopy: boolean
+  /**
+   * Preset that last filled the server fields and the Sent copy switch, or,
+   * in the fields of a saved account, the saved address's preset; undefined
+   * while neither exists. Another preset replaces the fields only while they
+   * still hold this one's values.
+   */
+  readonly appliedPreset: EmailPreset | undefined
 }
 
 /** Input of the account card a problem concerns. */
@@ -116,7 +123,8 @@ const EMPTY_ACCOUNT_DRAFT: EmailAccountDraft = Object.freeze({
   password: "",
   imap: EMPTY_SERVER_DRAFT,
   smtp: EMPTY_SERVER_DRAFT,
-  serverKeepsSentCopy: false
+  serverKeepsSentCopy: false,
+  appliedPreset: undefined
 })
 
 /** Host and port inputs of one server side. */
@@ -175,9 +183,10 @@ function buildServerDraft(server: EmailServerSettings): EmailServerDraft {
  * Builds the fields that show a saved account, or an empty card.
  *
  * @param account - Saved account, or null.
- * @returns The saved values with the password field empty; without an
- * account, every text empty, both servers on TLS, and Lys filing the Sent
- * copy.
+ * @returns The saved values with the password field empty, and the saved
+ * address's preset as the one that filled the servers; without an account,
+ * every text empty, both servers on TLS, Lys filing the Sent copy, and no
+ * preset.
  */
 export function buildEmailAccountDraft(
   account: EmailAccount | null
@@ -190,7 +199,8 @@ export function buildEmailAccountDraft(
     password: "",
     imap: buildServerDraft(account.imap),
     smtp: buildServerDraft(account.smtp),
-    serverKeepsSentCopy: account.serverKeepsSentCopy
+    serverKeepsSentCopy: account.serverKeepsSentCopy,
+    appliedPreset: findEmailPreset(account.address)
   }
 }
 
@@ -280,14 +290,17 @@ function buildPresetChoices(preset: EmailPreset): EmailServerChoices {
 /**
  * Answers whether a preset may fill a draft's server fields and Sent copy
  * switch: every one of them still holds what an empty card holds, or they
- * all still hold the preset of the address they were filled for.
+ * all still hold the values of the draft's applied preset, the one that
+ * last filled them or, for a saved account, its address's preset. Values
+ * the person typed are never replaced, even ones that equal another
+ * provider's preset.
  *
- * @param draft - Fields as they are, with the address before its change.
+ * @param draft - Fields as they are.
  * @returns True when a preset may replace the server fields and the switch.
  */
 function canApplyEmailPreset(draft: EmailAccountDraft): boolean {
   if (hasEmailServerChoices(draft, EMPTY_ACCOUNT_DRAFT)) return true
-  const applied = findEmailPreset(draft.address)
+  const applied = draft.appliedPreset
   return (
     applied !== undefined &&
     hasEmailServerChoices(draft, buildPresetChoices(applied))
@@ -298,13 +311,16 @@ function canApplyEmailPreset(draft: EmailAccountDraft): boolean {
  * Replaces the address and, when its provider has a preset and the server
  * fields and the Sent copy switch are free to fill, fills them from it.
  *
+ * @remarks An address typed one character at a time passes through texts
+ * without a preset; the applied preset stays through them, so the preset
+ * of the address typed in the end still replaces it.
  * @param draft - Fields as they are.
  * @param address - New address as typed.
  * @returns The draft with the address, and with the preset's servers and
- * Sent copy while every server field and the switch still hold what an
- * empty card holds, or they all still hold the preset applied for the
- * previous address; otherwise the servers and the Sent copy the person
- * made or kept stay as they are.
+ * Sent copy, recorded as the applied preset, while every server field and
+ * the switch still hold what an empty card holds or the values of the
+ * applied preset; otherwise the servers, the Sent copy, and the applied
+ * preset stay as they are.
  */
 export function updateEmailAccountAddress(
   draft: EmailAccountDraft,
@@ -319,7 +335,8 @@ export function updateEmailAccountAddress(
     address,
     imap: buildServerDraft(preset.imap),
     smtp: buildServerDraft(preset.smtp),
-    serverKeepsSentCopy: preset.serverKeepsSentCopy
+    serverKeepsSentCopy: preset.serverKeepsSentCopy,
+    appliedPreset: preset
   }
 }
 

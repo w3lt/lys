@@ -15,12 +15,44 @@ import {
   STORED_EMAIL_ACCOUNT,
   STORED_EMAIL_PASSWORD
 } from "../../support/settingsFixtures"
+import { listKeystrokeTexts } from "../../support/typing"
 
 /** Properties accepted by the card. */
 type EmailAccountCardProps = ComponentProps<typeof EmailAccountCard>
 
+/** What the server fields and the Sent copy switch show. */
+type ShownServerChoices = Readonly<{
+  /** The IMAP server's host, port, and pressed security, space separated. */
+  imap: string
+  /** The SMTP server's host, port, and pressed security, space separated. */
+  smtp: string
+  /** Whether the Sent copy switch is on. */
+  keepsSentCopy: boolean
+}>
+
 /** Problem of an address that is not one. */
 const ADDRESS_PROBLEM = /address/i
+
+/** What the fields show once the Gmail preset filled them. */
+const GMAIL_CHOICES: ShownServerChoices = Object.freeze({
+  imap: "imap.gmail.com 993 TLS",
+  smtp: "smtp.gmail.com 465 TLS",
+  keepsSentCopy: true
+})
+
+/** What the fields show once the iCloud preset filled them. */
+const ICLOUD_CHOICES: ShownServerChoices = Object.freeze({
+  imap: "imap.mail.me.com 993 TLS",
+  smtp: "smtp.mail.me.com 587 STARTTLS",
+  keepsSentCopy: false
+})
+
+/** What the fields show once the Fastmail preset filled them. */
+const FASTMAIL_CHOICES: ShownServerChoices = Object.freeze({
+  imap: "imap.fastmail.com 993 TLS",
+  smtp: "smtp.fastmail.com 465 TLS",
+  keepsSentCopy: true
+})
 
 /**
  * Renders the card for the stored account and password with no save and no
@@ -142,6 +174,56 @@ function getStatusLine(): HTMLElement {
  */
 function getSaveButton(): HTMLElement {
   return within(getCard()).getByRole("button", { name: "Save" })
+}
+
+/**
+ * Formats what one server's fields show.
+ *
+ * @param server - Legend of the server's fields.
+ * @returns The host, the port, and the label of the pressed way to secure
+ * the connection, separated by spaces.
+ */
+function formatShownServer(server: string): string {
+  const group = within(screen.getByRole("group", { name: server }))
+  const host = group.getByRole("textbox", { name: "Host" })
+  const port = group.getByRole("textbox", { name: "Port" })
+  const security = within(group.getByRole("group", { name: "Security" }))
+  if (!(host instanceof HTMLInputElement && port instanceof HTMLInputElement)) {
+    throw new Error(`No host or port input in ${server}`)
+  }
+  const pressed = security.getByRole("button", { pressed: true })
+  return `${host.value} ${port.value} ${pressed.textContent}`
+}
+
+/**
+ * Gets what the server fields and the Sent copy switch show.
+ *
+ * @returns Each server's fields as one line, and the switch's position.
+ */
+function getShownServerChoices(): ShownServerChoices {
+  const sentCopy = screen.getByRole("switch", {
+    name: "Server keeps a copy of sent mail"
+  })
+  return {
+    imap: formatShownServer("IMAP server"),
+    smtp: formatShownServer("SMTP server"),
+    keepsSentCopy: sentCopy.getAttribute("aria-checked") === "true"
+  }
+}
+
+/**
+ * Updates the address one keystroke at a time, as the person types it, with
+ * one change per character: Backspace down to the start the field shares
+ * with the new address, then each character of the rest.
+ *
+ * @param address - Address the field holds afterwards.
+ */
+function updateAddressByKeystroke(address: string): void {
+  const field = getField("Address")
+  if (!(field instanceof HTMLInputElement)) throw new Error("No address input")
+  for (const text of listKeystrokeTexts(field.value, address)) {
+    fireEvent.change(field, { target: { value: text } })
+  }
 }
 
 /**
@@ -281,6 +363,63 @@ describe("EmailAccountCard", () => {
       "No preset for this address. Enter the servers."
     )
     expect(getServerField("IMAP server", "Host")).toHaveValue("")
+  })
+
+  it("replaces the Gmail preset with Fastmail's when the address is retyped one character at a time", () => {
+    startEmptyEmailAccountCard()
+    updateAddressByKeystroke("ada@gmail.com")
+    expect(getShownServerChoices()).toEqual(GMAIL_CHOICES)
+
+    updateAddressByKeystroke("ada@fastmail.com")
+
+    expect(getShownServerChoices()).toEqual(FASTMAIL_CHOICES)
+    expect(getField("Address")).toHaveAccessibleDescription("Preset: Fastmail")
+  })
+
+  it("replaces the iCloud preset with Gmail's, its port, security, and Sent copy included, when the address is retyped one character at a time", () => {
+    startEmptyEmailAccountCard()
+    updateAddressByKeystroke("ada@icloud.com")
+    expect(getShownServerChoices()).toEqual(ICLOUD_CHOICES)
+
+    updateAddressByKeystroke("ada@gmail.com")
+
+    expect(getShownServerChoices()).toEqual(GMAIL_CHOICES)
+    expect(getField("Address")).toHaveAccessibleDescription("Preset: Gmail")
+  })
+
+  it("keeps a filled preset through an address without one, then replaces it with the preset of the address typed next", () => {
+    startEmptyEmailAccountCard()
+    updateAddressByKeystroke("ada@gmail.com")
+
+    updateAddressByKeystroke("ada@example.test")
+
+    expect(getShownServerChoices()).toEqual(GMAIL_CHOICES)
+    expect(getField("Address")).toHaveAccessibleDescription(
+      "No preset for this address. Enter the servers."
+    )
+
+    updateAddressByKeystroke("ada@fastmail.com")
+
+    expect(getShownServerChoices()).toEqual(FASTMAIL_CHOICES)
+    expect(getField("Address")).toHaveAccessibleDescription("Preset: Fastmail")
+  })
+
+  it("keeps a server value the person typed while the address is retyped for another provider", () => {
+    startEmptyEmailAccountCard()
+    updateAddressByKeystroke("ada@gmail.com")
+    fireEvent.change(getServerField("SMTP server", "Port"), {
+      target: { value: "587" }
+    })
+
+    updateAddressByKeystroke("ada@fastmail.com")
+
+    expect(getShownServerChoices()).toEqual({
+      ...GMAIL_CHOICES,
+      smtp: "smtp.gmail.com 587 TLS"
+    })
+    expect(getField("Address")).toHaveAccessibleDescription(
+      "Preset: Fastmail · servers changed"
+    )
   })
 
   it("shows the typed password on request", async () => {

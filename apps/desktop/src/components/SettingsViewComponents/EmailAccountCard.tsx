@@ -1534,23 +1534,25 @@ function useEmailAccountEdit(
  * removal is being confirmed and whether Remove account takes focus back
  * after the confirmation left without removing. Typing an address whose
  * provider has a preset fills the server fields and the Sent copy switch
- * while they all still hold what an empty card holds or the previous
- * address's preset. Problems show from the first Save on, each under its
- * input, and a rejected Save moves focus to the only input with a problem
- * or, when several have one, to a summary above the fields that lists
- * them, shown while two or more remain, whose buttons move focus to their
- * input. Enter or Save asks the parent to sign in and save when the fields
- * hold a valid account that differs from the saved one or a new password,
- * no check, save, or removal runs, and the backend runs; Save is disabled
- * while nothing differs, while a save runs, or while the backend is not
- * running, which the status line says once the fields differ from the
- * saved account, valid or not. What the latest save or check found shows
- * until the fields are edited again, also when it ended while the card was
- * not shown. Escape in an input discards the edit while there is one. A
- * save that succeeded resets the edit unless the person changed the fields
- * while it ran. After a removal succeeds, the edit is discarded and focus
- * moves to the address field, because Remove leaves. The status line is a
- * polite live region.
+ * while they all still hold what an empty card holds or the preset that
+ * last filled them, which for the saved account is its address's preset,
+ * also when the address is typed one character at a time; values the
+ * person typed are never replaced. Problems show from the first Save on,
+ * each under its input, and a rejected Save moves focus to the only input
+ * with a problem or, when several have one, to a summary above the fields
+ * that lists them, shown while two or more remain, whose buttons move
+ * focus to their input. Enter or Save asks the parent to sign in and save
+ * when the fields hold a valid account that differs from the saved one or
+ * a new password, no check, save, or removal runs, and the backend runs;
+ * Save is disabled while nothing differs, while a save runs, or while the
+ * backend is not running, which the status line says once the fields
+ * differ from the saved account, valid or not. What the latest save or
+ * check found shows until the fields are edited again, also when it ended
+ * while the card was not shown. Escape in an input discards the edit while
+ * there is one. A save that succeeded resets the edit unless the person
+ * changed the fields while it ran. After a removal succeeds, the edit is
+ * discarded and focus moves to the address field, because Remove leaves.
+ * The status line is a polite live region.
  * @param props - Saved account and password, save and check state, backend
  * status, and the requests.
  * @returns The card.

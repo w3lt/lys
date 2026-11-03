@@ -7,13 +7,15 @@ import {
   isEmailAccountDraftDifferent,
   parseEmailAccountDraft,
   updateEmailAccountAddress,
-  type EmailAccountDraft
+  type EmailAccountDraft,
+  type EmailServerDraft
 } from "@/lib/models/email-account-draft"
 import { findEmailPreset } from "@/lib/models/email-presets"
 import {
   STORED_EMAIL_ACCOUNT,
   STORED_EMAIL_PASSWORD
 } from "../../support/settingsFixtures"
+import { listKeystrokeTexts } from "../../support/typing"
 
 /** The fields showing the stored account. */
 const SAVED_DRAFT = buildEmailAccountDraft(STORED_EMAIL_ACCOUNT)
@@ -26,6 +28,42 @@ const FASTMAIL = findEmailPreset(STORED_EMAIL_ACCOUNT.address)
 
 /** Preset of a Gmail address. */
 const GMAIL = findEmailPreset("ada@gmail.com")
+
+/** Preset of an iCloud address. */
+const ICLOUD = findEmailPreset("ada@icloud.com")
+
+/** Fastmail's IMAP server, as the person types it for a domain of their own. */
+const TYPED_FASTMAIL_IMAP: EmailServerDraft = Object.freeze({
+  host: "imap.fastmail.com",
+  port: "993",
+  security: "tls"
+})
+
+/** Fastmail's SMTP server, as the person types it for a domain of their own. */
+const TYPED_FASTMAIL_SMTP: EmailServerDraft = Object.freeze({
+  host: "smtp.fastmail.com",
+  port: "465",
+  security: "tls"
+})
+
+/**
+ * Updates the address one keystroke at a time, as the card does while the
+ * person types: Backspace down to the start both addresses share, then each
+ * character of the rest.
+ *
+ * @param draft - Fields before the first keystroke.
+ * @param address - Address the fields hold afterwards.
+ * @returns The fields after the last keystroke.
+ */
+function updateAddressByKeystroke(
+  draft: EmailAccountDraft,
+  address: string
+): EmailAccountDraft {
+  return listKeystrokeTexts(draft.address, address).reduce(
+    (typed, text) => updateEmailAccountAddress(typed, text),
+    draft
+  )
+}
 
 /**
  * Builds the fields of a Gmail account typed from scratch.
@@ -58,7 +96,7 @@ describe("EMAIL_ACCOUNT_DRAFT_FIELDS", () => {
 })
 
 describe("buildEmailAccountDraft", () => {
-  it("shows the saved account with the ports as text and the password field empty", () => {
+  it("shows the saved account with the ports as text, the password field empty, and its address's preset as the applied one", () => {
     expect(SAVED_DRAFT).toEqual({
       address: "ada@fastmail.com",
       displayName: "Ada Fixture",
@@ -66,7 +104,8 @@ describe("buildEmailAccountDraft", () => {
       password: "",
       imap: { host: "imap.fastmail.com", port: "993", security: "tls" },
       smtp: { host: "smtp.fastmail.com", port: "465", security: "tls" },
-      serverKeepsSentCopy: true
+      serverKeepsSentCopy: true,
+      appliedPreset: FASTMAIL
     })
   })
 
@@ -107,13 +146,14 @@ describe("hasEmailPresetServers", () => {
 })
 
 describe("updateEmailAccountAddress", () => {
-  it("fills empty server fields and the Sent copy from the address's preset", () => {
+  it("fills empty server fields and the Sent copy from the address's preset, and records it as the applied one", () => {
     expect(updateEmailAccountAddress(EMPTY_DRAFT, "ada@icloud.com")).toEqual({
       ...EMPTY_DRAFT,
       address: "ada@icloud.com",
       imap: { host: "imap.mail.me.com", port: "993", security: "tls" },
       smtp: { host: "smtp.mail.me.com", port: "587", security: "starttls" },
-      serverKeepsSentCopy: false
+      serverKeepsSentCopy: false,
+      appliedPreset: ICLOUD
     })
   })
 
@@ -200,7 +240,8 @@ describe("updateEmailAccountAddress", () => {
       ...SAVED_DRAFT,
       address: "ada@gmail.com",
       imap: GMAIL === undefined ? undefined : { ...GMAIL.imap, port: "993" },
-      smtp: GMAIL === undefined ? undefined : { ...GMAIL.smtp, port: "465" }
+      smtp: GMAIL === undefined ? undefined : { ...GMAIL.smtp, port: "465" },
+      appliedPreset: GMAIL
     })
   })
 
@@ -208,6 +249,92 @@ describe("updateEmailAccountAddress", () => {
     expect(updateEmailAccountAddress(EMPTY_DRAFT, "ada@gma")).toEqual({
       ...EMPTY_DRAFT,
       address: "ada@gma"
+    })
+  })
+
+  it("replaces the Gmail preset with Fastmail's once the address is retyped one character at a time", () => {
+    const gmail = updateAddressByKeystroke(EMPTY_DRAFT, "ada@gmail.com")
+
+    expect(updateAddressByKeystroke(gmail, "ada@fastmail.com")).toMatchObject({
+      address: "ada@fastmail.com",
+      imap: { host: "imap.fastmail.com", port: "993", security: "tls" },
+      smtp: { host: "smtp.fastmail.com", port: "465", security: "tls" },
+      serverKeepsSentCopy: true
+    })
+  })
+
+  it("replaces the iCloud preset with Gmail's, its Sent copy included, once the address is retyped one character at a time", () => {
+    const icloud = updateAddressByKeystroke(EMPTY_DRAFT, "ada@icloud.com")
+
+    expect(updateAddressByKeystroke(icloud, "ada@gmail.com")).toMatchObject({
+      address: "ada@gmail.com",
+      imap: { host: "imap.gmail.com", port: "993", security: "tls" },
+      smtp: { host: "smtp.gmail.com", port: "465", security: "tls" },
+      serverKeepsSentCopy: true
+    })
+  })
+
+  it("keeps a filled preset through an address without one, then replaces it with the next address's preset", () => {
+    const gmail = updateAddressByKeystroke(EMPTY_DRAFT, "ada@gmail.com")
+    const noPreset = updateAddressByKeystroke(gmail, "ada@example.test")
+
+    expect(noPreset).toEqual({ ...gmail, address: "ada@example.test" })
+    expect(
+      updateAddressByKeystroke(noPreset, "ada@fastmail.com")
+    ).toMatchObject({
+      imap: { host: "imap.fastmail.com", port: "993", security: "tls" },
+      smtp: { host: "smtp.fastmail.com", port: "465", security: "tls" },
+      serverKeepsSentCopy: true
+    })
+  })
+
+  it("replaces saved servers that hold the saved address's preset once another provider's address is typed one character at a time", () => {
+    expect(
+      updateAddressByKeystroke(SAVED_DRAFT, "ada@gmail.com")
+    ).toMatchObject({
+      address: "ada@gmail.com",
+      imap: { host: "imap.gmail.com", port: "993", security: "tls" },
+      smtp: { host: "smtp.gmail.com", port: "465", security: "tls" },
+      serverKeepsSentCopy: true
+    })
+  })
+
+  it("keeps servers the person changed after a preset filled them while another provider's address is typed", () => {
+    const gmail = updateAddressByKeystroke(EMPTY_DRAFT, "ada@gmail.com")
+    const changedSmtp: EmailServerDraft = { ...gmail.smtp, port: "587" }
+    const changed: EmailAccountDraft = { ...gmail, smtp: changedSmtp }
+
+    expect(updateAddressByKeystroke(changed, "ada@fastmail.com")).toEqual({
+      ...changed,
+      address: "ada@fastmail.com"
+    })
+  })
+
+  it("keeps servers the person typed that equal another provider's preset when the address moves to a provider with a preset", () => {
+    const typed: EmailAccountDraft = {
+      ...EMPTY_DRAFT,
+      address: "ada@example.test",
+      imap: TYPED_FASTMAIL_IMAP,
+      smtp: TYPED_FASTMAIL_SMTP,
+      serverKeepsSentCopy: true
+    }
+
+    expect(updateAddressByKeystroke(typed, "ada@gmail.com")).toEqual({
+      ...typed,
+      address: "ada@gmail.com"
+    })
+  })
+
+  it("keeps the saved servers of an address without a preset, also when they equal another provider's preset", () => {
+    const ownDomain: EmailAccount = {
+      ...STORED_EMAIL_ACCOUNT,
+      address: "ada@example.test"
+    }
+    const saved = buildEmailAccountDraft(ownDomain)
+
+    expect(updateAddressByKeystroke(saved, "ada@gmail.com")).toEqual({
+      ...saved,
+      address: "ada@gmail.com"
     })
   })
 })

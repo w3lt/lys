@@ -19,10 +19,10 @@ use crate::message::{MessageView, format_size, parse_message};
 
 /// Most messages a conversation shows, the newest ones, and most hits it
 /// reads from one folder, the newest by UID.
-pub const CONVERSATION_LIMIT: usize = 50;
+const CONVERSATION_LIMIT: usize = 50;
 
 /// Most characters of a message's text shown inside a conversation.
-pub const CONVERSATION_TEXT_LIMIT: usize = 3_000;
+const CONVERSATION_TEXT_LIMIT: usize = 3_000;
 
 /// Most identifiers a conversation search asks the server about.
 const CONVERSATION_ID_LIMIT: usize = 30;
@@ -70,12 +70,12 @@ pub async fn run_read_email(context: &ToolContext, arguments: IdArguments) -> To
 
 /// Reads the conversation a message belongs to: every message, in every
 /// folder, whose Message-ID, In-Reply-To, or References field holds one
-/// of its identifiers, at most the newest [`CONVERSATION_LIMIT`] of each
-/// folder, and each once by its Message-ID, the All Mail view searched
-/// last. A message without a Message-ID cannot be told apart from its
-/// copies, so with an All Mail view it may be shown twice. The newest that
-/// fit in the result, at most [`CONVERSATION_LIMIT`], are shown oldest
-/// first, and the result says how many older ones were left out.
+/// of its identifiers, at most the newest 50 of each folder, and each once
+/// by its Message-ID, the All Mail view searched last. A message without a
+/// Message-ID cannot be told apart from its copies, so with an All Mail
+/// view it may be shown twice. The newest that fit in the result, at most
+/// 50, are shown oldest first, and the result says how many older ones
+/// were left out.
 ///
 /// # Arguments
 ///
@@ -457,7 +457,7 @@ fn parse_view(fetched: &FetchedMessage) -> Result<MessageView, ToolFailure> {
 /// * `id` - The message's id.
 /// * `flags` - Its flags.
 /// * `view` - The message.
-pub fn format_message_view(id: &EmailId, flags: Flags, view: &MessageView) -> String {
+fn format_message_view(id: &EmailId, flags: Flags, view: &MessageView) -> String {
     let mut text = format_view_heading(id, flags, view);
     text.push_str(view.text.trim_end());
     text
@@ -595,7 +595,7 @@ fn list_conversation_identifiers(view: &MessageView) -> Vec<String> {
 /// # Returns
 ///
 /// The keys, or `None` when there is no identifier to search by.
-pub fn build_conversation_criteria(identifiers: &[String]) -> Option<String> {
+fn build_conversation_criteria(identifiers: &[String]) -> Option<String> {
     let keys: Vec<String> = identifiers
         .iter()
         .flat_map(|identifier| {

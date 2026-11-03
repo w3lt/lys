@@ -25,10 +25,10 @@ use crate::message::{MessageView, ParsedMailbox};
 use crate::smtp::{SendProgress, SmtpFailure, open_smtp_session};
 
 /// Most recipients of one field.
-pub const MAXIMUM_RECIPIENTS: usize = 50;
+const MAXIMUM_RECIPIENTS: usize = 50;
 
 /// Longest body, in characters.
-pub const MAXIMUM_BODY_LENGTH: usize = 500_000;
+const MAXIMUM_BODY_LENGTH: usize = 500_000;
 
 /// The flags a Sent copy is stored with.
 const SENT_FLAGS: &str = "(\\Seen)";
@@ -391,7 +391,7 @@ fn build_send_failure(failure: SmtpFailure) -> ToolFailure {
 /// # Returns
 ///
 /// What became of the copy.
-pub async fn offer_sent_copy(
+async fn offer_sent_copy(
     context: &ToolContext,
     session: &mut Option<ImapSession>,
     bytes: &[u8],

@@ -308,7 +308,7 @@ fn format_readable_mailbox(mailbox: Mailbox) -> Option<String> {
 ///
 /// The identifier without angle brackets, such as
 /// `lys-1793611800.123456789-4242-7@example.com`.
-pub fn create_message_id(address: &str, stamp: MessageStamp) -> String {
+fn create_message_id(address: &str, stamp: MessageStamp) -> String {
     let domain = address
         .rsplit_once('@')
         .map_or("localhost", |(_, domain)| domain);

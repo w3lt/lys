@@ -16,10 +16,10 @@ use crate::imap::{Flags, FolderAccess, ImapSession, format_search_date, format_s
 use crate::message::{Headers, parse_headers};
 
 /// Messages per page.
-pub const PAGE_SIZE: usize = 20;
+const PAGE_SIZE: usize = 20;
 
 /// Most hits taken from one folder: the newest ones.
-pub const FOLDER_HIT_LIMIT: usize = 200;
+const FOLDER_HIT_LIMIT: usize = 200;
 
 /// The arguments of `search_emails`.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -269,7 +269,7 @@ fn format_hit(hit: &Hit) -> String {
 ///
 /// The keys, with `CHARSET UTF-8` in front when a text is not ASCII, or
 /// why an argument breaks a rule.
-pub fn build_search_criteria(arguments: &SearchArguments) -> Result<String, ToolFailure> {
+fn build_search_criteria(arguments: &SearchArguments) -> Result<String, ToolFailure> {
     let mut keys = Vec::new();
     let mut non_ascii = false;
     for (name, key, value) in [
@@ -329,7 +329,7 @@ pub fn build_search_criteria(arguments: &SearchArguments) -> Result<String, Tool
 ///
 /// The year, month, and day, or `None` when the text is not a calendar
 /// day.
-pub fn parse_day(text: &str) -> Option<(u16, u8, u8)> {
+fn parse_day(text: &str) -> Option<(u16, u8, u8)> {
     let bytes = text.as_bytes();
     if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
         return None;

@@ -301,7 +301,7 @@ fn build_attachment(index: usize, part: &MessagePart<'_>) -> Attachment {
 /// # Arguments
 ///
 /// * `content_type` - The type as `type/subtype`, in lower case.
-pub fn is_text_like(content_type: &str) -> bool {
+fn is_text_like(content_type: &str) -> bool {
     content_type.starts_with("text/")
         || TEXT_LIKE_TYPES.contains(&content_type)
         || TEXT_LIKE_SUFFIXES

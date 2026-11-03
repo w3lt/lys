@@ -4,9 +4,11 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
+import { createBackendLogger } from "../../../../../../src/log"
 import EmailAccountChecker, {
   type EmailAccountCheckEvent
 } from "../../../../../../src/modules/mcp/builtIn/email/emailAccountCheck"
+import { handleEmailAccountCheckEvent } from "../../../../../../src/modules/mcp/builtIn/email/emailAccountCheckLog"
 import type { EmailServerCommand } from "../../../../../../src/modules/mcp/builtIn/email/emailServer"
 import {
   buildEmailAccount,
@@ -16,6 +18,10 @@ import {
   SYNTHETIC_EMAIL_PASSWORD,
   type FakeEmailServerOptions
 } from "../../../../support/emailTestServer"
+import {
+  CapturedLogDestination,
+  type CapturedLogRecord
+} from "../../../../support/fastifyTestApp"
 import { isProcessRunning } from "../../../../support/mcpTestServers"
 import { createSettlementReader } from "../../../../support/settlement"
 import { createUnstartedChildProcess } from "../../../../support/unstartedChildProcess"
@@ -100,6 +106,22 @@ function createChecker(setup: CheckerSetup = {}) {
   return { checker, events }
 }
 
+/**
+ * Builds the records the backend's log holds for the events a checker
+ * reported, written as the backend writes them.
+ *
+ * @param events - The events, in the order they were reported.
+ * @returns One record per event, in that order.
+ */
+function buildCheckLogRecords(
+  events: readonly EmailAccountCheckEvent[]
+): readonly CapturedLogRecord[] {
+  const destination = new CapturedLogDestination()
+  const logger = createBackendLogger(destination)
+  for (const event of events) handleEmailAccountCheckEvent(logger, event)
+  return destination.records
+}
+
 describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
   it("answers both sign-ins' outcomes, starting the server in the working folder with the account and the password in its variable", async () => {
     const folder = await createCaseFolder()
@@ -155,6 +177,82 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         imap: { status: "accepted" },
         smtp: { status: "accepted" },
         errorLines: ["smtp: quit did not finish within the check's limit"]
+      }
+    ])
+  })
+
+  it.each([32, 33])(
+    "keeps the first 32 error lines with the outcomes of a check that reported, and the log writes those, when the server writes %i lines",
+    async (lineCount) => {
+      const { checker, events } = createChecker()
+      const keptLines = Array.from(
+        { length: 32 },
+        (_, index) => `line ${index + 1}`
+      )
+
+      const answer = await checker.sendCheck(
+        buildEmailAccount(`lines-${lineCount}@example.com`),
+        SYNTHETIC_EMAIL_PASSWORD
+      )
+
+      expect(answer).toEqual({
+        status: "checked",
+        imap: { status: "accepted" },
+        smtp: { status: "accepted" }
+      })
+      expect(events).toEqual([
+        {
+          kind: "checked",
+          imap: { status: "accepted" },
+          smtp: { status: "accepted" },
+          errorLines: keptLines
+        }
+      ])
+      expect(buildCheckLogRecords(events)).toEqual([
+        expect.objectContaining({
+          msg: "Email account check ran",
+          errorLines: keptLines
+        })
+      ])
+    }
+  )
+
+  it("answers a report the server printed in 65,536 characters, the most the checker reads", async () => {
+    const { checker, events } = createChecker()
+
+    const answer = await checker.sendCheck(
+      buildEmailAccount("padded-65536@example.com"),
+      SYNTHETIC_EMAIL_PASSWORD
+    )
+
+    expect(answer).toEqual({
+      status: "checked",
+      imap: { status: "accepted" },
+      smtp: { status: "accepted" }
+    })
+    expect(events).toEqual([
+      {
+        kind: "checked",
+        imap: { status: "accepted" },
+        smtp: { status: "accepted" },
+        errorLines: []
+      }
+    ])
+  })
+
+  it("answers server-failed when the server prints a report in 65,537 characters, one more than the checker reads", async () => {
+    const { checker, events } = createChecker()
+
+    const answer = await checker.sendCheck(
+      buildEmailAccount("padded-65537@example.com"),
+      SYNTHETIC_EMAIL_PASSWORD
+    )
+
+    expect(answer).toEqual({ status: "unavailable", reason: "server-failed" })
+    expect(events).toEqual([
+      {
+        kind: "server-failed",
+        failure: { kind: "unreadable-output", errorLines: [] }
       }
     ])
   })

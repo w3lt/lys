@@ -11,12 +11,16 @@
 // report that sign-in failed for the reason and the other accepted;
 // `quit-failed` writes the real server's line about a closing QUIT that
 // did not finish to standard error and reports both sign-ins accepted;
-// `hang` writes one line to standard error and never ends; `crash` writes two
-// lines to standard error and exits with code 1; `garbage` prints a line
-// that is not a report; `flood` prints far more than a report; `lock`
-// holds `lock` in its folder while it waits, as a check that must run
-// alone, and exits with code 3 when another check holds it. It imports only
-// Node's own modules and the fake stdio server.
+// `lines-<count>` writes that many lines, `line 1` onward, to standard
+// error and reports both sign-ins accepted; `padded-<length>` reports both
+// sign-ins accepted, padded with JSON white space so that it prints that
+// many characters, its closing newline included; `hang` writes one line to
+// standard error and never ends; `crash` writes two lines to standard error
+// and exits with code 1; `garbage` prints a line that is not a report;
+// `flood` prints far more than a report; `lock` holds `lock` in its folder
+// while it waits, as a check that must run alone, and exits with code 3
+// when another check holds it. It imports only Node's own modules and the
+// fake stdio server.
 import { rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { setTimeout as wait } from "node:timers/promises"
@@ -77,6 +81,67 @@ function sendCheckReport(imap: unknown, smtp: unknown): void {
 }
 
 /**
+ * Sends text to standard output, where the checker reads it, and exits
+ * with code 0 once all of it is written.
+ *
+ * @param text - Text to print.
+ * @remarks Exiting right after the write, as {@link sendCheckReport} does,
+ * would cut a text longer than the pipe takes at once, 64 KiB on macOS.
+ */
+async function sendOutput(text: string): Promise<void> {
+  await new Promise<void>((resolve) => {
+    process.stdout.write(text, () => {
+      resolve()
+    })
+  })
+  process.exit(0)
+}
+
+/**
+ * Builds the report of both sign-ins accepted, padded with JSON white space
+ * after it.
+ *
+ * @param accepted - The outcome of an accepted sign-in.
+ * @param length - Characters the text holds, its closing newline included;
+ * a length the report does not fit in leaves it unpadded.
+ * @returns The text.
+ */
+function buildPaddedCheckReport(accepted: unknown, length: number): string {
+  const report = JSON.stringify({ imap: accepted, smtp: accepted })
+  return `${report.padEnd(length - 1, " ")}\n`
+}
+
+/**
+ * Builds lines to write to standard error.
+ *
+ * @param count - How many: `line 1` onward.
+ * @returns The lines, each ended by a newline.
+ */
+function buildErrorLines(count: number): string {
+  return Array.from(
+    { length: count },
+    (_, index) => `line ${index + 1}\n`
+  ).join("")
+}
+
+/**
+ * Parses the whole number a local part holds after its prefix, exiting
+ * with code 64, as for an unknown address, when it holds none.
+ *
+ * @param localPart - The local part, such as `lines-33`.
+ * @param prefix - What precedes the number, such as `lines-`.
+ * @returns The number.
+ */
+function parseAddressNumber(localPart: string, prefix: string): number {
+  const number = Number(localPart.slice(prefix.length))
+  if (!Number.isSafeInteger(number) || number < 0) {
+    process.stderr.write("unknown fake address\n")
+    process.exit(64)
+  }
+  return number
+}
+
+/**
  * Builds the outcome of a failed sign-in.
  *
  * @param reason - Why it failed.
@@ -106,6 +171,16 @@ async function handleCheckCommand(address: string): Promise<void> {
       accepted,
       buildFailedSignIn(localPart.slice("smtp-".length))
     )
+  if (localPart.startsWith("lines-")) {
+    process.stderr.write(
+      buildErrorLines(parseAddressNumber(localPart, "lines-"))
+    )
+    sendCheckReport(accepted, accepted)
+  }
+  if (localPart.startsWith("padded-"))
+    await sendOutput(
+      buildPaddedCheckReport(accepted, parseAddressNumber(localPart, "padded-"))
+    )
   switch (localPart) {
     case "quit-failed":
       process.stderr.write(
@@ -127,8 +202,7 @@ async function handleCheckCommand(address: string): Promise<void> {
       process.exit(0)
       break
     case "flood":
-      process.stdout.write(`${"x".repeat(70_000)}\n`)
-      process.exit(0)
+      await sendOutput(`${"x".repeat(70_000)}\n`)
       break
     case "lock": {
       const lockPath = createLockFile()

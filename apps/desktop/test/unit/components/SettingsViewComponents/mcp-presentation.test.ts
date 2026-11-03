@@ -22,6 +22,7 @@ import {
   formatMcpDraftProblemSummaryHeading,
   formatMcpEditorHint,
   formatMcpEditorKind,
+  formatMcpListedServerKey,
   formatMcpServerApprovalNote,
   formatMcpServerJsonMessage,
   formatMcpServerListMeta,
@@ -39,7 +40,6 @@ import {
   formatSkippedMcpToolName,
   formatSkippedMcpToolReason,
   getMcpEntryListPresentation,
-  getMcpListedServerKey,
   getMcpListedServerName,
   getMcpListedServerTransport,
   getMcpTransportPresentation,
@@ -352,8 +352,10 @@ describe("listed servers", () => {
 
     expect(getMcpListedServerName(added)).toBe("notes")
     expect(getMcpListedServerName(EMAIL_SERVER)).toBe("email")
-    expect(getMcpListedServerKey(added)).toBe("added:notes")
-    expect(getMcpListedServerKey(EMAIL_SERVER)).toBe("built-in:email")
+    expect(formatMcpListedServerKey(added.kind, "notes")).toBe("added:notes")
+    expect(formatMcpListedServerKey(EMAIL_SERVER.kind, "email")).toBe(
+      "built-in:email"
+    )
     expect(getMcpListedServerTransport(added)).toBe("http")
     expect(getMcpListedServerTransport(EMAIL_SERVER)).toBe("stdio")
     expect(isMcpListedServerOn(added)).toBe(false)

@@ -95,6 +95,25 @@ const EMAIL_ON_SETTINGS = Object.freeze({
   mcp: { ...STORED_MCP_SETTINGS, builtIn: { email: { enabled: true } } }
 })
 
+/** An added server that takes the name of the email server Lys ships. */
+const ADDED_EMAIL_SERVER = mcpServerSettingsSchema.parse({
+  name: "email",
+  transport: "stdio",
+  command: "/usr/local/bin/mail-server"
+})
+
+/** MCP settings whose only added server takes the email server's name. */
+const ADDED_EMAIL_MCP_SETTINGS = Object.freeze({
+  ...STORED_MCP_SETTINGS,
+  servers: [ADDED_EMAIL_SERVER]
+})
+
+/** Settings whose only added server takes the email server's name. */
+const ADDED_EMAIL_SETTINGS = Object.freeze({
+  ...STORED_SETTINGS,
+  mcp: ADDED_EMAIL_MCP_SETTINGS
+})
+
 /** Answer of a check both servers accepted. */
 const ACCEPTED_ACCOUNT_CHECK = checkEmailAccountApiResponseSchema.parse({
   status: "checked",
@@ -266,6 +285,29 @@ function getServerToggle(serverName: string): HTMLElement {
   return within(getServerRow(serverName)).getByRole("button", {
     name: serverName
   })
+}
+
+/**
+ * Lists the toggles of the rows named email: the server Lys ships first,
+ * then an added server with its name.
+ *
+ * @returns The toggles, in list order.
+ */
+function listEmailRowToggles(): HTMLElement[] {
+  return within(screen.getByRole("list", { name: "MCP servers" }))
+    .getAllByRole("listitem", { name: "email" })
+    .map((row) => within(row).getByRole("button", { name: "email" }))
+}
+
+/**
+ * Lists whether each row named email shows its details.
+ *
+ * @returns The `aria-expanded` of each row's toggle, in list order.
+ */
+function listEmailRowExpansions(): (string | null)[] {
+  return listEmailRowToggles().map((toggle) =>
+    toggle.getAttribute("aria-expanded")
+  )
 }
 
 /**
@@ -635,6 +677,58 @@ describe("McpPaneContent", () => {
     expect(
       within(added).getByRole("switch", { name: "email on" })
     ).not.toHaveAttribute("aria-disabled")
+  })
+
+  it("shows the details of only the row the person expands while an added server has the email server's name, also after its editor closes", async () => {
+    startSettingsHost()
+    const { useLysStore } = await startMcpPane()
+    const user = userEvent.setup()
+    useLysStore.setState({ settings: ADDED_EMAIL_SETTINGS })
+    await waitForRenderedWork()
+
+    await user.click(listEmailRowToggles()[1])
+
+    expect(listEmailRowExpansions()).toEqual(["false", "true"])
+
+    await user.click(listEmailRowToggles()[0])
+
+    expect(listEmailRowExpansions()).toEqual(["true", "false"])
+
+    await user.click(listEmailRowToggles()[1])
+    await user.click(screen.getByRole("button", { name: "Edit email" }))
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+
+    expect(listEmailRowExpansions()).toEqual(["false", "true"])
+    expect(screen.getByRole("button", { name: "Edit email" })).toHaveFocus()
+  })
+
+  it("keeps the email server's details shown when an added server with its name is removed after the person moved on", async () => {
+    const write = createControlledPromise<unknown>()
+    startSettingsHost(() => write.promise)
+    const emailOnly = buildMcpServerList([
+      buildBuiltInMcpServerStatus("email", OFF_MCP_STATE)
+    ])
+    const { useLysStore } = await startMcpPane({
+      [SYNC_ROUTE]: answerList(emailOnly)
+    })
+    const user = userEvent.setup()
+    useLysStore.setState({ settings: ADDED_EMAIL_SETTINGS })
+    await waitForRenderedWork()
+    await user.click(listEmailRowToggles()[1])
+    await user.click(screen.getByRole("button", { name: "Remove email" }))
+    await user.click(
+      within(screen.getByRole("group", { name: /^remove / })).getByRole(
+        "button",
+        { name: "Remove email" }
+      )
+    )
+
+    await user.click(listEmailRowToggles()[0])
+    write.resolve(null)
+    await waitForRenderedWork()
+
+    expect(listEmailRowExpansions()).toEqual(["true"])
+    expect(listEmailRowToggles()[0]).toHaveFocus()
   })
 
   it("refuses a new server named like a server Lys ships", async () => {

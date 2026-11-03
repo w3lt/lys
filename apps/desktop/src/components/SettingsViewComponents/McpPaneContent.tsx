@@ -37,6 +37,7 @@ import {
 import { ToolApprovalSaveFeedback } from "./ToolApprovalSaveFeedback"
 import {
   findMcpPaneRetry,
+  formatMcpListedServerKey,
   formatMcpToolOfferWarning,
   isMcpListedServerOn,
   listMcpPaneNotes,
@@ -71,8 +72,11 @@ function calculateEditorReturnTarget(
 
 /** What the server list shows and which of its controls takes focus. */
 type McpListView = {
-  /** Name of the server whose details are shown, or null when none is. */
-  readonly expandedServerName: McpServerName | null
+  /**
+   * Key of the server whose details are shown, by its kind and name, or
+   * null when none is.
+   */
+  readonly expandedServerKey: string | null
   /** Control that takes focus when the list appears, or none. */
   readonly focusTarget: McpServerListFocusTarget
 }
@@ -82,8 +86,8 @@ type McpListViewChange =
   | {
       /** The person showed one server's details, or none. */
       readonly kind: "details"
-      /** Name of the server whose details to show, or null for none. */
-      readonly serverName: McpServerName | null
+      /** Key of the server whose details to show, or null for none. */
+      readonly serverKey: string | null
     }
   | {
       /** An editor closed, so the list returns. */
@@ -100,7 +104,7 @@ type McpListViewChange =
 
 /** The list before any change: no details shown, and focus left where it is. */
 const INITIAL_MCP_LIST_VIEW: McpListView = Object.freeze({
-  expandedServerName: null,
+  expandedServerKey: null,
   focusTarget: NO_FOCUS_TARGET
 })
 
@@ -111,10 +115,10 @@ const INITIAL_MCP_LIST_VIEW: McpListView = Object.freeze({
  * @param change - What happened.
  * @returns The details the person chose, with any focus request ended,
  * because it applied when the list appeared; after an editor closes, its
- * focus target and, for a server's Edit button, that server's details;
- * after a removal is saved, the removed server's details closed if they are
- * still shown, and a new request for Add server, which takes focus only
- * while focus is lost.
+ * focus target and, for an added server's Edit button, that server's
+ * details; after a removal is saved, the removed added server's details
+ * closed if they are still shown, and a new request for Add server, which
+ * takes focus only while focus is lost.
  */
 function calculateMcpListView(
   view: McpListView,
@@ -123,25 +127,28 @@ function calculateMcpListView(
   switch (change.kind) {
     case "details":
       return {
-        expandedServerName: change.serverName,
+        expandedServerKey: change.serverKey,
         focusTarget: NO_FOCUS_TARGET
       }
     case "editor-closed":
       return {
-        expandedServerName:
+        expandedServerKey:
           change.target.kind === "server"
-            ? change.target.serverName
-            : view.expandedServerName,
+            ? formatMcpListedServerKey("added", change.target.serverName)
+            : view.expandedServerKey,
         focusTarget: change.target
       }
-    case "server-removed":
+    case "server-removed": {
+      const focusTarget: McpServerListFocusTarget = { kind: "add-server" }
       return {
-        expandedServerName:
-          view.expandedServerName === change.serverName
+        expandedServerKey:
+          view.expandedServerKey ===
+          formatMcpListedServerKey("added", change.serverName)
             ? null
-            : view.expandedServerName,
-        focusTarget: { kind: "add-server" }
+            : view.expandedServerKey,
+        focusTarget
       }
+    }
   }
 }
 
@@ -303,14 +310,15 @@ type McpServerListViewProps = {
   readonly isBackendRunning: boolean
   /** Lifecycle of the list of applied servers. */
   readonly list: McpServerListState
-  /** Name of the server whose details are shown, or null when none is. */
-  readonly expandedServerName: McpServerName | null
+  /**
+   * Key of the server whose details are shown, by its kind and name, or
+   * null when none is.
+   */
+  readonly expandedServerKey: string | null
   /** Control that takes focus when the list appears. */
   readonly focusTarget: McpServerListFocusTarget
-  /** Proposes showing one server's details, or none with null. */
-  readonly onExpandedServerNameChange: (
-    serverName: McpServerName | null
-  ) => void
+  /** Proposes showing one server's details, by its key, or none with null. */
+  readonly onExpandedServerKeyChange: (serverKey: string | null) => void
   /** Requests that the parent open an editor in place of the list. */
   readonly onOpenEditor: (editor: McpEditorTarget) => void
   /** Reports to the parent that the removal of a server was saved. */
@@ -338,9 +346,9 @@ type McpServerListViewProps = {
 function McpServerListView({
   isBackendRunning,
   list,
-  expandedServerName,
+  expandedServerKey,
   focusTarget,
-  onExpandedServerNameChange,
+  onExpandedServerKeyChange,
   onOpenEditor,
   onRemoveServerComplete
 }: McpServerListViewProps): ReactElement {
@@ -408,14 +416,14 @@ function McpServerListView({
       {servers.some(isMcpListedServerOn) ? <McpToolOfferNotice /> : null}
       <McpServerSection
         builtInPanels={{ email: <EmailAccountCardView /> }}
-        expandedServerName={expandedServerName}
+        expandedServerKey={expandedServerKey}
         focusTarget={focusTarget}
         isBackendRunning={isBackendRunning}
         isSaving={isSaving}
         list={list}
         onAddServer={(transport) => onOpenEditor({ kind: "new", transport })}
         onEditServer={(server) => onOpenEditor({ kind: "server", server })}
-        onExpandedServerNameChange={onExpandedServerNameChange}
+        onExpandedServerKeyChange={onExpandedServerKeyChange}
         onReconnectServer={(serverName) =>
           void sendMcpServerReconnect(serverName)
         }
@@ -704,12 +712,12 @@ export default function McpPane(): ReactElement {
       />
       {editor === null ? (
         <McpServerListView
-          expandedServerName={listView.expandedServerName}
+          expandedServerKey={listView.expandedServerKey}
           focusTarget={listView.focusTarget}
           isBackendRunning={isBackendRunning}
           list={list}
-          onExpandedServerNameChange={(serverName) =>
-            updateListView({ kind: "details", serverName })
+          onExpandedServerKeyChange={(serverKey) =>
+            updateListView({ kind: "details", serverKey })
           }
           onOpenEditor={setEditor}
           onRemoveServerComplete={(serverName) =>

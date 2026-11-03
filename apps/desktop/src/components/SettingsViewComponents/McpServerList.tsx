@@ -33,11 +33,11 @@ import {
   canSwitchMcpServer,
   calculateConnectedMcpServerCount,
   findMcpServerStatus,
+  formatMcpListedServerKey,
   formatMcpServerListMeta,
   formatMcpServerStatus,
   formatMcpServerTarget,
   formatMcpServerToolCount,
-  getMcpListedServerKey,
   getMcpListedServerName,
   getMcpListedServerTransport,
   getMcpTransportPresentation,
@@ -669,16 +669,17 @@ type McpServerRowsProps = {
   readonly isBackendRunning: boolean
   /** Whether a save of the servers runs. */
   readonly isSaving: boolean
-  /** Name of the server whose details are shown, or null when none is. */
-  readonly expandedServerName: McpServerName | null
+  /**
+   * Key of the server whose details are shown, by its kind and name, or
+   * null when none is.
+   */
+  readonly expandedServerKey: string | null
   /** Name of the added server whose Edit button takes focus, or null. */
   readonly focusedServerName: McpServerName | null
   /** The panel each server Lys ships adds to its details. */
   readonly builtInPanels: BuiltInMcpServerPanels
-  /** Proposes showing one server's details, or none with null. */
-  readonly onExpandedServerNameChange: (
-    serverName: McpServerName | null
-  ) => void
+  /** Proposes showing one server's details, by its key, or none with null. */
+  readonly onExpandedServerKeyChange: (serverKey: string | null) => void
   /** Proposes switching one server on or off. */
   readonly onServerOnChange: (server: McpListedServer, isOn: boolean) => void
   /** Requests that the parent connect one server again. */
@@ -700,9 +701,9 @@ type McpServerRowsProps = {
  * Lists the servers, each with its row.
  *
  * @remarks The parent owns every value and action; the list owns no state.
- * Servers keep the listed order and are keyed by kind and name; the
- * details shown are those of the server with the chosen name, so while an
- * added server has a built-in server's name both show. An added server's
+ * Servers keep the listed order and are keyed by kind and name, and the
+ * details shown are those of the server with the chosen key, so a server
+ * Lys ships and an added server with its name expand apart. An added server's
  * details end with its configuration and actions, whose Edit button takes
  * focus when the parent names the server; the details of a server Lys
  * ships end with its own panel. The list is named MCP servers.
@@ -717,10 +718,10 @@ function McpServerRows({
   toolSettings,
   isBackendRunning,
   isSaving,
-  expandedServerName,
+  expandedServerKey,
   focusedServerName,
   builtInPanels,
-  onExpandedServerNameChange,
+  onExpandedServerKeyChange,
   onServerOnChange,
   onReconnectServer,
   onEditServer,
@@ -756,15 +757,16 @@ function McpServerRows({
    */
   function buildServerRow(server: McpListedServer): ReactElement {
     const serverName = getMcpListedServerName(server)
+    const serverKey = formatMcpListedServerKey(server.kind, serverName)
     return (
       <McpServerRow
         isBackendRunning={isBackendRunning}
-        isExpanded={serverName === expandedServerName}
+        isExpanded={serverKey === expandedServerKey}
         isSaving={isSaving}
-        key={getMcpListedServerKey(server)}
+        key={serverKey}
         list={list}
         onIsExpandedChange={(isExpanded) =>
-          onExpandedServerNameChange(isExpanded ? serverName : null)
+          onExpandedServerKeyChange(isExpanded ? serverKey : null)
         }
         onReconnect={() => onReconnectServer(serverName)}
         onServerOnChange={onServerOnChange}
@@ -881,11 +883,11 @@ export function McpServerSection({
   toolSettings,
   isBackendRunning,
   isSaving,
-  expandedServerName,
+  expandedServerKey,
   focusTarget,
   builtInPanels,
   onAddServer,
-  onExpandedServerNameChange,
+  onExpandedServerKeyChange,
   onServerOnChange,
   onReconnectServer,
   onEditServer,
@@ -915,7 +917,7 @@ export function McpServerSection({
       />
       <McpServerRows
         builtInPanels={builtInPanels}
-        expandedServerName={expandedServerName}
+        expandedServerKey={expandedServerKey}
         focusedServerName={
           focusTarget.kind === "server" ? focusTarget.serverName : null
         }
@@ -923,7 +925,7 @@ export function McpServerSection({
         isSaving={isSaving}
         list={list}
         onEditServer={onEditServer}
-        onExpandedServerNameChange={onExpandedServerNameChange}
+        onExpandedServerKeyChange={onExpandedServerKeyChange}
         onReconnectServer={onReconnectServer}
         onRemoveServer={onRemoveServer}
         onServerOnChange={onServerOnChange}

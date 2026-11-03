@@ -5,13 +5,16 @@ use std::time::Duration;
 use email::failure::ToolFailure;
 use email::folders::FolderRole;
 use email::smtp::SendProgress;
+use email::tools::ToolResult;
 use email::tools::drafts::{
     DraftIdArguments, SaveDraftArguments, SendDraftArguments, run_delete_draft, run_save_draft,
     run_send_draft,
 };
 
 use crate::support::imap::{FakeFolder, FakeMailbox, ImapFault, NewMessage};
-use crate::support::{Stack, assert_about, calculate_trimmed_bytes, start_stack};
+use crate::support::{
+    Stack, assert_about, assert_nothing_sent, calculate_trimmed_bytes, start_stack,
+};
 
 /// The reason a step reports when the IMAP server ended its connection.
 const LOST: &str = "The connection to the IMAP server ended before it answered.";
@@ -41,6 +44,34 @@ fn build_send(draft_id: &str, draft: &SaveDraftArguments) -> SendDraftArguments 
         subject: draft.subject.clone(),
         body: draft.body.clone(),
     }
+}
+
+/// The arguments that send the draft with the id without naming any of
+/// its fields.
+fn build_unnamed_send(draft_id: &str) -> SendDraftArguments {
+    SendDraftArguments {
+        draft_id: draft_id.to_owned(),
+        to: Vec::new(),
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        subject: String::new(),
+        body: String::new(),
+    }
+}
+
+/// Sends a draft with send_draft, without a stop.
+async fn send(stack: &Stack, arguments: SendDraftArguments) -> ToolResult {
+    run_send_draft(&stack.context, arguments, &SendProgress::default()).await
+}
+
+/// Asserts that nothing was sent and that the one draft is still in
+/// Drafts, not marked deleted, with no copy in Sent.
+fn assert_draft_kept_unsent(stack: &Stack) {
+    assert_nothing_sent(stack);
+    let drafts = stack.imap.list_messages("Drafts");
+    assert_eq!(drafts.len(), 1);
+    assert!(!drafts[0].has_flag("\\Deleted"));
+    assert!(stack.imap.list_messages("Sent").is_empty());
 }
 
 /// Saves the draft and gives its id.
@@ -300,102 +331,78 @@ async fn without_uidplus_send_draft_and_save_draft_only_mark_the_old_draft() {
     );
 }
 
+/// The fields of the draft `build_draft("Ready")` saves, as a refusal to
+/// send it names them, up to what it says of the body.
+const READY_FIELDS: &str = "Its own fields are:\nto: [\"Jane Doe <jane@example.com>\"]\ncc: []\nbcc: [\"hidden@example.com\"]\nsubject: \"Ready\"\nbody: its text as read_email shows it, which the body given";
+
 #[tokio::test(flavor = "multi_thread")]
-async fn refuses_to_send_a_draft_the_call_does_not_name_and_sends_nothing() {
+async fn refuses_to_send_a_draft_whose_text_the_call_leaves_out_or_changes() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
     let id = save(&stack, build_draft("Ready")).await;
-    let named = build_send(&id, &build_draft("Ready"));
+    let rewritten = SendDraftArguments {
+        body: "Not sent yet!".to_owned(),
+        ..build_send(&id, &build_draft("Ready"))
+    };
 
-    let unnamed = run_send_draft(
-        &stack.context,
-        SendDraftArguments {
-            to: Vec::new(),
-            bcc: Vec::new(),
-            subject: String::new(),
-            body: String::new(),
-            ..named.clone()
-        },
-        &SendProgress::default(),
-    )
-    .await;
-    let redirected = run_send_draft(
-        &stack.context,
-        SendDraftArguments {
-            to: vec![
-                "Jane Doe <jane@example.com>".to_owned(),
-                "attacker@example.net".to_owned(),
-            ],
-            ..named.clone()
-        },
-        &SendProgress::default(),
-    )
-    .await;
-    let substituted = run_send_draft(
-        &stack.context,
-        SendDraftArguments {
-            bcc: vec!["attacker@example.net".to_owned()],
-            ..named.clone()
-        },
-        &SendProgress::default(),
-    )
-    .await;
-    let rewritten = run_send_draft(
-        &stack.context,
-        SendDraftArguments {
-            body: "Not sent yet!".to_owned(),
-            ..named
-        },
-        &SendProgress::default(),
-    )
-    .await;
+    let unnamed = send(&stack, build_unnamed_send(&id)).await;
+    let changed = send(&stack, rewritten).await;
 
-    let fields = "Its own fields are:\nto: [\"Jane Doe <jane@example.com>\"]\ncc: []\nbcc: [\"hidden@example.com\"]\nsubject: \"Ready\"\nbody: its text as read_email shows it, which the body given";
     assert_eq!(
         unnamed,
         Err(ToolFailure::Argument(format!(
-            "The draft differs from this call in to, bcc, subject, body, so nothing was sent. {fields} differs from at character 1, counting a line break as one.\nCall send_draft with these to send it."
+            "The draft differs from this call in to, bcc, subject, body, so nothing was sent. {READY_FIELDS} differs from at character 1, counting a line break as one.\nCall send_draft with these to send it."
         )))
     );
+    assert_eq!(
+        changed,
+        Err(ToolFailure::Argument(format!(
+            "The draft differs from this call in body, so nothing was sent. {READY_FIELDS} differs from at character 13, counting a line break as one.\nCall send_draft with these to send it."
+        )))
+    );
+    assert_draft_kept_unsent(&stack);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_to_send_a_draft_to_recipients_the_draft_does_not_hold() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    let id = save(&stack, build_draft("Ready")).await;
+    let named = build_send(&id, &build_draft("Ready"));
+    let added = SendDraftArguments {
+        to: vec![
+            "Jane Doe <jane@example.com>".to_owned(),
+            "attacker@example.net".to_owned(),
+        ],
+        ..named.clone()
+    };
+    let substituted = SendDraftArguments {
+        bcc: vec!["attacker@example.net".to_owned()],
+        ..named
+    };
+
+    let redirected = send(&stack, added).await;
+    let replaced = send(&stack, substituted).await;
+
     assert_eq!(
         redirected,
         Err(ToolFailure::Argument(format!(
-            "The draft differs from this call in to, so nothing was sent. {fields} matches.\nCall send_draft with these to send it."
+            "The draft differs from this call in to, so nothing was sent. {READY_FIELDS} matches.\nCall send_draft with these to send it."
         )))
     );
     assert_eq!(
-        substituted,
+        replaced,
         Err(ToolFailure::Argument(format!(
-            "The draft differs from this call in bcc, so nothing was sent. {fields} matches.\nCall send_draft with these to send it."
+            "The draft differs from this call in bcc, so nothing was sent. {READY_FIELDS} matches.\nCall send_draft with these to send it."
         )))
     );
-    assert_eq!(
-        rewritten,
-        Err(ToolFailure::Argument(format!(
-            "The draft differs from this call in body, so nothing was sent. {fields} differs from at character 13, counting a line break as one.\nCall send_draft with these to send it."
-        )))
-    );
-    assert!(stack.smtp.list_mails().is_empty());
-    assert!(
-        stack
-            .smtp
-            .state
-            .lock()
-            .expect("the state")
-            .commands
-            .is_empty()
-    );
-    let drafts = stack.imap.list_messages("Drafts");
-    assert_eq!(drafts.len(), 1);
-    assert!(!drafts[0].has_flag("\\Deleted"));
-    assert!(stack.imap.list_messages("Sent").is_empty());
+    assert_draft_kept_unsent(&stack);
 }
 
 /// A draft another client saved, `1.1003.Drafts`: a quoted name, a group,
 /// an encoded subject, and a Bcc field.
 const OTHER_CLIENT_DRAFT: &str = "From: A Person <person@example.com>\r\nTo: \"Doe, Jane\" <jane@example.com>, Team: a@example.com, B <b@example.com>;\r\nCc: =?UTF-8?Q?J=C3=BCrgen?= <juergen@example.com>\r\nBcc: hidden@example.com\r\nSubject: =?UTF-8?Q?Gr=C3=BC=C3=9Fe?=\r\nMessage-ID: <other@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nLine one\r\nLine two\r\n";
 
-#[tokio::test(flavor = "multi_thread")]
-async fn sends_a_draft_another_client_saved_with_the_fields_the_refusal_names() {
+/// Starts the stack with the other client's draft in Drafts.
+async fn start_with_other_client_draft() -> Stack {
     let mut mailbox = FakeMailbox::create_standard();
     mailbox.add_message(
         "Drafts",
@@ -405,35 +412,32 @@ async fn sends_a_draft_another_client_saved_with_the_fields_the_refusal_names() 
             timestamp: 0,
         },
     );
-    let stack = start_stack(mailbox, false).await;
-    let unnamed = SendDraftArguments {
-        draft_id: "1.1003.Drafts".to_owned(),
-        to: Vec::new(),
-        cc: Vec::new(),
-        bcc: Vec::new(),
-        subject: String::new(),
-        body: String::new(),
-    };
+    start_stack(mailbox, false).await
+}
 
-    let refused = run_send_draft(&stack.context, unnamed.clone(), &SendProgress::default()).await;
-    let sent = run_send_draft(
-        &stack.context,
-        SendDraftArguments {
-            to: vec![
-                "\"Doe, Jane\" <jane@example.com>".to_owned(),
-                "a@example.com".to_owned(),
-                "B <b@example.com>".to_owned(),
-            ],
-            cc: vec!["Jürgen <juergen@example.com>".to_owned()],
-            bcc: vec!["hidden@example.com".to_owned()],
-            subject: "Grüße".to_owned(),
-            body: "Line one\nLine two".to_owned(),
-            ..unnamed
-        },
-        &SendProgress::default(),
-    )
-    .await
-    .expect("sent");
+/// The arguments that send the other client's draft, naming its fields
+/// as the refusal to send it without them gives them.
+fn build_other_client_send() -> SendDraftArguments {
+    SendDraftArguments {
+        to: vec![
+            "\"Doe, Jane\" <jane@example.com>".to_owned(),
+            "a@example.com".to_owned(),
+            "B <b@example.com>".to_owned(),
+        ],
+        cc: vec!["Jürgen <juergen@example.com>".to_owned()],
+        bcc: vec!["hidden@example.com".to_owned()],
+        subject: "Grüße".to_owned(),
+        body: "Line one\nLine two".to_owned(),
+        ..build_unnamed_send("1.1003.Drafts")
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sends_a_draft_another_client_saved_with_the_fields_the_refusal_names() {
+    let stack = start_with_other_client_draft().await;
+
+    let refused = send(&stack, build_unnamed_send("1.1003.Drafts")).await;
+    let sent = send(&stack, build_other_client_send()).await.expect("sent");
 
     assert_eq!(
         refused,

@@ -4,12 +4,15 @@
 use email::failure::{Protocol, SignInFailure, ToolFailure};
 use email::message::parse_message;
 use email::smtp::SendProgress;
-use email::tools::ToolContext;
 use email::tools::send::{MessageArguments, run_send_email};
+use email::tools::{ToolContext, ToolResult};
 use email::trust::Trust;
 
 use crate::support::imap::{FakeMailbox, ImapFault, NewMessage};
-use crate::support::{ADDRESS, Stack, TestMessage, calculate_trimmed_bytes, start_stack};
+use crate::support::smtp::SentMail;
+use crate::support::{
+    ADDRESS, Stack, TestMessage, assert_nothing_sent, calculate_trimmed_bytes, start_stack,
+};
 
 /// The time the original message was sent.
 const BASE: i64 = 1_793_611_800;
@@ -53,18 +56,47 @@ async fn start_with_originals(server_keeps_sent_copy: bool) -> Stack {
     start_stack(mailbox, server_keeps_sent_copy).await
 }
 
-/// Asserts that nothing reached the SMTP server.
-fn assert_nothing_sent(stack: &Stack) {
-    assert!(stack.smtp.list_mails().is_empty());
-    assert!(
-        stack
-            .smtp
-            .state
-            .lock()
-            .expect("the state")
-            .commands
-            .is_empty()
+/// Sends a message with send_email, without a stop.
+async fn send_message(stack: &Stack, arguments: MessageArguments) -> ToolResult {
+    run_send_email(&stack.context, arguments, &SendProgress::default()).await
+}
+
+/// Asserts that Sent holds one read copy of the mail, which one APPEND
+/// put there.
+fn assert_one_read_copy_in_sent(stack: &Stack, mail: &SentMail) {
+    let sent = stack.imap.list_messages("Sent");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].flags, vec!["\\Seen"]);
+    assert_eq!(
+        calculate_trimmed_bytes(&sent[0].bytes),
+        calculate_trimmed_bytes(&mail.bytes)
     );
+    let commands = stack.imap.list_commands();
+    let appends: Vec<&String> = commands
+        .iter()
+        .filter(|command| command.contains(" APPEND "))
+        .collect();
+    assert_eq!(appends.len(), 1, "{commands:?}");
+    assert!(
+        appends[0].contains(" APPEND \"Sent\" (\\Seen) "),
+        "{commands:?}"
+    );
+}
+
+/// A reply to the redirected message, `3.1001.INBOX`, to its sender, with
+/// the mailboxes its Reply-To names in Cc.
+fn build_reply_to_plans() -> MessageArguments {
+    MessageArguments {
+        to: vec!["\"Doe, Jane\" <jane@example.com>".to_owned()],
+        cc: vec![
+            "a@example.com".to_owned(),
+            "Team <b@example.com>".to_owned(),
+        ],
+        subject: "Re: Plans".to_owned(),
+        body: "Sounds good.".to_owned(),
+        reply_to_id: Some("3.1001.INBOX".to_owned()),
+        ..MessageArguments::default()
+    }
 }
 
 /// A message to Jane with the subject and body.
@@ -81,14 +113,13 @@ fn build_message_to_jane(subject: &str, body: &str) -> MessageArguments {
 async fn sends_a_message_and_keeps_one_read_copy_in_sent_without_the_bcc_field() {
     let stack = start_with_originals(false).await;
 
-    let report = run_send_email(
-        &stack.context,
+    let report = send_message(
+        &stack,
         MessageArguments {
             cc: vec!["cc@example.com".to_owned()],
             bcc: vec!["hidden@example.com".to_owned()],
             ..build_message_to_jane("Grüße", "Hello Jane,\n\nBye.")
         },
-        &SendProgress::default(),
     )
     .await
     .expect("sent");
@@ -123,28 +154,7 @@ async fn sends_a_message_and_keeps_one_read_copy_in_sent_without_the_bcc_field()
     let parsed = parse_message(&mails[0].bytes).expect("parsed");
     assert_eq!(parsed.headers.subject, "Grüße");
     assert_eq!(parsed.text, "Hello Jane,\r\n\r\nBye.\r\n");
-    let sent = stack.imap.list_messages("Sent");
-    assert_eq!(sent.len(), 1);
-    assert_eq!(sent[0].flags, vec!["\\Seen"]);
-    assert_eq!(
-        calculate_trimmed_bytes(&sent[0].bytes),
-        calculate_trimmed_bytes(&mails[0].bytes)
-    );
-    let commands = stack.imap.list_commands();
-    assert_eq!(
-        commands
-            .iter()
-            .filter(|command| command.contains(" APPEND "))
-            .count(),
-        1,
-        "{commands:?}"
-    );
-    assert!(
-        commands
-            .iter()
-            .any(|command| command.contains("APPEND \"Sent\" (\\Seen) ")),
-        "{commands:?}"
-    );
+    assert_one_read_copy_in_sent(&stack, &mails[0]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -236,23 +246,9 @@ async fn refuses_a_reply_that_leaves_out_its_recipients_or_subject() {
 async fn replies_in_the_conversation_to_exactly_the_recipients_given() {
     let stack = start_with_originals(false).await;
 
-    let report = run_send_email(
-        &stack.context,
-        MessageArguments {
-            to: vec!["\"Doe, Jane\" <jane@example.com>".to_owned()],
-            cc: vec![
-                "a@example.com".to_owned(),
-                "Team <b@example.com>".to_owned(),
-            ],
-            subject: "Re: Plans".to_owned(),
-            body: "Sounds good.".to_owned(),
-            reply_to_id: Some("3.1001.INBOX".to_owned()),
-            ..MessageArguments::default()
-        },
-        &SendProgress::default(),
-    )
-    .await
-    .expect("sent");
+    let report = send_message(&stack, build_reply_to_plans())
+        .await
+        .expect("sent");
 
     assert!(
         report.text.contains(
@@ -268,16 +264,15 @@ async fn replies_in_the_conversation_to_exactly_the_recipients_given() {
         vec!["jane@example.com", "a@example.com", "b@example.com"]
     );
     let text = String::from_utf8_lossy(&mails[0].bytes);
-    assert!(text.contains("Subject: Re: Plans\r\n"), "{text}");
-    assert!(
-        text.contains("In-Reply-To: <plans@example.com>\r\n"),
-        "{text}"
-    );
-    assert!(
-        text.contains("References: <plans@example.com>\r\n"),
-        "{text}"
-    );
-    assert!(text.contains("Sounds good."), "{text}");
+    let parts = [
+        "Subject: Re: Plans\r\n",
+        "In-Reply-To: <plans@example.com>\r\n",
+        "References: <plans@example.com>\r\n",
+        "Sounds good.",
+    ];
+    for part in parts {
+        assert!(text.contains(part), "{text}");
+    }
     let commands = stack.imap.list_commands();
     assert!(
         commands

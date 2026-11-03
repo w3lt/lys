@@ -37,6 +37,20 @@ const TOOL_NAMES: [&str; 10] = [
 /// cancel.
 const LOG_WAIT: Duration = Duration::from_secs(30);
 
+/// Builds the JSON of `LYS_EMAIL_ACCOUNT` for fakes on the ports that
+/// talk without TLS.
+fn build_plain_account_json(imap_port: u16, smtp_port: u16) -> String {
+    build_account_json(
+        TestServers {
+            imap_port,
+            imap_security: SecurityName::Plain,
+            smtp_port,
+            smtp_security: SecurityName::Plain,
+        },
+        false,
+    )
+}
+
 /// What the dialogue with the binary produced.
 struct Dialogue {
     /// The answers, in order.
@@ -156,15 +170,7 @@ async fn logs_a_send_cancelled_after_the_hand_over_as_unconfirmed() {
     let imap = FakeImapServer::start(FakeMailbox::create_standard(), ImapMode::Plain, None).await;
     let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
     smtp.add_fault(DATA_END, SmtpFault::Stall);
-    let variable = build_account_json(
-        TestServers {
-            imap_port: imap.port,
-            imap_security: SecurityName::Plain,
-            smtp_port: smtp.port,
-            smtp_security: SecurityName::Plain,
-        },
-        false,
-    );
+    let variable = build_plain_account_json(imap.port, smtp.port);
     let (release, released) = mpsc::channel();
 
     let dialogue =
@@ -180,8 +186,9 @@ async fn logs_a_send_cancelled_after_the_hand_over_as_unconfirmed() {
     assert_eq!(smtp.list_mails().len(), 1);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
+/// Builds the mailbox the dialogue reads: a short and a long message in
+/// INBOX, `1.1001.INBOX` and `2.1001.INBOX`, and [`DRAFT`] in Drafts.
+fn build_dialogue_mailbox() -> FakeMailbox {
     let mut mailbox = FakeMailbox::create_standard();
     let short = TestMessage {
         subject: "Short".to_owned(),
@@ -207,18 +214,14 @@ async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
             timestamp: 1_793_612_000,
         },
     );
-    let imap = FakeImapServer::start(mailbox, ImapMode::Plain, None).await;
-    let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
-    let variable = build_account_json(
-        TestServers {
-            imap_port: imap.port,
-            imap_security: SecurityName::Plain,
-            smtp_port: smtp.port,
-            smtp_security: SecurityName::Plain,
-        },
-        false,
-    );
-    let messages = vec![
+    mailbox
+}
+
+/// The messages of the dialogue: the handshake, the tool list, a folder
+/// list, a read the result cut, a bad id, a bad page, and the draft sent
+/// first without and then with the fields it holds.
+fn build_dialogue_messages() -> Vec<Value> {
+    vec![
         json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "lys-test", "version": "0"}}}),
         json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
         json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
@@ -228,7 +231,163 @@ async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
         json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "search_emails", "arguments": {"page": 0}}}),
         json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "send_draft", "arguments": {"draft_id": "1.1003.Drafts"}}}),
         json!({"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": {"name": "send_draft", "arguments": {"draft_id": "1.1003.Drafts", "to": ["Jane Doe <jane@example.com>"], "bcc": ["hidden@example.com"], "subject": "Plans", "body": "See you there."}}}),
+    ]
+}
+
+/// Asserts that the answer to `initialize` names the server and its
+/// version, gives instructions, and offers tools.
+fn assert_initialized(initialized: &Value) {
+    assert_eq!(initialized["result"]["serverInfo"]["name"], "lys-email");
+    assert_eq!(
+        initialized["result"]["serverInfo"]["version"],
+        env!("CARGO_PKG_VERSION")
+    );
+    assert!(
+        initialized["result"]["instructions"]
+            .as_str()
+            .is_some_and(|text| text.contains("search_emails"))
+    );
+    assert!(initialized["result"]["capabilities"]["tools"].is_object());
+}
+
+/// Finds a tool by name in the answer to `tools/list`.
+///
+/// # Panics
+///
+/// When the answer lists no such tool.
+fn find_listed_tool<'a>(listed: &'a Value, name: &str) -> &'a Value {
+    listed["result"]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .find(|tool| tool["name"] == name)
+        .expect("the tool")
+}
+
+/// Asserts that the answer to `tools/list` names every tool, each with an
+/// object schema and a description, and that `search_emails` reads only
+/// and takes a page.
+fn assert_tools_listed(listed: &Value) {
+    let tools = listed["result"]["tools"].as_array().expect("tools");
+    let mut names: Vec<&str> = tools
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("a name"))
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, TOOL_NAMES);
+    for tool in tools {
+        assert_eq!(tool["inputSchema"]["type"], "object", "{tool}");
+        assert!(
+            tool["description"]
+                .as_str()
+                .is_some_and(|text| !text.is_empty()),
+            "{tool}"
+        );
+    }
+    let search = find_listed_tool(listed, "search_emails");
+    assert_eq!(search["annotations"]["readOnlyHint"], true);
+    assert!(
+        search["inputSchema"]["properties"]["page"].is_object(),
+        "{search}"
+    );
+}
+
+/// Asserts that `send_draft` requires the draft's id and takes the fields
+/// the draft must hold, and that `delete_draft` takes only the id.
+fn assert_draft_tool_fields(listed: &Value) {
+    let send_draft = find_listed_tool(listed, "send_draft");
+    let mut send_draft_fields: Vec<&str> = send_draft["inputSchema"]["properties"]
+        .as_object()
+        .expect("properties")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    send_draft_fields.sort_unstable();
+    assert_eq!(
+        send_draft_fields,
+        ["bcc", "body", "cc", "draft_id", "subject", "to"]
+    );
+    assert_eq!(send_draft["inputSchema"]["required"], json!(["draft_id"]));
+    let delete_draft = find_listed_tool(listed, "delete_draft");
+    assert_eq!(
+        delete_draft["inputSchema"]["properties"]
+            .as_object()
+            .map(|properties| properties.keys().cloned().collect::<Vec<_>>()),
+        Some(vec!["draft_id".to_owned()])
+    );
+}
+
+/// Asserts that the folders were listed and that the long message's text
+/// was cut to the result limit, in UTF-16 code units, with the note.
+fn assert_read_answers(folders: &Value, long_read: &Value) {
+    assert_ne!(folders["result"]["isError"], true, "{folders}");
+    assert!(
+        folders["result"]["content"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.starts_with("- INBOX (Inbox): 2 messages\n")),
+        "{folders}"
+    );
+    let long_text = long_read["result"]["content"][0]["text"]
+        .as_str()
+        .expect("text");
+    assert_eq!(long_text.encode_utf16().count(), 20_000);
+    assert!(long_text.ends_with(CUT_NOTE));
+}
+
+/// Asserts that a bad id and a bad page fail as tool errors with their
+/// sentences.
+fn assert_failed_answers(bad_id: &Value, bad_page: &Value) {
+    assert_eq!(bad_id["result"]["isError"], true, "{bad_id}");
+    assert_eq!(
+        bad_id["result"]["content"][0]["text"],
+        "That is not a message id. Use an id from search_emails, such as 12.345.INBOX."
+    );
+    assert_eq!(bad_page["result"]["isError"], true, "{bad_page}");
+    assert_eq!(
+        bad_page["result"]["content"][0]["text"],
+        "page must be 1 or more."
+    );
+}
+
+/// Asserts that the draft was refused while the call named none of its
+/// fields, and sent once to its recipients when the call named them.
+fn assert_draft_answers(unshown_draft: &Value, shown_draft: &Value, smtp: &FakeSmtpServer) {
+    assert_eq!(unshown_draft["result"]["isError"], true, "{unshown_draft}");
+    assert!(
+        unshown_draft["result"]["content"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.starts_with(
+                "The draft differs from this call in to, bcc, subject, body, so nothing was sent."
+            )),
+        "{unshown_draft}"
+    );
+    assert_ne!(shown_draft["result"]["isError"], true, "{shown_draft}");
+    let mails = smtp.list_mails();
+    assert_eq!(mails.len(), 1, "{shown_draft}");
+    assert_eq!(mails[0].to, vec!["jane@example.com", "hidden@example.com"]);
+}
+
+/// Asserts that the binary logged that it serves and the calls' outcomes,
+/// and logged neither the password nor an address.
+fn assert_logged_without_account(stderr: &str) {
+    let lines = [
+        "server: serving MCP over stdio\n",
+        "tool list_folders: done (folders: 7 listed)\n",
+        "tool read_email: failed (invalid-id)\n",
     ];
+    for line in lines {
+        assert!(stderr.contains(line), "{stderr}");
+    }
+    assert!(!stderr.contains(crate::support::PASSWORD), "{stderr}");
+    assert!(!stderr.contains("example.com"), "{stderr}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
+    let imap = FakeImapServer::start(build_dialogue_mailbox(), ImapMode::Plain, None).await;
+    let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
+    let variable = build_plain_account_json(imap.port, smtp.port);
+    let messages = build_dialogue_messages();
 
     let dialogue = tokio::task::spawn_blocking(move || send_dialogue_messages(variable, messages))
         .await
@@ -248,132 +407,11 @@ async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
     else {
         panic!("{:?}", dialogue.answers);
     };
-    assert_eq!(initialized["result"]["serverInfo"]["name"], "lys-email");
-    assert_eq!(
-        initialized["result"]["serverInfo"]["version"],
-        env!("CARGO_PKG_VERSION")
-    );
-    assert!(
-        initialized["result"]["instructions"]
-            .as_str()
-            .is_some_and(|text| text.contains("search_emails"))
-    );
-    assert!(initialized["result"]["capabilities"]["tools"].is_object());
-    let mut names: Vec<&str> = listed["result"]["tools"]
-        .as_array()
-        .expect("tools")
-        .iter()
-        .map(|tool| tool["name"].as_str().expect("a name"))
-        .collect();
-    names.sort_unstable();
-    assert_eq!(names, TOOL_NAMES);
-    for tool in listed["result"]["tools"].as_array().expect("tools") {
-        assert_eq!(tool["inputSchema"]["type"], "object", "{tool}");
-        assert!(
-            tool["description"]
-                .as_str()
-                .is_some_and(|text| !text.is_empty()),
-            "{tool}"
-        );
-    }
-    let search = listed["result"]["tools"]
-        .as_array()
-        .expect("tools")
-        .iter()
-        .find(|tool| tool["name"] == "search_emails")
-        .expect("the search tool");
-    assert_eq!(search["annotations"]["readOnlyHint"], true);
-    assert!(
-        search["inputSchema"]["properties"]["page"].is_object(),
-        "{search}"
-    );
-    let find_tool = |name: &str| {
-        listed["result"]["tools"]
-            .as_array()
-            .expect("tools")
-            .iter()
-            .find(|tool| tool["name"] == name)
-            .cloned()
-            .expect("the tool")
-    };
-    let send_draft = find_tool("send_draft");
-    let mut send_draft_fields: Vec<&str> = send_draft["inputSchema"]["properties"]
-        .as_object()
-        .expect("properties")
-        .keys()
-        .map(String::as_str)
-        .collect();
-    send_draft_fields.sort_unstable();
-    assert_eq!(
-        send_draft_fields,
-        ["bcc", "body", "cc", "draft_id", "subject", "to"]
-    );
-    assert_eq!(send_draft["inputSchema"]["required"], json!(["draft_id"]));
-    let delete_draft = find_tool("delete_draft");
-    assert_eq!(
-        delete_draft["inputSchema"]["properties"]
-            .as_object()
-            .map(|properties| properties.keys().cloned().collect::<Vec<_>>()),
-        Some(vec!["draft_id".to_owned()])
-    );
-    assert_ne!(folders["result"]["isError"], true, "{folders}");
-    assert!(
-        folders["result"]["content"][0]["text"]
-            .as_str()
-            .is_some_and(|text| text.starts_with("- INBOX (Inbox): 2 messages\n")),
-        "{folders}"
-    );
-    let long_text = long_read["result"]["content"][0]["text"]
-        .as_str()
-        .expect("text");
-    assert_eq!(long_text.encode_utf16().count(), 20_000);
-    assert!(long_text.ends_with(CUT_NOTE));
-    assert_eq!(bad_id["result"]["isError"], true, "{bad_id}");
-    assert_eq!(
-        bad_id["result"]["content"][0]["text"],
-        "That is not a message id. Use an id from search_emails, such as 12.345.INBOX."
-    );
-    assert_eq!(bad_page["result"]["isError"], true, "{bad_page}");
-    assert_eq!(
-        bad_page["result"]["content"][0]["text"],
-        "page must be 1 or more."
-    );
-    assert_eq!(unshown_draft["result"]["isError"], true, "{unshown_draft}");
-    assert!(
-        unshown_draft["result"]["content"][0]["text"]
-            .as_str()
-            .is_some_and(|text| text.starts_with(
-                "The draft differs from this call in to, bcc, subject, body, so nothing was sent."
-            )),
-        "{unshown_draft}"
-    );
-    assert_ne!(shown_draft["result"]["isError"], true, "{shown_draft}");
-    let mails = smtp.list_mails();
-    assert_eq!(mails.len(), 1, "{shown_draft}");
-    assert_eq!(mails[0].to, vec!["jane@example.com", "hidden@example.com"]);
-    assert!(
-        dialogue.stderr.contains("server: serving MCP over stdio\n"),
-        "{}",
-        dialogue.stderr
-    );
-    assert!(
-        dialogue
-            .stderr
-            .contains("tool list_folders: done (folders: 7 listed)\n"),
-        "{}",
-        dialogue.stderr
-    );
-    assert!(
-        dialogue
-            .stderr
-            .contains("tool read_email: failed (invalid-id)\n"),
-        "{}",
-        dialogue.stderr
-    );
-    assert!(
-        !dialogue.stderr.contains(crate::support::PASSWORD)
-            && !dialogue.stderr.contains("example.com"),
-        "{}",
-        dialogue.stderr
-    );
+    assert_initialized(initialized);
+    assert_tools_listed(listed);
+    assert_draft_tool_fields(listed);
+    assert_read_answers(folders, long_read);
+    assert_failed_answers(bad_id, bad_page);
+    assert_draft_answers(unshown_draft, shown_draft, &smtp);
+    assert_logged_without_account(&dialogue.stderr);
 }

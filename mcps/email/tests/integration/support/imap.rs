@@ -420,6 +420,13 @@ struct ConnectionSetup {
     faulted: Arc<Notify>,
 }
 
+impl ConnectionSetup {
+    /// Records a line the client sent, in the order the fake read it.
+    fn record_line(&self, line: String) {
+        self.state.lock().expect("the state").commands.push(line);
+    }
+}
+
 /// Serves one connection in the setup's mode.
 async fn handle_connection(stream: TcpStream, setup: ConnectionSetup) {
     match setup.mode {
@@ -525,12 +532,7 @@ where
     }
     loop {
         let (text, literals) = read_command(&mut reader, &setup.state).await?;
-        setup
-            .state
-            .lock()
-            .expect("the state")
-            .commands
-            .push(text.clone());
+        setup.record_line(text.clone());
         let Some(command) = parse_command(&text, literals) else {
             continue;
         };
@@ -586,13 +588,7 @@ where
         .await
         .is_ok_and(|count| count > 0)
     {
-        let command = line.trim_end_matches(['\r', '\n']).to_owned();
-        setup
-            .state
-            .lock()
-            .expect("the state")
-            .commands
-            .push(command);
+        setup.record_line(line.trim_end_matches(['\r', '\n']).to_owned());
         line.clear();
     }
 }

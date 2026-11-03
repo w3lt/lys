@@ -68,8 +68,10 @@ saved email account, and runs for each account check. Development builds use
 `mcps/email/target/debug/email` in the checkout recorded at host compile
 time, which
 `cargo build --manifest-path mcps/email/Cargo.toml --target-dir mcps/email/target`
-produces; release builds use `$LYS_HOME/runtime/email/email`, which
-`build.sh` builds in release with the Rust toolchain and installs. The
+produces, unless a Cargo configuration sets `build.target`, which adds the
+target's name to the path; release builds use
+`$LYS_HOME/runtime/email/email`, which `build.sh` builds in release with the
+Rust toolchain and installs. The
 desktop host names the file to the backend in `LYS_EMAIL_SERVER_PATH`, and
 the standalone `pnpm backend:dev` sets the same variable to the debug build
 unless it is already set. Without the file, the email server shows `failed`

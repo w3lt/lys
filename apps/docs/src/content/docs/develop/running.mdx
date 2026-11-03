@@ -36,7 +36,8 @@ pnpm dev
   checkout, unless the variable is already set, so the backend finds the
   email MCP server once
   `cargo build --manifest-path mcps/email/Cargo.toml --target-dir mcps/email/target`
-  built it.
+  built it, unless a Cargo configuration sets `build.target`, which adds the
+  target's name to the path.
 - `pnpm dev`: runs `pnpm --filter @lys/desktop run tauri dev`, which starts the
   desktop Vite app and the Tauri shell. The backend the desktop starts runs the
   same `dev` script, so its log lines appear in this terminal the same way, and
@@ -85,8 +86,9 @@ home it resolved at startup, and `LYS_EMAIL_SERVER_PATH` to
 `mcps/email/target/debug/email` in that checkout, the email MCP server the
 backend starts once it is switched on; build it with
 `cargo build --manifest-path mcps/email/Cargo.toml --target-dir mcps/email/target`,
-since nothing builds it for you in development. A release build names
-`$LYS_HOME/runtime/email/email` instead.
+since nothing builds it for you in development. That command puts it there
+unless a Cargo configuration sets `build.target`, which adds the target's name
+to the path. A release build names `$LYS_HOME/runtime/email/email` instead.
 
 `runtime.autoStartBackend` defaults to `true`; initialization starts the child
 when the loaded value is enabled. The Runtime pane's "Start it when Lys opens"

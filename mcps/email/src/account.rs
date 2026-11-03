@@ -419,6 +419,11 @@ mod tests {
     const SHARED_VARIABLES: &str =
         include_str!("../../../packages/share/test/fixtures/email-account-variables.json");
 
+    /// Groups of the settings file that `emailSettingsSchema` in
+    /// `@lys/share`, the host, and the backend judge alike.
+    const SHARED_GROUPS: &str =
+        include_str!("../../../packages/share/test/fixtures/email-settings-groups.json");
+
     /// One shared account variable; the account and the password the
     /// backend writes it from are the backend's to check.
     #[derive(Deserialize)]
@@ -427,6 +432,18 @@ mod tests {
         case: String,
         /// The JSON the variable holds.
         variable: Value,
+    }
+
+    /// One case of the shared groups; what the host writes back for an
+    /// accepted group is the host's to check.
+    #[derive(Deserialize)]
+    struct SharedGroup {
+        /// What the case checks.
+        case: String,
+        /// The value of the settings file's `email` group.
+        group: Value,
+        /// Whether the shared rules accept the group.
+        accepted: bool,
     }
 
     /// Writes a server back with the variable's field names.
@@ -453,6 +470,39 @@ mod tests {
             "smtp": smtp,
             "serverKeepsSentCopy": account.server_keeps_sent_copy,
         })
+    }
+
+    /// Builds the variable the backend writes for the account of a shared
+    /// group: an account object gains the test password, and any other
+    /// value stays as it is.
+    ///
+    /// # Returns
+    ///
+    /// The variable's text, or `None` for a group that holds no account or
+    /// more than one field, whose case is about the group rather than the
+    /// account.
+    fn build_group_variable(group: &Value) -> Option<String> {
+        let fields = group.as_object().filter(|fields| fields.len() == 1)?;
+        match fields.get("account")? {
+            Value::Null => None,
+            Value::Object(account) => {
+                let mut account = account.clone();
+                account.insert("password".to_owned(), Value::from(SYNTHETIC_PASSWORD));
+                Some(Value::Object(account).to_string())
+            }
+            other => Some(other.to_string()),
+        }
+    }
+
+    /// Judges a shared group's account as the server would.
+    ///
+    /// # Returns
+    ///
+    /// Whether the server accepts the account, or `None` for a group whose
+    /// case is not about the account.
+    fn judge_shared_group(shared: &SharedGroup) -> Option<bool> {
+        let variable = build_group_variable(&shared.group)?;
+        Some(parse_account_variable(&variable).is_ok())
     }
 
     /// Builds the JSON the backend writes, with one field replaced.
@@ -647,6 +697,72 @@ mod tests {
                 case.case
             );
         }
+    }
+
+    #[test]
+    fn judges_each_account_of_the_shared_groups_as_the_shared_rules_do() {
+        let shared: Vec<SharedGroup> =
+            serde_json::from_str(SHARED_GROUPS).expect("the shared groups");
+
+        let judged: Vec<(&str, bool, bool)> = shared
+            .iter()
+            .filter_map(|case| {
+                judge_shared_group(case).map(|parsed| (case.case.as_str(), case.accepted, parsed))
+            })
+            .collect();
+
+        let mismatches: Vec<&(&str, bool, bool)> = judged
+            .iter()
+            .filter(|(_, accepted, parsed)| accepted != parsed)
+            .collect();
+        assert!(mismatches.is_empty(), "{mismatches:#?}");
+        assert!(judged.iter().any(|(_, accepted, _)| *accepted));
+        assert!(judged.iter().any(|(_, accepted, _)| !*accepted));
+    }
+
+    /// Parses the account with one text field set to `count` copies of a
+    /// character outside the Basic Multilingual Plane: one code point, two
+    /// UTF-16 code units, and four bytes each.
+    fn parse_with_long_text(field: &str, count: usize) -> Result<Account, AccountProblem> {
+        let text = "\u{1F600}".repeat(count);
+        parse_account_variable(&build_variable(field, &format!("\"{text}\"")))
+    }
+
+    #[test]
+    fn counts_names_and_the_password_in_code_points_up_to_the_shared_limits() {
+        for (field, limit) in [("displayName", 100), ("userName", 254), ("password", 1024)] {
+            assert!(
+                parse_with_long_text(field, limit).is_ok(),
+                "{field} at {limit}"
+            );
+            let problem = parse_with_long_text(field, limit + 1)
+                .map(|_| ())
+                .expect_err(field);
+            assert!(
+                matches!(problem, AccountProblem::Rule(rule) if rule.starts_with(field)),
+                "{field} over {limit}: {problem:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn allows_an_ipv6_host_in_brackets_up_to_47_characters() {
+        let at_limit = format!("[{}0]", "0:".repeat(22));
+        let over_limit = format!("[{}00]", "0:".repeat(22));
+        assert_eq!(at_limit.len(), 47);
+        let server =
+            |host: &str| format!("{{\"host\":\"{host}\",\"port\":993,\"security\":\"tls\"}}");
+
+        let accepted = parse_account_variable(&build_variable("imap", &server(&at_limit)));
+        let refused = parse_account_variable(&build_variable("imap", &server(&over_limit)));
+
+        assert_eq!(accepted.map(|account| account.imap.host), Ok(at_limit));
+        assert_eq!(
+            refused.map(|_| ()),
+            Err(AccountProblem::Rule(
+                "imap.host is a host name or an IPv6 address in brackets"
+            ))
+        );
     }
 
     #[test]

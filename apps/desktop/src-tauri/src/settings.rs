@@ -624,24 +624,6 @@ mod tests {
         newer_mcp_field["mcp"]["enabled"] = json!(true);
         let mut newer_server_field = get_complete_settings();
         newer_server_field["mcp"]["servers"][1]["timeoutSeconds"] = json!(30);
-        let mut null_built_in = get_complete_settings();
-        null_built_in["mcp"]["builtIn"] = Value::Null;
-        let mut unknown_built_in_server = get_complete_settings();
-        unknown_built_in_server["mcp"]["builtIn"]["github"] = json!({ "enabled": true });
-        let mut text_server_switch = get_complete_settings();
-        text_server_switch["mcp"]["servers"][0]["enabled"] = json!("on");
-        let mut null_email = get_settings_without_load_configuration();
-        null_email["email"] = Value::Null;
-        let mut padded_display_name = get_complete_settings();
-        padded_display_name["email"]["account"]["displayName"] = json!("A Person ");
-        let mut plain_remote_imap = get_complete_settings();
-        plain_remote_imap["email"]["account"]["imap"]["security"] = json!("plain");
-        let mut newer_email_field = get_complete_settings();
-        newer_email_field["email"]["signature"] = json!("Regards");
-        let mut newer_account_field = get_complete_settings();
-        newer_account_field["email"]["account"]["signature"] = json!("Regards");
-        let mut control_character_password = get_complete_settings();
-        control_character_password["secrets"]["emailPassword"] = json!("email-synthetic\n");
         let lone_surrogate = get_complete_settings()
             .to_string()
             .replace("env-synthetic-value", "env-synthetic-value\\ud800");
@@ -664,6 +646,45 @@ mod tests {
             newer_location_field.to_string(),
             newer_mcp_field.to_string(),
             newer_server_field.to_string(),
+            lone_surrogate,
+            String::from("{ not json"),
+        ];
+
+        for stored_text in unusable_files {
+            let directory = TestDirectory::create("settings-unusable");
+            let path = directory.create_file("settings.json", &stored_text);
+
+            let failure = load_settings_file(&path).expect_err("an unusable settings file");
+
+            assert!(failure.starts_with("Failed to parse "), "{failure}");
+            assert_eq!(
+                fs::read_to_string(&path).expect("read the settings file"),
+                stored_text
+            );
+        }
+    }
+
+    #[test]
+    fn fails_on_unusable_switches_or_email_settings_without_rewriting_the_file() {
+        let mut null_built_in = get_complete_settings();
+        null_built_in["mcp"]["builtIn"] = Value::Null;
+        let mut unknown_built_in_server = get_complete_settings();
+        unknown_built_in_server["mcp"]["builtIn"]["github"] = json!({ "enabled": true });
+        let mut text_server_switch = get_complete_settings();
+        text_server_switch["mcp"]["servers"][0]["enabled"] = json!("on");
+        let mut null_email = get_settings_without_load_configuration();
+        null_email["email"] = Value::Null;
+        let mut padded_display_name = get_complete_settings();
+        padded_display_name["email"]["account"]["displayName"] = json!("A Person ");
+        let mut plain_remote_imap = get_complete_settings();
+        plain_remote_imap["email"]["account"]["imap"]["security"] = json!("plain");
+        let mut newer_email_field = get_complete_settings();
+        newer_email_field["email"]["signature"] = json!("Regards");
+        let mut newer_account_field = get_complete_settings();
+        newer_account_field["email"]["account"]["signature"] = json!("Regards");
+        let mut control_character_password = get_complete_settings();
+        control_character_password["secrets"]["emailPassword"] = json!("email-synthetic\n");
+        let unusable_files = [
             null_built_in.to_string(),
             unknown_built_in_server.to_string(),
             text_server_switch.to_string(),
@@ -673,8 +694,6 @@ mod tests {
             newer_email_field.to_string(),
             newer_account_field.to_string(),
             control_character_password.to_string(),
-            lone_surrogate,
-            String::from("{ not json"),
         ];
 
         for stored_text in unusable_files {

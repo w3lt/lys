@@ -850,20 +850,7 @@ mod tests {
     /// servers, each with the most one-character arguments and the most
     /// variables, whose values take the remaining bytes in list order.
     fn build_unswitched_group_of_bytes(bytes: usize) -> Value {
-        let mut servers: Vec<Value> = (0..SERVER_MAX_COUNT)
-            .map(|server_index| {
-                let environment: Vec<Value> = (0..ENVIRONMENT_VARIABLE_MAX_COUNT)
-                    .map(|variable_index| json!({ "name": format!("V{variable_index}"), "value": "" }))
-                    .collect();
-                json!({
-                    "name": format!("server-{server_index}"),
-                    "transport": "stdio",
-                    "command": "c",
-                    "arguments": vec!["a"; COMMAND_ARGUMENT_MAX_COUNT],
-                    "environment": environment
-                })
-            })
-            .collect();
+        let mut servers: Vec<Value> = (0..SERVER_MAX_COUNT).map(build_full_stdio_server).collect();
         let mut remaining = bytes - calculate_compact_json_bytes(&json!({ "servers": servers }));
         for server in &mut servers {
             for variable in server["environment"].as_array_mut().expect("variables") {
@@ -874,6 +861,21 @@ mod tests {
         }
 
         json!({ "servers": servers })
+    }
+
+    /// Returns stdio server `index` with the most one-character arguments
+    /// and the most variables, every value still empty.
+    fn build_full_stdio_server(index: usize) -> Value {
+        let environment: Vec<Value> = (0..ENVIRONMENT_VARIABLE_MAX_COUNT)
+            .map(|variable_index| json!({ "name": format!("V{variable_index}"), "value": "" }))
+            .collect();
+        json!({
+            "name": format!("server-{index}"),
+            "transport": "stdio",
+            "command": "c",
+            "arguments": vec!["a"; COMMAND_ARGUMENT_MAX_COUNT],
+            "environment": environment
+        })
     }
 
     /// Returns `group` with every switch written, as the host writes it:

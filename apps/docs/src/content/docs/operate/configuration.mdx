@@ -227,17 +227,20 @@ IMAP and SMTP servers before it saves anything, so the backend must be
 running; the card says so otherwise. To add the account:
 
 1. Open Settings → MCP and expand the `email` row, then enter the address.
-   For Gmail, Outlook, iCloud, Yahoo, and Fastmail, the server fields fill
-   themselves from a preset; the note under the address says which, or that
-   there is none, in which case enter the IMAP and SMTP hosts, ports, and
-   security yourself.
+   For Gmail, iCloud, Yahoo, and Fastmail, the server fields and the Sent
+   copy switch fill themselves from a preset; the note under the address
+   says which, or that there is none, in which case enter the IMAP and SMTP
+   hosts, ports, and security yourself. Outlook.com, Hotmail, and Live
+   accounts cannot be used, because Microsoft refuses passwords over IMAP
+   and SMTP.
 2. Enter the display name the recipients see, the user name the servers
    expect, usually the address, and the password. Gmail, iCloud, and Yahoo
    refuse the account password here and need an app password made in the
    account's security settings.
-3. Leave "Server keeps a copy of sent mail" on for a server that files sent
-   mail itself, as Gmail, Outlook, and Yahoo do; off, Lys files the copy in
-   the Sent folder after each send.
+3. Switch "Server keeps a copy of sent mail" on for a server that files
+   sent mail itself, as Gmail and Yahoo do, which their presets do for you;
+   off, its position without a preset, Lys files the copy in the Sent
+   folder after each send.
 4. Press Save. Lys signs in to both servers, up to 20 seconds each, and the
    status line says what each answered; a refused sign-in saves nothing.
    Once both accepted, the account and the password are saved together.
@@ -257,7 +260,7 @@ hand edit the next time Lys starts. The backend hands the account and the
 password to the email server through its environment each time it starts
 it, and the server connects to the mail servers once per tool call, with TLS
 or STARTTLS verified against the system's certificate store; a connection
-without TLS is allowed only to `localhost`. See
+without TLS is allowed only to `localhost`, `127.0.0.1`, or `[::1]`. See
 [the email server](/architecture/backend/#the-email-server) for what the
 server does with the account, and
 [troubleshooting](/operate/troubleshooting/#the-email-account-cannot-be-saved)

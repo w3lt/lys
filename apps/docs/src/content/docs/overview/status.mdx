@@ -87,6 +87,15 @@ repository today; it is not a promise of unreleased work.
   decides for every tool from the saved choices; both web tools start off. Lys's instructions do not
   give her today's date yet
   ([#148](https://github.com/w3lt/lys/issues/148)).
+- The email server works with one account, signed in with a password or an app
+  password over IMAP and SMTP. It cannot reach Outlook, Microsoft 365, or any
+  other provider that accepts only an OAuth sign-in, and it speaks neither
+  POP3, JMAP, nor Exchange Web Services. It does not move, archive, mark as
+  read or unread, flag, or delete messages other than drafts, empty the trash,
+  attach files from the machine, or run filters and rules. Lys shows no inbox
+  and does not notify of new mail; of the mail, it keeps on disk only what a
+  tool call returned, as the call's result in the conversation; and a switch
+  turns a server on or off for every conversation, not for one.
 - A message can carry up to eight files. A model with vision sees an attached
   image with its message, on that turn and on every later one; every message
   lists its files for the model, and a model trained for tool use reads an

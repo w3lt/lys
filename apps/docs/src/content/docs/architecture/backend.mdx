@@ -736,7 +736,10 @@ Streamable HTTP. The routes are in the
 ### Registry and sessions
 
 `McpServerRegistry` (`src/modules/mcp/mcpServerRegistry.ts`) owns the applied
-servers, one `McpServerSession` each, in the group's order. The composition
+servers, the servers Lys ships first and then the group's in its order, with
+one `McpServerSession` for each server that is switched on and can start; a
+server that is switched off, or a built-in server that cannot start, has no
+session and is listed as `off` or `failed`. The composition
 root creates it without reading the file or starting anything, and an
 `onReady` hook in `src/di/fastify.ts` applies the group before the backend
 listens, so the first request already sees every configured server,
@@ -777,7 +780,8 @@ the tools of every connected server, and finds one tool by its model-facing
 name: the server name sits between `mcp__` and the next `__`, which is exact
 because server names hold no `_`. `close()` stops every session and waits for
 every settings read, opening, and close it started; the singleton bundle's
-cleanup closes the registry first.
+cleanup closes the email account checker first and the registry right after
+it, before every other service.
 
 An `McpServerSession` (`mcpServerSession.ts`) is one attempt to open a server
 and the connection it leads to. It is `connecting` until the opening ends,
@@ -787,9 +791,10 @@ call with HTTP 404 because it no longer knows the session, fails the session
 as `closed`.
 Stopping a session cancels its opening or closes its connection, and a
 connection an opening returns after the stop is closed at once. A call that
-is running when its session is stopped, because the settings just applied
-switched the server off, changed it, or no longer name it, fails with a
-sentence that says so, which the model reads. Closes run in
+is running when its session is stopped fails with a sentence that says why,
+which the model reads: the settings just applied switched the server off,
+changed it, or no longer name it; the person restarted or reconnected it;
+or Lys was shutting down. Closes run in
 the background, and the registry keeps each until it settles. Stopping also
 returns the session's release, which settles once its opening ended and every
 connection it led to closed, a command server's whole process group
@@ -1046,11 +1051,13 @@ not JSON; an HTTP error is logged only by its code and status, never its
 body. A stdio server's line is logged as the server wrote it; see
 [process logging](/operate/logging/#process-logging). The email account checks
 are logged by `handleEmailAccountCheckEvent`
-(`builtIn/email/emailAccountCheckLog.ts`): a report with both outcomes is
-information, a missing email server and a check the closing backend ended
-are warnings, and every other failure to report is an error with how the
-server ended and its own error lines; no entry holds the account or the
-password. See
+(`builtIn/email/emailAccountCheckLog.ts`): a report is information, with both
+outcomes and the server's own error lines; a missing email server, a check
+refused while another ran, and a check the closing backend ended or did not
+run are warnings; and every other failure to report is an error, with Node's
+error for a start that failed, which can name the command, and otherwise
+with the server's own error lines and, when it exited, its exit code or
+signal. No entry holds the account or the password. See
 [email account check entries](/operate/logging/#email-account-check-entries).
 
 ### The email server
@@ -1080,46 +1087,57 @@ be read, lists the server as `failed` with `account-missing` or
 `account-invalid`, and nothing is started; a missing executable fails the
 start as `start-failed`.
 
-The server reads the variable back under the same rules, because anyone on
-the machine can start the binary with a variable of their own, then serves
-MCP over stdio with ten tools: `search_emails`, `read_email`,
-`read_conversation`, `read_attachment`, `list_folders`, `manage_folder`,
-`send_email`, `save_draft`, `send_draft`, and `delete_draft`; the
-[API reference](/reference/api/#the-email-servers-tools) says what each
-does. Every call opens its own IMAP or SMTP connection and closes it before
-answering, so nothing stays open between calls, and stopping the process
-closes every connection. A connection is protected as the account says: TLS
-from the first byte, STARTTLS before any credential, or none, which the
-rules allow only to `localhost`, `127.0.0.1`, or `[::1]`; a certificate is
-verified by the operating system's store through
-`rustls-platform-verifier`. Connecting takes at most 15 seconds and each
-exchange 30, a send 120, and a whole call 240, within the five minutes the
-backend gives every MCP call, and a result is cut at 20,000 characters, as
-the backend cuts every MCP result. The server's standard error lines, which
-the backend keeps as `MCP server log line` entries, name an operation, a
-folder, counts, and the class of a failure, never the password, an address,
-a subject, or a body.
+The server reads the variable back under the same rules, because anyone on the
+machine can start the binary with a variable of their own, then serves MCP
+over stdio with ten tools: `search_emails`, `read_email`, `read_conversation`,
+`read_attachment`, `list_folders`, `manage_folder`, `send_email`,
+`save_draft`, `send_draft`, and `delete_draft`; the [API
+reference](/reference/api/#the-email-servers-tools) says what each does. Every
+call opens at most one IMAP and one SMTP connection of its own and closes them
+before answering. A reply, a forward, and `send_draft` keep their IMAP
+connection open while they send; any other send that files a copy in Sent
+opens IMAP only after the send. Nothing stays open between calls, and
+stopping the process closes every connection. A connection is protected as
+the account says: TLS from the first byte, STARTTLS before any credential,
+or none, which the rules allow only to `localhost`, `127.0.0.1`, or `[::1]`;
+a certificate is verified by the operating system's store through
+`rustls-platform-verifier`. A whole call takes at most 240 seconds, the one
+deadline, within the five minutes the backend gives every MCP call; inside it,
+the TCP connection and each TLS handshake but SMTP's after STARTTLS take at
+most 15 seconds each, each IMAP command and each SMTP step, such as the
+greeting with EHLO, STARTTLS with its handshake and second EHLO, the sign-in,
+MAIL, each recipient, DATA, or QUIT, at most 30, and a message's content with
+the SMTP server's answer at most 120. A longer successful result is cut so
+that, with its note, it holds at most 20,000 UTF-16 code units, the length the
+backend keeps of every MCP result, error or not. The server's standard error
+lines, which the backend keeps as `MCP server log line` entries, name an
+operation, counts, and the class of a failure, never the password, an
+address, a subject, or a body.
 
 ### Email account check
 
 `EmailAccountChecker` (`src/modules/mcp/builtIn/email/emailAccountCheck.ts`)
-answers `POST /api/v1/mcp/email/account-check`, which the desktop sends
-before it saves an account: it runs the email server's `check` subcommand in
-the person's home folder, with the candidate account and password in
-`LYS_EMAIL_ACCOUNT`, as the server itself is started, and the subcommand
-signs in to the IMAP and the SMTP server at the same time, within 20 seconds
-each, and prints one JSON line with both outcomes. The checker reads at most
-64 KiB of that output, keeps up to 32 of the server's error lines for the
-log, runs one check at a time in call order, and kills a check that has not
-ended after one minute. It answers `checked` with each server's outcome,
-`accepted` or `failed` with a reason, or `unavailable` with `server-missing`
-when the executable is not where the configuration names it, or
-`server-failed` when it could not be started, ended without a report, did
-not end in time, or the checker is closing. Nothing is saved: the desktop
-saves the account and its password only after both servers accepted the
-sign-in. The checker owns the run of the check running now, an
-`EmailServerCheckRun` that owns its process; the singleton bundle's cleanup
-closes the checker before the registry, which kills a running check.
+answers `POST /api/v1/mcp/email/account-check`, which the desktop sends before
+it saves an account: it runs the email server's `check` subcommand in the
+person's home folder, with the candidate account and password in
+`LYS_EMAIL_ACCOUNT`, as the server itself is started, and the subcommand signs
+in to the IMAP and the SMTP server at the same time, within 20 seconds each,
+and prints one JSON line with both outcomes; an SMTP sign-in whose closing
+QUIT fails or goes unanswered still counts as accepted, and the server writes
+an error line about it. The checker reads at most 65,536 characters of that
+output, keeps the first 32 of the server's error lines, which the log writes
+with the outcomes or with the failure, runs one check at a time without a
+queue, and kills a check that has not ended after one minute. It answers
+`checked` with each server's outcome, `accepted` or `failed` with a reason, or
+`unavailable` with `busy` at once, without running and without keeping the
+account or the password, when another check is running, `server-missing` when
+the executable is not where the configuration names it, or `server-failed`
+when it could not be started, ended without a report, did not end in time, or
+the checker is closing. Nothing is saved: the desktop saves the account and
+its password only after both servers accepted the sign-in. The checker owns
+the run of the check running now, an `EmailServerCheckRun` that owns its
+process; the singleton bundle's cleanup closes the checker before the
+registry, which kills a running check.
 
 ## Persistence
 
@@ -1309,9 +1327,10 @@ See the [health response contract](/reference/api/#model-health-responses).
 | An MCP tool call fails before the server returns a result (five minutes passed, the connection ended, an HTTP error, a refusal)      | The call is stored `failed` with the reason the model reads, and the backend logs it; the reply goes on.                                                                                                                                                           |
 | The `mcp` settings group fails its rules, or the settings file cannot be read, when it is applied                                    | The servers applied before are kept, the server list reports `invalid` or `unreadable`, and the backend logs a warning without any value.                                                                                                                          |
 | An MCP server is switched off in Settings → MCP                                                                                      | Its session is stopped and its tools are no longer listed; a call running on it fails with a sentence saying the server was stopped, and the list reports `off`. Reconnect answers `409` with `urn:lys:problem:mcp:server-off`.                                    |
-| The built-in email server is switched on while no usable account is saved                                                            | The server is `failed` with `account-missing` or `account-invalid`, nothing is started, and the backend logs a warning once per reason; saving an account applies the group again.                                                                                 |
+| The built-in email server is switched on while no usable account is saved                                                            | The server is `failed` with `account-missing` or `account-invalid`, nothing is started, and the backend logs a warning once per reason; Reconnect answers `409` with `urn:lys:problem:mcp:server-off`, and saving an account applies the group again.              |
 | An added MCP server has the built-in email server's name                                                                             | The added server is applied and listed; the built-in server is not, and the backend logs a warning until the added server is renamed or removed.                                                                                                                   |
 | The email server's executable is missing, or an account check does not report                                                        | The server fails as `start-failed`; a check answers `unavailable` with `server-missing` or `server-failed`, and the backend logs a warning for a missing server, or an error with the server's error lines; a check that has not ended after one minute is killed. |
+| An account check arrives while another runs                                                                                          | It is answered `unavailable` with `busy` at once, without running and without keeping the account or the password, and the backend logs a warning.                                                                                                                 |
 | Starting a turn fails for another reason                                                                                             | The route rethrows; Fastify logs it and responds `500` if no event was sent. Written rows stay.                                                                                                                                                                    |
 
 See the [provider cancellation policy](/architecture/providers/#cancellation-policy)

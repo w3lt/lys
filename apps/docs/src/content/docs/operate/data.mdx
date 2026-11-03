@@ -25,14 +25,14 @@ unless the `LYS_HOME` environment variable selects another directory.
 The desktop host owns a JSON settings file at `$LYS_HOME/settings.json`.
 
 - created automatically when the file is missing
-- stores the `runtime`, `model`, `generation`, `loadConfiguration`,
+- stores the `runtime`, `providers`, `generation`, `loadConfiguration`,
   `secrets`, `tools`, `location`, `mcp`, and `email` groups described in
   [Configuration](/operate/configuration/)
 - parsed as JSON on load and rewritten as pretty-printed JSON when the Tauri
   `save_settings` command is called
-- read, never written, by the backend for the Tavily API key, the Just run
-  list, the MCP servers with their switches, and the email account with its
-  password
+- read, never written, by the backend for the model provider, its address
+  and key, the Tavily API key, the Just run list, the MCP servers with their
+  switches, and the email account with its password
 - read, never created or written, by the host's `get_location` tool for the
   location the person saved
 

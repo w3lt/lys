@@ -72,10 +72,18 @@ The script sets `LYS_HOME` to `$HOME/.lys`:
 mkdir -p "$HOME/.lys"
 ```
 
-The email MCP server is not built by these commands. Build it once with
-`cargo build --manifest-path mcps/email/Cargo.toml` before switching it on in
-Settings → MCP, and again after changing it; in development, the backend
-starts `mcps/email/target/debug/email`.
+The email MCP server is not built by these commands. Build it once before
+saving an email account in Settings → MCP, since Save signs in through it,
+and again after changing it:
+
+```sh
+cargo build --manifest-path mcps/email/Cargo.toml --target-dir mcps/email/target
+```
+
+In development, the backend starts `mcps/email/target/debug/email`, where
+`--target-dir` puts the build even when `CARGO_TARGET_DIR` or Cargo's
+`build.target-dir` setting names another folder, unless a Cargo
+configuration sets `build.target`, which adds the target's name to the path.
 
 Desktop settings initialization creates the Lys home directory for the
 desktop-managed path. Choose one backend launch path: desktop auto-start is

@@ -666,17 +666,17 @@ edited and switched either way; their states need the backend. The
 rules a server follows, and the [API reference](/reference/api/#mcp-servers)
 the states and their reasons.
 
-A heading line, `servers`, says how many servers are listed, the built-in
-ones included, and, while the backend runs and its list is read, how many
-are connected, how many of their tools are on, and what those tools add to
-each request in tokens. Add server opens an empty editor for a local
-program; it is disabled while a save runs and once 16 servers are added,
-which a note then says. Without added servers, a note under the rows says
-what an added server is for and offers two cards, Local program (`stdio`)
-and Remote server (`http`), each opening the editor for that transport.
-While servers are saved, a warning above the list says when nothing from
-them is offered, because tool calls are off or the loaded model is not
-trained for tool calls, with Open Tools, which opens the Tools pane.
+A heading line, `servers`, says how many servers are listed, the built-in ones
+included, and, while the backend runs and its list is read, how many are
+connected, how many of their tools are on, and what those tools add to each
+request in tokens. Add server opens an empty editor for a local program; it is
+disabled while a save runs and once 16 servers are added, which a note then
+says. Without added servers, a note under the rows says what an added server
+is for and offers two cards, Local program (`stdio`) and Remote server
+(`http`), each opening the editor for that transport. While a server is
+switched on, a warning above the list says when nothing from the servers is
+offered, because tool calls are off or the loaded model is not trained for
+tool calls, with Open Tools, which opens the Tools pane.
 
 Each server is a row whose summary is a button that shows or hides its
 details; at most one row shows them. The summary shows a dot coloured by the
@@ -716,9 +716,10 @@ taken` while an added server has the built-in server's name; `Not applied`
   It is a polite status that names the server, so a change is announced
   once. Its button reads `Retry` after a failure, `Restart` or `Reconnect`
   while the server is connected or connecting, and `Start` or `Connect`
-  otherwise, and is absent while the server is off or its name is taken; it
-  is named by its text and the server and disabled while the backend is not
-  running.
+  otherwise, and is absent while the server is off or its name is taken, and
+  after the email server failed for its account (`account-missing` or
+  `account-invalid`), which the backend refuses to reconnect; it is named by
+  its text and the server and disabled while the backend is not running.
 - The tools, each a chip that switches the tool on or off: a toggle button
   named by the server's name for the tool, with its description as a tooltip.
   A switched-off tool is crossed out. The switch is the one the Tools pane
@@ -822,9 +823,12 @@ backend runs, the MCP server store asks the backend to apply the group with
 [`POST /api/v1/mcp/servers/sync`](/reference/api/#mcp-servers) and shows the
 list it answers, with new and changed servers connecting. The state line's
 button sends `POST /api/v1/mcp/servers/:serverName/reconnect`; when the backend answers
-that no applied server has the name, as for a saved server the backend has
-not applied yet, the store applies the saved group instead, unless the
-backend stopped since the reconnect started. A read of the
+that no applied server has the name (`404`), as for a saved server the
+backend has not applied yet, or that the server is off (`409` with
+`urn:lys:problem:mcp:server-off`), as for a server switched off since the
+list was read or the email server without a usable account, the store
+applies the saved group instead, unless the backend stopped since the
+reconnect started. A read of the
 states asked while a sync or reconnect runs, including the sync a reconnect
 falls back to, waits for it and shows the list it answers. The HTTP client,
 `src/lib/apis/http/mcp.ts`, validates every answer with the schemas of
@@ -859,70 +863,88 @@ and it reads the tool list once when it was never read.
 
 ### Email account
 
-The email server's details end with the Email account card, a form for the
-one account the server works with, saved in the `email` group of
-`settings.json` with its password in the `secrets` group; the
-[configuration reference](/reference/configuration/#email-account) gives the
-rules. The card holds Address, Display name, User name, and Password, then
-two groups, IMAP server and SMTP server, each with Host, Port, and Security,
-a choice of TLS, STARTTLS, or None, and a switch, "Server keeps a copy of
-sent mail". A note under the heading says that Lys signs in to IMAP and SMTP
-before saving and that Gmail, iCloud, and Yahoo need an app password; the
-switch's note says that Gmail, Outlook, and Yahoo file sent mail themselves
-and that off makes Lys file the copy in Sent. The password field starts
-empty; while a password is saved, bullets stand for it and a note says an
-empty field keeps it. The saved password is never put in the field, and the
-show button reveals only what is typed.
+The email server's details end with the Email account card, a form for the one
+account the server works with, saved in the `email` group of `settings.json`
+with its password in the `secrets` group; the [configuration
+reference](/reference/configuration/#email-account) gives the rules. The card
+holds Address, Display name, User name, and Password, then two groups, IMAP
+server and SMTP server, each with Host, Port, and Security, a choice of TLS,
+STARTTLS, or None, and a switch, "Server keeps a copy of sent mail". Address,
+User name, each Host and Port, and Password while none is saved say `required`
+beside their labels, and each Port states its range, `1–65535`, before entry.
+A note under the heading says that Lys signs in to IMAP and SMTP before saving
+and that Gmail, iCloud, and Yahoo need an app password; the switch's note says
+that Gmail and Yahoo file sent mail themselves and that off makes Lys file the
+copy in Sent. The password field starts empty; while a password is saved,
+bullets stand for it and a note says an empty field keeps it. The saved
+password is never put in the field, and the show button reveals only what is
+typed.
 
-Typing an address whose domain has a preset, Gmail, Outlook, iCloud, Yahoo,
-or Fastmail (`src/lib/models/email-presets.ts`), fills the server fields and
-the Sent-copy switch from it while they are empty or still hold the preset
-applied for the previous address; server values the person typed are never
+Typing an address whose domain has a preset, Gmail, iCloud, Yahoo, or
+Fastmail (`src/lib/models/email-presets.ts`), fills the server fields and
+the Sent-copy switch from it while every server field and the switch still
+hold what an empty card holds, or the preset applied for the previous
+address; a server value or a switch position the person chose is never
 overwritten, and a note under the address says `Preset: Gmail`,
 `Preset: Gmail · servers changed`, or that no preset exists for the address.
-The fields are read-only while a check, save, or removal runs, and Escape in
+Outlook.com, Hotmail, and Live addresses have no preset, because Microsoft
+refuses passwords over IMAP and SMTP. The fields and the Sent-copy switch
+are disabled while a check, save, or removal runs, and Escape in
 Address, Display name, User name, Password, or a host or port discards an
 edit.
 
 Save, or Enter in a field, reads the fields with the shared account and
 password rules, which `src/lib/models/email-account-draft.ts` places on the
 inputs: from then on each field shows its first problem as the person types,
-the port in the card's words and the rule about connections without TLS at
-the host; a problem moves focus to the first field that has one, and the
-status line says to fix the marked fields. A valid draft is first checked:
-the application store's email slice sends it to the backend's
-[account check](/reference/api/#email-account-check), which signs in to both
-servers through the email server Lys ships, and saves the account and the
-password, in one write of both groups serialized with the other group saves,
-only once both servers accepted; the store's account changes once the file
-holds it, because the backend reads the file. While the email server is
-switched on, a saved account then makes the MCP server store ask the backend
-to apply the group, so the server starts again with it. Save is disabled
-while the backend is not running, and the status line says to start it in
-Settings → Runtime.
+the port in the card's words and the rule about connections without TLS at the
+host. When one field has a problem, focus moves to it; when several have,
+focus moves to a summary above the fields, a heading `Fix N fields to save:`
+with a button for each field's label (`IMAP host`, `SMTP port`, …) and
+problem, in the card's order, that moves focus to it, as in the server editor.
+The status line says to fix the marked fields. A valid draft is first checked:
+the application store's email slice sends it to the backend's [account
+check](/reference/api/#email-account-check), which signs in to both servers
+through the email server Lys ships, and saves the account and the password, in
+one write of both groups serialized with the other group saves, only once both
+servers accepted; the store's account changes once the file holds it, because
+the backend reads the file. When the email server is switched on once the
+account is saved, read after the save, so also when it was switched on during
+the check, the MCP server store then asks the backend to apply the group, so
+the server starts again with it. Save is disabled while the backend is not
+running; while the fields differ from the saved account, valid or not, the
+status line then says to start it in Settings → Runtime.
 
 The status line, a polite live region that describes the fields, says first
-that Lys is signing in or saving; then that the marked fields need fixing;
-then that the fields are unsaved and that Save signs in to both servers
-first; then what the last try found, until the fields are edited again: each
-server's outcome, as `IMAP: accepted · SMTP: the user name or password was
-refused`, that the backend could not be asked, that the account could not be
-written, that Lys could not start its email server, which `build.sh`
-installs, or that the server failed while checking; and otherwise that no
-account is saved yet and the server stays off until one is, that the account
-was saved, or `Saved · <address>`.
+that Lys is signing in or saving; then, while the backend is not running and
+the fields differ from the saved account, to start it in Settings → Runtime;
+then that the marked fields need fixing; then, after an edit since the last
+tried save, while the fields hold a valid account other than the saved one,
+that the fields are unsaved and that Save signs in to both servers first;
+then what the last try found, until the fields are edited again, also when
+it ended while the card was not shown: that the account could not be written
+or removed, each server's outcome, as
+`IMAP: accepted · SMTP: the user name or password was refused`, that the
+backend could not be asked, that another check is still running, that Lys
+could not start its email server, which `build.sh` installs, or that the
+server failed while checking; then that the fields are unsaved; and
+otherwise that no account is saved yet and the server stays off until one
+is, that the account was saved, or `Saved · <address>`.
 
 Remove account shows while an account is saved and the fields are not
 edited. It asks "Remove the email account and its password? The email server
 is switched off.", with Keep, which takes focus, and Remove; Escape keeps the
 account. Removing first saves the email server's switch off, when it is on,
-and applies it, because the server cannot run without an account, then
-removes the account and the password in one write; when the switch cannot be
-saved, nothing is removed and the status line says the removal failed. After
+because the server cannot run without an account, and, while the backend
+runs, asks it to apply the group without waiting for its answer; then it
+removes the account and the password in one write; the card shows
+`Saving…` from the switch's save until the account is removed. When the
+switch cannot be saved, also while another save of the servers runs,
+nothing is removed and the status line says "Lys couldn't switch the email
+server off, so the account wasn't removed." After
 a removal, focus moves to the address field; after a confirmation that kept
 the account, or a failed removal, back to Remove account. Every action is
-disabled while a check, save, or removal runs, and the slice refuses a
-second save or removal meanwhile.
+disabled while a check, save, or removal runs, the removal's switch-off
+included, and the slice refuses a second save or removal meanwhile.
 
 ## Providers
 

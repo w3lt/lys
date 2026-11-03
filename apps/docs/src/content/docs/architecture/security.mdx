@@ -56,7 +56,7 @@ each call still asks first unless the person set the tool to Just run; see
 | Backend -> stdio MCP server      | The backend starts each configured command as the OS user running Lys, without a shell, in the person's home folder, and speaks MCP over its standard input and output; the process can do whatever that account can.                                                                                                                                                                   |
 | Backend -> remote MCP server     | Streamable HTTP to the configured URL, `https`, or `http` only for `localhost`, `127.0.0.1`, or `[::1]`, with the configured headers; redirects are not followed.                                                                                                                                                                                                                       |
 | Backend -> email server          | The backend starts the email server Lys ships, `$LYS_HOME/runtime/email/email` or the file `LYS_EMAIL_SERVER_PATH` names, as a stdio MCP server once it is switched on and an account is saved, and runs its `check` subcommand for each account check, as the OS user running Lys, with the account and its password in the `LYS_EMAIL_ACCOUNT` variable of the process's environment. |
-| Email server -> mail servers     | One IMAP or SMTP connection per tool call to the saved hosts and ports, with TLS or STARTTLS verified against the operating system's certificate store, or without TLS only to `localhost`, `127.0.0.1`, or `[::1]`; the mail servers receive the person's credentials and every message sent, and the model reads what the server returns.                                             |
+| Email server -> mail servers     | At most one IMAP and one SMTP connection per tool call to the saved hosts and ports, with TLS or STARTTLS verified against the operating system's certificate store, or without TLS only to `localhost`, `127.0.0.1`, or `[::1]`; the mail servers receive the person's credentials and every message sent, and the model reads what the server returns.                                |
 
 ## Current controls
 
@@ -89,8 +89,10 @@ each call still asks first unless the person set the tool to Just run; see
 | Untrusted MCP framing       | An MCP tool's result reaches the model between delimiters it cannot forge, after a notice never to follow it, cut at 20,000 characters; images, audio, and binary resources are named, not passed on.                                                                                                                                                                                                                                                                                     |
 | MCP settings stay out       | The server list the backend answers names each server, its transport, and its state, never a command, argument, variable, URL, or header. The host's `Debug` output shows a command's argument count and a URL without its query, never an argument, a variable's or a header's value; a validation error about a server never quotes a value.                                                                                                                                            |
 | Switched-off servers        | A server switched off in Settings → MCP is neither started nor reached, offers no tool, and cannot be reconnected until it is on; the servers Lys ships start off. Switching a server off stops it at once and fails a call running on it.                                                                                                                                                                                                                                                |
-| Email account handling      | The account and its password reach the email server only in the `LYS_EMAIL_ACCOUNT` variable of its own environment, and the backend's account check only in the JSON body of a loopback POST that needs a CORS preflight; the server list, the tool list, events, API answers, logs, and errors never carry them, and the server's own log lines name an operation, a folder, counts, and a failure class, never the password, an address, a subject, or a body.                         |
+| Email account handling      | The account and its password reach the email server only in the `LYS_EMAIL_ACCOUNT` variable of its own environment, and the backend's account check only in the JSON body of a loopback POST that needs a CORS preflight; the server list, the tool list, logs, and the MCP routes' answers never carry them, and the server's own log lines name an operation, counts, and a failure class, never the password, an address, a subject, or a body.                                       |
+| Tool errors                 | A tool's error never carries the password. It can quote the call's arguments and mail: a reply's refusal names the original's From and Reply-To, `send_draft`'s the draft's recipients and subject. Otherwise it names the account's address or user name only when a mail server's refusal of a step after the sign-in does, as a sender refusal may. An IMAP refusal is cut to 500 characters; the conversation keeps the error as the call's result, which its API returns.            |
 | Mail server TLS rule        | The shared account rules allow a connection without TLS only to `localhost`, `127.0.0.1`, or `[::1]`; the host and the backend check them before the account is saved or the server started, and the email server checks them again when it reads its variable, so a variable set by hand cannot make it send credentials to a remote host in the clear.                                                                                                                                  |
+| Recipients in the call      | Every recipient, the subject, and the body text of what `send_email`, `save_draft`, and `send_draft` send are arguments of the call, which the approval shows; a forward adds the original's text and attachments, and `send_draft` sends the stored draft with any HTML part and attachments. A reply or forward without a recipient or subject is refused rather than addressed from the original, and `send_draft` sends a draft only when its fields equal the call's.                |
 
 ## Candid limits
 
@@ -103,10 +105,11 @@ each call still asks first unless the person set the tool to Just run; see
   as the person's OS account can read them from the running process, as it
   can read `settings.json`.
 - The email server acts with the account's full rights: a call of
-  `send_email`, `send_draft`, `delete_draft`, or `manage_folder` the person
-  allows, or that runs on Just run, sends, deletes, or files mail as the
-  person, and sending is permanent. A message a tool reads can try to steer
-  the model, like any MCP result.
+  `send_email`, `save_draft`, `send_draft`, `delete_draft`, or
+  `manage_folder` the person allows, or that runs on Just run, sends,
+  deletes, or files mail as the person, and sending is permanent;
+  `save_draft` deletes the draft it replaces. A message a tool reads can try
+  to steer the model, like any MCP result.
 - A provider address may name another machine. Lys reaches it over plain
   HTTP without authentication, so the network between them can read and
   change the conversation. Lys does not warn when an address leaves the
@@ -189,7 +192,11 @@ each call still asks first unless the person set the tool to Just run; see
   rebinding, can list the MCP servers' names and states, make the backend
   start the configured commands again or reach the configured URLs through
   sync and reconnect, and answer an MCP call's approval prompt with
-  `allowed` ([#171](https://github.com/w3lt/lys/issues/171)).
+  `allowed` ([#171](https://github.com/w3lt/lys/issues/171)). Through the
+  [account check](/reference/api/#email-account-check) it can also make the
+  backend sign in to any IMAP and SMTP host and port it names, with any user
+  name and password, and learn whether each server accepted them, one check
+  at a time.
 - Attachment files are stored as sent, unencrypted, under
   `$LYS_HOME/attachments`, readable by the person's OS account and any process
   running as it. The folders and files are created with the process's default
@@ -438,10 +445,11 @@ rules and the [API reference](/reference/api/#mcp-servers) for the routes.
 - **Output schemas.** A tool's output schema is never compiled or checked, so
   a server cannot make the backend run a regular expression it chose; a
   result's structured content is read as untrusted JSON within Lys's limits.
-- **Local callers and web pages.** Sync and reconnect are `POST`s with a JSON
-  body, which a page on another site cannot send without a CORS preflight
-  that the backend refuses. A local process, or a page that uses DNS
-  rebinding, can call them; see [Candid limits](#candid-limits).
+- **Local callers and web pages.** Sync, reconnect, and the email account
+  check are `POST`s with a JSON body, which a page on another site cannot
+  send without a CORS preflight that the backend refuses. A local process, or
+  a page that uses DNS rebinding, can call them; see
+  [Candid limits](#candid-limits).
 - **The email server Lys ships.** Settings → MCP lists it first, marked
   built-in, off until the person saves an email account on its card and
   switches it on; see [email account](/architecture/desktop/#email-account).
@@ -453,7 +461,9 @@ rules and the [API reference](/reference/api/#mcp-servers) for the routes.
   [account check](/reference/api/#email-account-check), which sends the
   password over loopback in a JSON body, so an account the servers refuse is
   never saved. Its ten tools read, search, send, and file mail; sending and
-  deleting are permanent, and every tool starts on Ask me.
+  deleting are permanent, and every tool starts on Ask me, unless a Just run
+  choice saved for a tool of the same name of an earlier server named
+  `email` was kept; see Choices kept by name above.
 
 ## Practical implication
 

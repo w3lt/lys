@@ -126,8 +126,10 @@ crate of the email MCP server Lys ships.
   (IMAP and SMTP), `mail-parser`, and `tokio` with `tokio-rustls` and
   `rustls-platform-verifier`, which verifies certificates against the
   operating system's store
-- Built with `cargo build --manifest-path mcps/email/Cargo.toml`; `build.sh`
-  builds it in release and installs it as `$LYS_HOME/runtime/email/email`.
+- Built for development with
+  `cargo build --manifest-path mcps/email/Cargo.toml --target-dir mcps/email/target`;
+  `build.sh` builds it in release and installs it as
+  `$LYS_HOME/runtime/email/email`.
   Its checks are the Cargo commands in
   [Testing and validation](/develop/testing/)
 

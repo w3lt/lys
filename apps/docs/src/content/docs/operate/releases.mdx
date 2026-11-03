@@ -52,10 +52,14 @@ The script stops at the first failing step. In order, it:
    Swift toolchain is missing. Nothing is installed yet, so a machine that
    cannot build vmo keeps its current install.
 3. Builds the email MCP server Lys ships in release with
-   `cargo build --release --locked --manifest-path mcps/email/Cargo.toml`,
+   `cargo build --release --locked --manifest-path mcps/email/Cargo.toml --message-format=json-render-diagnostics`,
    which uses the versions `mcps/email/Cargo.lock` records and stops when the
    lock file no longer matches the manifest. It stops first when `cargo` is
-   missing, again before anything is installed.
+   missing, again before anything is installed. The last option makes Cargo
+   write its messages as JSON, from which `jq` reads the path of the `email`
+   executable, wherever `CARGO_TARGET_DIR`, a Cargo configuration, or a build
+   target put it; a build that fails or names no executable stops the script
+   there.
 4. Runs `pnpm run backend:build`, which bundles the backend into
    `apps/backend/dist/backend.mjs` and copies its prompt files beside it.
 5. Creates `$LYS_HOME/runtime`, using `${LYS_HOME:-$HOME/.lys}`.
@@ -68,8 +72,9 @@ The script stops at the first failing step. In order, it:
 8. Replaces `$LYS_HOME/runtime/vmo` with a directory holding only the new
    `vmo` executable, and signs it ad hoc with the virtualization entitlement
    in `apps/vmo/vmo.entitlements`.
-9. Installs the new `email` executable at `$LYS_HOME/runtime/email/email`,
-   replacing the previously installed email MCP server.
+9. Installs the `email` executable step 3 built at
+   `$LYS_HOME/runtime/email/email`, replacing the previously installed email
+   MCP server.
 10. Runs `pnpm run desktop:build:ci` and `pnpm run desktop:bundle:ci`, which
     build the Tauri app without bundling and then bundle only `Lys.app`.
 11. Removes any previously installed `/Applications/Lys.app`, then copies the

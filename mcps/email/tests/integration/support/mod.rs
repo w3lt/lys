@@ -2,8 +2,6 @@
 //! authority, an IMAP server, an SMTP server, and accounts pointing at
 //! them.
 
-#![allow(dead_code)]
-
 pub mod imap;
 pub mod smtp;
 pub mod tls;

@@ -1,8 +1,6 @@
 //! `send_email` against the fake SMTP and IMAP servers: plain sends,
 //! replies, forwards, the Sent copy, and refusals.
 
-mod support;
-
 use email::failure::{Protocol, SignInFailure, ToolFailure};
 use email::message::parse_message;
 use email::smtp::SendProgress;
@@ -10,8 +8,8 @@ use email::tools::ToolContext;
 use email::tools::send::{MessageArguments, run_send_email};
 use email::trust::Trust;
 
-use support::imap::{FakeMailbox, ImapFault, NewMessage};
-use support::{ADDRESS, Stack, TestMessage, calculate_trimmed_bytes, start_stack};
+use crate::support::imap::{FakeMailbox, ImapFault, NewMessage};
+use crate::support::{ADDRESS, Stack, TestMessage, calculate_trimmed_bytes, start_stack};
 
 /// The time the original message was sent.
 const BASE: i64 = 1_793_611_800;
@@ -364,16 +362,16 @@ async fn reports_a_refused_recipient_and_a_refused_sign_in_without_a_sent_copy()
     stack.smtp.add_refused_recipient("nobody@example.com");
     let wrong_password = ToolContext::new(
         email::account::parse_account_variable(
-            &support::build_account_json(
-                support::TestServers {
+            &crate::support::build_account_json(
+                crate::support::TestServers {
                     imap_port: stack.imap.port,
-                    imap_security: support::SecurityName::Tls,
+                    imap_security: crate::support::SecurityName::Tls,
                     smtp_port: stack.smtp.port,
-                    smtp_security: support::SecurityName::Tls,
+                    smtp_security: crate::support::SecurityName::Tls,
                 },
                 false,
             )
-            .replace(support::PASSWORD, "another-synthetic-value"),
+            .replace(crate::support::PASSWORD, "another-synthetic-value"),
         )
         .expect("account"),
         Trust::create_with_extra_roots(vec![stack.authority.root.clone()]),

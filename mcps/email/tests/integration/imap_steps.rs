@@ -2,8 +2,6 @@
 //! the sign-in: each step ends within its own time limit, measured on the
 //! paused clock, as a sign-in that took too long.
 
-mod support;
-
 use std::time::Duration;
 
 use email::failure::{Protocol, SignInFailure, ToolFailure};
@@ -11,9 +9,9 @@ use email::tools::ToolContext;
 use email::tools::folders::run_list_folders;
 use email::trust::Trust;
 
-use support::imap::{FakeImapServer, FakeMailbox, ImapFault, ImapMode};
-use support::tls::TestAuthority;
-use support::{SecurityName, TestServers, assert_about, build_account, start_stack};
+use crate::support::imap::{FakeImapServer, FakeMailbox, ImapFault, ImapMode};
+use crate::support::tls::TestAuthority;
+use crate::support::{SecurityName, TestServers, assert_about, build_account, start_stack};
 
 /// Builds the tools' context for an account whose IMAP server is the fake,
 /// reached as the security says; its SMTP server is never reached.

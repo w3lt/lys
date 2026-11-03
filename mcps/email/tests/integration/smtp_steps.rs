@@ -3,8 +3,6 @@
 //! was when the call is stopped, and each step ends within its own time
 //! limit, measured on the paused clock.
 
-mod support;
-
 use std::time::Duration;
 
 use email::failure::{ConnectionFailure, Protocol, SignInFailure, SmtpExtension, ToolFailure};
@@ -13,10 +11,10 @@ use email::tools::send::{MessageArguments, run_send_email};
 use email::tools::{ToolContext, ToolReport};
 use email::trust::Trust;
 
-use support::imap::{FakeImapServer, FakeMailbox, ImapMode};
-use support::smtp::{DATA_END, FakeSmtpServer, SmtpFault, SmtpMode};
-use support::tls::TestAuthority;
-use support::{SecurityName, Stack, TestServers, assert_about, build_account, start_stack};
+use crate::support::imap::{FakeImapServer, FakeMailbox, ImapMode};
+use crate::support::smtp::{DATA_END, FakeSmtpServer, SmtpFault, SmtpMode};
+use crate::support::tls::TestAuthority;
+use crate::support::{SecurityName, Stack, TestServers, assert_about, build_account, start_stack};
 
 /// A message to Jane.
 fn build_message() -> MessageArguments {

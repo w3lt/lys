@@ -1,7 +1,5 @@
 //! `save_draft`, `send_draft`, and `delete_draft` against the fakes.
 
-mod support;
-
 use std::time::Duration;
 
 use email::failure::ToolFailure;
@@ -12,8 +10,8 @@ use email::tools::drafts::{
     run_send_draft,
 };
 
-use support::imap::{FakeFolder, FakeMailbox, ImapFault, NewMessage};
-use support::{Stack, assert_about, calculate_trimmed_bytes, start_stack};
+use crate::support::imap::{FakeFolder, FakeMailbox, ImapFault, NewMessage};
+use crate::support::{Stack, assert_about, calculate_trimmed_bytes, start_stack};
 
 /// The reason a step reports when the IMAP server ended its connection.
 const LOST: &str = "The connection to the IMAP server ended before it answered.";

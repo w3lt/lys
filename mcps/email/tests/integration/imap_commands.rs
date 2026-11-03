@@ -2,8 +2,6 @@
 //! the tagged status of each command and fails with the server's code and
 //! text instead of reading a refusal as an empty answer.
 
-mod support;
-
 use email::failure::ToolFailure;
 use email::tools::drafts::{
     DraftIdArguments, SaveDraftArguments, run_delete_draft, run_save_draft,
@@ -12,8 +10,8 @@ use email::tools::folders::{FolderAction, FolderArguments, run_list_folders, run
 use email::tools::read::{IdArguments, run_read_email};
 use email::tools::search::{SearchArguments, run_search_emails};
 
-use support::imap::FakeMailbox;
-use support::{TestMessage, start_stack};
+use crate::support::imap::FakeMailbox;
+use crate::support::{TestMessage, start_stack};
 
 /// A mailbox with one message from Jane in INBOX, `1.1001.INBOX`, and one
 /// draft in Drafts, `1.1003.Drafts`.

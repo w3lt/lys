@@ -1,16 +1,14 @@
 //! `search_emails`, `read_email`, `read_conversation`, and
 //! `read_attachment` against the fake IMAP server.
 
-mod support;
-
 use email::failure::ToolFailure;
 use email::tools::read::{
     AttachmentArguments, IdArguments, run_read_attachment, run_read_conversation, run_read_email,
 };
 use email::tools::search::{SearchArguments, run_search_emails};
 
-use support::imap::{FakeMailbox, NewMessage};
-use support::{Stack, TestMessage, start_stack};
+use crate::support::imap::{FakeMailbox, NewMessage};
+use crate::support::{Stack, TestMessage, start_stack};
 
 /// The time the first message was sent.
 const BASE: i64 = 1_793_611_800;

@@ -2,8 +2,6 @@
 //! the MCP handshake, the tool list, a call, a cut result, a failed
 //! call, a cancelled send, and the exit on the end of input.
 
-mod support;
-
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -11,9 +9,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use support::imap::{FakeImapServer, FakeMailbox, ImapMode, NewMessage};
-use support::smtp::{DATA_END, FakeSmtpServer, SmtpFault, SmtpMode};
-use support::{SecurityName, TestMessage, TestServers, build_account_json};
+use crate::support::imap::{FakeImapServer, FakeMailbox, ImapMode, NewMessage};
+use crate::support::smtp::{DATA_END, FakeSmtpServer, SmtpFault, SmtpMode};
+use crate::support::{SecurityName, TestMessage, TestServers, build_account_json};
 
 /// The note a cut result ends with.
 const CUT_NOTE: &str = "\n\n[The result was cut at 20,000 characters.]";
@@ -373,7 +371,8 @@ async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
         dialogue.stderr
     );
     assert!(
-        !dialogue.stderr.contains(support::PASSWORD) && !dialogue.stderr.contains("example.com"),
+        !dialogue.stderr.contains(crate::support::PASSWORD)
+            && !dialogue.stderr.contains("example.com"),
         "{}",
         dialogue.stderr
     );

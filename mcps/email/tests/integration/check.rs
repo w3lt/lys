@@ -1,8 +1,6 @@
 //! The account check against the fakes: both sign-ins, each way they
 //! fail, and the process contract of the `check` subcommand.
 
-mod support;
-
 use std::time::Duration;
 
 use email::account::Account;
@@ -10,10 +8,10 @@ use email::check::{CheckOutcome, offer_account_sign_ins};
 use email::failure::SignInFailure;
 use email::trust::Trust;
 
-use support::imap::{FakeImapServer, FakeMailbox, ImapMode};
-use support::smtp::{FakeSmtpServer, SmtpFault, SmtpMode};
-use support::tls::TestAuthority;
-use support::{
+use crate::support::imap::{FakeImapServer, FakeMailbox, ImapMode};
+use crate::support::smtp::{FakeSmtpServer, SmtpFault, SmtpMode};
+use crate::support::tls::TestAuthority;
+use crate::support::{
     SecurityName, TestServers, assert_about, build_account, build_account_json,
     build_account_json_for,
 };
@@ -159,7 +157,7 @@ async fn reports_a_wrong_password_on_each_server() {
         },
         false,
     )
-    .replace(support::PASSWORD, "another-synthetic-value");
+    .replace(crate::support::PASSWORD, "another-synthetic-value");
     let account = email::account::parse_account_variable(&json).expect("account");
 
     let report = offer_account_sign_ins(
@@ -416,7 +414,7 @@ async fn the_check_subcommand_prints_one_json_line_and_exits_0() {
         "{\"imap\":{\"status\":\"accepted\"},\"smtp\":{\"status\":\"accepted\"}}\n"
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stderr.contains(support::PASSWORD), "{stderr}");
+    assert!(!stderr.contains(crate::support::PASSWORD), "{stderr}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -448,7 +446,7 @@ async fn refuses_to_start_without_a_usable_account_and_names_the_rule_only() {
     let stderr = String::from_utf8_lossy(&plain_remote.stderr);
     assert!(stderr.starts_with("LYS_EMAIL_ACCOUNT: "), "{stderr}");
     assert!(
-        !stderr.contains("mail.example.com") && !stderr.contains(support::PASSWORD),
+        !stderr.contains("mail.example.com") && !stderr.contains(crate::support::PASSWORD),
         "{stderr}"
     );
     assert!(plain_remote.stdout.is_empty());

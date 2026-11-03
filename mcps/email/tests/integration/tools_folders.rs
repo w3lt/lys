@@ -1,13 +1,11 @@
 //! `list_folders` and `manage_folder` against the fake IMAP server.
 
-mod support;
-
 use email::failure::ToolFailure;
 use email::folders::FolderRole;
 use email::tools::folders::{FolderAction, FolderArguments, run_list_folders, run_manage_folder};
 
-use support::imap::FakeMailbox;
-use support::{TestMessage, start_stack};
+use crate::support::imap::FakeMailbox;
+use crate::support::{TestMessage, start_stack};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn lists_folders_with_roles_and_counts() {

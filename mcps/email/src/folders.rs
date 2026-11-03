@@ -168,18 +168,13 @@ pub fn build_folders(listings: &[FolderListing]) -> Vec<Folder> {
 /// * `folders` - The classified folders.
 /// * `name` - The name asked for.
 pub fn find_folder<'a>(folders: &'a [Folder], name: &str) -> Option<&'a Folder> {
+    let exact = folders.iter().find(|folder| folder.name == name);
+    if exact.is_some() || !name.eq_ignore_ascii_case("INBOX") {
+        return exact;
+    }
     folders
         .iter()
-        .find(|folder| folder.name == name)
-        .or_else(|| {
-            name.eq_ignore_ascii_case("INBOX")
-                .then(|| {
-                    folders
-                        .iter()
-                        .find(|folder| folder.name.eq_ignore_ascii_case("INBOX"))
-                })
-                .flatten()
-        })
+        .find(|folder| folder.name.eq_ignore_ascii_case("INBOX"))
 }
 
 /// Calculates whether other listed folders are inside a folder: their

@@ -440,14 +440,15 @@ fn parse_day(text: &str) -> Option<(u16, u8, u8)> {
     let year = number(0..4)?;
     let month = u8::try_from(number(5..7)?).ok()?;
     let day = u8::try_from(number(8..10)?).ok()?;
-    if year < 1000
-        || !(1..=12).contains(&month)
-        || day == 0
-        || day > calculate_days_in_month(year, month)
-    {
+    if year < 1000 || !is_day_of_month(year, month, day) {
         return None;
     }
     Some((year, month, day))
+}
+
+/// Whether the month exists and has the day.
+fn is_day_of_month(year: u16, month: u8, day: u8) -> bool {
+    (1..=12).contains(&month) && (1..=calculate_days_in_month(year, month)).contains(&day)
 }
 
 /// Counts the days of a month.

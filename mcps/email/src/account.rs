@@ -250,22 +250,17 @@ pub fn parse_account_variable(text: &str) -> Result<Account, AccountProblem> {
             "address is a local part of 1 to 64 visible ASCII characters, @, and a host name, 254 characters at most",
         ));
     }
-    if !is_account_text(&stored.display_name, MAXIMUM_DISPLAY_NAME_LENGTH)
-        || !stored.display_name.is_empty() && has_edge_white_space(&stored.display_name)
-    {
+    if !is_display_name(&stored.display_name) {
         return Err(AccountProblem::Rule(
             "displayName has at most 100 characters, no control character, and no white space at its ends",
         ));
     }
-    if stored.user_name.is_empty()
-        || !is_account_text(&stored.user_name, MAXIMUM_USER_NAME_LENGTH)
-        || has_edge_white_space(&stored.user_name)
-    {
+    if !is_user_name(&stored.user_name) {
         return Err(AccountProblem::Rule(
             "userName has 1 to 254 characters, no control character, and no white space at its ends",
         ));
     }
-    if stored.password.is_empty() || !is_account_text(&stored.password, MAXIMUM_PASSWORD_LENGTH) {
+    if !is_password(&stored.password) {
         return Err(AccountProblem::Rule(
             "password has 1 to 1024 characters and no control character",
         ));
@@ -350,6 +345,27 @@ fn is_address(value: &str) -> bool {
             .bytes()
             .all(|byte| (b'!'..=b'~').contains(&byte) && byte != b'@')
         && is_host_name(host)
+}
+
+/// Whether the text is a display name: at most
+/// [`MAXIMUM_DISPLAY_NAME_LENGTH`] characters, no control character, and no
+/// white space at its ends. It may be empty.
+fn is_display_name(value: &str) -> bool {
+    is_account_text(value, MAXIMUM_DISPLAY_NAME_LENGTH) && !has_edge_white_space(value)
+}
+
+/// Whether the text is a user name: 1 to [`MAXIMUM_USER_NAME_LENGTH`]
+/// characters, no control character, and no white space at its ends.
+fn is_user_name(value: &str) -> bool {
+    !value.is_empty()
+        && is_account_text(value, MAXIMUM_USER_NAME_LENGTH)
+        && !has_edge_white_space(value)
+}
+
+/// Whether the text is a password: 1 to [`MAXIMUM_PASSWORD_LENGTH`]
+/// characters and no control character.
+fn is_password(value: &str) -> bool {
+    !value.is_empty() && is_account_text(value, MAXIMUM_PASSWORD_LENGTH)
 }
 
 /// Whether the text has at most `maximum_length` code points and no

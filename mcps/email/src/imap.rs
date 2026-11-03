@@ -118,6 +118,14 @@ pub enum SearchWord {
     Text(String),
 }
 
+impl SearchWord {
+    /// Whether the word is a text that is not ASCII, which needs the
+    /// search to name its character set.
+    fn is_text_beyond_ascii(&self) -> bool {
+        matches!(self, Self::Text(text) if !text.is_ascii())
+    }
+}
+
 /// A part of a command; a space separates each from the next.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum CommandPart<'a> {
@@ -1151,9 +1159,7 @@ fn format_uid_set(uids: &[u32]) -> String {
 ///
 /// * `words` - The search keys, each followed by its arguments.
 fn build_search_parts(words: &[SearchWord]) -> Vec<CommandPart<'_>> {
-    let needs_charset = words
-        .iter()
-        .any(|word| matches!(word, SearchWord::Text(text) if !text.is_ascii()));
+    let needs_charset = words.iter().any(SearchWord::is_text_beyond_ascii);
     let command = if needs_charset {
         "UID SEARCH CHARSET UTF-8"
     } else {

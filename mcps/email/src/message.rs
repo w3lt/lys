@@ -9,7 +9,9 @@
 use std::borrow::Cow;
 
 use mail_parser::decoders::html::html_to_text;
-use mail_parser::{Address, AddressList, Message, MessageParser, MessagePart, PartKind, TextList};
+use mail_parser::{
+    Address, AddressList, ContentType, Message, MessageParser, MessagePart, PartKind, TextList,
+};
 
 /// Content types read as text besides `text/*`.
 const TEXT_LIKE_TYPES: [&str; 5] = [
@@ -129,16 +131,7 @@ pub(crate) fn build_message_view(message: &Message<'_>) -> MessageView {
     let headers = read_headers(message);
     let (text, text_from_html) = message
         .text_body()
-        .find_map(|part| match part.kind() {
-            PartKind::Text => Some((part.text().map(Cow::into_owned).unwrap_or_default(), false)),
-            PartKind::Html => Some((
-                part.text()
-                    .map(|html| html_to_text(&html))
-                    .unwrap_or_default(),
-                true,
-            )),
-            _ => None,
-        })
+        .find_map(read_body_text)
         .unwrap_or_default();
     let attachments = message
         .attachments()
@@ -151,6 +144,29 @@ pub(crate) fn build_message_view(message: &Message<'_>) -> MessageView {
         text,
         text_from_html,
         attachments,
+    }
+}
+
+/// Reads the text of a body part, with whether it was converted from HTML.
+///
+/// # Arguments
+///
+/// * `part` - A part of the message's text body.
+///
+/// # Returns
+///
+/// The text and whether it came from HTML, or `None` when the part is
+/// neither plain text nor HTML.
+fn read_body_text(part: MessagePart<'_>) -> Option<(String, bool)> {
+    match part.kind() {
+        PartKind::Text => Some((part.text().map(Cow::into_owned).unwrap_or_default(), false)),
+        PartKind::Html => Some((
+            part.text()
+                .map(|html| html_to_text(&html))
+                .unwrap_or_default(),
+            true,
+        )),
+        _ => None,
     }
 }
 
@@ -258,15 +274,21 @@ fn format_mailbox(name: Option<&str>, address: Option<&str>) -> String {
     }
 }
 
+/// Formats a part's content type as `type/subtype` in lowercase, or as the
+/// type alone when it has no subtype.
+fn format_content_type(content_type: ContentType<'_>) -> String {
+    match content_type.subtype() {
+        Some(subtype) => format!("{}/{}", content_type.ctype(), subtype).to_ascii_lowercase(),
+        None => content_type.ctype().to_ascii_lowercase(),
+    }
+}
+
 /// Builds an attachment from its part.
 fn build_attachment(index: usize, part: &MessagePart<'_>) -> Attachment {
     let number = u32::try_from(index + 1).unwrap_or(u32::MAX);
     let content_type = part
         .content_type()
-        .map(|content_type| match content_type.subtype() {
-            Some(subtype) => format!("{}/{}", content_type.ctype(), subtype).to_ascii_lowercase(),
-            None => content_type.ctype().to_ascii_lowercase(),
-        })
+        .map(format_content_type)
         .unwrap_or_else(|| "application/octet-stream".to_owned());
     let name = part
         .attachment_name()

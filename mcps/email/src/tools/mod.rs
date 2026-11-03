@@ -162,7 +162,18 @@ fn calculate_utf16_cut(text: &str, limit: usize) -> usize {
 pub fn build_imap_failure_conversion(
     operation: &'static str,
 ) -> impl Fn(ImapFailure) -> ToolFailure {
-    move |failure| match failure {
+    move |failure| build_imap_tool_failure(operation, failure)
+}
+
+/// Builds the tool failure of an IMAP command: the server's refusal of the
+/// operation, or the connection's failure.
+///
+/// # Arguments
+///
+/// * `operation` - What the command was to do, as a verb phrase.
+/// * `failure` - How the command failed.
+fn build_imap_tool_failure(operation: &'static str, failure: ImapFailure) -> ToolFailure {
+    match failure {
         ImapFailure::Refused(text) => ToolFailure::ImapRefused { operation, text },
         ImapFailure::Connection(failure) => ToolFailure::Connection {
             protocol: Protocol::Imap,

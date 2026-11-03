@@ -34,17 +34,19 @@ function getLoggedFields(
 }
 
 describe("handleEmailAccountCheckEvent", () => {
-  it("logs a report with both sign-ins' outcomes", () => {
+  it("logs a report with both sign-ins' outcomes and the server's error lines", () => {
     expect(
       getLoggedFields({
         kind: "checked",
         imap: { status: "failed", reason: "wrong-password" },
-        smtp: { status: "accepted" }
+        smtp: { status: "accepted" },
+        errorLines: ["smtp: quit failed"]
       })
     ).toEqual({
       level: "info",
       imap: { status: "failed", reason: "wrong-password" },
       smtp: { status: "accepted" },
+      errorLines: ["smtp: quit failed"],
       msg: "Email account check ran"
     })
   })

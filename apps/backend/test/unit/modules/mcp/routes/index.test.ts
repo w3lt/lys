@@ -754,7 +754,8 @@ describe("registerMcpRoutes", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         {
           kind: "checked",
           imap: { status: "failed", reason: "wrong-password" },
-          smtp: { status: "accepted" }
+          smtp: { status: "accepted" },
+          errorLines: []
         }
       ])
     })
@@ -883,7 +884,8 @@ describe("registerMcpRoutes", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         {
           kind: "checked",
           imap: { status: "accepted" },
-          smtp: { status: "accepted" }
+          smtp: { status: "accepted" },
+          errorLines: []
         }
       ])
     })

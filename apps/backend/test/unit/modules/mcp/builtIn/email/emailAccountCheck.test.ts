@@ -130,7 +130,31 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       {
         kind: "checked",
         imap: { status: "accepted" },
-        smtp: { status: "accepted" }
+        smtp: { status: "accepted" },
+        errorLines: []
+      }
+    ])
+  })
+
+  it("reports what the server wrote to standard error with the outcomes of a check that reported", async () => {
+    const { checker, events } = createChecker()
+
+    const answer = await checker.sendCheck(
+      buildEmailAccount("quit-failed@example.com"),
+      SYNTHETIC_EMAIL_PASSWORD
+    )
+
+    expect(answer).toEqual({
+      status: "checked",
+      imap: { status: "accepted" },
+      smtp: { status: "accepted" }
+    })
+    expect(events).toEqual([
+      {
+        kind: "checked",
+        imap: { status: "accepted" },
+        smtp: { status: "accepted" },
+        errorLines: ["smtp: quit did not finish within the check's limit"]
       }
     ])
   })

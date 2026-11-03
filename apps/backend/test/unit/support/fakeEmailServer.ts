@@ -8,8 +8,10 @@
 // process identifier. What the check does depends on the local part of
 // the account's address, read from `LYS_EMAIL_ACCOUNT`: `accepted`
 // reports both sign-ins accepted; `imap-<reason>` and `smtp-<reason>`
-// report that sign-in failed for the reason and the other accepted; `hang`
-// writes one line to standard error and never ends; `crash` writes two
+// report that sign-in failed for the reason and the other accepted;
+// `quit-failed` writes the real server's line about a closing QUIT that
+// did not finish to standard error and reports both sign-ins accepted;
+// `hang` writes one line to standard error and never ends; `crash` writes two
 // lines to standard error and exits with code 1; `garbage` prints a line
 // that is not a report; `flood` prints far more than a report; `lock`
 // holds `lock` in its folder while it waits, as a check that must run
@@ -105,6 +107,12 @@ async function handleCheckCommand(address: string): Promise<void> {
       buildFailedSignIn(localPart.slice("smtp-".length))
     )
   switch (localPart) {
+    case "quit-failed":
+      process.stderr.write(
+        "smtp: quit did not finish within the check's limit\n"
+      )
+      sendCheckReport(accepted, accepted)
+      break
     case "hang":
       process.stderr.write("connecting to the IMAP server\n")
       setInterval(() => undefined, 1000)

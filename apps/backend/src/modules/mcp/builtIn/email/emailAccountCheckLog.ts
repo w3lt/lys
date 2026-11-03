@@ -12,7 +12,8 @@ const CHECK_FAILED_MESSAGE = "The email server's account check failed"
  *
  * @param logger - Backend logger, borrowed for the call.
  * @param event - Event the checker reported.
- * @remarks A report is information with both sign-ins' outcomes; a missing
+ * @remarks A report is information with both sign-ins' outcomes and the
+ * server's own error lines, which name a closing step that failed; a missing
  * email server is a warning; a check refused while another ran is a
  * warning; a check the closing checker ended is a warning; every other
  * failure to report is an error with how the server ended and its own
@@ -26,7 +27,7 @@ export function handleEmailAccountCheckEvent(
   switch (event.kind) {
     case "checked":
       logger.info(
-        { imap: event.imap, smtp: event.smtp },
+        { imap: event.imap, smtp: event.smtp, errorLines: event.errorLines },
         "Email account check ran"
       )
       return

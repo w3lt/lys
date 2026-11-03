@@ -83,8 +83,8 @@ export type EmailServerRunFailure =
  * for the log.
  *
  * @remarks No event carries the account or the password. The error lines
- * a failure carries are the email server's own, which it writes without
- * the password, an address, a subject, or a body.
+ * a report or a failure carries are the email server's own, which it
+ * writes without the password, an address, a subject, or a body.
  */
 export type EmailAccountCheckEvent =
   | Readonly<{
@@ -94,6 +94,12 @@ export type EmailAccountCheckEvent =
       imap: EmailServerCheck
       /** Outcome of the SMTP sign-in. */
       smtp: EmailServerCheck
+      /**
+       * What it wrote to standard error, cut to a bound, such as a closing
+       * QUIT that failed after an accepted sign-in; empty when it wrote
+       * nothing.
+       */
+      errorLines: readonly string[]
     }>
   | Readonly<{
       /** The email server's executable is not where the configuration names it. */
@@ -356,7 +362,8 @@ export default class EmailAccountChecker {
     this.#dependencies.reportEvent({
       kind: "checked",
       imap: report.imap,
-      smtp: report.smtp
+      smtp: report.smtp,
+      errorLines: run.errorLines
     })
     return Object.freeze({
       status: "checked",

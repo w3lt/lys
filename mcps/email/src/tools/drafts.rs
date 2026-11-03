@@ -947,6 +947,7 @@ mod tests {
             raw_name: "Drafts".to_owned(),
             role: Some(FolderRole::Drafts),
             selectable: true,
+            delimiter: Some("/".to_owned()),
         };
         let inside = EmailId {
             uid: 1,

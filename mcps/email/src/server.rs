@@ -149,7 +149,7 @@ impl EmailServer {
 
     #[tool(
         name = "manage_folder",
-        description = "Creates, renames, or deletes a folder. A folder with a role (Inbox, Sent, Drafts, Trash, Junk, Archive, All) cannot be renamed or deleted, and a folder holding messages cannot be deleted.",
+        description = "Creates, renames, or deletes a folder. A folder with a role (Inbox, Sent, Drafts, Trash, Junk, Archive, All) cannot be renamed or deleted, and a folder holding messages or other folders cannot be deleted.",
         annotations(
             read_only_hint = false,
             destructive_hint = true,

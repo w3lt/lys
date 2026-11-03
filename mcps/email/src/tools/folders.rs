@@ -10,7 +10,7 @@ use super::{
 };
 use crate::failure::ToolFailure;
 use crate::folder_name::build_encoded_folder_name;
-use crate::folders::{Folder, find_folder};
+use crate::folders::{Folder, find_folder, has_subfolders};
 use crate::imap::ImapSession;
 
 /// What `manage_folder` does.
@@ -21,7 +21,7 @@ pub enum FolderAction {
     Create,
     /// Renames a folder.
     Rename,
-    /// Deletes an empty folder.
+    /// Deletes a folder that holds no message and no other folder.
     Delete,
 }
 
@@ -155,7 +155,9 @@ async fn update_folder_name(
     })
 }
 
-/// Deletes a folder without a role that holds no message.
+/// Deletes a folder without a role that holds no message and no other
+/// folder: some servers delete the folders inside a folder with it, and
+/// others keep them, so a folder with subfolders is refused either way.
 ///
 /// # Arguments
 ///
@@ -168,6 +170,9 @@ async fn delete_empty_folder(
     name: &str,
 ) -> Result<ToolReport, ToolFailure> {
     let folder = get_changeable_folder(folders, name)?;
+    if has_subfolders(folders, folder) {
+        return Err(ToolFailure::FolderHasSubfolders(folder.name.clone()));
+    }
     if folder.selectable {
         let count = session
             .get_message_count(&folder.raw_name)

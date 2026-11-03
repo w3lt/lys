@@ -2,10 +2,26 @@
 
 use email::failure::ToolFailure;
 use email::folders::FolderRole;
+use email::tools::ToolResult;
 use email::tools::folders::{FolderAction, FolderArguments, run_list_folders, run_manage_folder};
 
-use crate::support::imap::FakeMailbox;
-use crate::support::{TestMessage, start_stack};
+use crate::support::imap::{FakeFolder, FakeMailbox};
+use crate::support::{Stack, TestMessage, start_stack};
+
+/// Deletes a folder with manage_folder.
+///
+/// # Arguments
+///
+/// * `stack` - The running fakes and the tools' context.
+/// * `name` - The folder's name.
+async fn delete_folder(stack: &Stack, name: &str) -> ToolResult {
+    let arguments = FolderArguments {
+        action: FolderAction::Delete,
+        name: name.to_owned(),
+        new_name: None,
+    };
+    run_manage_folder(&stack.context, arguments).await
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn lists_folders_with_roles_and_counts() {
@@ -186,4 +202,46 @@ async fn refuses_role_folders_taken_names_missing_folders_and_folders_that_hold_
     assert!(!stack.imap.list_commands().iter().any(|command| {
         command.contains(" CREATE ") || command.contains(" RENAME ") || command.contains(" DELETE ")
     }));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_to_delete_a_folder_that_holds_other_folders() {
+    let mut mailbox = FakeMailbox::create_standard();
+    let projects = mailbox.find_folder_mut("Projects").expect("the folder");
+    projects.attributes = vec!["\\HasChildren".to_owned()];
+    let inner = FakeFolder::new("Projects/2026", &["\\HasNoChildren"], 1010);
+    mailbox.folders.push(inner);
+    let stack = start_stack(mailbox, false).await;
+
+    let refused = delete_folder(&stack, "Projects").await;
+    let inner_deleted = delete_folder(&stack, "Projects/2026").await;
+    let outer_deleted = delete_folder(&stack, "Projects").await;
+
+    assert_eq!(
+        refused.as_ref().map_err(ToolFailure::class),
+        Err("folder-has-subfolders".to_owned())
+    );
+    assert_eq!(
+        refused.map_err(|failure| failure.to_string()),
+        Err("Projects holds other folders, so it cannot be deleted. Delete them first.".to_owned())
+    );
+    assert_eq!(
+        inner_deleted.map(|report| report.text),
+        Ok("Folder Projects/2026 deleted.".to_owned())
+    );
+    assert_eq!(
+        outer_deleted.map(|report| report.text),
+        Ok("Folder Projects deleted.".to_owned())
+    );
+    let deletions: Vec<String> = stack
+        .imap
+        .list_commands()
+        .into_iter()
+        .filter(|command| command.contains(" DELETE "))
+        .collect();
+    assert_eq!(deletions.len(), 2, "{deletions:?}");
+    assert!(
+        deletions[0].ends_with(" DELETE \"Projects/2026\""),
+        "{deletions:?}"
+    );
 }

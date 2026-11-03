@@ -407,12 +407,14 @@ mod tests {
                 raw_name: "INBOX".to_owned(),
                 role: Some(FolderRole::Inbox),
                 selectable: true,
+                delimiter: Some("/".to_owned()),
             },
             Folder {
                 name: "Projects".to_owned(),
                 raw_name: "Projects".to_owned(),
                 role: None,
                 selectable: true,
+                delimiter: Some("/".to_owned()),
             },
         ];
 

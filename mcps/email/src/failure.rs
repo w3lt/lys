@@ -276,6 +276,8 @@ pub enum ToolFailure {
     },
     /// The folder holds messages, so it cannot be deleted.
     FolderNotEmpty(String),
+    /// The folder holds other folders, so it cannot be deleted.
+    FolderHasSubfolders(String),
     /// A folder with the name already exists.
     FolderExists(String),
     /// The id is not in the Drafts folder.
@@ -350,6 +352,7 @@ impl ToolFailure {
             Self::NoRoleFolder(role) => format!("no-{}-folder", role.name().to_ascii_lowercase()),
             Self::RoleFolder { .. } => "role-folder".to_owned(),
             Self::FolderNotEmpty(_) => "folder-not-empty".to_owned(),
+            Self::FolderHasSubfolders(_) => "folder-has-subfolders".to_owned(),
             Self::FolderExists(_) => "folder-exists".to_owned(),
             Self::NotInDrafts => "not-in-drafts".to_owned(),
             Self::AttachmentMissing { .. } => "attachment-missing".to_owned(),
@@ -400,6 +403,9 @@ impl fmt::Display for ToolFailure {
             Self::RoleFolder { name, role } => format_role_folder_sentence(name, *role),
             Self::FolderNotEmpty(name) => {
                 format!("{name} holds messages, so it cannot be deleted. Empty it first.")
+            }
+            Self::FolderHasSubfolders(name) => {
+                format!("{name} holds other folders, so it cannot be deleted. Delete them first.")
             }
             Self::FolderExists(name) => format!("A folder named {name} already exists."),
             Self::NotInDrafts => NOT_IN_DRAFTS_SENTENCE.to_owned(),

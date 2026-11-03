@@ -112,6 +112,8 @@ pub struct Folder {
     pub role: Option<FolderRole>,
     /// Whether messages can be read from it (`\Noselect` is absent).
     pub selectable: bool,
+    /// The hierarchy delimiter the server listed it with, when it has one.
+    pub delimiter: Option<String>,
 }
 
 /// Builds the folders from the server's listing, giving each role to one
@@ -132,6 +134,7 @@ pub fn build_folders(listings: &[FolderListing]) -> Vec<Folder> {
                 .attributes
                 .iter()
                 .any(|attribute| attribute.eq_ignore_ascii_case("\\Noselect")),
+            delimiter: listing.delimiter.clone(),
         })
         .collect();
     for role in FolderRole::ALL_ROLES {
@@ -177,6 +180,24 @@ pub fn find_folder<'a>(folders: &'a [Folder], name: &str) -> Option<&'a Folder> 
                 })
                 .flatten()
         })
+}
+
+/// Calculates whether other listed folders are inside a folder: their
+/// names start with its name and its hierarchy delimiter. A folder listed
+/// without a delimiter has none.
+///
+/// # Arguments
+///
+/// * `folders` - The classified folders, as the server listed them all.
+/// * `folder` - The folder.
+pub fn has_subfolders(folders: &[Folder], folder: &Folder) -> bool {
+    let Some(delimiter) = &folder.delimiter else {
+        return false;
+    };
+    let prefix = format!("{}{delimiter}", folder.raw_name);
+    folders
+        .iter()
+        .any(|other| other.raw_name.starts_with(&prefix))
 }
 
 /// Finds the folder with the role.
@@ -258,5 +279,28 @@ mod tests {
             Some("Sent")
         );
         assert_eq!(find_folder(&folders, "sent"), None);
+    }
+
+    #[test]
+    fn finds_subfolders_only_below_the_folder_name_and_its_delimiter() {
+        let flat = FolderListing {
+            delimiter: None,
+            ..build_listing("Flat", &[])
+        };
+        let folders = build_folders(&[
+            build_listing("Projects", &[]),
+            build_listing("Projects/2026", &[]),
+            build_listing("Notes", &[]),
+            build_listing("Notes 2025", &[]),
+            flat,
+            build_listing("Flat/Inside", &[]),
+        ]);
+
+        let with_subfolders: Vec<&str> = folders
+            .iter()
+            .filter(|folder| has_subfolders(&folders, folder))
+            .map(|folder| folder.name.as_str())
+            .collect();
+        assert_eq!(with_subfolders, vec!["Projects"]);
     }
 }

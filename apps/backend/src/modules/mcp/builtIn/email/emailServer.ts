@@ -3,6 +3,7 @@ import {
   type BuiltInMcpServerName,
   type EmailAccount,
   type EmailPassword,
+  type McpEnvironmentVariable,
   type McpServerSettings
 } from "@lys/share"
 import type { EmailAccountRead } from "../../../../infrastructure/settings/emailAccountFile"
@@ -126,17 +127,16 @@ export function buildEmailServerSettings(
   account: EmailAccount,
   password: EmailPassword
 ): McpServerSettings {
+  const accountVariable: McpEnvironmentVariable = {
+    name: EMAIL_ACCOUNT_VARIABLE_NAME,
+    value: formatEmailAccountVariable(account, password)
+  }
   return mcpServerSettingsSchema.parse({
     name: EMAIL_SERVER_NAME,
     transport: "stdio",
     command: serverCommand.command,
     arguments: serverCommand.arguments,
-    environment: [
-      {
-        name: EMAIL_ACCOUNT_VARIABLE_NAME,
-        value: formatEmailAccountVariable(account, password)
-      }
-    ],
+    environment: [accountVariable],
     enabled: true
   })
 }

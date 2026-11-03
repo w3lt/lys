@@ -2,7 +2,8 @@ import {
   emailAccountSchema,
   emailPasswordSchema,
   type EmailAccount,
-  type EmailPassword
+  type EmailPassword,
+  type EmailServerSettings
 } from "@lys/share"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
@@ -90,12 +91,22 @@ export async function readRecordedEmailProcessId(
  * @returns A validated account at `example.com` servers over TLS.
  */
 export function buildEmailAccount(address: string): EmailAccount {
+  const imap: EmailServerSettings = {
+    host: "imap.example.com",
+    port: 993,
+    security: "tls"
+  }
+  const smtp: EmailServerSettings = {
+    host: "smtp.example.com",
+    port: 465,
+    security: "tls"
+  }
   return emailAccountSchema.parse({
     address,
     displayName: "Test Person",
     userName: address,
-    imap: { host: "imap.example.com", port: 993, security: "tls" },
-    smtp: { host: "smtp.example.com", port: 465, security: "tls" },
+    imap,
+    smtp,
     serverKeepsSentCopy: false
   })
 }

@@ -318,17 +318,12 @@ export default class McpServerRegistry {
     if (entry.run.status !== "running") return "off"
     const { settings } = entry.run
     this.#stopSession(entry.run.session, "reconnected")
-    this.#entries.set(
-      serverName,
-      Object.freeze({
-        ...entry,
-        run: Object.freeze({
-          status: "running",
-          settings,
-          session: this.#startSession(settings)
-        })
-      })
-    )
+    const run: ServerRun = Object.freeze({
+      status: "running",
+      settings,
+      session: this.#startSession(settings)
+    })
+    this.#entries.set(serverName, Object.freeze({ ...entry, run }))
     return "reconnecting"
   }
 
@@ -559,16 +554,12 @@ export default class McpServerRegistry {
     switch (server.run.status) {
       case "start": {
         const { settings } = server.run
-        return Object.freeze({
-          name,
-          transport,
-          isBuiltIn,
-          run: Object.freeze({
-            status: "running",
-            settings,
-            session: this.#startSession(settings)
-          })
+        const run: ServerRun = Object.freeze({
+          status: "running",
+          settings,
+          session: this.#startSession(settings)
         })
+        return Object.freeze({ name, transport, isBuiltIn, run })
       }
       case "off":
         return Object.freeze({ name, transport, isBuiltIn, run: OFF_RUN })
@@ -583,12 +574,8 @@ export default class McpServerRegistry {
             serverName: name,
             reason
           })
-        return Object.freeze({
-          name,
-          transport,
-          isBuiltIn,
-          run: Object.freeze({ status: "unusable", reason })
-        })
+        const run: ServerRun = Object.freeze({ status: "unusable", reason })
+        return Object.freeze({ name, transport, isBuiltIn, run })
       }
     }
   }
@@ -731,14 +718,15 @@ async function createBuiltInServerPlan(
   server: BuiltInMcpServer
 ): Promise<ServerPlan> {
   const read = await server.readServer()
+  const run: PlannedRun =
+    read.status === "read"
+      ? Object.freeze({ status: "start", settings: read.settings })
+      : Object.freeze({ status: "unusable", reason: read.status })
   return Object.freeze({
     name: server.name,
     transport: server.transport,
     isBuiltIn: true,
-    run:
-      read.status === "read"
-        ? Object.freeze({ status: "start", settings: read.settings })
-        : Object.freeze({ status: "unusable", reason: read.status })
+    run
   })
 }
 
@@ -764,13 +752,14 @@ function buildOffBuiltInServerPlan(server: BuiltInMcpServer): ServerPlan {
  * @returns A start with its settings while it is switched on, else off.
  */
 function buildAddedServerPlan(settings: McpServerSettings): ServerPlan {
+  const run: PlannedRun = settings.enabled
+    ? Object.freeze({ status: "start", settings })
+    : OFF_PLAN
   return Object.freeze({
     name: settings.name,
     transport: settings.transport,
     isBuiltIn: false,
-    run: settings.enabled
-      ? Object.freeze({ status: "start", settings })
-      : OFF_PLAN
+    run
   })
 }
 

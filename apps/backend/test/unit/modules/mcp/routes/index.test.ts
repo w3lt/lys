@@ -344,10 +344,11 @@ describe("registerMcpRoutes", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         [FILES_SERVER],
         buildEmailAccount("accepted@example.com")
       )
+      const emailServerCommand = buildFakeEmailServerCommand({
+        recordsVariable: true
+      })
       const { app, registry } = await createMcpRouteApp(settingsFilePath, {
-        emailServerCommand: buildFakeEmailServerCommand({
-          recordsVariable: true
-        }),
+        emailServerCommand,
         workingDirectory: folder,
         withBuiltInEmailServer: true
       })
@@ -762,8 +763,12 @@ describe("registerMcpRoutes", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("answers unavailable when the email server is not installed", async () => {
       const folder = await createCaseFolder()
+      const emailServerCommand: EmailServerCommand = {
+        command: join(folder, "email"),
+        arguments: []
+      }
       const { app } = await createMcpRouteApp(await createSettingsFilePath(), {
-        emailServerCommand: { command: join(folder, "email"), arguments: [] }
+        emailServerCommand
       })
 
       const response = await app.inject({
@@ -783,9 +788,13 @@ describe("registerMcpRoutes", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const folder = await createCaseFolder()
       const file = join(folder, "file")
       await writeFile(file, "")
+      const emailServerCommand: EmailServerCommand = {
+        command: join(file, "email"),
+        arguments: []
+      }
       const { app, checkEvents } = await createMcpRouteApp(
         await createSettingsFilePath(),
-        { emailServerCommand: { command: join(file, "email"), arguments: [] } }
+        { emailServerCommand }
       )
 
       const response = await app.inject({
@@ -839,15 +848,13 @@ describe("registerMcpRoutes", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("answers busy at once to a check sent while another runs, and the running check answers its outcome", async () => {
       const folder = await createCaseFolder()
+      const emailServerCommand = buildFakeEmailServerCommand({
+        recordsProcessId: true,
+        holdMilliseconds: 1000
+      })
       const { app, checkEvents } = await createMcpRouteApp(
         await createSettingsFilePath(),
-        {
-          emailServerCommand: buildFakeEmailServerCommand({
-            recordsProcessId: true,
-            holdMilliseconds: 1000
-          }),
-          workingDirectory: folder
-        }
+        { emailServerCommand, workingDirectory: folder }
       )
       const running = app.inject({
         method: "POST",

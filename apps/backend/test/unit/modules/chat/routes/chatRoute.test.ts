@@ -1296,9 +1296,10 @@ describe("updateFastifyWithChatRoute", () => {
       settings: McpServerSettings,
       status: "connected" | "failed"
     ): Promise<void> {
+      const mcpSettings = mcpSettingsSchema.parse({ servers: [settings] })
       testApp.readMcpSettings.mockResolvedValue({
         status: "read",
-        settings: mcpSettingsSchema.parse({ servers: [settings] })
+        settings: mcpSettings
       })
       await testApp.app.mcpServerRegistry.updateServers()
       await vi.waitFor(

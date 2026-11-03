@@ -153,17 +153,16 @@ export function buildFakeLauncherServerSettings(
   name: string,
   options: FakeStdioServerOptions
 ): McpServerSettings {
+  const optionsVariable: McpEnvironmentVariable = Object.freeze({
+    name: "LYS_FAKE_MCP_OPTIONS",
+    value: JSON.stringify(options)
+  })
   return Object.freeze({
     name,
     transport: "stdio",
     command: process.execPath,
     arguments: Object.freeze(["--no-warnings", FAKE_LAUNCHER_PATH]),
-    environment: Object.freeze([
-      Object.freeze({
-        name: "LYS_FAKE_MCP_OPTIONS",
-        value: JSON.stringify(options)
-      })
-    ]),
+    environment: Object.freeze([optionsVariable]),
     enabled: true
   })
 }

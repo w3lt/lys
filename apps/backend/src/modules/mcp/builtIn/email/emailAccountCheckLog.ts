@@ -64,12 +64,16 @@ function handleRunFailure(
         "The email account check was ended because the backend is closing"
       )
       return
-    case "start-failed":
+    case "start-failed": {
+      const loggedFailure: Pick<EmailServerRunFailure, "kind"> = {
+        kind: failure.kind
+      }
       logger.error(
-        { failure: { kind: failure.kind }, err: failure.error },
+        { failure: loggedFailure, err: failure.error },
         CHECK_FAILED_MESSAGE
       )
       return
+    }
     case "timed-out":
     case "exited":
     case "unreadable-output":

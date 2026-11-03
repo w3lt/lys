@@ -125,8 +125,9 @@ function buildCheckLogRecords(
 describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
   it("answers both sign-ins' outcomes, starting the server in the working folder with the account and the password in its variable", async () => {
     const folder = await createCaseFolder()
+    const fake: FakeEmailServerOptions = { recordsVariable: true }
     const { checker, events } = createChecker({
-      fake: { recordsVariable: true },
+      fake,
       workingDirectory: folder
     })
     const account = buildEmailAccount("accepted@example.com")
@@ -286,9 +287,11 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
   it("answers server-missing when the email server's executable does not exist", async () => {
     const folder = await createCaseFolder()
-    const { checker, events } = createChecker({
-      serverCommand: { command: join(folder, "email"), arguments: [] }
-    })
+    const serverCommand: EmailServerCommand = {
+      command: join(folder, "email"),
+      arguments: []
+    }
+    const { checker, events } = createChecker({ serverCommand })
 
     const answer = await checker.sendCheck(
       buildEmailAccount("accepted@example.com"),
@@ -304,9 +307,8 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     const path = join(folder, "email")
     await writeFile(path, "not a program")
     await chmod(path, 0o644)
-    const { checker, events } = createChecker({
-      serverCommand: { command: path, arguments: [] }
-    })
+    const serverCommand: EmailServerCommand = { command: path, arguments: [] }
+    const { checker, events } = createChecker({ serverCommand })
 
     const answer = await checker.sendCheck(
       buildEmailAccount("accepted@example.com"),
@@ -332,10 +334,12 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const folder = await createCaseFolder()
       const file = join(folder, "file")
       await writeFile(file, "")
+      const serverCommand: EmailServerCommand = {
+        command: join(file, "email"),
+        arguments: []
+      }
       const { checker, events } = createChecker(
-        place === "command"
-          ? { serverCommand: { command: join(file, "email"), arguments: [] } }
-          : { workingDirectory: file }
+        place === "command" ? { serverCommand } : { workingDirectory: file }
       )
 
       const answer = await checker.sendCheck(
@@ -367,9 +371,8 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const path = join(folder, "email")
       await writeFile(path, "not a program")
       await chmod(path, 0o755)
-      const { checker, events } = createChecker({
-        serverCommand: { command: path, arguments: [] }
-      })
+      const serverCommand: EmailServerCommand = { command: path, arguments: [] }
+      const { checker, events } = createChecker({ serverCommand })
 
       const answer = await checker.sendCheck(
         buildEmailAccount("accepted@example.com"),
@@ -492,8 +495,9 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
   it("kills a server that does not end within the time limit and answers server-failed, keeping the error lines it wrote", async () => {
     const folder = await createCaseFolder()
+    const fake: FakeEmailServerOptions = { recordsProcessId: true }
     const { checker, events } = createChecker({
-      fake: { recordsProcessId: true },
+      fake,
       workingDirectory: folder,
       // Far past the fake's start, by which it wrote its pid and its line.
       timeoutMilliseconds: 1000
@@ -522,8 +526,12 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
   it("answers busy at once to a check asked for while another runs, starting nothing for it, and runs a check asked for once the other ended", async () => {
     const folder = await createCaseFolder()
+    const fake: FakeEmailServerOptions = {
+      recordsVariable: true,
+      holdMilliseconds: 300
+    }
     const { checker, events } = createChecker({
-      fake: { recordsVariable: true, holdMilliseconds: 300 },
+      fake,
       workingDirectory: folder
     })
     const accepted = {
@@ -560,8 +568,9 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
   it("answers a check asked for while the checker closes as closed, not busy", async () => {
     const folder = await createCaseFolder()
+    const fake: FakeEmailServerOptions = { recordsProcessId: true }
     const { checker, events } = createChecker({
-      fake: { recordsProcessId: true },
+      fake,
       workingDirectory: folder
     })
     const running = checker.sendCheck(
@@ -592,8 +601,9 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
   it("kills the running check as it closes, and runs no later check", async () => {
     const folder = await createCaseFolder()
+    const fake: FakeEmailServerOptions = { recordsProcessId: true }
     const { checker, events } = createChecker({
-      fake: { recordsProcessId: true },
+      fake,
       workingDirectory: folder
     })
     const account = buildEmailAccount("hang@example.com")

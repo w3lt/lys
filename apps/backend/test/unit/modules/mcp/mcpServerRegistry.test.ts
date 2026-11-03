@@ -260,18 +260,17 @@ function buildSettingsRead(
   servers: readonly McpServerSettings[],
   builtIn?: BuiltInMcpSettings
 ): McpSettingsRead {
-  return Object.freeze({
-    status: "read",
-    settings: mcpSettingsSchema.parse(
-      JSON.parse(JSON.stringify({ servers, builtIn }))
-    )
-  })
+  const settings = mcpSettingsSchema.parse(
+    JSON.parse(JSON.stringify({ servers, builtIn }))
+  )
+  return Object.freeze({ status: "read", settings })
 }
 
+/** The switch of a built-in server that is on. */
+const SWITCH_ON: BuiltInMcpSettings["email"] = Object.freeze({ enabled: true })
+
 /** Switches that switch the built-in email server on. */
-const EMAIL_ON: BuiltInMcpSettings = Object.freeze({
-  email: Object.freeze({ enabled: true })
-})
+const EMAIL_ON: BuiltInMcpSettings = Object.freeze({ email: SWITCH_ON })
 
 /** A recorded built-in email server, and what its reads return. */
 type FakeBuiltInServer = Readonly<{
@@ -301,8 +300,13 @@ function createFakeBuiltInServer(
 ): FakeBuiltInServer {
   let nextRead = read
   const readServer = vi.fn(() => Promise.resolve(nextRead))
+  const server: BuiltInMcpServer = Object.freeze({
+    name: "email",
+    transport: "stdio",
+    readServer
+  })
   return Object.freeze({
-    server: Object.freeze({ name: "email", transport: "stdio", readServer }),
+    server,
     readServer,
     setRead: (next) => {
       nextRead = next

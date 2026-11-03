@@ -54,6 +54,9 @@ function buildSettingsTextOfGroup(
   })
 }
 
+/** Validates the group the desktop host writes back for an accepted one. */
+const writtenEmailGroupSchema = z.strictObject({ account: z.unknown() })
+
 /**
  * Validates one case of the groups shared with the desktop host: an
  * accepted group comes with what the host writes back for it.
@@ -63,7 +66,7 @@ const sharedEmailGroupCaseSchema = z.discriminatedUnion("accepted", [
     case: z.string(),
     group: z.unknown(),
     accepted: z.literal(true),
-    written: z.strictObject({ account: z.unknown() })
+    written: writtenEmailGroupSchema
   }),
   z.strictObject({
     case: z.string(),

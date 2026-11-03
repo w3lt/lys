@@ -238,12 +238,10 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   const readJustRunToolNames = vi.fn<ReadJustRunToolNames>(() =>
     Promise.reject(createUnexpectedCallError("readJustRunToolNames"))
   )
+  const emptyMcpSettings = mcpSettingsSchema.parse({})
   const readMcpSettings = vi.fn<() => Promise<McpSettingsRead>>(() =>
     Promise.resolve(
-      Object.freeze({
-        status: "read",
-        settings: mcpSettingsSchema.parse({})
-      })
+      Object.freeze({ status: "read", settings: emptyMcpSettings })
     )
   )
   const { processGroups } = createOwnedMcpServerProcessGroups()

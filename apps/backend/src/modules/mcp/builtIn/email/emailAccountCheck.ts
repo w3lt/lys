@@ -578,16 +578,17 @@ function startCheckProcess(
   start: EmailServerCheckStart,
   timeLimit: AbortSignal
 ): CheckChildProcess | Error {
+  const environment: Record<string, string> = {
+    ...getDefaultEnvironment(),
+    [EMAIL_ACCOUNT_VARIABLE_NAME]: start.accountVariableValue
+  }
   try {
     return spawn(
       start.serverCommand.command,
       [...start.serverCommand.arguments, EMAIL_SERVER_CHECK_SUBCOMMAND],
       {
         cwd: start.workingDirectory,
-        env: {
-          ...getDefaultEnvironment(),
-          [EMAIL_ACCOUNT_VARIABLE_NAME]: start.accountVariableValue
-        },
+        env: environment,
         stdio: ["ignore", "pipe", "pipe"],
         signal: timeLimit,
         killSignal: "SIGKILL"

@@ -1,6 +1,10 @@
+import type { EmailServerCheck } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
 import { createBackendLogger } from "../../../../../../src/log"
-import type { EmailAccountCheckEvent } from "../../../../../../src/modules/mcp/builtIn/email/emailAccountCheck"
+import type {
+  EmailAccountCheckEvent,
+  EmailServerRunFailure
+} from "../../../../../../src/modules/mcp/builtIn/email/emailAccountCheck"
 import { handleEmailAccountCheckEvent } from "../../../../../../src/modules/mcp/builtIn/email/emailAccountCheckLog"
 import {
   CapturedLogDestination,
@@ -35,11 +39,17 @@ function getLoggedFields(
 
 describe("handleEmailAccountCheckEvent", () => {
   it("logs a report with both sign-ins' outcomes and the server's error lines", () => {
+    const imap: EmailServerCheck = {
+      status: "failed",
+      reason: "wrong-password"
+    }
+    const smtp: EmailServerCheck = { status: "accepted" }
+
     expect(
       getLoggedFields({
         kind: "checked",
-        imap: { status: "failed", reason: "wrong-password" },
-        smtp: { status: "accepted" },
+        imap,
+        smtp,
         errorLines: ["smtp: quit failed"]
       })
     ).toEqual({
@@ -70,10 +80,9 @@ describe("handleEmailAccountCheckEvent", () => {
       code: "EACCES"
     })
 
-    const fields = getLoggedFields({
-      kind: "server-failed",
-      failure: { kind: "start-failed", error }
-    })
+    const failure: EmailServerRunFailure = { kind: "start-failed", error }
+
+    const fields = getLoggedFields({ kind: "server-failed", failure })
 
     expect(fields).toMatchObject({
       level: "error",
@@ -106,9 +115,9 @@ describe("handleEmailAccountCheckEvent", () => {
   )
 
   it("warns of a check the closing backend ended", () => {
-    expect(
-      getLoggedFields({ kind: "server-failed", failure: { kind: "closed" } })
-    ).toEqual({
+    const failure: EmailServerRunFailure = { kind: "closed" }
+
+    expect(getLoggedFields({ kind: "server-failed", failure })).toEqual({
       level: "warn",
       failure: { kind: "closed" },
       msg: "The email account check was ended because the backend is closing"

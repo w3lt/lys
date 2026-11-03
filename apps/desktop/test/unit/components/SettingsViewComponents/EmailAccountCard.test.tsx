@@ -33,6 +33,21 @@ type ShownServerChoices = Readonly<{
 /** Problem of an address that is not one. */
 const ADDRESS_PROBLEM = /address/i
 
+/** Rule the Address field states before entry. */
+const ADDRESS_HINT = "name@host · up to 254"
+
+/** Rule the Password field states before entry. */
+const PASSWORD_HINT = "up to 1024"
+
+/** Rule each Host field states before entry. */
+const HOST_HINT = "host name, IPv4, or [IPv6]"
+
+/** Rule each Port field states before entry. */
+const PORT_HINT = "1–65535"
+
+/** Rule of None that each Security choice states before a choice. */
+const PLAIN_SECURITY_HINT = "None only for localhost, 127.0.0.1, [::1]"
+
 /** What the fields show once the Gmail preset filled them. */
 const GMAIL_CHOICES: ShownServerChoices = Object.freeze({
   imap: "imap.gmail.com 993 TLS",
@@ -134,6 +149,19 @@ function getServerField(server: string, label: string): HTMLElement {
 }
 
 /**
+ * Gets the choice of how the connection to one server is secured.
+ *
+ * @param server - Legend of the server's fields.
+ * @returns The group named Security.
+ */
+function getSecurityGroup(server: string): HTMLElement {
+  return within(screen.getByRole("group", { name: server })).getByRole(
+    "group",
+    { name: "Security" }
+  )
+}
+
+/**
  * Gets one way to secure the connection to one server.
  *
  * @param server - Legend of the server's fields.
@@ -141,10 +169,7 @@ function getServerField(server: string, label: string): HTMLElement {
  * @returns The pressable choice.
  */
 function getSecurityChoice(server: string, label: string): HTMLElement {
-  const security = within(
-    screen.getByRole("group", { name: server })
-  ).getByRole("group", { name: "Security" })
-  return within(security).getByRole("button", { name: label })
+  return within(getSecurityGroup(server)).getByRole("button", { name: label })
 }
 
 /**
@@ -187,7 +212,7 @@ function formatShownServer(server: string): string {
   const group = within(screen.getByRole("group", { name: server }))
   const host = group.getByRole("textbox", { name: "Host" })
   const port = group.getByRole("textbox", { name: "Port" })
-  const security = within(group.getByRole("group", { name: "Security" }))
+  const security = within(getSecurityGroup(server))
   if (!(host instanceof HTMLInputElement && port instanceof HTMLInputElement)) {
     throw new Error(`No host or port input in ${server}`)
   }
@@ -248,13 +273,16 @@ describe("EmailAccountCard", () => {
       "Lys signs in to IMAP and SMTP before saving. Gmail, iCloud, and Yahoo need an app password."
     )
     expect(getField("Address")).toHaveValue("ada@fastmail.com")
+    expect(getField("Address")).toHaveAccessibleDescription(
+      `${ADDRESS_HINT} Preset: Fastmail`
+    )
     expect(getField("Display name")).toHaveValue("Ada Fixture")
     expect(getField("User name")).toHaveValue("ada@fastmail.com")
     expect(getPasswordField()).toHaveValue("")
     expect(getPasswordField()).toHaveAttribute("type", "password")
     expect(getPasswordField()).toHaveAttribute("placeholder", "••••••••")
     expect(getPasswordField()).toHaveAccessibleDescription(
-      "Leave empty to keep the saved password."
+      `${PASSWORD_HINT} Leave empty to keep the saved password.`
     )
     expect(getServerField("IMAP server", "Host")).toHaveValue(
       "imap.fastmail.com"
@@ -285,7 +313,7 @@ describe("EmailAccountCard", () => {
 
     expect(getField("Address")).toHaveValue("")
     expect(getPasswordField()).not.toHaveAttribute("placeholder")
-    expect(getPasswordField()).not.toHaveAccessibleDescription()
+    expect(getPasswordField()).toHaveAccessibleDescription(PASSWORD_HINT)
     expect(getServerField("IMAP server", "Host")).toHaveValue("")
     expect(getSecurityChoice("SMTP server", "TLS")).toHaveAttribute(
       "aria-pressed",
@@ -303,22 +331,40 @@ describe("EmailAccountCard", () => {
     expect(getSaveButton()).toBeEnabled()
   })
 
-  it("marks the required fields and states the port range before entry", () => {
+  it("marks the required fields and states the rule of each field and of None before entry", () => {
     startEmptyEmailAccountCard()
 
     expect(getField("Address")).toBeRequired()
+    expect(getField("Address")).toHaveAccessibleDescription(ADDRESS_HINT)
     expect(getField("Display name")).not.toBeRequired()
+    expect(getField("Display name")).toHaveAccessibleDescription(
+      "optional · up to 100"
+    )
     expect(getField("User name")).toBeRequired()
+    expect(getField("User name")).toHaveAccessibleDescription("up to 254")
     expect(getPasswordField()).toBeRequired()
+    expect(getPasswordField()).toHaveAccessibleDescription(PASSWORD_HINT)
     expect(getServerField("IMAP server", "Host")).toBeRequired()
+    expect(getServerField("IMAP server", "Host")).toHaveAccessibleDescription(
+      HOST_HINT
+    )
     expect(getServerField("IMAP server", "Port")).toBeRequired()
     expect(getServerField("IMAP server", "Port")).toHaveAccessibleDescription(
-      "1–65535"
+      PORT_HINT
+    )
+    expect(getSecurityGroup("IMAP server")).toHaveAccessibleDescription(
+      PLAIN_SECURITY_HINT
     )
     expect(getServerField("SMTP server", "Host")).toBeRequired()
+    expect(getServerField("SMTP server", "Host")).toHaveAccessibleDescription(
+      HOST_HINT
+    )
     expect(getServerField("SMTP server", "Port")).toBeRequired()
     expect(getServerField("SMTP server", "Port")).toHaveAccessibleDescription(
-      "1–65535"
+      PORT_HINT
+    )
+    expect(getSecurityGroup("SMTP server")).toHaveAccessibleDescription(
+      PLAIN_SECURITY_HINT
     )
     expect(within(getCard()).getAllByText("required")).toHaveLength(7)
   })
@@ -343,13 +389,15 @@ describe("EmailAccountCard", () => {
     expect(
       screen.getByRole("switch", { name: "Server keeps a copy of sent mail" })
     ).toBeChecked()
-    expect(getField("Address")).toHaveAccessibleDescription("Preset: Gmail")
+    expect(getField("Address")).toHaveAccessibleDescription(
+      `${ADDRESS_HINT} Preset: Gmail`
+    )
 
     await user.clear(getServerField("SMTP server", "Port"))
     await user.type(getServerField("SMTP server", "Port"), "587")
 
     expect(getField("Address")).toHaveAccessibleDescription(
-      "Preset: Gmail · servers changed"
+      `${ADDRESS_HINT} Preset: Gmail · servers changed`
     )
   })
 
@@ -360,7 +408,7 @@ describe("EmailAccountCard", () => {
     await user.type(getField("Address"), "ada@example.test")
 
     expect(getField("Address")).toHaveAccessibleDescription(
-      "No preset for this address. Enter the servers."
+      `${ADDRESS_HINT} No preset for this address. Enter the servers.`
     )
     expect(getServerField("IMAP server", "Host")).toHaveValue("")
   })
@@ -373,7 +421,9 @@ describe("EmailAccountCard", () => {
     updateAddressByKeystroke("ada@fastmail.com")
 
     expect(getShownServerChoices()).toEqual(FASTMAIL_CHOICES)
-    expect(getField("Address")).toHaveAccessibleDescription("Preset: Fastmail")
+    expect(getField("Address")).toHaveAccessibleDescription(
+      `${ADDRESS_HINT} Preset: Fastmail`
+    )
   })
 
   it("replaces the iCloud preset with Gmail's, its port, security, and Sent copy included, when the address is retyped one character at a time", () => {
@@ -384,7 +434,9 @@ describe("EmailAccountCard", () => {
     updateAddressByKeystroke("ada@gmail.com")
 
     expect(getShownServerChoices()).toEqual(GMAIL_CHOICES)
-    expect(getField("Address")).toHaveAccessibleDescription("Preset: Gmail")
+    expect(getField("Address")).toHaveAccessibleDescription(
+      `${ADDRESS_HINT} Preset: Gmail`
+    )
   })
 
   it("keeps a filled preset through an address without one, then replaces it with the preset of the address typed next", () => {
@@ -395,13 +447,15 @@ describe("EmailAccountCard", () => {
 
     expect(getShownServerChoices()).toEqual(GMAIL_CHOICES)
     expect(getField("Address")).toHaveAccessibleDescription(
-      "No preset for this address. Enter the servers."
+      `${ADDRESS_HINT} No preset for this address. Enter the servers.`
     )
 
     updateAddressByKeystroke("ada@fastmail.com")
 
     expect(getShownServerChoices()).toEqual(FASTMAIL_CHOICES)
-    expect(getField("Address")).toHaveAccessibleDescription("Preset: Fastmail")
+    expect(getField("Address")).toHaveAccessibleDescription(
+      `${ADDRESS_HINT} Preset: Fastmail`
+    )
   })
 
   it("keeps a server value the person typed while the address is retyped for another provider", () => {
@@ -418,7 +472,7 @@ describe("EmailAccountCard", () => {
       smtp: "smtp.gmail.com 587 TLS"
     })
     expect(getField("Address")).toHaveAccessibleDescription(
-      "Preset: Fastmail · servers changed"
+      `${ADDRESS_HINT} Preset: Fastmail · servers changed`
     )
   })
 
@@ -515,10 +569,10 @@ describe("EmailAccountCard", () => {
       "true"
     )
     expect(getServerField("IMAP server", "Port")).toHaveAccessibleDescription(
-      "1–65535 A port is a whole number from 1 to 65535."
+      `${PORT_HINT} A port is a whole number from 1 to 65535.`
     )
     expect(getPasswordField()).toHaveAccessibleDescription(
-      "Enter the password."
+      `${PASSWORD_HINT} Enter the password.`
     )
     expect(getField("User name")).not.toHaveAttribute("aria-invalid")
     expect(getStatusLine()).toHaveTextContent("Fix the marked fields to save.")
@@ -533,9 +587,11 @@ describe("EmailAccountCard", () => {
     await user.type(getField("Address"), "@gmail.com")
 
     expect(getField("Address")).not.toHaveAttribute("aria-invalid")
-    expect(getField("Address")).toHaveAccessibleDescription("Preset: Gmail")
+    expect(getField("Address")).toHaveAccessibleDescription(
+      `${ADDRESS_HINT} Preset: Gmail`
+    )
     expect(getPasswordField()).toHaveAccessibleDescription(
-      "Enter the password."
+      `${PASSWORD_HINT} Enter the password.`
     )
   })
 
@@ -795,7 +851,7 @@ describe("EmailAccountCard", () => {
     await user.click(getSaveButton())
 
     expect(getServerField("SMTP server", "Host")).toHaveAccessibleDescription(
-      "A connection without TLS is allowed only to localhost, 127.0.0.1, or [::1]."
+      `${HOST_HINT} A connection without TLS is allowed only to localhost, 127.0.0.1, or [::1].`
     )
     expect(getServerField("SMTP server", "Host")).toHaveFocus()
     expect(requests.onSaveEmailAccount).not.toHaveBeenCalled()

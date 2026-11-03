@@ -10,7 +10,7 @@ import { isHostName, MAXIMUM_TCP_PORT } from "./hostName"
  * file. Raising it changes which settings files load and requires a
  * coordinated desktop and backend release.
  */
-const MAXIMUM_EMAIL_ADDRESS_LENGTH = 254
+export const MAXIMUM_EMAIL_ADDRESS_LENGTH = 254
 
 /** Most characters the part of an email address before `@` may have, inclusive. */
 const MAXIMUM_EMAIL_LOCAL_PART_LENGTH = 64
@@ -18,14 +18,24 @@ const MAXIMUM_EMAIL_LOCAL_PART_LENGTH = 64
 /**
  * Most characters, counted as Unicode code points, the display name of an
  * email account may have, inclusive.
+ *
+ * @remarks The settings file never holds a longer name: the desktop host
+ * checks the same limit, in its own copy of this rule, when it loads the
+ * file. Raising it changes which settings files load and requires a
+ * coordinated desktop and backend release.
  */
-const MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH = 100
+export const MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH = 100
 
 /**
  * Most characters, counted as Unicode code points, the user name an email
  * account signs in with may have, inclusive.
+ *
+ * @remarks The settings file never holds a longer name: the desktop host
+ * checks the same limit, in its own copy of this rule, when it loads the
+ * file. Raising it changes which settings files load and requires a
+ * coordinated desktop and backend release.
  */
-const MAXIMUM_EMAIL_USER_NAME_LENGTH = 254
+export const MAXIMUM_EMAIL_USER_NAME_LENGTH = 254
 
 /** Most characters an IPv6 address in brackets may have, inclusive. */
 const MAXIMUM_BRACKETED_IPV6_LENGTH = 47
@@ -54,8 +64,14 @@ const BRACKETED_IPV6_PATTERN = /^\[[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*\]$/
 /**
  * Hosts a mail server may be reached on without TLS, in lowercase: the
  * machine Lys runs on.
+ *
+ * @remarks A host matches in any case. The settings file never holds a
+ * connection without TLS to another host: the desktop host checks the same
+ * hosts, in its own copy of this rule, when it loads the file. Changing
+ * the list changes which settings files load and requires a coordinated
+ * desktop and backend release.
  */
-const LOOPBACK_EMAIL_HOSTS: ReadonlySet<string> = new Set([
+export const LOOPBACK_EMAIL_HOSTS: readonly string[] = Object.freeze([
   "localhost",
   "127.0.0.1",
   "[::1]"
@@ -125,7 +141,7 @@ function isEmailHost(value: string): boolean {
  * @returns True for `localhost`, `127.0.0.1`, or `[::1]`, in any case.
  */
 function isLoopbackEmailHost(host: string): boolean {
-  return LOOPBACK_EMAIL_HOSTS.has(host.toLowerCase())
+  return LOOPBACK_EMAIL_HOSTS.includes(host.toLowerCase())
 }
 
 /**

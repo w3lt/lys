@@ -93,6 +93,10 @@ export {
   emailAddressSchema,
   emailSecuritySchema,
   emailSettingsSchema,
+  LOOPBACK_EMAIL_HOSTS,
+  MAXIMUM_EMAIL_ADDRESS_LENGTH,
+  MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH,
+  MAXIMUM_EMAIL_USER_NAME_LENGTH,
   type EmailAccount,
   type EmailAccountCandidate,
   type EmailSecurity,
@@ -141,6 +145,7 @@ export {
 export {
   emailPasswordSchema,
   groqApiKeySchema,
+  MAXIMUM_EMAIL_PASSWORD_LENGTH,
   ollamaApiKeySchema,
   tavilyApiKeySchema,
   type EmailPassword,

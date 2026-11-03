@@ -39,10 +39,16 @@ import type {
 import {
   EMAIL_ACCOUNT_NOTE,
   EMAIL_ACCOUNT_REMOVAL_QUESTION,
+  EMAIL_ADDRESS_HINT,
+  EMAIL_DISPLAY_NAME_HINT,
+  EMAIL_HOST_HINT,
+  EMAIL_PASSWORD_HINT,
   EMAIL_PASSWORD_KEPT_NOTE,
   EMAIL_PORT_HINT,
   EMAIL_SECURITIES,
+  EMAIL_SECURITY_HINT,
   EMAIL_SENT_COPY_NOTE,
+  EMAIL_USER_NAME_HINT,
   findEmailSecurity,
   formatEmailAccountMessage,
   formatEmailPresetNote,
@@ -84,14 +90,33 @@ type EmailFieldRef = RefObject<HTMLInputElement | null>
 /** Hosts of the card's inputs, by field. */
 type EmailFieldRefs = Readonly<Record<EmailAccountDraftField, EmailFieldRef>>
 
-/** Properties accepted by {@link EmailFieldLabel}. */
-type EmailFieldLabelProps = {
+/** What a field's label names. */
+type EmailFieldLabelTarget =
+  | {
+      /** The label names one input. */
+      readonly kind: "control"
+      /** Identifier of the input. */
+      readonly controlId: string
+    }
+  | {
+      /** The label names a group of controls, which refers to it. */
+      readonly kind: "group"
+      /** Identifier the label takes. */
+      readonly labelId: string
+    }
+
+/** Properties accepted by {@link EmailFieldTop}. */
+type EmailFieldTopProps = {
+  /** Input or group the label names. */
+  readonly target: EmailFieldLabelTarget
   /** Visible label of the field. */
   readonly label: string
-  /** Identifier of the input the label names. */
-  readonly fieldId: string
   /** Whether the account needs a value here, shown beside the label. */
   readonly isRequired: boolean
+  /** Identifier the hint takes, which the input or group refers to. */
+  readonly hintId: string
+  /** Rule of the field, shown beside the label before entry. */
+  readonly hint: string
 }
 
 /** Properties accepted by {@link EmailFieldProblem}. */
@@ -118,9 +143,9 @@ type EmailTextFieldProps = {
   readonly isRequired: boolean
   /**
    * Rule of the field, shown beside the label before entry and describing
-   * the input; omitted for none.
+   * the input.
    */
-  readonly hint?: string
+  readonly hint: string
   /** Text in the field. */
   readonly text: string
   /** Why the text breaks a rule, or undefined. */
@@ -158,6 +183,33 @@ type EmailPasswordFieldProps = {
   /** Host of the input, which the card moves focus to. */
   readonly fieldRef: EmailFieldRef
   /** Proposes new text for the field. */
+  readonly onTextChange: (text: string) => void
+  /** Proposes showing or hiding the password. */
+  readonly onIsPasswordShownChange: (isPasswordShown: boolean) => void
+  /**
+   * Proposes discarding the card's edit on Escape; omitted while there is no
+   * edit, which leaves Escape its native action.
+   */
+  readonly onDiscardEdit?: () => void
+}
+
+/** Properties accepted by {@link EmailPasswordInput}. */
+type EmailPasswordInputProps = {
+  /** Identifier of the input, which the field's label names. */
+  readonly fieldId: string
+  /** Text in the input. */
+  readonly text: string
+  /** Identifiers of the elements that describe the input, or undefined. */
+  readonly descriptionIds: string | undefined
+  /** Whether the text breaks a rule. */
+  readonly isInvalid: boolean
+  /** Whether a password is saved, which an empty input keeps. */
+  readonly hasSavedPassword: boolean
+  /** Whether the password shows as text instead of bullets. */
+  readonly isPasswordShown: boolean
+  /** Host of the input, which the card moves focus to. */
+  readonly fieldRef: EmailFieldRef
+  /** Proposes new text for the input. */
   readonly onTextChange: (text: string) => void
   /** Proposes showing or hiding the password. */
   readonly onIsPasswordShownChange: (isPasswordShown: boolean) => void
@@ -516,27 +568,41 @@ function handleFieldKeyDown(
 }
 
 /**
- * Presents a field's label and, when the account needs a value there, that
- * it is required.
+ * Presents a field's label, whether the account needs a value there, and
+ * the field's rule, on one line.
  *
  * @remarks The field owns every value; the component owns no state or
- * effects. The marker is text beside the label, outside it, so the input's
- * name stays the label; the input itself carries the required state.
- * @param props - Label, input identifier, and requirement.
- * @returns The label and the marker.
+ * effects. An input's label is a `label` element; a group's is a plain span
+ * that the group refers to. The required marker is text beside the label,
+ * outside it, so the name stays the label; the input itself carries the
+ * required state. The hint takes `hintId`, so that the input or group whose
+ * rule it states refers to it.
+ * @param props - Label target, label, requirement, and hint.
+ * @returns The label line.
  */
-function EmailFieldLabel({
+function EmailFieldTop({
+  target,
   label,
-  fieldId,
-  isRequired
-}: EmailFieldLabelProps): ReactElement {
+  isRequired,
+  hintId,
+  hint
+}: EmailFieldTopProps): ReactElement {
   return (
-    <span className="settings-view__email-field-label">
-      <label htmlFor={fieldId}>{label}</label>
-      {isRequired ? (
-        <span className="settings-view__email-field-rule">required</span>
-      ) : null}
-    </span>
+    <div className="settings-view__email-field-top">
+      <span className="settings-view__email-field-label">
+        {target.kind === "control" ? (
+          <label htmlFor={target.controlId}>{label}</label>
+        ) : (
+          <span id={target.labelId}>{label}</span>
+        )}
+        {isRequired ? (
+          <span className="settings-view__email-field-rule">required</span>
+        ) : null}
+      </span>
+      <span className="settings-view__email-field-rule" id={hintId}>
+        {hint}
+      </span>
+    </div>
   )
 }
 
@@ -585,9 +651,9 @@ function EmailFieldNote({
  * @remarks The card owns the text; the field owns no state or effects. A
  * required field says so beside the label and is marked required, and a
  * hint beside the label states the field's rule before entry. The input is
- * described by its hint, when it has one, then by its problem, when it has
- * one, then by the note when there is one. Escape in the input proposes
- * discarding the card's edit, except an Escape that ends text composition.
+ * described by its hint, then by its problem, when it has one, then by the
+ * note when there is one. Escape in the input proposes discarding the
+ * card's edit, except an Escape that ends text composition.
  * @param props - Label, requirement, hint, text, problem, note identifier,
  * input settings, ref, and the proposals.
  * @returns The field.
@@ -611,21 +677,16 @@ function EmailTextField({
 
   return (
     <div className="settings-view__email-field">
-      <div className="settings-view__email-field-top">
-        <EmailFieldLabel
-          fieldId={fieldId}
-          isRequired={isRequired}
-          label={label}
-        />
-        {hint === undefined ? null : (
-          <span className="settings-view__email-field-rule" id={hintId}>
-            {hint}
-          </span>
-        )}
-      </div>
+      <EmailFieldTop
+        hint={hint}
+        hintId={hintId}
+        isRequired={isRequired}
+        label={label}
+        target={{ kind: "control", controlId: fieldId }}
+      />
       <Input
         aria-describedby={formatDescriptionIds([
-          hint === undefined ? undefined : hintId,
+          hintId,
           problem === undefined ? undefined : problemId,
           noteId
         ])}
@@ -647,16 +708,72 @@ function EmailTextField({
 }
 
 /**
+ * Edits the password, hidden as bullets until the person shows it.
+ *
+ * @remarks The card owns the text and whether the password is shown; the
+ * input owns no state or effects. While a password is saved, bullets stand
+ * for it in the empty input and the input is not marked required; otherwise
+ * it is. The show button is a toggle named `Show password` whose pressed
+ * state says the password is shown. Escape in the input proposes discarding
+ * the card's edit, except an Escape that ends text composition.
+ * @param props - Identifier, text, descriptions, validity, saved and shown
+ * state, ref, and the proposals.
+ * @returns The input and its show button.
+ */
+function EmailPasswordInput({
+  fieldId,
+  text,
+  descriptionIds,
+  isInvalid,
+  hasSavedPassword,
+  isPasswordShown,
+  fieldRef,
+  onTextChange,
+  onIsPasswordShownChange,
+  onDiscardEdit
+}: EmailPasswordInputProps): ReactElement {
+  return (
+    <div className="settings-view__secret-field">
+      <Input
+        aria-describedby={descriptionIds}
+        aria-invalid={isInvalid ? true : undefined}
+        aria-required={!hasSavedPassword}
+        autoComplete="off"
+        id={fieldId}
+        onChange={(event) => onTextChange(event.target.value)}
+        onKeyDown={(event) => handleFieldKeyDown(event, onDiscardEdit)}
+        placeholder={hasSavedPassword ? PASSWORD_PLACEHOLDER : undefined}
+        ref={fieldRef}
+        spellCheck={false}
+        type={isPasswordShown ? "text" : "password"}
+        value={text}
+      />
+      <Button
+        aria-label="Show password"
+        aria-pressed={isPasswordShown}
+        onClick={() => onIsPasswordShownChange(!isPasswordShown)}
+        size="icon-sm"
+        type="button"
+        variant="ghost"
+      >
+        <Eye aria-hidden="true" />
+      </Button>
+    </div>
+  )
+}
+
+/**
  * Presents the password field with its show and hide button and, when the
  * text breaks a rule, what to change.
  *
  * @remarks The card owns the text and whether the password is shown; the
- * field owns no state or effects. It starts empty; while a password is
- * saved, bullets stand for it and a note says an empty field keeps it,
- * and otherwise the field says beside the label that it is required and
- * is marked required. The saved password is never put in the field.
- * Escape in the input proposes discarding the card's edit, except an
- * Escape that ends text composition.
+ * field owns no state or effects. It starts empty, and a hint beside the
+ * label states the password's rule before entry. While a password is
+ * saved, bullets stand for it and a note says an empty field keeps it;
+ * otherwise the field says beside the label that it is required and is
+ * marked required. The input is described by its hint, then by its
+ * problem, when it has one, then by the note while a password is saved.
+ * The saved password is never put in the field.
  * @param props - Text, problem, saved state, shown state, ref, and the
  * proposals.
  * @returns The field.
@@ -672,45 +789,35 @@ function EmailPasswordField({
   onDiscardEdit
 }: EmailPasswordFieldProps): ReactElement {
   const fieldId = useId()
+  const hintId = `${fieldId}-hint`
   const problemId = `${fieldId}-problem`
   const noteId = `${fieldId}-note`
 
   return (
     <div className="settings-view__email-field">
-      <EmailFieldLabel
-        fieldId={fieldId}
+      <EmailFieldTop
+        hint={EMAIL_PASSWORD_HINT}
+        hintId={hintId}
         isRequired={!hasSavedPassword}
         label="Password"
+        target={{ kind: "control", controlId: fieldId }}
       />
-      <div className="settings-view__secret-field">
-        <Input
-          aria-describedby={formatDescriptionIds([
-            problem === undefined ? undefined : problemId,
-            hasSavedPassword ? noteId : undefined
-          ])}
-          aria-invalid={problem === undefined ? undefined : true}
-          aria-required={!hasSavedPassword}
-          autoComplete="off"
-          id={fieldId}
-          onChange={(event) => onTextChange(event.target.value)}
-          onKeyDown={(event) => handleFieldKeyDown(event, onDiscardEdit)}
-          placeholder={hasSavedPassword ? PASSWORD_PLACEHOLDER : undefined}
-          ref={fieldRef}
-          spellCheck={false}
-          type={isPasswordShown ? "text" : "password"}
-          value={text}
-        />
-        <Button
-          aria-label="Show password"
-          aria-pressed={isPasswordShown}
-          onClick={() => onIsPasswordShownChange(!isPasswordShown)}
-          size="icon-sm"
-          type="button"
-          variant="ghost"
-        >
-          <Eye aria-hidden="true" />
-        </Button>
-      </div>
+      <EmailPasswordInput
+        descriptionIds={formatDescriptionIds([
+          hintId,
+          problem === undefined ? undefined : problemId,
+          hasSavedPassword ? noteId : undefined
+        ])}
+        fieldId={fieldId}
+        fieldRef={fieldRef}
+        hasSavedPassword={hasSavedPassword}
+        isInvalid={problem !== undefined}
+        isPasswordShown={isPasswordShown}
+        onDiscardEdit={onDiscardEdit}
+        onIsPasswordShownChange={onIsPasswordShownChange}
+        onTextChange={onTextChange}
+        text={text}
+      />
       <EmailFieldProblem id={problemId} problem={problem} />
       <EmailFieldNote
         id={noteId}
@@ -726,6 +833,8 @@ function EmailPasswordField({
  * @remarks The card owns the way; the choice owns no state or effects. It
  * is a toggle group named Security with one item per way, in the order of
  * {@link EMAIL_SECURITIES}; pressing the chosen way again proposes nothing.
+ * A hint beside the label states, before a choice, the hosts the way
+ * without TLS is allowed for, and describes the group.
  * @param props - The way and the proposal.
  * @returns The labelled toggle group.
  */
@@ -734,6 +843,7 @@ function EmailSecurityChoice({
   onSecurityChange
 }: EmailSecurityChoiceProps): ReactElement {
   const labelId = useId()
+  const hintId = `${labelId}-hint`
 
   /**
    * Proposes the way to secure the connection the toggle group selected.
@@ -747,8 +857,15 @@ function EmailSecurityChoice({
 
   return (
     <div className="settings-view__email-security">
-      <span id={labelId}>Security</span>
+      <EmailFieldTop
+        hint={EMAIL_SECURITY_HINT}
+        hintId={hintId}
+        isRequired={false}
+        label="Security"
+        target={{ kind: "group", labelId }}
+      />
       <ToggleGroup
+        aria-describedby={hintId}
         aria-labelledby={labelId}
         onValueChange={handleSecurityValueChange}
         size="sm"
@@ -775,8 +892,9 @@ function EmailSecurityChoice({
  *
  * @remarks The card owns the fields; the group owns no state or effects.
  * It is a group named by its legend, such as `IMAP server`. The host and
- * the port are required, and the port's hint states its range. Escape in
- * the host or port proposes discarding the card's edit.
+ * the port are required; the host's hint states its format, and the port's
+ * its range. Escape in the host or port proposes discarding the card's
+ * edit.
  * @param props - Side, fields, problems, refs, and the proposals.
  * @returns The group of fields.
  */
@@ -795,6 +913,7 @@ function EmailServerFields({
       <EmailTextField
         autoComplete="off"
         fieldRef={hostRef}
+        hint={EMAIL_HOST_HINT}
         isRequired
         label="Host"
         onDiscardEdit={onDiscardEdit}
@@ -866,9 +985,10 @@ function EmailSentCopyField({
  * @remarks The card owns the fields; the component owns no state or
  * effects. Typing an address proposes the fields with the address's preset
  * filled in where {@link updateEmailAccountAddress} allows it. The address
- * and the user name are required. The note under the address says which
- * preset applies and describes the address. Escape in an input proposes
- * discarding the card's edit.
+ * and the user name are required, and each field's hint states its rule
+ * before entry. The note under the address says which preset applies and
+ * describes the address. Escape in an input proposes discarding the card's
+ * edit.
  * @param props - Fields, problems, refs, and the proposals.
  * @returns The address, its note, the display name, and the user name, in
  * that order and in no wrapper.
@@ -888,6 +1008,7 @@ function EmailIdentityFields({
       <EmailTextField
         autoComplete="email"
         fieldRef={fieldRefs.address}
+        hint={EMAIL_ADDRESS_HINT}
         isRequired
         label="Address"
         noteId={presetNote === "" ? undefined : presetId}
@@ -902,6 +1023,7 @@ function EmailIdentityFields({
       <EmailTextField
         autoComplete="name"
         fieldRef={fieldRefs.displayName}
+        hint={EMAIL_DISPLAY_NAME_HINT}
         isRequired={false}
         label="Display name"
         onDiscardEdit={onDiscardEdit}
@@ -912,6 +1034,7 @@ function EmailIdentityFields({
       <EmailTextField
         autoComplete="username"
         fieldRef={fieldRefs.userName}
+        hint={EMAIL_USER_NAME_HINT}
         isRequired
         label="User name"
         onDiscardEdit={onDiscardEdit}
@@ -1552,7 +1675,8 @@ function useEmailAccountEdit(
  * there is one. A save that succeeded resets the edit unless the person
  * changed the fields while it ran. After a removal succeeds, the edit is
  * discarded and focus moves to the address field, because Remove leaves.
- * The status line is a polite live region.
+ * The status line is a polite live region. Each field, and each server's
+ * Security choice, states its rule beside its label before entry.
  * @param props - Saved account and password, save and check state, backend
  * status, and the requests.
  * @returns The card.

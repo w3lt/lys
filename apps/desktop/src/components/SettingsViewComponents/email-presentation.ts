@@ -7,6 +7,11 @@ import type {
 import {
   emailAddressSchema,
   emailSecuritySchema,
+  LOOPBACK_EMAIL_HOSTS,
+  MAXIMUM_EMAIL_ADDRESS_LENGTH,
+  MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH,
+  MAXIMUM_EMAIL_PASSWORD_LENGTH,
+  MAXIMUM_EMAIL_USER_NAME_LENGTH,
   MAXIMUM_TCP_PORT,
   type EmailAccount,
   type EmailSecurity
@@ -78,6 +83,21 @@ export const EMAIL_PASSWORD_KEPT_NOTE =
 export const EMAIL_SENT_COPY_NOTE =
   "Gmail and Yahoo file sent mail themselves. Off makes Lys file the copy in Sent."
 
+/** Rule of an address, shown beside its label before entry. */
+export const EMAIL_ADDRESS_HINT = `name@host · up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH}`
+
+/** Rule of a display name, shown beside its label before entry. */
+export const EMAIL_DISPLAY_NAME_HINT = `optional · up to ${MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH}`
+
+/** Rule of a user name, shown beside its label before entry. */
+export const EMAIL_USER_NAME_HINT = `up to ${MAXIMUM_EMAIL_USER_NAME_LENGTH}`
+
+/** Rule of a password, shown beside its label before entry. */
+export const EMAIL_PASSWORD_HINT = `up to ${MAXIMUM_EMAIL_PASSWORD_LENGTH}`
+
+/** Rule of a mail server host, shown beside its label before entry. */
+export const EMAIL_HOST_HINT = "host name, IPv4, or [IPv6]"
+
 /** Rule of a port, shown beside its label before entry. */
 export const EMAIL_PORT_HINT = `1–${MAXIMUM_TCP_PORT}`
 
@@ -95,6 +115,12 @@ const EMAIL_SECURITY_LABELS = Object.freeze({
   starttls: "STARTTLS",
   plain: "None"
 } satisfies Readonly<Record<EmailSecurity, string>>)
+
+/**
+ * Rule of the way without TLS, shown beside the Security label of each
+ * server before a choice: the hosts it is allowed for.
+ */
+export const EMAIL_SECURITY_HINT = `${EMAIL_SECURITY_LABELS.plain} only for ${LOOPBACK_EMAIL_HOSTS.join(", ")}`
 
 /** Label of each server's fields; a new side must add one. */
 const EMAIL_SERVER_SIDE_LABELS = Object.freeze({

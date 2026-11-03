@@ -68,7 +68,8 @@ pub struct ComposedMessage {
     pub bytes: Vec<u8>,
     /// The sender and every recipient, `Bcc` ones included.
     pub envelope: Envelope,
-    /// The message's identifier, without angle brackets.
+    /// The message's identifier, without angle brackets; empty for a
+    /// stored draft that has no `Message-ID` field.
     pub message_id: String,
 }
 

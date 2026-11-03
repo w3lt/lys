@@ -29,7 +29,7 @@ export const EMAIL_ACCOUNT_CHECK_TIMEOUT_MILLISECONDS = 60_000
  */
 const MAXIMUM_OUTPUT_LENGTH = 65_536
 
-/** Most standard error lines kept to log a failed check. */
+/** Most standard error lines kept to log with a check's outcome. */
 const MAXIMUM_ERROR_LINE_COUNT = 32
 
 /** Validates what the check subcommand prints: both sign-ins' outcomes. */

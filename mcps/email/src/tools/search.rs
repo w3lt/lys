@@ -12,7 +12,9 @@ use super::{
 use crate::email_id::EmailId;
 use crate::failure::ToolFailure;
 use crate::folders::{Folder, FolderRole};
-use crate::imap::{Flags, FolderAccess, ImapSession, format_search_date, format_search_text};
+use crate::imap::{
+    Flags, FolderAccess, ImapSession, Summary, format_search_date, format_search_text,
+};
 use crate::message::{Headers, parse_headers};
 
 /// Messages per page.
@@ -81,62 +83,165 @@ pub struct Hit {
 /// * `arguments` - What to search for.
 pub async fn run_search_emails(context: &ToolContext, arguments: SearchArguments) -> ToolResult {
     let criteria = build_search_criteria(&arguments)?;
-    let page = match arguments.page {
-        None => 1,
-        Some(0) => return Err(ToolFailure::Argument("page must be 1 or more.".to_owned())),
-        Some(page) => page as usize,
-    };
+    let page = parse_page(arguments.page)?;
     if let Some(folder) = &arguments.folder {
         parse_text_argument("folder", folder, super::MAXIMUM_FOLDER_NAME_LENGTH)?;
     }
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
-    let targets: Vec<Folder> = match &arguments.folder {
-        Some(name) => {
-            let folder = get_folder(&folders, name)?;
-            if !folder.selectable {
-                return Err(ToolFailure::Argument(format!(
-                    "{name} cannot hold messages. Use list_folders to see the folders."
-                )));
-            }
-            vec![folder.clone()]
-        }
-        None => folders
+    let targets = list_search_folders(&folders, arguments.folder.as_deref())?;
+    let mut found = find_search_hits(&mut session, &targets, &criteria).await?;
+    session.close().await;
+    found.hits.sort_by(calculate_hit_order);
+    build_search_report(&found, page, targets.len())
+}
+
+/// The hits a search found in its folders, and the folders where more
+/// messages matched than were read.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct SearchHits {
+    /// The hits of every folder.
+    hits: Vec<Hit>,
+    /// The folders where more than [`FOLDER_HIT_LIMIT`] messages matched,
+    /// so that only the newest of them were read.
+    cut_folders: Vec<String>,
+}
+
+/// Parses the page argument.
+///
+/// # Arguments
+///
+/// * `page` - The page asked for, from 1, or `None` for the first.
+///
+/// # Returns
+///
+/// The page, or the rule a page of 0 breaks as the model reads it.
+fn parse_page(page: Option<u32>) -> Result<usize, ToolFailure> {
+    match page {
+        None => Ok(1),
+        Some(0) => Err(ToolFailure::Argument("page must be 1 or more.".to_owned())),
+        Some(page) => Ok(page as usize),
+    }
+}
+
+/// Lists the folders a search reads: the one named, or every folder that
+/// can hold messages but an All Mail view, whose messages the other
+/// folders already hold.
+///
+/// # Arguments
+///
+/// * `folders` - The classified folders.
+/// * `name` - The folder asked for, if any.
+///
+/// # Returns
+///
+/// The folders, or why the one named cannot be searched.
+fn list_search_folders(folders: &[Folder], name: Option<&str>) -> Result<Vec<Folder>, ToolFailure> {
+    let Some(name) = name else {
+        return Ok(folders
             .iter()
             .filter(|folder| folder.selectable && folder.role != Some(FolderRole::All))
             .cloned()
-            .collect(),
+            .collect());
     };
-    let mut hits = Vec::new();
-    let mut cut_folders = Vec::new();
-    for folder in &targets {
+    let folder = get_folder(folders, name)?;
+    if !folder.selectable {
+        return Err(ToolFailure::Argument(format!(
+            "{name} cannot hold messages. Use list_folders to see the folders."
+        )));
+    }
+    Ok(vec![folder.clone()])
+}
+
+/// Searches each folder, keeping its newest [`FOLDER_HIT_LIMIT`] hits.
+///
+/// # Arguments
+///
+/// * `session` - The signed-in session.
+/// * `targets` - The folders to search.
+/// * `criteria` - The search keys.
+async fn find_search_hits(
+    session: &mut ImapSession,
+    targets: &[Folder],
+    criteria: &str,
+) -> Result<SearchHits, ToolFailure> {
+    let mut found = SearchHits::default();
+    for folder in targets {
         let query = HitQuery {
-            criteria: &criteria,
+            criteria,
             limit: FOLDER_HIT_LIMIT,
         };
-        let (found, cut) = list_folder_hits(&mut session, folder, query).await?;
-        hits.extend(found);
+        let (hits, cut) = list_folder_hits(session, folder, query).await?;
+        found.hits.extend(hits);
         if cut {
-            cut_folders.push(folder.name.clone());
+            found.cut_folders.push(folder.name.clone());
         }
     }
-    session.close().await;
-    hits.sort_by(calculate_hit_order);
-    let total = hits.len();
-    let pages = total.div_ceil(PAGE_SIZE).max(1);
+    Ok(found)
+}
+
+/// Builds the report of one page of a search.
+///
+/// # Arguments
+///
+/// * `found` - The hits, newest first, and the folders that were cut.
+/// * `page` - The page asked for, from 1.
+/// * `folder_count` - How many folders were searched, for the log.
+///
+/// # Returns
+///
+/// The page, or the pages there are when the one asked for is past them.
+fn build_search_report(found: &SearchHits, page: usize, folder_count: usize) -> ToolResult {
+    let total = found.hits.len();
     if total == 0 {
         return Ok(ToolReport {
             text: "No message matches.".to_owned(),
-            log: format!("search: {} folder(s), 0 hits", targets.len()),
+            log: format!("search: {folder_count} folder(s), 0 hits"),
         });
     }
+    let pages = total.div_ceil(PAGE_SIZE);
     if page > pages {
-        return Err(ToolFailure::Argument(if pages == 1 {
-            "Only 1 page matches. Ask for page 1.".to_owned()
-        } else {
-            format!("Only {pages} pages match. Ask for a page from 1 to {pages}.")
-        }));
+        return Err(format_page_failure(pages));
     }
+    let mut text = format_search_heading(found, page, pages);
+    for hit in found
+        .hits
+        .iter()
+        .skip((page - 1) * PAGE_SIZE)
+        .take(PAGE_SIZE)
+    {
+        text.push_str("\n\n");
+        text.push_str(&format_hit(hit));
+    }
+    Ok(ToolReport {
+        text,
+        log: format!("search: {folder_count} folder(s), {total} hit(s), page {page} of {pages}"),
+    })
+}
+
+/// Formats the refusal of a page past the last one.
+///
+/// # Arguments
+///
+/// * `pages` - How many pages there are, at least 1.
+fn format_page_failure(pages: usize) -> ToolFailure {
+    ToolFailure::Argument(if pages == 1 {
+        "Only 1 page matches. Ask for page 1.".to_owned()
+    } else {
+        format!("Only {pages} pages match. Ask for a page from 1 to {pages}.")
+    })
+}
+
+/// Formats the heading of a search page: which page of how many, how many
+/// messages match, and the folders that matched more than were read.
+///
+/// # Arguments
+///
+/// * `found` - The hits and the folders that were cut.
+/// * `page` - The page shown.
+/// * `pages` - How many pages there are.
+fn format_search_heading(found: &SearchHits, page: usize, pages: usize) -> String {
+    let total = found.hits.len();
     let mut text = format!(
         "Page {page} of {pages}: {total} {} match, newest first.",
         if total == 1 { "message" } else { "messages" }
@@ -144,23 +249,13 @@ pub async fn run_search_emails(context: &ToolContext, arguments: SearchArguments
     if page < pages {
         text.push_str(&format!(" Ask for page {} to see the next ones.", page + 1));
     }
-    if !cut_folders.is_empty() {
+    if !found.cut_folders.is_empty() {
         text.push_str(&format!(
             "\nMore than {FOLDER_HIT_LIMIT} messages match in {}; only the newest {FOLDER_HIT_LIMIT} of each are listed. Narrow the search to see others.",
-            cut_folders.join(", ")
+            found.cut_folders.join(", ")
         ));
     }
-    for hit in hits.iter().skip((page - 1) * PAGE_SIZE).take(PAGE_SIZE) {
-        text.push_str("\n\n");
-        text.push_str(&format_hit(hit));
-    }
-    Ok(ToolReport {
-        text,
-        log: format!(
-            "search: {} folder(s), {total} hit(s), page {page} of {pages}",
-            targets.len()
-        ),
-    })
+    text
 }
 
 /// What a folder is searched for: the search keys, and how many of the
@@ -206,31 +301,40 @@ pub async fn list_folder_hits(
         .map_err(build_imap_failure_conversion("fetch the message summaries"))?;
     let hits = summaries
         .into_iter()
-        .map(|summary| {
-            let headers = parse_headers(&summary.header);
-            let timestamp = headers
-                .timestamp
-                .or(summary.internal_timestamp)
-                .unwrap_or_default();
-            let date = headers
-                .date
-                .clone()
-                .or(summary.internal_date)
-                .unwrap_or_else(|| "unknown".to_owned());
-            Hit {
-                id: EmailId {
-                    uid: summary.uid,
-                    uid_validity: selected.uid_validity,
-                    folder: folder.name.clone(),
-                },
-                flags: summary.flags,
-                headers,
-                timestamp,
-                date,
-            }
-        })
+        .map(|summary| build_hit(summary, folder, selected.uid_validity))
         .collect();
     Ok((hits, cut))
+}
+
+/// Builds the hit of a fetched summary.
+///
+/// # Arguments
+///
+/// * `summary` - The summary the server answered.
+/// * `folder` - The folder it was found in.
+/// * `uid_validity` - The folder's UIDVALIDITY when it was selected.
+fn build_hit(summary: Summary, folder: &Folder, uid_validity: u32) -> Hit {
+    let headers = parse_headers(&summary.header);
+    let timestamp = headers
+        .timestamp
+        .or(summary.internal_timestamp)
+        .unwrap_or_default();
+    let date = headers
+        .date
+        .clone()
+        .or(summary.internal_date)
+        .unwrap_or_else(|| "unknown".to_owned());
+    Hit {
+        id: EmailId {
+            uid: summary.uid,
+            uid_validity,
+            folder: folder.name.clone(),
+        },
+        flags: summary.flags,
+        headers,
+        timestamp,
+        date,
+    }
 }
 
 /// Calculates the order of two hits, newest first: by time, then by UID.

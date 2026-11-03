@@ -10,7 +10,8 @@ use super::{
 };
 use crate::failure::ToolFailure;
 use crate::folder_name::build_encoded_folder_name;
-use crate::folders::find_folder;
+use crate::folders::{Folder, find_folder};
+use crate::imap::ImapSession;
 
 /// What `manage_folder` does.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -90,59 +91,100 @@ pub async fn run_manage_folder(context: &ToolContext, arguments: FolderArguments
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
     let report = match arguments.action {
-        FolderAction::Create => {
-            if find_folder(&folders, &arguments.name).is_some() {
-                return Err(ToolFailure::FolderExists(arguments.name));
-            }
-            session
-                .create_folder(&build_encoded_folder_name(&arguments.name))
-                .await
-                .map_err(build_imap_failure_conversion("create the folder"))?;
-            ToolReport {
-                text: format!("Folder {} created.", arguments.name),
-                log: "folder: created".to_owned(),
-            }
-        }
-        FolderAction::Rename => {
-            let new_name = arguments.new_name.ok_or_else(|| {
-                ToolFailure::Argument("new_name is required to rename a folder.".to_owned())
-            })?;
-            let folder = get_changeable_folder(&folders, &arguments.name)?;
-            if find_folder(&folders, &new_name).is_some() {
-                return Err(ToolFailure::FolderExists(new_name));
-            }
-            session
-                .update_folder_name(&folder.raw_name, &build_encoded_folder_name(&new_name))
-                .await
-                .map_err(build_imap_failure_conversion("rename the folder"))?;
-            ToolReport {
-                text: format!("Folder {} renamed to {new_name}.", folder.name),
-                log: "folder: renamed".to_owned(),
-            }
-        }
+        FolderAction::Create => create_new_folder(&mut session, &folders, &arguments.name).await?,
+        FolderAction::Rename => update_folder_name(&mut session, &folders, &arguments).await?,
         FolderAction::Delete => {
-            let folder = get_changeable_folder(&folders, &arguments.name)?;
-            if folder.selectable {
-                let count = session
-                    .get_message_count(&folder.raw_name)
-                    .await
-                    .map_err(build_imap_failure_conversion("count the messages"))?;
-                if count > 0 {
-                    return Err(ToolFailure::FolderNotEmpty(folder.name.clone()));
-                }
-            }
-            session
-                .delete_folder(&folder.raw_name)
-                .await
-                .map_err(build_imap_failure_conversion("delete the folder"))?;
-            ToolReport {
-                text: format!("Folder {} deleted.", folder.name),
-                log: "folder: deleted".to_owned(),
-            }
+            delete_empty_folder(&mut session, &folders, &arguments.name).await?
         }
     };
     session.close().await;
     Ok(report)
+}
+
+/// Creates a folder no folder has the name of.
+///
+/// # Arguments
+///
+/// * `session` - The signed-in session.
+/// * `folders` - The classified folders.
+/// * `name` - The new folder's name.
+async fn create_new_folder(
+    session: &mut ImapSession,
+    folders: &[Folder],
+    name: &str,
+) -> Result<ToolReport, ToolFailure> {
+    if find_folder(folders, name).is_some() {
+        return Err(ToolFailure::FolderExists(name.to_owned()));
+    }
+    session
+        .create_folder(&build_encoded_folder_name(name))
+        .await
+        .map_err(build_imap_failure_conversion("create the folder"))?;
+    Ok(ToolReport {
+        text: format!("Folder {name} created."),
+        log: "folder: created".to_owned(),
+    })
+}
+
+/// Renames a folder without a role to a name no folder has.
+///
+/// # Arguments
+///
+/// * `session` - The signed-in session.
+/// * `folders` - The classified folders.
+/// * `arguments` - The folder's name and its new name.
+async fn update_folder_name(
+    session: &mut ImapSession,
+    folders: &[Folder],
+    arguments: &FolderArguments,
+) -> Result<ToolReport, ToolFailure> {
+    let new_name = arguments.new_name.as_deref().ok_or_else(|| {
+        ToolFailure::Argument("new_name is required to rename a folder.".to_owned())
+    })?;
+    let folder = get_changeable_folder(folders, &arguments.name)?;
+    if find_folder(folders, new_name).is_some() {
+        return Err(ToolFailure::FolderExists(new_name.to_owned()));
+    }
+    session
+        .update_folder_name(&folder.raw_name, &build_encoded_folder_name(new_name))
+        .await
+        .map_err(build_imap_failure_conversion("rename the folder"))?;
+    Ok(ToolReport {
+        text: format!("Folder {} renamed to {new_name}.", folder.name),
+        log: "folder: renamed".to_owned(),
+    })
+}
+
+/// Deletes a folder without a role that holds no message.
+///
+/// # Arguments
+///
+/// * `session` - The signed-in session.
+/// * `folders` - The classified folders.
+/// * `name` - The folder's name.
+async fn delete_empty_folder(
+    session: &mut ImapSession,
+    folders: &[Folder],
+    name: &str,
+) -> Result<ToolReport, ToolFailure> {
+    let folder = get_changeable_folder(folders, name)?;
+    if folder.selectable {
+        let count = session
+            .get_message_count(&folder.raw_name)
+            .await
+            .map_err(build_imap_failure_conversion("count the messages"))?;
+        if count > 0 {
+            return Err(ToolFailure::FolderNotEmpty(folder.name.clone()));
+        }
+    }
+    session
+        .delete_folder(&folder.raw_name)
+        .await
+        .map_err(build_imap_failure_conversion("delete the folder"))?;
+    Ok(ToolReport {
+        text: format!("Folder {} deleted.", folder.name),
+        log: "folder: deleted".to_owned(),
+    })
 }
 
 #[cfg(test)]

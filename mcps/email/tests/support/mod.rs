@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use email::account::{Account, parse_account_variable};
 use email::tools::ToolContext;
 use email::trust::Trust;
+use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 use tokio::time::{Instant, timeout};
 
 use self::imap::{FakeImapServer, FakeMailbox, ImapMode, NewMessage};
@@ -123,6 +124,16 @@ where
         .await
         .expect("a limit of the code under test ends the future");
     (outcome, started.elapsed())
+}
+
+/// Reads and drops bytes, text or not, such as a TLS handshake, until the
+/// stream ends or fails.
+pub async fn read_until_end<S>(reader: &mut BufReader<S>)
+where
+    S: AsyncRead + Unpin,
+{
+    let mut buffer = [0_u8; 1024];
+    while reader.read(&mut buffer).await.is_ok_and(|count| count > 0) {}
 }
 
 /// Asserts that a duration measured across a pause of the clock is the

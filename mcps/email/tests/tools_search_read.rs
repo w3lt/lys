@@ -109,6 +109,24 @@ async fn read_conversation_text(stack: &Stack, id: &str) -> String {
         .text
 }
 
+/// Searches INBOX for every message and shows one page.
+///
+/// # Arguments
+///
+/// * `stack` - The running fakes and the tools' context.
+/// * `page` - The page, or `None` for the first.
+async fn search_inbox(stack: &Stack, page: Option<u32>) -> String {
+    let arguments = SearchArguments {
+        folder: Some("INBOX".to_owned()),
+        page,
+        ..SearchArguments::default()
+    };
+    run_search_emails(&stack.context, arguments)
+        .await
+        .expect("the hits")
+        .text
+}
+
 /// Lists the ids of a conversation's entries, in the order shown.
 fn list_entry_ids(text: &str) -> Vec<&str> {
     text.split("\n\n----\nid ")
@@ -259,6 +277,33 @@ async fn searches_every_folder_but_the_all_view_and_folders_that_hold_nothing() 
             .any(|command| command.contains("\"All Mail\"") || command.contains("\"[Gmail]\"")),
         "{commands:?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lists_only_the_newest_200_hits_of_a_folder_and_says_so() {
+    let mut mailbox = FakeMailbox::create_standard();
+    for number in 1..=205 {
+        let message = TestMessage {
+            subject: format!("Message {number}"),
+            body: "Text.".to_owned(),
+            message_id: format!("n{number}@example.com"),
+            timestamp: BASE + number * 60,
+            ..TestMessage::default()
+        };
+        mailbox.add_message("INBOX", message.build_new_message(&[]));
+    }
+    let stack = start_stack(mailbox, false).await;
+
+    let first = search_inbox(&stack, None).await;
+    let last = search_inbox(&stack, Some(10)).await;
+
+    assert!(
+        first.starts_with("Page 1 of 10: 200 messages match, newest first. Ask for page 2 to see the next ones.\nMore than 200 messages match in INBOX; only the newest 200 of each are listed. Narrow the search to see others.\n\nid 205.1001.INBOX\n"),
+        "{first}"
+    );
+    assert_eq!(calculate_hit_count(&last), 20, "{last}");
+    assert!(last.contains("\n\nid 6.1001.INBOX\n"), "{last}");
+    assert!(!last.contains("id 5.1001.INBOX\n"), "{last}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -16,7 +16,7 @@ use tokio_rustls::TlsAcceptor;
 
 use super::{
     PASSWORD, USER_NAME, format_internal_date, get_current_timestamp, parse_search_date,
-    run_past_fault,
+    read_until_end, run_past_fault,
 };
 
 /// How the fake protects its connections.
@@ -30,7 +30,9 @@ pub enum ImapMode {
     StartTlsRefused,
     /// Plain, no TLS at all.
     Plain,
-    /// Accepts the connection and never writes.
+    /// Accepts the connection, reads whatever comes, text or not, and
+    /// never writes; each connection counts as a fault for
+    /// [`FakeImapServer::run_past_fault`].
     Silent,
     /// Greets with text that is not IMAP, then closes.
     Garbage,
@@ -422,15 +424,8 @@ struct ConnectionSetup {
 async fn handle_connection(stream: TcpStream, setup: ConnectionSetup) {
     match setup.mode {
         ImapMode::Silent => {
-            let mut reader = BufReader::new(stream);
-            let mut line = String::new();
-            while reader
-                .read_line(&mut line)
-                .await
-                .is_ok_and(|count| count > 0)
-            {
-                line.clear();
-            }
+            setup.faulted.notify_one();
+            read_until_end(&mut BufReader::new(stream)).await;
         }
         ImapMode::Garbage => {
             let mut stream = stream;

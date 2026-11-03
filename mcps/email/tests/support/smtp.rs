@@ -10,12 +10,12 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 use tokio_rustls::TlsAcceptor;
 
-use super::{PASSWORD, USER_NAME, run_past_fault};
+use super::{PASSWORD, USER_NAME, read_until_end, run_past_fault};
 
 /// How the fake protects its connections.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -442,15 +442,6 @@ where
         }
         self.send_reply("250 2.0.0 OK: queued\r\n").await
     }
-}
-
-/// Reads and drops bytes, text or not, until the stream ends or fails.
-async fn read_until_end<S>(reader: &mut BufReader<S>)
-where
-    S: AsyncRead + Unpin,
-{
-    let mut buffer = [0_u8; 1024];
-    while reader.read(&mut buffer).await.is_ok_and(|count| count > 0) {}
 }
 
 /// Reads one command line without its line break.

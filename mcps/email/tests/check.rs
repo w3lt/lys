@@ -75,17 +75,20 @@ async fn offer_sign_ins_to_fakes(
     (report.imap, report.smtp)
 }
 
-/// Builds an account whose SMTP server is the plain fake and whose IMAP
-/// server is a port nothing listens on.
-async fn build_account_without_imap(smtp: &FakeSmtpServer) -> Account {
+/// Finds a local port nothing listens on.
+async fn find_closed_port() -> u16 {
     let closed = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("a port");
-    let imap_port = closed.local_addr().expect("the address").port();
-    drop(closed);
+    closed.local_addr().expect("the address").port()
+}
+
+/// Builds an account whose SMTP server is the plain fake and whose IMAP
+/// server is a port nothing listens on.
+async fn build_account_without_imap(smtp: &FakeSmtpServer) -> Account {
     build_account(
         TestServers {
-            imap_port,
+            imap_port: find_closed_port().await,
             imap_security: SecurityName::Plain,
             smtp_port: smtp.port,
             smtp_security: SecurityName::Plain,
@@ -355,6 +358,37 @@ async fn ends_an_unanswered_quit_at_the_check_limit_and_accepts_the_sign_in() {
         .await;
 
     assert_eq!(report.smtp, CheckOutcome::Accepted);
+    assert_about(elapsed, Duration::from_secs(20));
+}
+
+#[tokio::test]
+async fn ends_an_imap_sign_in_without_a_greeting_at_the_check_limit() {
+    let imap = FakeImapServer::start(FakeMailbox::create_standard(), ImapMode::Silent, None).await;
+    let servers = TestServers {
+        imap_port: imap.port,
+        imap_security: SecurityName::Plain,
+        smtp_port: find_closed_port().await,
+        smtp_security: SecurityName::Plain,
+    };
+    let account = build_account(servers, false);
+    let trust = Trust::create_with_extra_roots(Vec::new());
+
+    let (report, elapsed) = imap
+        .run_past_fault(offer_account_sign_ins(&account, &trust))
+        .await;
+
+    assert_eq!(
+        report.imap,
+        CheckOutcome::Failed {
+            reason: SignInFailure::TimedOut
+        }
+    );
+    assert_eq!(
+        report.smtp,
+        CheckOutcome::Failed {
+            reason: SignInFailure::Unreachable
+        }
+    );
     assert_about(elapsed, Duration::from_secs(20));
 }
 

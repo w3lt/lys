@@ -470,6 +470,43 @@ async fn refuses_arguments_that_break_a_rule_before_connecting() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn sends_a_message_without_a_copy_when_no_folder_is_the_sent_one() {
+    let mut mailbox = FakeMailbox::create_standard();
+    mailbox.folders.retain(|folder| folder.name != "Sent");
+    let stack = start_stack(mailbox, false).await;
+
+    let report = run_send_email(
+        &stack.context,
+        build_message_to_jane("Hi", "Hello"),
+        &SendProgress::default(),
+    )
+    .await
+    .expect("sent");
+
+    assert!(
+        report
+            .text
+            .ends_with("\nNo Sent folder was found, so no copy was saved."),
+        "{}",
+        report.text
+    );
+    assert_eq!(
+        report.log,
+        "send: 1 recipient(s), 0 attachment(s), copy no folder"
+    );
+    assert_eq!(stack.smtp.list_mails().len(), 1);
+    assert!(
+        !stack
+            .imap
+            .list_commands()
+            .iter()
+            .any(|command| command.contains(" APPEND ")),
+        "{:?}",
+        stack.imap.list_commands()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn reports_a_message_sent_before_its_copy_failed_as_sent() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
     stack.imap.add_fault("APPEND", ImapFault::Close);

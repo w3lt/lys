@@ -442,9 +442,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn composes_a_plain_message_with_every_field_and_strips_bcc_unless_kept() {
-        let composition = Composition {
+    /// A reply with every recipient field, a subject that is not ASCII, and
+    /// a body of two paragraphs.
+    fn build_plain_composition() -> Composition {
+        Composition {
             to: vec!["Jane Doe <jane@example.com>".to_owned()],
             cc: vec!["cc@example.com".to_owned()],
             bcc: vec!["hidden@example.com".to_owned()],
@@ -453,12 +454,15 @@ mod tests {
             in_reply_to: Some("one@example.com".to_owned()),
             references: vec!["zero@example.com".to_owned(), "one@example.com".to_owned()],
             attachments: Vec::new(),
-        };
+        }
+    }
+
+    #[test]
+    fn composes_a_plain_message_with_every_field_but_bcc() {
+        let composition = build_plain_composition();
 
         let sent =
             build_sent_message(&build_account(), &composition, build_stamp(7)).expect("message");
-        let draft =
-            build_draft_message(&build_account(), &composition, build_stamp(8)).expect("draft");
 
         let text = String::from_utf8(sent.bytes.clone()).expect("utf-8");
         assert!(
@@ -483,16 +487,26 @@ mod tests {
             text.contains(&format!("Message-ID: <{}>\r\n", sent.message_id)),
             "{text}"
         );
+        let message_id = &sent.message_id;
         assert!(
-            sent.message_id.starts_with("lys-1793611800.000000000-"),
-            "{}",
-            sent.message_id
+            message_id.starts_with("lys-1793611800.000000000-"),
+            "{message_id}"
         );
-        assert!(
-            sent.message_id.ends_with("-7@example.com"),
-            "{}",
-            sent.message_id
-        );
+        assert!(message_id.ends_with("-7@example.com"), "{message_id}");
+        let parsed = parse_message(&sent.bytes).expect("parsed");
+        assert_eq!(parsed.headers.subject, "Grüße");
+        assert_eq!(parsed.text, "Hello Jane,\r\n\r\nBye.\r\n");
+    }
+
+    #[test]
+    fn sends_to_every_recipient_and_keeps_bcc_only_in_a_draft() {
+        let composition = build_plain_composition();
+
+        let sent =
+            build_sent_message(&build_account(), &composition, build_stamp(7)).expect("message");
+        let draft =
+            build_draft_message(&build_account(), &composition, build_stamp(8)).expect("draft");
+
         let recipients: Vec<String> = sent.envelope.to().iter().map(ToString::to_string).collect();
         assert_eq!(
             recipients,
@@ -502,9 +516,6 @@ mod tests {
             sent.envelope.from().map(ToString::to_string),
             Some("person@example.com".to_owned())
         );
-        let parsed = parse_message(&sent.bytes).expect("parsed");
-        assert_eq!(parsed.headers.subject, "Grüße");
-        assert_eq!(parsed.text, "Hello Jane,\r\n\r\nBye.\r\n");
         let draft_text = String::from_utf8(draft.bytes).expect("utf-8");
         assert!(
             draft_text.contains("Bcc: hidden@example.com\r\n"),

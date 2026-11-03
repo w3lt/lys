@@ -8,6 +8,25 @@ use email::tools::folders::{FolderAction, FolderArguments, run_list_folders, run
 use crate::support::imap::{FakeFolder, FakeMailbox};
 use crate::support::{Stack, TestMessage, start_stack};
 
+/// Builds the arguments of manage_folder.
+///
+/// # Arguments
+///
+/// * `action` - What to do with the folder.
+/// * `name` - The folder's name.
+/// * `new_name` - The name to rename it to, if any.
+fn build_folder_arguments(
+    action: FolderAction,
+    name: &str,
+    new_name: Option<&str>,
+) -> FolderArguments {
+    FolderArguments {
+        action,
+        name: name.to_owned(),
+        new_name: new_name.map(str::to_owned),
+    }
+}
+
 /// Deletes a folder with manage_folder.
 ///
 /// # Arguments
@@ -15,12 +34,22 @@ use crate::support::{Stack, TestMessage, start_stack};
 /// * `stack` - The running fakes and the tools' context.
 /// * `name` - The folder's name.
 async fn delete_folder(stack: &Stack, name: &str) -> ToolResult {
-    let arguments = FolderArguments {
-        action: FolderAction::Delete,
-        name: name.to_owned(),
-        new_name: None,
-    };
+    let arguments = build_folder_arguments(FolderAction::Delete, name, None);
     run_manage_folder(&stack.context, arguments).await
+}
+
+/// Lists the commands that create, rename, or delete a folder.
+fn list_folder_changes(stack: &Stack) -> Vec<String> {
+    stack
+        .imap
+        .list_commands()
+        .into_iter()
+        .filter(|command| {
+            command.contains(" CREATE ")
+                || command.contains(" RENAME ")
+                || command.contains(" DELETE ")
+        })
+        .collect()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -71,71 +100,90 @@ async fn lists_folders_with_roles_and_counts() {
 #[tokio::test(flavor = "multi_thread")]
 async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    let create = build_folder_arguments(FolderAction::Create, "Grüße", None);
+    let rename = build_folder_arguments(FolderAction::Rename, "Grüße", Some("Archive 2026"));
 
-    let created = run_manage_folder(
-        &stack.context,
-        FolderArguments {
-            action: FolderAction::Create,
-            name: "Grüße".to_owned(),
-            new_name: None,
-        },
-    )
-    .await
-    .expect("created");
+    let created = run_manage_folder(&stack.context, create).await;
     let listed = run_list_folders(&stack.context).await.expect("the folders");
-    let renamed = run_manage_folder(
-        &stack.context,
-        FolderArguments {
-            action: FolderAction::Rename,
-            name: "Grüße".to_owned(),
-            new_name: Some("Archive 2026".to_owned()),
-        },
-    )
-    .await
-    .expect("renamed");
-    let deleted = run_manage_folder(
-        &stack.context,
-        FolderArguments {
-            action: FolderAction::Delete,
-            name: "Archive 2026".to_owned(),
-            new_name: None,
-        },
-    )
-    .await
-    .expect("deleted");
+    let renamed = run_manage_folder(&stack.context, rename).await;
+    let deleted = delete_folder(&stack, "Archive 2026").await;
 
-    assert_eq!(created.text, "Folder Grüße created.");
+    assert_eq!(
+        created.map(|report| report.text),
+        Ok("Folder Grüße created.".to_owned())
+    );
     assert!(
         listed.text.contains("\n- Grüße: 0 messages"),
         "{}",
         listed.text
     );
-    assert_eq!(renamed.text, "Folder Grüße renamed to Archive 2026.");
-    assert_eq!(deleted.text, "Folder Archive 2026 deleted.");
-    let commands = stack.imap.list_commands();
+    assert_eq!(
+        renamed.map(|report| report.text),
+        Ok("Folder Grüße renamed to Archive 2026.".to_owned())
+    );
+    assert_eq!(
+        deleted.map(|report| report.text),
+        Ok("Folder Archive 2026 deleted.".to_owned())
+    );
+    let changes = list_folder_changes(&stack);
+    assert_eq!(changes.len(), 3, "{changes:?}");
     assert!(
-        commands
-            .iter()
-            .any(|command| command.ends_with("CREATE \"Gr&APwA3w-e\"")),
-        "{commands:?}"
+        changes[0].ends_with(" CREATE \"Gr&APwA3w-e\""),
+        "{changes:?}"
     );
     assert!(
-        commands
-            .iter()
-            .any(|command| command.ends_with("RENAME \"Gr&APwA3w-e\" \"Archive 2026\"")),
-        "{commands:?}"
+        changes[1].ends_with(" RENAME \"Gr&APwA3w-e\" \"Archive 2026\""),
+        "{changes:?}"
     );
     assert!(
-        commands
-            .iter()
-            .any(|command| command.ends_with("DELETE \"Archive 2026\"")),
-        "{commands:?}"
+        changes[2].ends_with(" DELETE \"Archive 2026\""),
+        "{changes:?}"
     );
     assert!(stack.imap.find_folder("Archive 2026").is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn refuses_role_folders_taken_names_missing_folders_and_folders_that_hold_messages() {
+async fn refuses_to_change_role_folders_or_to_take_a_name_in_use() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    let change = |action: FolderAction, name: &str, new_name: Option<&str>| {
+        run_manage_folder(
+            &stack.context,
+            build_folder_arguments(action, name, new_name),
+        )
+    };
+
+    let renamed_inbox = change(FolderAction::Rename, "INBOX", Some("Old")).await;
+    let deleted_sent = change(FolderAction::Delete, "Sent", None).await;
+    let created_twice = change(FolderAction::Create, "Projects", None).await;
+    let renamed_onto_inbox = change(FolderAction::Rename, "Projects", Some("inbox")).await;
+
+    assert_eq!(
+        renamed_inbox,
+        Err(ToolFailure::RoleFolder {
+            name: "INBOX".to_owned(),
+            role: FolderRole::Inbox
+        })
+    );
+    assert_eq!(
+        deleted_sent,
+        Err(ToolFailure::RoleFolder {
+            name: "Sent".to_owned(),
+            role: FolderRole::Sent
+        })
+    );
+    assert_eq!(
+        created_twice,
+        Err(ToolFailure::FolderExists("Projects".to_owned()))
+    );
+    assert_eq!(
+        renamed_onto_inbox,
+        Err(ToolFailure::FolderExists("inbox".to_owned()))
+    );
+    assert_eq!(list_folder_changes(&stack), Vec::<String>::new());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_missing_folders_folders_that_hold_messages_and_unusable_names() {
     let mut mailbox = FakeMailbox::create_standard();
     let message = TestMessage {
         subject: "Plan".to_owned(),
@@ -149,59 +197,36 @@ async fn refuses_role_folders_taken_names_missing_folders_and_folders_that_hold_
     let change = |action: FolderAction, name: &str, new_name: Option<&str>| {
         run_manage_folder(
             &stack.context,
-            FolderArguments {
-                action,
-                name: name.to_owned(),
-                new_name: new_name.map(str::to_owned),
-            },
+            build_folder_arguments(action, name, new_name),
         )
     };
 
+    let deleted_full = change(FolderAction::Delete, "Projects", None).await;
+    let deleted_missing = change(FolderAction::Delete, "Nowhere", None).await;
+    let renamed_to_nothing = change(FolderAction::Rename, "Projects", None).await;
+    let created_spaced = change(FolderAction::Create, " Spaced", None).await;
+
     assert_eq!(
-        change(FolderAction::Rename, "INBOX", Some("Old")).await,
-        Err(ToolFailure::RoleFolder {
-            name: "INBOX".to_owned(),
-            role: FolderRole::Inbox
-        })
-    );
-    assert_eq!(
-        change(FolderAction::Delete, "Sent", None).await,
-        Err(ToolFailure::RoleFolder {
-            name: "Sent".to_owned(),
-            role: FolderRole::Sent
-        })
-    );
-    assert_eq!(
-        change(FolderAction::Create, "Projects", None).await,
-        Err(ToolFailure::FolderExists("Projects".to_owned()))
-    );
-    assert_eq!(
-        change(FolderAction::Rename, "Projects", Some("inbox")).await,
-        Err(ToolFailure::FolderExists("inbox".to_owned()))
-    );
-    assert_eq!(
-        change(FolderAction::Delete, "Projects", None).await,
+        deleted_full,
         Err(ToolFailure::FolderNotEmpty("Projects".to_owned()))
     );
     assert_eq!(
-        change(FolderAction::Delete, "Nowhere", None).await,
+        deleted_missing,
         Err(ToolFailure::FolderMissing("Nowhere".to_owned()))
     );
     assert_eq!(
-        change(FolderAction::Rename, "Projects", None).await,
+        renamed_to_nothing,
         Err(ToolFailure::Argument(
             "new_name is required to rename a folder.".to_owned()
         ))
     );
     assert_eq!(
-        change(FolderAction::Create, " Spaced", None).await,
+        created_spaced,
         Err(ToolFailure::Argument(
             "name must be a folder name without whitespace at its edges.".to_owned()
         ))
     );
-    assert!(!stack.imap.list_commands().iter().any(|command| {
-        command.contains(" CREATE ") || command.contains(" RENAME ") || command.contains(" DELETE ")
-    }));
+    assert_eq!(list_folder_changes(&stack), Vec::<String>::new());
 }
 
 #[tokio::test(flavor = "multi_thread")]

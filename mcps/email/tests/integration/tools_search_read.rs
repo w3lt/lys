@@ -2,6 +2,7 @@
 //! `read_attachment` against the fake IMAP server.
 
 use email::failure::ToolFailure;
+use email::tools::ToolResult;
 use email::tools::read::{
     AttachmentArguments, IdArguments, run_read_attachment, run_read_conversation, run_read_email,
 };
@@ -115,14 +116,89 @@ async fn read_conversation_text(stack: &Stack, id: &str) -> String {
 /// * `page` - The page, or `None` for the first.
 async fn search_inbox(stack: &Stack, page: Option<u32>) -> String {
     let arguments = SearchArguments {
-        folder: Some("INBOX".to_owned()),
         page,
         ..SearchArguments::default()
+    };
+    search_inbox_with(stack, arguments).await
+}
+
+/// Searches INBOX with the arguments, whatever folder they name.
+///
+/// # Arguments
+///
+/// * `stack` - The running fakes and the tools' context.
+/// * `arguments` - The search's other arguments.
+async fn search_inbox_with(stack: &Stack, arguments: SearchArguments) -> String {
+    let arguments = SearchArguments {
+        folder: Some("INBOX".to_owned()),
+        ..arguments
     };
     run_search_emails(&stack.context, arguments)
         .await
         .expect("the hits")
         .text
+}
+
+/// Reads one attachment of a message.
+///
+/// # Arguments
+///
+/// * `stack` - The running fakes and the tools' context.
+/// * `id` - The message's id.
+/// * `attachment` - The attachment's number, from 1.
+async fn read_attachment_number(stack: &Stack, id: &str, attachment: u32) -> ToolResult {
+    let arguments = AttachmentArguments {
+        id: id.to_owned(),
+        attachment,
+    };
+    run_read_attachment(&stack.context, arguments).await
+}
+
+/// Builds a mailbox with a conversation of three messages across folders
+/// and one message outside it: `a@example.com` and its reply's reply
+/// `c@example.com` in INBOX, the user's reply `b@example.com` in Sent, and
+/// the unrelated `d@example.com` in INBOX, sent between the first two.
+fn build_conversation_mailbox() -> FakeMailbox {
+    let mut mailbox = FakeMailbox::create_standard();
+    let first = TestMessage {
+        subject: "Plan".to_owned(),
+        body: "Shall we?".to_owned(),
+        message_id: "a@example.com".to_owned(),
+        timestamp: BASE,
+        ..TestMessage::default()
+    };
+    let mut reply = TestMessage {
+        subject: "Re: Plan".to_owned(),
+        body: "Yes.".to_owned(),
+        message_id: "b@example.com".to_owned(),
+        timestamp: BASE + 60,
+        ..TestMessage::default()
+    };
+    reply.from = "A Person <person@example.com>".to_owned();
+    reply.to = "Jane Doe <jane@example.com>".to_owned();
+    reply.in_reply_to = "a@example.com".to_owned();
+    reply.references = "<a@example.com>".to_owned();
+    let mut last = TestMessage {
+        subject: "Re: Plan".to_owned(),
+        body: "Great.".to_owned(),
+        message_id: "c@example.com".to_owned(),
+        timestamp: BASE + 120,
+        ..TestMessage::default()
+    };
+    last.in_reply_to = "b@example.com".to_owned();
+    last.references = "<a@example.com> <b@example.com>".to_owned();
+    let unrelated = TestMessage {
+        subject: "Other".to_owned(),
+        body: "Unrelated.".to_owned(),
+        message_id: "d@example.com".to_owned(),
+        timestamp: BASE + 30,
+        ..TestMessage::default()
+    };
+    mailbox.add_message("INBOX", first.build_new_message(&["\\Seen"]));
+    mailbox.add_message("INBOX", unrelated.build_new_message(&[]));
+    mailbox.add_message("Sent", reply.build_new_message(&["\\Seen"]));
+    mailbox.add_message("INBOX", last.build_new_message(&[]));
+    mailbox
 }
 
 /// Lists the ids of a conversation's entries, in the order shown.
@@ -134,64 +210,75 @@ fn list_entry_ids(text: &str) -> Vec<&str> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn searches_one_folder_in_pages_newest_first_without_marking_anything() {
+async fn lists_the_first_page_of_one_folder_newest_first() {
     let stack = start_filled_stack().await;
-    let in_inbox = |page: Option<u32>| SearchArguments {
+    let arguments = SearchArguments {
         folder: Some("INBOX".to_owned()),
-        page,
         ..SearchArguments::default()
     };
 
-    let first = run_search_emails(&stack.context, in_inbox(None))
+    let first = run_search_emails(&stack.context, arguments)
         .await
         .expect("page 1");
-    let second = run_search_emails(&stack.context, in_inbox(Some(2)))
-        .await
-        .expect("page 2");
-    let third = run_search_emails(&stack.context, in_inbox(Some(3))).await;
 
+    let text = &first.text;
     assert!(
-        first
-            .text
-            .starts_with("Page 1 of 2: 25 messages match, newest first. Ask for page 2 to see the next ones.\n\nid 25.1001.INBOX\n"),
-        "{}",
-        first.text
+        text.starts_with("Page 1 of 2: 25 messages match, newest first. Ask for page 2 to see the next ones.\n\nid 25.1001.INBOX\n"),
+        "{text}"
     );
-    assert_eq!(calculate_hit_count(&first.text), 20);
+    assert_eq!(calculate_hit_count(text), 20);
     assert!(
-        first.text.contains(
+        text.contains(
             "\nfrom Jane Doe <jane@example.com>\nsubject Message 25\nflags unread\nfolder INBOX"
         ),
-        "{}",
-        first.text
+        "{text}"
     );
-    assert!(first.text.contains("subject Message 6\n"), "{}", first.text);
-    assert!(
-        !first.text.contains("subject Message 5\n"),
-        "{}",
-        first.text
-    );
+    assert!(text.contains("subject Message 6\n"), "{text}");
+    assert!(!text.contains("subject Message 5\n"), "{text}");
     assert_eq!(first.log, "search: 1 folder(s), 25 hit(s), page 1 of 2");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lists_the_last_page_of_one_folder_and_refuses_a_page_past_it() {
+    let stack = start_filled_stack().await;
+    let past_the_end = SearchArguments {
+        folder: Some("INBOX".to_owned()),
+        page: Some(3),
+        ..SearchArguments::default()
+    };
+
+    let second = search_inbox(&stack, Some(2)).await;
+    let third = run_search_emails(&stack.context, past_the_end).await;
+
     assert!(
-        second
-            .text
-            .starts_with("Page 2 of 2: 25 messages match, newest first.\n\nid 5.1001.INBOX\n"),
-        "{}",
-        second.text
+        second.starts_with("Page 2 of 2: 25 messages match, newest first.\n\nid 5.1001.INBOX\n"),
+        "{second}"
     );
-    assert_eq!(calculate_hit_count(&second.text), 5);
-    assert!(
-        second.text.contains("\nflags unread, flagged\n"),
-        "{}",
-        second.text
-    );
-    assert!(second.text.contains("\nflags read\n"), "{}", second.text);
+    assert_eq!(calculate_hit_count(&second), 5);
+    assert!(second.contains("\nflags unread, flagged\n"), "{second}");
+    assert!(second.contains("\nflags read\n"), "{second}");
     assert_eq!(
         third,
         Err(ToolFailure::Argument(
             "Only 2 pages match. Ask for a page from 1 to 2.".to_owned()
         ))
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn searches_a_folder_without_marking_anything_and_signs_out_after_each_call() {
+    let stack = start_filled_stack().await;
+    let past_the_end = SearchArguments {
+        folder: Some("INBOX".to_owned()),
+        page: Some(3),
+        ..SearchArguments::default()
+    };
+
+    search_inbox(&stack, None).await;
+    search_inbox(&stack, Some(2)).await;
+    let refused = run_search_emails(&stack.context, past_the_end).await;
+
+    assert!(refused.is_err(), "{refused:?}");
     let commands = stack.imap.list_commands();
     assert!(
         commands
@@ -305,88 +392,24 @@ async fn lists_only_the_newest_200_hits_of_a_folder_and_says_so() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn narrows_a_search_by_flags_fields_dates_and_text_that_is_not_ascii() {
+async fn narrows_a_search_by_flags() {
     let stack = start_filled_stack().await;
-    let greeting = TestMessage {
-        subject: "Grüße aus Wien".to_owned(),
-        body: "Servus".to_owned(),
-        message_id: "g@example.com".to_owned(),
-        timestamp: BASE + 200 * 3_600,
-        ..TestMessage::default()
-    };
-    stack.imap.update_state(|state| {
-        state.add_message("INBOX", greeting.build_new_message(&[]));
-    });
-    let search = |arguments: SearchArguments| {
-        run_search_emails(
-            &stack.context,
-            SearchArguments {
-                folder: Some("INBOX".to_owned()),
-                ..arguments
-            },
-        )
-    };
-
-    let read = search(SearchArguments {
+    let read_only = SearchArguments {
         unread: Some(false),
         ..SearchArguments::default()
-    })
-    .await
-    .expect("read");
-    let flagged = search(SearchArguments {
+    };
+    let flagged_only = SearchArguments {
         flagged: Some(true),
         ..SearchArguments::default()
-    })
-    .await
-    .expect("flagged");
-    let by_fields = search(SearchArguments {
-        from: Some("jane".to_owned()),
-        subject: Some("Message 1".to_owned()),
-        ..SearchArguments::default()
-    })
-    .await
-    .expect("by fields");
-    let by_dates = search(SearchArguments {
-        since: Some("2026-11-02".to_owned()),
-        before: Some("2026-11-03".to_owned()),
-        ..SearchArguments::default()
-    })
-    .await
-    .expect("by dates");
-    let non_ascii = search(SearchArguments {
-        subject: Some("Grüße".to_owned()),
-        ..SearchArguments::default()
-    })
-    .await
-    .expect("non-ASCII");
-    let none = search(SearchArguments {
-        text: Some("nothing matches this".to_owned()),
-        ..SearchArguments::default()
-    })
-    .await
-    .expect("none");
+    };
 
-    assert_eq!(calculate_hit_count(&read.text), 1);
-    assert!(read.text.contains("subject Message 3\n"), "{}", read.text);
-    assert_eq!(calculate_hit_count(&flagged.text), 1);
-    assert!(
-        flagged.text.contains("subject Message 5\n"),
-        "{}",
-        flagged.text
-    );
-    assert_eq!(calculate_hit_count(&by_fields.text), 11);
-    assert!(
-        by_dates.text.starts_with("Page 1 of 1: 14 messages match"),
-        "{}",
-        by_dates.text
-    );
-    assert_eq!(calculate_hit_count(&non_ascii.text), 1);
-    assert!(
-        non_ascii.text.contains("subject Grüße aus Wien\n"),
-        "{}",
-        non_ascii.text
-    );
-    assert_eq!(none.text, "No message matches.");
+    let read = search_inbox_with(&stack, read_only).await;
+    let flagged = search_inbox_with(&stack, flagged_only).await;
+
+    assert_eq!(calculate_hit_count(&read), 1);
+    assert!(read.contains("subject Message 3\n"), "{read}");
+    assert_eq!(calculate_hit_count(&flagged), 1);
+    assert!(flagged.contains("subject Message 5\n"), "{flagged}");
     let commands = stack.imap.list_commands();
     assert!(
         commands
@@ -394,6 +417,31 @@ async fn narrows_a_search_by_flags_fields_dates_and_text_that_is_not_ascii() {
             .any(|command| command.ends_with("UID SEARCH SEEN")),
         "{commands:?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn narrows_a_search_by_fields_and_dates() {
+    let stack = start_filled_stack().await;
+    let fields = SearchArguments {
+        from: Some("jane".to_owned()),
+        subject: Some("Message 1".to_owned()),
+        ..SearchArguments::default()
+    };
+    let dates = SearchArguments {
+        since: Some("2026-11-02".to_owned()),
+        before: Some("2026-11-03".to_owned()),
+        ..SearchArguments::default()
+    };
+
+    let by_fields = search_inbox_with(&stack, fields).await;
+    let by_dates = search_inbox_with(&stack, dates).await;
+
+    assert_eq!(calculate_hit_count(&by_fields), 11);
+    assert!(
+        by_dates.starts_with("Page 1 of 1: 14 messages match"),
+        "{by_dates}"
+    );
+    let commands = stack.imap.list_commands();
     assert!(
         commands
             .iter()
@@ -406,6 +454,40 @@ async fn narrows_a_search_by_flags_fields_dates_and_text_that_is_not_ascii() {
             .any(|command| command.ends_with("UID SEARCH SINCE 2-Nov-2026 BEFORE 3-Nov-2026")),
         "{commands:?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn narrows_a_search_by_a_subject_that_is_not_ascii_or_finds_nothing() {
+    let stack = start_filled_stack().await;
+    let greeting = TestMessage {
+        subject: "Grüße aus Wien".to_owned(),
+        body: "Servus".to_owned(),
+        message_id: "g@example.com".to_owned(),
+        timestamp: BASE + 200 * 3_600,
+        ..TestMessage::default()
+    };
+    stack.imap.update_state(|state| {
+        state.add_message("INBOX", greeting.build_new_message(&[]));
+    });
+    let subject = SearchArguments {
+        subject: Some("Grüße".to_owned()),
+        ..SearchArguments::default()
+    };
+    let unmatched_text = SearchArguments {
+        text: Some("nothing matches this".to_owned()),
+        ..SearchArguments::default()
+    };
+
+    let non_ascii = search_inbox_with(&stack, subject).await;
+    let none = search_inbox_with(&stack, unmatched_text).await;
+
+    assert_eq!(calculate_hit_count(&non_ascii), 1);
+    assert!(
+        non_ascii.contains("subject Grüße aus Wien\n"),
+        "{non_ascii}"
+    );
+    assert_eq!(none, "No message matches.");
+    let commands = stack.imap.list_commands();
     assert!(
         commands
             .iter()
@@ -506,46 +588,24 @@ async fn reads_a_message_without_marking_it_as_read() {
 #[tokio::test(flavor = "multi_thread")]
 async fn converts_html_lists_attachments_and_reads_text_ones() {
     let stack = start_filled_stack().await;
+    let mixed = NewMessage {
+        bytes: MIXED.as_bytes().to_vec(),
+        flags: &[],
+        timestamp: BASE,
+    };
     stack.imap.update_state(|state| {
-        state.add_message(
-            "Projects",
-            NewMessage {
-                bytes: MIXED.as_bytes().to_vec(),
-                flags: &[],
-                timestamp: BASE,
-            },
-        );
+        state.add_message("Projects", mixed);
     });
     let id = "3.1006.Projects";
 
     let message = run_read_email(&stack.context, IdArguments { id: id.to_owned() })
         .await
         .expect("the message");
-    let csv = run_read_attachment(
-        &stack.context,
-        AttachmentArguments {
-            id: id.to_owned(),
-            attachment: 1,
-        },
-    )
-    .await
-    .expect("the attachment");
-    let pdf = run_read_attachment(
-        &stack.context,
-        AttachmentArguments {
-            id: id.to_owned(),
-            attachment: 2,
-        },
-    )
-    .await;
-    let missing = run_read_attachment(
-        &stack.context,
-        AttachmentArguments {
-            id: id.to_owned(),
-            attachment: 3,
-        },
-    )
-    .await;
+    let csv = read_attachment_number(&stack, id, 1)
+        .await
+        .expect("the attachment");
+    let pdf = read_attachment_number(&stack, id, 2).await;
+    let missing = read_attachment_number(&stack, id, 3).await;
 
     assert!(message.text.contains("Attachments: 2\n  #1 data.csv (text/csv, 8 B)\n  #2 report.pdf (application/pdf, 5 B)\n[The text was converted from HTML.]\n\nHello there."), "{}", message.text);
     assert_eq!(
@@ -570,83 +630,40 @@ async fn converts_html_lists_attachments_and_reads_text_ones() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn reads_a_conversation_across_folders_oldest_first() {
-    let mut mailbox = FakeMailbox::create_standard();
-    let first = TestMessage {
-        subject: "Plan".to_owned(),
-        body: "Shall we?".to_owned(),
-        message_id: "a@example.com".to_owned(),
-        timestamp: BASE,
-        ..TestMessage::default()
+    let stack = start_stack(build_conversation_mailbox(), false).await;
+    let last = IdArguments {
+        id: "3.1001.INBOX".to_owned(),
     };
-    let mut reply = TestMessage {
-        subject: "Re: Plan".to_owned(),
-        body: "Yes.".to_owned(),
-        message_id: "b@example.com".to_owned(),
-        timestamp: BASE + 60,
-        ..TestMessage::default()
-    };
-    reply.from = "A Person <person@example.com>".to_owned();
-    reply.to = "Jane Doe <jane@example.com>".to_owned();
-    reply.in_reply_to = "a@example.com".to_owned();
-    reply.references = "<a@example.com>".to_owned();
-    let mut last = TestMessage {
-        subject: "Re: Plan".to_owned(),
-        body: "Great.".to_owned(),
-        message_id: "c@example.com".to_owned(),
-        timestamp: BASE + 120,
-        ..TestMessage::default()
-    };
-    last.in_reply_to = "b@example.com".to_owned();
-    last.references = "<a@example.com> <b@example.com>".to_owned();
-    let unrelated = TestMessage {
-        subject: "Other".to_owned(),
-        body: "Unrelated.".to_owned(),
-        message_id: "d@example.com".to_owned(),
-        timestamp: BASE + 30,
-        ..TestMessage::default()
-    };
-    mailbox.add_message("INBOX", first.build_new_message(&["\\Seen"]));
-    mailbox.add_message("INBOX", unrelated.build_new_message(&[]));
-    mailbox.add_message("Sent", reply.build_new_message(&["\\Seen"]));
-    mailbox.add_message("INBOX", last.build_new_message(&[]));
-    let stack = start_stack(mailbox, false).await;
 
-    let report = run_read_conversation(
-        &stack.context,
-        IdArguments {
-            id: "3.1001.INBOX".to_owned(),
-        },
-    )
-    .await
-    .expect("the conversation");
+    let report = run_read_conversation(&stack.context, last)
+        .await
+        .expect("the conversation");
 
+    let text = &report.text;
     assert!(
-        report.text.starts_with(
+        text.starts_with(
             "The conversation has 3 messages, oldest first.\n\n----\nid 1.1001.INBOX\n"
         ),
-        "{}",
-        report.text
+        "{text}"
     );
     let position = |needle: &str| {
-        report
-            .text
-            .find(needle)
-            .unwrap_or_else(|| panic!("{needle} in {}", report.text))
+        text.find(needle)
+            .unwrap_or_else(|| panic!("{needle} in {text}"))
     };
     assert!(position("Message-ID: <a@example.com>") < position("Message-ID: <b@example.com>"));
     assert!(position("Message-ID: <b@example.com>") < position("Message-ID: <c@example.com>"));
-    assert!(
-        report.text.contains("\nid 1.1002.Sent\n"),
-        "{}",
-        report.text
-    );
-    assert!(
-        report.text.contains("\nid 3.1001.INBOX\n"),
-        "{}",
-        report.text
-    );
-    assert!(!report.text.contains("d@example.com"), "{}", report.text);
+    assert!(text.contains("\nid 1.1002.Sent\n"), "{text}");
+    assert!(text.contains("\nid 3.1001.INBOX\n"), "{text}");
+    assert!(!text.contains("d@example.com"), "{text}");
     assert_eq!(report.log, "conversation: 3 message(s), 3 shown");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn finds_a_conversation_by_its_identifiers_without_marking_anything() {
+    let stack = start_stack(build_conversation_mailbox(), false).await;
+
+    read_conversation_text(&stack, "3.1001.INBOX").await;
+
     let commands = stack.imap.list_commands();
     assert!(
         commands.iter().any(|command| command.contains("UID SEARCH OR HEADER MESSAGE-ID \"c@example.com\" OR HEADER IN-REPLY-TO \"c@example.com\" OR HEADER REFERENCES \"c@example.com\" OR HEADER MESSAGE-ID \"b@example.com\"")),

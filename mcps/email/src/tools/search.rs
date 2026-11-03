@@ -576,9 +576,9 @@ mod tests {
         assert_eq!(parse_day("２０２６-11-02"), None);
     }
 
-    #[test]
-    fn sorts_hits_newest_first_and_formats_them() {
-        let build = |uid: u32, timestamp: i64| Hit {
+    /// An unread hit in INBOX from Jane, with the UID and the timestamp.
+    fn build_hit(uid: u32, timestamp: i64) -> Hit {
+        Hit {
             id: EmailId {
                 uid,
                 uid_validity: 7,
@@ -592,8 +592,17 @@ mod tests {
             },
             timestamp,
             date: "2026-11-02T10:30:00Z".to_owned(),
-        };
-        let mut hits = [build(1, 10), build(2, 30), build(3, 30), build(4, 20)];
+        }
+    }
+
+    #[test]
+    fn sorts_hits_newest_first_and_formats_them() {
+        let mut hits = [
+            build_hit(1, 10),
+            build_hit(2, 30),
+            build_hit(3, 30),
+            build_hit(4, 20),
+        ];
 
         hits.sort_by(calculate_hit_order);
 

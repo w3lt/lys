@@ -535,19 +535,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let mut reader = BufReader::new(stream);
-    let mut session = Session {
-        mode: setup.mode,
-        secured,
-        capabilities: format_capabilities(setup.mode, secured, &setup.state),
-        selected: None,
-    };
-    if !secured || setup.mode == ImapMode::Tls {
-        send_line(
-            &mut reader,
-            &format!("* OK [CAPABILITY {}] Fake ready\r\n", session.capabilities),
-        )
-        .await;
-    }
+    let mut session = start_session(&mut reader, setup, secured).await;
     loop {
         let (text, literals) = read_command(&mut reader, &setup.state).await?;
         setup.record_line(text.clone());
@@ -592,6 +580,35 @@ where
             }
         }
     }
+}
+
+/// Starts a session on the connection: greets the client, unless STARTTLS
+/// just upgraded the connection, after which IMAP sends no new greeting.
+///
+/// # Arguments
+///
+/// * `reader` - The connection.
+/// * `setup` - The mode and the mailbox.
+/// * `secured` - Whether TLS protects the connection already.
+async fn start_session<S>(
+    reader: &mut BufReader<S>,
+    setup: &ConnectionSetup,
+    secured: bool,
+) -> Session
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let session = Session {
+        mode: setup.mode,
+        secured,
+        capabilities: format_capabilities(setup.mode, secured, &setup.state),
+        selected: None,
+    };
+    if !secured || setup.mode == ImapMode::Tls {
+        let greeting = format!("* OK [CAPABILITY {}] Fake ready\r\n", session.capabilities);
+        send_line(reader, &greeting).await;
+    }
+    session
 }
 
 /// Fails a command: never answers it, recording each line the client sends
@@ -1176,13 +1193,7 @@ impl Tokenizer {
 /// Parses a UID set such as `1,3:5,*`.
 fn parse_set(text: &str, folder: &FakeFolder) -> Vec<u32> {
     let highest = folder.messages.last().map_or(0, |message| message.uid);
-    let bound = |part: &str| -> Option<u32> {
-        if part == "*" {
-            Some(highest)
-        } else {
-            part.parse().ok()
-        }
-    };
+    let bound = |part: &str| parse_set_bound(part, highest);
     let mut uids = Vec::new();
     for item in text.split(',') {
         match item.split_once(':') {
@@ -1199,6 +1210,14 @@ fn parse_set(text: &str, folder: &FakeFolder) -> Vec<u32> {
         }
     }
     uids
+}
+
+/// Parses one end of a UID range: a number, or `*` for the highest UID.
+fn parse_set_bound(part: &str, highest: u32) -> Option<u32> {
+    if part == "*" {
+        return Some(highest);
+    }
+    part.parse().ok()
 }
 
 /// The header fields of a message, unfolded, as (lower-case name, value).
@@ -1300,47 +1319,13 @@ impl SearchKeys<'_> {
             .ok_or("a key is missing")?
             .to_ascii_uppercase();
         self.index += 1;
-        let fields = parse_header_fields(&message.bytes);
-        let field_contains = |name: &str, needle: &str| {
-            fields
-                .iter()
-                .filter(|(field, _)| field == name)
-                .any(|(_, value)| value.to_lowercase().contains(&needle.to_lowercase()))
-        };
+        if let Some(matched) = calculate_flag_match(&key, message) {
+            return Ok(matched);
+        }
         let days = message.timestamp.div_euclid(86_400);
         Ok(match key.as_str() {
-            "ALL" => true,
-            "SEEN" => message.has_flag("\\Seen"),
-            "UNSEEN" => !message.has_flag("\\Seen"),
-            "FLAGGED" => message.has_flag("\\Flagged"),
-            "UNFLAGGED" => !message.has_flag("\\Flagged"),
-            "DELETED" => message.has_flag("\\Deleted"),
-            "UNDELETED" => !message.has_flag("\\Deleted"),
-            "DRAFT" => message.has_flag("\\Draft"),
-            "UNDRAFT" => !message.has_flag("\\Draft"),
-            "ANSWERED" => message.has_flag("\\Answered"),
-            "UNANSWERED" => !message.has_flag("\\Answered"),
-            "TEXT" => {
-                let needle = self.read_argument(&key)?.to_lowercase();
-                String::from_utf8_lossy(&message.bytes)
-                    .to_lowercase()
-                    .contains(&needle)
-            }
-            "BODY" => {
-                let needle = self.read_argument(&key)?.to_lowercase();
-                let text = String::from_utf8_lossy(&message.bytes);
-                text.split_once("\r\n\r\n")
-                    .map(|(_, body)| body.to_lowercase().contains(&needle))
-                    .unwrap_or(false)
-            }
-            "FROM" | "TO" | "CC" | "SUBJECT" => {
-                let needle = self.read_argument(&key)?;
-                field_contains(&key.to_ascii_lowercase(), &needle)
-            }
-            "HEADER" => {
-                let name = self.read_argument(&key)?.to_ascii_lowercase();
-                let needle = self.read_argument(&key)?;
-                field_contains(&name, &needle)
+            "TEXT" | "BODY" | "FROM" | "TO" | "CC" | "SUBJECT" | "HEADER" => {
+                self.calculate_text_match(&key, message)?
             }
             "SINCE" => days >= parse_search_date(&self.read_argument(&key)?).ok_or("a bad date")?,
             "BEFORE" => days < parse_search_date(&self.read_argument(&key)?).ok_or("a bad date")?,
@@ -1355,6 +1340,67 @@ impl SearchKeys<'_> {
             _ => return Err(format!("unknown search key {key}")),
         })
     }
+
+    /// Calculates whether the message matches a key that searches its text,
+    /// `TEXT`, `BODY`, `HEADER`, or a header field such as `SUBJECT`,
+    /// advancing past the key's arguments. Letter case is ignored.
+    fn calculate_text_match(&mut self, key: &str, message: &FakeMessage) -> Result<bool, String> {
+        let fields = parse_header_fields(&message.bytes);
+        let field_contains = |name: &str, needle: &str| {
+            fields
+                .iter()
+                .filter(|(field, _)| field == name)
+                .any(|(_, value)| value.to_lowercase().contains(&needle.to_lowercase()))
+        };
+        Ok(match key {
+            "TEXT" => {
+                let needle = self.read_argument(key)?.to_lowercase();
+                String::from_utf8_lossy(&message.bytes)
+                    .to_lowercase()
+                    .contains(&needle)
+            }
+            "BODY" => {
+                let needle = self.read_argument(key)?.to_lowercase();
+                let text = String::from_utf8_lossy(&message.bytes);
+                text.split_once("\r\n\r\n")
+                    .map(|(_, body)| body.to_lowercase().contains(&needle))
+                    .unwrap_or(false)
+            }
+            "HEADER" => {
+                let name = self.read_argument(key)?.to_ascii_lowercase();
+                let needle = self.read_argument(key)?;
+                field_contains(&name, &needle)
+            }
+            _ => {
+                let needle = self.read_argument(key)?;
+                field_contains(&key.to_ascii_lowercase(), &needle)
+            }
+        })
+    }
+}
+
+/// Calculates whether the message matches `ALL` or a key that tests a flag,
+/// such as `UNSEEN`.
+///
+/// # Returns
+///
+/// Whether it matches, or `None` for any other key.
+fn calculate_flag_match(key: &str, message: &FakeMessage) -> Option<bool> {
+    let (flag, wanted) = match key {
+        "ALL" => return Some(true),
+        "SEEN" => ("\\Seen", true),
+        "UNSEEN" => ("\\Seen", false),
+        "FLAGGED" => ("\\Flagged", true),
+        "UNFLAGGED" => ("\\Flagged", false),
+        "DELETED" => ("\\Deleted", true),
+        "UNDELETED" => ("\\Deleted", false),
+        "DRAFT" => ("\\Draft", true),
+        "UNDRAFT" => ("\\Draft", false),
+        "ANSWERED" => ("\\Answered", true),
+        "UNANSWERED" => ("\\Answered", false),
+        _ => return None,
+    };
+    Some(message.has_flag(flag) == wanted)
 }
 
 /// Answers a FETCH of the set with the items.
@@ -1366,69 +1412,91 @@ fn handle_folder_fetch(folder: &mut FakeFolder, arguments: &[String], tag: &str)
     let items = parse_tokens(items.trim_start_matches('(').trim_end_matches(')'));
     let mut answer = Vec::new();
     for position in 0..folder.messages.len() {
-        if !uids.contains(&folder.messages[position].uid) {
+        let message = &folder.messages[position];
+        if !uids.contains(&message.uid) {
             continue;
         }
-        let mut parts: Vec<Vec<u8>> = Vec::new();
+        let mut parts = Vec::new();
         let mut mark_seen = false;
         for item in &items {
-            let upper = item.to_ascii_uppercase();
-            let message = &folder.messages[position];
-            if let Some(section) = upper
-                .strip_prefix("BODY.PEEK[")
-                .or_else(|| upper.strip_prefix("BODY["))
-            {
-                let section = section.trim_end_matches(']');
-                mark_seen |= !upper.starts_with("BODY.PEEK[");
-                let content = if section.is_empty() {
-                    message.bytes.clone()
-                } else if let Some(list) = section.strip_prefix("HEADER.FIELDS ") {
-                    let names: Vec<String> = list
-                        .trim_matches(['(', ')'])
-                        .split_whitespace()
-                        .map(str::to_owned)
-                        .collect();
-                    build_header_subset(&message.bytes, &names)
-                } else {
-                    return format!("{tag} BAD Unsupported section\r\n").into_bytes();
-                };
-                let mut part = format!("BODY[{section}] {{{}}}\r\n", content.len()).into_bytes();
-                part.extend_from_slice(&content);
-                parts.push(part);
-            } else {
-                match upper.as_str() {
-                    "UID" => parts.push(format!("UID {}", message.uid).into_bytes()),
-                    "FLAGS" => {
-                        parts.push(format!("FLAGS ({})", message.flags.join(" ")).into_bytes())
-                    }
-                    "INTERNALDATE" => parts.push(
-                        format!(
-                            "INTERNALDATE \"{}\"",
-                            format_internal_date(message.timestamp)
-                        )
-                        .into_bytes(),
-                    ),
-                    "RFC822.SIZE" => {
-                        parts.push(format!("RFC822.SIZE {}", message.bytes.len()).into_bytes())
-                    }
-                    _ => return format!("{tag} BAD Unsupported item {item}\r\n").into_bytes(),
+            match build_fetch_part(item, message) {
+                Ok((part, marks_seen)) => {
+                    parts.push(part);
+                    mark_seen |= marks_seen;
                 }
+                Err(reason) => return format!("{tag} BAD {reason}\r\n").into_bytes(),
             }
         }
         if mark_seen && !folder.messages[position].has_flag("\\Seen") {
             folder.messages[position].flags.push("\\Seen".to_owned());
         }
-        answer.extend_from_slice(format!("* {} FETCH (", position + 1).as_bytes());
-        for (index, part) in parts.iter().enumerate() {
-            if index > 0 {
-                answer.push(b' ');
-            }
-            answer.extend_from_slice(part);
-        }
-        answer.extend_from_slice(b")\r\n");
+        answer.extend_from_slice(&format_fetch_line(position + 1, &parts));
     }
     answer.extend_from_slice(format!("{tag} OK Fetch completed\r\n").as_bytes());
     answer
+}
+
+/// Builds one item of a message's FETCH answer.
+///
+/// # Returns
+///
+/// The item's bytes with whether fetching it marks the message seen, or
+/// why the item is not supported.
+fn build_fetch_part(item: &str, message: &FakeMessage) -> Result<(Vec<u8>, bool), String> {
+    let upper = item.to_ascii_uppercase();
+    if let Some(section) = upper
+        .strip_prefix("BODY.PEEK[")
+        .or_else(|| upper.strip_prefix("BODY["))
+    {
+        let section = section.trim_end_matches(']');
+        let content = build_section_content(section, message).ok_or("Unsupported section")?;
+        let mut part = format!("BODY[{section}] {{{}}}\r\n", content.len()).into_bytes();
+        part.extend_from_slice(&content);
+        return Ok((part, !upper.starts_with("BODY.PEEK[")));
+    }
+    let part = match upper.as_str() {
+        "UID" => format!("UID {}", message.uid),
+        "FLAGS" => format!("FLAGS ({})", message.flags.join(" ")),
+        "INTERNALDATE" => format!(
+            "INTERNALDATE \"{}\"",
+            format_internal_date(message.timestamp)
+        ),
+        "RFC822.SIZE" => format!("RFC822.SIZE {}", message.bytes.len()),
+        _ => return Err(format!("Unsupported item {item}")),
+    };
+    Ok((part.into_bytes(), false))
+}
+
+/// Builds the content of a BODY section: the whole message for an empty
+/// section, or the header fields a `HEADER.FIELDS` section names.
+///
+/// # Returns
+///
+/// The content, or `None` for any other section.
+fn build_section_content(section: &str, message: &FakeMessage) -> Option<Vec<u8>> {
+    if section.is_empty() {
+        return Some(message.bytes.clone());
+    }
+    let names: Vec<String> = section
+        .strip_prefix("HEADER.FIELDS ")?
+        .trim_matches(['(', ')'])
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
+    Some(build_header_subset(&message.bytes, &names))
+}
+
+/// Formats one message's FETCH line from its items.
+///
+/// # Arguments
+///
+/// * `number` - The message's sequence number.
+/// * `parts` - The items, in the order the command named them.
+fn format_fetch_line(number: usize, parts: &[Vec<u8>]) -> Vec<u8> {
+    let mut line = format!("* {number} FETCH (").into_bytes();
+    line.extend_from_slice(&parts.join(&b' '));
+    line.extend_from_slice(b")\r\n");
+    line
 }
 
 /// Answers a STORE of flags on the set.
@@ -1452,19 +1520,7 @@ fn handle_folder_store(folder: &mut FakeFolder, arguments: &[String], tag: &str)
         if !uids.contains(&message.uid) {
             continue;
         }
-        if upper.starts_with('+') {
-            for flag in &flags {
-                if !message.has_flag(flag) {
-                    message.flags.push(flag.clone());
-                }
-            }
-        } else if upper.starts_with('-') {
-            message
-                .flags
-                .retain(|existing| !flags.iter().any(|flag| flag.eq_ignore_ascii_case(existing)));
-        } else {
-            message.flags = flags.clone();
-        }
+        update_message_flags(message, &upper, &flags);
         if !silent {
             answer.push_str(&format!(
                 "* {} FETCH (FLAGS ({}))\r\n",
@@ -1475,6 +1531,30 @@ fn handle_folder_store(folder: &mut FakeFolder, arguments: &[String], tag: &str)
     }
     answer.push_str(&format!("{tag} OK Store completed\r\n"));
     answer.into_bytes()
+}
+
+/// Changes a message's flags as a STORE item says: adds them for `+FLAGS`,
+/// removes them for `-FLAGS`, and replaces them for `FLAGS`.
+///
+/// # Arguments
+///
+/// * `message` - The message.
+/// * `item` - The STORE item in capitals, such as `+FLAGS.SILENT`.
+/// * `flags` - The flags the command lists.
+fn update_message_flags(message: &mut FakeMessage, item: &str, flags: &[String]) {
+    if item.starts_with('+') {
+        for flag in flags {
+            if !message.has_flag(flag) {
+                message.flags.push(flag.clone());
+            }
+        }
+    } else if item.starts_with('-') {
+        message
+            .flags
+            .retain(|existing| !flags.iter().any(|flag| flag.eq_ignore_ascii_case(existing)));
+    } else {
+        message.flags = flags.to_vec();
+    }
 }
 
 /// Writes text, ignoring a closed connection.

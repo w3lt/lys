@@ -13,21 +13,9 @@ use base64::engine::general_purpose::STANDARD;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
-use tokio::time::{Instant, timeout};
 use tokio_rustls::TlsAcceptor;
 
-use super::{PASSWORD, USER_NAME};
-
-/// How many times a future may take up input its connection already has,
-/// after the fake met its fault and before the clock pauses: enough for a
-/// connection the fake accepted to finish connecting, so that only the
-/// wait the fault caused is left.
-const SETTLING_TURNS: usize = 3;
-
-/// Longest a future may wait on the paused clock before the test fails it:
-/// longer than any limit of the code under test, so that a step without a
-/// limit fails the test instead of hanging it.
-const GUARD_LIMIT: Duration = Duration::from_secs(600);
+use super::{PASSWORD, USER_NAME, run_past_fault};
 
 /// How the fake protects its connections.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -193,38 +181,17 @@ impl FakeSmtpServer {
 
     /// Runs a future until a fault strikes, or a connection was accepted
     /// in the silent mode, lets it take up the input it already has, pauses
-    /// the clock, and runs it to its end.
+    /// the clock, and runs it to its end, as [`run_past_fault`] does.
     ///
     /// # Returns
     ///
     /// The future's output and how long it took, the paused part included.
-    ///
-    /// # Panics
-    ///
-    /// When the future ends before the clock paused, or waits on the
-    /// paused clock longer than [`GUARD_LIMIT`].
     pub async fn run_past_fault<F>(&self, future: F) -> (F::Output, Duration)
     where
         F: Future,
         F::Output: Debug,
     {
-        let started = Instant::now();
-        tokio::pin!(future);
-        tokio::select! {
-            () = self.wait_for_fault() => {}
-            outcome = &mut future => panic!("the future ended before the fault: {outcome:?}"),
-        }
-        for _ in 0..SETTLING_TURNS {
-            tokio::select! {
-                () = tokio::task::yield_now() => {}
-                outcome = &mut future => panic!("the future ended before the clock paused: {outcome:?}"),
-            }
-        }
-        tokio::time::pause();
-        let outcome = timeout(GUARD_LIMIT, future)
-            .await
-            .expect("a limit of the code under test ends the future");
-        (outcome, started.elapsed())
+        run_past_fault(self.wait_for_fault(), future).await
     }
 }
 

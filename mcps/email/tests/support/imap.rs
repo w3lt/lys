@@ -1,13 +1,22 @@
 //! A fake IMAP server: folders and messages in memory, the commands the
-//! email server sends, TLS or STARTTLS, and a log of every command.
+//! email server sends, TLS or STARTTLS, and a log of every command; on
+//! request it refuses a command, or fails it by never answering it or by
+//! closing the connection.
 
+use std::fmt::Debug;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Notify;
 use tokio_rustls::TlsAcceptor;
 
-use super::{PASSWORD, USER_NAME, format_internal_date, get_current_timestamp, parse_search_date};
+use super::{
+    PASSWORD, USER_NAME, format_internal_date, get_current_timestamp, parse_search_date,
+    run_past_fault,
+};
 
 /// How the fake protects its connections.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,6 +33,18 @@ pub enum ImapMode {
     Silent,
     /// Greets with text that is not IMAP, then closes.
     Garbage,
+}
+
+/// How the fake fails a command instead of handling it; a command with a
+/// synchronizing literal, such as APPEND, fails before its literal is
+/// sent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImapFault {
+    /// Never answers, and records each line the client sends after it as
+    /// a command, until the client closes the connection.
+    Stall,
+    /// Closes the connection without answering.
+    Close,
 }
 
 /// One stored message.
@@ -115,6 +136,8 @@ pub struct FakeMailbox {
     /// The commands the fake refuses, by name, with what it answers after
     /// the tag.
     refusals: Vec<(String, String)>,
+    /// The commands the fake fails, by name, and how.
+    faults: Vec<(String, ImapFault)>,
 }
 
 impl FakeMailbox {
@@ -127,6 +150,7 @@ impl FakeMailbox {
             delimiter: "/".to_owned(),
             next_uid_validity: 2001,
             refusals: Vec::new(),
+            faults: Vec::new(),
         }
     }
 
@@ -200,6 +224,14 @@ impl FakeMailbox {
             .find(|(refused, _)| refused == name)
             .map(|(_, answer)| answer.clone())
     }
+
+    /// Finds how the fake fails a command of the name, if it fails it.
+    fn find_fault(&self, name: &str) -> Option<ImapFault> {
+        self.faults
+            .iter()
+            .find(|(failed, _)| failed == name)
+            .map(|(_, fault)| *fault)
+    }
 }
 
 /// The running fake.
@@ -214,6 +246,8 @@ pub struct FakeImapServer {
     pub port: u16,
     /// Its state.
     pub state: Arc<Mutex<FakeMailbox>>,
+    /// Notified each time a fault strikes.
+    faulted: Arc<Notify>,
 }
 
 impl FakeImapServer {
@@ -232,10 +266,12 @@ impl FakeImapServer {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("a free port");
         let port = listener.local_addr().expect("the address").port();
         let state = Arc::new(Mutex::new(mailbox));
+        let faulted = Arc::new(Notify::new());
         let setup = ConnectionSetup {
             mode,
             acceptor,
             state: Arc::clone(&state),
+            faulted: Arc::clone(&faulted),
         };
         tokio::spawn(async move {
             loop {
@@ -248,7 +284,11 @@ impl FakeImapServer {
                 });
             }
         });
-        Self { port, state }
+        Self {
+            port,
+            state,
+            faulted,
+        }
     }
 
     /// The commands received so far.
@@ -280,6 +320,36 @@ impl FakeImapServer {
     pub fn update_state(&self, change: impl FnOnce(&mut FakeMailbox)) {
         change(&mut self.state.lock().expect("the state"));
     }
+
+    /// Fails every command of a name from now on instead of handling it.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The command's name in capitals; for `UID <name>`, the
+    ///   name after `UID`.
+    /// * `fault` - How the fake fails it.
+    pub fn add_fault(&self, name: &str, fault: ImapFault) {
+        self.state
+            .lock()
+            .expect("the state")
+            .faults
+            .push((name.to_owned(), fault));
+    }
+
+    /// Runs a future until a fault strikes, lets it take up the input it
+    /// already has, pauses the clock, and runs it to its end, as
+    /// [`run_past_fault`] does.
+    ///
+    /// # Returns
+    ///
+    /// The future's output and how long it took, the paused part included.
+    pub async fn run_past_fault<F>(&self, future: F) -> (F::Output, Duration)
+    where
+        F: Future,
+        F::Output: Debug,
+    {
+        run_past_fault(self.faulted.notified(), future).await
+    }
 }
 
 /// What every connection of the fake shares.
@@ -291,6 +361,8 @@ struct ConnectionSetup {
     acceptor: Option<TlsAcceptor>,
     /// The folders, the messages, and what the fake has seen.
     state: Arc<Mutex<FakeMailbox>>,
+    /// Notified each time a fault strikes.
+    faulted: Arc<Notify>,
 }
 
 /// Serves one connection in the setup's mode.
@@ -376,8 +448,9 @@ enum Step {
     Logout(String),
 }
 
-/// Handles the session's commands until LOGOUT, the end of the stream,
-/// or an accepted STARTTLS, which hands the stream back for the upgrade.
+/// Handles the session's commands until LOGOUT, the end of the stream, a
+/// fault, or an accepted STARTTLS, which hands the stream back for the
+/// upgrade.
 ///
 /// # Arguments
 ///
@@ -413,6 +486,15 @@ where
         let Some(command) = parse_command(&text, literals) else {
             continue;
         };
+        let fault = setup
+            .state
+            .lock()
+            .expect("the state")
+            .find_fault(&command.name);
+        if let Some(fault) = fault {
+            handle_fault(&mut reader, setup, fault).await;
+            return None;
+        }
         let step = {
             let mut mailbox = setup.state.lock().expect("the state");
             session.handle_command(&command, &mut mailbox)
@@ -428,6 +510,41 @@ where
                 return None;
             }
         }
+    }
+}
+
+/// Fails a command: never answers it, recording each line the client sends
+/// after it until the client closes the connection, or returns at once,
+/// so that the caller closes the connection.
+///
+/// # Arguments
+///
+/// * `reader` - The connection.
+/// * `setup` - The mailbox, which records the lines, and the notification
+///   of the fault.
+/// * `fault` - How the command fails.
+async fn handle_fault<S>(reader: &mut BufReader<S>, setup: &ConnectionSetup, fault: ImapFault)
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    setup.faulted.notify_one();
+    if fault == ImapFault::Close {
+        return;
+    }
+    let mut line = String::new();
+    while reader
+        .read_line(&mut line)
+        .await
+        .is_ok_and(|count| count > 0)
+    {
+        let command = line.trim_end_matches(['\r', '\n']).to_owned();
+        setup
+            .state
+            .lock()
+            .expect("the state")
+            .commands
+            .push(command);
+        line.clear();
     }
 }
 
@@ -783,13 +900,14 @@ fn format_capabilities(mode: ImapMode, secured: bool, state: &Arc<Mutex<FakeMail
 }
 
 /// Reads one command, with its literals, which are shown in the text as
-/// quoted strings; a refused command ends before a synchronizing literal,
-/// which the client then never sends.
+/// quoted strings; a refused or failed command ends before a synchronizing
+/// literal, which the client then never sends.
 ///
 /// # Arguments
 ///
 /// * `reader` - The connection.
-/// * `state` - The mailbox, which says which commands are refused.
+/// * `state` - The mailbox, which says which commands are refused or
+///   failed.
 async fn read_command<S>(
     reader: &mut BufReader<S>,
     state: &Arc<Mutex<FakeMailbox>>,
@@ -808,7 +926,7 @@ where
         let cut = text.rfind('{')?;
         text.truncate(cut);
         if synchronizing {
-            if is_refused(&text, state) {
+            if is_answered_before_literal(&text, state) {
                 return Some((text, literals));
             }
             send_line(reader, "+ OK\r\n").await;
@@ -824,14 +942,12 @@ where
     Some((text, literals))
 }
 
-/// Whether the fake refuses the command the text begins.
-fn is_refused(text: &str, state: &Arc<Mutex<FakeMailbox>>) -> bool {
+/// Whether the fake refuses or fails the command the text begins, so that
+/// it never asks for the command's literal.
+fn is_answered_before_literal(text: &str, state: &Arc<Mutex<FakeMailbox>>) -> bool {
     parse_command(text, Vec::new()).is_some_and(|command| {
-        state
-            .lock()
-            .expect("the state")
-            .find_refusal(&command.name)
-            .is_some()
+        let mailbox = state.lock().expect("the state");
+        mailbox.find_refusal(&command.name).is_some() || mailbox.find_fault(&command.name).is_some()
     })
 }
 

@@ -99,23 +99,36 @@ impl ConnectionFailure {
         }
     }
 
-    /// Formats the failure as the sentence the model reads.
+    /// Formats the failure as the sentence the model reads when it ends a
+    /// call: what happened, and, for a connection that ended or timed out,
+    /// to try again.
     ///
     /// # Arguments
     ///
     /// * `protocol` - Which server's connection ended.
     fn format_sentence(self, protocol: Protocol) -> String {
+        let fact = self.format_fact(protocol);
+        match self {
+            Self::Lost | Self::TimedOut => format!("{fact} Try again."),
+            Self::Unreadable => fact,
+        }
+    }
+
+    /// Formats what happened as a sentence, without advice.
+    ///
+    /// # Arguments
+    ///
+    /// * `protocol` - Which server's connection ended.
+    fn format_fact(self, protocol: Protocol) -> String {
         let server = protocol.name();
         match self {
             Self::Lost => {
-                format!(
-                    "The connection to the {server} server ended before it answered. Try again."
-                )
+                format!("The connection to the {server} server ended before it answered.")
             }
             Self::Unreadable => {
                 format!("The {server} server answered something Lys could not read.")
             }
-            Self::TimedOut => format!("The {server} server did not answer in time. Try again."),
+            Self::TimedOut => format!("The {server} server did not answer in time."),
         }
     }
 }
@@ -286,6 +299,18 @@ pub enum ToolFailure {
 }
 
 impl ToolFailure {
+    /// Formats the failure as the reason a step failed after the call had
+    /// already changed something, such as the copy of a sent message: the
+    /// sentence the model reads without the advice to try again, which only
+    /// a failure of a connection carries, as trying the call again would
+    /// repeat what it already did.
+    pub fn format_reason(&self) -> String {
+        match self {
+            Self::Connection { protocol, failure } => failure.format_fact(*protocol),
+            _ => self.to_string(),
+        }
+    }
+
     /// Returns the class of the failure for the log, without any server
     /// text, name, or address.
     pub fn class(&self) -> String {
@@ -617,5 +642,34 @@ mod tests {
             assert_eq!(failure.class(), class);
             assert_eq!(failure.to_string(), sentence);
         }
+    }
+
+    #[test]
+    fn states_why_a_step_after_a_change_failed_without_advice_to_try_again() {
+        let connection = |failure| ToolFailure::Connection {
+            protocol: Protocol::Imap,
+            failure,
+        };
+        let refused = ToolFailure::ImapRefused {
+            operation: "save the copy",
+            text: "[OVERQUOTA] Quota exceeded".to_owned(),
+        };
+
+        assert_eq!(
+            connection(ConnectionFailure::Lost).format_reason(),
+            "The connection to the IMAP server ended before it answered."
+        );
+        assert_eq!(
+            connection(ConnectionFailure::TimedOut).format_reason(),
+            "The IMAP server did not answer in time."
+        );
+        assert_eq!(
+            connection(ConnectionFailure::Unreadable).format_reason(),
+            "The IMAP server answered something Lys could not read."
+        );
+        assert_eq!(
+            refused.format_reason(),
+            "The IMAP server refused to save the copy: [OVERQUOTA] Quota exceeded."
+        );
     }
 }

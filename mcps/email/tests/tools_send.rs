@@ -10,7 +10,7 @@ use email::tools::ToolContext;
 use email::tools::send::{MessageArguments, run_send_email};
 use email::trust::Trust;
 
-use support::imap::{FakeMailbox, NewMessage};
+use support::imap::{FakeMailbox, ImapFault, NewMessage};
 use support::{ADDRESS, Stack, TestMessage, calculate_trimmed_bytes, start_stack};
 
 /// The time the original message was sent.
@@ -467,4 +467,32 @@ async fn refuses_arguments_that_break_a_rule_before_connecting() {
     );
     assert_nothing_sent(&stack);
     assert!(stack.imap.list_commands().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reports_a_message_sent_before_its_copy_failed_as_sent() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    stack.imap.add_fault("APPEND", ImapFault::Close);
+
+    let report = run_send_email(
+        &stack.context,
+        build_message_to_jane("Hi", "Hello"),
+        &SendProgress::default(),
+    )
+    .await
+    .expect("sent");
+
+    assert!(
+        report.text.ends_with(
+            "\nThe copy could not be saved in Sent: The connection to the IMAP server ended before it answered."
+        ),
+        "{}",
+        report.text
+    );
+    assert_eq!(
+        report.log,
+        "send: 1 recipient(s), 0 attachment(s), copy failed (imap-connection-lost)"
+    );
+    assert_eq!(stack.smtp.list_mails().len(), 1);
+    assert!(stack.imap.list_messages("Sent").is_empty());
 }

@@ -71,18 +71,22 @@ pub enum SentCopy {
     Saved(String),
     /// No Sent folder was found.
     NoFolder,
-    /// Saving the copy failed as described.
-    Failed(String),
+    /// Saving the copy failed for the reason.
+    Failed(ToolFailure),
 }
 
 impl SentCopy {
-    /// Returns the sentence the model reads.
+    /// Returns the sentence the model reads; a failure is stated without
+    /// advice to try again, as the message is sent.
     pub fn format_sentence(&self) -> String {
         match self {
             Self::KeptByServer => "The server keeps a copy of sent mail.".to_owned(),
             Self::Saved(folder) => format!("A copy was saved in {folder}."),
             Self::NoFolder => "No Sent folder was found, so no copy was saved.".to_owned(),
-            Self::Failed(reason) => format!("The copy could not be saved in Sent: {reason}"),
+            Self::Failed(failure) => format!(
+                "The copy could not be saved in Sent: {}",
+                failure.format_reason()
+            ),
         }
     }
 }
@@ -395,10 +399,9 @@ pub async fn offer_sent_copy(
     if context.account.server_keeps_sent_copy {
         return SentCopy::KeptByServer;
     }
-    match save_sent_copy(context, session, bytes).await {
-        Ok(copy) => copy,
-        Err(failure) => SentCopy::Failed(failure.to_string()),
-    }
+    save_sent_copy(context, session, bytes)
+        .await
+        .unwrap_or_else(SentCopy::Failed)
 }
 
 /// Appends the copy to the Sent folder.
@@ -412,29 +415,35 @@ async fn save_sent_copy(
         None => session.insert(context.open_imap().await?),
     };
     let folders = load_folders(opened).await?;
-    let Some(sent) = find_role_folder(&folders, FolderRole::Sent) else {
-        return Ok(SentCopy::NoFolder);
-    };
-    save_read_copy(opened, sent, bytes).await?;
-    Ok(SentCopy::Saved(sent.name.clone()))
+    save_copy_in_sent(opened, &folders, bytes).await
 }
 
-/// Appends a sent message's copy to a folder, marked as read.
+/// Appends a sent message's copy, marked as read, to the Sent folder of
+/// the account's folders.
 ///
 /// # Arguments
 ///
 /// * `session` - The signed-in session.
-/// * `folder` - The Sent folder.
+/// * `folders` - The account's folders.
 /// * `bytes` - The message as sent.
-pub async fn save_read_copy(
+///
+/// # Returns
+///
+/// The folder the copy was saved in, or that no folder has the Sent role;
+/// otherwise why the server did not store the copy.
+pub(super) async fn save_copy_in_sent(
     session: &mut ImapSession,
-    folder: &Folder,
+    folders: &[Folder],
     bytes: &[u8],
-) -> Result<(), ToolFailure> {
+) -> Result<SentCopy, ToolFailure> {
+    let Some(sent) = find_role_folder(folders, FolderRole::Sent) else {
+        return Ok(SentCopy::NoFolder);
+    };
     session
-        .save_message(&folder.raw_name, SENT_FLAGS, bytes)
+        .save_message(&sent.raw_name, SENT_FLAGS, bytes)
         .await
-        .map_err(build_imap_failure_conversion("save the copy"))
+        .map_err(build_imap_failure_conversion("save the copy"))?;
+    Ok(SentCopy::Saved(sent.name.clone()))
 }
 
 /// Formats a recipient list as a line, or nothing when it is empty.
@@ -446,13 +455,13 @@ pub fn format_optional_list(name: &str, recipients: &[String]) -> String {
     }
 }
 
-/// Names what became of the copy, for the log.
-pub fn format_copy_for_log(copy: &SentCopy) -> &'static str {
+/// Names what became of the copy, for the log: a failure with its class.
+pub fn format_copy_for_log(copy: &SentCopy) -> String {
     match copy {
-        SentCopy::KeptByServer => "kept by the server",
-        SentCopy::Saved(_) => "saved",
-        SentCopy::NoFolder => "no folder",
-        SentCopy::Failed(_) => "failed",
+        SentCopy::KeptByServer => "kept by the server".to_owned(),
+        SentCopy::Saved(_) => "saved".to_owned(),
+        SentCopy::NoFolder => "no folder".to_owned(),
+        SentCopy::Failed(failure) => format!("failed ({})", failure.class()),
     }
 }
 

@@ -5,11 +5,12 @@
 //! says, reads the greeting, signs in, and gives an [`ImapSession`] whose
 //! every command answers within [`EXCHANGE_LIMIT`] or fails. Each command
 //! is read up to its tagged status, so a `NO` or `BAD` is a failure that
-//! carries the server's code and text, never an empty answer. The session
-//! is closed with [`ImapSession::close`], which logs out; dropping it
-//! closes the socket either way. A command that ends in a time limit or a
-//! lost connection leaves the session unusable, and the tools never reuse
-//! one.
+//! carries the server's code and text, never an empty answer. A command
+//! that ends in the time limit or a lost connection ends the session: every
+//! later command fails at once with the same failure and sends nothing, as
+//! a late answer to the first could be read as the answer to the next. The
+//! session is closed with [`ImapSession::close`], which logs out unless a
+//! command ended the session; dropping it closes the socket either way.
 //!
 //! Folder names given to commands are the server's own (modified UTF-7);
 //! [`crate::folder_name`] converts them.
@@ -187,12 +188,17 @@ pub struct SelectedFolder {
 /// mutably, so one task at a time uses it, and each tool call opens its
 /// own. Resource ownership: owns the connection; [`Self::close`] logs out
 /// and closes it, and dropping the session closes the socket without
-/// logging out.
+/// logging out. Invariant: once a command ended in the time limit or a
+/// lost connection, the session sends nothing more, and every later
+/// command fails at once with that failure.
 pub struct ImapSession {
     /// The protocol session.
     session: Session<Stream>,
     /// Whether the server supports `UID EXPUNGE`, once asked.
     supports_uid_plus: Option<bool>,
+    /// The time limit or the lost connection that ended the session, once
+    /// a command met one.
+    ended_by: Option<ConnectionFailure>,
 }
 
 impl fmt::Debug for ImapSession {
@@ -200,6 +206,7 @@ impl fmt::Debug for ImapSession {
         formatter
             .debug_struct("ImapSession")
             .field("supports_uid_plus", &self.supports_uid_plus)
+            .field("ended_by", &self.ended_by)
             .finish_non_exhaustive()
     }
 }
@@ -255,6 +262,7 @@ pub async fn open_imap_session(
     Ok(ImapSession {
         session,
         supports_uid_plus: None,
+        ended_by: None,
     })
 }
 
@@ -304,7 +312,7 @@ impl ImapSession {
     ///
     /// The folders in the server's order, or why the listing failed.
     pub async fn list_folders(&mut self) -> Result<Vec<FolderListing>, ImapFailure> {
-        send_command(&mut self.session, "LIST \"\" \"*\"", read_listing).await
+        self.send_command("LIST \"\" \"*\"", read_listing).await
     }
 
     /// Counts the messages of a folder without selecting it.
@@ -319,7 +327,7 @@ impl ImapSession {
     /// unreadable.
     pub async fn get_message_count(&mut self, raw_name: &str) -> Result<u32, ImapFailure> {
         let command = format!("STATUS {} (MESSAGES)", quote_folder_name(raw_name)?);
-        let counts = send_command(&mut self.session, &command, read_message_count).await?;
+        let counts = self.send_command(&command, read_message_count).await?;
         counts.last().copied().ok_or(UNREADABLE)
     }
 
@@ -345,7 +353,7 @@ impl ImapSession {
             FolderAccess::Change => "SELECT",
         };
         let command = format!("{verb} {}", quote_folder_name(raw_name)?);
-        let facts = send_command(&mut self.session, &command, read_selection_fact).await?;
+        let facts = self.send_command(&command, read_selection_fact).await?;
         build_selected_folder(&facts)
     }
 
@@ -361,7 +369,7 @@ impl ImapSession {
     /// The matching UIDs, highest first.
     pub async fn list_matching_uids(&mut self, criteria: &str) -> Result<Vec<u32>, ImapFailure> {
         let command = format!("UID SEARCH {criteria}");
-        let answers = send_command(&mut self.session, &command, read_search_uids).await?;
+        let answers = self.send_command(&command, read_search_uids).await?;
         let mut uids: Vec<u32> = answers.into_iter().flatten().collect();
         uids.sort_unstable_by(|left, right| right.cmp(left));
         uids.dedup();
@@ -380,7 +388,7 @@ impl ImapSession {
             return Ok(Vec::new());
         }
         let command = format!("UID FETCH {} {SUMMARY_QUERY}", format_uid_set(uids));
-        send_command(&mut self.session, &command, read_summary).await
+        self.send_command(&command, read_summary).await
     }
 
     /// Fetches one whole message of the selected folder, without marking
@@ -395,11 +403,12 @@ impl ImapSession {
     /// The message, or `None` when no message has the UID any more.
     pub async fn find_message(&mut self, uid: u32) -> Result<Option<FetchedMessage>, ImapFailure> {
         let command = format!("UID FETCH {uid} {MESSAGE_QUERY}");
-        let messages = send_command(&mut self.session, &command, read_fetched_message).await?;
+        let messages = self.send_command(&command, read_fetched_message).await?;
         Ok(messages.into_iter().find(|message| message.uid == uid))
     }
 
-    /// Appends a message to a folder.
+    /// Appends a message to a folder, within [`EXCHANGE_LIMIT`], unless a
+    /// command ended the session.
     ///
     /// # Arguments
     ///
@@ -423,12 +432,8 @@ impl ImapSession {
             quote_folder_name(raw_name)?,
             bytes.len()
         );
-        timeout(
-            EXCHANGE_LIMIT,
-            send_append(&mut self.session, &command, bytes),
-        )
-        .await
-        .unwrap_or(Err(TIMED_OUT))
+        let exchange = send_append(&mut self.session, &command, bytes);
+        run_exchange(&mut self.ended_by, exchange).await
     }
 
     /// Deletes one message of the selected folder: marks it `\Deleted`
@@ -447,11 +452,12 @@ impl ImapSession {
     pub async fn delete_message(&mut self, uid: u32) -> Result<Deletion, ImapFailure> {
         let supports_uid_plus = self.find_uid_plus().await?;
         let mark = format!("UID STORE {uid} +FLAGS.SILENT (\\Deleted)");
-        run_status_command(&mut self.session, &mark).await?;
+        self.run_status_command(&mark).await?;
         if !supports_uid_plus {
             return Ok(Deletion::MarkedOnly);
         }
-        run_status_command(&mut self.session, &format!("UID EXPUNGE {uid}")).await?;
+        self.run_status_command(&format!("UID EXPUNGE {uid}"))
+            .await?;
         Ok(Deletion::Removed)
     }
 
@@ -462,7 +468,7 @@ impl ImapSession {
     /// * `raw_name` - The new folder's name as the server expects it.
     pub async fn create_folder(&mut self, raw_name: &str) -> Result<(), ImapFailure> {
         let command = format!("CREATE {}", quote_folder_name(raw_name)?);
-        run_status_command(&mut self.session, &command).await
+        self.run_status_command(&command).await
     }
 
     /// Deletes a folder.
@@ -472,7 +478,7 @@ impl ImapSession {
     /// * `raw_name` - The folder's name as the server wrote it.
     pub async fn delete_folder(&mut self, raw_name: &str) -> Result<(), ImapFailure> {
         let command = format!("DELETE {}", quote_folder_name(raw_name)?);
-        run_status_command(&mut self.session, &command).await
+        self.run_status_command(&command).await
     }
 
     /// Renames a folder.
@@ -491,12 +497,16 @@ impl ImapSession {
             quote_folder_name(raw_name)?,
             quote_folder_name(new_raw_name)?
         );
-        run_status_command(&mut self.session, &command).await
+        self.run_status_command(&command).await
     }
 
     /// Logs out and closes the connection; a failure to log out is logged
-    /// and otherwise ignored, as the socket closes either way.
+    /// and otherwise ignored, as the socket closes either way. A session a
+    /// command ended is closed without logging out.
     pub async fn close(mut self) {
+        if self.ended_by.is_some() {
+            return;
+        }
         match timeout(EXCHANGE_LIMIT, self.session.logout()).await {
             Ok(Ok(())) => {}
             Ok(Err(_)) => send_log_line("imap: logout refused"),
@@ -510,56 +520,81 @@ impl ImapSession {
         if let Some(supported) = self.supports_uid_plus {
             return Ok(supported);
         }
-        let answers = send_command(&mut self.session, "CAPABILITY", read_uid_plus).await?;
+        let answers = self.send_command("CAPABILITY", read_uid_plus).await?;
         let supported = answers.contains(&true);
         self.supports_uid_plus = Some(supported);
         Ok(supported)
     }
+
+    /// Sends one command and reads its answers up to its tagged status,
+    /// within [`EXCHANGE_LIMIT`], unless a command ended the session.
+    ///
+    /// # Arguments
+    ///
+    /// * `command` - The command, without its tag.
+    /// * `read_answer` - Reads an untagged response the command asked for;
+    ///   `None` skips any other response, such as an update the server
+    ///   sends on its own.
+    ///
+    /// # Returns
+    ///
+    /// The answers in the server's order, or why the command failed: the
+    /// server's code and text for `NO` or `BAD`, an ended connection, an
+    /// answer that is not IMAP, or the time limit.
+    async fn send_command<T>(
+        &mut self,
+        command: &str,
+        read_answer: fn(&Response<'_>) -> Option<T>,
+    ) -> Result<Vec<T>, ImapFailure> {
+        let session = &mut self.session;
+        let exchange = async {
+            let tag = session.run_command(command).await.map_err(|_| LOST)?;
+            read_tagged_answers(session, &tag, read_answer).await
+        };
+        run_exchange(&mut self.ended_by, exchange).await
+    }
+
+    /// Runs one command whose tagged status is its whole answer.
+    ///
+    /// # Arguments
+    ///
+    /// * `command` - The command, without its tag.
+    async fn run_status_command(&mut self, command: &str) -> Result<(), ImapFailure> {
+        self.send_command(command, |_| None::<()>).await.map(drop)
+    }
 }
 
-/// Sends one command and reads its answers up to its tagged status,
-/// within [`EXCHANGE_LIMIT`].
+/// Runs one exchange of a session within [`EXCHANGE_LIMIT`], unless a
+/// command ended the session: then it fails at once with that failure, and
+/// the exchange, which sends nothing before it is awaited, never runs.
 ///
 /// # Arguments
 ///
-/// * `session` - The signed-in session.
-/// * `command` - The command, without its tag.
-/// * `read_answer` - Reads an untagged response the command asked for;
-///   `None` skips any other response, such as an update the server sends
-///   on its own.
+/// * `ended_by` - What ended the session, if a command did; an exchange
+///   that ends in the time limit or a lost connection sets it.
+/// * `exchange` - The command's exchange with the server.
 ///
 /// # Returns
 ///
-/// The answers in the server's order, or why the command failed: the
-/// server's code and text for `NO` or `BAD`, an ended connection, an
-/// answer that is not IMAP, or the time limit.
-async fn send_command<T>(
-    session: &mut Session<Stream>,
-    command: &str,
-    read_answer: fn(&Response<'_>) -> Option<T>,
-) -> Result<Vec<T>, ImapFailure> {
-    let exchange = async {
-        let tag = session.run_command(command).await.map_err(|_| LOST)?;
-        read_tagged_answers(session, &tag, read_answer).await
-    };
-    timeout(EXCHANGE_LIMIT, exchange)
+/// The exchange's outcome, the time limit, or the failure that ended the
+/// session.
+async fn run_exchange<T>(
+    ended_by: &mut Option<ConnectionFailure>,
+    exchange: impl Future<Output = Result<T, ImapFailure>>,
+) -> Result<T, ImapFailure> {
+    if let Some(failure) = *ended_by {
+        return Err(ImapFailure::Connection(failure));
+    }
+    let outcome = timeout(EXCHANGE_LIMIT, exchange)
         .await
-        .unwrap_or(Err(TIMED_OUT))
-}
-
-/// Runs one command whose tagged status is its whole answer.
-///
-/// # Arguments
-///
-/// * `session` - The signed-in session.
-/// * `command` - The command, without its tag.
-async fn run_status_command(
-    session: &mut Session<Stream>,
-    command: &str,
-) -> Result<(), ImapFailure> {
-    send_command(session, command, |_| None::<()>)
-        .await
-        .map(drop)
+        .unwrap_or(Err(TIMED_OUT));
+    if let Err(ImapFailure::Connection(
+        failure @ (ConnectionFailure::Lost | ConnectionFailure::TimedOut),
+    )) = outcome
+    {
+        *ended_by = Some(failure);
+    }
+    outcome
 }
 
 /// Sends an APPEND: the command, the message once the server asks for it,

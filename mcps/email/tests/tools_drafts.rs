@@ -2,6 +2,8 @@
 
 mod support;
 
+use std::time::Duration;
+
 use email::failure::ToolFailure;
 use email::folders::FolderRole;
 use email::smtp::SendProgress;
@@ -10,8 +12,14 @@ use email::tools::drafts::{
     run_send_draft,
 };
 
-use support::imap::{FakeFolder, FakeMailbox, NewMessage};
-use support::{Stack, calculate_trimmed_bytes, start_stack};
+use support::imap::{FakeFolder, FakeMailbox, ImapFault, NewMessage};
+use support::{Stack, assert_about, calculate_trimmed_bytes, start_stack};
+
+/// The reason a step reports when the IMAP server ended its connection.
+const LOST: &str = "The connection to the IMAP server ended before it answered.";
+
+/// The reason a step reports when the IMAP server did not answer in time.
+const TIMED_OUT: &str = "The IMAP server did not answer in time.";
 
 /// A draft to Jane with a hidden recipient.
 fn build_draft(subject: &str) -> SaveDraftArguments {
@@ -457,4 +465,76 @@ async fn sends_a_draft_another_client_saved_with_the_fields_the_refusal_names() 
         text.contains("Team: a@example.com, B <b@example.com>;"),
         "{text}"
     );
+}
+
+/// The end of the report of a sent draft whose IMAP session ended at its
+/// Sent copy for the reason.
+fn format_kept_draft_end(reason: &str) -> String {
+    format!(
+        "\nThe copy could not be saved in Sent: {reason}\nThe draft could not be deleted and may still be in Drafts: {reason} Delete it with delete_draft; do not send it again."
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reports_a_draft_sent_before_the_imap_connection_ended_as_sent_and_kept() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    let id = save(&stack, build_draft("Ready")).await;
+    stack.imap.add_fault("APPEND", ImapFault::Close);
+
+    let report = run_send_draft(
+        &stack.context,
+        build_send(&id, &build_draft("Ready")),
+        &SendProgress::default(),
+    )
+    .await
+    .expect("sent");
+
+    assert_eq!(
+        report.text,
+        format!(
+            "Sent draft 1.1003.Drafts.\nTo: Jane Doe <jane@example.com>\nBcc: hidden@example.com\nSubject: Ready{}",
+            format_kept_draft_end(LOST)
+        )
+    );
+    assert_eq!(
+        report.log,
+        "draft: sent to 2 recipient(s), copy failed (imap-connection-lost), deleted false (imap-connection-lost)"
+    );
+    assert_eq!(stack.smtp.list_mails().len(), 1);
+    assert!(stack.imap.list_messages("Sent").is_empty());
+    assert_eq!(stack.imap.list_messages("Drafts").len(), 1);
+}
+
+#[tokio::test]
+async fn sends_nothing_more_over_an_imap_session_whose_sent_copy_timed_out() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    let id = save(&stack, build_draft("Ready")).await;
+    stack.imap.add_fault("APPEND", ImapFault::Stall);
+    let progress = SendProgress::default();
+
+    let (sent, elapsed) = stack
+        .imap
+        .run_past_fault(run_send_draft(
+            &stack.context,
+            build_send(&id, &build_draft("Ready")),
+            &progress,
+        ))
+        .await;
+
+    let commands = stack.imap.list_commands();
+    assert!(
+        commands
+            .last()
+            .is_some_and(|command| command.contains(" APPEND ")),
+        "{commands:?}"
+    );
+    assert_about(elapsed, Duration::from_secs(30));
+    let report = sent.expect("sent");
+    assert!(
+        report.text.ends_with(&format_kept_draft_end(TIMED_OUT)),
+        "{}",
+        report.text
+    );
+    assert_eq!(stack.smtp.list_mails().len(), 1);
+    assert_eq!(stack.imap.list_messages("Drafts").len(), 1);
 }

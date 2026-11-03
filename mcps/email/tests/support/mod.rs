@@ -8,11 +8,14 @@ pub mod imap;
 pub mod smtp;
 pub mod tls;
 
+use std::fmt::Debug;
+use std::future::Future;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use email::account::{Account, parse_account_variable};
 use email::tools::ToolContext;
 use email::trust::Trust;
+use tokio::time::{Instant, timeout};
 
 use self::imap::{FakeImapServer, FakeMailbox, ImapMode, NewMessage};
 use self::smtp::{FakeSmtpServer, SmtpMode};
@@ -37,6 +40,17 @@ pub const MONTH_NAMES: [&str; 12] = [
 
 /// Weekday names as mail writes them, from Sunday.
 pub const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/// How many times a future may take up input its connection already has,
+/// after a fake met its fault and before the clock pauses: enough for a
+/// connection the fake accepted to finish connecting, so that only the
+/// wait the fault caused is left.
+const SETTLING_TURNS: usize = 3;
+
+/// Longest a future may wait on the paused clock before the test fails it:
+/// longer than any limit of the code under test, so that a step without a
+/// limit fails the test instead of hanging it.
+const GUARD_LIMIT: Duration = Duration::from_secs(600);
 
 /// How a server of an account is reached, as the settings name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,6 +82,47 @@ pub struct TestServers {
     pub smtp_port: u16,
     /// How the SMTP fake is reached.
     pub smtp_security: SecurityName,
+}
+
+/// Runs a future until a fake's fault strikes, lets it take up the input
+/// it already has, pauses the clock, and runs it to its end, so that the
+/// limit of the wait the fault caused passes at once.
+///
+/// # Arguments
+///
+/// * `fault` - Ends when the fault strikes.
+/// * `future` - The code under test.
+///
+/// # Returns
+///
+/// The future's output and how long it took, the paused part included.
+///
+/// # Panics
+///
+/// When the future ends before the clock paused, or waits on the paused
+/// clock longer than [`GUARD_LIMIT`].
+pub async fn run_past_fault<F>(fault: impl Future<Output = ()>, future: F) -> (F::Output, Duration)
+where
+    F: Future,
+    F::Output: Debug,
+{
+    let started = Instant::now();
+    tokio::pin!(future);
+    tokio::select! {
+        () = fault => {}
+        outcome = &mut future => panic!("the future ended before the fault: {outcome:?}"),
+    }
+    for _ in 0..SETTLING_TURNS {
+        tokio::select! {
+            () = tokio::task::yield_now() => {}
+            outcome = &mut future => panic!("the future ended before the clock paused: {outcome:?}"),
+        }
+    }
+    tokio::time::pause();
+    let outcome = timeout(GUARD_LIMIT, future)
+        .await
+        .expect("a limit of the code under test ends the future");
+    (outcome, started.elapsed())
 }
 
 /// Asserts that a duration measured across a pause of the clock is the

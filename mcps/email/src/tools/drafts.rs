@@ -11,8 +11,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::send::{
-    MessageArguments, build_composition, format_copy_for_log, format_optional_list,
-    parse_message_arguments, save_read_copy, send_composed,
+    MessageArguments, SentCopy, build_composition, format_copy_for_log, format_optional_list,
+    parse_message_arguments, save_copy_in_sent, send_composed,
 };
 use super::{
     ToolContext, ToolReport, ToolResult, build_imap_failure_conversion, format_list_argument,
@@ -225,54 +225,64 @@ pub async fn run_send_draft(
     }
     send_composed(context, &prepared.message, progress).await?;
     let copy = if context.account.server_keeps_sent_copy {
-        super::send::SentCopy::KeptByServer
+        SentCopy::KeptByServer
     } else {
-        match folders
-            .iter()
-            .find(|folder| folder.role == Some(FolderRole::Sent))
-        {
-            Some(sent) => match save_read_copy(&mut session, sent, &prepared.message.bytes).await {
-                Ok(()) => super::send::SentCopy::Saved(sent.name.clone()),
-                Err(failure) => super::send::SentCopy::Failed(failure.to_string()),
-            },
-            None => super::send::SentCopy::NoFolder,
-        }
-    };
-    let deleted = match session
-        .open_folder(&drafts.raw_name, FolderAccess::Change)
-        .await
-        .map_err(build_imap_failure_conversion("select the Drafts folder"))
-    {
-        Ok(_) => session
-            .delete_message(id.uid)
+        save_copy_in_sent(&mut session, &folders, &prepared.message.bytes)
             .await
-            .map_err(build_imap_failure_conversion("delete the sent draft")),
-        Err(failure) => Err(failure),
+            .unwrap_or_else(SentCopy::Failed)
     };
+    // Drafts is still open at the draft's id, as load_draft checked it:
+    // appending the copy to Sent does not change the open folder.
+    let deleted = session
+        .delete_message(id.uid)
+        .await
+        .map_err(build_imap_failure_conversion("delete the sent draft"));
     session.close().await;
-    let deletion = match &deleted {
-        Ok(deletion) => format!(
-            "The draft {}.",
-            format_deletion_clause(*deletion, &drafts.name)
-        ),
-        Err(failure) => format!("The draft is still in {}: {failure}", drafts.name),
-    };
     Ok(ToolReport {
         text: format!(
-            "Sent draft {id}.\nTo: {}\n{}{}Subject: {}\n{}\n{deletion}",
+            "Sent draft {id}.\nTo: {}\n{}{}Subject: {}\n{}\n{}",
             prepared.fields.to.join(", "),
             format_optional_list("Cc", &prepared.fields.cc),
             format_optional_list("Bcc", &prepared.fields.bcc),
             prepared.fields.subject,
-            copy.format_sentence()
+            copy.format_sentence(),
+            format_sent_draft_deletion(&deleted, &drafts.name)
         ),
         log: format!(
             "draft: sent to {} recipient(s), copy {}, deleted {}",
             prepared.message.envelope.to().len(),
             format_copy_for_log(&copy),
-            deleted == Ok(Deletion::Removed)
+            format_deletion_for_log(&deleted)
         ),
     })
+}
+
+/// Formats what deleting a sent draft did, as the last sentence of the
+/// report; a failure is stated without advice to try again, as the draft
+/// is sent.
+///
+/// # Arguments
+///
+/// * `deleted` - What the deletion did, or why it failed.
+/// * `drafts` - The Drafts folder's name.
+fn format_sent_draft_deletion(deleted: &Result<Deletion, ToolFailure>, drafts: &str) -> String {
+    match deleted {
+        Ok(deletion) => format!("The draft {}.", format_deletion_clause(*deletion, drafts)),
+        Err(failure) => format!(
+            "The draft could not be deleted and may still be in {drafts}: {} Delete it with delete_draft; do not send it again.",
+            failure.format_reason()
+        ),
+    }
+}
+
+/// Names what deleting a sent draft did, for the log: `true` once it is
+/// gone, else `false`, with the class of a failure.
+fn format_deletion_for_log(deleted: &Result<Deletion, ToolFailure>) -> String {
+    match deleted {
+        Ok(Deletion::Removed) => "true".to_owned(),
+        Ok(Deletion::MarkedOnly) => "false".to_owned(),
+        Err(failure) => format!("false ({})", failure.class()),
+    }
 }
 
 /// Deletes a draft.

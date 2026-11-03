@@ -504,6 +504,33 @@ describe("McpPaneContent", () => {
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE])
   })
 
+  it("disables every server's switch while a save of the servers runs", async () => {
+    const write = createControlledPromise<unknown>()
+    startSettingsHost(() => write.promise)
+    const filesOff = buildMcpServerList([
+      buildMcpServerStatus("files", "stdio", OFF_MCP_STATE),
+      ...STORED_LIST.servers.slice(1)
+    ])
+    await startMcpPane({ [SYNC_ROUTE]: answerList(filesOff) })
+    const user = userEvent.setup()
+
+    await user.click(getServerSwitch("files"))
+    await waitForRenderedWork()
+
+    for (const serverName of ["files", "notes", "email"]) {
+      expect(getServerSwitch(serverName)).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      )
+    }
+    write.resolve(null)
+    await waitForRenderedWork()
+
+    for (const serverName of ["files", "notes", "email"]) {
+      expect(getServerSwitch(serverName)).not.toHaveAttribute("aria-disabled")
+    }
+  })
+
   it("shows the email server's details with its account card, and no Edit, Remove, or configuration, never the password", async () => {
     startSettingsHost()
     await startMcpPane()

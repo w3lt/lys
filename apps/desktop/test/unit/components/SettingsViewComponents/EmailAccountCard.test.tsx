@@ -539,6 +539,27 @@ describe("EmailAccountCard", () => {
     expect(getStatusLine()).toHaveTextContent("Saved · ada@fastmail.com")
   })
 
+  it("discards the tried save and the shown password with the edit on Escape", async () => {
+    startEmailAccountCard()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "Show password" }))
+    await user.clear(getField("User name"))
+    await user.click(getSaveButton())
+    expect(getField("User name")).toHaveFocus()
+
+    await user.keyboard("{Escape}")
+
+    expect(getField("User name")).toHaveValue(STORED_EMAIL_ACCOUNT.userName)
+    expect(getPasswordField()).toHaveAttribute("type", "password")
+    expect(
+      screen.getByRole("button", { name: "Show password" })
+    ).toHaveAttribute("aria-pressed", "false")
+
+    await user.clear(getField("User name"))
+
+    expect(getField("User name")).not.toHaveAttribute("aria-invalid")
+  })
+
   it("keeps the edit on an Escape that ends text composition", async () => {
     startEmailAccountCard()
     const user = userEvent.setup()

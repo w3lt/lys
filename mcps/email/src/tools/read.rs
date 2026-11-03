@@ -14,7 +14,7 @@ use super::{
 use crate::email_id::{EmailId, parse_email_id};
 use crate::failure::{ConnectionFailure, Protocol, ToolFailure};
 use crate::folders::{Folder, FolderRole};
-use crate::imap::{FetchedMessage, Flags, ImapSession, format_search_text};
+use crate::imap::{FetchedMessage, Flags, ImapSession, SearchWord};
 use crate::message::{MessageView, format_size, parse_message};
 
 /// Most messages a conversation shows, the newest ones, and most hits it
@@ -594,22 +594,27 @@ fn list_conversation_identifiers(view: &MessageView) -> Vec<String> {
 ///
 /// # Returns
 ///
-/// The keys, or `None` when there is no identifier to search by.
-fn build_conversation_criteria(identifiers: &[String]) -> Option<String> {
-    let keys: Vec<String> = identifiers
+/// The keys, `OR` in front of each but the last, or `None` when there is
+/// no identifier to search by.
+fn build_conversation_criteria(identifiers: &[String]) -> Option<Vec<SearchWord>> {
+    let keys: Vec<(&str, &String)> = identifiers
         .iter()
         .flat_map(|identifier| {
-            let quoted = format_search_text(identifier);
-            [
-                format!("HEADER MESSAGE-ID {quoted}"),
-                format!("HEADER IN-REPLY-TO {quoted}"),
-                format!("HEADER REFERENCES {quoted}"),
-            ]
+            ["MESSAGE-ID", "IN-REPLY-TO", "REFERENCES"].map(|field| (field, identifier))
         })
         .collect();
-    keys.into_iter()
-        .rev()
-        .reduce(|inner, key| format!("OR {key} {inner}"))
+    let mut words = Vec::new();
+    for (index, (field, identifier)) in keys.iter().enumerate() {
+        if index + 1 < keys.len() {
+            words.push(SearchWord::Plain("OR".to_owned()));
+        }
+        words.extend([
+            SearchWord::Plain("HEADER".to_owned()),
+            SearchWord::Plain((*field).to_owned()),
+            SearchWord::Text((*identifier).clone()),
+        ]);
+    }
+    (!keys.is_empty()).then_some(words)
 }
 
 #[cfg(test)]
@@ -619,15 +624,33 @@ mod tests {
 
     #[test]
     fn builds_an_or_chain_over_every_identifier() {
+        let plain = |word: &str| SearchWord::Plain(word.to_owned());
+        let text = |value: &str| SearchWord::Text(value.to_owned());
+
         assert_eq!(build_conversation_criteria(&[]), None);
         assert_eq!(
             build_conversation_criteria(&["one@example.com".to_owned()]).expect("criteria"),
-            "OR HEADER MESSAGE-ID \"one@example.com\" OR HEADER IN-REPLY-TO \"one@example.com\" HEADER REFERENCES \"one@example.com\""
+            [
+                plain("OR"),
+                plain("HEADER"),
+                plain("MESSAGE-ID"),
+                text("one@example.com"),
+                plain("OR"),
+                plain("HEADER"),
+                plain("IN-REPLY-TO"),
+                text("one@example.com"),
+                plain("HEADER"),
+                plain("REFERENCES"),
+                text("one@example.com"),
+            ]
         );
         let two =
             build_conversation_criteria(&["a@x".to_owned(), "b@x".to_owned()]).expect("criteria");
-        assert_eq!(two.matches("OR ").count(), 5);
-        assert!(two.ends_with("HEADER REFERENCES \"b@x\""), "{two}");
+        assert_eq!(two.iter().filter(|word| **word == plain("OR")).count(), 5);
+        assert!(
+            two.ends_with(&[plain("HEADER"), plain("REFERENCES"), text("b@x")]),
+            "{two:?}"
+        );
     }
 
     #[test]

@@ -66,6 +66,17 @@ async fn a_refused_search_fails_instead_of_matching_nothing() {
             "[BADCHARSET (US-ASCII)] Unsupported charset"
         ))
     );
+    let commands = stack.imap.list_commands();
+    assert!(
+        commands
+            .last()
+            .is_some_and(|command| command.ends_with("UID SEARCH CHARSET UTF-8 SUBJECT ")),
+        "{commands:?}"
+    );
+    assert!(
+        !commands.iter().any(|command| command.contains("Grüße")),
+        "{commands:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

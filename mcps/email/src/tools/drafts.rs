@@ -25,7 +25,7 @@ use crate::compose::{
 use crate::email_id::{EmailId, parse_email_id};
 use crate::failure::ToolFailure;
 use crate::folders::{Folder, FolderRole};
-use crate::imap::{Deletion, FolderAccess, ImapSession, Summary, format_search_text};
+use crate::imap::{Deletion, FolderAccess, ImapSession, SearchWord, Summary};
 use crate::message::{ParsedMailbox, build_message_view};
 use crate::smtp::SendProgress;
 
@@ -235,7 +235,11 @@ async fn find_saved_draft_id(
         .open_folder(&drafts.raw_name, FolderAccess::Change)
         .await
         .map_err(build_imap_failure_conversion("select the Drafts folder"))?;
-    let criteria = format!("HEADER MESSAGE-ID {}", format_search_text(message_id));
+    let criteria = [
+        SearchWord::Plain("HEADER".to_owned()),
+        SearchWord::Plain("MESSAGE-ID".to_owned()),
+        SearchWord::Text(message_id.to_owned()),
+    ];
     let uids = session
         .list_matching_uids(&criteria)
         .await

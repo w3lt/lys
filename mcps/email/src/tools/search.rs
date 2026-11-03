@@ -12,9 +12,7 @@ use super::{
 use crate::email_id::EmailId;
 use crate::failure::ToolFailure;
 use crate::folders::{Folder, FolderRole};
-use crate::imap::{
-    Flags, FolderAccess, ImapSession, Summary, format_search_date, format_search_text,
-};
+use crate::imap::{Flags, FolderAccess, ImapSession, SearchWord, Summary, format_search_date};
 use crate::message::{Headers, parse_headers};
 
 /// Messages per page.
@@ -163,7 +161,7 @@ fn list_search_folders(folders: &[Folder], name: Option<&str>) -> Result<Vec<Fol
 async fn find_search_hits(
     session: &mut ImapSession,
     targets: &[Folder],
-    criteria: &str,
+    criteria: &[SearchWord],
 ) -> Result<SearchHits, ToolFailure> {
     let mut found = SearchHits::default();
     for folder in targets {
@@ -263,7 +261,7 @@ fn format_search_heading(found: &SearchHits, page: usize, pages: usize) -> Strin
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HitQuery<'a> {
     /// The search keys.
-    pub criteria: &'a str,
+    pub criteria: &'a [SearchWord],
     /// Most hits to keep: the newest by UID.
     pub limit: usize,
 }
@@ -371,11 +369,9 @@ fn format_hit(hit: &Hit) -> String {
 ///
 /// # Returns
 ///
-/// The keys, with `CHARSET UTF-8` in front when a text is not ASCII, or
-/// why an argument breaks a rule.
-fn build_search_criteria(arguments: &SearchArguments) -> Result<String, ToolFailure> {
+/// The keys, or why an argument breaks a rule.
+fn build_search_criteria(arguments: &SearchArguments) -> Result<Vec<SearchWord>, ToolFailure> {
     let mut keys = Vec::new();
-    let mut non_ascii = false;
     for (name, key, value) in [
         ("text", "TEXT", &arguments.text),
         ("from", "FROM", &arguments.from),
@@ -387,8 +383,8 @@ fn build_search_criteria(arguments: &SearchArguments) -> Result<String, ToolFail
             if value.is_empty() {
                 return Err(ToolFailure::Argument(format!("{name} must not be empty.")));
             }
-            non_ascii |= !value.is_ascii();
-            keys.push(format!("{key} {}", format_search_text(value)));
+            keys.push(SearchWord::Plain(key.to_owned()));
+            keys.push(SearchWord::Text(value.clone()));
         }
     }
     for (name, key, value) in [
@@ -399,28 +395,24 @@ fn build_search_criteria(arguments: &SearchArguments) -> Result<String, ToolFail
             let (year, month, day) = parse_day(value).ok_or_else(|| {
                 ToolFailure::Argument(format!("{name} must be a day as YYYY-MM-DD."))
             })?;
-            keys.push(format!("{key} {}", format_search_date(year, month, day)));
+            keys.push(SearchWord::Plain(key.to_owned()));
+            keys.push(SearchWord::Plain(format_search_date(year, month, day)));
         }
     }
     match arguments.unread {
-        Some(true) => keys.push("UNSEEN".to_owned()),
-        Some(false) => keys.push("SEEN".to_owned()),
+        Some(true) => keys.push(SearchWord::Plain("UNSEEN".to_owned())),
+        Some(false) => keys.push(SearchWord::Plain("SEEN".to_owned())),
         None => {}
     }
     match arguments.flagged {
-        Some(true) => keys.push("FLAGGED".to_owned()),
-        Some(false) => keys.push("UNFLAGGED".to_owned()),
+        Some(true) => keys.push(SearchWord::Plain("FLAGGED".to_owned())),
+        Some(false) => keys.push(SearchWord::Plain("UNFLAGGED".to_owned())),
         None => {}
     }
     if keys.is_empty() {
-        keys.push("ALL".to_owned());
+        keys.push(SearchWord::Plain("ALL".to_owned()));
     }
-    let criteria = keys.join(" ");
-    Ok(if non_ascii {
-        format!("CHARSET UTF-8 {criteria}")
-    } else {
-        criteria
-    })
+    Ok(keys)
 }
 
 /// Parses a day written as `YYYY-MM-DD`.
@@ -490,14 +482,31 @@ mod tests {
             flagged: Some(false),
             ..SearchArguments::default()
         };
+        let plain = |word: &str| SearchWord::Plain(word.to_owned());
+        let text = |value: &str| SearchWord::Text(value.to_owned());
 
         assert_eq!(
             build_search_criteria(&arguments).expect("criteria"),
-            "CHARSET UTF-8 TEXT \"invoice\" FROM \"jane@example.com\" TO \"me\" SUBJECT {7+}\r\nGrüße SINCE 5-Jan-2026 BEFORE 29-Feb-2028 UNSEEN UNFLAGGED"
+            [
+                plain("TEXT"),
+                text("invoice"),
+                plain("FROM"),
+                text("jane@example.com"),
+                plain("TO"),
+                text("me"),
+                plain("SUBJECT"),
+                text("Grüße"),
+                plain("SINCE"),
+                plain("5-Jan-2026"),
+                plain("BEFORE"),
+                plain("29-Feb-2028"),
+                plain("UNSEEN"),
+                plain("UNFLAGGED"),
+            ]
         );
         assert_eq!(
             build_search_criteria(&SearchArguments::default()).expect("criteria"),
-            "ALL"
+            [plain("ALL")]
         );
         assert_eq!(
             build_search_criteria(&SearchArguments {
@@ -506,7 +515,7 @@ mod tests {
                 ..SearchArguments::default()
             })
             .expect("criteria"),
-            "SEEN FLAGGED"
+            [plain("SEEN"), plain("FLAGGED")]
         );
     }
 

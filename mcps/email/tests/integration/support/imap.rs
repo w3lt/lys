@@ -1,8 +1,8 @@
 //! A fake IMAP server: folders and messages in memory, the commands the
 //! email server sends, TLS or STARTTLS, and a log of every command; on
-//! request it refuses a command, fails it by never answering it or by
-//! closing the connection, or removes a message before a command, as
-//! another client would.
+//! request it leaves LITERAL+ or UIDPLUS out of its capabilities, refuses
+//! a command, fails it by never answering it or by closing the connection,
+//! or removes a message before a command, as another client would.
 
 use std::fmt::Debug;
 use std::future::Future;
@@ -144,6 +144,10 @@ pub struct FakeMailbox {
     pub commands: Vec<String>,
     /// Whether UIDPLUS is advertised.
     pub uid_plus: bool,
+    /// Whether LITERAL+ is advertised. Without it, `{n+}` is not a
+    /// literal: a command line that ends in one ends there and is answered
+    /// `BAD`, and the next line is read as a command of its own.
+    pub literal_plus: bool,
     /// The hierarchy delimiter.
     pub delimiter: String,
     /// The UIDVALIDITY the next created folder gets.
@@ -165,6 +169,7 @@ impl FakeMailbox {
             folders: Vec::new(),
             commands: Vec::new(),
             uid_plus: true,
+            literal_plus: true,
             delimiter: "/".to_owned(),
             next_uid_validity: 2001,
             refusals: Vec::new(),
@@ -536,6 +541,14 @@ where
         let Some(command) = parse_command(&text, literals) else {
             continue;
         };
+        if parse_trailing_literal(&text).is_some() {
+            let answer = format!(
+                "{} BAD Error in IMAP command: Invalid literal\r\n",
+                command.tag
+            );
+            send_line(&mut reader, &answer).await;
+            continue;
+        }
         let fault = setup
             .state
             .lock()
@@ -934,8 +947,12 @@ fn format_no_mailbox_reply(tag: &str) -> Vec<u8> {
 
 /// The capabilities advertised in the state.
 fn format_capabilities(mode: ImapMode, secured: bool, state: &Arc<Mutex<FakeMailbox>>) -> String {
-    let mut capabilities = vec!["IMAP4rev1", "LITERAL+"];
-    if state.lock().expect("the state").uid_plus {
+    let mut capabilities = vec!["IMAP4rev1"];
+    let mailbox = state.lock().expect("the state");
+    if mailbox.literal_plus {
+        capabilities.push("LITERAL+");
+    }
+    if mailbox.uid_plus {
         capabilities.push("UIDPLUS");
     }
     if matches!(mode, ImapMode::StartTls | ImapMode::StartTlsRefused) && !secured {
@@ -946,7 +963,9 @@ fn format_capabilities(mode: ImapMode, secured: bool, state: &Arc<Mutex<FakeMail
 
 /// Reads one command, with its literals, which are shown in the text as
 /// quoted strings; a refused or failed command ends before a synchronizing
-/// literal, which the client then never sends.
+/// literal, which the client then never sends. Without LITERAL+, a line
+/// that ends in `{n+}` ends the command there, its marker kept in the
+/// text.
 ///
 /// # Arguments
 ///
@@ -968,6 +987,9 @@ where
     let mut text = line.trim_end_matches(['\r', '\n']).to_owned();
     let mut literals = Vec::new();
     while let Some((length, synchronizing)) = parse_trailing_literal(&text) {
+        if !synchronizing && !state.lock().expect("the state").literal_plus {
+            break;
+        }
         let cut = text.rfind('{')?;
         text.truncate(cut);
         if synchronizing {

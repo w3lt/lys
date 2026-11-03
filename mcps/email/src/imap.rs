@@ -12,6 +12,11 @@
 //! session is closed with [`ImapSession::close`], which logs out unless a
 //! command ended the session; dropping it closes the socket either way.
 //!
+//! A literal, such as a draft or a search text that is not ASCII, is
+//! always synchronizing: the server reads it only after it asked for it,
+//! so a server that answers the command first never reads the literal as
+//! a command of its own.
+//!
 //! Folder names given to commands are the server's own (modified UTF-7);
 //! [`crate::folder_name`] converts them.
 
@@ -84,6 +89,29 @@ pub enum ImapFailure {
     Refused(String),
     /// The connection ended, answered something unreadable, or timed out.
     Connection(ConnectionFailure),
+}
+
+/// One word of a search: a key or an argument as the command writes it,
+/// or a text to search for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SearchWord {
+    /// Written as it is, such as `SUBJECT`, `UNSEEN`, or a date from
+    /// [`format_search_date`].
+    Plain(String),
+    /// A text to search for: a quoted string when it is ASCII without a
+    /// line break, and otherwise a synchronizing literal. A text that is
+    /// not ASCII puts `CHARSET UTF-8` in front of the keys.
+    Text(String),
+}
+
+/// A part of a command; a space separates each from the next.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum CommandPart<'a> {
+    /// Written on the line as it is: atoms, quoted strings, and lists.
+    Written(String),
+    /// Sent as a synchronizing literal: `{n}` on the line, and the bytes
+    /// once the server asks for them.
+    Literal(&'a [u8]),
 }
 
 /// The system flags of a message that the tools report.
@@ -357,19 +385,27 @@ impl ImapSession {
         build_selected_folder(&facts)
     }
 
-    /// Searches the selected folder.
+    /// Searches the selected folder, within [`EXCHANGE_LIMIT`], unless a
+    /// command ended the session.
     ///
     /// # Arguments
     ///
-    /// * `criteria` - The search keys, formatted with
-    ///   [`format_search_text`] and [`format_search_date`].
+    /// * `words` - The search keys, each followed by its arguments.
     ///
     /// # Returns
     ///
     /// The matching UIDs, highest first.
-    pub async fn list_matching_uids(&mut self, criteria: &str) -> Result<Vec<u32>, ImapFailure> {
-        let command = format!("UID SEARCH {criteria}");
-        let answers = self.send_command(&command, read_search_uids).await?;
+    pub async fn list_matching_uids(
+        &mut self,
+        words: &[SearchWord],
+    ) -> Result<Vec<u32>, ImapFailure> {
+        let parts = build_search_parts(words);
+        let session = &mut self.session;
+        let exchange = async {
+            let tag = send_command_parts(session, &parts).await?;
+            read_tagged_answers(session, &tag, read_search_uids).await
+        };
+        let answers = run_exchange(&mut self.ended_by, exchange).await?;
         let mut uids: Vec<u32> = answers.into_iter().flatten().collect();
         uids.sort_unstable_by(|left, right| right.cmp(left));
         uids.dedup();
@@ -427,12 +463,17 @@ impl ImapSession {
         flags: &str,
         bytes: &[u8],
     ) -> Result<(), ImapFailure> {
-        let command = format!(
-            "APPEND {} {flags} {{{}}}",
-            quote_folder_name(raw_name)?,
-            bytes.len()
-        );
-        let exchange = send_append(&mut self.session, &command, bytes);
+        let parts = [
+            CommandPart::Written(format!("APPEND {} {flags}", quote_folder_name(raw_name)?)),
+            CommandPart::Literal(bytes),
+        ];
+        let session = &mut self.session;
+        let exchange = async {
+            let tag = send_command_parts(session, &parts).await?;
+            read_tagged_answers(session, &tag, |_| None::<()>)
+                .await
+                .map(drop)
+        };
         run_exchange(&mut self.ended_by, exchange).await
     }
 
@@ -597,27 +638,88 @@ async fn run_exchange<T>(
     outcome
 }
 
-/// Sends an APPEND: the command, the message once the server asks for it,
-/// and then reads the tagged status.
+/// Sends a command, each literal as a synchronizing literal: the line up
+/// to the literal, ending in `{n}`, and then, once the server asks for it,
+/// the literal and the rest of the line. A server that answers the command
+/// before it asks for a literal receives neither that literal nor anything
+/// after it.
 ///
 /// # Arguments
 ///
 /// * `session` - The signed-in session.
-/// * `command` - The command up to the length of its message, without
-///   its tag.
-/// * `bytes` - The message.
+/// * `parts` - The command, without its tag.
 ///
 /// # Returns
 ///
-/// Nothing once the server stored the message; the server's code and text
-/// when it refused the command, before or after the message; or why the
-/// connection failed.
-async fn send_append(
+/// The command's tag once all of it is sent; otherwise the server's code
+/// and text when it refused the command before a literal, an unreadable
+/// answer for any other status before one, or a lost connection.
+async fn send_command_parts(
     session: &mut Session<Stream>,
-    command: &str,
-    bytes: &[u8],
+    parts: &[CommandPart<'_>],
+) -> Result<RequestId, ImapFailure> {
+    let mut tag = None;
+    let mut line = String::new();
+    for (index, part) in parts.iter().enumerate() {
+        if index > 0 {
+            line.push(' ');
+        }
+        match part {
+            CommandPart::Written(text) => line.push_str(text),
+            CommandPart::Literal(bytes) => {
+                line.push_str(&format!("{{{}}}", bytes.len()));
+                let sent = send_command_line(session, tag, &line).await?;
+                read_continuation(session, &sent).await?;
+                session.get_mut().write_all(bytes).await.map_err(|_| LOST)?;
+                tag = Some(sent);
+                line.clear();
+            }
+        }
+    }
+    send_command_line(session, tag, &line).await
+}
+
+/// Sends one line of a command and its line end: the first line with a
+/// new tag, and a later one, which goes on after a literal, as it is.
+///
+/// # Arguments
+///
+/// * `session` - The signed-in session.
+/// * `tag` - The command's tag, once its first line is sent.
+/// * `line` - The line, without its line end.
+///
+/// # Returns
+///
+/// The command's tag, or a lost connection.
+async fn send_command_line(
+    session: &mut Session<Stream>,
+    tag: Option<RequestId>,
+    line: &str,
+) -> Result<RequestId, ImapFailure> {
+    let Some(tag) = tag else {
+        return session.run_command(line).await.map_err(|_| LOST);
+    };
+    session.run_command_untagged(line).await.map_err(|_| LOST)?;
+    Ok(tag)
+}
+
+/// Reads the server's answers until it asks for a literal.
+///
+/// # Arguments
+///
+/// * `session` - The signed-in session.
+/// * `tag` - The command's tag.
+///
+/// # Returns
+///
+/// Nothing once the server asked for the literal; otherwise the server's
+/// code and text when it refused the command, an unreadable answer for any
+/// other status, as a command without its literal cannot have succeeded,
+/// or a lost connection.
+async fn read_continuation(
+    session: &mut Session<Stream>,
+    tag: &RequestId,
 ) -> Result<(), ImapFailure> {
-    let tag = session.run_command(command).await.map_err(|_| LOST)?;
     loop {
         let response = session
             .read_response()
@@ -625,21 +727,12 @@ async fn send_append(
             .map_err(|_| LOST)?
             .ok_or(LOST)?;
         if matches!(response.parsed(), Response::Continue(_)) {
-            break;
+            return Ok(());
         }
-        if let Some(outcome) = calculate_tagged_outcome(response.parsed(), &tag) {
-            // A tagged OK before the message was sent answers a command
-            // that never received its message, so it is not the answer.
+        if let Some(outcome) = calculate_tagged_outcome(response.parsed(), tag) {
             return outcome.and(Err(UNREADABLE));
         }
     }
-    let stream = session.get_mut();
-    stream.write_all(bytes).await.map_err(|_| LOST)?;
-    stream.write_all(b"\r\n").await.map_err(|_| LOST)?;
-    stream.flush().await.map_err(|_| LOST)?;
-    read_tagged_answers(session, &tag, |_| None::<()>)
-        .await
-        .map(drop)
 }
 
 /// Reads a command's answers up to its tagged status.
@@ -1027,22 +1120,38 @@ fn format_uid_set(uids: &[u32]) -> String {
         .join(",")
 }
 
-/// Formats a text for a search key.
+/// Builds a `UID SEARCH` command: `CHARSET UTF-8` in front of the keys
+/// when a text is not ASCII, and each word as [`build_search_part`] sends
+/// it.
 ///
 /// # Arguments
 ///
-/// * `text` - The text to search for, without line breaks.
-///
-/// # Returns
-///
-/// A quoted string for ASCII text, and a non-synchronizing literal
-/// (`{n+}`, RFC 7888) for other text. A server without LITERAL+ answers
-/// such a search with `BAD`, and the search fails with the server's text.
-pub fn format_search_text(text: &str) -> String {
-    if text.is_ascii() {
-        return format_quoted_string(text);
+/// * `words` - The search keys, each followed by its arguments.
+fn build_search_parts(words: &[SearchWord]) -> Vec<CommandPart<'_>> {
+    let needs_charset = words
+        .iter()
+        .any(|word| matches!(word, SearchWord::Text(text) if !text.is_ascii()));
+    let command = if needs_charset {
+        "UID SEARCH CHARSET UTF-8"
+    } else {
+        "UID SEARCH"
+    };
+    let mut parts = vec![CommandPart::Written(command.to_owned())];
+    parts.extend(words.iter().map(build_search_part));
+    parts
+}
+
+/// Builds the part of a search word: a plain word as it is, a text that
+/// is ASCII without a line break as a quoted string, and any other text
+/// as a synchronizing literal, which no text can end early.
+fn build_search_part(word: &SearchWord) -> CommandPart<'_> {
+    match word {
+        SearchWord::Plain(text) => CommandPart::Written(text.clone()),
+        SearchWord::Text(text) if text.is_ascii() && !text.contains(['\r', '\n']) => {
+            CommandPart::Written(format_quoted_string(text))
+        }
+        SearchWord::Text(text) => CommandPart::Literal(text.as_bytes()),
     }
-    format!("{{{}+}}\r\n{}", text.len(), text)
 }
 
 /// Formats a calendar date as a search key writes it.
@@ -1081,12 +1190,36 @@ mod tests {
             .format(),
             "read, answered, flagged"
         );
-        assert_eq!(format_search_text("plain"), "\"plain\"");
         assert_eq!(
-            format_search_text("say \"hi\" \\ bye"),
-            "\"say \\\"hi\\\" \\\\ bye\""
+            build_search_parts(&[
+                SearchWord::Plain("SUBJECT".to_owned()),
+                SearchWord::Text("say \"hi\" \\ bye".to_owned()),
+                SearchWord::Plain("UNSEEN".to_owned()),
+                SearchWord::Text("a\r\nb".to_owned()),
+            ]),
+            [
+                CommandPart::Written("UID SEARCH".to_owned()),
+                CommandPart::Written("SUBJECT".to_owned()),
+                CommandPart::Written("\"say \\\"hi\\\" \\\\ bye\"".to_owned()),
+                CommandPart::Written("UNSEEN".to_owned()),
+                CommandPart::Literal(b"a\r\nb"),
+            ]
         );
-        assert_eq!(format_search_text("Grüße"), "{7+}\r\nGrüße");
+        assert_eq!(
+            build_search_parts(&[
+                SearchWord::Plain("TEXT".to_owned()),
+                SearchWord::Text("plain".to_owned()),
+                SearchWord::Plain("SUBJECT".to_owned()),
+                SearchWord::Text("Grüße".to_owned()),
+            ]),
+            [
+                CommandPart::Written("UID SEARCH CHARSET UTF-8".to_owned()),
+                CommandPart::Written("TEXT".to_owned()),
+                CommandPart::Written("\"plain\"".to_owned()),
+                CommandPart::Written("SUBJECT".to_owned()),
+                CommandPart::Literal("Grüße".as_bytes()),
+            ]
+        );
         assert_eq!(format_search_date(2026, 11, 2), "2-Nov-2026");
         assert_eq!(format_search_date(2026, 1, 31), "31-Jan-2026");
         assert_eq!(format_uid_set(&[3, 1, 2]), "3,1,2");

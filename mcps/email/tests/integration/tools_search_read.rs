@@ -415,6 +415,56 @@ async fn narrows_a_search_by_flags_fields_dates_and_text_that_is_not_ascii() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn sends_text_that_is_not_ascii_as_literals_a_server_without_literal_plus_reads() {
+    let mut mailbox = FakeMailbox::create_standard();
+    mailbox.literal_plus = false;
+    for (number, subject, body) in [
+        (1, "Grüße aus Wien", "Schöne Grüße"),
+        (2, "Grüße aus Graz", "Bis bald"),
+    ] {
+        let message = TestMessage {
+            subject: subject.to_owned(),
+            body: body.to_owned(),
+            message_id: format!("g{number}@example.com"),
+            timestamp: BASE + number,
+            ..TestMessage::default()
+        };
+        mailbox.add_message("INBOX", message.build_new_message(&[]));
+    }
+    let stack = start_stack(mailbox, false).await;
+
+    let found = run_search_emails(
+        &stack.context,
+        SearchArguments {
+            folder: Some("INBOX".to_owned()),
+            text: Some("Schöne".to_owned()),
+            subject: Some("Grüße".to_owned()),
+            unread: Some(true),
+            ..SearchArguments::default()
+        },
+    )
+    .await
+    .expect("found");
+
+    assert_eq!(calculate_hit_count(&found.text), 1, "{}", found.text);
+    assert!(
+        found.text.contains("subject Grüße aus Wien\n"),
+        "{}",
+        found.text
+    );
+    let commands = stack.imap.list_commands();
+    let searches: Vec<&String> = commands
+        .iter()
+        .filter(|command| command.contains(" SEARCH "))
+        .collect();
+    assert_eq!(searches.len(), 1, "{commands:?}");
+    assert!(
+        searches[0].ends_with("UID SEARCH CHARSET UTF-8 TEXT \"Schöne\" SUBJECT \"Grüße\" UNSEEN"),
+        "{commands:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn reads_a_message_without_marking_it_as_read() {
     let stack = start_filled_stack().await;
 

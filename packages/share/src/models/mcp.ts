@@ -526,6 +526,11 @@ const builtInMcpServerSettingsSchema = z
   })
   .readonly()
 
+/** The switch of a built-in server the settings leave out, which is off. */
+const NO_BUILT_IN_SERVER_SWITCH: z.input<
+  typeof builtInMcpServerSettingsSchema
+> = Object.freeze({})
+
 /**
  * Validates the switches of the MCP servers Lys ships, one field per name
  * in {@link BUILT_IN_MCP_SERVER_NAMES}. The output is frozen; unknown
@@ -536,12 +541,16 @@ const builtInMcpServerSettingsSchema = z
 const builtInMcpSettingsSchema = z
   .strictObject({
     /** The email server's switch. */
-    email: builtInMcpServerSettingsSchema.prefault({})
+    email: builtInMcpServerSettingsSchema.prefault(NO_BUILT_IN_SERVER_SWITCH)
   })
   .readonly()
 
 /** Switches of the MCP servers Lys ships. */
 export type BuiltInMcpSettings = z.infer<typeof builtInMcpSettingsSchema>
+
+/** The switches of an `mcp` group that has none, which are all off. */
+const NO_BUILT_IN_SWITCHES: z.input<typeof builtInMcpSettingsSchema> =
+  Object.freeze({})
 
 /**
  * Validates the `mcp` settings group: the MCP servers the person added,
@@ -567,7 +576,7 @@ export const mcpSettingsSchema = z
       .default([])
       .readonly(),
     /** Switches of the servers Lys ships. */
-    builtIn: builtInMcpSettingsSchema.prefault({})
+    builtIn: builtInMcpSettingsSchema.prefault(NO_BUILT_IN_SWITCHES)
   })
   .refine(
     (group) =>

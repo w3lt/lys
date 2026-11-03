@@ -157,7 +157,7 @@ describe("updateEmailAccountAddress", () => {
     })
   })
 
-  it("replaces the servers of the previous preset when the address moves to another provider", () => {
+  it("replaces the servers of the preset that filled them when the address changes to another provider's at once", () => {
     const gmail = updateEmailAccountAddress(EMPTY_DRAFT, "ada@gmail.com")
 
     expect(updateEmailAccountAddress(gmail, "ada@icloud.com")).toMatchObject({
@@ -235,7 +235,7 @@ describe("updateEmailAccountAddress", () => {
     })
   })
 
-  it("keeps the saved servers while the address is edited", () => {
+  it("replaces saved servers that hold the saved address's preset when the address changes to another provider's at once", () => {
     expect(updateEmailAccountAddress(SAVED_DRAFT, "ada@gmail.com")).toEqual({
       ...SAVED_DRAFT,
       address: "ada@gmail.com",

@@ -328,7 +328,7 @@ async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
     let long_text = long_read["result"]["content"][0]["text"]
         .as_str()
         .expect("text");
-    assert_eq!(long_text.chars().count(), 20_000 + CUT_NOTE.chars().count());
+    assert_eq!(long_text.encode_utf16().count(), 20_000);
     assert!(long_text.ends_with(CUT_NOTE));
     assert_eq!(bad_id["result"]["isError"], true, "{bad_id}");
     assert_eq!(

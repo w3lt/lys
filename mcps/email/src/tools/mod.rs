@@ -20,7 +20,9 @@ use crate::folders::{Folder, FolderRole, build_folders, find_folder, find_role_f
 use crate::imap::{FolderAccess, ImapFailure, ImapSession, open_imap_session};
 use crate::trust::Trust;
 
-/// Longest text a tool answers, in characters; a longer one is cut.
+/// Longest text a tool answers, in UTF-16 code units as the backend
+/// counts them, inclusive; a longer one is cut so that it ends with
+/// [`CUT_NOTE`] within the limit.
 pub const RESULT_LIMIT: usize = 20_000;
 
 /// The note a cut result ends with.
@@ -97,21 +99,58 @@ pub struct ToolReport {
 /// The outcome of a tool call.
 pub type ToolResult = Result<ToolReport, ToolFailure>;
 
-/// Cuts a result to [`RESULT_LIMIT`] characters, with a note.
+/// Cuts a result longer than [`RESULT_LIMIT`] on a character boundary,
+/// so that with [`CUT_NOTE`] after it, it is at most the limit.
 ///
 /// # Arguments
 ///
 /// * `text` - The result as the tool built it.
+///
+/// # Returns
+///
+/// The text itself when it fits; otherwise its longest beginning that
+/// fits with the note, then the note.
 pub fn format_result_text(text: String) -> String {
-    match text.char_indices().nth(RESULT_LIMIT) {
-        Some((end, _)) => {
-            let mut cut = text;
-            cut.truncate(end);
-            cut.push_str(CUT_NOTE);
-            cut
-        }
-        None => text,
+    if calculate_utf16_length(&text) <= RESULT_LIMIT {
+        return text;
     }
+    let kept_length = RESULT_LIMIT - calculate_utf16_length(CUT_NOTE);
+    let mut cut = text;
+    cut.truncate(calculate_utf16_cut(&cut, kept_length));
+    cut.push_str(CUT_NOTE);
+    cut
+}
+
+/// Counts a text's UTF-16 code units, as the backend measures a result.
+///
+/// # Arguments
+///
+/// * `text` - The text.
+fn calculate_utf16_length(text: &str) -> usize {
+    text.encode_utf16().count()
+}
+
+/// Calculates where a text ends when it is cut to a number of UTF-16 code
+/// units without splitting a character.
+///
+/// # Arguments
+///
+/// * `text` - The text.
+/// * `limit` - Most code units kept, inclusive.
+///
+/// # Returns
+///
+/// The byte index of the first character that would pass the limit, or
+/// the text's length when it fits.
+fn calculate_utf16_cut(text: &str, limit: usize) -> usize {
+    let mut length = 0;
+    for (index, character) in text.char_indices() {
+        length += character.len_utf16();
+        if length > limit {
+            return index;
+        }
+    }
+    text.len()
 }
 
 /// Builds the conversion of an IMAP failure into a tool failure.
@@ -298,15 +337,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cuts_long_results_on_a_character_boundary() {
-        let short = "ü".repeat(RESULT_LIMIT);
-        let long = "ü".repeat(RESULT_LIMIT + 1);
+    fn cuts_long_results_to_the_limit_in_utf16_units_with_the_note() {
+        let kept_length = RESULT_LIMIT - CUT_NOTE.encode_utf16().count();
+        let emoji = "\u{1F600}";
+        let whole_ascii = "x".repeat(RESULT_LIMIT);
+        let whole_emoji = emoji.repeat(RESULT_LIMIT / 2);
 
-        assert_eq!(format_result_text(short.clone()), short);
+        let cut_ascii = format_result_text("x".repeat(RESULT_LIMIT + 1));
+        let cut_emoji = format_result_text(emoji.repeat(RESULT_LIMIT / 2 + 1));
+        let cut_mid_pair = format_result_text(format!("x{whole_emoji}"));
+
+        assert_eq!(format_result_text(whole_ascii.clone()), whole_ascii);
+        assert_eq!(format_result_text(whole_emoji.clone()), whole_emoji);
+        assert_eq!(cut_ascii, format!("{}{CUT_NOTE}", "x".repeat(kept_length)));
         assert_eq!(
-            format_result_text(long),
-            format!("{}{CUT_NOTE}", "ü".repeat(RESULT_LIMIT))
+            cut_emoji,
+            format!("{}{CUT_NOTE}", emoji.repeat(kept_length / 2))
         );
+        assert_eq!(
+            cut_mid_pair,
+            format!("x{}{CUT_NOTE}", emoji.repeat((kept_length - 1) / 2))
+        );
+        assert_eq!(cut_ascii.encode_utf16().count(), RESULT_LIMIT);
+        assert_eq!(cut_emoji.encode_utf16().count(), RESULT_LIMIT);
+        assert_eq!(cut_mid_pair.encode_utf16().count(), RESULT_LIMIT - 1);
     }
 
     #[test]

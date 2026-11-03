@@ -151,10 +151,10 @@ export function createMcpSettingsSlice(
       set({ mcpSettingsSave: SAVE_FAILED })
       return "failed"
     }
-    set((state) => ({
-      settings: { ...state.settings, mcp },
-      mcpSettingsSave: SAVED
-    }))
+    set((state) => {
+      const settings: LysSettings = { ...state.settings, mcp }
+      return { settings, mcpSettingsSave: SAVED }
+    })
     return "saved"
   }
 

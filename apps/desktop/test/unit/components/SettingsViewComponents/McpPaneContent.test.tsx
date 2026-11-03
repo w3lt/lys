@@ -40,6 +40,7 @@ import {
   type RuntimeArrangement
 } from "../../support/runtimeFixtures"
 import {
+  EMAIL_ON_SETTINGS,
   STORED_EMAIL_ACCOUNT,
   STORED_EMAIL_PASSWORD,
   STORED_MCP_SETTINGS,
@@ -88,12 +89,6 @@ const EMAIL_BLURB = "Reads, searches, and sends your email over IMAP and SMTP."
 
 /** Saved values that can be secrets, which the pane never shows as text. */
 const SECRET_VALUES = ["debug", "fixture-0000", STORED_EMAIL_PASSWORD]
-
-/** Settings with the email server switched on. */
-const EMAIL_ON_SETTINGS = Object.freeze({
-  ...STORED_SETTINGS,
-  mcp: { ...STORED_MCP_SETTINGS, builtIn: { email: { enabled: true } } }
-})
 
 /** An added server that takes the name of the email server Lys ships. */
 const ADDED_EMAIL_SERVER = mcpServerSettingsSchema.parse({
@@ -615,13 +610,11 @@ describe("McpPaneContent", () => {
     const { useLysStore } = await startMcpPane()
     const user = userEvent.setup()
 
-    useLysStore.setState({
-      settings: {
-        ...STORED_SETTINGS,
-        secrets: { ...STORED_SETTINGS.secrets, emailPassword: null },
-        email: { account: null }
-      }
-    })
+    const secrets = { ...STORED_SETTINGS.secrets, emailPassword: null }
+    const noAccount = { account: null }
+    const settings = { ...STORED_SETTINGS, secrets, email: noAccount }
+
+    useLysStore.setState({ settings })
     await waitForRenderedWork()
 
     expect(getServerSwitch("email")).toHaveAttribute("aria-disabled", "true")
@@ -644,18 +637,8 @@ describe("McpPaneContent", () => {
   it("says an added server took the email server's name, and disables the built-in switch", async () => {
     startSettingsHost()
     const { useLysStore } = await startMcpPane()
-    const addedEmail = mcpServerSettingsSchema.parse({
-      name: "email",
-      transport: "stdio",
-      command: "/usr/local/bin/mail-server"
-    })
 
-    useLysStore.setState({
-      settings: {
-        ...STORED_SETTINGS,
-        mcp: { ...STORED_MCP_SETTINGS, servers: [addedEmail] }
-      }
-    })
+    useLysStore.setState({ settings: ADDED_EMAIL_SETTINGS })
     await waitForRenderedWork()
 
     const rows = within(
@@ -1238,12 +1221,10 @@ describe("McpPaneContent", () => {
     })
     const user = userEvent.setup()
 
-    useLysStore.setState({
-      settings: {
-        ...STORED_SETTINGS,
-        mcp: { ...STORED_MCP_SETTINGS, servers: [] }
-      }
-    })
+    const mcp = { ...STORED_MCP_SETTINGS, servers: [] }
+    const settings = { ...STORED_SETTINGS, mcp }
+
+    useLysStore.setState({ settings })
     await waitForRenderedWork()
 
     expect(
@@ -2275,9 +2256,10 @@ describe("McpPaneContent", () => {
       })
     )
 
-    useLysStore.setState({
-      settings: { ...STORED_SETTINGS, mcp: { ...STORED_MCP_SETTINGS, servers } }
-    })
+    const mcp = { ...STORED_MCP_SETTINGS, servers }
+    const settings = { ...STORED_SETTINGS, mcp }
+
+    useLysStore.setState({ settings })
     await waitForRenderedWork()
 
     expect(screen.getByRole("button", { name: "Add server" })).toBeDisabled()

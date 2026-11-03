@@ -259,3 +259,18 @@ export const STORED_SETTINGS: LysSettings = Object.freeze({
   mcp: STORED_MCP_SETTINGS,
   email: STORED_EMAIL_SETTINGS
 })
+
+/**
+ * MCP group with the stored added servers and the email server Lys ships
+ * switched on, which the stored group leaves off.
+ */
+export const EMAIL_ON_MCP_SETTINGS: McpSettings = mcpSettingsSchema.parse({
+  servers: STORED_MCP_SETTINGS.servers,
+  builtIn: { email: { enabled: true } }
+})
+
+/** {@link STORED_SETTINGS} with the email server Lys ships switched on. */
+export const EMAIL_ON_SETTINGS: LysSettings = Object.freeze({
+  ...STORED_SETTINGS,
+  mcp: EMAIL_ON_MCP_SETTINGS
+})

@@ -19,6 +19,7 @@ import {
   type ControlledPromise
 } from "../../support/settlement"
 import {
+  EMAIL_ON_SETTINGS,
   STORED_MCP_SETTINGS,
   STORED_SETTINGS,
   STORED_SETTINGS_DOCUMENT
@@ -245,12 +246,7 @@ describe("createMcpSettingsSlice", () => {
   it("keeps the built-in switches as saved when the added servers are saved", async () => {
     const { host, writes } = startControlledSettingsHost()
     const store = createMcpStore()
-    store.setState({
-      settings: {
-        ...STORED_SETTINGS,
-        mcp: { ...STORED_MCP_SETTINGS, builtIn: { email: { enabled: true } } }
-      }
-    })
+    store.setState({ settings: EMAIL_ON_SETTINGS })
 
     const save = store.getState().saveMcpServers([ADDED_SERVER])
     await waitForMicrotasks()

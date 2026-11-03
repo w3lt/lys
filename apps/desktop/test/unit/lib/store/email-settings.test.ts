@@ -24,8 +24,8 @@ import {
   type ControlledPromise
 } from "../../support/settlement"
 import {
+  EMAIL_ON_SETTINGS,
   STORED_EMAIL_ACCOUNT,
-  STORED_MCP_SETTINGS,
   STORED_SETTINGS,
   STORED_SETTINGS_DOCUMENT
 } from "../../support/settingsFixtures"
@@ -63,12 +63,6 @@ const REFUSED_CHECK = checkEmailAccountApiResponseSchema.parse({
 const UNAVAILABLE_CHECK = checkEmailAccountApiResponseSchema.parse({
   status: "unavailable",
   reason: "server-missing"
-})
-
-/** Stored settings with the email server switched on. */
-const EMAIL_ON_SETTINGS: LysSettings = Object.freeze({
-  ...STORED_SETTINGS,
-  mcp: { ...STORED_MCP_SETTINGS, builtIn: { email: { enabled: true } } }
 })
 
 /** Why a removal kept the account because the server stayed on. */

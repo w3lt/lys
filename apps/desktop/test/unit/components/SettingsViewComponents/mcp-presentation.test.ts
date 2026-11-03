@@ -86,6 +86,7 @@ import {
   OFF_MCP_STATE
 } from "../../support/mcpFixtures"
 import {
+  EMAIL_ON_MCP_SETTINGS,
   STORED_EMAIL_SETTINGS,
   STORED_MCP_SETTINGS
 } from "../../support/settingsFixtures"
@@ -282,6 +283,9 @@ const LOADED_LIST: McpServerListState = buildLoadedMcpList([
   buildMcpServerStatus("files", "stdio", buildConnectedMcpState(2))
 ])
 
+/** List the pane has not read yet, as before the backend runs. */
+const UNREAD_LIST: McpServerListState = Object.freeze({ status: "idle" })
+
 /** Facts of a pane with nothing to say. */
 const QUIET_FACTS: McpPaneFacts = Object.freeze<McpPaneFacts>({
   isBackendRunning: true,
@@ -331,13 +335,14 @@ describe("listed servers", () => {
   })
 
   it("marks the email server as not ready without a saved account, and its name as taken by an added server", () => {
-    const servers = listMcpServers({
-      mcp: {
-        servers: [{ ...BARE_COMMAND_SERVER, name: "email" }],
-        builtIn: { email: { enabled: true } }
-      },
-      email: { account: null }
-    })
+    const emailNamedServer: McpServerSettings = {
+      ...BARE_COMMAND_SERVER,
+      name: "email"
+    }
+    const mcp = { ...EMAIL_ON_MCP_SETTINGS, servers: [emailNamedServer] }
+    const noAccount = { account: null }
+
+    const servers = listMcpServers({ mcp, email: noAccount })
 
     expect(servers[0]).toEqual({
       ...EMAIL_SERVER,
@@ -540,10 +545,15 @@ describe("formatMcpServerStatus", () => {
   )
 
   it("says an added server that is switched off is off, before any state the backend reports", () => {
+    const offServer = buildAddedListedServer({
+      ...COMMAND_SERVER,
+      enabled: false
+    })
+
     expect(
       formatMcpServerStatus({
         ...buildAppliedRowFacts(COMMAND_SERVER, buildConnectedMcpState(2)),
-        server: buildAddedListedServer({ ...COMMAND_SERVER, enabled: false })
+        server: offServer
       })
     ).toEqual({
       condition: "off",
@@ -572,7 +582,7 @@ describe("formatMcpServerStatus", () => {
     expect(
       formatMcpServerStatus({
         isBackendRunning: false,
-        list: { status: "idle" },
+        list: UNREAD_LIST,
         server: EMAIL_SERVER_WITHOUT_ACCOUNT
       })
     ).toEqual({
@@ -612,6 +622,11 @@ describe("formatMcpServerStatus", () => {
         "An added server has this name. Rename or remove it to use the built-in server.",
       reconnectLabel: ""
     }
+    const takenOffServer: McpListedServer = {
+      ...EMAIL_SERVER,
+      isOn: false,
+      isNameTaken: true
+    }
 
     expect(
       formatMcpServerStatus(
@@ -624,8 +639,8 @@ describe("formatMcpServerStatus", () => {
     expect(
       formatMcpServerStatus({
         isBackendRunning: false,
-        list: { status: "idle" },
-        server: { ...EMAIL_SERVER, isOn: false, isNameTaken: true }
+        list: UNREAD_LIST,
+        server: takenOffServer
       })
     ).toEqual(expected)
   })

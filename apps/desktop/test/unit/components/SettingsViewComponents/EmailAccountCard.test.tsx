@@ -1,11 +1,14 @@
 import type { ComponentProps } from "react"
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { checkEmailAccountApiResponseSchema } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
 import EmailAccountCard from "@/components/SettingsViewComponents/EmailAccountCard"
 import type {
+  EmailAccountCheckState,
   EmailAccountRemovalOutcome,
-  EmailAccountSaveOutcome
+  EmailAccountSaveOutcome,
+  EmailAccountSaveState
 } from "@/lib/store/email-settings"
 import {
   createControlledPromise,
@@ -48,6 +51,51 @@ const PORT_HINT = "1–65535"
 /** Rule of None that each Security choice states before a choice. */
 const PLAIN_SECURITY_HINT = "None only for localhost, 127.0.0.1, [::1]"
 
+/** Save state before any save or removal. */
+const IDLE_SAVE_STATE: EmailAccountSaveState = Object.freeze({ status: "idle" })
+
+/** Save state while the account is written. */
+const SAVING_STATE: EmailAccountSaveState = Object.freeze({ status: "saving" })
+
+/** Save state once the file holds the account and its password, or none. */
+const SAVED_STATE: EmailAccountSaveState = Object.freeze({ status: "saved" })
+
+/** Check state before any check. */
+const IDLE_CHECK_STATE: EmailAccountCheckState = Object.freeze({
+  status: "idle"
+})
+
+/** Check state while Lys signs in to both servers. */
+const CHECKING_STATE: EmailAccountCheckState = Object.freeze({
+  status: "checking"
+})
+
+/** Answer of a check both servers accepted. */
+const ACCEPTED_CHECK = checkEmailAccountApiResponseSchema.parse({
+  status: "checked",
+  imap: { status: "accepted" },
+  smtp: { status: "accepted" }
+})
+
+/** Check state once both servers accepted the sign-in. */
+const ACCEPTED_CHECK_STATE: EmailAccountCheckState = Object.freeze({
+  status: "checked",
+  outcome: ACCEPTED_CHECK
+})
+
+/** Answer of a check whose IMAP server refused the user name or password. */
+const IMAP_REFUSED_CHECK = checkEmailAccountApiResponseSchema.parse({
+  status: "checked",
+  imap: { status: "failed", reason: "wrong-password" },
+  smtp: { status: "accepted" }
+})
+
+/** Check state once the IMAP server refused the sign-in. */
+const IMAP_REFUSED_CHECK_STATE: EmailAccountCheckState = Object.freeze({
+  status: "checked",
+  outcome: IMAP_REFUSED_CHECK
+})
+
 /** What the fields show once the Gmail preset filled them. */
 const GMAIL_CHOICES: ShownServerChoices = Object.freeze({
   imap: "imap.gmail.com 993 TLS",
@@ -89,8 +137,8 @@ function startEmailAccountCard(props: Partial<EmailAccountCardProps> = {}) {
   const cardProps: EmailAccountCardProps = {
     savedAccount: STORED_EMAIL_ACCOUNT,
     savedPassword: STORED_EMAIL_PASSWORD,
-    saveState: { status: "idle" },
-    checkState: { status: "idle" },
+    saveState: IDLE_SAVE_STATE,
+    checkState: IDLE_CHECK_STATE,
     isBackendRunning: true,
     ...requests,
     ...props
@@ -694,8 +742,8 @@ describe("EmailAccountCard", () => {
   })
 
   it.each<[string, Partial<EmailAccountCardProps>, string]>([
-    ["Lys signs in", { checkState: { status: "checking" } }, "Signing in…"],
-    ["the account is written", { saveState: { status: "saving" } }, "Saving…"]
+    ["Lys signs in", { checkState: CHECKING_STATE }, "Signing in…"],
+    ["the account is written", { saveState: SAVING_STATE }, "Saving…"]
   ])(
     "disables the fields and the actions while %s, and says so",
     async (_label, props, text) => {
@@ -946,13 +994,13 @@ describe("EmailAccountCard", () => {
     // The store drops the account before it answers the removal.
     rendered.rerender(
       <EmailAccountCard
-        checkState={{ status: "idle" }}
+        checkState={IDLE_CHECK_STATE}
         isBackendRunning
         onRemoveEmailAccount={onRemoveEmailAccount}
         onSaveEmailAccount={vi.fn()}
         savedAccount={null}
         savedPassword={null}
-        saveState={{ status: "saved" }}
+        saveState={SAVED_STATE}
       />
     )
     removal.resolve("saved")
@@ -992,15 +1040,8 @@ describe("EmailAccountCard", () => {
 
   it("shows the account as saved once the parent reports the save", () => {
     startEmailAccountCard({
-      saveState: { status: "saved" },
-      checkState: {
-        status: "checked",
-        outcome: {
-          status: "checked",
-          imap: { status: "accepted" },
-          smtp: { status: "accepted" }
-        }
-      }
+      saveState: SAVED_STATE,
+      checkState: ACCEPTED_CHECK_STATE
     })
 
     expect(getStatusLine()).toHaveTextContent("Account saved.")
@@ -1018,20 +1059,13 @@ describe("EmailAccountCard", () => {
     await waitForMicrotasks()
     rendered.rerender(
       <EmailAccountCard
-        checkState={{
-          status: "checked",
-          outcome: {
-            status: "checked",
-            imap: { status: "failed", reason: "wrong-password" },
-            smtp: { status: "accepted" }
-          }
-        }}
+        checkState={IMAP_REFUSED_CHECK_STATE}
         isBackendRunning
         onRemoveEmailAccount={requests.onRemoveEmailAccount}
         onSaveEmailAccount={onSaveEmailAccount}
         savedAccount={STORED_EMAIL_ACCOUNT}
         savedPassword={STORED_EMAIL_PASSWORD}
-        saveState={{ status: "idle" }}
+        saveState={IDLE_SAVE_STATE}
       />
     )
 

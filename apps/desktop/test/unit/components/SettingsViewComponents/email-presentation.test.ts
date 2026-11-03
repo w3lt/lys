@@ -17,8 +17,14 @@ import {
   buildEmailAccountDraft,
   EMAIL_ACCOUNT_DRAFT_FIELDS,
   updateEmailAccountAddress,
-  type EmailAccountDraftParse
+  type EmailAccountDraftParse,
+  type EmailAccountDraftProblems,
+  type EmailServerDraft
 } from "@/lib/models/email-account-draft"
+import type {
+  EmailAccountCheckState,
+  EmailAccountSaveState
+} from "@/lib/store/email-settings"
 import {
   STORED_EMAIL_ACCOUNT,
   STORED_EMAIL_PASSWORD
@@ -37,21 +43,62 @@ const CHANGED_PARSE: EmailAccountDraftParse = Object.freeze({
   password: STORED_EMAIL_PASSWORD
 })
 
+/** Fields that hold the saved account and no new password. */
+const UNCHANGED_PARSE: EmailAccountDraftParse = Object.freeze({
+  status: "unchanged"
+})
+
+/** Problem of an empty Address field, the only field that breaks a rule. */
+const ADDRESS_PROBLEMS: EmailAccountDraftProblems = Object.freeze({
+  address: "Enter an address."
+})
+
 /** Fields that break a rule. */
 const INVALID_PARSE: EmailAccountDraftParse = Object.freeze({
   status: "invalid",
-  problems: Object.freeze({ address: "Enter an address." })
+  problems: ADDRESS_PROBLEMS
+})
+
+/** Save state before any save or removal. */
+const IDLE_SAVE_STATE: EmailAccountSaveState = Object.freeze({ status: "idle" })
+
+/** Save state while the account is written. */
+const SAVING_STATE: EmailAccountSaveState = Object.freeze({ status: "saving" })
+
+/** Save state once the file holds the account and its password, or none. */
+const SAVED_STATE: EmailAccountSaveState = Object.freeze({ status: "saved" })
+
+/** Save state of a save or removal the settings file did not take. */
+const FAILED_SAVE_STATE: EmailAccountSaveState = Object.freeze({
+  status: "failed",
+  error: "Lys couldn't write."
+})
+
+/** Check state before any check. */
+const IDLE_CHECK_STATE: EmailAccountCheckState = Object.freeze({
+  status: "idle"
+})
+
+/** Check state while Lys signs in to both servers. */
+const CHECKING_STATE: EmailAccountCheckState = Object.freeze({
+  status: "checking"
+})
+
+/** Check state of a check the backend could not be asked. */
+const FAILED_CHECK_STATE: EmailAccountCheckState = Object.freeze({
+  status: "failed",
+  error: "Lys couldn't reach."
 })
 
 /** The stored account shown, nothing edited, nothing tried, backend running. */
 const RESTING_INPUT: EmailAccountStatusInput = Object.freeze({
   savedAccount: STORED_EMAIL_ACCOUNT,
-  draftParse: Object.freeze({ status: "unchanged" }),
+  draftParse: UNCHANGED_PARSE,
   isDraftDifferent: false,
   hasSubmitted: false,
   isEditedSinceSubmit: false,
-  saveState: Object.freeze({ status: "idle" }),
-  checkState: Object.freeze({ status: "idle" }),
+  saveState: IDLE_SAVE_STATE,
+  checkState: IDLE_CHECK_STATE,
   isBackendRunning: true
 })
 
@@ -67,6 +114,26 @@ const ACCEPTED_CHECK = checkEmailAccountApiResponseSchema.parse({
   status: "checked",
   imap: { status: "accepted" },
   smtp: { status: "accepted" }
+})
+
+/** Answer of a check whose IMAP server refused the user name or password. */
+const IMAP_REFUSED_CHECK = checkEmailAccountApiResponseSchema.parse({
+  status: "checked",
+  imap: { status: "failed", reason: "wrong-password" },
+  smtp: { status: "accepted" }
+})
+
+/** Answer of a check whose SMTP server refused the user name or password. */
+const SMTP_REFUSED_CHECK = checkEmailAccountApiResponseSchema.parse({
+  status: "checked",
+  imap: { status: "accepted" },
+  smtp: { status: "failed", reason: "wrong-password" }
+})
+
+/** Answer of a check during which Lys's email server failed. */
+const SERVER_FAILED_CHECK = checkEmailAccountApiResponseSchema.parse({
+  status: "unavailable",
+  reason: "server-failed"
 })
 
 /** Line of the stored account while nothing happens. */
@@ -163,13 +230,11 @@ describe("formatEmailPresetNote", () => {
 
   it("says the servers were changed once they differ from the preset's", () => {
     const draft = updateEmailAccountAddress(EMPTY_DRAFT, "ada@gmail.com")
+    const smtp: EmailServerDraft = { ...draft.smtp, security: "starttls" }
 
-    expect(
-      formatEmailPresetNote({
-        ...draft,
-        smtp: { ...draft.smtp, security: "starttls" }
-      })
-    ).toBe("Preset: Gmail · servers changed")
+    expect(formatEmailPresetNote({ ...draft, smtp })).toBe(
+      "Preset: Gmail · servers changed"
+    )
   })
 })
 
@@ -235,8 +300,8 @@ describe("formatEmailAccountMessage", () => {
       formatEmailAccountMessage({
         ...SUBMITTED_INPUT,
         draftParse: INVALID_PARSE,
-        checkState: { status: "checking" },
-        saveState: { status: "failed", error: "Lys couldn't write." }
+        checkState: CHECKING_STATE,
+        saveState: FAILED_SAVE_STATE
       })
     ).toEqual({ text: "Signing in…", tone: "pending" })
   })
@@ -245,7 +310,7 @@ describe("formatEmailAccountMessage", () => {
     expect(
       formatEmailAccountMessage({
         ...SUBMITTED_INPUT,
-        saveState: { status: "saving" },
+        saveState: SAVING_STATE,
         checkState: buildChecked(ACCEPTED_CHECK)
       })
     ).toEqual({ text: "Saving…", tone: "pending" })
@@ -262,7 +327,7 @@ describe("formatEmailAccountMessage", () => {
           ...SUBMITTED_INPUT,
           draftParse: INVALID_PARSE,
           isEditedSinceSubmit,
-          saveState: { status: "failed", error: "Lys couldn't write." }
+          saveState: FAILED_SAVE_STATE
         })
       ).toEqual({ text: "Fix the marked fields to save.", tone: "danger" })
     }
@@ -306,21 +371,11 @@ describe("formatEmailAccountMessage", () => {
     ],
     [
       "a server refused the sign-in they were tried with",
-      {
-        ...SUBMITTED_INPUT,
-        checkState: buildChecked({
-          status: "checked",
-          imap: { status: "failed", reason: "wrong-password" },
-          smtp: { status: "accepted" }
-        })
-      }
+      { ...SUBMITTED_INPUT, checkState: buildChecked(IMAP_REFUSED_CHECK) }
     ],
     [
       "the save they were tried with failed",
-      {
-        ...SUBMITTED_INPUT,
-        saveState: { status: "failed", error: "Lys couldn't write." }
-      }
+      { ...SUBMITTED_INPUT, saveState: FAILED_SAVE_STATE }
     ]
   ])(
     "says the backend must run while the fields differ from the saved account, when %s",
@@ -366,7 +421,7 @@ describe("formatEmailAccountMessage", () => {
     expect(
       formatEmailAccountMessage({
         ...SUBMITTED_INPUT,
-        saveState: { status: "failed", error: "Lys couldn't write." },
+        saveState: FAILED_SAVE_STATE,
         checkState: buildChecked(ACCEPTED_CHECK)
       })
     ).toEqual({ text: "Lys couldn't write.", tone: "danger" })
@@ -376,7 +431,7 @@ describe("formatEmailAccountMessage", () => {
     expect(
       formatEmailAccountMessage({
         ...RESTING_INPUT,
-        saveState: { status: "failed", error: "Lys couldn't write." }
+        saveState: FAILED_SAVE_STATE
       })
     ).toEqual({ text: "Lys couldn't write.", tone: "danger" })
   })
@@ -386,7 +441,7 @@ describe("formatEmailAccountMessage", () => {
       formatEmailAccountMessage({
         ...SUBMITTED_INPUT,
         isEditedSinceSubmit: true,
-        saveState: { status: "failed", error: "Lys couldn't write." }
+        saveState: FAILED_SAVE_STATE
       })
     ).toEqual(UNSAVED_LINE)
   })
@@ -395,20 +450,11 @@ describe("formatEmailAccountMessage", () => {
     [
       "a failed save",
       {
-        saveState: { status: "failed", error: "Lys couldn't write." },
+        saveState: FAILED_SAVE_STATE,
         checkState: buildChecked(ACCEPTED_CHECK)
       }
     ],
-    [
-      "a refusal",
-      {
-        checkState: buildChecked({
-          status: "checked",
-          imap: { status: "accepted" },
-          smtp: { status: "failed", reason: "wrong-password" }
-        })
-      }
-    ]
+    ["a refusal", { checkState: buildChecked(SMTP_REFUSED_CHECK) }]
   ] as const)(
     "shows the saved address once the fields are edited back to the saved values after %s",
     (_label, outcome) => {
@@ -416,7 +462,7 @@ describe("formatEmailAccountMessage", () => {
         formatEmailAccountMessage({
           ...SUBMITTED_INPUT,
           ...outcome,
-          draftParse: { status: "unchanged" },
+          draftParse: UNCHANGED_PARSE,
           isEditedSinceSubmit: true
         })
       ).toEqual(SAVED_LINE)
@@ -427,7 +473,7 @@ describe("formatEmailAccountMessage", () => {
     expect(
       formatEmailAccountMessage({
         ...SUBMITTED_INPUT,
-        checkState: { status: "failed", error: "Lys couldn't reach." }
+        checkState: FAILED_CHECK_STATE
       })
     ).toEqual({ text: "Lys couldn't reach.", tone: "danger" })
   })
@@ -436,11 +482,7 @@ describe("formatEmailAccountMessage", () => {
     expect(
       formatEmailAccountMessage({
         ...SUBMITTED_INPUT,
-        checkState: buildChecked({
-          status: "checked",
-          imap: { status: "accepted" },
-          smtp: { status: "failed", reason: "wrong-password" }
-        })
+        checkState: buildChecked(SMTP_REFUSED_CHECK)
       })
     ).toEqual({
       text: "IMAP: accepted · SMTP: the user name or password was refused",
@@ -456,15 +498,14 @@ describe("formatEmailAccountMessage", () => {
     ["timed-out", "it did not answer in time"],
     ["protocol-error", "it answered something Lys could not read"]
   ])("words the %s failure of a server", (reason, clause) => {
+    const checkState = buildChecked({
+      status: "checked",
+      imap: { status: "failed", reason },
+      smtp: { status: "failed", reason }
+    })
+
     expect(
-      formatEmailAccountMessage({
-        ...SUBMITTED_INPUT,
-        checkState: buildChecked({
-          status: "checked",
-          imap: { status: "failed", reason },
-          smtp: { status: "failed", reason }
-        })
-      })
+      formatEmailAccountMessage({ ...SUBMITTED_INPUT, checkState })
     ).toEqual({ text: `IMAP: ${clause} · SMTP: ${clause}`, tone: "danger" })
   })
 
@@ -478,11 +519,10 @@ describe("formatEmailAccountMessage", () => {
   ])(
     "says why no sign-in was tried when the email server is %s",
     (reason, text) => {
+      const checkState = buildChecked({ status: "unavailable", reason })
+
       expect(
-        formatEmailAccountMessage({
-          ...SUBMITTED_INPUT,
-          checkState: buildChecked({ status: "unavailable", reason })
-        })
+        formatEmailAccountMessage({ ...SUBMITTED_INPUT, checkState })
       ).toEqual({ text, tone: "danger" })
     }
   )
@@ -492,19 +532,13 @@ describe("formatEmailAccountMessage", () => {
       formatEmailAccountMessage({
         ...SUBMITTED_INPUT,
         isEditedSinceSubmit: true,
-        checkState: buildChecked({
-          status: "unavailable",
-          reason: "server-failed"
-        })
+        checkState: buildChecked(SERVER_FAILED_CHECK)
       })
     ).toEqual(UNSAVED_LINE)
   })
 
   it("shows a refusal kept from before the card was shown again, until the fields are edited", () => {
-    const refusal = buildChecked({
-      status: "unavailable",
-      reason: "server-failed"
-    })
+    const refusal = buildChecked(SERVER_FAILED_CHECK)
 
     expect(
       formatEmailAccountMessage({ ...RESTING_INPUT, checkState: refusal })
@@ -526,7 +560,7 @@ describe("formatEmailAccountMessage", () => {
     expect(
       formatEmailAccountMessage({
         ...RESTING_INPUT,
-        saveState: { status: "saved" },
+        saveState: SAVED_STATE,
         checkState: buildChecked(ACCEPTED_CHECK)
       })
     ).toEqual({ text: "Account saved.", tone: "success" })
@@ -537,7 +571,7 @@ describe("formatEmailAccountMessage", () => {
       formatEmailAccountMessage({
         ...RESTING_INPUT,
         savedAccount: null,
-        saveState: { status: "saved" }
+        saveState: SAVED_STATE
       })
     ).toEqual({
       text: "No account yet. The email server stays off until you save one.",

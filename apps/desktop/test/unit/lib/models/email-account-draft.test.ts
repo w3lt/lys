@@ -46,6 +46,52 @@ const TYPED_FASTMAIL_SMTP: EmailServerDraft = Object.freeze({
   security: "tls"
 })
 
+/** The saved IMAP server with a host of the person's own. */
+const SAVED_IMAP_ON_OWN_HOST: EmailServerDraft = Object.freeze({
+  ...SAVED_DRAFT.imap,
+  host: "mail.example.test"
+})
+
+/** The saved SMTP server on port 587. */
+const SAVED_SMTP_ON_PORT_587: EmailServerDraft = Object.freeze({
+  ...SAVED_DRAFT.smtp,
+  port: "587"
+})
+
+/** The saved SMTP server secured with STARTTLS. */
+const SAVED_SMTP_WITH_STARTTLS: EmailServerDraft = Object.freeze({
+  ...SAVED_DRAFT.smtp,
+  security: "starttls"
+})
+
+/** Gmail's IMAP server with a space in its host. */
+const SPACED_HOST_IMAP: EmailServerDraft = Object.freeze({
+  host: "mail server",
+  port: "993",
+  security: "tls"
+})
+
+/** Gmail's SMTP server on a port above 65535. */
+const OUT_OF_RANGE_PORT_SMTP: EmailServerDraft = Object.freeze({
+  host: "smtp.gmail.com",
+  port: "70000",
+  security: "tls"
+})
+
+/** Gmail's SMTP server on a port with a letter in it. */
+const LETTERED_PORT_SMTP: EmailServerDraft = Object.freeze({
+  host: "smtp.gmail.com",
+  port: "25a",
+  security: "tls"
+})
+
+/** Gmail's IMAP server on port zero. */
+const ZERO_PORT_IMAP: EmailServerDraft = Object.freeze({
+  host: "imap.gmail.com",
+  port: "0",
+  security: "tls"
+})
+
 /**
  * Updates the address one keystroke at a time, as the card does while the
  * person types: Backspace down to the start both addresses share, then each
@@ -130,12 +176,9 @@ describe("hasEmailPresetServers", () => {
   })
 
   it.each([
-    [
-      "the IMAP host",
-      { imap: { ...SAVED_DRAFT.imap, host: "mail.example.test" } }
-    ],
-    ["a port", { smtp: { ...SAVED_DRAFT.smtp, port: "587" } }],
-    ["the security", { smtp: { ...SAVED_DRAFT.smtp, security: "starttls" } }]
+    ["the IMAP host", { imap: SAVED_IMAP_ON_OWN_HOST }],
+    ["a port", { smtp: SAVED_SMTP_ON_PORT_587 }],
+    ["the security", { smtp: SAVED_SMTP_WITH_STARTTLS }]
   ] as const)("is false once %s differs", (_label, change) => {
     if (FASTMAIL === undefined) throw new Error("No Fastmail preset")
 
@@ -173,10 +216,12 @@ describe("updateEmailAccountAddress", () => {
   })
 
   it("keeps server fields the person typed", () => {
-    const typed = {
-      ...EMPTY_DRAFT,
-      imap: { host: "mail.example.test", port: "993", security: "tls" }
-    } as const
+    const imap: EmailServerDraft = {
+      host: "mail.example.test",
+      port: "993",
+      security: "tls"
+    }
+    const typed: EmailAccountDraft = { ...EMPTY_DRAFT, imap }
 
     expect(updateEmailAccountAddress(typed, "ada@gmail.com")).toEqual({
       ...typed,
@@ -185,10 +230,12 @@ describe("updateEmailAccountAddress", () => {
   })
 
   it("keeps a port and a security the person chose before the hosts", () => {
-    const chosen: EmailAccountDraft = {
-      ...EMPTY_DRAFT,
-      imap: { host: "", port: "1993", security: "starttls" }
+    const imap: EmailServerDraft = {
+      host: "",
+      port: "1993",
+      security: "starttls"
     }
+    const chosen: EmailAccountDraft = { ...EMPTY_DRAFT, imap }
 
     expect(updateEmailAccountAddress(chosen, "ada@gmail.com")).toEqual({
       ...chosen,
@@ -220,7 +267,8 @@ describe("updateEmailAccountAddress", () => {
 
   it("keeps the servers of a preset the person changed", () => {
     const gmail = updateEmailAccountAddress(EMPTY_DRAFT, "ada@gmail.com")
-    const changed = { ...gmail, smtp: { ...gmail.smtp, port: "587" } }
+    const smtp: EmailServerDraft = { ...gmail.smtp, port: "587" }
+    const changed: EmailAccountDraft = { ...gmail, smtp }
 
     expect(updateEmailAccountAddress(changed, "ada@yahoo.com")).toEqual({
       ...changed,
@@ -351,12 +399,17 @@ describe("parseEmailAccountDraft", () => {
   })
 
   it("reads a typed account as changed, trimmed, with the ports as numbers", () => {
-    const typed = {
+    const imap: EmailServerDraft = {
+      host: " imap.gmail.com ",
+      port: " 993 ",
+      security: "tls"
+    }
+    const typed: EmailAccountDraft = {
       ...buildTypedGmailDraft(),
       address: " ada@gmail.com ",
       displayName: " Ada ",
-      imap: { host: " imap.gmail.com ", port: " 993 ", security: "tls" }
-    } as const
+      imap
+    }
 
     expect(parseEmailAccountDraft(typed, null, null)).toEqual({
       status: "changed",
@@ -409,27 +462,22 @@ describe("parseEmailAccountDraft", () => {
       "display name"
     ],
     ["an empty user name", { userName: "" }, "userName", "user name"],
-    [
-      "a host",
-      { imap: { host: "mail server", port: "993", security: "tls" } },
-      "imapHost",
-      "host"
-    ],
+    ["a host", { imap: SPACED_HOST_IMAP }, "imapHost", "host"],
     [
       "a port that is not a whole number in range",
-      { smtp: { host: "smtp.gmail.com", port: "70000", security: "tls" } },
+      { smtp: OUT_OF_RANGE_PORT_SMTP },
       "smtpPort",
       "A port is a whole number from 1 to 65535."
     ],
     [
       "a port with letters",
-      { smtp: { host: "smtp.gmail.com", port: "25a", security: "tls" } },
+      { smtp: LETTERED_PORT_SMTP },
       "smtpPort",
       "A port is a whole number from 1 to 65535."
     ],
     [
       "a port of zero",
-      { imap: { host: "imap.gmail.com", port: "0", security: "tls" } },
+      { imap: ZERO_PORT_IMAP },
       "imapPort",
       "A port is a whole number from 1 to 65535."
     ],
@@ -455,11 +503,14 @@ describe("parseEmailAccountDraft", () => {
   })
 
   it("places a connection without TLS to another machine on that server's host", () => {
+    const smtp: EmailServerDraft = {
+      host: "smtp.gmail.com",
+      port: "25",
+      security: "plain"
+    }
+
     const parse = parseEmailAccountDraft(
-      {
-        ...buildTypedGmailDraft(),
-        smtp: { host: "smtp.gmail.com", port: "25", security: "plain" }
-      },
+      { ...buildTypedGmailDraft(), smtp },
       null,
       null
     )
@@ -474,11 +525,14 @@ describe("parseEmailAccountDraft", () => {
   })
 
   it("allows a connection without TLS to this machine", () => {
+    const imap: EmailServerDraft = {
+      host: "localhost",
+      port: "143",
+      security: "plain"
+    }
+
     const parse = parseEmailAccountDraft(
-      {
-        ...buildTypedGmailDraft(),
-        imap: { host: "localhost", port: "143", security: "plain" }
-      },
+      { ...buildTypedGmailDraft(), imap },
       null,
       null
     )
@@ -575,14 +629,8 @@ describe("isEmailAccountDraftDifferent", () => {
     ["the display name changes", { displayName: "Ada Lovelace" }],
     ["the user name is emptied", { userName: "" }],
     ["a password is typed", { password: "app-password" }],
-    [
-      "the IMAP host changes",
-      { imap: { ...SAVED_DRAFT.imap, host: "mail.example.test" } }
-    ],
-    [
-      "the SMTP security changes",
-      { smtp: { ...SAVED_DRAFT.smtp, security: "starttls" } }
-    ],
+    ["the IMAP host changes", { imap: SAVED_IMAP_ON_OWN_HOST }],
+    ["the SMTP security changes", { smtp: SAVED_SMTP_WITH_STARTTLS }],
     ["the Sent copy switch changes", { serverKeepsSentCopy: false }]
   ])("is true once %s in the saved account's fields", (_label, change) => {
     expect(

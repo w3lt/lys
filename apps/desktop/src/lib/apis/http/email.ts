@@ -68,13 +68,14 @@ async function sendEmailAccountCheckRequest(
   connection: EmailApiConnection,
   body: CheckEmailAccountApiRequestBody
 ): Promise<Response> {
+  const headers: Readonly<Record<string, string>> = {
+    Accept: "application/json",
+    "Content-Type": "application/json"
+  }
   try {
     return await fetch(`${connection.backendUrl}${checkEmailAccountApi.path}`, {
       method: checkEmailAccountApi.method,
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json"
-      },
+      headers,
       body: JSON.stringify(body),
       cache: "no-store"
     })

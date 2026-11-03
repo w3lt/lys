@@ -68,10 +68,18 @@ type McpReconnectRefusal = Exclude<
   { readonly status: "reconnected" }
 >
 
+/** Outcome of a reconnect naming a server the backend has not applied. */
+const MCP_RECONNECT_NOT_FOUND: McpReconnectRefusal = Object.freeze({
+  status: "not-found"
+})
+
+/** Outcome of a reconnect of a server that is off or cannot start. */
+const MCP_RECONNECT_OFF: McpReconnectRefusal = Object.freeze({ status: "off" })
+
 /** Outcome each declared problem of a reconnect stands for, by its status. */
 const MCP_RECONNECT_REFUSALS = Object.freeze({
-  [HTTP_NOT_FOUND_STATUS]: Object.freeze({ status: "not-found" }),
-  [HTTP_CONFLICT_STATUS]: Object.freeze({ status: "off" })
+  [HTTP_NOT_FOUND_STATUS]: MCP_RECONNECT_NOT_FOUND,
+  [HTTP_CONFLICT_STATUS]: MCP_RECONNECT_OFF
 } satisfies Readonly<Record<McpReconnectProblemStatus, McpReconnectRefusal>>)
 
 /**

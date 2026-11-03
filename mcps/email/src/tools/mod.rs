@@ -91,8 +91,8 @@ impl ToolContext {
 pub struct ToolReport {
     /// The text the model reads.
     pub text: String,
-    /// What the log line says about the call: counts and folders, never
-    /// an address, a subject, or a body.
+    /// What the log line says about the call: the operation and its
+    /// counts, never an address, a subject, or a body.
     pub log: String,
 }
 

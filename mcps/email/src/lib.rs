@@ -17,9 +17,9 @@
 //! [`email_id`] name what the tools work on, [`failure`] names what goes
 //! wrong, [`tools`] do the work, [`server`] offers them over MCP,
 //! [`check`] signs in for the desktop's account card, and [`log`] writes
-//! the lines the backend keeps. Standard error
-//! carries the operation, the folder, the counts, and the class of a
-//! failure, never the password, an address, a subject, or a body.
+//! the lines the backend keeps. Standard error carries the operation, the
+//! counts, and the class of a failure, never the password, an address, a
+//! subject, or a body.
 
 pub mod account;
 pub mod check;

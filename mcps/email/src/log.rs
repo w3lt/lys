@@ -1,7 +1,7 @@
 //! Lines written to standard error, which the backend keeps as the
 //! server's log.
 //!
-//! A line names an operation, a folder, counts, or the class of a failure.
+//! A line names an operation, counts, or the class of a failure.
 //! No line holds the password, an address, a subject, or a body: the
 //! backend keeps these lines and shows them to the person.
 

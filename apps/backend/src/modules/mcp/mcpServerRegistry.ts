@@ -248,8 +248,6 @@ export default class McpServerRegistry {
   readonly #dependencies: McpServerRegistryDependencies
   /** Applied servers in list order: the built-in ones, then the group's. */
   #entries: Map<string, ServerEntry>
-  /** Names of the built-in servers an added server took at the last apply. */
-  #takenBuiltInNames: ReadonlySet<string>
   /** Outcome of the last read of the settings group. */
   #settingsStatus: SettingsStatus
   /** Settles once every settings read asked for so far was applied. */
@@ -275,7 +273,6 @@ export default class McpServerRegistry {
   public constructor(dependencies: McpServerRegistryDependencies) {
     this.#dependencies = dependencies
     this.#entries = new Map()
-    this.#takenBuiltInNames = new Set()
     this.#settingsStatus = "applied"
     this.#settingsReads = Promise.resolve()
     this.#tasks = new Set()
@@ -443,7 +440,10 @@ export default class McpServerRegistry {
     if (this.#isClosed) return
     switch (read.status) {
       case "read": {
-        const plan = await this.#createSettingsPlan(read.settings)
+        const plan = await createSettingsPlan(
+          read.settings,
+          this.#dependencies.builtInServers
+        )
         if (this.#isClosed) return
         this.#settingsStatus = "applied"
         this.#updateEntries(plan)
@@ -461,38 +461,6 @@ export default class McpServerRegistry {
         this.#dependencies.reportEvent({ kind: "settings-unreadable" })
         return
     }
-  }
-
-  /**
-   * Creates the plan of a settings group that passed its rules: what each
-   * server is to do, reading what each built-in server it switches on needs.
-   *
-   * @param settings - The group.
-   * @returns The built-in servers whose names are free, in their fixed
-   * order, then the group's servers in its order, and the names of the
-   * built-in servers an added server took.
-   * @throws The first failure, in the built-in servers' order, of a read
-   * of what one needs; every read has ended by then.
-   */
-  async #createSettingsPlan(settings: McpSettings): Promise<SettingsPlan> {
-    const addedNames = new Set(settings.servers.map((server) => server.name))
-    const { builtInServers } = this.#dependencies
-    const builtInPlans = await createBuiltInServerPlans(
-      builtInServers.filter((builtIn) => !addedNames.has(builtIn.name)),
-      settings
-    )
-    const takenBuiltInNames = new Set(
-      builtInServers
-        .map((builtIn) => builtIn.name)
-        .filter((name) => addedNames.has(name))
-    )
-    const addedPlans = settings.servers.map((server) =>
-      buildAddedServerPlan(server)
-    )
-    return Object.freeze({
-      servers: Object.freeze([...builtInPlans, ...addedPlans]),
-      takenBuiltInNames
-    })
   }
 
   /**
@@ -534,7 +502,15 @@ export default class McpServerRegistry {
         keptEntries.get(server.name) ??
           this.#startServer(server, previousEntries.get(server.name))
       )
-    this.#updateTakenBuiltInNames(plan.takenBuiltInNames)
+    const newlyTakenNames = listNewlyTakenBuiltInNames(
+      previousEntries,
+      plan.takenBuiltInNames
+    )
+    for (const serverName of newlyTakenNames)
+      this.#dependencies.reportEvent({
+        kind: "built-in-name-taken",
+        serverName
+      })
   }
 
   /**
@@ -578,22 +554,6 @@ export default class McpServerRegistry {
         return Object.freeze({ name, transport, isBuiltIn, run })
       }
     }
-  }
-
-  /**
-   * Updates the names of the built-in servers an added server took,
-   * reporting each name newly taken; the next apply compares with them.
-   *
-   * @param takenNames - Names of the built-in servers an added server took.
-   */
-  #updateTakenBuiltInNames(takenNames: ReadonlySet<string>): void {
-    for (const serverName of takenNames)
-      if (!this.#takenBuiltInNames.has(serverName))
-        this.#dependencies.reportEvent({
-          kind: "built-in-name-taken",
-          serverName
-        })
-    this.#takenBuiltInNames = takenNames
   }
 
   /**
@@ -672,6 +632,41 @@ export default class McpServerRegistry {
     )
     return Promise.resolve(buildServerNotConnectedOutcome(definition))
   }
+}
+
+/**
+ * Creates the plan of a settings group that passed its rules: what each
+ * server is to do, reading what each built-in server it switches on needs.
+ *
+ * @param settings - The group.
+ * @param builtInServers - The servers Lys ships, in their fixed order.
+ * @returns The built-in servers whose names are free, in their fixed
+ * order, then the group's servers in its order, and the names of the
+ * built-in servers an added server took.
+ * @throws The first failure, in the built-in servers' order, of a read
+ * of what one needs; every read has ended by then.
+ */
+async function createSettingsPlan(
+  settings: McpSettings,
+  builtInServers: readonly BuiltInMcpServer[]
+): Promise<SettingsPlan> {
+  const addedNames = new Set(settings.servers.map((server) => server.name))
+  const builtInPlans = await createBuiltInServerPlans(
+    builtInServers.filter((builtIn) => !addedNames.has(builtIn.name)),
+    settings
+  )
+  const takenBuiltInNames = new Set(
+    builtInServers
+      .map((builtIn) => builtIn.name)
+      .filter((name) => addedNames.has(name))
+  )
+  const addedPlans = settings.servers.map((server) =>
+    buildAddedServerPlan(server)
+  )
+  return Object.freeze({
+    servers: Object.freeze([...builtInPlans, ...addedPlans]),
+    takenBuiltInNames
+  })
 }
 
 /**
@@ -797,6 +792,25 @@ function hasEqualSettings(run: ServerRun, plannedRun: PlannedRun): boolean {
     run.status === "running" &&
     plannedRun.status === "start" &&
     isDeepStrictEqual(run.settings, plannedRun.settings)
+  )
+}
+
+/**
+ * Lists the built-in server names an added server takes in a plan that no
+ * added server held among the servers applied before it.
+ *
+ * @param previousEntries - Servers applied before the plan, by name.
+ * @param takenNames - Names of the built-in servers an added server takes
+ * in the plan.
+ * @returns Each name of `takenNames`, in its order, whose previous entry
+ * is missing or a built-in server's.
+ */
+function listNewlyTakenBuiltInNames(
+  previousEntries: ReadonlyMap<string, ServerEntry>,
+  takenNames: ReadonlySet<string>
+): readonly string[] {
+  return [...takenNames].filter(
+    (serverName) => previousEntries.get(serverName)?.isBuiltIn !== false
   )
 }
 

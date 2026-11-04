@@ -370,40 +370,40 @@ describe("listed servers", () => {
   })
 
   it.each([
-    ["an added server", buildAddedListedServer(COMMAND_SERVER), true],
+    ["an added server", true, buildAddedListedServer(COMMAND_SERVER)],
     [
       "an added server that is off",
-      buildAddedListedServer({ ...COMMAND_SERVER, enabled: false }),
-      true
+      true,
+      buildAddedListedServer({ ...COMMAND_SERVER, enabled: false })
     ],
     [
       "the email server with an account",
-      { ...EMAIL_SERVER, isOn: false },
-      true
+      true,
+      { ...EMAIL_SERVER, isOn: false }
     ],
     [
       "the email server that is on without an account",
-      { ...EMAIL_SERVER, isReady: false },
-      true
+      true,
+      { ...EMAIL_SERVER, isReady: false }
     ],
     [
       "the email server that is on while its name is taken",
-      { ...EMAIL_SERVER, isNameTaken: true },
-      true
+      true,
+      { ...EMAIL_SERVER, isNameTaken: true }
     ],
     [
       "the email server off without an account",
-      EMAIL_SERVER_WITHOUT_ACCOUNT,
-      false
+      false,
+      EMAIL_SERVER_WITHOUT_ACCOUNT
     ],
     [
       "the email server off while its name is taken",
-      { ...EMAIL_SERVER, isOn: false, isNameTaken: true },
-      false
+      false,
+      { ...EMAIL_SERVER, isOn: false, isNameTaken: true }
     ]
   ] as const)(
     "answers whether %s can be switched: %s",
-    (_, server, canSwitch) => {
+    (_, canSwitch, server) => {
       expect(canSwitchMcpServer(server)).toBe(canSwitch)
     }
   )
@@ -725,19 +725,28 @@ describe("formatMcpServerStatus", () => {
   })
 
   it.each([
-    [URL_SERVER, "waiting for initialize from mcp.example.test"],
-    [OPEN_URL_SERVER, "waiting for initialize from localhost:3845"],
     [
+      "a remote server on the default HTTPS port",
+      "waiting for initialize from mcp.example.test",
+      URL_SERVER
+    ],
+    [
+      "a remote server on a port of its own",
+      "waiting for initialize from localhost:3845",
+      OPEN_URL_SERVER
+    ],
+    [
+      "a remote server whose host has letters beyond ASCII",
+      "waiting for initialize from bücher.example",
       parseMcpServer({
         name: "books",
         transport: "http",
         url: "https://bücher.example/mcp?team=lys"
-      }),
-      "waiting for initialize from bücher.example"
+      })
     ]
   ])(
-    "says a remote server is connecting, naming its host and port",
-    (server, detail) => {
+    "says %s is connecting, naming its host and port: %s",
+    (_, detail, server) => {
       expect(
         formatMcpServerStatus(
           buildAppliedRowFacts(server, CONNECTING_MCP_STATE)
@@ -776,42 +785,42 @@ describe("formatMcpServerStatus", () => {
   it.each([
     [
       "local program",
-      COMMAND_SERVER,
-      buildConnectedMcpState(3),
       "Running",
       "3 tools listed",
-      "Restart"
+      "Restart",
+      COMMAND_SERVER,
+      buildConnectedMcpState(3)
     ],
     [
       "remote server",
-      URL_SERVER,
-      buildConnectedMcpState(1),
       "Connected",
       "1 tool listed",
-      "Reconnect"
+      "Reconnect",
+      URL_SERVER,
+      buildConnectedMcpState(1)
     ],
     [
       "remote server",
-      URL_SERVER,
-      buildConnectedMcpState(0),
       "Connected",
       "0 tools listed",
-      "Reconnect"
+      "Reconnect",
+      URL_SERVER,
+      buildConnectedMcpState(0)
     ],
     [
       "local program",
+      "Running",
+      "4 tools listed · 2 skipped",
+      "Restart",
       COMMAND_SERVER,
       buildConnectedMcpState(4, [
         { name: "a", reason: "unsupported-name" },
         { name: "b", reason: "duplicate-name" }
-      ]),
-      "Running",
-      "4 tools listed · 2 skipped",
-      "Restart"
+      ])
     ]
   ])(
-    "says a connected %s is %s and counts its tools: %s",
-    (_, server, state, heading, detail, reconnectLabel) => {
+    "says a connected %s is %s, counts its tools: %s, and offers %s",
+    (_, heading, detail, reconnectLabel, server, state) => {
       expect(
         formatMcpServerStatus(buildAppliedRowFacts(server, state))
       ).toEqual({

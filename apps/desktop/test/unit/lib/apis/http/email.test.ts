@@ -75,31 +75,40 @@ describe("sendEmailAccountCheck", () => {
     expect(request?.cache).toBe("no-store")
   })
 
-  it.each<CheckEmailAccountApiResponse>([
-    {
-      status: "checked",
-      imap: { status: "failed", reason: "wrong-password" },
-      smtp: { status: "accepted" }
-    },
-    {
-      status: "checked",
-      imap: { status: "failed", reason: "unreachable" },
-      smtp: { status: "failed", reason: "timed-out" }
-    },
-    { status: "unavailable", reason: "server-missing" },
-    { status: "unavailable", reason: "server-failed" }
-  ])(
-    "returns the $status outcome as the backend answered it",
-    async (answer) => {
-      startBackendFake({
-        [ACCOUNT_CHECK_ROUTE]: () => buildJsonResponse(200, answer)
-      })
+  it.each<[string, CheckEmailAccountApiResponse]>([
+    [
+      "a checked outcome whose IMAP password was refused",
+      {
+        status: "checked",
+        imap: { status: "failed", reason: "wrong-password" },
+        smtp: { status: "accepted" }
+      }
+    ],
+    [
+      "a checked outcome whose IMAP server was unreachable and SMTP server timed out",
+      {
+        status: "checked",
+        imap: { status: "failed", reason: "unreachable" },
+        smtp: { status: "failed", reason: "timed-out" }
+      }
+    ],
+    [
+      "an unavailable outcome whose email server is missing",
+      { status: "unavailable", reason: "server-missing" }
+    ],
+    [
+      "an unavailable outcome whose email server failed",
+      { status: "unavailable", reason: "server-failed" }
+    ]
+  ])("returns %s as the backend answered it", async (_label, answer) => {
+    startBackendFake({
+      [ACCOUNT_CHECK_ROUTE]: () => buildJsonResponse(200, answer)
+    })
 
-      await expect(
-        sendEmailAccountCheck(CONNECTION, CHECK_BODY)
-      ).resolves.toEqual(answer)
-    }
-  )
+    await expect(
+      sendEmailAccountCheck(CONNECTION, CHECK_BODY)
+    ).resolves.toEqual(answer)
+  })
 
   it.each([
     [

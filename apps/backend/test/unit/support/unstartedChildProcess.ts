@@ -12,10 +12,18 @@ export type FileDescriptorShortage = "EMFILE" | "ENFILE"
  * Process object of a start Node gave up: a `ChildProcess` that never
  * started a process, so it has no pid and no standard streams.
  *
- * @remarks The subclass preserves Node's `ChildProcess` contract for a
- * process that never started. It replaces only `kill`, which would
- * otherwise signal through a native handle that never started a process.
- * It is not designed for subclassing.
+ * @remarks Owns only the state its base class keeps, to stand in for the
+ * process object `spawn` returns for such a start, while preserving its
+ * invariant: it starts no process, and its `kill` sends no signal. The
+ * subclass preserves Node's `ChildProcess` contract for a process that
+ * never started. It replaces only `kill`. Node's own `kill` would signal
+ * through the native handle the base class creates, a handle that never
+ * started a process; on Node v24.19.0, that signal reaches every process
+ * in the calling process's group. As the replacement is part of the
+ * class, it holds for the object's whole life, not only until the runner
+ * restores a case's mocks. Resource ownership: it owns no process, pipe,
+ * or file descriptor, so it has nothing to release. Concurrency model:
+ * single-owner, in one test. It is not designed for subclassing.
  */
 class UnstartedChildProcess extends ChildProcess {
   /**

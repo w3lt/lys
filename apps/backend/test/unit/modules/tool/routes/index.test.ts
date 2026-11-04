@@ -103,9 +103,10 @@ function createMcpServerRegistry(
 ): McpServerRegistry {
   const events: McpServerEvent[] = []
   const { processGroups } = createOwnedMcpServerProcessGroups()
-  const settings = mcpSettingsSchema.parse({ servers })
+  const mcpSettings = mcpSettingsSchema.parse({ servers })
   const registry = new McpServerRegistry({
-    readSettings: () => Promise.resolve({ status: "read", settings }),
+    readSettings: () =>
+      Promise.resolve({ status: "read", settings: mcpSettings }),
     builtInServers: [],
     openServer: (settings, context) =>
       openMcpServer(settings, context, MCP_OPENING_TIMEOUT_MILLISECONDS),

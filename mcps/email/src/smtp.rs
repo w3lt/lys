@@ -107,9 +107,9 @@ pub enum SendStage {
 /// message over and the server accepts it, and read by the caller that may
 /// stop the send, to tell whether the message may have gone out.
 ///
-/// Concurrency model: shared; the send moves the stage through one shared
-/// reference while the caller holds another, and each access takes the
-/// lock only to read or write the stage. The lock makes the progress
+/// Concurrency model: serialized; the send moves the stage through one
+/// shared reference while the caller holds another, and each access takes
+/// the lock only to read or write the stage. The lock makes the progress
 /// `Sync`, so that a send borrowing it can run on any thread. Resource
 /// ownership: holds only the stage.
 #[derive(Debug, Default)]

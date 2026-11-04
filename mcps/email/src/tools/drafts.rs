@@ -281,7 +281,7 @@ fn build_draft_save_failure(failure: AppendFailure, replaced: Option<&EmailId>) 
 }
 
 /// Deletes the draft a stored draft replaces from Drafts, which is still
-/// open at its id, as [`store_draft`] left it.
+/// open at its id, as [`get_draft_folder`] left it.
 ///
 /// # Arguments
 ///

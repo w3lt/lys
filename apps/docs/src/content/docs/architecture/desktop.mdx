@@ -872,8 +872,9 @@ server and SMTP server, each with Host, Port, and Security, a choice of TLS,
 STARTTLS, or None, and a switch, "Server keeps a copy of sent mail". Address,
 User name, each Host and Port, and Password while none is saved say `required`
 beside their labels, and every field states its rule there before entry, which
-its input names as its first description: Address `name@host · up to 254`,
-Display name `optional · up to 100`, User name `up to 254`, Password
+its input names as its first description: Address
+`name@host · ASCII name up to 64 · up to 254 in all`, Display name
+`optional · up to 100`, User name `up to 254`, Password
 `up to 1024`, each Host `host name, IPv4, or [IPv6]`, and each Port `1–65535`;
 each Security group is described by `None only for localhost, 127.0.0.1, [::1]`.
 The hints take their limits and hosts from `@lys/share`. A note under the

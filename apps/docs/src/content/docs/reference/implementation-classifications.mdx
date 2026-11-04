@@ -118,15 +118,16 @@ approve its public surface or establish an exception.
 
 ## Email server owners
 
-| Declaration     | Source                                                                                           | Recorded classification            |
-| --------------- | ------------------------------------------------------------------------------------------------ | ---------------------------------- |
-| `EmailServer`   | [mcps/email/src/server.rs](https://github.com/w3lt/lys/blob/main/mcps/email/src/server.rs)       | framework adapter                  |
-| `ToolContext`   | [mcps/email/src/tools/mod.rs](https://github.com/w3lt/lys/blob/main/mcps/email/src/tools/mod.rs) | resource owner or boundary adapter |
-| `ImapSession`   | [mcps/email/src/imap.rs](https://github.com/w3lt/lys/blob/main/mcps/email/src/imap.rs)           | resource owner                     |
-| `SmtpSession`   | [mcps/email/src/smtp.rs](https://github.com/w3lt/lys/blob/main/mcps/email/src/smtp.rs)           | resource owner or boundary adapter |
-| `SendProgress`  | [mcps/email/src/smtp.rs](https://github.com/w3lt/lys/blob/main/mcps/email/src/smtp.rs)           | invariant owner                    |
-| `SmtpTlsStream` | [mcps/email/src/smtp.rs](https://github.com/w3lt/lys/blob/main/mcps/email/src/smtp.rs)           | framework adapter                  |
-| `Trust`         | [mcps/email/src/trust.rs](https://github.com/w3lt/lys/blob/main/mcps/email/src/trust.rs)         | resource owner or boundary adapter |
+| Declaration     | Source                                                                                                 | Recorded classification            |
+| --------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| `EmailServer`   | [mcps/email/src/server.rs](https://github.com/w3lt/lys/blob/main/mcps/email/src/server.rs)             | framework adapter                  |
+| `ToolContext`   | [mcps/email/src/tools/mod.rs](https://github.com/w3lt/lys/blob/main/mcps/email/src/tools/mod.rs)       | resource owner or boundary adapter |
+| `ImapSession`   | [mcps/email/src/imap.rs](https://github.com/w3lt/lys/blob/main/mcps/email/src/imap.rs)                 | resource owner                     |
+| `SmtpSession`   | [mcps/email/src/smtp.rs](https://github.com/w3lt/lys/blob/main/mcps/email/src/smtp.rs)                 | resource owner or boundary adapter |
+| `SendProgress`  | [mcps/email/src/smtp.rs](https://github.com/w3lt/lys/blob/main/mcps/email/src/smtp.rs)                 | invariant owner                    |
+| `DraftProgress` | [mcps/email/src/tools/drafts.rs](https://github.com/w3lt/lys/blob/main/mcps/email/src/tools/drafts.rs) | invariant owner                    |
+| `SmtpTlsStream` | [mcps/email/src/smtp.rs](https://github.com/w3lt/lys/blob/main/mcps/email/src/smtp.rs)                 | framework adapter                  |
+| `Trust`         | [mcps/email/src/trust.rs](https://github.com/w3lt/lys/blob/main/mcps/email/src/trust.rs)               | resource owner or boundary adapter |
 
 ## Page reader owners
 

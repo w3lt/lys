@@ -162,11 +162,12 @@ function handleReconnect(
  * through the email server Lys ships and answers with the outcome.
  *
  * @param app - Application to register the route on.
- * @param checker - Borrowed email account checker.
+ * @param checker - Borrowed email account checker, of which the route calls
+ * only `sendCheck`.
  */
 function registerCheckEmailAccountRoute(
   app: FastifyInstance,
-  checker: EmailAccountChecker
+  checker: Pick<EmailAccountChecker, "sendCheck">
 ): void {
   app.route<CheckEmailAccountApiRoute>({
     method: checkEmailAccountApi.method,

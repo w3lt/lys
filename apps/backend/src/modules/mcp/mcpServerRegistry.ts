@@ -234,11 +234,12 @@ const OFF_STATE: McpServerState = Object.freeze({ status: "off" })
  * read keep the servers applied before.
  * Resource ownership: owns every session it started until it stops it; a
  * stopped session closes its connection, now or when its opening ends.
- * Concurrency model: single-threaded with background tasks; settings reads
- * run one after another in call order, each applied synchronously once
- * read, and every state change happens synchronously, so a lookup always
- * sees one consistent state. {@link close} is idempotent and waits for every
- * opening and close it started.
+ * Concurrency model: single-owner, on the backend's event loop, with
+ * background tasks; settings reads run one after another in call order,
+ * each applied synchronously once read, and every state change happens
+ * synchronously, so a lookup always sees one consistent state.
+ * {@link close} is idempotent and waits for every opening and close it
+ * started.
  */
 export default class McpServerRegistry {
   /**

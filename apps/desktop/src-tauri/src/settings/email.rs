@@ -50,7 +50,7 @@ const USER_NAME_MAX_LENGTH: usize = 254;
 const BRACKETED_IPV6_MAX_LENGTH: usize = 47;
 
 /// Hosts a mail server may be reached on without TLS, in lowercase: the
-/// machine Lys runs on.
+/// machine Lys runs on. Matches `LOOPBACK_EMAIL_HOSTS` in `@lys/share`.
 const LOOPBACK_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
 
 /// Error for an account value that is not an account object.

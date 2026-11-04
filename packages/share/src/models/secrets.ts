@@ -66,8 +66,10 @@ export type GroqApiKey = z.infer<typeof groqApiKeySchema>
  *
  * @remarks The settings file never holds a longer password: the desktop
  * host checks the same limit, in its own copy of this rule, when it loads
- * the file. Raising it changes which settings files load and requires a
- * coordinated desktop and backend release.
+ * the file, and the email server checks it again, in a third copy, before
+ * it uses the account. Raising it changes which settings files load and
+ * which accounts the email server accepts, and requires a coordinated
+ * release of the desktop host, the backend, and the email server.
  */
 export const MAXIMUM_EMAIL_PASSWORD_LENGTH = 1024
 

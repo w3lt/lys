@@ -7,8 +7,10 @@ import { isHostName, MAXIMUM_TCP_PORT } from "./hostName"
  *
  * @remarks The settings file never holds a longer address: the desktop host
  * checks the same limit, in its own copy of this rule, when it loads the
- * file. Raising it changes which settings files load and requires a
- * coordinated desktop and backend release.
+ * file, and the email server checks it again, in a third copy, before it
+ * uses the account. Raising it changes which settings files load and which
+ * accounts the email server accepts, and requires a coordinated release of
+ * the desktop host, the backend, and the email server.
  */
 export const MAXIMUM_EMAIL_ADDRESS_LENGTH = 254
 
@@ -21,8 +23,10 @@ const MAXIMUM_EMAIL_LOCAL_PART_LENGTH = 64
  *
  * @remarks The settings file never holds a longer name: the desktop host
  * checks the same limit, in its own copy of this rule, when it loads the
- * file. Raising it changes which settings files load and requires a
- * coordinated desktop and backend release.
+ * file, and the email server checks it again, in a third copy, before it
+ * uses the account. Raising it changes which settings files load and which
+ * accounts the email server accepts, and requires a coordinated release of
+ * the desktop host, the backend, and the email server.
  */
 export const MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH = 100
 
@@ -32,8 +36,10 @@ export const MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH = 100
  *
  * @remarks The settings file never holds a longer name: the desktop host
  * checks the same limit, in its own copy of this rule, when it loads the
- * file. Raising it changes which settings files load and requires a
- * coordinated desktop and backend release.
+ * file, and the email server checks it again, in a third copy, before it
+ * uses the account. Raising it changes which settings files load and which
+ * accounts the email server accepts, and requires a coordinated release of
+ * the desktop host, the backend, and the email server.
  */
 export const MAXIMUM_EMAIL_USER_NAME_LENGTH = 254
 
@@ -67,9 +73,11 @@ const BRACKETED_IPV6_PATTERN = /^\[[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*\]$/
  *
  * @remarks A host matches in any case. The settings file never holds a
  * connection without TLS to another host: the desktop host checks the same
- * hosts, in its own copy of this rule, when it loads the file. Changing
- * the list changes which settings files load and requires a coordinated
- * desktop and backend release.
+ * hosts, in its own copy of this rule, when it loads the file, and the
+ * email server checks them again, in a third copy, before it uses the
+ * account. Changing the list changes which settings files load and which
+ * accounts the email server accepts, and requires a coordinated release of
+ * the desktop host, the backend, and the email server.
  */
 export const LOOPBACK_EMAIL_HOSTS: readonly string[] = Object.freeze([
   "localhost",

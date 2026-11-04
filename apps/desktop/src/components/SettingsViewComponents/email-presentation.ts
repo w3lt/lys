@@ -10,6 +10,7 @@ import {
   LOOPBACK_EMAIL_HOSTS,
   MAXIMUM_EMAIL_ADDRESS_LENGTH,
   MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH,
+  MAXIMUM_EMAIL_LOCAL_PART_LENGTH,
   MAXIMUM_EMAIL_PASSWORD_LENGTH,
   MAXIMUM_EMAIL_USER_NAME_LENGTH,
   MAXIMUM_TCP_PORT,
@@ -83,8 +84,11 @@ export const EMAIL_PASSWORD_KEPT_NOTE =
 export const EMAIL_SENT_COPY_NOTE =
   "On when the server files sent mail itself, as Gmail does. Off makes Lys file the copy in Sent."
 
-/** Rule of an address, shown beside its label before entry. */
-export const EMAIL_ADDRESS_HINT = `name@host · up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH}`
+/**
+ * Rule of an address, shown beside its label before entry: its shape, the
+ * limits of the name before `@`, and its length in all.
+ */
+export const EMAIL_ADDRESS_HINT = `name@host · ASCII name up to ${MAXIMUM_EMAIL_LOCAL_PART_LENGTH} · up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH} in all`
 
 /** Rule of a display name, shown beside its label before entry. */
 export const EMAIL_DISPLAY_NAME_HINT = `optional · up to ${MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH}`

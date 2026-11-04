@@ -14,8 +14,18 @@ import { isHostName, MAXIMUM_TCP_PORT } from "./hostName"
  */
 export const MAXIMUM_EMAIL_ADDRESS_LENGTH = 254
 
-/** Most characters the part of an email address before `@` may have, inclusive. */
-const MAXIMUM_EMAIL_LOCAL_PART_LENGTH = 64
+/**
+ * Most characters the part of an email address before `@` may have,
+ * inclusive.
+ *
+ * @remarks The settings file never holds a longer name: the desktop host
+ * checks the same limit, in its own copy of this rule, when it loads the
+ * file, and the email server checks it again, in a third copy, before it
+ * uses the account. Raising it changes which settings files load and which
+ * accounts the email server accepts, and requires a coordinated release of
+ * the desktop host, the backend, and the email server.
+ */
+export const MAXIMUM_EMAIL_LOCAL_PART_LENGTH = 64
 
 /**
  * Most characters, counted as Unicode code points, the display name of an
@@ -167,7 +177,7 @@ export const emailAddressSchema = z
   .string()
   .refine(
     isEmailAddress,
-    `An email address is a name of visible characters, @, and a host name, up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH} characters.`
+    `An email address is a name of 1 to ${MAXIMUM_EMAIL_LOCAL_PART_LENGTH} visible ASCII characters other than @, then @ and a host name, up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH} characters in all.`
   )
 
 /**

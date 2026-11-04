@@ -57,8 +57,7 @@ const LOOPBACK_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
 const ACCOUNT_SHAPE_ERROR: &str = "an email account must be an object holding address, displayName, userName, imap, smtp, and serverKeepsSentCopy of the right types, and no other field";
 
 /// Rule of an address, as an error message.
-const ADDRESS_RULE: &str =
-    "an email address must be a name of visible characters, @, and a host name, up to 254 characters";
+const ADDRESS_RULE: &str = "an email address must be a name of 1 to 64 visible ASCII characters other than @, then @ and a host name, up to 254 characters in all";
 
 /// Rule of a display name, as an error message.
 const DISPLAY_NAME_RULE: &str = "a display name must be up to 100 characters, without control characters or white space at either end";
@@ -469,6 +468,9 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::EmailSettings;
+
+    /// The address rule, as an error about an address states it.
+    const ADDRESS_RULE_TEXT: &str = "an email address must be a name of 1 to 64 visible ASCII characters other than @, then @ and a host name, up to 254 characters in all";
 
     /// Reads `stored` as the `email` group.
     fn parse_email_settings(stored: Value) -> Result<EmailSettings, serde_json::Error> {
@@ -881,10 +883,20 @@ mod tests {
 
     #[test]
     fn reports_the_broken_rule_of_a_field() {
+        let long_name_address = format!("{}@example.com", "a".repeat(65));
+
         for (account, rule) in [
             (
                 get_account_with("address", json!("person")),
-                "an email address must be",
+                ADDRESS_RULE_TEXT,
+            ),
+            (
+                get_account_with("address", json!("pérson@example.com")),
+                ADDRESS_RULE_TEXT,
+            ),
+            (
+                get_account_with("address", json!(long_name_address)),
+                ADDRESS_RULE_TEXT,
             ),
             (
                 get_account_with("displayName", json!(" A Person")),

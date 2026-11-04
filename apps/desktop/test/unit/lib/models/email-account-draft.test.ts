@@ -23,6 +23,10 @@ const SAVED_DRAFT = buildEmailAccountDraft(STORED_EMAIL_ACCOUNT)
 /** The fields of an empty card. */
 const EMPTY_DRAFT = buildEmailAccountDraft(null)
 
+/** Problem of an address that breaks the address rule. */
+const ADDRESS_PROBLEM =
+  "An email address is a name of 1 to 64 visible ASCII characters other than @, then @ and a host name, up to 254 characters in all."
+
 /** Preset of the stored account's provider. */
 const FASTMAIL = findEmailPreset(STORED_EMAIL_ACCOUNT.address)
 
@@ -455,6 +459,18 @@ describe("parseEmailAccountDraft", () => {
 
   it.each<[string, Partial<EmailAccountDraft>, string, string]>([
     ["an address", { address: "ada" }, "address", "address"],
+    [
+      "an address whose name holds a letter beyond ASCII",
+      { address: "josé@example.test" },
+      "address",
+      ADDRESS_PROBLEM
+    ],
+    [
+      "an address whose name is over 64 characters",
+      { address: `${"a".repeat(65)}@example.test` },
+      "address",
+      ADDRESS_PROBLEM
+    ],
     [
       "a display name over the limit",
       { displayName: "a".repeat(201) },

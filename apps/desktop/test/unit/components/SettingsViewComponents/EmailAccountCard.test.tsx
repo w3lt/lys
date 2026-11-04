@@ -37,7 +37,7 @@ type ShownServerChoices = Readonly<{
 const ADDRESS_PROBLEM = /address/i
 
 /** Rule the Address field states before entry. */
-const ADDRESS_HINT = "name@host · up to 254"
+const ADDRESS_HINT = "name@host · ASCII name up to 64 · up to 254 in all"
 
 /** Rule the Password field states before entry. */
 const PASSWORD_HINT = "up to 1024"

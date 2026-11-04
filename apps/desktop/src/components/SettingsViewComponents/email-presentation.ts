@@ -85,10 +85,10 @@ export const EMAIL_SENT_COPY_NOTE =
   "On when the server files sent mail itself, as Gmail does. Off makes Lys file the copy in Sent."
 
 /**
- * Rule of an address, shown beside its label before entry: its shape, the
- * limits of the name before `@`, and its length in all.
+ * Rule of an address, shown beside its label before entry: its shape, in
+ * ASCII, the length of the name before `@`, and its length in all.
  */
-export const EMAIL_ADDRESS_HINT = `name@host · ASCII name up to ${MAXIMUM_EMAIL_LOCAL_PART_LENGTH} · up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH} in all`
+export const EMAIL_ADDRESS_HINT = `name@host in ASCII · name up to ${MAXIMUM_EMAIL_LOCAL_PART_LENGTH} · up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH} in all`
 
 /** Rule of a display name, shown beside its label before entry. */
 export const EMAIL_DISPLAY_NAME_HINT = `optional · up to ${MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH}`
@@ -100,7 +100,7 @@ export const EMAIL_USER_NAME_HINT = `up to ${MAXIMUM_EMAIL_USER_NAME_LENGTH}`
 export const EMAIL_PASSWORD_HINT = `up to ${MAXIMUM_EMAIL_PASSWORD_LENGTH}`
 
 /** Rule of a mail server host, shown beside its label before entry. */
-export const EMAIL_HOST_HINT = "host name, IPv4, or [IPv6]"
+export const EMAIL_HOST_HINT = "ASCII host name, IPv4, or [IPv6]"
 
 /** Rule of a port, shown beside its label before entry. */
 export const EMAIL_PORT_HINT = `1–${MAXIMUM_TCP_PORT}`

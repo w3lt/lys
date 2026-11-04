@@ -25,7 +25,11 @@ const EMPTY_DRAFT = buildEmailAccountDraft(null)
 
 /** Problem of an address that breaks the address rule. */
 const ADDRESS_PROBLEM =
-  "An email address is a name of 1 to 64 visible ASCII characters other than @, then @ and a host name, up to 254 characters in all."
+  "An email address is a name of 1 to 64 visible ASCII characters other than @, then @ and an ASCII host name, up to 254 characters in all."
+
+/** Problem of a mail server host that breaks the host rule. */
+const HOST_PROBLEM =
+  "A mail server host is an ASCII host name, an IPv4 address, or an IPv6 address in brackets."
 
 /** Preset of the stored account's provider. */
 const FASTMAIL = findEmailPreset(STORED_EMAIL_ACCOUNT.address)
@@ -71,6 +75,13 @@ const SAVED_SMTP_WITH_STARTTLS: EmailServerDraft = Object.freeze({
 /** Gmail's IMAP server with a space in its host. */
 const SPACED_HOST_IMAP: EmailServerDraft = Object.freeze({
   host: "mail server",
+  port: "993",
+  security: "tls"
+})
+
+/** An IMAP server whose host holds a letter beyond ASCII. */
+const NON_ASCII_HOST_IMAP: EmailServerDraft = Object.freeze({
+  host: "imap.bücher.example",
   port: "993",
   security: "tls"
 })
@@ -472,6 +483,12 @@ describe("parseEmailAccountDraft", () => {
       ADDRESS_PROBLEM
     ],
     [
+      "an address whose host holds a letter beyond ASCII",
+      { address: "ada@bücher.example" },
+      "address",
+      ADDRESS_PROBLEM
+    ],
+    [
       "a display name over the limit",
       { displayName: "a".repeat(201) },
       "displayName",
@@ -479,6 +496,12 @@ describe("parseEmailAccountDraft", () => {
     ],
     ["an empty user name", { userName: "" }, "userName", "user name"],
     ["a host", { imap: SPACED_HOST_IMAP }, "imapHost", "host"],
+    [
+      "a host that holds a letter beyond ASCII",
+      { imap: NON_ASCII_HOST_IMAP },
+      "imapHost",
+      HOST_PROBLEM
+    ],
     [
       "a port that is not a whole number in range",
       { smtp: OUT_OF_RANGE_PORT_SMTP },

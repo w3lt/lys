@@ -37,13 +37,13 @@ type ShownServerChoices = Readonly<{
 const ADDRESS_PROBLEM = /address/i
 
 /** Rule the Address field states before entry. */
-const ADDRESS_HINT = "name@host · ASCII name up to 64 · up to 254 in all"
+const ADDRESS_HINT = "name@host in ASCII · name up to 64 · up to 254 in all"
 
 /** Rule the Password field states before entry. */
 const PASSWORD_HINT = "up to 1024"
 
 /** Rule each Host field states before entry. */
-const HOST_HINT = "host name, IPv4, or [IPv6]"
+const HOST_HINT = "ASCII host name, IPv4, or [IPv6]"
 
 /** Rule each Port field states before entry. */
 const PORT_HINT = "1–65535"

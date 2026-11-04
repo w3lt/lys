@@ -177,7 +177,7 @@ export const emailAddressSchema = z
   .string()
   .refine(
     isEmailAddress,
-    `An email address is a name of 1 to ${MAXIMUM_EMAIL_LOCAL_PART_LENGTH} visible ASCII characters other than @, then @ and a host name, up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH} characters in all.`
+    `An email address is a name of 1 to ${MAXIMUM_EMAIL_LOCAL_PART_LENGTH} visible ASCII characters other than @, then @ and an ASCII host name, up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH} characters in all.`
   )
 
 /**
@@ -237,7 +237,7 @@ const emailServerSettingsSchema = z
       .string()
       .refine(
         isEmailHost,
-        "A mail server host is a host name, an IPv4 address, or an IPv6 address in brackets."
+        "A mail server host is an ASCII host name, an IPv4 address, or an IPv6 address in brackets."
       ),
     /** TCP port, such as 993 for IMAP or 465 for SMTP over TLS. */
     port: z.int().min(1).max(MAXIMUM_TCP_PORT),

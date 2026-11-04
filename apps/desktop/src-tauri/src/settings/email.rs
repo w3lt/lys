@@ -57,7 +57,7 @@ const LOOPBACK_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
 const ACCOUNT_SHAPE_ERROR: &str = "an email account must be an object holding address, displayName, userName, imap, smtp, and serverKeepsSentCopy of the right types, and no other field";
 
 /// Rule of an address, as an error message.
-const ADDRESS_RULE: &str = "an email address must be a name of 1 to 64 visible ASCII characters other than @, then @ and a host name, up to 254 characters in all";
+const ADDRESS_RULE: &str = "an email address must be a name of 1 to 64 visible ASCII characters other than @, then @ and an ASCII host name, up to 254 characters in all";
 
 /// Rule of a display name, as an error message.
 const DISPLAY_NAME_RULE: &str = "a display name must be up to 100 characters, without control characters or white space at either end";
@@ -67,7 +67,7 @@ const USER_NAME_RULE: &str = "a user name must be 1 to 254 characters, without c
 
 /// Rule of a mail server host, as an error message.
 const HOST_RULE: &str =
-    "a mail server host must be a host name, an IPv4 address, or an IPv6 address in brackets";
+    "a mail server host must be an ASCII host name, an IPv4 address, or an IPv6 address in brackets";
 
 /// Rule of a mail server port, as an error message.
 const PORT_RULE: &str = "a mail server port must be a whole number from 1 to 65535";
@@ -470,7 +470,11 @@ mod tests {
     use super::EmailSettings;
 
     /// The address rule, as an error about an address states it.
-    const ADDRESS_RULE_TEXT: &str = "an email address must be a name of 1 to 64 visible ASCII characters other than @, then @ and a host name, up to 254 characters in all";
+    const ADDRESS_RULE_TEXT: &str = "an email address must be a name of 1 to 64 visible ASCII characters other than @, then @ and an ASCII host name, up to 254 characters in all";
+
+    /// The host rule, as an error about a mail server host states it.
+    const HOST_RULE_TEXT: &str =
+        "a mail server host must be an ASCII host name, an IPv4 address, or an IPv6 address in brackets";
 
     /// Reads `stored` as the `email` group.
     fn parse_email_settings(stored: Value) -> Result<EmailSettings, serde_json::Error> {
@@ -899,6 +903,10 @@ mod tests {
                 ADDRESS_RULE_TEXT,
             ),
             (
+                get_account_with("address", json!("person@bücher.example")),
+                ADDRESS_RULE_TEXT,
+            ),
+            (
                 get_account_with("displayName", json!(" A Person")),
                 "a display name must be",
             ),
@@ -906,9 +914,10 @@ mod tests {
                 get_account_with("userName", json!("")),
                 "a user name must be",
             ),
+            (get_account_with_imap("host", json!("::1")), HOST_RULE_TEXT),
             (
-                get_account_with_imap("host", json!("::1")),
-                "a mail server host must be",
+                get_account_with_imap("host", json!("imap.bücher.example")),
+                HOST_RULE_TEXT,
             ),
             (
                 get_account_with_imap("port", json!(0)),

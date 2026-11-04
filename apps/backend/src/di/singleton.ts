@@ -179,7 +179,8 @@ export type SingletonServices = Readonly<{
   toolApprovalService: ToolApprovalService
   /**
    * Connections to the MCP servers the settings file names, and their
-   * tools; the bundle's cleanup closes it first.
+   * tools; the bundle's cleanup closes it after the email account checker,
+   * before the other services.
    */
   mcpServerRegistry: McpServerRegistry
   /**

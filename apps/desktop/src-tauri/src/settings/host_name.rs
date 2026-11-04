@@ -2,8 +2,11 @@
 //! provider addresses and the email account's mail servers.
 //!
 //! The rule matches `isHostName` in `@lys/share`, which the renderer and the
-//! backend check. Changing it changes which settings files load and requires
-//! a coordinated desktop and backend release.
+//! backend check, and the email server checks it again, in a third copy, for
+//! the email account's address and mail servers before it uses the account.
+//! Changing it changes which settings files load and which accounts the
+//! email server accepts, and requires a coordinated release of the desktop
+//! host, the backend, and the email server.
 
 /// Most characters a host name may have, inclusive. Matches
 /// `MAXIMUM_HOST_NAME_LENGTH` in `@lys/share`.

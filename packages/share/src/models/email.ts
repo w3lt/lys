@@ -77,6 +77,11 @@ export const LOOPBACK_EMAIL_HOSTS: readonly string[] = Object.freeze([
   "[::1]"
 ])
 
+/** The loopback hosts as a message names them: `localhost, 127.0.0.1, or [::1]`. */
+const LOOPBACK_EMAIL_HOSTS_TEXT = new Intl.ListFormat("en", {
+  type: "disjunction"
+}).format(LOOPBACK_EMAIL_HOSTS)
+
 /**
  * Answers whether a text is a saved text of an email account: at most a
  * number of Unicode code points, without a control character, white space
@@ -223,7 +228,7 @@ const emailServerSettingsSchema = z
   })
   .refine(
     (server) => server.security !== "plain" || isLoopbackEmailHost(server.host),
-    "A connection without TLS is allowed only to localhost, 127.0.0.1, or [::1]."
+    `A connection without TLS is allowed only to ${LOOPBACK_EMAIL_HOSTS_TEXT}.`
   )
   .readonly()
 

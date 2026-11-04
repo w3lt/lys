@@ -331,7 +331,29 @@ impl ToolFailure {
     pub fn format_reason(&self) -> String {
         match self {
             Self::Connection { protocol, failure } => failure.format_fact(*protocol),
-            _ => self.to_string(),
+            Self::SignIn { .. }
+            | Self::ImapRefused { .. }
+            | Self::SmtpRefused { .. }
+            | Self::SmtpExtensionMissing(_)
+            | Self::SendUnconfirmed
+            | Self::StoppedUnconfirmed(_)
+            | Self::StoppedAfterSend { .. }
+            | Self::DraftUnconfirmed { .. }
+            | Self::StoppedWhileSaving { .. }
+            | Self::TimedOut
+            | Self::Cancelled
+            | Self::InvalidId
+            | Self::StaleId
+            | Self::FolderMissing(_)
+            | Self::NoRoleFolder(_)
+            | Self::RoleFolder { .. }
+            | Self::FolderNotEmpty(_)
+            | Self::FolderHasSubfolders(_)
+            | Self::FolderExists(_)
+            | Self::NotInDrafts
+            | Self::AttachmentMissing { .. }
+            | Self::AttachmentNotText { .. }
+            | Self::Argument(_) => self.to_string(),
         }
     }
 
@@ -384,6 +406,19 @@ impl ToolFailure {
             Self::AttachmentMissing { .. } => "attachment-missing".to_owned(),
             Self::AttachmentNotText { .. } => "attachment-not-text".to_owned(),
             Self::Argument(_) => "argument".to_owned(),
+        }
+    }
+}
+
+impl From<Stop> for ToolFailure {
+    /// Gives the failure that reports a stop as it is, with nothing about
+    /// how far the call came: [`ToolFailure::Cancelled`] for a call the
+    /// client cancelled and [`ToolFailure::TimedOut`] for one that reached
+    /// its time limit.
+    fn from(stop: Stop) -> Self {
+        match stop {
+            Stop::Cancelled => Self::Cancelled,
+            Stop::TimedOut => Self::TimedOut,
         }
     }
 }

@@ -283,7 +283,7 @@ async fn run_tool_call<F>(name: &str, token: CancellationToken, call: F) -> Call
 where
     F: Future<Output = ToolResult>,
 {
-    let outcome = run_tool_call_within(token, CALL_LIMIT, call).await;
+    let outcome = calculate_call_outcome(run_tool_call_within(token, CALL_LIMIT, call).await);
     handle_tool_call_outcome(name, outcome)
 }
 
@@ -298,69 +298,90 @@ where
 ///
 /// # Returns
 ///
-/// The call's outcome, `Cancelled`, or `TimedOut`.
-async fn run_tool_call_within<F>(token: CancellationToken, limit: Duration, call: F) -> ToolResult
+/// The call's outcome once it finished, or what stopped it first: the
+/// cancellation or the limit.
+async fn run_tool_call_within<F>(
+    token: CancellationToken,
+    limit: Duration,
+    call: F,
+) -> Result<ToolResult, Stop>
 where
     F: Future<Output = ToolResult>,
 {
     tokio::select! {
-        () = token.cancelled() => Err(ToolFailure::Cancelled),
-        finished = timeout(limit, call) => finished.unwrap_or(Err(ToolFailure::TimedOut)),
+        () = token.cancelled() => Err(Stop::Cancelled),
+        finished = timeout(limit, call) => finished.map_err(|_| Stop::TimedOut),
     }
+}
+
+/// Calculates what a call reports when how far it came does not change
+/// the report of its stop, as for every tool but the two send tools and
+/// `save_draft`: the call's outcome once it finished, or the stop that
+/// came first, as it is.
+///
+/// # Arguments
+///
+/// * `outcome` - What the call did once it finished, or what stopped it
+///   first.
+fn calculate_call_outcome(outcome: Result<ToolResult, Stop>) -> ToolResult {
+    outcome.unwrap_or_else(|stop| Err(stop.into()))
 }
 
 /// Reports a send tool's call that was stopped by how far its send came:
 /// a stop before the end of the message was handed over sent nothing and
-/// stays as it is; a stop after it, while the server's answer was awaited,
-/// leaves the send unconfirmed; and a stop after the server accepted the
-/// message is reported as a send whose later steps may be missing.
+/// is reported as it is; a stop after it, while the server's answer was
+/// awaited, leaves the send unconfirmed; and a stop after the server
+/// accepted the message is reported as a send whose later steps may be
+/// missing.
 ///
 /// # Arguments
 ///
-/// * `outcome` - What the call did, `Cancelled` or `TimedOut` when it was
-///   stopped.
+/// * `outcome` - What the call did once it finished, or what stopped it
+///   first.
 /// * `stage` - How far its send came.
 /// * `sent` - What the tool sends.
 ///
 /// # Returns
 ///
-/// The outcome to report; any outcome but a stop is reported as it is.
-fn calculate_send_outcome(outcome: ToolResult, stage: SendStage, sent: SentKind) -> ToolResult {
-    let stop = match &outcome {
-        Err(ToolFailure::Cancelled) => Stop::Cancelled,
-        Err(ToolFailure::TimedOut) => Stop::TimedOut,
-        Ok(_) | Err(_) => return outcome,
+/// The outcome to report; a call that finished is reported as it is.
+fn calculate_send_outcome(
+    outcome: Result<ToolResult, Stop>,
+    stage: SendStage,
+    sent: SentKind,
+) -> ToolResult {
+    let stop = match outcome {
+        Ok(finished) => return finished,
+        Err(stop) => stop,
     };
     match stage {
-        SendStage::NotHandedOver => outcome,
+        SendStage::NotHandedOver => Err(stop.into()),
         SendStage::HandedOver => Err(ToolFailure::StoppedUnconfirmed(stop)),
         SendStage::Accepted => Err(ToolFailure::StoppedAfterSend { stop, sent }),
     }
 }
 
 /// Reports a `save_draft` call that was stopped by whether storing its
-/// draft began: a stop before it stored nothing and stays as it is, and a
-/// stop after it may have left the draft stored, and the draft it
+/// draft began: a stop before it stored nothing and is reported as it is,
+/// and a stop after it may have left the draft stored, and the draft it
 /// replaces, which it names, still in Drafts.
 ///
 /// # Arguments
 ///
-/// * `outcome` - What the call did, `Cancelled` or `TimedOut` when it was
-///   stopped.
+/// * `outcome` - What the call did once it finished, or what stopped it
+///   first.
 /// * `stage` - How far the call came, with the draft it replaces once
 ///   storing began.
 ///
 /// # Returns
 ///
-/// The outcome to report; any outcome but a stop is reported as it is.
-fn calculate_save_outcome(outcome: ToolResult, stage: DraftStage) -> ToolResult {
-    let stop = match &outcome {
-        Err(ToolFailure::Cancelled) => Stop::Cancelled,
-        Err(ToolFailure::TimedOut) => Stop::TimedOut,
-        Ok(_) | Err(_) => return outcome,
+/// The outcome to report; a call that finished is reported as it is.
+fn calculate_save_outcome(outcome: Result<ToolResult, Stop>, stage: DraftStage) -> ToolResult {
+    let stop = match outcome {
+        Ok(finished) => return finished,
+        Err(stop) => stop,
     };
     match stage {
-        DraftStage::BeforeStoring => outcome,
+        DraftStage::BeforeStoring => Err(stop.into()),
         DraftStage::Storing { replaced } => Err(ToolFailure::StoppedWhileSaving { stop, replaced }),
     }
 }
@@ -411,12 +432,14 @@ mod tests {
         let after_cancel = run_tool_call("read_email", cancelled, pending::<ToolResult>()).await;
         let after_limit = handle_tool_call_outcome(
             "read_email",
-            run_tool_call_within(
-                CancellationToken::new(),
-                Duration::from_millis(10),
-                pending::<ToolResult>(),
-            )
-            .await,
+            calculate_call_outcome(
+                run_tool_call_within(
+                    CancellationToken::new(),
+                    Duration::from_millis(10),
+                    pending::<ToolResult>(),
+                )
+                .await,
+            ),
         );
         let long = run_tool_call("read_email", CancellationToken::new(), async {
             Ok(ToolReport {
@@ -461,11 +484,15 @@ mod tests {
         ];
         for stage in stages {
             assert_eq!(
-                calculate_send_outcome(report(), stage, SentKind::Message),
+                calculate_send_outcome(Ok(report()), stage, SentKind::Message),
                 report()
             );
             assert_eq!(
-                calculate_send_outcome(Err(ToolFailure::SendUnconfirmed), stage, SentKind::Draft),
+                calculate_send_outcome(
+                    Ok(Err(ToolFailure::SendUnconfirmed)),
+                    stage,
+                    SentKind::Draft
+                ),
                 Err(ToolFailure::SendUnconfirmed)
             );
         }
@@ -475,24 +502,16 @@ mod tests {
         ];
         for (failure, stop) in stops {
             assert_eq!(
-                calculate_send_outcome(
-                    Err(failure.clone()),
-                    SendStage::NotHandedOver,
-                    SentKind::Message
-                ),
-                Err(failure.clone())
+                calculate_send_outcome(Err(stop), SendStage::NotHandedOver, SentKind::Message),
+                Err(failure)
             );
             assert_eq!(
-                calculate_send_outcome(
-                    Err(failure.clone()),
-                    SendStage::HandedOver,
-                    SentKind::Draft
-                ),
+                calculate_send_outcome(Err(stop), SendStage::HandedOver, SentKind::Draft),
                 Err(ToolFailure::StoppedUnconfirmed(stop))
             );
             for sent in [SentKind::Message, SentKind::Draft] {
                 assert_eq!(
-                    calculate_send_outcome(Err(failure.clone()), SendStage::Accepted, sent),
+                    calculate_send_outcome(Err(stop), SendStage::Accepted, sent),
                     Err(ToolFailure::StoppedAfterSend { stop, sent })
                 );
             }
@@ -525,9 +544,12 @@ mod tests {
             },
         ];
         for stage in stages {
-            assert_eq!(calculate_save_outcome(report(), stage.clone()), report());
             assert_eq!(
-                calculate_save_outcome(Err(ToolFailure::StaleId), stage),
+                calculate_save_outcome(Ok(report()), stage.clone()),
+                report()
+            );
+            assert_eq!(
+                calculate_save_outcome(Ok(Err(ToolFailure::StaleId)), stage),
                 Err(ToolFailure::StaleId)
             );
         }
@@ -537,15 +559,15 @@ mod tests {
         ];
         for (failure, stop) in stops {
             assert_eq!(
-                calculate_save_outcome(Err(failure.clone()), DraftStage::BeforeStoring),
-                Err(failure.clone())
+                calculate_save_outcome(Err(stop), DraftStage::BeforeStoring),
+                Err(failure)
             );
             for replaced in [None, Some(build_replaced_draft_id())] {
                 let stage = DraftStage::Storing {
                     replaced: replaced.clone(),
                 };
                 assert_eq!(
-                    calculate_save_outcome(Err(failure.clone()), stage),
+                    calculate_save_outcome(Err(stop), stage),
                     Err(ToolFailure::StoppedWhileSaving { stop, replaced })
                 );
             }

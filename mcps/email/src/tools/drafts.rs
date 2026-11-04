@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::SystemTime;
 
 use lettre::address::{Address, Envelope};
@@ -95,30 +95,59 @@ pub struct DraftIdArguments {
     pub draft_id: String,
 }
 
-/// Whether a `save_draft` call began to store its draft: set by the call
-/// as it does, and read by the caller that may stop the call, to tell
-/// whether the draft may be stored.
+/// How far a `save_draft` call has come.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum DraftStage {
+    /// Storing the draft has not begun, so whatever stops the call now,
+    /// the server stores nothing.
+    #[default]
+    BeforeStoring,
+    /// Storing the draft began: from then on, a stopped call may have
+    /// stored it, and may have left the draft it replaces in Drafts.
+    Storing {
+        /// The id of the draft the stored one replaces, or `None` when the
+        /// call replaces none.
+        replaced: Option<EmailId>,
+    },
+}
+
+/// How far one `save_draft` call has come: moved to storing by the call as
+/// it begins to store its draft, with the id of the draft it replaces, and
+/// read by the caller that may stop the call, to tell whether the draft
+/// may be stored and which draft may still be in Drafts beside it.
 ///
-/// Concurrency model: shared; the call sets the flag through one shared
-/// reference while the caller holds another, and the flag is atomic, so
-/// that a call borrowing it can run on any thread. Resource ownership:
-/// holds only the flag.
+/// Concurrency model: serialized; the call moves the stage through one
+/// shared reference while the caller holds another, and each access takes
+/// the lock only to read or write the stage. The lock makes the progress
+/// `Sync`, so that a call borrowing it can run on any thread. Resource
+/// ownership: holds only the stage. Invariant: the stage records that
+/// storing began and the draft it replaces together, and never moves back
+/// to before storing.
 #[derive(Debug, Default)]
 pub struct DraftProgress {
-    /// Whether storing the draft began.
-    storing: AtomicBool,
+    /// The stage the call has reached.
+    stage: Mutex<DraftStage>,
 }
 
 impl DraftProgress {
-    /// Whether storing the draft began: from then on, a stopped call may
-    /// have stored it.
-    pub fn has_begun_storing(&self) -> bool {
-        self.storing.load(Ordering::SeqCst)
+    /// Reads the stage the call has reached, as a copy.
+    pub fn read_stage(&self) -> DraftStage {
+        self.stage
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
-    /// Records that storing the draft begins.
-    fn update_to_storing(&self) {
-        self.storing.store(true, Ordering::SeqCst);
+    /// Records that storing the draft begins, with the draft it replaces.
+    ///
+    /// # Arguments
+    ///
+    /// * `replaced` - The id of the draft the stored one replaces, if any.
+    fn update_to_storing(&self, replaced: Option<&EmailId>) {
+        let storing = DraftStage::Storing {
+            replaced: replaced.cloned(),
+        };
+        *self.stage.lock().unwrap_or_else(PoisonError::into_inner) = storing;
     }
 }
 
@@ -127,14 +156,15 @@ impl DraftProgress {
 /// Once the server stored the draft, no step fails the call, as the model
 /// would save it again: finding its id and deleting the draft it replaces
 /// are reported as they went. A draft whose storing was not confirmed is
-/// reported as one that may be stored.
+/// reported as one that may be stored, beside the draft it replaces, which
+/// the call did not delete.
 ///
 /// # Arguments
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - The draft's fields.
-/// * `progress` - Records when storing the draft begins, for the caller
-///   that may stop the call.
+/// * `progress` - Records when storing the draft begins, with the draft it
+///   replaces, for the caller that may stop the call.
 pub async fn run_save_draft(
     context: &ToolContext,
     arguments: SaveDraftArguments,
@@ -168,11 +198,11 @@ pub async fn run_save_draft(
         None => context.open_imap().await?,
     };
     let drafts = get_draft_folder(&mut session, replaced.as_ref()).await?;
-    progress.update_to_storing();
+    progress.update_to_storing(replaced.as_ref());
     session
         .save_message(&drafts.raw_name, DRAFT_FLAGS, &composed.bytes)
         .await
-        .map_err(build_draft_save_failure)?;
+        .map_err(|failure| build_draft_save_failure(failure, replaced.as_ref()))?;
     let replacement = match replaced {
         Some(replaced) => Some(delete_replaced_draft(&mut session, replaced).await),
         None => None,
@@ -233,11 +263,20 @@ async fn get_draft_folder(
 }
 
 /// Builds the failure of a draft the server did not store, or may have
-/// stored without confirming it.
-fn build_draft_save_failure(failure: AppendFailure) -> ToolFailure {
+/// stored without confirming it; the latter names the draft it replaces,
+/// which the call then did not delete.
+///
+/// # Arguments
+///
+/// * `failure` - Why storing the draft failed or was not confirmed.
+/// * `replaced` - The id of the draft it replaces, if any.
+fn build_draft_save_failure(failure: AppendFailure, replaced: Option<&EmailId>) -> ToolFailure {
     match failure {
         AppendFailure::Failed(failure) => build_imap_failure_conversion("save the draft")(failure),
-        AppendFailure::Unconfirmed(failure) => ToolFailure::DraftUnconfirmed(failure),
+        AppendFailure::Unconfirmed(failure) => ToolFailure::DraftUnconfirmed {
+            failure,
+            replaced: replaced.cloned(),
+        },
     }
 }
 

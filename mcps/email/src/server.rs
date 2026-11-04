@@ -15,7 +15,7 @@ use crate::failure::{SentKind, Stop, ToolFailure};
 use crate::log::send_log_line;
 use crate::smtp::{SendProgress, SendStage};
 use crate::tools::drafts::{
-    DraftIdArguments, DraftProgress, SaveDraftArguments, SendDraftArguments,
+    DraftIdArguments, DraftProgress, DraftStage, SaveDraftArguments, SendDraftArguments,
 };
 use crate::tools::folders::FolderArguments;
 use crate::tools::read::{AttachmentArguments, IdArguments};
@@ -212,7 +212,7 @@ impl EmailServer {
         let progress = DraftProgress::default();
         let call = drafts::run_save_draft(&self.context, arguments, &progress);
         let outcome = run_tool_call_within(token, CALL_LIMIT, call).await;
-        let reported = calculate_save_outcome(outcome, progress.has_begun_storing());
+        let reported = calculate_save_outcome(outcome, progress.read_stage());
         handle_tool_call_outcome("save_draft", reported)
     }
 
@@ -340,26 +340,28 @@ fn calculate_send_outcome(outcome: ToolResult, stage: SendStage, sent: SentKind)
 
 /// Reports a `save_draft` call that was stopped by whether storing its
 /// draft began: a stop before it stored nothing and stays as it is, and a
-/// stop after it may have left the draft stored.
+/// stop after it may have left the draft stored, and the draft it
+/// replaces, which it names, still in Drafts.
 ///
 /// # Arguments
 ///
 /// * `outcome` - What the call did, `Cancelled` or `TimedOut` when it was
 ///   stopped.
-/// * `storing` - Whether storing the draft began.
+/// * `stage` - How far the call came, with the draft it replaces once
+///   storing began.
 ///
 /// # Returns
 ///
 /// The outcome to report; any outcome but a stop is reported as it is.
-fn calculate_save_outcome(outcome: ToolResult, storing: bool) -> ToolResult {
-    match outcome {
-        Err(ToolFailure::Cancelled) if storing => {
-            Err(ToolFailure::StoppedWhileSaving(Stop::Cancelled))
-        }
-        Err(ToolFailure::TimedOut) if storing => {
-            Err(ToolFailure::StoppedWhileSaving(Stop::TimedOut))
-        }
-        outcome => outcome,
+fn calculate_save_outcome(outcome: ToolResult, stage: DraftStage) -> ToolResult {
+    let stop = match &outcome {
+        Err(ToolFailure::Cancelled) => Stop::Cancelled,
+        Err(ToolFailure::TimedOut) => Stop::TimedOut,
+        Ok(_) | Err(_) => return outcome,
+    };
+    match stage {
+        DraftStage::BeforeStoring => outcome,
+        DraftStage::Storing { replaced } => Err(ToolFailure::StoppedWhileSaving { stop, replaced }),
     }
 }
 
@@ -388,6 +390,7 @@ mod tests {
     use std::future::pending;
 
     use super::*;
+    use crate::email_id::EmailId;
     use crate::tools::ToolReport;
 
     /// The text of a result's first content block.
@@ -496,6 +499,16 @@ mod tests {
         }
     }
 
+    /// The id of the draft a save replaces in the tests below,
+    /// `1.1003.Drafts`.
+    fn build_replaced_draft_id() -> EmailId {
+        EmailId {
+            uid: 1,
+            uid_validity: 1003,
+            folder: "Drafts".to_owned(),
+        }
+    }
+
     #[test]
     fn reports_a_stopped_save_by_whether_storing_its_draft_began() {
         let report = || -> ToolResult {
@@ -504,27 +517,74 @@ mod tests {
                 log: "draft".to_owned(),
             })
         };
+        let stages = [
+            DraftStage::BeforeStoring,
+            DraftStage::Storing { replaced: None },
+            DraftStage::Storing {
+                replaced: Some(build_replaced_draft_id()),
+            },
+        ];
+        for stage in stages {
+            assert_eq!(calculate_save_outcome(report(), stage.clone()), report());
+            assert_eq!(
+                calculate_save_outcome(Err(ToolFailure::StaleId), stage),
+                Err(ToolFailure::StaleId)
+            );
+        }
         let stops = [
             (ToolFailure::Cancelled, Stop::Cancelled),
             (ToolFailure::TimedOut, Stop::TimedOut),
         ];
-        for storing in [false, true] {
-            assert_eq!(calculate_save_outcome(report(), storing), report());
-            assert_eq!(
-                calculate_save_outcome(Err(ToolFailure::StaleId), storing),
-                Err(ToolFailure::StaleId)
-            );
-        }
         for (failure, stop) in stops {
             assert_eq!(
-                calculate_save_outcome(Err(failure.clone()), false),
+                calculate_save_outcome(Err(failure.clone()), DraftStage::BeforeStoring),
                 Err(failure.clone())
             );
-            assert_eq!(
-                calculate_save_outcome(Err(failure), true),
-                Err(ToolFailure::StoppedWhileSaving(stop))
-            );
+            for replaced in [None, Some(build_replaced_draft_id())] {
+                let stage = DraftStage::Storing {
+                    replaced: replaced.clone(),
+                };
+                assert_eq!(
+                    calculate_save_outcome(Err(failure.clone()), stage),
+                    Err(ToolFailure::StoppedWhileSaving { stop, replaced })
+                );
+            }
         }
+    }
+
+    #[tokio::test]
+    async fn answers_a_save_stopped_once_storing_began_with_the_draft_it_replaces() {
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+        let storing = DraftStage::Storing {
+            replaced: Some(build_replaced_draft_id()),
+        };
+
+        let after_cancel =
+            run_tool_call_within(cancelled, CALL_LIMIT, pending::<ToolResult>()).await;
+        let after_limit = run_tool_call_within(
+            CancellationToken::new(),
+            Duration::from_millis(10),
+            pending::<ToolResult>(),
+        )
+        .await;
+        let cancel_answer = handle_tool_call_outcome(
+            "save_draft",
+            calculate_save_outcome(after_cancel, storing.clone()),
+        );
+        let limit_answer =
+            handle_tool_call_outcome("save_draft", calculate_save_outcome(after_limit, storing));
+
+        assert_eq!(cancel_answer.is_error, Some(true));
+        assert_eq!(
+            get_first_text(&cancel_answer),
+            "The call was cancelled after saving the draft began, so the draft may be in the Drafts folder; search that folder before saving it again. The draft it replaces, 1.1003.Drafts, may still be in the Drafts folder too."
+        );
+        assert_eq!(limit_answer.is_error, Some(true));
+        assert_eq!(
+            get_first_text(&limit_answer),
+            "The call did not finish within 240 seconds and was stopped after saving the draft began, so the draft may be in the Drafts folder; search that folder before saving it again. The draft it replaces, 1.1003.Drafts, may still be in the Drafts folder too."
+        );
     }
 
     /// The names of the tools, in the order the spec lists them.

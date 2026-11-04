@@ -2,13 +2,14 @@
 
 use std::time::Duration;
 
+use email::email_id::EmailId;
 use email::failure::ToolFailure;
 use email::folders::FolderRole;
 use email::smtp::SendProgress;
 use email::tools::ToolResult;
 use email::tools::drafts::{
-    DraftIdArguments, DraftProgress, SaveDraftArguments, SendDraftArguments, run_delete_draft,
-    run_save_draft, run_send_draft,
+    DraftIdArguments, DraftProgress, DraftStage, SaveDraftArguments, SendDraftArguments,
+    run_delete_draft, run_save_draft, run_send_draft,
 };
 
 use crate::support::imap::{FakeFolder, FakeMailbox, ImapFault, NewMessage};
@@ -97,7 +98,10 @@ async fn saves_a_draft_with_its_bcc_field_and_answers_its_id() {
         .await
         .expect("saved");
 
-    assert!(progress.has_begun_storing());
+    assert_eq!(
+        progress.read_stage(),
+        DraftStage::Storing { replaced: None }
+    );
 
     assert_eq!(
         report.text,
@@ -144,7 +148,7 @@ async fn replaces_a_draft_and_answers_the_new_id() {
     assert_eq!(drafts[0].uid, 2);
     assert!(String::from_utf8_lossy(&drafts[0].bytes).contains("Subject: Second\r\n"));
     assert_eq!(stale, Err(ToolFailure::StaleId));
-    assert!(!stale_progress.has_begun_storing());
+    assert_eq!(stale_progress.read_stage(), DraftStage::BeforeStoring);
     let commands = stack.imap.list_commands();
     assert!(
         commands
@@ -256,7 +260,7 @@ async fn needs_a_drafts_folder() {
     let saved = run_save_draft(&stack.context, build_draft("Nowhere"), &progress).await;
 
     assert_eq!(saved, Err(ToolFailure::NoRoleFolder(FolderRole::Drafts)));
-    assert!(!progress.has_begun_storing());
+    assert_eq!(progress.read_stage(), DraftStage::BeforeStoring);
 }
 
 /// A standard mailbox whose server lacks UIDPLUS, with a message in
@@ -684,5 +688,49 @@ async fn answers_a_draft_whose_answer_never_came_once_all_of_it_was_sent_as_mayb
         ))
     );
     assert_eq!(stack.imap.list_messages("Drafts").len(), 1);
-    assert!(progress.has_begun_storing());
+    assert_eq!(
+        progress.read_stage(),
+        DraftStage::Storing { replaced: None }
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn answers_a_replacing_draft_whose_answer_was_lost_with_the_draft_it_replaces() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    let first = save(&stack, build_draft("First")).await;
+    stack
+        .imap
+        .add_fault("APPEND", ImapFault::CloseAfterHandling);
+    let progress = DraftProgress::default();
+
+    let saved = run_save_draft(
+        &stack.context,
+        SaveDraftArguments {
+            draft_id: Some(first),
+            ..build_draft("Second")
+        },
+        &progress,
+    )
+    .await;
+
+    assert_eq!(
+        saved.map_err(|failure| failure.to_string()),
+        Err(format!(
+            "{LOST} The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again. The draft it replaces, 1.1003.Drafts, is still in the Drafts folder."
+        ))
+    );
+    let drafts = stack.imap.list_messages("Drafts");
+    assert_eq!(drafts.len(), 2);
+    assert!(drafts.iter().all(|draft| !draft.has_flag("\\Deleted")));
+    let replaced = EmailId {
+        uid: 1,
+        uid_validity: 1003,
+        folder: "Drafts".to_owned(),
+    };
+    assert_eq!(
+        progress.read_stage(),
+        DraftStage::Storing {
+            replaced: Some(replaced)
+        }
+    );
 }

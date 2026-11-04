@@ -9,6 +9,7 @@ use std::fmt;
 
 use serde::Serialize;
 
+use crate::email_id::EmailId;
 use crate::folders::FolderRole;
 
 /// Why signing in to one mail server failed; the reasons the protocol's
@@ -257,11 +258,25 @@ pub enum ToolFailure {
     },
     /// The whole draft was handed to the IMAP server, which did not confirm
     /// that it stored it: the connection ended, its answer could not be
-    /// read, or it did not come in time. The draft may be in Drafts.
-    DraftUnconfirmed(ConnectionFailure),
+    /// read, or it did not come in time. The draft may be in Drafts, and
+    /// the call did not delete the draft it replaces, if any.
+    DraftUnconfirmed {
+        /// How the server's answer was lost.
+        failure: ConnectionFailure,
+        /// The id of the draft the new one replaces, or `None` when it
+        /// replaces none.
+        replaced: Option<EmailId>,
+    },
     /// A `save_draft` call was stopped once storing its draft began; the
-    /// draft may be in Drafts.
-    StoppedWhileSaving(Stop),
+    /// draft may be in Drafts, and the draft it replaces, if any, may still
+    /// be there too.
+    StoppedWhileSaving {
+        /// What stopped the call.
+        stop: Stop,
+        /// The id of the draft the new one replaces, or `None` when it
+        /// replaces none.
+        replaced: Option<EmailId>,
+    },
     /// The whole call reached its time limit.
     TimedOut,
     /// The client cancelled the call.
@@ -351,8 +366,10 @@ impl ToolFailure {
             Self::SendUnconfirmed => "send-unconfirmed".to_owned(),
             Self::StoppedUnconfirmed(stop) => format!("{}-after-hand-over", stop.name()),
             Self::StoppedAfterSend { stop, .. } => format!("{}-after-send", stop.name()),
-            Self::DraftUnconfirmed(failure) => format!("save-unconfirmed-{}", failure.name()),
-            Self::StoppedWhileSaving(stop) => format!("{}-while-saving", stop.name()),
+            Self::DraftUnconfirmed { failure, .. } => {
+                format!("save-unconfirmed-{}", failure.name())
+            }
+            Self::StoppedWhileSaving { stop, .. } => format!("{}-while-saving", stop.name()),
             Self::TimedOut => "timed-out".to_owned(),
             Self::Cancelled => "cancelled".to_owned(),
             Self::InvalidId => "invalid-id".to_owned(),
@@ -406,14 +423,12 @@ impl fmt::Display for ToolFailure {
             Self::StoppedAfterSend { stop, sent } => {
                 format_stopped_after_send_sentence(*stop, *sent)
             }
-            Self::DraftUnconfirmed(failure) => format!(
-                "{} The whole draft had been handed over, so it may or may not be in the Drafts folder; {UNCONFIRMED_DRAFT_ADVICE}",
-                failure.format_fact(Protocol::Imap)
-            ),
-            Self::StoppedWhileSaving(stop) => format!(
-                "The call {} after saving the draft began, so the draft may be in the Drafts folder; {UNCONFIRMED_DRAFT_ADVICE}",
-                stop.format_clause()
-            ),
+            Self::DraftUnconfirmed { failure, replaced } => {
+                format_unconfirmed_draft_sentence(*failure, replaced.as_ref())
+            }
+            Self::StoppedWhileSaving { stop, replaced } => {
+                format_stopped_while_saving_sentence(*stop, replaced.as_ref())
+            }
             Self::TimedOut => format!("The call {}.", Stop::TimedOut.format_clause()),
             Self::Cancelled => format!("The call {}.", Stop::Cancelled.format_clause()),
             Self::InvalidId => INVALID_ID_SENTENCE.to_owned(),
@@ -487,6 +502,51 @@ fn format_stopped_after_send_sentence(stop: Stop, sent: SentKind) -> String {
         ),
         SentKind::Draft => format!(
             "The draft was sent, but then the call {clause}, so its copy in Sent may be missing and the draft may still be in Drafts. Do not send it again; delete it instead."
+        ),
+    }
+}
+
+/// Formats the sentence of a draft the IMAP server did not confirm it
+/// stored, which names the draft it replaces, if any, as one the call did
+/// not delete.
+///
+/// # Arguments
+///
+/// * `failure` - How the server's answer was lost.
+/// * `replaced` - The id of the draft the new one replaces, if any.
+fn format_unconfirmed_draft_sentence(
+    failure: ConnectionFailure,
+    replaced: Option<&EmailId>,
+) -> String {
+    let sentence = format!(
+        "{} The whole draft had been handed over, so it may or may not be in the Drafts folder; {UNCONFIRMED_DRAFT_ADVICE}",
+        failure.format_fact(Protocol::Imap)
+    );
+    match replaced {
+        None => sentence,
+        Some(replaced) => {
+            format!("{sentence} The draft it replaces, {replaced}, is still in the Drafts folder.")
+        }
+    }
+}
+
+/// Formats the sentence of a `save_draft` call stopped once storing its
+/// draft began, which names the draft it replaces, if any, as one that may
+/// not have been deleted.
+///
+/// # Arguments
+///
+/// * `stop` - What stopped the call.
+/// * `replaced` - The id of the draft the new one replaces, if any.
+fn format_stopped_while_saving_sentence(stop: Stop, replaced: Option<&EmailId>) -> String {
+    let sentence = format!(
+        "The call {} after saving the draft began, so the draft may be in the Drafts folder; {UNCONFIRMED_DRAFT_ADVICE}",
+        stop.format_clause()
+    );
+    match replaced {
+        None => sentence,
+        Some(replaced) => format!(
+            "{sentence} The draft it replaces, {replaced}, may still be in the Drafts folder too."
         ),
     }
 }
@@ -662,26 +722,38 @@ mod tests {
         ),
     ];
 
-    /// Each way a draft can end unconfirmed, with the class the log gives
-    /// it and the sentence the model reads.
+    /// Each way a draft that replaces none can end unconfirmed, with the
+    /// class the log gives it and the sentence the model reads.
     const UNCONFIRMED_DRAFTS: [(ToolFailure, &str, &str); 4] = [
         (
-            ToolFailure::DraftUnconfirmed(ConnectionFailure::Lost),
+            ToolFailure::DraftUnconfirmed {
+                failure: ConnectionFailure::Lost,
+                replaced: None,
+            },
             "save-unconfirmed-lost",
             "The connection to the IMAP server ended before it answered. The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again.",
         ),
         (
-            ToolFailure::DraftUnconfirmed(ConnectionFailure::Unreadable),
+            ToolFailure::DraftUnconfirmed {
+                failure: ConnectionFailure::Unreadable,
+                replaced: None,
+            },
             "save-unconfirmed-unreadable",
             "The IMAP server answered something Lys could not read. The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again.",
         ),
         (
-            ToolFailure::StoppedWhileSaving(Stop::Cancelled),
+            ToolFailure::StoppedWhileSaving {
+                stop: Stop::Cancelled,
+                replaced: None,
+            },
             "cancelled-while-saving",
             "The call was cancelled after saving the draft began, so the draft may be in the Drafts folder; search that folder before saving it again.",
         ),
         (
-            ToolFailure::StoppedWhileSaving(Stop::TimedOut),
+            ToolFailure::StoppedWhileSaving {
+                stop: Stop::TimedOut,
+                replaced: None,
+            },
             "timed-out-while-saving",
             "The call did not finish within 240 seconds and was stopped after saving the draft began, so the draft may be in the Drafts folder; search that folder before saving it again.",
         ),
@@ -690,6 +762,51 @@ mod tests {
     #[test]
     fn describes_a_draft_that_may_be_stored_without_advice_to_try_again() {
         for (failure, class, sentence) in UNCONFIRMED_DRAFTS {
+            assert_eq!(failure.class(), class);
+            assert_eq!(failure.to_string(), sentence);
+        }
+    }
+
+    /// Each way a draft that replaces `1.1003.Drafts` can end unconfirmed,
+    /// with the class the log gives it, the same as without a replaced
+    /// draft, and the sentence the model reads, which names that draft.
+    fn build_replacing_unconfirmed_drafts() -> [(ToolFailure, &'static str, &'static str); 3] {
+        let replaced = Some(EmailId {
+            uid: 1,
+            uid_validity: 1003,
+            folder: "Drafts".to_owned(),
+        });
+        [
+            (
+                ToolFailure::DraftUnconfirmed {
+                    failure: ConnectionFailure::Lost,
+                    replaced: replaced.clone(),
+                },
+                "save-unconfirmed-lost",
+                "The connection to the IMAP server ended before it answered. The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again. The draft it replaces, 1.1003.Drafts, is still in the Drafts folder.",
+            ),
+            (
+                ToolFailure::StoppedWhileSaving {
+                    stop: Stop::Cancelled,
+                    replaced: replaced.clone(),
+                },
+                "cancelled-while-saving",
+                "The call was cancelled after saving the draft began, so the draft may be in the Drafts folder; search that folder before saving it again. The draft it replaces, 1.1003.Drafts, may still be in the Drafts folder too.",
+            ),
+            (
+                ToolFailure::StoppedWhileSaving {
+                    stop: Stop::TimedOut,
+                    replaced,
+                },
+                "timed-out-while-saving",
+                "The call did not finish within 240 seconds and was stopped after saving the draft began, so the draft may be in the Drafts folder; search that folder before saving it again. The draft it replaces, 1.1003.Drafts, may still be in the Drafts folder too.",
+            ),
+        ]
+    }
+
+    #[test]
+    fn names_the_draft_a_save_replaces_when_the_new_one_may_be_stored() {
+        for (failure, class, sentence) in build_replacing_unconfirmed_drafts() {
             assert_eq!(failure.class(), class);
             assert_eq!(failure.to_string(), sentence);
         }

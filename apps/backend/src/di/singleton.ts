@@ -492,8 +492,9 @@ function createToolServices(
 /**
  * Builds the close operation of the tool services that own resources.
  *
- * @param toolServices - Services whose MCP server registry and email
- * account checker the operation closes; the caller hands it their cleanup.
+ * @param toolServices - The MCP server registry and the email account
+ * checker, of which the operation calls only `close`; the caller hands it
+ * their cleanup.
  * @returns An operation that closes the email account checker, then the
  * MCP server registry, and settles once both closes settled. It attempts
  * both even when the first fails, and rejects with the failure, or with a
@@ -501,7 +502,10 @@ function createToolServices(
  * is the checker's.
  */
 function buildCloseToolServices(
-  toolServices: ToolServices
+  toolServices: Readonly<{
+    mcpServerRegistry: Pick<McpServerRegistry, "close">
+    emailAccountChecker: Pick<EmailAccountChecker, "close">
+  }>
 ): () => Promise<void> {
   const toolServicesLifetime = new AsyncDisposableStack()
   toolServicesLifetime.defer(() => toolServices.mcpServerRegistry.close())

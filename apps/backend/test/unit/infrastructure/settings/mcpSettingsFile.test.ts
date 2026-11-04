@@ -466,6 +466,34 @@ function listLetters(range: ListedLetterRange): string[] {
 }
 
 /**
+ * One server of {@link buildLetterServers}: a URL server with no headers,
+ * switched on, as the reader returns it.
+ */
+type LetterServer = UrlServerEntry & {
+  /** No headers. */
+  headers: []
+  /** Always switched on. */
+  enabled: true
+}
+
+/**
+ * Builds one server of {@link buildLetterServers}.
+ *
+ * @param name - Server name, distinct in the group.
+ * @param host - Host of its URL, as the file holds it.
+ * @returns The server, to `https://<host>/mcp`.
+ */
+function buildLetterServer(name: string, host: string): LetterServer {
+  return {
+    name,
+    transport: "http",
+    url: `https://${host}/mcp`,
+    headers: [],
+    enabled: true
+  }
+}
+
+/**
  * Builds the servers of letters, each in a host part between two digits,
  * typed as itself and as the punycode Node writes for it, in uppercase.
  *
@@ -473,31 +501,13 @@ function listLetters(range: ListedLetterRange): string[] {
  * @returns Two servers per letter, with distinct names, as the reader
  * returns them.
  */
-function buildLetterServers(letters: readonly string[]): {
-  name: string
-  transport: "http"
-  url: string
-  headers: []
-  enabled: true
-}[] {
+function buildLetterServers(letters: readonly string[]): LetterServer[] {
   return letters.flatMap((letter, index) => {
     const host = `1${letter}2.example`
     const punycodeHost = domainToASCII(host).toUpperCase()
     return [
-      {
-        name: `text-${index}`,
-        transport: "http",
-        url: `https://${host}/mcp`,
-        headers: [],
-        enabled: true
-      },
-      {
-        name: `punycode-${index}`,
-        transport: "http",
-        url: `https://${punycodeHost}/mcp`,
-        headers: [],
-        enabled: true
-      }
+      buildLetterServer(`text-${index}`, host),
+      buildLetterServer(`punycode-${index}`, punycodeHost)
     ]
   })
 }

@@ -33,6 +33,7 @@ import type { McpServerEvent } from "../../../../src/modules/mcp/mcpServerEvent"
 import McpServerRegistry, {
   type BuiltInMcpServer,
   type BuiltInMcpServerRead,
+  type McpServerRegistryDependencies,
   type TurnMcpTool
 } from "../../../../src/modules/mcp/mcpServerRegistry"
 import {
@@ -382,6 +383,109 @@ function holdCloseUntil(
 }
 
 /**
+ * Owns the hold on new openings, to open each server the registry under test
+ * asks for with the case's opener once no hold stops it.
+ *
+ * @remarks Holds new openings from each {@link HoldableServerOpener.startHold}
+ * until the next release of a hold. An opening started while held waits,
+ * before it starts anything, until its hold is released, until its signal
+ * aborts, or until the case ends; it then ends cancelled if its signal
+ * aborted, and opens otherwise. An opening started while nothing is held
+ * opens at once. The case's opener and the promise of the case's end are
+ * borrowed from the harness. Concurrency model: single-owner, on the test's
+ * event loop.
+ */
+class HoldableServerOpener {
+  /** Opens each server once no hold stops it. */
+  readonly #open: TestOpener
+  /** Settles once the case ended, which ends every wait on a hold. */
+  readonly #testEnded: Promise<void>
+  /**
+   * Settles once the hold on new openings is released; undefined while
+   * nothing is held.
+   */
+  #heldUntil: Promise<void> | undefined = undefined
+
+  /**
+   * Creates the opener with nothing held.
+   *
+   * @param open - Opens each server: the case's opener, or the default one.
+   * @param testEnded - Settles once the case ended; also lent to every
+   * opening.
+   */
+  public constructor(open: TestOpener, testEnded: Promise<void>) {
+    this.#open = open
+    this.#testEnded = testEnded
+  }
+
+  /**
+   * Opens one server once the hold that was on when the opening started no
+   * longer stops it.
+   *
+   * @param settings - Validated settings of the server.
+   * @param context - Context the registry gave the opening.
+   * @returns How the opening ended: cancelled, without starting anything,
+   * when it was held and its signal aborted before it went on; otherwise
+   * what the case's opener returned.
+   */
+  public async openServer(
+    settings: McpServerSettings,
+    context: McpServerConnectionContext
+  ): Promise<McpServerOpening> {
+    const heldUntil = this.#heldUntil
+    if (heldUntil !== undefined) {
+      await Promise.race([
+        heldUntil,
+        waitForAbort(context.abortSignal),
+        this.#testEnded
+      ])
+      if (context.abortSignal.aborted) return CANCELLED_OPENING
+    }
+    return this.#open(settings, context, this.#testEnded)
+  }
+
+  /**
+   * Starts holding every opening started from now on.
+   *
+   * @returns Releases the openings this hold holds, and stops holding new
+   * ones.
+   */
+  public startHold(): () => void {
+    const release = Promise.withResolvers<void>()
+    this.#heldUntil = release.promise
+    return () => {
+      this.#heldUntil = undefined
+      release.resolve()
+    }
+  }
+}
+
+/**
+ * Adds the connection an opening ended with to the case's observations, with
+ * a spy on its close.
+ *
+ * @param openedConnections - The case's connections, in the order the
+ * openings ended; it gains one when the opening connected.
+ * @param serverName - Name of the opened server.
+ * @param opening - How the opening ended; one that did not connect has no
+ * connection to add.
+ */
+function addOpenedConnection(
+  openedConnections: OpenedConnection[],
+  serverName: string,
+  opening: McpServerOpening
+): void {
+  if (opening.status === "connected")
+    openedConnections.push(
+      Object.freeze({
+        serverName,
+        connection: opening.connection,
+        close: vi.spyOn(opening.connection, "close")
+      })
+    )
+}
+
+/**
  * Creates a registry whose settings reads return what the case sets and
  * whose openings start real fake servers, closed when the case finishes.
  *
@@ -396,37 +500,20 @@ function createRegistryHarness(
   const testEnd = Promise.withResolvers<void>()
   const events: McpServerEvent[] = []
   const openedConnections: OpenedConnection[] = []
-  const open = options.open ?? openFakeServer
+  const serverOpener = new HoldableServerOpener(
+    options.open ?? openFakeServer,
+    testEnd.promise
+  )
   let nextRead: () => McpSettingsRead = () => buildSettingsRead([])
-  let hold: Promise<void> | undefined
   const readSettings = vi.fn(() =>
     options.readSettings === undefined
       ? Promise.resolve(nextRead())
       : options.readSettings(testEnd.promise)
   )
-  const openServer = vi.fn(
-    async (
-      settings: McpServerSettings,
-      context: McpServerConnectionContext
-    ): Promise<McpServerOpening> => {
-      const heldUntil = hold
-      if (heldUntil !== undefined) {
-        await Promise.race([
-          heldUntil,
-          waitForAbort(context.abortSignal),
-          testEnd.promise
-        ])
-        if (context.abortSignal.aborted) return CANCELLED_OPENING
-      }
-      const opening = await open(settings, context, testEnd.promise)
-      if (opening.status === "connected")
-        openedConnections.push(
-          Object.freeze({
-            serverName: settings.name,
-            connection: opening.connection,
-            close: vi.spyOn(opening.connection, "close")
-          })
-        )
+  const openServer = vi.fn<McpServerRegistryDependencies["openServer"]>(
+    async (settings, context) => {
+      const opening = await serverOpener.openServer(settings, context)
+      addOpenedConnection(openedConnections, settings.name, opening)
       return opening
     }
   )
@@ -455,14 +542,7 @@ function createRegistryHarness(
     setSettingsRead: (read) => {
       nextRead = () => read
     },
-    holdOpenings: () => {
-      const release = Promise.withResolvers<void>()
-      hold = release.promise
-      return () => {
-        hold = undefined
-        release.resolve()
-      }
-    }
+    holdOpenings: () => serverOpener.startHold()
   })
 }
 

@@ -1,6 +1,7 @@
 //! The binary over standard input and output, as the backend runs it:
 //! the MCP handshake, the tool list, a call, a cut result, a failed
-//! call, a cancelled send, and the exit on the end of input.
+//! call, a cancelled send, a draft save cancelled while its draft is
+//! stored, and the exit on the end of input.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
@@ -8,8 +9,9 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use tokio::time::timeout;
 
-use crate::support::imap::{FakeImapServer, FakeMailbox, ImapMode, NewMessage};
+use crate::support::imap::{FakeImapServer, FakeMailbox, ImapFault, ImapMode, NewMessage};
 use crate::support::smtp::{DATA_END, FakeSmtpServer, SmtpFault, SmtpMode};
 use crate::support::{SecurityName, TestMessage, TestServers, build_account_json};
 
@@ -36,6 +38,10 @@ const TOOL_NAMES: [&str; 10] = [
 /// Longest the binary may take, in real time, to log a call it was told to
 /// cancel.
 const LOG_WAIT: Duration = Duration::from_secs(30);
+
+/// Longest the binary may take, in real time, to answer `initialize`, or
+/// to bring a call to the fault the fake holds it at.
+const STEP_WAIT: Duration = Duration::from_secs(30);
 
 /// Builds the JSON of `LYS_EMAIL_ACCOUNT` for fakes on the ports that
 /// talk without TLS.
@@ -126,13 +132,26 @@ fn wait_for_tool_line(lines: &mpsc::Receiver<String>, tool: &str) -> String {
     }
 }
 
-/// Runs the binary over stdio, calls `send_email`, cancels the call once
-/// `released` says the fake holds the whole message, and closes its input.
+/// Runs the binary over stdio, makes the call, cancels it once `released`
+/// says the fake holds the call at its fault, and stops the binary.
+///
+/// # Arguments
+///
+/// * `variable` - The JSON of `LYS_EMAIL_ACCOUNT`.
+/// * `call` - The parameters of `tools/call`: the tool's name and its
+///   arguments.
+/// * `released` - Says that the fake holds the call at its fault.
 ///
 /// # Returns
 ///
 /// The line the binary logged for the call.
-fn read_cancelled_send_line(variable: String, released: mpsc::Receiver<()>) -> String {
+///
+/// # Panics
+///
+/// When the binary does not answer `initialize` within [`STEP_WAIT`], or
+/// does not log the call in time.
+fn read_cancelled_call_line(variable: String, call: Value, released: mpsc::Receiver<()>) -> String {
+    let tool = call["name"].as_str().expect("the tool's name").to_owned();
     let mut child = Command::new(env!("CARGO_BIN_EXE_email"))
         .env("LYS_EMAIL_ACCOUNT", variable)
         .stdin(Stdio::piped())
@@ -141,26 +160,29 @@ fn read_cancelled_send_line(variable: String, released: mpsc::Receiver<()>) -> S
         .spawn()
         .expect("the binary starts");
     let mut stdin = child.stdin.take().expect("stdin");
-    let mut stdout = BufReader::new(child.stdout.take().expect("stdout"));
+    let stdout = BufReader::new(child.stdout.take().expect("stdout"));
     let stderr = BufReader::new(child.stderr.take().expect("stderr"));
+    let (answer_sender, answers) = mpsc::channel();
+    std::thread::spawn(move || forward_lines(stdout, &answer_sender));
     let (line_sender, lines) = mpsc::channel();
     std::thread::spawn(move || forward_lines(stderr, &line_sender));
     let initialize = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "lys-test", "version": "0"}}});
     writeln!(stdin, "{initialize}").expect("written");
-    let mut answer = String::new();
-    stdout.read_line(&mut answer).expect("an answer");
+    answers
+        .recv_timeout(STEP_WAIT)
+        .expect("initialize is answered in time");
     let messages = [
         json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
-        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "send_email", "arguments": {"to": ["jane@example.com"], "subject": "Hi", "body": "Hello"}}}),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": call}),
     ];
     for message in messages {
         writeln!(stdin, "{message}").expect("written");
     }
-    released.recv().expect("the fake holds the message");
+    released.recv().expect("the fake holds the call");
     let cancel = json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 2, "reason": "The person stopped it."}});
     writeln!(stdin, "{cancel}").expect("written");
-    let logged = wait_for_tool_line(&lines, "send_email");
-    drop(stdin);
+    let logged = wait_for_tool_line(&lines, &tool);
+    child.kill().expect("the binary is stopped");
     child.wait().expect("the binary ends");
     logged
 }
@@ -171,11 +193,14 @@ async fn logs_a_send_cancelled_after_the_hand_over_as_unconfirmed() {
     let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
     smtp.add_fault(DATA_END, SmtpFault::Stall);
     let variable = build_plain_account_json(imap.port, smtp.port);
+    let call = json!({"name": "send_email", "arguments": {"to": ["jane@example.com"], "subject": "Hi", "body": "Hello"}});
     let (release, released) = mpsc::channel();
 
     let dialogue =
-        tokio::task::spawn_blocking(move || read_cancelled_send_line(variable, released));
-    smtp.wait_for_fault().await;
+        tokio::task::spawn_blocking(move || read_cancelled_call_line(variable, call, released));
+    timeout(STEP_WAIT, smtp.wait_for_fault())
+        .await
+        .expect("the fake holds the whole message in time");
     release.send(()).expect("the dialogue waits for the fake");
     let logged = dialogue.await.expect("the dialogue ends");
 
@@ -184,6 +209,41 @@ async fn logs_a_send_cancelled_after_the_hand_over_as_unconfirmed() {
         "tool send_email: failed (cancelled-after-hand-over)"
     );
     assert_eq!(smtp.list_mails().len(), 1);
+}
+
+/// [`DRAFT`] as the fake stores it, with the `\Draft` flag.
+fn build_draft_message() -> NewMessage<'static> {
+    NewMessage {
+        bytes: DRAFT.as_bytes().to_vec(),
+        flags: &["\\Draft"],
+        timestamp: 1_793_612_000,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn logs_a_save_cancelled_once_storing_began_as_stopped_while_saving() {
+    let mut mailbox = FakeMailbox::create_standard();
+    mailbox.add_message("Drafts", build_draft_message());
+    let imap = FakeImapServer::start(mailbox, ImapMode::Plain, None).await;
+    imap.add_fault("APPEND", ImapFault::StallAfterHandling);
+    let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
+    let variable = build_plain_account_json(imap.port, smtp.port);
+    let call = json!({"name": "save_draft", "arguments": {"draft_id": "1.1003.Drafts", "to": ["jane@example.com"], "subject": "Plans, again", "body": "Later."}});
+    let (release, released) = mpsc::channel();
+
+    let dialogue =
+        tokio::task::spawn_blocking(move || read_cancelled_call_line(variable, call, released));
+    timeout(STEP_WAIT, imap.wait_for_fault())
+        .await
+        .expect("the fake stores the new draft in time");
+    release.send(()).expect("the dialogue waits for the fake");
+    let logged = dialogue.await.expect("the dialogue ends");
+
+    assert_eq!(logged, "tool save_draft: failed (cancelled-while-saving)");
+    let drafts = imap.list_messages("Drafts");
+    assert_eq!(drafts.len(), 2);
+    assert!(drafts.iter().all(|draft| !draft.has_flag("\\Deleted")));
+    assert!(String::from_utf8_lossy(&drafts[1].bytes).contains("Subject: Plans, again\r\n"));
 }
 
 /// Builds the mailbox the dialogue reads: a short and a long message in
@@ -206,14 +266,7 @@ fn build_dialogue_mailbox() -> FakeMailbox {
     };
     mailbox.add_message("INBOX", short.build_new_message(&[]));
     mailbox.add_message("INBOX", long.build_new_message(&[]));
-    mailbox.add_message(
-        "Drafts",
-        NewMessage {
-            bytes: DRAFT.as_bytes().to_vec(),
-            flags: &["\\Draft"],
-            timestamp: 1_793_612_000,
-        },
-    );
+    mailbox.add_message("Drafts", build_draft_message());
     mailbox
 }
 

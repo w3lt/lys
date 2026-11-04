@@ -409,6 +409,12 @@ impl FakeImapServer {
             .push((name.to_owned(), fault));
     }
 
+    /// Waits until a fault has struck, or a connection was accepted in the
+    /// silent mode, since the last wait.
+    pub async fn wait_for_fault(&self) {
+        self.faulted.notified().await;
+    }
+
     /// Runs a future until a fault strikes, lets it take up the input it
     /// already has, pauses the clock, and runs it to its end, as
     /// [`run_past_fault`] does.
@@ -421,7 +427,7 @@ impl FakeImapServer {
         F: Future,
         F::Output: Debug,
     {
-        run_past_fault(self.faulted.notified(), future).await
+        run_past_fault(self.wait_for_fault(), future).await
     }
 }
 

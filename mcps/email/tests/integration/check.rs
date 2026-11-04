@@ -1,6 +1,7 @@
 //! The account check against the fakes: both sign-ins, each way they
 //! fail, and the process contract of the `check` subcommand.
 
+use std::process::Output;
 use std::time::Duration;
 
 use email::account::Account;
@@ -8,6 +9,7 @@ use email::check::{CheckOutcome, offer_account_sign_ins};
 use email::failure::SignInFailure;
 use email::trust::Trust;
 
+use crate::support::binary::{BinaryProcess, read_to_end_in_thread, wait_for_stream_end};
 use crate::support::imap::{FakeImapServer, FakeMailbox, ImapFault, ImapMode};
 use crate::support::smtp::{FakeSmtpServer, SmtpFault, SmtpMode};
 use crate::support::tls::TestAuthority;
@@ -16,18 +18,27 @@ use crate::support::{
     build_account_json_for,
 };
 
-/// Runs the binary with the arguments and the variable, off the runtime's
-/// threads, and gives its output.
-async fn read_binary_output(arguments: &[&str], variable: Option<&str>) -> std::process::Output {
-    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_email"));
-    command.args(arguments);
-    match variable {
-        Some(value) => command.env("LYS_EMAIL_ACCOUNT", value),
-        None => command.env_remove("LYS_EMAIL_ACCOUNT"),
-    };
-    tokio::task::spawn_blocking(move || command.output().expect("the binary runs"))
-        .await
-        .expect("the task finishes")
+/// Runs the binary with the arguments and the variable, its input ended at
+/// once, and gives its output once it exited, waiting off the runtime's
+/// threads.
+///
+/// # Panics
+///
+/// When the binary does not exit within
+/// [`STEP_WAIT`](crate::support::binary::STEP_WAIT), or its output does not
+/// end in time once it exited.
+async fn read_binary_output(arguments: &[&str], variable: Option<&str>) -> Output {
+    let (mut binary, streams) = BinaryProcess::start(arguments, variable);
+    drop(streams.input);
+    let stdout = read_to_end_in_thread(streams.output);
+    let stderr = read_to_end_in_thread(streams.log);
+    tokio::task::spawn_blocking(move || Output {
+        status: binary.wait_for_exit(),
+        stdout: wait_for_stream_end(&stdout, "standard output"),
+        stderr: wait_for_stream_end(&stderr, "standard error"),
+    })
+    .await
+    .expect("the task finishes")
 }
 
 /// How the two fakes of a check behave, and how the account reaches

@@ -3,14 +3,16 @@
 //! call, a cancelled send, a draft save cancelled while its draft is
 //! stored, and the exit on the end of input.
 
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Command, Stdio};
+use std::io::Write;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tokio::time::timeout;
 
+use crate::support::binary::{
+    BinaryProcess, STEP_WAIT, follow_lines, read_to_end_in_thread, wait_for_stream_end,
+};
 use crate::support::imap::{FakeImapServer, FakeMailbox, ImapFault, ImapMode, NewMessage};
 use crate::support::smtp::{DATA_END, FakeSmtpServer, SmtpFault, SmtpMode};
 use crate::support::{SecurityName, TestMessage, TestServers, build_account_json};
@@ -39,10 +41,6 @@ const TOOL_NAMES: [&str; 10] = [
 /// cancel.
 const LOG_WAIT: Duration = Duration::from_secs(30);
 
-/// Longest the binary may take, in real time, to answer `initialize`, or
-/// to bring a call to the fault the fake holds it at.
-const STEP_WAIT: Duration = Duration::from_secs(30);
-
 /// Builds the JSON of `LYS_EMAIL_ACCOUNT` for fakes on the ports that
 /// talk without TLS.
 fn build_plain_account_json(imap_port: u16, smtp_port: u16) -> String {
@@ -68,44 +66,43 @@ struct Dialogue {
 }
 
 /// Runs the binary over stdio, sends the messages, closes its input, and
-/// collects the answers to the requests among them.
+/// collects the answers to the requests among them; each answer, the exit,
+/// and the end of standard error come within [`STEP_WAIT`].
+///
+/// # Arguments
+///
+/// * `variable` - The JSON of `LYS_EMAIL_ACCOUNT`.
+/// * `messages` - The messages, in order; each one with an id is a request
+///   whose answer comes before the next message is sent.
+///
+/// # Panics
+///
+/// When a request is not answered in time, the binary does not exit in
+/// time once its input ended, or its standard error does not end in time.
 fn send_dialogue_messages(variable: String, messages: Vec<Value>) -> Dialogue {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_email"))
-        .env("LYS_EMAIL_ACCOUNT", variable)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("the binary starts");
-    let mut stdin = child.stdin.take().expect("stdin");
-    let stdout = child.stdout.take().expect("stdout");
-    let mut reader = BufReader::new(stdout);
+    let (mut binary, streams) = BinaryProcess::start(&[], Some(&variable));
+    let mut input = streams.input;
+    let lines = follow_lines(streams.output);
+    let log = read_to_end_in_thread(streams.log);
     let mut answers = Vec::new();
     for message in messages {
-        writeln!(stdin, "{message}").expect("written");
-        stdin.flush().expect("flushed");
-        if message.get("id").is_some() {
-            let mut line = String::new();
-            reader.read_line(&mut line).expect("an answer");
-            answers.push(serde_json::from_str(&line).expect("JSON"));
-        }
+        writeln!(input, "{message}").expect("written");
+        input.flush().expect("flushed");
+        let Some(id) = message.get("id") else {
+            continue;
+        };
+        let line = lines
+            .recv_timeout(STEP_WAIT)
+            .unwrap_or_else(|error| panic!("request {id} is not answered: {error}"));
+        answers.push(serde_json::from_str(&line).expect("JSON"));
     }
-    drop(stdin);
-    let output = child.wait_with_output().expect("the binary ends");
+    drop(input);
+    let status = binary.wait_for_exit();
+    let stderr = wait_for_stream_end(&log, "standard error");
     Dialogue {
         answers,
-        exit_code: output.status.code(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    }
-}
-
-/// Sends each line the reader gives to the receiver, until the reader
-/// ends or the receiver is gone.
-fn forward_lines(reader: impl BufRead, sender: &mpsc::Sender<String>) {
-    for line in reader.lines().map_while(Result::ok) {
-        if sender.send(line).is_err() {
-            return;
-        }
+        exit_code: status.code(),
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
     }
 }
 
@@ -148,26 +145,17 @@ fn wait_for_tool_line(lines: &mpsc::Receiver<String>, tool: &str) -> String {
 ///
 /// # Panics
 ///
-/// When the binary does not answer `initialize` within [`STEP_WAIT`], or
-/// does not log the call in time.
+/// When the binary does not answer `initialize` within [`STEP_WAIT`],
+/// `released` does not say within [`STEP_WAIT`] that the fake holds the
+/// call, or the binary does not log the call in time.
 fn read_cancelled_call_line(variable: String, call: Value, released: mpsc::Receiver<()>) -> String {
     let tool = call["name"].as_str().expect("the tool's name").to_owned();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_email"))
-        .env("LYS_EMAIL_ACCOUNT", variable)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("the binary starts");
-    let mut stdin = child.stdin.take().expect("stdin");
-    let stdout = BufReader::new(child.stdout.take().expect("stdout"));
-    let stderr = BufReader::new(child.stderr.take().expect("stderr"));
-    let (answer_sender, answers) = mpsc::channel();
-    std::thread::spawn(move || forward_lines(stdout, &answer_sender));
-    let (line_sender, lines) = mpsc::channel();
-    std::thread::spawn(move || forward_lines(stderr, &line_sender));
+    let (binary, streams) = BinaryProcess::start(&[], Some(&variable));
+    let mut input = streams.input;
+    let answers = follow_lines(streams.output);
+    let lines = follow_lines(streams.log);
     let initialize = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "lys-test", "version": "0"}}});
-    writeln!(stdin, "{initialize}").expect("written");
+    writeln!(input, "{initialize}").expect("written");
     answers
         .recv_timeout(STEP_WAIT)
         .expect("initialize is answered in time");
@@ -176,14 +164,15 @@ fn read_cancelled_call_line(variable: String, call: Value, released: mpsc::Recei
         json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": call}),
     ];
     for message in messages {
-        writeln!(stdin, "{message}").expect("written");
+        writeln!(input, "{message}").expect("written");
     }
-    released.recv().expect("the fake holds the call");
+    released
+        .recv_timeout(STEP_WAIT)
+        .expect("the fake holds the call in time");
     let cancel = json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 2, "reason": "The person stopped it."}});
-    writeln!(stdin, "{cancel}").expect("written");
+    writeln!(input, "{cancel}").expect("written");
     let logged = wait_for_tool_line(&lines, &tool);
-    child.kill().expect("the binary is stopped");
-    child.wait().expect("the binary ends");
+    binary.stop();
     logged
 }
 

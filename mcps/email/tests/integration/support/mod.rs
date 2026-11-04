@@ -1,7 +1,8 @@
 //! Fakes and builders shared by the integration tests: a certificate
-//! authority, an IMAP server, an SMTP server, and accounts pointing at
-//! them.
+//! authority, an IMAP server, an SMTP server, accounts pointing at them,
+//! and the binary's process.
 
+pub mod binary;
 pub mod imap;
 pub mod smtp;
 pub mod tls;

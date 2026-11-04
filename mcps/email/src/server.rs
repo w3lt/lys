@@ -190,7 +190,7 @@ impl EmailServer {
         let progress = SendProgress::default();
         let call = send::run_send_email(&self.context, arguments, &progress);
         let outcome = run_tool_call_within(token, CALL_LIMIT, call).await;
-        let reported = calculate_send_outcome(outcome, progress.read_stage(), SentKind::Message);
+        let reported = calculate_send_outcome(outcome, progress.stage(), SentKind::Message);
         handle_tool_call_outcome("send_email", reported)
     }
 
@@ -212,7 +212,7 @@ impl EmailServer {
         let progress = DraftProgress::default();
         let call = drafts::run_save_draft(&self.context, arguments, &progress);
         let outcome = run_tool_call_within(token, CALL_LIMIT, call).await;
-        let reported = calculate_save_outcome(outcome, progress.read_stage());
+        let reported = calculate_save_outcome(outcome, progress.stage());
         handle_tool_call_outcome("save_draft", reported)
     }
 
@@ -234,7 +234,7 @@ impl EmailServer {
         let progress = SendProgress::default();
         let call = drafts::run_send_draft(&self.context, arguments, &progress);
         let outcome = run_tool_call_within(token, CALL_LIMIT, call).await;
-        let reported = calculate_send_outcome(outcome, progress.read_stage(), SentKind::Draft);
+        let reported = calculate_send_outcome(outcome, progress.stage(), SentKind::Draft);
         handle_tool_call_outcome("send_draft", reported)
     }
 

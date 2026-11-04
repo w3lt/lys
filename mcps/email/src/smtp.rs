@@ -119,8 +119,8 @@ pub struct SendProgress {
 }
 
 impl SendProgress {
-    /// Reads the stage the send has reached.
-    pub fn read_stage(&self) -> SendStage {
+    /// The stage the send has reached.
+    pub fn stage(&self) -> SendStage {
         *self.stage.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -409,7 +409,7 @@ impl SmtpSession {
             None
         }));
         let answer = timeout(MESSAGE_LIMIT, self.connection.message_iter(content)).await;
-        let handed_over = progress.read_stage() == SendStage::HandedOver;
+        let handed_over = progress.stage() == SendStage::HandedOver;
         match answer {
             Ok(Ok(_)) => {
                 progress.update_stage(SendStage::Accepted);

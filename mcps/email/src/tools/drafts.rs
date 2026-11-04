@@ -130,8 +130,8 @@ pub struct DraftProgress {
 }
 
 impl DraftProgress {
-    /// Reads the stage the call has reached, as a copy.
-    pub fn read_stage(&self) -> DraftStage {
+    /// The stage the call has reached, as a copy.
+    pub fn stage(&self) -> DraftStage {
         self.stage
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

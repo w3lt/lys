@@ -77,7 +77,7 @@ async fn a_connection_that_ends_before_the_data_ends_sends_nothing() {
     let sent = run_send_email(&stack.context, build_message(), &progress).await;
 
     assert_eq!(sent, Err(build_connection_failure(ConnectionFailure::Lost)));
-    assert_eq!(progress.read_stage(), SendStage::NotHandedOver);
+    assert_eq!(progress.stage(), SendStage::NotHandedOver);
     assert_nothing_delivered(&stack);
 }
 
@@ -92,7 +92,7 @@ async fn a_plain_text_connection_that_ends_before_a_reply_is_lost_too() {
     let sent = run_send_email(&context, build_message(), &progress).await;
 
     assert_eq!(sent, Err(build_connection_failure(ConnectionFailure::Lost)));
-    assert_eq!(progress.read_stage(), SendStage::NotHandedOver);
+    assert_eq!(progress.stage(), SendStage::NotHandedOver);
     assert!(smtp.list_mails().is_empty());
 }
 
@@ -105,7 +105,7 @@ async fn a_connection_that_ends_after_the_data_ended_leaves_the_send_unconfirmed
     let sent = run_send_email(&stack.context, build_message(), &progress).await;
 
     assert_eq!(sent, Err(ToolFailure::SendUnconfirmed));
-    assert_eq!(progress.read_stage(), SendStage::HandedOver);
+    assert_eq!(progress.stage(), SendStage::HandedOver);
     assert_eq!(stack.smtp.list_mails().len(), 1);
     assert!(stack.imap.list_messages("Sent").is_empty());
 }
@@ -122,7 +122,7 @@ async fn a_reply_that_is_not_smtp_fails_the_send_as_unreadable_and_sends_nothing
         sent,
         Err(build_connection_failure(ConnectionFailure::Unreadable))
     );
-    assert_eq!(progress.read_stage(), SendStage::NotHandedOver);
+    assert_eq!(progress.stage(), SendStage::NotHandedOver);
     assert_nothing_delivered(&stack);
 }
 
@@ -134,7 +134,7 @@ async fn a_send_the_server_accepted_reaches_the_accepted_stage() {
     let sent = run_send_email(&stack.context, build_message(), &progress).await;
 
     assert!(sent.is_ok(), "{sent:?}");
-    assert_eq!(progress.read_stage(), SendStage::Accepted);
+    assert_eq!(progress.stage(), SendStage::Accepted);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -148,7 +148,7 @@ async fn a_send_stopped_while_a_recipient_waits_was_not_handed_over() {
         .stop_at_fault(run_send_email(&stack.context, build_message(), &progress))
         .await;
 
-    assert_eq!(progress.read_stage(), SendStage::NotHandedOver);
+    assert_eq!(progress.stage(), SendStage::NotHandedOver);
     assert_nothing_delivered(&stack);
 }
 
@@ -163,7 +163,7 @@ async fn a_send_stopped_while_the_server_answers_the_data_was_handed_over() {
         .stop_at_fault(run_send_email(&stack.context, build_message(), &progress))
         .await;
 
-    assert_eq!(progress.read_stage(), SendStage::HandedOver);
+    assert_eq!(progress.stage(), SendStage::HandedOver);
     assert_eq!(stack.smtp.list_mails().len(), 1);
 }
 
@@ -186,7 +186,7 @@ async fn an_address_beyond_ascii_is_not_offered_to_a_server_without_smtputf8() {
         sent,
         Err(ToolFailure::SmtpExtensionMissing(SmtpExtension::SmtpUtf8))
     );
-    assert_eq!(progress.read_stage(), SendStage::NotHandedOver);
+    assert_eq!(progress.stage(), SendStage::NotHandedOver);
     assert!(
         !stack
             .smtp
@@ -294,7 +294,7 @@ async fn data_without_an_answer_leaves_the_send_unconfirmed_after_120_seconds() 
 
     assert_eq!(sent, Err(ToolFailure::SendUnconfirmed));
     assert_about(elapsed, Duration::from_secs(120));
-    assert_eq!(progress.read_stage(), SendStage::HandedOver);
+    assert_eq!(progress.stage(), SendStage::HandedOver);
     assert_eq!(stack.smtp.list_mails().len(), 1);
     assert!(stack.imap.list_messages("Sent").is_empty());
 }
@@ -316,6 +316,6 @@ async fn a_quit_without_an_answer_after_the_send_reports_it_sent_after_30_second
         "{report:?}"
     );
     assert_about(elapsed, Duration::from_secs(30));
-    assert_eq!(progress.read_stage(), SendStage::Accepted);
+    assert_eq!(progress.stage(), SendStage::Accepted);
     assert_eq!(stack.smtp.list_mails().len(), 1);
 }

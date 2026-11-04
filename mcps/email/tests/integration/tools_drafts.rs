@@ -98,10 +98,7 @@ async fn saves_a_draft_with_its_bcc_field_and_answers_its_id() {
         .await
         .expect("saved");
 
-    assert_eq!(
-        progress.read_stage(),
-        DraftStage::Storing { replaced: None }
-    );
+    assert_eq!(progress.stage(), DraftStage::Storing { replaced: None });
 
     assert_eq!(
         report.text,
@@ -148,7 +145,7 @@ async fn replaces_a_draft_and_answers_the_new_id() {
     assert_eq!(drafts[0].uid, 2);
     assert!(String::from_utf8_lossy(&drafts[0].bytes).contains("Subject: Second\r\n"));
     assert_eq!(stale, Err(ToolFailure::StaleId));
-    assert_eq!(stale_progress.read_stage(), DraftStage::BeforeStoring);
+    assert_eq!(stale_progress.stage(), DraftStage::BeforeStoring);
     let commands = stack.imap.list_commands();
     assert!(
         commands
@@ -285,7 +282,7 @@ async fn needs_a_drafts_folder() {
     let saved = run_save_draft(&stack.context, build_draft("Nowhere"), &progress).await;
 
     assert_eq!(saved, Err(ToolFailure::NoRoleFolder(FolderRole::Drafts)));
-    assert_eq!(progress.read_stage(), DraftStage::BeforeStoring);
+    assert_eq!(progress.stage(), DraftStage::BeforeStoring);
 }
 
 /// A standard mailbox whose server lacks UIDPLUS, with a message in
@@ -713,10 +710,7 @@ async fn answers_a_draft_whose_answer_never_came_once_all_of_it_was_sent_as_mayb
         ))
     );
     assert_eq!(stack.imap.list_messages("Drafts").len(), 1);
-    assert_eq!(
-        progress.read_stage(),
-        DraftStage::Storing { replaced: None }
-    );
+    assert_eq!(progress.stage(), DraftStage::Storing { replaced: None });
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -753,7 +747,7 @@ async fn answers_a_replacing_draft_whose_answer_was_lost_with_the_draft_it_repla
         folder: "Drafts".to_owned(),
     };
     assert_eq!(
-        progress.read_stage(),
+        progress.stage(),
         DraftStage::Storing {
             replaced: Some(replaced)
         }

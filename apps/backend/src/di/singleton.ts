@@ -310,8 +310,7 @@ export async function createSingletonServices(
       }
     )
     const toolServices = createToolServices(config, logReporters)
-    serviceLifetime.defer(() => toolServices.mcpServerRegistry.close())
-    serviceLifetime.defer(() => toolServices.emailAccountChecker.close())
+    serviceLifetime.defer(buildCloseToolServices(toolServices))
 
     return Object.freeze({
       chatService,
@@ -487,6 +486,26 @@ function createToolServices(
     mcpServerProcessGroups,
     emailAccountChecker
   }
+}
+
+/**
+ * Builds the close operation of the tool services that own resources.
+ *
+ * @param toolServices - Services whose MCP server registry and email
+ * account checker the operation closes; the caller hands it their cleanup.
+ * @returns An operation that closes the email account checker, then the
+ * MCP server registry, and settles once both closes settled. It attempts
+ * both even when the first fails, and rejects with the failure, or with a
+ * `SuppressedError` whose `error` is the registry's and whose `suppressed`
+ * is the checker's.
+ */
+function buildCloseToolServices(
+  toolServices: ToolServices
+): () => Promise<void> {
+  const toolServicesLifetime = new AsyncDisposableStack()
+  toolServicesLifetime.defer(() => toolServices.mcpServerRegistry.close())
+  toolServicesLifetime.defer(() => toolServices.emailAccountChecker.close())
+  return () => toolServicesLifetime.disposeAsync()
 }
 
 /**

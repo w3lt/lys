@@ -43,8 +43,8 @@ export type EmailAccountDraft = {
   /**
    * Preset that last filled the server fields and the Sent copy switch, or,
    * in the fields of a saved account, the saved address's preset; undefined
-   * while neither exists. Another preset replaces the fields only while they
-   * still hold this one's values.
+   * while neither exists. {@link canApplyEmailPreset} reads it to decide
+   * whether another preset may fill the fields.
    */
   readonly appliedPreset: EmailPreset | undefined
 }

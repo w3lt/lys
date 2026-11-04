@@ -165,6 +165,31 @@ async fn replaces_a_draft_and_answers_the_new_id() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn replaces_a_draft_when_the_server_sends_untagged_data_before_asking_for_it() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    let first = save(&stack, build_draft("First")).await;
+    stack.imap.update_state(|state| {
+        let size = state.find_folder("Drafts").expect("Drafts").messages.len();
+        state.untagged_before_continuation = Some(format!("* {size} EXISTS"));
+    });
+
+    let second = save(
+        &stack,
+        SaveDraftArguments {
+            draft_id: Some(first),
+            ..build_draft("Second")
+        },
+    )
+    .await;
+
+    assert_eq!(second, "2.1003.Drafts");
+    let drafts = stack.imap.list_messages("Drafts");
+    assert_eq!(drafts.len(), 1);
+    assert_eq!(drafts[0].uid, 2);
+    assert!(String::from_utf8_lossy(&drafts[0].bytes).contains("Subject: Second\r\n"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn sends_a_draft_without_its_bcc_field_keeps_a_copy_and_deletes_it() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
     let id = save(&stack, build_draft("Ready")).await;

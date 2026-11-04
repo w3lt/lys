@@ -547,6 +547,33 @@ async fn sends_text_that_is_not_ascii_as_literals_a_server_without_literal_plus_
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn searches_for_text_beyond_ascii_when_the_server_sends_untagged_data_before_asking_for_it() {
+    let stack = start_filled_stack().await;
+    let greeting = TestMessage {
+        subject: "Grüße aus Wien".to_owned(),
+        body: "Schöne Grüße".to_owned(),
+        message_id: "g@example.com".to_owned(),
+        timestamp: BASE + 200 * 3_600,
+        ..TestMessage::default()
+    };
+    stack.imap.update_state(|state| {
+        state.add_message("INBOX", greeting.build_new_message(&[]));
+        let size = state.find_folder("INBOX").expect("INBOX").messages.len();
+        state.untagged_before_continuation = Some(format!("* {size} EXISTS"));
+    });
+    let arguments = SearchArguments {
+        text: Some("Schöne".to_owned()),
+        subject: Some("Grüße".to_owned()),
+        ..SearchArguments::default()
+    };
+
+    let found = search_inbox_with(&stack, arguments).await;
+
+    assert_eq!(calculate_hit_count(&found), 1, "{found}");
+    assert!(found.contains("subject Grüße aus Wien\n"), "{found}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn reads_a_message_without_marking_it_as_read() {
     let stack = start_filled_stack().await;
 

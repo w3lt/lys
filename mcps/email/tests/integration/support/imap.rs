@@ -1,8 +1,9 @@
 //! A fake IMAP server: folders and messages in memory, the commands the
 //! email server sends, TLS or STARTTLS, and a log of every command; on
-//! request it leaves LITERAL+ or UIDPLUS out of its capabilities, refuses
-//! a command, fails it by never answering it or by closing the connection,
-//! or removes a message before a command, as another client would.
+//! request it leaves LITERAL+ or UIDPLUS out of its capabilities, writes an
+//! untagged line before each continuation request, refuses a command,
+//! fails it by never answering it or by closing the connection, or removes
+//! a message before a command, as another client would.
 
 use std::fmt::Debug;
 use std::future::Future;
@@ -163,6 +164,11 @@ pub struct FakeMailbox {
     pub literal_plus: bool,
     /// The hierarchy delimiter.
     pub delimiter: String,
+    /// An untagged line the fake writes before each continuation request,
+    /// such as `* 1 EXISTS` repeating the size of the open folder, as a
+    /// server may send data the client did not ask for at any time
+    /// (RFC 3501, section 5.2); `None` writes none.
+    pub untagged_before_continuation: Option<String>,
     /// The UIDVALIDITY the next created folder gets.
     next_uid_validity: u32,
     /// The commands the fake refuses, by name, with what it answers after
@@ -184,6 +190,7 @@ impl FakeMailbox {
             uid_plus: true,
             literal_plus: true,
             delimiter: "/".to_owned(),
+            untagged_before_continuation: None,
             next_uid_validity: 2001,
             refusals: Vec::new(),
             faults: Vec::new(),
@@ -1003,15 +1010,15 @@ fn format_capabilities(mode: ImapMode, secured: bool, state: &Arc<Mutex<FakeMail
 
 /// Reads one command, with its literals, which are shown in the text as
 /// quoted strings; a refused or failed command ends before a synchronizing
-/// literal, which the client then never sends. Without LITERAL+, a line
-/// that ends in `{n+}` ends the command there, its marker kept in the
-/// text.
+/// literal, which the client then never sends, and any other is asked for
+/// as [`send_continuation`] does. Without LITERAL+, a line that ends in
+/// `{n+}` ends the command there, its marker kept in the text.
 ///
 /// # Arguments
 ///
 /// * `reader` - The connection.
 /// * `state` - The mailbox, which says which commands are refused or
-///   failed.
+///   failed, and what to write before a continuation request.
 async fn read_command<S>(
     reader: &mut BufReader<S>,
     state: &Arc<Mutex<FakeMailbox>>,
@@ -1036,7 +1043,7 @@ where
             if is_answered_before_literal(&text, state) {
                 return Some((text, literals));
             }
-            send_line(reader, "+ OK\r\n").await;
+            send_continuation(reader, state).await;
         }
         let mut bytes = vec![0; length];
         reader.read_exact(&mut bytes).await.ok()?;
@@ -1047,6 +1054,28 @@ where
         text.push_str(rest.trim_end_matches(['\r', '\n']));
     }
     Some((text, literals))
+}
+
+/// Asks the client for a literal with `+ OK`, after the mailbox's untagged
+/// line, if it has one.
+///
+/// # Arguments
+///
+/// * `reader` - The connection.
+/// * `state` - The mailbox, which holds the untagged line.
+async fn send_continuation<S>(reader: &mut BufReader<S>, state: &Arc<Mutex<FakeMailbox>>)
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let untagged = state
+        .lock()
+        .expect("the state")
+        .untagged_before_continuation
+        .clone();
+    if let Some(untagged) = untagged {
+        send_line(reader, &format!("{untagged}\r\n")).await;
+    }
+    send_line(reader, "+ OK\r\n").await;
 }
 
 /// Whether the fake refuses the command the text begins, or fails it

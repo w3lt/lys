@@ -2229,6 +2229,32 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       expect(harness.openServer).toHaveBeenCalledTimes(2)
     })
 
+    it("reports the taken name at the apply in which an added server takes the place of a built-in server listed before it", async () => {
+      const builtIn = createFakeBuiltInServer()
+      const harness = createRegistryHarness({
+        builtInServers: [builtIn.server]
+      })
+      harness.setServers([])
+      await harness.registry.updateServers()
+      expect(harness.registry.listServers()).toEqual(
+        buildList([buildEmailStatus(OFF)])
+      )
+      harness.setServers([buildFakeStdioServerSettings("email")])
+
+      await harness.registry.updateServers()
+
+      expect(harness.registry.listServers()).toEqual(
+        buildList([buildStdioStatus("email", CONNECTING)])
+      )
+      expect(filterEvents(harness.events, "built-in-name-taken")).toEqual([
+        { kind: "built-in-name-taken", serverName: "email" }
+      ])
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("email", buildConnectedState(1))])
+      )
+    })
+
     it("tells the model the server was stopped when its session is stopped while a call runs, and reports the failed call", async () => {
       const harness = createRegistryHarness()
       const alpha = buildFakeStdioServerSettings("alpha", {

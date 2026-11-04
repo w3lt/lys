@@ -501,10 +501,13 @@ impl ImapSession {
                 .map(drop)
         };
         match run_exchange(&mut self.ended_by, exchange).await {
+            Ok(()) => Ok(()),
             Err(ImapFailure::Connection(failure)) if sent => {
                 Err(AppendFailure::Unconfirmed(failure))
             }
-            outcome => outcome.map_err(AppendFailure::Failed),
+            Err(failure @ (ImapFailure::Refused(_) | ImapFailure::Connection(_))) => {
+                Err(AppendFailure::Failed(failure))
+            }
         }
     }
 

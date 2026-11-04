@@ -166,7 +166,9 @@ fn read_body_text(part: MessagePart<'_>) -> Option<(String, bool)> {
                 .unwrap_or_default(),
             true,
         )),
-        _ => None,
+        PartKind::Binary | PartKind::InlineBinary | PartKind::Multipart | PartKind::Message(_) => {
+            None
+        }
     }
 }
 

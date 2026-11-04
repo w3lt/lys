@@ -507,7 +507,9 @@ mod tests {
                 account.insert("password".to_owned(), Value::from(SYNTHETIC_PASSWORD));
                 Some(Value::Object(account).to_string())
             }
-            other => Some(other.to_string()),
+            other @ (Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_)) => {
+                Some(other.to_string())
+            }
         }
     }
 

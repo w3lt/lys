@@ -489,7 +489,8 @@ function addOpenedConnection(
  * Creates a registry whose settings reads return what the case sets and
  * whose openings start real fake servers, closed when the case finishes.
  *
- * @param options - Opener and settings reader replacing the defaults.
+ * @param options - Opener, settings reader, working folder, and built-in
+ * servers replacing the defaults.
  * @returns The registry and what it was given and reported.
  * @remarks Teardown first ends every wait on the case, then closes the
  * registry, which waits for every opening and close it started.

@@ -228,10 +228,11 @@ const CLOSED_FAILURE: EmailServerRunFailure = Object.freeze({ kind: "closed" })
  * ownership: owns the run of the check running now until it ends, which
  * kills its process at the time limit, and stops it on {@link close}; a
  * check that runs when the backend is killed ends by itself at the email
- * server's own limits. Concurrency model: one check at a time, without a
- * queue; a check asked for while another runs is answered `busy` at once
- * and keeps neither the account nor the password, so at most one email
- * server process runs for checks. {@link close} is idempotent.
+ * server's own limits. Concurrency model: single-owner, on the backend's
+ * event loop. It runs one check at a time, without a queue: a check asked
+ * for while another runs is answered `busy` at once and keeps neither the
+ * account nor the password, so at most one email server process runs for
+ * checks. {@link close} is idempotent.
  */
 export default class EmailAccountChecker {
   /** Borrowed command, folder, time limit, and reporter. */

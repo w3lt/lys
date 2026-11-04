@@ -60,20 +60,37 @@ export function createUnstartedChildProcess(
   shortage: FileDescriptorShortage
 ): ChildProcess {
   const child = new UnstartedChildProcess()
-  const errorNumber = -constants.errno[shortage]
-  const syscall = `spawn ${command}`
+  const startError = buildFailedStartError(command, args, shortage)
   process.nextTick(() => {
-    child.emit(
-      "error",
-      Object.assign(new Error(`${syscall} ${shortage}`), {
-        errno: errorNumber,
-        code: shortage,
-        syscall,
-        path: command,
-        spawnargs: [...args]
-      })
-    )
-    child.emit("close", errorNumber, null)
+    child.emit("error", startError)
+    child.emit("close", startError.errno, null)
   })
   return child
+}
+
+/**
+ * Builds Node's error for a start that found no file descriptor for the
+ * process's pipes.
+ *
+ * @param command - Command the case was asked to start.
+ * @param args - Its arguments.
+ * @param shortage - Which file descriptors ran out.
+ * @returns An error with Node's message, `spawn <command> <code>`, and Node's
+ * fields: the negative error number as `errno`, the code as `code`,
+ * `spawn <command>` as `syscall`, the command as `path`, and a copy of the
+ * arguments as `spawnargs`.
+ */
+function buildFailedStartError(
+  command: string,
+  args: readonly string[],
+  shortage: FileDescriptorShortage
+): NodeJS.ErrnoException & { errno: number; spawnargs: string[] } {
+  const syscall = `spawn ${command}`
+  return Object.assign(new Error(`${syscall} ${shortage}`), {
+    errno: -constants.errno[shortage],
+    code: shortage,
+    syscall,
+    path: command,
+    spawnargs: [...args]
+  })
 }

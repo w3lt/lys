@@ -250,7 +250,7 @@ pub fn parse_account_variable(text: &str) -> Result<Account, AccountProblem> {
     };
     if !is_address(&stored.address) {
         return Err(AccountProblem::Rule(
-            "address is a local part of 1 to 64 visible ASCII characters, @, and a host name, 254 characters at most",
+            "address is a local part of 1 to 64 visible ASCII characters, @, and an ASCII host name, 254 characters at most",
         ));
     }
     if !is_display_name(&stored.display_name) {
@@ -290,8 +290,8 @@ pub fn parse_account_variable(text: &str) -> Result<Account, AccountProblem> {
 fn parse_server(stored: StoredServer, protocol: Protocol) -> Result<MailServer, AccountProblem> {
     if !is_host_name(&stored.host) && !is_bracketed_ipv6(&stored.host) {
         return Err(AccountProblem::Rule(match protocol {
-            Protocol::Imap => "imap.host is a host name or an IPv6 address in brackets",
-            Protocol::Smtp => "smtp.host is a host name or an IPv6 address in brackets",
+            Protocol::Imap => "imap.host is an ASCII host name or an IPv6 address in brackets",
+            Protocol::Smtp => "smtp.host is an ASCII host name or an IPv6 address in brackets",
         }));
     }
     let Some(port) = parse_port(stored.port) else {
@@ -382,8 +382,8 @@ fn has_edge_white_space(value: &str) -> bool {
     value.starts_with(char::is_whitespace) || value.ends_with(char::is_whitespace)
 }
 
-/// Whether the text is a host name: labels of letters, digits, and inner
-/// hyphens, 63 bytes each, joined by dots, 253 bytes at most.
+/// Whether the text is a host name: labels of ASCII letters, digits, and
+/// inner hyphens, 63 bytes each, joined by dots, 253 bytes at most.
 fn is_host_name(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAXIMUM_HOST_NAME_LENGTH
@@ -782,7 +782,19 @@ mod tests {
         assert_eq!(
             refused.map(|_| ()),
             Err(AccountProblem::Rule(
-                "imap.host is a host name or an IPv6 address in brackets"
+                "imap.host is an ASCII host name or an IPv6 address in brackets"
+            ))
+        );
+    }
+
+    #[test]
+    fn names_the_address_rule_with_its_ascii_host_name() {
+        let refused = parse_account_variable(&build_variable("address", "\"person\""));
+
+        assert_eq!(
+            refused.map(|_| ()),
+            Err(AccountProblem::Rule(
+                "address is a local part of 1 to 64 visible ASCII characters, @, and an ASCII host name, 254 characters at most"
             ))
         );
     }
@@ -792,7 +804,7 @@ mod tests {
         let broken = [
             (
                 "{\"host\":\"-mail-\",\"port\":993,\"security\":\"tls\"}",
-                "host is a host name or an IPv6 address in brackets",
+                "host is an ASCII host name or an IPv6 address in brackets",
             ),
             (
                 "{\"host\":\"mail.example.com\",\"port\":0,\"security\":\"tls\"}",

@@ -290,12 +290,12 @@ fn assert_initialized(initialized: &Value) {
     assert!(initialized["result"]["capabilities"]["tools"].is_object());
 }
 
-/// Finds a tool by name in the answer to `tools/list`.
+/// Gets a tool by name from the answer to `tools/list`.
 ///
 /// # Panics
 ///
 /// When the answer lists no such tool.
-fn find_listed_tool<'a>(listed: &'a Value, name: &str) -> &'a Value {
+fn get_listed_tool<'a>(listed: &'a Value, name: &str) -> &'a Value {
     listed["result"]["tools"]
         .as_array()
         .expect("tools")
@@ -324,7 +324,7 @@ fn assert_tools_listed(listed: &Value) {
             "{tool}"
         );
     }
-    let search = find_listed_tool(listed, "search_emails");
+    let search = get_listed_tool(listed, "search_emails");
     assert_eq!(search["annotations"]["readOnlyHint"], true);
     assert!(
         search["inputSchema"]["properties"]["page"].is_object(),
@@ -335,7 +335,7 @@ fn assert_tools_listed(listed: &Value) {
 /// Asserts that `send_draft` requires the draft's id and takes the fields
 /// the draft must hold, and that `delete_draft` takes only the id.
 fn assert_draft_tool_fields(listed: &Value) {
-    let send_draft = find_listed_tool(listed, "send_draft");
+    let send_draft = get_listed_tool(listed, "send_draft");
     let mut send_draft_fields: Vec<&str> = send_draft["inputSchema"]["properties"]
         .as_object()
         .expect("properties")
@@ -348,7 +348,7 @@ fn assert_draft_tool_fields(listed: &Value) {
         ["bcc", "body", "cc", "draft_id", "subject", "to"]
     );
     assert_eq!(send_draft["inputSchema"]["required"], json!(["draft_id"]));
-    let delete_draft = find_listed_tool(listed, "delete_draft");
+    let delete_draft = get_listed_tool(listed, "delete_draft");
     assert_eq!(
         delete_draft["inputSchema"]["properties"]
             .as_object()

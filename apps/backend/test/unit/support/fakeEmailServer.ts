@@ -38,13 +38,29 @@ const FAKE_STDIO_SERVER_URL = new URL(
  * stdio server, which reads the same argument, are left to it.
  */
 const fakeEmailServerOptionsSchema = z.object({
-  /** Write the value of `LYS_EMAIL_ACCOUNT` to `variable` on start. */
+  /**
+   * Write the value of `LYS_EMAIL_ACCOUNT` to `variable` in its folder on
+   * start; `readRecordedEmailVariable` in `emailTestServer.ts` reads it.
+   */
   recordsVariable: z.boolean().optional(),
-  /** Write the process identifier to `pid` on start. */
+  /**
+   * Write the process identifier to `pid` in its folder on start;
+   * `readRecordedEmailProcessId` in `emailTestServer.ts` reads it.
+   */
   recordsProcessId: z.boolean().optional(),
-  /** How long the `lock` check holds `lock`. */
+  /** How long the `lock` check holds `lock` in its folder. */
   holdMilliseconds: z.number().optional()
 })
+
+/**
+ * What the fake email server does, as `buildFakeEmailServerCommand` in
+ * `emailTestServer.ts` writes it into the fake's first argument. The fake
+ * records into the folder it runs in, which a case names as the working
+ * folder of the checker or the registry that starts it.
+ */
+export type FakeEmailServerOptions = Readonly<
+  z.input<typeof fakeEmailServerOptionsSchema>
+>
 
 /** The account the fake was started with, as far as it reads it. */
 const fakeAccountSchema = z.object({

@@ -9,31 +9,14 @@ import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { EmailServerCommand } from "../../../src/modules/mcp/builtIn/email/emailServer"
+import type { FakeEmailServerOptions } from "./fakeEmailServer"
 
 /** Path of the fake email server script. */
 const FAKE_EMAIL_SERVER_PATH = fileURLToPath(
   new URL("./fakeEmailServer.ts", import.meta.url)
 )
 
-/**
- * What the fake email server does; see the script. It records into the
- * folder it runs in, which a case names as the working folder of the
- * checker or the registry that starts it.
- */
-export type FakeEmailServerOptions = Readonly<{
-  /**
-   * Write the value of `LYS_EMAIL_ACCOUNT` to `variable` in its folder on
-   * start; {@link readRecordedEmailVariable} reads it.
-   */
-  recordsVariable?: boolean
-  /**
-   * Write the process identifier to `pid` in its folder on start;
-   * {@link readRecordedEmailProcessId} reads it.
-   */
-  recordsProcessId?: boolean
-  /** How long the `lock` check holds `lock` in its folder. */
-  holdMilliseconds?: number
-}>
+export type { FakeEmailServerOptions }
 
 /** Synthetic password standing in for a secret; not a real credential. */
 export const SYNTHETIC_EMAIL_PASSWORD: EmailPassword =

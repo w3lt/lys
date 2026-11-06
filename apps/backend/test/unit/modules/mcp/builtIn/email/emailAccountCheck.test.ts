@@ -106,6 +106,30 @@ function createChecker(setup: CheckerSetup = {}) {
   return { checker, events }
 }
 
+/** What goes through a plain file, so that Node throws as it starts the server. */
+type FileInPathPlace = "command" | "working folder"
+
+/**
+ * Builds the setup that puts a plain file where Node needs a folder as it
+ * starts the email server.
+ *
+ * @param place - Where the file goes: the command's path or the working
+ * folder.
+ * @param file - Path of the plain file.
+ * @returns The setup with the file in that place.
+ */
+function buildFileInPathSetup(
+  place: FileInPathPlace,
+  file: string
+): CheckerSetup {
+  switch (place) {
+    case "command":
+      return { serverCommand: { command: join(file, "email"), arguments: [] } }
+    case "working folder":
+      return { workingDirectory: file }
+  }
+}
+
 /**
  * Builds the records the backend's log holds for the events a checker
  * reported, written as the backend writes them.
@@ -334,12 +358,8 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const folder = await createCaseFolder()
       const file = join(folder, "file")
       await writeFile(file, "")
-      const serverCommand: EmailServerCommand = {
-        command: join(file, "email"),
-        arguments: []
-      }
       const { checker, events } = createChecker(
-        place === "command" ? { serverCommand } : { workingDirectory: file }
+        buildFileInPathSetup(place, file)
       )
 
       const answer = await checker.sendCheck(

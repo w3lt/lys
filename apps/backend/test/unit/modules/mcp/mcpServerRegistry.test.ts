@@ -475,14 +475,26 @@ function addOpenedConnection(
   serverName: string,
   opening: McpServerOpening
 ): void {
-  if (opening.status === "connected")
-    openedConnections.push(
-      Object.freeze({
-        serverName,
-        connection: opening.connection,
-        close: vi.spyOn(opening.connection, "close")
-      })
-    )
+  switch (opening.status) {
+    case "connected":
+      openedConnections.push(
+        Object.freeze({
+          serverName,
+          connection: opening.connection,
+          close: vi.spyOn(opening.connection, "close")
+        })
+      )
+      return
+    case "failed":
+    case "cancelled":
+      return
+    default: {
+      const unhandledOpening: never = opening
+      throw new TypeError(
+        `Unhandled MCP server opening: ${JSON.stringify(unhandledOpening)}`
+      )
+    }
+  }
 }
 
 /**

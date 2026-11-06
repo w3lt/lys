@@ -512,7 +512,7 @@ mod tests {
     use super::*;
 
     /// What an EHLO answer offering the extensions, one per line, tells.
-    fn read_server_info(extensions: &[&str]) -> ServerInfo {
+    fn build_server_info(extensions: &[&str]) -> ServerInfo {
         let mut answer = String::from("250-localhost Hello\r\n");
         for extension in extensions {
             answer.push_str(&format!("250-{extension}\r\n"));
@@ -531,8 +531,8 @@ mod tests {
 
     #[test]
     fn asks_for_each_extension_a_message_needs_only_from_a_server_that_offers_it() {
-        let neither = read_server_info(&[]);
-        let both = read_server_info(&["SMTPUTF8", "8BITMIME"]);
+        let neither = build_server_info(&[]);
+        let both = build_server_info(&["SMTPUTF8", "8BITMIME"]);
         let ascii = build_envelope("person@example.com", "jane@example.com");
         let from_beyond = build_envelope("jöran@example.com", "jane@example.com");
         let to_beyond = build_envelope("person@example.com", "jane@bücher.example");

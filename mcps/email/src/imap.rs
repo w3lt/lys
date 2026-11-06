@@ -362,7 +362,8 @@ impl ImapSession {
     ///
     /// The folders in the server's order, or why the listing failed.
     pub async fn list_folders(&mut self) -> Result<Vec<FolderListing>, ImapFailure> {
-        self.send_command("LIST \"\" \"*\"", read_listing).await
+        self.send_command("LIST \"\" \"*\"", find_folder_listing)
+            .await
     }
 
     /// Counts the messages of a folder without selecting it.
@@ -377,7 +378,7 @@ impl ImapSession {
     /// unreadable.
     pub async fn get_message_count(&mut self, raw_name: &str) -> Result<u32, ImapFailure> {
         let command = format!("STATUS {} (MESSAGES)", quote_folder_name(raw_name)?);
-        let counts = self.send_command(&command, read_message_count).await?;
+        let counts = self.send_command(&command, find_message_count).await?;
         counts.last().copied().ok_or(UNREADABLE)
     }
 
@@ -403,7 +404,7 @@ impl ImapSession {
             FolderAccess::Change => "SELECT",
         };
         let command = format!("{verb} {}", quote_folder_name(raw_name)?);
-        let facts = self.send_command(&command, read_selection_fact).await?;
+        let facts = self.send_command(&command, find_selection_fact).await?;
         build_selected_folder(&facts)
     }
 
@@ -425,7 +426,7 @@ impl ImapSession {
         let session = &mut self.session;
         let exchange = async {
             let tag = send_command_parts(session, &parts).await?;
-            read_tagged_answers(session, &tag, read_search_uids).await
+            read_tagged_answers(session, &tag, find_search_uids).await
         };
         let answers = run_exchange(&mut self.ended_by, exchange).await?;
         let mut uids: Vec<u32> = answers.into_iter().flatten().collect();
@@ -446,7 +447,7 @@ impl ImapSession {
             return Ok(Vec::new());
         }
         let command = format!("UID FETCH {} {SUMMARY_QUERY}", format_uid_set(uids));
-        self.send_command(&command, read_summary).await
+        self.send_command(&command, find_summary).await
     }
 
     /// Fetches one whole message of the selected folder, without marking
@@ -461,7 +462,7 @@ impl ImapSession {
     /// The message, or `None` when no message has the UID any more.
     pub async fn find_message(&mut self, uid: u32) -> Result<Option<FetchedMessage>, ImapFailure> {
         let command = format!("UID FETCH {uid} {MESSAGE_QUERY}");
-        let messages = self.send_command(&command, read_fetched_message).await?;
+        let messages = self.send_command(&command, find_fetched_message).await?;
         Ok(messages.into_iter().find(|message| message.uid == uid))
     }
 
@@ -595,7 +596,9 @@ impl ImapSession {
         if let Some(supported) = self.supports_uid_plus {
             return Ok(supported);
         }
-        let answers = self.send_command("CAPABILITY", read_uid_plus).await?;
+        let answers = self
+            .send_command("CAPABILITY", find_uid_plus_support)
+            .await?;
         let supported = answers.contains(&true);
         self.supports_uid_plus = Some(supported);
         Ok(supported)
@@ -607,9 +610,9 @@ impl ImapSession {
     /// # Arguments
     ///
     /// * `command` - The command, without its tag.
-    /// * `read_answer` - Reads an untagged response the command asked for;
-    ///   `None` skips any other response, such as an update the server
-    ///   sends on its own.
+    /// * `find_answer` - Finds the answer the command asked for in an
+    ///   untagged response; `None` skips any other response, such as an
+    ///   update the server sends on its own.
     ///
     /// # Returns
     ///
@@ -619,12 +622,12 @@ impl ImapSession {
     async fn send_command<T>(
         &mut self,
         command: &str,
-        read_answer: fn(&Response<'_>) -> Option<T>,
+        find_answer: fn(&Response<'_>) -> Option<T>,
     ) -> Result<Vec<T>, ImapFailure> {
         let session = &mut self.session;
         let exchange = async {
             let tag = session.run_command(command).await.map_err(|_| LOST)?;
-            read_tagged_answers(session, &tag, read_answer).await
+            read_tagged_answers(session, &tag, find_answer).await
         };
         run_exchange(&mut self.ended_by, exchange).await
     }
@@ -775,11 +778,12 @@ async fn read_continuation(
 ///
 /// * `session` - The signed-in session.
 /// * `tag` - The command's tag.
-/// * `read_answer` - Reads an untagged response the command asked for.
+/// * `find_answer` - Finds the answer the command asked for in an untagged
+///   response.
 async fn read_tagged_answers<T>(
     session: &mut Session<Stream>,
     tag: &RequestId,
-    read_answer: fn(&Response<'_>) -> Option<T>,
+    find_answer: fn(&Response<'_>) -> Option<T>,
 ) -> Result<Vec<T>, ImapFailure> {
     let mut answers = Vec::new();
     loop {
@@ -791,7 +795,7 @@ async fn read_tagged_answers<T>(
         if let Some(outcome) = calculate_tagged_outcome(response.parsed(), tag) {
             return outcome.map(|()| answers);
         }
-        answers.extend(read_answer(response.parsed()));
+        answers.extend(find_answer(response.parsed()));
     }
 }
 
@@ -886,8 +890,8 @@ fn format_quoted_string(text: &str) -> String {
     format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// Reads a folder listing from a `LIST` answer.
-fn read_listing(response: &Response<'_>) -> Option<FolderListing> {
+/// Finds a folder listing in a `LIST` answer.
+fn find_folder_listing(response: &Response<'_>) -> Option<FolderListing> {
     let Response::MailboxData(MailboxDatum::List(list)) = response else {
         return None;
     };
@@ -898,8 +902,8 @@ fn read_listing(response: &Response<'_>) -> Option<FolderListing> {
     })
 }
 
-/// Reads the message count of a `STATUS` answer.
-fn read_message_count(response: &Response<'_>) -> Option<u32> {
+/// Finds the message count in a `STATUS` answer.
+fn find_message_count(response: &Response<'_>) -> Option<u32> {
     let Response::MailboxData(MailboxDatum::Status { status, .. }) = response else {
         return None;
     };
@@ -920,9 +924,9 @@ enum SelectionFact {
     UidValidity(u32),
 }
 
-/// Reads a fact about the selected folder from a `SELECT` or `EXAMINE`
+/// Finds a fact about the selected folder in a `SELECT` or `EXAMINE`
 /// answer.
-fn read_selection_fact(response: &Response<'_>) -> Option<SelectionFact> {
+fn find_selection_fact(response: &Response<'_>) -> Option<SelectionFact> {
     match response {
         Response::MailboxData(MailboxDatum::Exists(count)) => Some(SelectionFact::Exists(*count)),
         Response::Data {
@@ -959,16 +963,16 @@ fn build_selected_folder(facts: &[SelectionFact]) -> Result<SelectedFolder, Imap
     })
 }
 
-/// Reads the UIDs of a `SEARCH` answer.
-fn read_search_uids(response: &Response<'_>) -> Option<Vec<u32>> {
+/// Finds the UIDs in a `SEARCH` answer.
+fn find_search_uids(response: &Response<'_>) -> Option<Vec<u32>> {
     let Response::MailboxData(MailboxDatum::Search(uids)) = response else {
         return None;
     };
     Some(uids.clone())
 }
 
-/// Reads whether a `CAPABILITY` answer lists UIDPLUS, in any letter case.
-fn read_uid_plus(response: &Response<'_>) -> Option<bool> {
+/// Finds whether a `CAPABILITY` answer lists UIDPLUS, in any letter case.
+fn find_uid_plus_support(response: &Response<'_>) -> Option<bool> {
     let Response::Capabilities(capabilities) = response else {
         return None;
     };
@@ -997,8 +1001,8 @@ struct FetchedAttributes {
     body: Option<Vec<u8>>,
 }
 
-/// Reads the attributes of a `FETCH` answer.
-fn read_fetched_attributes(response: &Response<'_>) -> Option<FetchedAttributes> {
+/// Finds the attributes in a `FETCH` answer.
+fn find_fetched_attributes(response: &Response<'_>) -> Option<FetchedAttributes> {
     let Response::Fetch(_, values) = response else {
         return None;
     };
@@ -1006,7 +1010,7 @@ fn read_fetched_attributes(response: &Response<'_>) -> Option<FetchedAttributes>
     for value in values {
         match value {
             AttributeValue::Uid(uid) => attributes.uid = Some(*uid),
-            AttributeValue::Flags(names) => attributes.flags = read_flags(names),
+            AttributeValue::Flags(names) => attributes.flags = build_flags(names),
             AttributeValue::Rfc822Size(size) => attributes.size = Some(*size),
             AttributeValue::InternalDate(text) => {
                 attributes.internal_date = parse_internal_date(text)
@@ -1029,11 +1033,11 @@ fn read_fetched_attributes(response: &Response<'_>) -> Option<FetchedAttributes>
     Some(attributes)
 }
 
-/// Reads a summary from a `FETCH` answer of [`SUMMARY_QUERY`]; an answer
+/// Finds a summary in a `FETCH` answer of [`SUMMARY_QUERY`]; an answer
 /// without a UID, such as a flag change the server reports on its own, is
 /// skipped.
-fn read_summary(response: &Response<'_>) -> Option<Summary> {
-    let attributes = read_fetched_attributes(response)?;
+fn find_summary(response: &Response<'_>) -> Option<Summary> {
+    let attributes = find_fetched_attributes(response)?;
     Some(Summary {
         uid: attributes.uid?,
         flags: attributes.flags,
@@ -1044,10 +1048,10 @@ fn read_summary(response: &Response<'_>) -> Option<Summary> {
     })
 }
 
-/// Reads a whole message from a `FETCH` answer of [`MESSAGE_QUERY`]; an
+/// Finds a whole message in a `FETCH` answer of [`MESSAGE_QUERY`]; an
 /// answer without a UID or the message is skipped.
-fn read_fetched_message(response: &Response<'_>) -> Option<FetchedMessage> {
-    let attributes = read_fetched_attributes(response)?;
+fn find_fetched_message(response: &Response<'_>) -> Option<FetchedMessage> {
+    let attributes = find_fetched_attributes(response)?;
     Some(FetchedMessage {
         uid: attributes.uid?,
         flags: attributes.flags,
@@ -1055,8 +1059,8 @@ fn read_fetched_message(response: &Response<'_>) -> Option<FetchedMessage> {
     })
 }
 
-/// Reads the system flags of a flag list, in any letter case.
-fn read_flags(names: &[Cow<'_, str>]) -> Flags {
+/// Builds the system flags of a flag list, in any letter case.
+fn build_flags(names: &[Cow<'_, str>]) -> Flags {
     let mut flags = Flags::default();
     for name in names {
         match name.to_ascii_lowercase().as_str() {
@@ -1352,7 +1356,7 @@ mod tests {
         ];
 
         assert_eq!(
-            read_flags(&names),
+            build_flags(&names),
             Flags {
                 seen: true,
                 answered: false,

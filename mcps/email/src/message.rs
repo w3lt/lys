@@ -128,10 +128,10 @@ pub fn parse_message(bytes: &[u8]) -> Option<MessageView> {
 ///
 /// * `message` - The message as `mail-parser` parsed it.
 pub(crate) fn build_message_view(message: &Message<'_>) -> MessageView {
-    let headers = read_headers(message);
+    let headers = build_headers(message);
     let (text, text_from_html) = message
         .text_body()
-        .find_map(read_body_text)
+        .find_map(find_body_text)
         .unwrap_or_default();
     let attachments = message
         .attachments()
@@ -140,14 +140,14 @@ pub(crate) fn build_message_view(message: &Message<'_>) -> MessageView {
         .collect();
     MessageView {
         headers,
-        addresses: read_address_fields(message),
+        addresses: build_address_fields(message),
         text,
         text_from_html,
         attachments,
     }
 }
 
-/// Reads the text of a body part, with whether it was converted from HTML.
+/// Finds the text of a body part, with whether it was converted from HTML.
 ///
 /// # Arguments
 ///
@@ -157,7 +157,7 @@ pub(crate) fn build_message_view(message: &Message<'_>) -> MessageView {
 ///
 /// The text and whether it came from HTML, or `None` when the part is
 /// neither plain text nor HTML.
-fn read_body_text(part: MessagePart<'_>) -> Option<(String, bool)> {
+fn find_body_text(part: MessagePart<'_>) -> Option<(String, bool)> {
     match part.kind() {
         PartKind::Text => Some((part.text().map(Cow::into_owned).unwrap_or_default(), false)),
         PartKind::Html => Some((
@@ -172,8 +172,8 @@ fn read_body_text(part: MessagePart<'_>) -> Option<(String, bool)> {
     }
 }
 
-/// Reads the mailboxes of the address fields.
-fn read_address_fields(message: &Message<'_>) -> AddressFields {
+/// Builds the address fields, each as the list of its mailboxes.
+fn build_address_fields(message: &Message<'_>) -> AddressFields {
     AddressFields {
         from: list_mailboxes(message.from()),
         reply_to: list_mailboxes(message.reply_to()),
@@ -206,12 +206,12 @@ fn list_mailboxes(list: Option<AddressList<'_>>) -> Vec<ParsedMailbox> {
 pub fn parse_headers(bytes: &[u8]) -> Headers {
     MessageParser::default()
         .parse_headers(bytes)
-        .map(|message| read_headers(&message))
+        .map(|message| build_headers(&message))
         .unwrap_or_default()
 }
 
-/// Reads the header fields the tools show.
-fn read_headers(message: &Message<'_>) -> Headers {
+/// Builds the header fields the tools show.
+fn build_headers(message: &Message<'_>) -> Headers {
     let date = message.date();
     Headers {
         from: message.from().map(format_addresses).unwrap_or_default(),

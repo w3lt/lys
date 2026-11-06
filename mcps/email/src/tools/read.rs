@@ -155,10 +155,10 @@ async fn find_conversation_hits(
 ///
 /// * `folders` - The classified folders.
 fn list_conversation_folders(folders: &[Folder]) -> Vec<&Folder> {
-    let (views, filed): (Vec<&Folder>, Vec<&Folder>) = folders
+    let (filed, views): (Vec<&Folder>, Vec<&Folder>) = folders
         .iter()
         .filter(|folder| folder.selectable)
-        .partition(|folder| folder.role == Some(FolderRole::All));
+        .partition(|folder| folder.role.is_none_or(FolderRole::has_own_messages));
     filed.into_iter().chain(views).collect()
 }
 

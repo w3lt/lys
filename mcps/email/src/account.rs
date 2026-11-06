@@ -16,6 +16,7 @@ use std::env;
 use std::fmt;
 
 use serde::Deserialize;
+use serde_json::error::Category;
 
 use crate::failure::Protocol;
 
@@ -245,8 +246,12 @@ pub fn read_account_variable() -> Result<String, AccountProblem> {
 pub fn parse_account_variable(text: &str) -> Result<Account, AccountProblem> {
     let stored: StoredAccount = match serde_json::from_str(text) {
         Ok(stored) => stored,
-        Err(error) if error.is_syntax() || error.is_eof() => return Err(AccountProblem::NotJson),
-        Err(_) => return Err(AccountProblem::NotAnAccount),
+        Err(error) => {
+            return Err(match error.classify() {
+                Category::Syntax | Category::Eof => AccountProblem::NotJson,
+                Category::Data | Category::Io => AccountProblem::NotAnAccount,
+            });
+        }
     };
     if !is_address(&stored.address) {
         return Err(AccountProblem::Rule(

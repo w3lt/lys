@@ -12,7 +12,7 @@ import {
   buildEmailServerSettings,
   createEmailMcpServer,
   EMAIL_ACCOUNT_VARIABLE_NAME,
-  formatEmailAccountVariable
+  buildEmailAccountVariable
 } from "../../../../../../src/modules/mcp/builtIn/email/emailServer"
 import {
   buildEmailAccount,
@@ -30,7 +30,7 @@ const INSTALLED_COMMAND = buildEmailServerCommand(
 /** The variable that holds the account and its password. */
 const EXPECTED_VARIABLE = Object.freeze({
   name: EMAIL_ACCOUNT_VARIABLE_NAME,
-  value: formatEmailAccountVariable(ACCOUNT, SYNTHETIC_EMAIL_PASSWORD)
+  value: buildEmailAccountVariable(ACCOUNT, SYNTHETIC_EMAIL_PASSWORD)
 })
 
 /** Settings the installed server starts with for the account. */
@@ -84,11 +84,11 @@ describe("buildEmailServerCommand", () => {
   })
 })
 
-describe("formatEmailAccountVariable", () => {
+describe("buildEmailAccountVariable", () => {
   it.each(SHARED_ACCOUNT_VARIABLE_CASES)(
     "writes the shared variable of $case as one line of JSON",
     ({ account, password, variable }) => {
-      const value = formatEmailAccountVariable(account, password)
+      const value = buildEmailAccountVariable(account, password)
 
       expect(value).not.toContain("\n")
       expect(JSON.parse(value)).toEqual(variable)

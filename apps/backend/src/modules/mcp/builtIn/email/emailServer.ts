@@ -17,7 +17,7 @@ export const EMAIL_SERVER_NAME = "email" satisfies BuiltInMcpServerName
 
 /**
  * Environment variable the email server reads its account and password
- * from, as the JSON text {@link formatEmailAccountVariable} writes.
+ * from, as the JSON text {@link buildEmailAccountVariable} writes.
  */
 export const EMAIL_ACCOUNT_VARIABLE_NAME = "LYS_EMAIL_ACCOUNT"
 
@@ -129,7 +129,7 @@ export function buildEmailServerSettings(
 ): McpServerSettings {
   const accountVariable: McpEnvironmentVariable = {
     name: EMAIL_ACCOUNT_VARIABLE_NAME,
-    value: formatEmailAccountVariable(account, password)
+    value: buildEmailAccountVariable(account, password)
   }
   return mcpServerSettingsSchema.parse({
     name: EMAIL_SERVER_NAME,
@@ -142,7 +142,7 @@ export function buildEmailServerSettings(
 }
 
 /**
- * Formats the account and its password as the email server reads them.
+ * Builds the text the email server reads its account and password from.
  *
  * @param account - Account the server signs in with.
  * @param password - Its password.
@@ -152,7 +152,7 @@ export function buildEmailServerSettings(
  * character, so the line holds none, and its length stays within the limit
  * of an environment variable's value.
  */
-export function formatEmailAccountVariable(
+export function buildEmailAccountVariable(
   account: EmailAccount,
   password: EmailPassword
 ): string {

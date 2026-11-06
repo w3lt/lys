@@ -13,7 +13,7 @@ import McpServerLogLines from "../../mcpServerLogLines"
 import {
   EMAIL_ACCOUNT_VARIABLE_NAME,
   EMAIL_SERVER_CHECK_SUBCOMMAND,
-  formatEmailAccountVariable,
+  buildEmailAccountVariable,
   type EmailServerCommand
 } from "./emailServer"
 
@@ -278,7 +278,7 @@ export default class EmailAccountChecker {
     const check = EmailServerCheckRun.start({
       serverCommand: this.#dependencies.serverCommand,
       workingDirectory: this.#dependencies.workingDirectory,
-      accountVariableValue: formatEmailAccountVariable(account, password),
+      accountVariableValue: buildEmailAccountVariable(account, password),
       timeoutMilliseconds: this.#dependencies.timeoutMilliseconds
     })
     this.#runningCheck = check

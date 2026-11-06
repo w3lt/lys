@@ -16,7 +16,7 @@ use tokio::sync::Notify;
 use tokio_rustls::TlsAcceptor;
 
 use super::{
-    PASSWORD, USER_NAME, format_internal_date, get_current_timestamp, parse_search_date,
+    PASSWORD, USER_NAME, build_internal_date, get_current_timestamp, parse_search_date,
     read_until_end, run_past_fault,
 };
 
@@ -624,7 +624,7 @@ where
     let session = Session {
         mode: setup.mode,
         secured,
-        capabilities: format_capabilities(setup.mode, secured, &setup.state),
+        capabilities: build_capabilities(setup.mode, secured, &setup.state),
         selected: None,
     };
     if is_greeting_due(setup.mode, secured) {
@@ -906,7 +906,7 @@ fn handle_rename(command: &Command, mailbox: &mut FakeMailbox) -> Vec<u8> {
 fn handle_search(command: &Command, mailbox: &FakeMailbox, selected: Option<&str>) -> Vec<u8> {
     let tag = &command.tag;
     let Some(folder) = selected.and_then(|name| mailbox.find_folder(name)) else {
-        return format_no_mailbox_reply(tag);
+        return build_no_mailbox_reply(tag);
     };
     match list_search_matches(folder, &command.arguments) {
         Ok(uids) => {
@@ -926,7 +926,7 @@ fn handle_search(command: &Command, mailbox: &FakeMailbox, selected: Option<&str
 fn handle_fetch(command: &Command, mailbox: &mut FakeMailbox, selected: Option<&str>) -> Vec<u8> {
     match selected.and_then(|name| mailbox.find_folder_mut(name)) {
         Some(folder) => handle_folder_fetch(folder, &command.arguments, &command.tag),
-        None => format_no_mailbox_reply(&command.tag),
+        None => build_no_mailbox_reply(&command.tag),
     }
 }
 
@@ -934,7 +934,7 @@ fn handle_fetch(command: &Command, mailbox: &mut FakeMailbox, selected: Option<&
 fn handle_store(command: &Command, mailbox: &mut FakeMailbox, selected: Option<&str>) -> Vec<u8> {
     match selected.and_then(|name| mailbox.find_folder_mut(name)) {
         Some(folder) => handle_folder_store(folder, &command.arguments, &command.tag),
-        None => format_no_mailbox_reply(&command.tag),
+        None => build_no_mailbox_reply(&command.tag),
     }
 }
 
@@ -951,7 +951,7 @@ fn handle_expunge(
         .as_deref()
         .and_then(|name| mailbox.find_folder_mut(name))
     else {
-        return format_no_mailbox_reply(tag);
+        return build_no_mailbox_reply(tag);
     };
     let only: Option<Vec<u32>> = if command.by_uid {
         command.arguments.first().map(|set| parse_set(set, folder))
@@ -1026,12 +1026,12 @@ fn handle_append(command: &Command, mailbox: &mut FakeMailbox) -> Vec<u8> {
 }
 
 /// The answer to a command that needs a selected folder while none is.
-fn format_no_mailbox_reply(tag: &str) -> Vec<u8> {
+fn build_no_mailbox_reply(tag: &str) -> Vec<u8> {
     format!("{tag} BAD No mailbox selected\r\n").into_bytes()
 }
 
 /// The capabilities advertised in the state.
-fn format_capabilities(mode: ImapMode, secured: bool, state: &Arc<Mutex<FakeMailbox>>) -> String {
+fn build_capabilities(mode: ImapMode, secured: bool, state: &Arc<Mutex<FakeMailbox>>) -> String {
     let mut capabilities = vec!["IMAP4rev1"];
     let mailbox = state.lock().expect("the state");
     if mailbox.literal_plus {
@@ -1089,7 +1089,7 @@ where
         }
         let mut bytes = vec![0; length];
         reader.read_exact(&mut bytes).await.ok()?;
-        text.push_str(&format_quoted(&String::from_utf8_lossy(&bytes)));
+        text.push_str(&build_quoted_string(&String::from_utf8_lossy(&bytes)));
         literals.push(bytes);
         let mut rest = String::new();
         reader.read_line(&mut rest).await.ok()?;
@@ -1146,8 +1146,8 @@ fn parse_trailing_literal(text: &str) -> Option<(usize, bool)> {
     Some((digits.parse().ok()?, synchronizing))
 }
 
-/// Quotes a string as IMAP writes it.
-fn format_quoted(text: &str) -> String {
+/// Builds the quoted string IMAP writes for a text.
+fn build_quoted_string(text: &str) -> String {
     format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
@@ -1511,7 +1511,7 @@ fn handle_folder_fetch(folder: &mut FakeFolder, arguments: &[String], tag: &str)
         if mark_seen && !folder.messages[position].has_flag("\\Seen") {
             folder.messages[position].flags.push("\\Seen".to_owned());
         }
-        answer.extend_from_slice(&format_fetch_line(position + 1, &parts));
+        answer.extend_from_slice(&build_fetch_line(position + 1, &parts));
     }
     answer.extend_from_slice(format!("{tag} OK Fetch completed\r\n").as_bytes());
     answer
@@ -1540,7 +1540,7 @@ fn build_fetch_part(item: &str, message: &FakeMessage) -> Result<(Vec<u8>, bool)
         "FLAGS" => format!("FLAGS ({})", message.flags.join(" ")),
         "INTERNALDATE" => format!(
             "INTERNALDATE \"{}\"",
-            format_internal_date(message.timestamp)
+            build_internal_date(message.timestamp)
         ),
         "RFC822.SIZE" => format!("RFC822.SIZE {}", message.bytes.len()),
         _ => return Err(format!("Unsupported item {item}")),
@@ -1567,13 +1567,13 @@ fn build_section_content(section: &str, message: &FakeMessage) -> Option<Vec<u8>
     Some(build_header_subset(&message.bytes, &names))
 }
 
-/// Formats one message's FETCH line from its items.
+/// Builds one message's FETCH line from its items.
 ///
 /// # Arguments
 ///
 /// * `number` - The message's sequence number.
 /// * `parts` - The items, in the order the command named them.
-fn format_fetch_line(number: usize, parts: &[Vec<u8>]) -> Vec<u8> {
+fn build_fetch_line(number: usize, parts: &[Vec<u8>]) -> Vec<u8> {
     let mut line = format!("* {number} FETCH (").into_bytes();
     line.extend_from_slice(&parts.join(&b' '));
     line.extend_from_slice(b")\r\n");

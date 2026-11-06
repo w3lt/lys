@@ -475,7 +475,7 @@ mod tests {
     }
 
     /// Writes a server back with the variable's field names.
-    fn format_server_value(server: &MailServer) -> Value {
+    fn build_server_value(server: &MailServer) -> Value {
         let security = match server.security {
             Security::Tls => "tls",
             Security::StartTls => "starttls",
@@ -486,9 +486,9 @@ mod tests {
 
     /// Writes an account back with the variable's field names, to compare
     /// with the variable it was parsed from.
-    fn format_account_value(account: &Account) -> Value {
-        let imap = format_server_value(&account.imap);
-        let smtp = format_server_value(&account.smtp);
+    fn build_account_value(account: &Account) -> Value {
+        let imap = build_server_value(&account.imap);
+        let smtp = build_server_value(&account.smtp);
         json!({
             "address": account.address,
             "displayName": account.display_name,
@@ -721,7 +721,7 @@ mod tests {
         for case in shared {
             let account = parse_account_variable(&case.variable.to_string()).expect(&case.case);
             assert_eq!(
-                format_account_value(&account),
+                build_account_value(&account),
                 case.variable,
                 "{}",
                 case.case

@@ -609,13 +609,13 @@ fn build_compared_fields(fields: &MessageArguments) -> Result<ComparedFields, To
     Ok(ComparedFields {
         recipients,
         subject: fields.subject.trim().to_owned(),
-        body: format_compared_text(&fields.body),
+        body: build_compared_text(&fields.body),
     })
 }
 
-/// Formats a text as it is compared: CR LF line breaks as LF, and no
+/// Builds a text as it is compared: CR LF line breaks as LF, and no
 /// white space at its end, as `read_email` shows a text.
-fn format_compared_text(text: &str) -> String {
+fn build_compared_text(text: &str) -> String {
     text.replace("\r\n", "\n").trim_end().to_owned()
 }
 

@@ -12,7 +12,7 @@ use super::{
 use crate::email_id::EmailId;
 use crate::failure::ToolFailure;
 use crate::folders::{Folder, FolderRole};
-use crate::imap::{Flags, FolderAccess, ImapSession, SearchWord, Summary, format_search_date};
+use crate::imap::{Flags, FolderAccess, ImapSession, SearchWord, Summary, build_search_date};
 use crate::message::{Headers, parse_headers};
 
 /// Messages per page.
@@ -398,7 +398,7 @@ fn build_search_criteria(arguments: &SearchArguments) -> Result<Vec<SearchWord>,
                 ToolFailure::Argument(format!("{name} must be a day as YYYY-MM-DD."))
             })?;
             keys.push(SearchWord::Plain(key.to_owned()));
-            keys.push(SearchWord::Plain(format_search_date(year, month, day)));
+            keys.push(SearchWord::Plain(build_search_date(year, month, day)));
         }
     }
     match arguments.unread {

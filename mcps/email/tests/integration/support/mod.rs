@@ -271,7 +271,7 @@ impl TestMessage {
         }
         text.push_str(&format!(
             "Date: {}\r\nSubject: {}\r\nMessage-ID: <{}>\r\n",
-            format_rfc2822(self.timestamp),
+            build_rfc2822_date(self.timestamp),
             self.subject,
             self.message_id
         ));
@@ -347,8 +347,8 @@ pub fn calculate_epoch_days(year: i64, month: u8, day: u8) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
-/// Formats a timestamp as a `Date` field writes it, in UTC.
-pub fn format_rfc2822(timestamp: i64) -> String {
+/// Builds the text a `Date` field writes for a timestamp, in UTC.
+pub fn build_rfc2822_date(timestamp: i64) -> String {
     let days = timestamp.div_euclid(86_400);
     let seconds = timestamp.rem_euclid(86_400);
     let (year, month, day) = calculate_civil_day(days);
@@ -362,8 +362,8 @@ pub fn format_rfc2822(timestamp: i64) -> String {
     )
 }
 
-/// Formats a timestamp as IMAP's INTERNALDATE writes it, in UTC.
-pub fn format_internal_date(timestamp: i64) -> String {
+/// Builds the text IMAP's INTERNALDATE writes for a timestamp, in UTC.
+pub fn build_internal_date(timestamp: i64) -> String {
     let days = timestamp.div_euclid(86_400);
     let seconds = timestamp.rem_euclid(86_400);
     let (year, month, day) = calculate_civil_day(days);

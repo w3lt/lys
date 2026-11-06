@@ -110,7 +110,7 @@ pub enum AppendFailure {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SearchWord {
     /// Written as it is, such as `SUBJECT`, `UNSEEN`, or a date from
-    /// [`format_search_date`].
+    /// [`build_search_date`].
     Plain(String),
     /// A text to search for: a quoted string when it is ASCII without a
     /// line break, and otherwise a synchronizing literal. A text that is
@@ -449,7 +449,7 @@ impl ImapSession {
         if uids.is_empty() {
             return Ok(Vec::new());
         }
-        let command = format!("UID FETCH {} {SUMMARY_QUERY}", format_uid_set(uids));
+        let command = format!("UID FETCH {} {SUMMARY_QUERY}", build_uid_set(uids));
         self.send_command(&command, find_summary).await
     }
 
@@ -895,11 +895,11 @@ fn build_quoted_folder_name(raw_name: &str) -> Result<String, ImapFailure> {
     if raw_name.contains(['\r', '\n']) {
         return Err(UNREADABLE);
     }
-    Ok(format_quoted_string(raw_name))
+    Ok(build_quoted_string(raw_name))
 }
 
-/// Formats a text without line breaks as a quoted string.
-fn format_quoted_string(text: &str) -> String {
+/// Builds the quoted string of a text without line breaks.
+fn build_quoted_string(text: &str) -> String {
     format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
@@ -910,7 +910,7 @@ fn find_folder_listing(response: &Response<'_>) -> Option<FolderListing> {
     };
     Some(FolderListing {
         raw_name: list.name.to_string(),
-        attributes: list.name_attributes.iter().map(format_attribute).collect(),
+        attributes: list.name_attributes.iter().map(build_attribute).collect(),
         delimiter: list.delimiter.as_deref().map(str::to_owned),
     })
 }
@@ -1147,8 +1147,8 @@ fn is_calendar_date(date: &DateTime) -> bool {
     (normalized.year, normalized.month, normalized.day) == (date.year, date.month, date.day)
 }
 
-/// Formats a `LIST` attribute as the protocol writes it.
-fn format_attribute(attribute: &NameAttribute<'_>) -> String {
+/// Builds the text of a `LIST` attribute as the protocol writes it.
+fn build_attribute(attribute: &NameAttribute<'_>) -> String {
     match attribute {
         NameAttribute::NoInferiors => "\\Noinferiors".to_owned(),
         NameAttribute::NoSelect => "\\Noselect".to_owned(),
@@ -1166,8 +1166,8 @@ fn format_attribute(attribute: &NameAttribute<'_>) -> String {
     }
 }
 
-/// Formats UIDs as one `UID FETCH` set.
-fn format_uid_set(uids: &[u32]) -> String {
+/// Builds one `UID FETCH` set of UIDs.
+fn build_uid_set(uids: &[u32]) -> String {
     uids.iter()
         .map(u32::to_string)
         .collect::<Vec<String>>()
@@ -1200,13 +1200,13 @@ fn build_search_part(word: &SearchWord) -> CommandPart<'_> {
     match word {
         SearchWord::Plain(text) => CommandPart::Written(text.clone()),
         SearchWord::Text(text) if text.is_ascii() && !text.contains(['\r', '\n']) => {
-            CommandPart::Written(format_quoted_string(text))
+            CommandPart::Written(build_quoted_string(text))
         }
         SearchWord::Text(text) => CommandPart::Literal(text.as_bytes()),
     }
 }
 
-/// Formats a calendar date as a search key writes it.
+/// Builds the text a search key writes for a calendar date.
 ///
 /// # Arguments
 ///
@@ -1217,7 +1217,7 @@ fn build_search_part(word: &SearchWord) -> CommandPart<'_> {
 /// # Returns
 ///
 /// The date as `D-Mon-YYYY`.
-pub fn format_search_date(year: u16, month: u8, day: u8) -> String {
+pub fn build_search_date(year: u16, month: u8, day: u8) -> String {
     let month_name = MONTH_NAMES[usize::from(month.clamp(1, 12)) - 1];
     format!("{day}-{month_name}-{year:04}")
 }
@@ -1272,9 +1272,9 @@ mod tests {
                 CommandPart::Literal("Grüße".as_bytes()),
             ]
         );
-        assert_eq!(format_search_date(2026, 11, 2), "2-Nov-2026");
-        assert_eq!(format_search_date(2026, 1, 31), "31-Jan-2026");
-        assert_eq!(format_uid_set(&[3, 1, 2]), "3,1,2");
+        assert_eq!(build_search_date(2026, 11, 2), "2-Nov-2026");
+        assert_eq!(build_search_date(2026, 1, 31), "31-Jan-2026");
+        assert_eq!(build_uid_set(&[3, 1, 2]), "3,1,2");
     }
 
     #[test]

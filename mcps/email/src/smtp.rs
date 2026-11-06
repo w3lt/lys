@@ -156,7 +156,9 @@ impl fmt::Debug for SmtpSession {
 /// lettre's connection takes a stream of its own trait, which lettre gives
 /// only a TCP stream; this wrapper gives it a TLS stream by handing every
 /// read, write, flush, and shutdown to the stream it wraps. Resource
-/// ownership: owns the TLS stream, which closes with it.
+/// ownership: owns the TLS stream, which closes with it. Concurrency model:
+/// single-owner; the lettre connection that runs over it owns it, and one
+/// task polls it.
 #[derive(Debug)]
 struct SmtpTlsStream(TlsStream<TcpStream>);
 

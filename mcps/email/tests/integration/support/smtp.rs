@@ -265,7 +265,8 @@ enum Step {
 
 /// One connection's dialogue, and the mail being sent on it.
 ///
-/// Owned by the task that serves the connection, which runs it once.
+/// Concurrency model: single-owner; the task that serves the connection
+/// owns it and runs it once.
 struct Session<S> {
     /// The connection.
     reader: BufReader<S>,

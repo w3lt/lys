@@ -149,6 +149,9 @@ impl FakeFolder {
 }
 
 /// The folders, the messages, and what the fake has seen.
+///
+/// Concurrency model: single-owner; the fake retains it behind one mutex,
+/// and only the holder of the lock reads or changes it.
 #[derive(Debug)]
 pub struct FakeMailbox {
     /// The folders, in listing order.
@@ -439,6 +442,9 @@ impl FakeImapServer {
 }
 
 /// What every connection of the fake shares.
+///
+/// Concurrency model: single-owner; each connection's task owns its own
+/// copy, and the copies reach the mailbox only through its mutex.
 #[derive(Clone)]
 struct ConnectionSetup {
     /// How the fake protects its connections.
@@ -498,8 +504,8 @@ async fn handle_connection(stream: TcpStream, setup: ConnectionSetup) {
 /// One session over one connection: what it knows about the connection,
 /// and the folder it has open.
 ///
-/// Owned by the task that serves the connection, which handles its
-/// commands one at a time.
+/// Concurrency model: single-owner; the task that serves the connection
+/// owns it and handles its commands one at a time.
 struct Session {
     /// How the fake protects its connections.
     mode: ImapMode,
@@ -1127,7 +1133,8 @@ fn parse_tokens(text: &str) -> Vec<String> {
 
 /// What [`tokenize`] has read of a command so far.
 ///
-/// Owned by one [`tokenize`] call, which feeds it one character at a time.
+/// Concurrency model: single-owner; one [`tokenize`] call owns it and
+/// feeds it one character at a time.
 #[derive(Default)]
 struct Tokenizer {
     /// The tokens ended so far.
@@ -1323,6 +1330,9 @@ fn list_search_matches(folder: &FakeFolder, keys: &[String]) -> Result<Vec<u32>,
 }
 
 /// A position in the keys of a SEARCH command.
+///
+/// Concurrency model: single-owner; one [`list_search_matches`] call owns
+/// it for each message and moves it forward one key at a time.
 struct SearchKeys<'a> {
     /// The keys.
     keys: &'a [String],

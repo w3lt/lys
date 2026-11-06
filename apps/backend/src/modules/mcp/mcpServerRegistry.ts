@@ -313,16 +313,22 @@ export default class McpServerRegistry {
   public openServerAgain(serverName: string): McpServerReconnection {
     const entry = this.#entries.get(serverName)
     if (entry === undefined) return "not-found"
-    if (entry.run.status !== "running") return "off"
-    const { settings } = entry.run
-    this.#stopSession(entry.run.session, "reconnected")
-    const run: ServerRun = Object.freeze({
-      status: "running",
-      settings,
-      session: this.#startSession(settings)
-    })
-    this.#entries.set(serverName, Object.freeze({ ...entry, run }))
-    return "reconnecting"
+    switch (entry.run.status) {
+      case "running": {
+        const { settings } = entry.run
+        this.#stopSession(entry.run.session, "reconnected")
+        const run: ServerRun = Object.freeze({
+          status: "running",
+          settings,
+          session: this.#startSession(settings)
+        })
+        this.#entries.set(serverName, Object.freeze({ ...entry, run }))
+        return "reconnecting"
+      }
+      case "off":
+      case "unusable":
+        return "off"
+    }
   }
 
   /**
@@ -357,9 +363,7 @@ export default class McpServerRegistry {
   public listToolDefinitions(): readonly McpToolDefinition[] {
     return Object.freeze(
       [...this.#entries.values()].flatMap((entry) =>
-        entry.run.status === "running"
-          ? entry.run.session.listToolDefinitions()
-          : []
+        listRunToolDefinitions(entry.run)
       )
     )
   }
@@ -379,20 +383,13 @@ export default class McpServerRegistry {
     const entry =
       serverName === undefined ? undefined : this.#entries.get(serverName)
     if (entry === undefined) return UNKNOWN_TOOL
-    if (entry.run.status !== "running") return NOT_CONNECTED_TOOL
-    const lookup = entry.run.session.findTool(toolName)
-    if (lookup.status !== "found") return lookup
-    const { definition } = lookup
-    return Object.freeze({
-      status: "found",
-      tool: Object.freeze({
-        definition,
-        sendToolCall: (
-          callArguments: McpToolCallArguments,
-          abortSignal: AbortSignal
-        ) => this.#sendToolCall(definition, callArguments, abortSignal)
-      })
-    })
+    switch (entry.run.status) {
+      case "running":
+        return this.#findSessionTool(entry.run.session, toolName)
+      case "off":
+      case "unusable":
+        return NOT_CONNECTED_TOOL
+    }
   }
 
   /**
@@ -406,8 +403,20 @@ export default class McpServerRegistry {
   public async close(): Promise<void> {
     this.#isClosed = true
     for (const entry of this.#entries.values())
-      if (entry.run.status === "running")
-        void entry.run.session.stop("shut-down")
+      switch (entry.run.status) {
+        case "running":
+          void entry.run.session.stop("shut-down")
+          break
+        case "off":
+        case "unusable":
+          break
+        default: {
+          const unhandledRun: never = entry.run
+          throw new TypeError(
+            `Unhandled MCP server run: ${JSON.stringify(unhandledRun)}`
+          )
+        }
+      }
     this.#entries = new Map()
     await this.#settingsReads
     await this.#waitForNoTaskLeft()
@@ -461,6 +470,12 @@ export default class McpServerRegistry {
         this.#settingsStatus = "unreadable"
         this.#dependencies.reportEvent({ kind: "settings-unreadable" })
         return
+      default: {
+        const unhandledRead: never = read
+        throw new TypeError(
+          `Unhandled MCP settings read: ${JSON.stringify(unhandledRead)}`
+        )
+      }
     }
   }
 
@@ -485,17 +500,9 @@ export default class McpServerRegistry {
     const plannedByName = new Map(
       plan.servers.map((server) => [server.name, server])
     )
-    for (const [serverName, entry] of previousEntries) {
-      if (entry.run.status !== "running" || keptEntries.has(serverName))
-        continue
-      const reason = findStopReason(entry, plannedByName.get(serverName))
-      this.#stopSession(entry.run.session, reason)
-      this.#dependencies.reportEvent({
-        kind: "server-stopped",
-        serverName,
-        reason
-      })
-    }
+    for (const [serverName, entry] of previousEntries)
+      if (!keptEntries.has(serverName))
+        this.#stopDroppedEntry(entry, plannedByName.get(serverName))
     this.#entries = new Map()
     for (const server of plan.servers)
       this.#entries.set(
@@ -512,6 +519,38 @@ export default class McpServerRegistry {
         kind: "built-in-name-taken",
         serverName
       })
+  }
+
+  /**
+   * Stops the session of a server an apply does not keep, when it runs
+   * one, and reports why.
+   *
+   * @param entry - The server's entry before the apply.
+   * @param server - Its plan from the group just read, if the group names
+   * it.
+   */
+  #stopDroppedEntry(entry: ServerEntry, server: ServerPlan | undefined): void {
+    switch (entry.run.status) {
+      case "running": {
+        const reason = findStopReason(entry, server)
+        this.#stopSession(entry.run.session, reason)
+        this.#dependencies.reportEvent({
+          kind: "server-stopped",
+          serverName: entry.name,
+          reason
+        })
+        return
+      }
+      case "off":
+      case "unusable":
+        return
+      default: {
+        const unhandledRun: never = entry.run
+        throw new TypeError(
+          `Unhandled MCP server run: ${JSON.stringify(unhandledRun)}`
+        )
+      }
+    }
   }
 
   /**
@@ -542,10 +581,7 @@ export default class McpServerRegistry {
         return Object.freeze({ name, transport, isBuiltIn, run: OFF_RUN })
       case "unusable": {
         const { reason } = server.run
-        if (
-          previousEntry?.run.status !== "unusable" ||
-          previousEntry.run.reason !== reason
-        )
+        if (!isUnusableFor(previousEntry, reason))
           this.#dependencies.reportEvent({
             kind: "built-in-unusable",
             serverName: name,
@@ -622,16 +658,55 @@ export default class McpServerRegistry {
     abortSignal: AbortSignal
   ): Promise<McpToolCallOutcome> {
     const entry = this.#entries.get(definition.server)
-    if (entry?.run.status === "running")
-      return entry.run.session.sendToolCall(
-        definition,
-        callArguments,
-        abortSignal
-      )
-    this.#dependencies.reportEvent(
-      buildCallNotSentEvent(definition, "server-not-connected")
-    )
-    return Promise.resolve(buildServerNotConnectedOutcome(definition))
+    switch (entry?.run.status) {
+      case "running":
+        return entry.run.session.sendToolCall(
+          definition,
+          callArguments,
+          abortSignal
+        )
+      case "off":
+      case "unusable":
+      case undefined:
+        this.#dependencies.reportEvent(
+          buildCallNotSentEvent(definition, "server-not-connected")
+        )
+        return Promise.resolve(buildServerNotConnectedOutcome(definition))
+    }
+  }
+
+  /**
+   * Finds one MCP tool a request offers on its server's running session.
+   *
+   * @param session - The server's session.
+   * @param toolName - Model-facing name of the tool.
+   * @returns `found` when the session is connected and lists the tool,
+   * whose calls run on the server's session as it is when each call runs;
+   * otherwise the session's answer.
+   */
+  #findSessionTool(
+    session: McpServerSession,
+    toolName: string
+  ): McpTurnToolLookup {
+    const lookup = session.findTool(toolName)
+    switch (lookup.status) {
+      case "found": {
+        const { definition } = lookup
+        return Object.freeze({
+          status: "found",
+          tool: Object.freeze({
+            definition,
+            sendToolCall: (
+              callArguments: McpToolCallArguments,
+              abortSignal: AbortSignal
+            ) => this.#sendToolCall(definition, callArguments, abortSignal)
+          })
+        })
+      }
+      case "not-connected":
+      case "unknown":
+        return lookup
+    }
   }
 }
 
@@ -789,11 +864,56 @@ function findUnchangedEntry(
  * settings; false when either is off or unable to start.
  */
 function hasEqualSettings(run: ServerRun, plannedRun: PlannedRun): boolean {
-  return (
-    run.status === "running" &&
-    plannedRun.status === "start" &&
-    isDeepStrictEqual(run.settings, plannedRun.settings)
-  )
+  switch (run.status) {
+    case "running":
+      return isStartWithSettings(plannedRun, run.settings)
+    case "off":
+    case "unusable":
+      return false
+  }
+}
+
+/**
+ * Answers whether a server's plan starts it with given settings.
+ *
+ * @param plannedRun - What its plan from the group just read is to do.
+ * @param settings - Settings its running session opens.
+ * @returns True when the plan is a start with deeply equal settings; false
+ * when it keeps the server off or reports that it cannot start.
+ */
+function isStartWithSettings(
+  plannedRun: PlannedRun,
+  settings: McpServerSettings
+): boolean {
+  switch (plannedRun.status) {
+    case "start":
+      return isDeepStrictEqual(settings, plannedRun.settings)
+    case "off":
+    case "unusable":
+      return false
+  }
+}
+
+/**
+ * Answers whether a server's entry before an apply is unable to start for
+ * a reason, so that reason was already reported.
+ *
+ * @param entry - The entry, if the server was applied.
+ * @param reason - Why the built-in server cannot start now.
+ * @returns True when the entry is unable to start for the same reason.
+ */
+function isUnusableFor(
+  entry: ServerEntry | undefined,
+  reason: BuiltInMcpServerProblem
+): boolean {
+  switch (entry?.run.status) {
+    case "unusable":
+      return entry.run.reason === reason
+    case "running":
+    case "off":
+    case undefined:
+      return false
+  }
 }
 
 /**
@@ -837,6 +957,23 @@ function findStopReason(
     case "start":
     case "unusable":
       return "changed"
+  }
+}
+
+/**
+ * Lists the tools a server offers in what it does now.
+ *
+ * @param run - What the server does now.
+ * @returns Its session's tools, in their order; none while it is switched
+ * off or unable to start.
+ */
+function listRunToolDefinitions(run: ServerRun): readonly McpToolDefinition[] {
+  switch (run.status) {
+    case "running":
+      return run.session.listToolDefinitions()
+    case "off":
+    case "unusable":
+      return []
   }
 }
 

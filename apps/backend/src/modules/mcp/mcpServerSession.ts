@@ -425,14 +425,26 @@ export default class McpServerSession {
    */
   #handleConnectionEnded(): void {
     this.#hasConnectionEnded = true
-    if (this.#stopReason !== undefined || this.#state.status !== "connected")
-      return
-    this.#closeConnection(this.#state.connection)
-    this.#dependencies.reportEvent({
-      kind: "connection-closed",
-      serverName: this.#settings.name
-    })
-    this.#state = CLOSED_STATE
+    if (this.#stopReason !== undefined) return
+    switch (this.#state.status) {
+      case "connected":
+        this.#closeConnection(this.#state.connection)
+        this.#dependencies.reportEvent({
+          kind: "connection-closed",
+          serverName: this.#settings.name
+        })
+        this.#state = CLOSED_STATE
+        return
+      case "connecting":
+      case "failed":
+        return
+      default: {
+        const unhandledState: never = this.#state
+        throw new TypeError(
+          `Unhandled MCP session state: ${JSON.stringify(unhandledState)}`
+        )
+      }
+    }
   }
 
   /**

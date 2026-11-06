@@ -241,7 +241,7 @@ impl TryFrom<StoredMailServer> for MailServer {
         let host = MailHost::new(stored.host).ok_or(HOST_RULE)?;
         let port = parse_port(stored.port).ok_or(PORT_RULE)?;
         let security = Security::parse(&stored.security).ok_or(SECURITY_RULE)?;
-        if security == Security::Plain && !host.is_loopback() {
+        if !security.is_allowed_for(&host) {
             return Err(PLAIN_RULE);
         }
 
@@ -280,6 +280,16 @@ impl Security {
             "starttls" => Some(Self::StartTls),
             "plain" => Some(Self::Plain),
             _ => None,
+        }
+    }
+
+    /// Reports whether a mail server's host may be reached with this
+    /// security: TLS and STARTTLS reach any host, a connection without TLS
+    /// only a loopback host.
+    fn is_allowed_for(self, host: &MailHost) -> bool {
+        match self {
+            Self::Tls | Self::StartTls => true,
+            Self::Plain => host.is_loopback(),
         }
     }
 }

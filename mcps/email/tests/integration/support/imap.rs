@@ -60,7 +60,10 @@ pub enum ImapFault {
 impl ImapFault {
     /// Whether the fault strikes before the command is handled.
     fn is_before_handling(self) -> bool {
-        matches!(self, Self::Stall | Self::Close)
+        match self {
+            Self::Stall | Self::Close => true,
+            Self::StallAfterHandling | Self::CloseAfterHandling => false,
+        }
     }
 }
 
@@ -624,11 +627,29 @@ where
         capabilities: format_capabilities(setup.mode, secured, &setup.state),
         selected: None,
     };
-    if !secured || setup.mode == ImapMode::Tls {
+    if is_greeting_due(setup.mode, secured) {
         let greeting = format!("* OK [CAPABILITY {}] Fake ready\r\n", session.capabilities);
         send_line(reader, &greeting).await;
     }
     session
+}
+
+/// Whether the fake greets on a connection: on one with TLS from the
+/// first byte, and on any plain one; not after STARTTLS upgraded it.
+///
+/// # Arguments
+///
+/// * `mode` - How the fake protects its connections.
+/// * `secured` - Whether TLS protects the connection already.
+fn is_greeting_due(mode: ImapMode, secured: bool) -> bool {
+    match mode {
+        ImapMode::Tls => true,
+        ImapMode::StartTls
+        | ImapMode::StartTlsRefused
+        | ImapMode::Plain
+        | ImapMode::Silent
+        | ImapMode::Garbage => !secured,
+    }
 }
 
 /// Fails a command: never answers it, recording each line the client sends
@@ -646,8 +667,9 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     setup.faulted.notify_one();
-    if matches!(fault, ImapFault::Close | ImapFault::CloseAfterHandling) {
-        return;
+    match fault {
+        ImapFault::Close | ImapFault::CloseAfterHandling => return,
+        ImapFault::Stall | ImapFault::StallAfterHandling => {}
     }
     let mut line = String::new();
     while reader
@@ -734,10 +756,19 @@ impl Session {
 /// Answers STARTTLS: an upgrade while the fake offers it on a plain
 /// connection, else a refusal.
 fn handle_starttls(tag: &str, mode: ImapMode, secured: bool) -> Step {
-    if mode == ImapMode::StartTls && !secured {
-        return Step::StartTls(format!("{tag} OK Begin TLS negotiation now\r\n"));
+    match mode {
+        ImapMode::StartTls if !secured => {
+            Step::StartTls(format!("{tag} OK Begin TLS negotiation now\r\n"))
+        }
+        ImapMode::StartTls
+        | ImapMode::Tls
+        | ImapMode::StartTlsRefused
+        | ImapMode::Plain
+        | ImapMode::Silent
+        | ImapMode::Garbage => {
+            Step::Answer(format!("{tag} NO STARTTLS is not available\r\n").into_bytes())
+        }
     }
-    Step::Answer(format!("{tag} NO STARTTLS is not available\r\n").into_bytes())
 }
 
 /// Answers LOGIN: accepted for the test account's user name and password.
@@ -1009,7 +1040,11 @@ fn format_capabilities(mode: ImapMode, secured: bool, state: &Arc<Mutex<FakeMail
     if mailbox.uid_plus {
         capabilities.push("UIDPLUS");
     }
-    if matches!(mode, ImapMode::StartTls | ImapMode::StartTlsRefused) && !secured {
+    let offers_starttls = match mode {
+        ImapMode::StartTls | ImapMode::StartTlsRefused => !secured,
+        ImapMode::Tls | ImapMode::Plain | ImapMode::Silent | ImapMode::Garbage => false,
+    };
+    if offers_starttls {
         capabilities.push("STARTTLS");
     }
     capabilities.join(" ")

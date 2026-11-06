@@ -310,7 +310,7 @@ where
     /// Runs the dialogue until QUIT, the end of the stream, or an accepted
     /// STARTTLS, which hands the stream back for the upgrade.
     async fn handle_commands(mut self) -> Option<S> {
-        if !self.secured || self.mode == SmtpMode::Tls {
+        if self.is_greeting_due() {
             send_line(&mut self.reader, "220 localhost ESMTP fake\r\n").await;
         }
         loop {
@@ -385,7 +385,21 @@ where
 
     /// Whether the fake offers STARTTLS on this connection.
     fn is_starttls_offered(&self) -> bool {
-        self.mode == SmtpMode::StartTls && !self.secured
+        match self.mode {
+            SmtpMode::StartTls => !self.secured,
+            SmtpMode::Tls | SmtpMode::StartTlsRefused | SmtpMode::Plain | SmtpMode::Silent => false,
+        }
+    }
+
+    /// Whether the fake greets on this connection: on one with TLS from the
+    /// first byte, and on any plain one; not after STARTTLS upgraded it.
+    fn is_greeting_due(&self) -> bool {
+        match self.mode {
+            SmtpMode::Tls => true,
+            SmtpMode::StartTls | SmtpMode::StartTlsRefused | SmtpMode::Plain | SmtpMode::Silent => {
+                !self.secured
+            }
+        }
     }
 
     /// Whether the fake withholds the AUTH mechanism.

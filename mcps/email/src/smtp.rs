@@ -103,6 +103,17 @@ pub enum SendStage {
     Accepted,
 }
 
+impl SendStage {
+    /// Whether the whole message was handed over, so the server may have
+    /// it.
+    fn is_handed_over(self) -> bool {
+        match self {
+            Self::HandedOver | Self::Accepted => true,
+            Self::NotHandedOver => false,
+        }
+    }
+}
+
 /// How far one send has come: moved forward by the send as it hands the
 /// message over and the server accepts it, and read by the caller that may
 /// stop the send, to tell whether the message may have gone out.
@@ -226,8 +237,9 @@ pub(crate) async fn open_smtp_session(
     let server = &account.smtp;
     let stream = open_smtp_stream(server, trust).await?;
     let mut connection = start_smtp_dialogue(stream).await?;
-    if server.security == Security::StartTls {
-        start_tls(&mut connection, server, trust).await?;
+    match server.security {
+        Security::StartTls => start_tls(&mut connection, server, trust).await?,
+        Security::Tls | Security::Plain => {}
     }
     send_sign_in(&mut connection, account).await?;
     Ok(SmtpSession { connection })
@@ -411,7 +423,7 @@ impl SmtpSession {
             None
         }));
         let answer = timeout(MESSAGE_LIMIT, self.connection.message_iter(content)).await;
-        let handed_over = progress.stage() == SendStage::HandedOver;
+        let handed_over = progress.stage().is_handed_over();
         match answer {
             Ok(Ok(_)) => {
                 progress.update_stage(SendStage::Accepted);

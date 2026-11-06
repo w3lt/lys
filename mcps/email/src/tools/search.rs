@@ -138,7 +138,9 @@ fn list_search_folders(folders: &[Folder], name: Option<&str>) -> Result<Vec<Fol
     let Some(name) = name else {
         return Ok(folders
             .iter()
-            .filter(|folder| folder.selectable && folder.role != Some(FolderRole::All))
+            .filter(|folder| {
+                folder.selectable && folder.role.is_none_or(FolderRole::has_own_messages)
+            })
             .cloned()
             .collect());
     };

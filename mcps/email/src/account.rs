@@ -306,7 +306,7 @@ fn parse_server(stored: StoredServer, protocol: Protocol) -> Result<MailServer, 
             Protocol::Smtp => "smtp.security is tls, starttls, or plain",
         }));
     };
-    if security == Security::Plain && !is_loopback_host(&stored.host) {
+    if !is_security_allowed(security, &stored.host) {
         return Err(AccountProblem::Rule(match protocol {
             Protocol::Imap => "imap.security may be plain only for localhost, 127.0.0.1, or [::1]",
             Protocol::Smtp => "smtp.security may be plain only for localhost, 127.0.0.1, or [::1]",
@@ -380,6 +380,15 @@ fn is_account_text(value: &str, maximum_length: usize) -> bool {
 /// Whether the text starts or ends with white space.
 fn has_edge_white_space(value: &str) -> bool {
     value.starts_with(char::is_whitespace) || value.ends_with(char::is_whitespace)
+}
+
+/// Whether a server's host may be reached with its security: TLS and
+/// STARTTLS reach any host, a connection without TLS only a loopback host.
+fn is_security_allowed(security: Security, host: &str) -> bool {
+    match security {
+        Security::Tls | Security::StartTls => true,
+        Security::Plain => is_loopback_host(host),
+    }
 }
 
 /// Whether the text is a host name: labels of ASCII letters, digits, and

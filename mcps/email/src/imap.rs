@@ -122,7 +122,10 @@ impl SearchWord {
     /// Whether the word is a text that is not ASCII, which needs the
     /// search to name its character set.
     fn is_text_beyond_ascii(&self) -> bool {
-        matches!(self, Self::Text(text) if !text.is_ascii())
+        match self {
+            Self::Text(text) => !text.is_ascii(),
+            Self::Plain(_) => false,
+        }
     }
 }
 
@@ -666,13 +669,23 @@ async fn run_exchange<T>(
     let outcome = timeout(EXCHANGE_LIMIT, exchange)
         .await
         .unwrap_or(Err(TIMED_OUT));
-    if let Err(ImapFailure::Connection(
-        failure @ (ConnectionFailure::Lost | ConnectionFailure::TimedOut),
-    )) = outcome
-    {
+    if let Some(failure) = find_session_end(&outcome) {
         *ended_by = Some(failure);
     }
     outcome
+}
+
+/// Finds what ends a session in an exchange's outcome: a lost connection
+/// or the time limit. A refusal or an unreadable answer leaves the session
+/// open.
+fn find_session_end<T>(outcome: &Result<T, ImapFailure>) -> Option<ConnectionFailure> {
+    match outcome {
+        Err(ImapFailure::Connection(
+            failure @ (ConnectionFailure::Lost | ConnectionFailure::TimedOut),
+        )) => Some(*failure),
+        Err(ImapFailure::Connection(ConnectionFailure::Unreadable) | ImapFailure::Refused(_))
+        | Ok(_) => None,
+    }
 }
 
 /// Sends a command, each literal as a synchronizing literal: the line up
@@ -981,7 +994,10 @@ fn find_uid_plus_support(response: &Response<'_>) -> Option<bool> {
 
 /// Whether a capability is UIDPLUS, in any letter case.
 fn is_uid_plus(capability: &Capability<'_>) -> bool {
-    matches!(capability, Capability::Atom(name) if name.eq_ignore_ascii_case("UIDPLUS"))
+    match capability {
+        Capability::Atom(name) => name.eq_ignore_ascii_case("UIDPLUS"),
+        Capability::Imap4rev1 | Capability::Auth(_) => false,
+    }
 }
 
 /// The attributes of one `FETCH` answer that the tools use.

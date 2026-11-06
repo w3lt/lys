@@ -293,8 +293,9 @@ fn find_left_out_fields(
     let mut sentences = Vec::new();
     if arguments.to.is_empty() && arguments.cc.is_empty() && arguments.bcc.is_empty() {
         sentences.push(format!("A {kind} needs its recipients in to, cc, or bcc."));
-        if usage == OriginalUse::Reply {
-            sentences.extend(format_reply_mailboxes(original));
+        match usage {
+            OriginalUse::Reply => sentences.extend(format_reply_mailboxes(original)),
+            OriginalUse::Forward => {}
         }
     }
     if arguments.subject.trim().is_empty() {

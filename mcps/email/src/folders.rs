@@ -51,6 +51,18 @@ impl FolderRole {
         }
     }
 
+    /// Whether a folder of the role holds messages of its own, which a
+    /// search of every folder reads; an All Mail view shows the messages
+    /// the other folders hold.
+    pub fn has_own_messages(self) -> bool {
+        match self {
+            Self::Inbox | Self::Sent | Self::Drafts | Self::Trash | Self::Junk | Self::Archive => {
+                true
+            }
+            Self::All => false,
+        }
+    }
+
     /// Finds the role a `LIST` attribute declares.
     fn find_for_attribute(attribute: &str) -> Option<Self> {
         match attribute.to_ascii_lowercase().as_str() {

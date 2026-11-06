@@ -108,27 +108,28 @@ async fn get_conversation_text(stack: &Stack, id: &str) -> String {
         .text
 }
 
-/// Searches INBOX for every message and shows one page.
+/// Gets one page of the search for every message in INBOX.
 ///
 /// # Arguments
 ///
 /// * `stack` - The running fakes and the tools' context.
 /// * `page` - The page, or `None` for the first.
-async fn search_inbox(stack: &Stack, page: Option<u32>) -> String {
+async fn get_inbox_page(stack: &Stack, page: Option<u32>) -> String {
     let arguments = SearchArguments {
         page,
         ..SearchArguments::default()
     };
-    search_inbox_with(stack, arguments).await
+    get_inbox_hits(stack, arguments).await
 }
 
-/// Searches INBOX with the arguments, whatever folder they name.
+/// Gets the hits of a search of INBOX with the arguments, whatever folder
+/// they name.
 ///
 /// # Arguments
 ///
 /// * `stack` - The running fakes and the tools' context.
 /// * `arguments` - The search's other arguments.
-async fn search_inbox_with(stack: &Stack, arguments: SearchArguments) -> String {
+async fn get_inbox_hits(stack: &Stack, arguments: SearchArguments) -> String {
     let arguments = SearchArguments {
         folder: Some("INBOX".to_owned()),
         ..arguments
@@ -247,7 +248,7 @@ async fn lists_the_last_page_of_one_folder_and_refuses_a_page_past_it() {
         ..SearchArguments::default()
     };
 
-    let second = search_inbox(&stack, Some(2)).await;
+    let second = get_inbox_page(&stack, Some(2)).await;
     let third = run_search_emails(&stack.context, past_the_end).await;
 
     assert!(
@@ -274,8 +275,8 @@ async fn searches_a_folder_without_marking_anything_and_signs_out_after_each_cal
         ..SearchArguments::default()
     };
 
-    search_inbox(&stack, None).await;
-    search_inbox(&stack, Some(2)).await;
+    get_inbox_page(&stack, None).await;
+    get_inbox_page(&stack, Some(2)).await;
     let refused = run_search_emails(&stack.context, past_the_end).await;
 
     assert!(refused.is_err(), "{refused:?}");
@@ -379,8 +380,8 @@ async fn lists_only_the_newest_200_hits_of_a_folder_and_says_so() {
     }
     let stack = start_stack(mailbox, false).await;
 
-    let first = search_inbox(&stack, None).await;
-    let last = search_inbox(&stack, Some(10)).await;
+    let first = get_inbox_page(&stack, None).await;
+    let last = get_inbox_page(&stack, Some(10)).await;
 
     assert!(
         first.starts_with("Page 1 of 10: 200 messages match, newest first. Ask for page 2 to see the next ones.\nMore than 200 messages match in INBOX; only the newest 200 of each are listed. Narrow the search to see others.\n\nid 205.1001.INBOX\n"),
@@ -403,8 +404,8 @@ async fn narrows_a_search_by_flags() {
         ..SearchArguments::default()
     };
 
-    let read = search_inbox_with(&stack, read_only).await;
-    let flagged = search_inbox_with(&stack, flagged_only).await;
+    let read = get_inbox_hits(&stack, read_only).await;
+    let flagged = get_inbox_hits(&stack, flagged_only).await;
 
     assert_eq!(calculate_hit_count(&read), 1);
     assert!(read.contains("subject Message 3\n"), "{read}");
@@ -433,8 +434,8 @@ async fn narrows_a_search_by_fields_and_dates() {
         ..SearchArguments::default()
     };
 
-    let by_fields = search_inbox_with(&stack, fields).await;
-    let by_dates = search_inbox_with(&stack, dates).await;
+    let by_fields = get_inbox_hits(&stack, fields).await;
+    let by_dates = get_inbox_hits(&stack, dates).await;
 
     assert_eq!(calculate_hit_count(&by_fields), 11);
     assert!(
@@ -478,8 +479,8 @@ async fn narrows_a_search_by_a_subject_that_is_not_ascii_or_finds_nothing() {
         ..SearchArguments::default()
     };
 
-    let non_ascii = search_inbox_with(&stack, subject).await;
-    let none = search_inbox_with(&stack, unmatched_text).await;
+    let non_ascii = get_inbox_hits(&stack, subject).await;
+    let none = get_inbox_hits(&stack, unmatched_text).await;
 
     assert_eq!(calculate_hit_count(&non_ascii), 1);
     assert!(
@@ -567,7 +568,7 @@ async fn searches_for_text_beyond_ascii_when_the_server_sends_untagged_data_befo
         ..SearchArguments::default()
     };
 
-    let found = search_inbox_with(&stack, arguments).await;
+    let found = get_inbox_hits(&stack, arguments).await;
 
     assert_eq!(calculate_hit_count(&found), 1, "{found}");
     assert!(found.contains("subject Grüße aus Wien\n"), "{found}");

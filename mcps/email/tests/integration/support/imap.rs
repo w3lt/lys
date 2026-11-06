@@ -452,8 +452,9 @@ struct ConnectionSetup {
 }
 
 impl ConnectionSetup {
-    /// Records a line the client sent, in the order the fake read it.
-    fn record_line(&self, line: String) {
+    /// Adds a line the client sent to the fake's commands, in the order
+    /// the fake read it.
+    fn add_command_line(&self, line: String) {
         self.state.lock().expect("the state").commands.push(line);
     }
 }
@@ -551,7 +552,7 @@ where
     let mut session = start_session(&mut reader, setup, secured).await;
     loop {
         let (text, literals) = read_command(&mut reader, &setup.state).await?;
-        setup.record_line(text.clone());
+        setup.add_command_line(text.clone());
         let Some(command) = parse_command(&text, literals) else {
             continue;
         };
@@ -648,7 +649,7 @@ where
         .await
         .is_ok_and(|count| count > 0)
     {
-        setup.record_line(line.trim_end_matches(['\r', '\n']).to_owned());
+        setup.add_command_line(line.trim_end_matches(['\r', '\n']).to_owned());
         line.clear();
     }
 }

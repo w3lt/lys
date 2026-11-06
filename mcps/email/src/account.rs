@@ -515,13 +515,13 @@ mod tests {
         }
     }
 
-    /// Judges a shared group's account as the server would.
+    /// Calculates whether the server accepts a shared group's account.
     ///
     /// # Returns
     ///
     /// Whether the server accepts the account, or `None` for a group whose
     /// case is not about the account.
-    fn judge_shared_group(shared: &SharedGroup) -> Option<bool> {
+    fn calculate_shared_group_acceptance(shared: &SharedGroup) -> Option<bool> {
         let variable = build_group_variable(&shared.group)?;
         Some(parse_account_variable(&variable).is_ok())
     }
@@ -728,7 +728,8 @@ mod tests {
         let judged: Vec<(&str, bool, bool)> = shared
             .iter()
             .filter_map(|case| {
-                judge_shared_group(case).map(|parsed| (case.case.as_str(), case.accepted, parsed))
+                calculate_shared_group_acceptance(case)
+                    .map(|parsed| (case.case.as_str(), case.accepted, parsed))
             })
             .collect();
 

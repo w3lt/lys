@@ -377,7 +377,7 @@ impl ImapSession {
     /// The count, or why it is not known; an answer without the count is
     /// unreadable.
     pub async fn get_message_count(&mut self, raw_name: &str) -> Result<u32, ImapFailure> {
-        let command = format!("STATUS {} (MESSAGES)", quote_folder_name(raw_name)?);
+        let command = format!("STATUS {} (MESSAGES)", build_quoted_folder_name(raw_name)?);
         let counts = self.send_command(&command, find_message_count).await?;
         counts.last().copied().ok_or(UNREADABLE)
     }
@@ -403,7 +403,7 @@ impl ImapSession {
             FolderAccess::Read => "EXAMINE",
             FolderAccess::Change => "SELECT",
         };
-        let command = format!("{verb} {}", quote_folder_name(raw_name)?);
+        let command = format!("{verb} {}", build_quoted_folder_name(raw_name)?);
         let facts = self.send_command(&command, find_selection_fact).await?;
         build_selected_folder(&facts)
     }
@@ -487,7 +487,7 @@ impl ImapSession {
         flags: &str,
         bytes: &[u8],
     ) -> Result<(), AppendFailure> {
-        let name = quote_folder_name(raw_name).map_err(AppendFailure::Failed)?;
+        let name = build_quoted_folder_name(raw_name).map_err(AppendFailure::Failed)?;
         let parts = [
             CommandPart::Written(format!("APPEND {name} {flags}")),
             CommandPart::Literal(bytes),
@@ -543,7 +543,7 @@ impl ImapSession {
     ///
     /// * `raw_name` - The new folder's name as the server expects it.
     pub async fn create_folder(&mut self, raw_name: &str) -> Result<(), ImapFailure> {
-        let command = format!("CREATE {}", quote_folder_name(raw_name)?);
+        let command = format!("CREATE {}", build_quoted_folder_name(raw_name)?);
         self.run_status_command(&command).await
     }
 
@@ -553,7 +553,7 @@ impl ImapSession {
     ///
     /// * `raw_name` - The folder's name as the server wrote it.
     pub async fn delete_folder(&mut self, raw_name: &str) -> Result<(), ImapFailure> {
-        let command = format!("DELETE {}", quote_folder_name(raw_name)?);
+        let command = format!("DELETE {}", build_quoted_folder_name(raw_name)?);
         self.run_status_command(&command).await
     }
 
@@ -570,8 +570,8 @@ impl ImapSession {
     ) -> Result<(), ImapFailure> {
         let command = format!(
             "RENAME {} {}",
-            quote_folder_name(raw_name)?,
-            quote_folder_name(new_raw_name)?
+            build_quoted_folder_name(raw_name)?,
+            build_quoted_folder_name(new_raw_name)?
         );
         self.run_status_command(&command).await
     }
@@ -871,14 +871,14 @@ fn format_response_code(code: &ResponseCode<'_>) -> Option<String> {
     }
 }
 
-/// Quotes a folder name for a command.
+/// Builds the quoted string of a folder name for a command.
 ///
 /// # Returns
 ///
 /// The quoted name, or an unreadable answer for a name with a line
 /// break, which only the server's own listing can give and a quoted
 /// string cannot hold.
-fn quote_folder_name(raw_name: &str) -> Result<String, ImapFailure> {
+fn build_quoted_folder_name(raw_name: &str) -> Result<String, ImapFailure> {
     if raw_name.contains(['\r', '\n']) {
         return Err(UNREADABLE);
     }
@@ -1387,10 +1387,10 @@ mod tests {
     #[test]
     fn quotes_folder_names_and_refuses_line_breaks() {
         assert_eq!(
-            quote_folder_name("Projects/\"2026\" \\ old"),
+            build_quoted_folder_name("Projects/\"2026\" \\ old"),
             Ok("\"Projects/\\\"2026\\\" \\\\ old\"".to_owned())
         );
-        assert_eq!(quote_folder_name("Bad\r\nName"), Err(UNREADABLE));
+        assert_eq!(build_quoted_folder_name("Bad\r\nName"), Err(UNREADABLE));
     }
 
     #[test]

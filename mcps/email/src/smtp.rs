@@ -227,7 +227,7 @@ pub(crate) async fn open_smtp_session(
     if server.security == Security::StartTls {
         start_tls(&mut connection, server, trust).await?;
     }
-    sign_in(&mut connection, account).await?;
+    send_sign_in(&mut connection, account).await?;
     Ok(SmtpSession { connection })
 }
 
@@ -290,9 +290,9 @@ async fn start_tls(
     }
 }
 
-/// Signs in with PLAIN or LOGIN, within [`EXCHANGE_LIMIT`] for the
-/// command and its challenges.
-async fn sign_in(
+/// Sends the sign-in, with PLAIN or LOGIN, within [`EXCHANGE_LIMIT`] for
+/// the command and its challenges.
+async fn send_sign_in(
     connection: &mut AsyncSmtpConnection,
     account: &Account,
 ) -> Result<(), SignInFailure> {
@@ -369,7 +369,7 @@ impl SmtpSession {
                 .await?;
         }
         self.send_command(Data).await?;
-        self.hand_over_message(bytes, progress).await
+        self.send_message_data(bytes, progress).await
     }
 
     /// Ends the session: says QUIT within [`EXCHANGE_LIMIT`] and closes the
@@ -392,14 +392,14 @@ impl SmtpSession {
         }
     }
 
-    /// Hands over the message and reads the server's answer, within
-    /// [`MESSAGE_LIMIT`].
+    /// Sends the message's data, handing the message over, and reads the
+    /// server's answer, within [`MESSAGE_LIMIT`].
     ///
     /// lettre writes each part of the message it is given and asks for the
     /// next before it writes the line that ends the data. That question
     /// moves the progress to `HandedOver`, so the stage never shows less
     /// than the server may have received.
-    async fn hand_over_message(
+    async fn send_message_data(
         &mut self,
         bytes: &[u8],
         progress: &SendProgress,

@@ -36,8 +36,8 @@ import {
 } from "./McpServerList"
 import { ToolApprovalSaveFeedback } from "./ToolApprovalSaveFeedback"
 import {
+  buildMcpListedServerKey,
   findMcpPaneRetry,
-  formatMcpListedServerKey,
   formatMcpToolOfferWarning,
   isMcpListedServerOn,
   listMcpPaneNotes,
@@ -134,7 +134,7 @@ function calculateMcpListView(
       return {
         expandedServerKey:
           change.target.kind === "server"
-            ? formatMcpListedServerKey("added", change.target.serverName)
+            ? buildMcpListedServerKey("added", change.target.serverName)
             : view.expandedServerKey,
         focusTarget: change.target
       }
@@ -143,7 +143,7 @@ function calculateMcpListView(
       return {
         expandedServerKey:
           view.expandedServerKey ===
-          formatMcpListedServerKey("added", change.serverName)
+          buildMcpListedServerKey("added", change.serverName)
             ? null
             : view.expandedServerKey,
         focusTarget

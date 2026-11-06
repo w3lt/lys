@@ -12,6 +12,7 @@ import {
 } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
+  buildMcpListedServerKey,
   canAddMcpServer,
   canSwitchMcpServer,
   calculateConnectedMcpServerCount,
@@ -22,7 +23,6 @@ import {
   formatMcpDraftProblemSummaryHeading,
   formatMcpEditorHint,
   formatMcpEditorKind,
-  formatMcpListedServerKey,
   formatMcpServerApprovalNote,
   formatMcpServerJsonMessage,
   formatMcpServerListMeta,
@@ -357,8 +357,8 @@ describe("listed servers", () => {
 
     expect(getMcpListedServerName(added)).toBe("notes")
     expect(getMcpListedServerName(EMAIL_SERVER)).toBe("email")
-    expect(formatMcpListedServerKey(added.kind, "notes")).toBe("added:notes")
-    expect(formatMcpListedServerKey(EMAIL_SERVER.kind, "email")).toBe(
+    expect(buildMcpListedServerKey(added.kind, "notes")).toBe("added:notes")
+    expect(buildMcpListedServerKey(EMAIL_SERVER.kind, "email")).toBe(
       "built-in:email"
     )
     expect(getMcpListedServerTransport(added)).toBe("http")

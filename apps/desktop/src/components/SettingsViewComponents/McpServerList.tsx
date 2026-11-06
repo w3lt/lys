@@ -29,11 +29,11 @@ import {
 } from "./McpServerDetails"
 import { isDocumentFocusLost } from "./focus-target"
 import {
+  buildMcpListedServerKey,
   canAddMcpServer,
   canSwitchMcpServer,
   calculateConnectedMcpServerCount,
   findMcpServerStatus,
-  formatMcpListedServerKey,
   formatMcpServerListMeta,
   formatMcpServerStatus,
   formatMcpServerTarget,
@@ -769,7 +769,7 @@ function McpServerRows({
    */
   function buildServerRow(server: McpListedServer): ReactElement {
     const serverName = getMcpListedServerName(server)
-    const serverKey = formatMcpListedServerKey(server.kind, serverName)
+    const serverKey = buildMcpListedServerKey(server.kind, serverName)
     return (
       <McpServerRow
         isBackendRunning={isBackendRunning}

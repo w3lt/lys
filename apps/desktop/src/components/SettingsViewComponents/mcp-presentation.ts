@@ -448,14 +448,14 @@ export function isMcpListedServerOn(server: McpListedServer): boolean {
 }
 
 /**
- * Formats the key a listed server is told from the others by.
+ * Builds the key a listed server is told from the others by.
  *
  * @param kind - Whether the person added the server or Lys ships it.
  * @param serverName - Name of the server.
  * @returns Its kind and name, so a server Lys ships and an added server
  * with its name stay distinct.
  */
-export function formatMcpListedServerKey(
+export function buildMcpListedServerKey(
   kind: McpListedServer["kind"],
   serverName: McpServerName
 ): string {

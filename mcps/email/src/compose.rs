@@ -261,10 +261,10 @@ pub(crate) fn parse_recipient(text: &str) -> Result<Mailbox, CompositionProblem>
         .map_err(|_| CompositionProblem::InvalidRecipient(text.to_owned()))
 }
 
-/// Formats a mailbox of a fetched message as a recipient the model can
-/// give back: `Name <address>` as lettre writes it, with the name quoted
-/// when it needs to be, or the address alone when there is no name or the
-/// name does not survive that form.
+/// Builds the recipient text of a fetched message's mailbox, which the
+/// model can give back: `Name <address>` as lettre writes it, with the
+/// name quoted when it needs to be, or the address alone when there is no
+/// name or the name does not survive that form.
 ///
 /// # Arguments
 ///
@@ -274,7 +274,7 @@ pub(crate) fn parse_recipient(text: &str) -> Result<Mailbox, CompositionProblem>
 ///
 /// The recipient, which [`parse_recipient`] reads back to the same
 /// address, or `None` when the mailbox has no address lettre accepts.
-pub(crate) fn format_recipient(mailbox: &ParsedMailbox) -> Option<String> {
+pub(crate) fn build_recipient(mailbox: &ParsedMailbox) -> Option<String> {
     let address = lettre::Address::from_str(mailbox.address.as_deref()?).ok()?;
     mailbox
         .name
@@ -282,14 +282,14 @@ pub(crate) fn format_recipient(mailbox: &ParsedMailbox) -> Option<String> {
         .map(str::trim)
         .filter(|name| !name.is_empty() && !name.chars().any(char::is_control))
         .and_then(|name| {
-            format_readable_mailbox(Mailbox::new(Some(name.to_owned()), address.clone()))
+            build_readable_mailbox(Mailbox::new(Some(name.to_owned()), address.clone()))
         })
-        .or_else(|| format_readable_mailbox(Mailbox::new(None, address)))
+        .or_else(|| build_readable_mailbox(Mailbox::new(None, address)))
 }
 
-/// Formats a mailbox as lettre writes it, when lettre reads that text
-/// back to the same mailbox.
-fn format_readable_mailbox(mailbox: Mailbox) -> Option<String> {
+/// Builds a mailbox's text as lettre writes it, when lettre reads that
+/// text back to the same mailbox.
+fn build_readable_mailbox(mailbox: Mailbox) -> Option<String> {
     let mut text = String::new();
     write!(text, "{mailbox}").ok()?;
     let read_back = Mailbox::from_str(&text).ok()?;
@@ -605,7 +605,7 @@ mod tests {
     }
 
     #[test]
-    fn formats_recipients_that_read_back_to_the_same_mailbox() {
+    fn builds_recipients_that_read_back_to_the_same_mailbox() {
         let cases = [
             (
                 Some("Jane Doe"),
@@ -639,12 +639,12 @@ mod tests {
         ];
 
         for (name, address, expected) in cases {
-            let formatted = format_recipient(&ParsedMailbox {
+            let recipient = build_recipient(&ParsedMailbox {
                 name: name.map(str::to_owned),
                 address: Some(address.to_owned()),
             });
 
-            assert_eq!(formatted.as_deref(), Some(expected), "{name:?}");
+            assert_eq!(recipient.as_deref(), Some(expected), "{name:?}");
             let parsed = parse_recipient(expected).expect("reads back");
             assert_eq!(parsed.email.to_string(), address);
         }
@@ -653,7 +653,7 @@ mod tests {
                 name: Some("Nobody".to_owned()),
                 address: address.map(str::to_owned),
             };
-            assert_eq!(format_recipient(&mailbox), None, "{address:?}");
+            assert_eq!(build_recipient(&mailbox), None, "{address:?}");
         }
     }
 

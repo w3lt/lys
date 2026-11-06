@@ -276,9 +276,9 @@ fn format_mailbox(name: Option<&str>, address: Option<&str>) -> String {
     }
 }
 
-/// Formats a part's content type as `type/subtype` in lowercase, or as the
-/// type alone when it has no subtype.
-fn format_content_type(content_type: ContentType<'_>) -> String {
+/// Builds the text of a part's content type: `type/subtype` in lowercase,
+/// or the type alone when it has no subtype.
+fn build_content_type(content_type: ContentType<'_>) -> String {
     match content_type.subtype() {
         Some(subtype) => format!("{}/{}", content_type.ctype(), subtype).to_ascii_lowercase(),
         None => content_type.ctype().to_ascii_lowercase(),
@@ -290,7 +290,7 @@ fn build_attachment(index: usize, part: &MessagePart<'_>) -> Attachment {
     let number = u32::try_from(index + 1).unwrap_or(u32::MAX);
     let content_type = part
         .content_type()
-        .map(format_content_type)
+        .map(build_content_type)
         .unwrap_or_else(|| "application/octet-stream".to_owned());
     let name = part
         .attachment_name()

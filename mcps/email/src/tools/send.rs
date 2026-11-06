@@ -14,8 +14,8 @@ use super::{
 };
 use crate::compose::{
     ComposedMessage, Composition, MessageStamp, build_forward_attachments, build_forward_body,
-    build_forward_subject, build_reply_references, build_reply_subject, build_sent_message,
-    format_recipient,
+    build_forward_subject, build_recipient, build_reply_references, build_reply_subject,
+    build_sent_message,
 };
 use crate::email_id::parse_email_id;
 use crate::failure::{Protocol, ToolFailure};
@@ -339,7 +339,7 @@ fn format_reply_mailboxes(original: &MessageView) -> Option<String> {
 /// Lists mailboxes as recipients the model can give, leaving out those
 /// without an address lettre accepts.
 fn list_recipient_arguments(mailboxes: &[ParsedMailbox]) -> Vec<String> {
-    mailboxes.iter().filter_map(format_recipient).collect()
+    mailboxes.iter().filter_map(build_recipient).collect()
 }
 
 /// Sends a composed message over an SMTP session of its own, which it

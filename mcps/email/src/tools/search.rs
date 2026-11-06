@@ -201,7 +201,7 @@ fn build_search_report(found: &SearchHits, page: usize, folder_count: usize) -> 
     }
     let pages = total.div_ceil(PAGE_SIZE);
     if page > pages {
-        return Err(format_page_failure(pages));
+        return Err(build_page_failure(pages));
     }
     let mut text = format_search_heading(found, page, pages);
     for hit in found
@@ -219,12 +219,12 @@ fn build_search_report(found: &SearchHits, page: usize, folder_count: usize) -> 
     })
 }
 
-/// Formats the refusal of a page past the last one.
+/// Builds the refusal of a page past the last one.
 ///
 /// # Arguments
 ///
 /// * `pages` - How many pages there are, at least 1.
-fn format_page_failure(pages: usize) -> ToolFailure {
+fn build_page_failure(pages: usize) -> ToolFailure {
     ToolFailure::Argument(if pages == 1 {
         "Only 1 page matches. Ask for page 1.".to_owned()
     } else {

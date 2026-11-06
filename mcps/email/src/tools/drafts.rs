@@ -21,7 +21,7 @@ use super::{
 };
 use crate::compose::{
     ComposedMessage, Composition, CompositionProblem, MessageStamp, build_draft_message,
-    format_recipient, parse_recipient,
+    build_recipient, parse_recipient,
 };
 use crate::email_id::{EmailId, parse_email_id};
 use crate::failure::ToolFailure;
@@ -746,7 +746,7 @@ fn list_draft_recipients(
 ) -> Result<Vec<String>, ToolFailure> {
     mailboxes
         .iter()
-        .map(|mailbox| format_recipient(mailbox).ok_or_else(|| build_entry_refusal(field, mailbox)))
+        .map(|mailbox| build_recipient(mailbox).ok_or_else(|| build_entry_refusal(field, mailbox)))
         .collect()
 }
 

@@ -113,6 +113,12 @@ export function handleMcpServerEvent(
     case "tool-call-failed":
       handleRequestFailureEvent(logger, event)
       return
+    default: {
+      const unhandledEvent: never = event
+      throw new TypeError(
+        `Unhandled MCP server event: ${JSON.stringify(unhandledEvent)}`
+      )
+    }
   }
 }
 
@@ -206,6 +212,12 @@ function handleConnectionEvent(
         "Closing an MCP server connection failed"
       )
       return
+    default: {
+      const unhandledEvent: never = event
+      throw new TypeError(
+        `Unhandled MCP connection event: ${JSON.stringify(unhandledEvent)}`
+      )
+    }
   }
 }
 

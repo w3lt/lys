@@ -130,15 +130,17 @@ function registerReconnectMcpServerRoute(
  *
  * @param request - Validated server name.
  * @param reply - HTTP response owner.
- * @param registry - Borrowed MCP server registry.
+ * @param registry - Borrowed MCP server registry, of which the handler calls
+ * only `openServerAgain` and `listServers`.
  */
 function handleReconnect(
   request: FastifyRequest<ReconnectMcpServerApiRoute>,
   reply: FastifyReply<ReconnectMcpServerApiRoute>,
-  registry: McpServerRegistry
+  registry: Pick<McpServerRegistry, "openServerAgain" | "listServers">
 ): void {
   const { serverName } = request.params
-  switch (registry.openServerAgain(serverName)) {
+  const reconnection = registry.openServerAgain(serverName)
+  switch (reconnection) {
     case "not-found":
       reply
         .type("application/problem+json")
@@ -154,6 +156,12 @@ function handleReconnect(
     case "reconnecting":
       reply.code(200).send(registry.listServers())
       return
+    default: {
+      const unhandledReconnection: never = reconnection
+      throw new TypeError(
+        `Unhandled MCP server reconnection: ${JSON.stringify(unhandledReconnection)}`
+      )
+    }
   }
 }
 

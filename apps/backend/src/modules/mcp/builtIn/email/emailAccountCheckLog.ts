@@ -44,6 +44,12 @@ export function handleEmailAccountCheckEvent(
     case "server-failed":
       handleRunFailure(logger, event.failure)
       return
+    default: {
+      const unhandledEvent: never = event
+      throw new TypeError(
+        `Unhandled email account check event: ${JSON.stringify(unhandledEvent)}`
+      )
+    }
   }
 }
 
@@ -79,5 +85,11 @@ function handleRunFailure(
     case "unreadable-output":
       logger.error({ failure }, CHECK_FAILED_MESSAGE)
       return
+    default: {
+      const unhandledFailure: never = failure
+      throw new TypeError(
+        `Unhandled email server run failure: ${JSON.stringify(unhandledFailure)}`
+      )
+    }
   }
 }

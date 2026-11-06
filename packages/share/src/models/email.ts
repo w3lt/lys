@@ -160,7 +160,8 @@ function isEmailHost(value: string): boolean {
  * Answers whether a mail server host is the machine Lys runs on, which it
  * may be reached on without TLS.
  *
- * @param host - Host that passed the mail server host rule.
+ * @param host - Host as typed, which may have failed the mail server host
+ * rule.
  * @returns True for `localhost`, `127.0.0.1`, or `[::1]`, in any case.
  */
 function isLoopbackEmailHost(host: string): boolean {
@@ -224,7 +225,8 @@ export type EmailSecurity = z.infer<typeof emailSecuritySchema>
 /**
  * Answers whether a mail server's host may be reached with its security.
  *
- * @param server - The server's host and security, each valid.
+ * @param server - The server's host as typed, which may have failed the
+ * host rule, and its security.
  * @returns True for TLS or STARTTLS to any host, and for a connection
  * without TLS to `localhost`, `127.0.0.1`, or `[::1]`.
  */

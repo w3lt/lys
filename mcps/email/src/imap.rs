@@ -157,7 +157,7 @@ pub struct Flags {
 impl Flags {
     /// Formats the flags as the tools list them, `read` for a seen
     /// message and `unread` otherwise.
-    pub fn format(self) -> String {
+    pub fn format_flag_list(self) -> String {
         let mut words = vec![if self.seen { "read" } else { "unread" }];
         if self.answered {
             words.push("answered");
@@ -1229,8 +1229,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn formats_flags_search_texts_dates_and_uid_sets() {
-        assert_eq!(Flags::default().format(), "unread");
+    fn formats_flag_lists_and_builds_search_parts_dates_and_uid_sets() {
+        assert_eq!(Flags::default().format_flag_list(), "unread");
         assert_eq!(
             Flags {
                 seen: true,
@@ -1239,7 +1239,7 @@ mod tests {
                 draft: false,
                 deleted: false
             }
-            .format(),
+            .format_flag_list(),
             "read, answered, flagged"
         );
         assert_eq!(

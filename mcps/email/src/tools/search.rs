@@ -358,7 +358,7 @@ fn format_hit(hit: &Hit) -> String {
         hit.date,
         hit.headers.from,
         hit.headers.subject,
-        hit.flags.format(),
+        hit.flags.format_flag_list(),
         hit.id.folder
     )
 }

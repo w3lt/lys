@@ -519,7 +519,7 @@ fn format_view_heading(id: &EmailId, flags: Flags, view: &MessageView) -> String
     }
     text.push_str(&format!(
         "Flags: {}\nFolder: {}\n",
-        flags.format(),
+        flags.format_flag_list(),
         id.folder
     ));
     match view.attachments.len() {

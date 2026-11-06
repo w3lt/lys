@@ -20,11 +20,14 @@
 // `flood` prints far more than a report; `lock` holds `lock` in its folder
 // while it waits, as a check that must run alone, and exits with code 3
 // when another check holds it. It imports only Node's own modules, zod,
-// which checks its options and the account, and the fake stdio server.
+// which checks its options and the account, and the fake stdio server;
+// the account's type comes from `@lys/share` in a type import, which Node
+// strips with the other types.
 import { rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { setTimeout as wait } from "node:timers/promises"
 
+import type { EmailAccount } from "@lys/share"
 import * as z from "zod"
 
 /** Module of the fake stdio MCP server, which serves MCP in the fake's place. */
@@ -63,7 +66,7 @@ export type FakeEmailServerOptions = Readonly<
 >
 
 /** The account the fake was started with, as far as it reads it. */
-const fakeAccountSchema = z.object({
+const fakeAccountSchema: z.ZodType<Pick<EmailAccount, "address">> = z.object({
   address: z.string()
 })
 

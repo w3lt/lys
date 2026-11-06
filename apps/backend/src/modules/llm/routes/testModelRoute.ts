@@ -2,7 +2,7 @@ import { llmTestModelApi, type LlmTestModelApiRoute } from "@lys/protocol"
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import * as z from "zod"
 import type { LlmModelHealthReader } from "../llmModelCapabilities"
-import type { LlmModelHealthDiagnostic } from "../llmModelHealthDiagnostic"
+import type { LlmRuntimeFailureEvidence } from "../llmRuntimeFailureEvidence"
 import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
 
 /**
@@ -113,11 +113,11 @@ async function handleLlmTestModelRequest(
  * @param modelKey - Canonical model key associated with the failed query.
  */
 function reportLlmModelHealthFailure(
-  diagnostic: LlmModelHealthDiagnostic,
+  diagnostic: LlmRuntimeFailureEvidence,
   request: FastifyRequest<LlmTestModelApiRoute>,
   modelKey: string
 ): void {
-  diagnostic.handleLlmModelHealthFailureReport((failure) =>
+  diagnostic.handleLlmRuntimeFailureReport((failure) =>
     request.log.error(
       { err: failure, modelKey },
       "LLM runtime state could not be established during model health query"

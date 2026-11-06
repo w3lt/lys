@@ -205,9 +205,13 @@ puts no tool on Just run and switches no tool, for `location` it saves no
 location, and for `mcp` it lists no server. A `model` group, which
 older files hold for a context-size estimate Lys no longer has, is ignored,
 and the next save leaves it out. Loading never rewrites an
-existing file. Invalid JSON or invalid field values, including a temperature
-outside `[0, 1]`, cause loading to fail, and the file is left as it is. Loading
-a missing file creates the parent directory and writes the default document.
+existing file. Invalid JSON, a JSON array in place of the document, of a
+group, or of an object inside a group, or invalid field values, including a
+temperature outside `[0, 1]`, cause loading to fail, and the file is left as
+it is; the error names the line and column where reading stopped. The host
+reads the document and every object in it from a JSON object only, as the
+`@lys/share` schemas the backend reads them with do. Loading a missing file
+creates the parent directory and writes the default document.
 
 Every save writes a temporary file beside `settings.json`, readable and
 writable only by its owner on Unix, flushes it to disk, and renames it over the

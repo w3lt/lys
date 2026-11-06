@@ -83,7 +83,7 @@ describe("getLlmModelHealth", () => {
       latencyMs: 4
     })
     expect(outcome.diagnostics).toHaveLength(1)
-    outcome.diagnostics[0]?.handleLlmModelHealthFailureReport(reporter)
+    outcome.diagnostics[0]?.handleLlmRuntimeFailureReport(reporter)
     expect(reporter.mock.calls[0]?.[0]).toBe(failure)
   })
 

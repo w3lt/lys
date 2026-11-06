@@ -921,8 +921,11 @@ declares no client capabilities.
   failure it reports while a send is pending is passed on once the send
   settles; and an HTTP error a send throws carries the status but never the
   answer's body. Closing the connection aborts its open requests, which fail
-  without being reported as connection errors, and then asks the server to
-  end its session, as the MCP specification asks of a client:
+  without being reported as connection errors: an abort failure the SDK
+  reports once the close started is dropped, because the SDK reports the
+  aborted request for the server's event stream although it was asked to
+  abort it. The close then asks the server to end its session, as the MCP
+  specification asks of a client:
   `closeMcpHttpSession` (`mcpHttpSessionEnd.ts`) sends `DELETE` to the URL with
   the configured headers, `Mcp-Session-Id`, and `Mcp-Protocol-Version`,
   following no redirect, and gives up after two seconds. An answer of `2xx`,

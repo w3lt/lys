@@ -13,6 +13,8 @@
 use serde::de::Error;
 use serde::{Deserialize, Serialize};
 
+use super::json::parse_json_object;
+
 /// Most characters a host name may have, inclusive. Matches
 /// `MAXIMUM_HOST_NAME_LENGTH` in `@lys/share`, which the renderer and the
 /// backend check.
@@ -146,13 +148,16 @@ pub struct OllamaProviderSettings {
 /// object.
 ///
 /// A missing field takes its default: LM Studio active and both addresses
-/// `null`. The group may not be `null`, and unknown fields are rejected.
+/// `null`. The group may not be `null`, unknown fields are rejected, and each
+/// server is read from a JSON object only, as `@lys/share` reads it.
 pub struct ProvidersSettings {
     /// Provider every request goes to.
     active: LlmProvider,
     /// LM Studio's server.
+    #[serde(deserialize_with = "parse_json_object")]
     lm_studio: LmStudioProviderSettings,
     /// The local Ollama server.
+    #[serde(deserialize_with = "parse_json_object")]
     ollama: OllamaProviderSettings,
 }
 

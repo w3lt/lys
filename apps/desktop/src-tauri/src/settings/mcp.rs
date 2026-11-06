@@ -254,7 +254,7 @@ struct BuiltInMcpServerSettings {
 }
 
 /// Returns the switch of a server the file does not switch: on.
-fn default_server_switch() -> bool {
+fn get_default_server_switch() -> bool {
     true
 }
 
@@ -359,7 +359,7 @@ struct StoredStdioMcpServer {
     #[serde(default, deserialize_with = "parse_json_objects")]
     environment: Vec<StoredNamedValue>,
     /// Switch; a missing switch is on.
-    #[serde(default = "default_server_switch")]
+    #[serde(default = "get_default_server_switch")]
     enabled: bool,
 }
 
@@ -426,7 +426,7 @@ struct StoredHttpMcpServer {
     #[serde(default, deserialize_with = "parse_json_objects")]
     headers: Vec<StoredNamedValue>,
     /// Switch; a missing switch is on.
-    #[serde(default = "default_server_switch")]
+    #[serde(default = "get_default_server_switch")]
     enabled: bool,
 }
 

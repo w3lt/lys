@@ -76,8 +76,9 @@ to store another agent under their codes `caliginia` and `lysiptera`. It is
 decorated as `app.agentService`; the agent routes in
 `src/modules/agent/routes/` call it. The agent runtime service, decorated as
 `app.agentRuntimeService`, reads agents through it for the chat routes and
-keeps the [live agents](/architecture/backend/#live-agents) and the requests
-they work on in memory only; nothing of them is stored.
+keeps the [live agents](/architecture/backend/#live-agents), the requests
+they work on, and their request slots in memory only; nothing of them is
+stored.
 Every borrowed operation fails once the database closes,
 and the database remains open until every reply generation has stored its final
 state.

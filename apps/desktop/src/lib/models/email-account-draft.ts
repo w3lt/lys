@@ -163,7 +163,18 @@ type AccountIssue = {
 
 /** The password field read: the password to save, or its problem. */
 type PasswordDraftParse =
-  { readonly password: EmailPassword } | { readonly problem: string }
+  | {
+      /** The field holds a password to save. */
+      readonly status: "valid"
+      /** The typed password, or the saved one while none is typed. */
+      readonly password: EmailPassword
+    }
+  | {
+      /** The field is empty while none is saved, or breaks its rule. */
+      readonly status: "invalid"
+      /** That a password must be entered, or the rule it breaks. */
+      readonly problem: string
+    }
 
 /**
  * Builds the fields of one server from saved settings.
@@ -447,13 +458,35 @@ function parsePasswordDraft(
 ): PasswordDraftParse {
   if (password === "") {
     return savedPassword === null
-      ? { problem: EMPTY_PASSWORD_PROBLEM }
-      : { password: savedPassword }
+      ? { status: "invalid", problem: EMPTY_PASSWORD_PROBLEM }
+      : { status: "valid", password: savedPassword }
   }
   const parsed = emailPasswordSchema.safeParse(password)
   return parsed.success
-    ? { password: parsed.data }
-    : { problem: parsed.error.issues[0]?.message ?? "" }
+    ? { status: "valid", password: parsed.data }
+    : { status: "invalid", problem: parsed.error.issues[0]?.message ?? "" }
+}
+
+/**
+ * Finds the problem of the password field, placed on its input.
+ *
+ * @param password - The password field read.
+ * @returns The password input and its problem, or undefined while the
+ * field holds a password to save.
+ */
+function findPlacedPasswordProblem(
+  password: PasswordDraftParse
+): PlacedProblem | undefined {
+  switch (password.status) {
+    case "invalid":
+      return ["password", password.problem]
+    case "valid":
+      return undefined
+    default: {
+      const unhandledPassword: never = password
+      return unhandledPassword
+    }
+  }
 }
 
 /**
@@ -522,9 +555,9 @@ export function parseEmailAccountDraft(
     ...(account.success
       ? []
       : account.error.issues.map(findPlacedAccountProblem)),
-    "problem" in password ? ["password", password.problem] : undefined
+    findPlacedPasswordProblem(password)
   ])
-  if (!account.success || "problem" in password) {
+  if (!account.success || password.status === "invalid") {
     return { status: "invalid", problems }
   }
   if (

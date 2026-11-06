@@ -108,6 +108,27 @@ function buildRefusedSave(rule: string | undefined): McpSettingsSaveState {
 }
 
 /**
+ * Answers whether a save of the MCP group runs.
+ *
+ * @param save - Latest save of the group.
+ * @returns True while it runs.
+ */
+export function isMcpSettingsSaveRunning(save: McpSettingsSaveState): boolean {
+  switch (save.status) {
+    case "saving":
+      return true
+    case "idle":
+    case "saved":
+    case "failed":
+      return false
+    default: {
+      const unhandledSave: never = save
+      return unhandledSave
+    }
+  }
+}
+
+/**
  * Creates the application-owned MCP settings command and initial state.
  * @param set - Owning store's atomic state updater.
  * @param get - Reads the slice's state.
@@ -135,7 +156,7 @@ export function createMcpSettingsSlice(
   async function saveMcpGroup(
     candidate: McpSettingsCandidate
   ): Promise<McpSettingsSaveOutcome> {
-    if (get().mcpSettingsSave.status === "saving") return "busy"
+    if (isMcpSettingsSaveRunning(get().mcpSettingsSave)) return "busy"
     const parsed = mcpSettingsSchema.safeParse(candidate)
     if (!parsed.success) {
       set({

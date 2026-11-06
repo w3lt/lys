@@ -5,6 +5,15 @@ import {
   type McpDraftProblemListing
 } from "./mcp-presentation"
 
+/** Level of a summary's heading. */
+type McpDraftProblemSummaryHeadingLevel = 3 | 4
+
+/** Element of each heading level; a new level must add one. */
+const SUMMARY_HEADING_TAGS = Object.freeze({
+  3: "h3",
+  4: "h4"
+} satisfies Readonly<Record<McpDraftProblemSummaryHeadingLevel, "h3" | "h4">>)
+
 /**
  * Properties accepted by {@link McpDraftProblemSummary}.
  *
@@ -16,7 +25,7 @@ type McpDraftProblemSummaryProps<TField extends string> = {
    * Level of the summary's heading, one below the heading of the form it
    * belongs to.
    */
-  readonly headingLevel: 3 | 4
+  readonly headingLevel: McpDraftProblemSummaryHeadingLevel
   /** Fields with a problem, in the form's order; two or more. */
   readonly problems: readonly McpDraftProblemListing<TField>[]
   /** Host the parent moves focus to when a save is rejected. */
@@ -48,7 +57,7 @@ export function McpDraftProblemSummary<TField extends string>({
   onSelectField
 }: McpDraftProblemSummaryProps<TField>): ReactElement {
   const headingId = useId()
-  const Heading = headingLevel === 3 ? "h3" : "h4"
+  const Heading = SUMMARY_HEADING_TAGS[headingLevel]
 
   return (
     <fieldset

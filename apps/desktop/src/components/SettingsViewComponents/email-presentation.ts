@@ -28,9 +28,10 @@ import {
   type EmailServerSide
 } from "@/lib/models/email-account-draft"
 import { findEmailPreset } from "@/lib/models/email-presets"
-import type {
-  EmailAccountCheckState,
-  EmailAccountSaveState
+import {
+  isEmailAccountCheckAccepted,
+  type EmailAccountCheckState,
+  type EmailAccountSaveState
 } from "@/lib/store/email-settings"
 
 import type { McpDraftProblemListing } from "./mcp-presentation"
@@ -324,11 +325,32 @@ function formatEmailCheckOutcome(
       tone: "danger"
     }
   }
-  const isAccepted =
-    outcome.imap.status === "accepted" && outcome.smtp.status === "accepted"
   return {
     text: `IMAP: ${formatEmailServerCheck(outcome.imap)} · SMTP: ${formatEmailServerCheck(outcome.smtp)}`,
-    tone: isAccepted ? "success" : "danger"
+    tone: isEmailAccountCheckAccepted(outcome) ? "success" : "danger"
+  }
+}
+
+/**
+ * Formats the line of a save or removal that runs.
+ *
+ * @param saveState - Latest save or removal.
+ * @returns That Lys saves, or undefined while no save or removal runs.
+ */
+function formatSavingMessage(
+  saveState: EmailAccountSaveState
+): EmailAccountMessage | undefined {
+  switch (saveState.status) {
+    case "saving":
+      return SAVING_MESSAGE
+    case "idle":
+    case "saved":
+    case "failed":
+      return undefined
+    default: {
+      const unhandledSave: never = saveState
+      return unhandledSave
+    }
   }
 }
 
@@ -343,9 +365,18 @@ function formatPendingMessage(
   saveState: EmailAccountSaveState,
   checkState: EmailAccountCheckState
 ): EmailAccountMessage | undefined {
-  if (checkState.status === "checking") return SIGNING_IN_MESSAGE
-  if (saveState.status === "saving") return SAVING_MESSAGE
-  return undefined
+  switch (checkState.status) {
+    case "checking":
+      return SIGNING_IN_MESSAGE
+    case "idle":
+    case "checked":
+    case "failed":
+      return formatSavingMessage(saveState)
+    default: {
+      const unhandledCheck: never = checkState
+      return unhandledCheck
+    }
+  }
 }
 
 /**
@@ -381,12 +412,21 @@ function isWaitingForBackend(input: EmailAccountStatusInput): boolean {
 function formatCheckMessage(
   checkState: EmailAccountCheckState
 ): EmailAccountMessage | undefined {
-  if (checkState.status === "failed") {
-    return { text: checkState.error, tone: "danger" }
+  switch (checkState.status) {
+    case "failed":
+      return { text: checkState.error, tone: "danger" }
+    case "checked":
+      return isEmailAccountCheckAccepted(checkState.outcome)
+        ? undefined
+        : formatEmailCheckOutcome(checkState.outcome)
+    case "idle":
+    case "checking":
+      return undefined
+    default: {
+      const unhandledCheck: never = checkState
+      return unhandledCheck
+    }
   }
-  if (checkState.status !== "checked") return undefined
-  const checked = formatEmailCheckOutcome(checkState.outcome)
-  return checked.tone === "success" ? undefined : checked
 }
 
 /**
@@ -405,10 +445,18 @@ function formatOutcomeMessage(
   input: EmailAccountStatusInput
 ): EmailAccountMessage | undefined {
   if (input.isEditedSinceSubmit) return undefined
-  if (input.saveState.status === "failed") {
-    return { text: input.saveState.error, tone: "danger" }
+  switch (input.saveState.status) {
+    case "failed":
+      return { text: input.saveState.error, tone: "danger" }
+    case "idle":
+    case "saving":
+    case "saved":
+      return formatCheckMessage(input.checkState)
+    default: {
+      const unhandledSave: never = input.saveState
+      return unhandledSave
+    }
   }
-  return formatCheckMessage(input.checkState)
 }
 
 /**
@@ -418,10 +466,46 @@ function formatOutcomeMessage(
  * @returns True when it ran and both servers accepted.
  */
 function isCheckAccepted(checkState: EmailAccountCheckState): boolean {
-  return (
-    checkState.status === "checked" &&
-    formatEmailCheckOutcome(checkState.outcome).tone === "success"
-  )
+  switch (checkState.status) {
+    case "checked":
+      return isEmailAccountCheckAccepted(checkState.outcome)
+    case "idle":
+    case "checking":
+    case "failed":
+      return false
+    default: {
+      const unhandledCheck: never = checkState
+      return unhandledCheck
+    }
+  }
+}
+
+/**
+ * Answers whether the latest save saved an account that its check
+ * accepted.
+ *
+ * @param saveState - Latest save or removal.
+ * @param checkState - Latest check.
+ * @returns True when the latest save or removal was saved and the latest
+ * check accepted both servers; a removal resets the check, so it never
+ * counts.
+ */
+function isAcceptedAccountSaved(
+  saveState: EmailAccountSaveState,
+  checkState: EmailAccountCheckState
+): boolean {
+  switch (saveState.status) {
+    case "saved":
+      return isCheckAccepted(checkState)
+    case "idle":
+    case "saving":
+    case "failed":
+      return false
+    default: {
+      const unhandledSave: never = saveState
+      return unhandledSave
+    }
+  }
 }
 
 /**
@@ -436,10 +520,25 @@ function formatRestingMessage(
   input: EmailAccountStatusInput
 ): EmailAccountMessage {
   if (input.savedAccount === null) return NO_ACCOUNT_MESSAGE
-  if (input.saveState.status === "saved" && isCheckAccepted(input.checkState)) {
+  if (isAcceptedAccountSaved(input.saveState, input.checkState)) {
     return ACCOUNT_SAVED_MESSAGE
   }
   return { text: `Saved · ${input.savedAccount.address}`, tone: "muted" }
+}
+
+/**
+ * Formats the line while the fields hold no account to save.
+ *
+ * @param input - Saved account, the save, the check, and how the fields
+ * relate to them.
+ * @returns A failed save or removal, or what the latest check found, until
+ * the fields are edited; otherwise whether an account is saved, or that it
+ * was just saved.
+ */
+function formatSettledMessage(
+  input: EmailAccountStatusInput
+): EmailAccountMessage {
+  return formatOutcomeMessage(input) ?? formatRestingMessage(input)
 }
 
 /**
@@ -458,20 +557,19 @@ function formatRestingMessage(
 export function formatEmailAccountMessage(
   input: EmailAccountStatusInput
 ): EmailAccountMessage {
-  const { draftParse } = input
   const pending = formatPendingMessage(input.saveState, input.checkState)
   if (pending !== undefined) return pending
   if (isWaitingForBackend(input)) return BACKEND_STOPPED_MESSAGE
-  if (input.hasSubmitted && draftParse.status === "invalid") {
-    return INVALID_MESSAGE
+  switch (input.draftParse.status) {
+    case "invalid":
+      return input.hasSubmitted ? INVALID_MESSAGE : formatSettledMessage(input)
+    case "changed":
+      return formatOutcomeMessage(input) ?? UNSAVED_MESSAGE
+    case "unchanged":
+      return formatSettledMessage(input)
+    default: {
+      const unhandledParse: never = input.draftParse
+      return unhandledParse
+    }
   }
-  if (draftParse.status === "changed" && input.isEditedSinceSubmit) {
-    return UNSAVED_MESSAGE
-  }
-  const outcome = formatOutcomeMessage(input)
-  if (outcome !== undefined) return outcome
-  if (draftParse.status === "changed") {
-    return UNSAVED_MESSAGE
-  }
-  return formatRestingMessage(input)
 }

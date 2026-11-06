@@ -29,11 +29,14 @@ import {
   type EmailServerDraft,
   type EmailServerSide
 } from "@/lib/models/email-account-draft"
-import type {
-  EmailAccountCheckState,
-  EmailAccountRemovalOutcome,
-  EmailAccountSaveOutcome,
-  EmailAccountSaveState
+import {
+  isEmailAccountCheckRunning,
+  isEmailAccountSaved,
+  isEmailAccountSaveRunning,
+  type EmailAccountCheckState,
+  type EmailAccountRemovalOutcome,
+  type EmailAccountSaveOutcome,
+  type EmailAccountSaveState
 } from "@/lib/store/email-settings"
 
 import {
@@ -1233,6 +1236,51 @@ function EmailAccountRemovalQuestion({
 }
 
 /**
+ * Answers whether the question whether to remove the account shows in
+ * place of the actions.
+ *
+ * @param removalStep - Where the removal stands.
+ * @returns True from the moment the question opens until it closes, also
+ * while the removal runs.
+ */
+function isRemovalQuestionShown(removalStep: EmailAccountRemovalStep): boolean {
+  switch (removalStep) {
+    case "confirming":
+      return true
+    case "idle":
+    case "returning":
+      return false
+    default: {
+      const unhandledStep: never = removalStep
+      return unhandledStep
+    }
+  }
+}
+
+/**
+ * Answers whether Remove account takes focus once it is attached again.
+ *
+ * @param removalStep - Where the removal stands.
+ * @returns True once the question closed without a removal, until Remove
+ * account took focus.
+ */
+function shouldFocusRemoveAccount(
+  removalStep: EmailAccountRemovalStep
+): boolean {
+  switch (removalStep) {
+    case "returning":
+      return true
+    case "idle":
+    case "confirming":
+      return false
+    default: {
+      const unhandledStep: never = removalStep
+      return unhandledStep
+    }
+  }
+}
+
+/**
  * Owns the footer's removal of the saved account: whether the question
  * shows, and whether Remove account takes focus back.
  *
@@ -1273,12 +1321,20 @@ function useEmailAccountRemoval(
    */
   async function handleRemoveAccount(): Promise<void> {
     const outcome = await onRemoveEmailAccount()
-    if (outcome !== "saved") {
-      setRemovalStep("returning")
-      return
+    switch (outcome) {
+      case "saved":
+        setRemovalStep("idle")
+        onRemoveEmailAccountComplete()
+        return
+      case "failed":
+      case "busy":
+        setRemovalStep("returning")
+        return
+      default: {
+        const unhandledOutcome: never = outcome
+        return unhandledOutcome
+      }
     }
-    setRemovalStep("idle")
-    onRemoveEmailAccountComplete()
   }
 
   /**
@@ -1299,8 +1355,9 @@ function useEmailAccountRemoval(
     openRemovalQuestion,
     closeRemovalQuestion,
     handleRemoveAccount,
-    removeAccountRef:
-      removalStep === "returning" ? handleRemoveAccountAttach : undefined
+    removeAccountRef: shouldFocusRemoveAccount(removalStep)
+      ? handleRemoveAccountAttach
+      : undefined
   }
 }
 
@@ -1344,7 +1401,7 @@ function EmailAccountFooter({
       >
         {message.text}
       </p>
-      {removal.removalStep === "confirming" ? (
+      {isRemovalQuestionShown(removal.removalStep) ? (
         <EmailAccountRemovalQuestion
           isBusy={isBusy}
           onKeepEmailAccount={removal.closeRemovalQuestion}
@@ -1493,6 +1550,91 @@ function calculateEmailAccountEdit(
 }
 
 /**
+ * Answers whether a save was tried since the card's edit last started
+ * afresh, from which the fields' problems show.
+ *
+ * @param saveTry - The save tried last.
+ * @returns True once a save was tried.
+ */
+function hasTriedSave(saveTry: EmailAccountSaveTry): boolean {
+  switch (saveTry.status) {
+    case "tried":
+      return true
+    case "none":
+      return false
+    default: {
+      const unhandledTry: never = saveTry
+      return unhandledTry
+    }
+  }
+}
+
+/**
+ * Answers whether the fields changed since the last save was tried, after
+ * which what that save found no longer concerns them.
+ *
+ * @param edit - The card's own state.
+ * @returns True while the edit is not the one the last save was tried
+ * with, or, before any tried save, while there is an edit.
+ */
+function isEditedSinceTriedSave(edit: EmailAccountEdit): boolean {
+  switch (edit.saveTry.status) {
+    case "tried":
+      return edit.editedDraft !== edit.saveTry.draft
+    case "none":
+      return edit.editedDraft !== null
+    default: {
+      const unhandledTry: never = edit.saveTry
+      return unhandledTry
+    }
+  }
+}
+
+/**
+ * Gets the problems a reading of the fields found.
+ *
+ * @param draftParse - Outcome of reading the fields.
+ * @returns The first problem of each input that has one; none while the
+ * fields hold an account to save or the saved one.
+ */
+function getDraftParseProblems(
+  draftParse: EmailAccountDraftParse
+): EmailAccountDraftProblems {
+  switch (draftParse.status) {
+    case "invalid":
+      return draftParse.problems
+    case "changed":
+    case "unchanged":
+      return NO_PROBLEMS
+    default: {
+      const unhandledParse: never = draftParse
+      return unhandledParse
+    }
+  }
+}
+
+/**
+ * Answers whether the fields hold the saved account and no new password,
+ * which leaves Save nothing to save.
+ *
+ * @param draftParse - Outcome of reading the fields.
+ * @returns True while nothing differs from the saved account.
+ */
+function isDraftUnchanged(draftParse: EmailAccountDraftParse): boolean {
+  switch (draftParse.status) {
+    case "unchanged":
+      return true
+    case "changed":
+    case "invalid":
+      return false
+    default: {
+      const unhandledParse: never = draftParse
+      return unhandledParse
+    }
+  }
+}
+
+/**
  * Builds one render's reading of the card's edit.
  *
  * @param edit - The card's own state.
@@ -1512,36 +1654,53 @@ function buildEmailAccountEditReading(
     savedAccount,
     facts.savedPassword
   )
-  const hasSubmitted = edit.saveTry.status === "tried"
-  const triedDraft = edit.saveTry.status === "tried" ? edit.saveTry.draft : null
+  const hasSubmitted = hasTriedSave(edit.saveTry)
   const isBusy =
-    saveState.status === "saving" || checkState.status === "checking"
+    isEmailAccountSaveRunning(saveState) ||
+    isEmailAccountCheckRunning(checkState)
   const canSubmit = !isBusy && isBackendRunning
   const message = formatEmailAccountMessage({
     savedAccount,
     draftParse,
     isDraftDifferent: isEmailAccountDraftDifferent(draft, savedAccount),
     hasSubmitted,
-    isEditedSinceSubmit: edit.editedDraft !== triedDraft,
+    isEditedSinceSubmit: isEditedSinceTriedSave(edit),
     saveState,
     checkState,
     isBackendRunning
   })
   const view: EmailAccountEditView = {
     draft,
-    problems:
-      hasSubmitted && draftParse.status === "invalid"
-        ? draftParse.problems
-        : NO_PROBLEMS,
+    problems: hasSubmitted ? getDraftParseProblems(draftParse) : NO_PROBLEMS,
     isEdited: edit.editedDraft !== null,
     isPasswordShown: edit.isPasswordShown,
     rejectedSaveCount: edit.rejectedSaveCount,
     isBusy,
-    isSaveDisabled: draftParse.status === "unchanged" || !canSubmit,
+    isSaveDisabled: isDraftUnchanged(draftParse) || !canSubmit,
     message
   }
 
   return { view, draftParse, canSubmit }
+}
+
+/**
+ * Answers whether a field breaks a rule, which rejects a save.
+ *
+ * @param draftParse - Outcome of reading the fields.
+ * @returns True while at least one field breaks a rule.
+ */
+function isDraftInvalid(draftParse: EmailAccountDraftParse): boolean {
+  switch (draftParse.status) {
+    case "invalid":
+      return true
+    case "changed":
+    case "unchanged":
+      return false
+    default: {
+      const unhandledParse: never = draftParse
+      return unhandledParse
+    }
+  }
 }
 
 /**
@@ -1617,7 +1776,7 @@ function useEmailAccountEdit(
     triedDraft: EmailAccountDraft | null
   ): Promise<void> {
     const outcome = await onSaveEmailAccount(account, password)
-    if (outcome === "saved") updateEdit({ kind: "saved", triedDraft })
+    if (isEmailAccountSaved(outcome)) updateEdit({ kind: "saved", triedDraft })
   }
 
   /**
@@ -1629,10 +1788,23 @@ function useEmailAccountEdit(
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
     if (!canSubmit) return
-    const isRejected = draftParse.status === "invalid"
-    updateEdit({ kind: "save-tried", isRejected })
-    if (draftParse.status !== "changed") return
-    void saveAccount(draftParse.account, draftParse.password, edit.editedDraft)
+    updateEdit({ kind: "save-tried", isRejected: isDraftInvalid(draftParse) })
+    switch (draftParse.status) {
+      case "changed":
+        void saveAccount(
+          draftParse.account,
+          draftParse.password,
+          edit.editedDraft
+        )
+        return
+      case "unchanged":
+      case "invalid":
+        return
+      default: {
+        const unhandledParse: never = draftParse
+        return unhandledParse
+      }
+    }
   }
 
   return {

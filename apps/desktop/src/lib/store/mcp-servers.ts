@@ -443,11 +443,19 @@ function createMcpServerStore(
         updateActionFailure(request, failure)
         return
       }
-      if (result.status !== "reconnected") {
-        if (!isRequestDiscarded(request)) await sendMcpServerSync()
-        return
+      switch (result.status) {
+        case "reconnected":
+          updateServerList(request, buildLoadedMcpServerList(result.list))
+          return
+        case "not-found":
+        case "off":
+          if (!isRequestDiscarded(request)) await sendMcpServerSync()
+          return
+        default: {
+          const unhandledResult: never = result
+          return unhandledResult
+        }
       }
-      updateServerList(request, buildLoadedMcpServerList(result.list))
     }
 
     /**
@@ -470,10 +478,18 @@ function createMcpServerStore(
     function handleGroupSave(
       outcome: McpSettingsSaveOutcome
     ): McpSettingsSaveOutcome {
-      if (outcome === "saved" && dependencies.isBackendRunning()) {
-        void sendMcpServerSync()
+      switch (outcome) {
+        case "saved":
+          if (dependencies.isBackendRunning()) void sendMcpServerSync()
+          return outcome
+        case "failed":
+        case "busy":
+          return outcome
+        default: {
+          const unhandledOutcome: never = outcome
+          return unhandledOutcome
+        }
       }
-      return outcome
     }
 
     /**

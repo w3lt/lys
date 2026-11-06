@@ -268,15 +268,33 @@ const NAME_TAKEN_STATUS: McpServerStatusPresentation = Object.freeze({
   reconnectLabel: ""
 })
 
+/** State of a server whose command is starting. */
+const STARTING_STATUS: McpServerStatusPresentation = Object.freeze({
+  condition: "connecting",
+  chip: "starting",
+  heading: "Starting",
+  detail: "started · waiting for initialize",
+  reconnectLabel: MCP_CONNECTION_WORDS.stdio.reconnectLabel
+})
+
 /**
- * Failures the backend refuses to reconnect a server after, because the
- * server cannot start until its settings change: the email server's missing
- * or unusable account, which saving an account applies again.
+ * Label of the button that connects a server again after each failure; a
+ * new reason must add one. It is empty after a failure the backend refuses
+ * to reconnect a server after, because the server cannot start until its
+ * settings change: the email server's missing or unusable account, which
+ * saving an account applies again.
  */
-const MCP_FAILURES_WITHOUT_RECONNECT: ReadonlySet<McpServerFailure> = new Set([
-  "account-missing",
-  "account-invalid"
-])
+const MCP_FAILURE_RECONNECT_LABELS = Object.freeze({
+  "start-failed": "Retry",
+  closed: "Retry",
+  "timed-out": "Retry",
+  unauthorized: "Retry",
+  unreachable: "Retry",
+  "http-error": "Retry",
+  "protocol-error": "Retry",
+  "account-missing": "",
+  "account-invalid": ""
+} satisfies Readonly<Record<McpServerFailure, string>>)
 
 /** Why a server is not connected; a new reason must add one. */
 const MCP_SERVER_FAILURE_TEXTS = Object.freeze({
@@ -580,6 +598,27 @@ function formatToolCount(count: number): string {
 }
 
 /**
+ * Formats the state of a server while the backend runs and the states it
+ * reports are not known.
+ *
+ * @param detail - Why they are not known: being read, or unreadable.
+ * @param connectLabel - Label of the button that connects the server.
+ * @returns `State unknown`, with why.
+ */
+function formatUnknownStatus(
+  detail: string,
+  connectLabel: string
+): McpServerStatusPresentation {
+  return {
+    condition: "idle",
+    chip: "",
+    heading: "State unknown",
+    detail,
+    reconnectLabel: connectLabel
+  }
+}
+
+/**
  * Formats the state of a server whose state the backend does not report.
  *
  * @param facts - Backend status, the list, and the server.
@@ -600,24 +639,55 @@ function formatIdleStatus(
       reconnectLabel: connectLabel
     }
   }
-  if (facts.list.status === "loaded") {
-    return {
-      condition: "idle",
-      chip: "not applied",
-      heading: "Not applied",
-      detail: `${connectLabel} applies the saved servers.`,
-      reconnectLabel: connectLabel
+  switch (facts.list.status) {
+    case "loaded":
+      return {
+        condition: "idle",
+        chip: "not applied",
+        heading: "Not applied",
+        detail: `${connectLabel} applies the saved servers.`,
+        reconnectLabel: connectLabel
+      }
+    case "failed":
+      return formatUnknownStatus(
+        "Lys couldn't read the server states.",
+        connectLabel
+      )
+    case "idle":
+    case "loading":
+      return formatUnknownStatus("Reading the server states…", connectLabel)
+    default: {
+      const unhandledList: never = facts.list
+      return unhandledList
     }
   }
-  return {
-    condition: "idle",
-    chip: "",
-    heading: "State unknown",
-    detail:
-      facts.list.status === "failed"
-        ? "Lys couldn't read the server states."
-        : "Reading the server states…",
-    reconnectLabel: connectLabel
+}
+
+/**
+ * Formats the state of an added server that is starting or connecting.
+ *
+ * @param settings - The server's saved settings.
+ * @returns `starting` for a command, `connecting` for a URL, with what Lys
+ * waits for.
+ */
+function formatAddedConnectingStatus(
+  settings: McpServerSettings
+): McpServerStatusPresentation {
+  switch (settings.transport) {
+    case "http":
+      return {
+        condition: "connecting",
+        chip: "connecting",
+        heading: "Connecting",
+        detail: `waiting for initialize from ${formatMcpServerHost(settings.url)}`,
+        reconnectLabel: MCP_CONNECTION_WORDS.http.reconnectLabel
+      }
+    case "stdio":
+      return STARTING_STATUS
+    default: {
+      const unhandledSettings: never = settings
+      return unhandledSettings
+    }
   }
 }
 
@@ -631,21 +701,15 @@ function formatIdleStatus(
 function formatConnectingStatus(
   server: McpListedServer
 ): McpServerStatusPresentation {
-  if (server.kind === "added" && server.settings.transport === "http") {
-    return {
-      condition: "connecting",
-      chip: "connecting",
-      heading: "Connecting",
-      detail: `waiting for initialize from ${formatMcpServerHost(server.settings.url)}`,
-      reconnectLabel: MCP_CONNECTION_WORDS.http.reconnectLabel
+  switch (server.kind) {
+    case "added":
+      return formatAddedConnectingStatus(server.settings)
+    case "built-in":
+      return STARTING_STATUS
+    default: {
+      const unhandledServer: never = server
+      return unhandledServer
     }
-  }
-  return {
-    condition: "connecting",
-    chip: "starting",
-    heading: "Starting",
-    detail: "started · waiting for initialize",
-    reconnectLabel: MCP_CONNECTION_WORDS.stdio.reconnectLabel
   }
 }
 
@@ -674,6 +738,28 @@ function formatConnectedStatus(
 }
 
 /**
+ * Formats what the state of a server that is switched off says.
+ *
+ * @param server - Listed server.
+ * @returns What a server Lys ships still needs before it can be switched
+ * on; otherwise that its tools are not offered.
+ */
+function formatOffDetail(server: McpListedServer): string {
+  switch (server.kind) {
+    case "built-in":
+      return server.isReady
+        ? MCP_SERVER_OFF_DETAIL
+        : BUILT_IN_MCP_SERVER_PRESENTATIONS[server.name].needsNote
+    case "added":
+      return MCP_SERVER_OFF_DETAIL
+    default: {
+      const unhandledServer: never = server
+      return unhandledServer
+    }
+  }
+}
+
+/**
  * Formats the state of a server that is switched off.
  *
  * @param server - Listed server.
@@ -681,16 +767,67 @@ function formatConnectedStatus(
  * be switched on, or that its tools are not offered.
  */
 function formatOffStatus(server: McpListedServer): McpServerStatusPresentation {
-  const detail =
-    server.kind === "built-in" && !server.isReady
-      ? BUILT_IN_MCP_SERVER_PRESENTATIONS[server.name].needsNote
-      : MCP_SERVER_OFF_DETAIL
   return {
     condition: "off",
     chip: "off",
     heading: "Off",
-    detail,
+    detail: formatOffDetail(server),
     reconnectLabel: ""
+  }
+}
+
+/**
+ * Formats why a server Lys ships is not connected.
+ *
+ * @param serverName - Name of the server.
+ * @param reason - Why it is not connected.
+ * @returns How to install it when it could not be started; otherwise the
+ * reason's text.
+ */
+function formatBuiltInFailedDetail(
+  serverName: BuiltInMcpServerName,
+  reason: McpServerFailure
+): string {
+  switch (reason) {
+    case "start-failed":
+      return BUILT_IN_MCP_SERVER_PRESENTATIONS[serverName].startFailure
+    case "closed":
+    case "timed-out":
+    case "unauthorized":
+    case "unreachable":
+    case "http-error":
+    case "protocol-error":
+    case "account-missing":
+    case "account-invalid":
+      return MCP_SERVER_FAILURE_TEXTS[reason]
+    default: {
+      const unhandledReason: never = reason
+      return unhandledReason
+    }
+  }
+}
+
+/**
+ * Formats why a server is not connected.
+ *
+ * @param server - Listed server.
+ * @param reason - Why it is not connected.
+ * @returns For a server Lys ships that could not be started, how to
+ * install it; otherwise the reason's text.
+ */
+function formatFailedDetail(
+  server: McpListedServer,
+  reason: McpServerFailure
+): string {
+  switch (server.kind) {
+    case "built-in":
+      return formatBuiltInFailedDetail(server.name, reason)
+    case "added":
+      return MCP_SERVER_FAILURE_TEXTS[reason]
+    default: {
+      const unhandledServer: never = server
+      return unhandledServer
+    }
   }
 }
 
@@ -707,16 +844,33 @@ function formatFailedStatus(
   server: McpListedServer,
   reason: McpServerFailure
 ): McpServerStatusPresentation {
-  const detail =
-    server.kind === "built-in" && reason === "start-failed"
-      ? BUILT_IN_MCP_SERVER_PRESENTATIONS[server.name].startFailure
-      : MCP_SERVER_FAILURE_TEXTS[reason]
   return {
     condition: "failed",
     chip: "failed",
     heading: "Failed",
-    detail,
-    reconnectLabel: MCP_FAILURES_WITHOUT_RECONNECT.has(reason) ? "" : "Retry"
+    detail: formatFailedDetail(server, reason),
+    reconnectLabel: MCP_FAILURE_RECONNECT_LABELS[reason]
+  }
+}
+
+/**
+ * Answers whether an added server took the name of a listed server Lys
+ * ships.
+ *
+ * @param server - Listed server.
+ * @returns True for a server Lys ships whose name an added server took;
+ * false for an added server.
+ */
+function isBuiltInNameTaken(server: McpListedServer): boolean {
+  switch (server.kind) {
+    case "built-in":
+      return server.isNameTaken
+    case "added":
+      return false
+    default: {
+      const unhandledServer: never = server
+      return unhandledServer
+    }
   }
 }
 
@@ -735,7 +889,7 @@ export function formatMcpServerStatus(
   facts: McpServerRowFacts
 ): McpServerStatusPresentation {
   const { server } = facts
-  if (server.kind === "built-in" && server.isNameTaken) return NAME_TAKEN_STATUS
+  if (isBuiltInNameTaken(server)) return NAME_TAKEN_STATUS
   if (!isMcpListedServerOn(server)) return formatOffStatus(server)
   const status = facts.isBackendRunning
     ? findMcpServerStatus(facts.list, getMcpListedServerName(server))
@@ -814,6 +968,32 @@ export function formatMcpServerToolMeta(
 }
 
 /**
+ * Formats what a connected server's tools section says while it shows no
+ * tool.
+ *
+ * @param facts - The tool list and the server's skipped tools.
+ * @returns Why no tool is shown: the tool list could not be read, it is
+ * being read, or the server lists none, or none Lys can offer.
+ */
+function formatConnectedToolsNote(facts: McpServerToolsFacts): string {
+  switch (facts.toolList.status) {
+    case "failed":
+      return facts.toolList.error
+    case "idle":
+    case "loading":
+      return "Listing tools…"
+    case "loaded":
+      return facts.skippedToolCount === 0
+        ? "It lists no tools."
+        : "It lists no tool Lys can offer."
+    default: {
+      const unhandledToolList: never = facts.toolList
+      return unhandledToolList
+    }
+  }
+}
+
+/**
  * Formats what a server's tools section says while it shows no tool.
  *
  * @param facts - The server's condition, the tool list, and its skipped
@@ -833,13 +1013,12 @@ export function formatMcpServerToolsNote(facts: McpServerToolsFacts): string {
     case "off":
       return "Nothing is listed while it is off."
     case "connected":
-      break
+      return formatConnectedToolsNote(facts)
+    default: {
+      const unhandledCondition: never = facts.condition
+      return unhandledCondition
+    }
   }
-  if (facts.toolList.status === "failed") return facts.toolList.error
-  if (facts.toolList.status !== "loaded") return "Listing tools…"
-  return facts.skippedToolCount === 0
-    ? "It lists no tools."
-    : "It lists no tool Lys can offer."
 }
 
 /**
@@ -959,6 +1138,36 @@ export function formatMcpServerRemovalQuestion(
 }
 
 /**
+ * Answers whether the backend reports a listed server connected.
+ *
+ * @param server - Listed server.
+ * @param list - Lifecycle of the list of applied servers.
+ * @returns True while the list holds the server connected; false for a
+ * built-in server whose name an added server took, whose state is the
+ * added server's.
+ */
+function isMcpListedServerConnected(
+  server: McpListedServer,
+  list: McpServerListState
+): boolean {
+  if (isBuiltInNameTaken(server)) return false
+  const status = findMcpServerStatus(list, getMcpListedServerName(server))
+  if (status === undefined) return false
+  switch (status.state.status) {
+    case "connected":
+      return true
+    case "connecting":
+    case "failed":
+    case "off":
+      return false
+    default: {
+      const unhandledState: never = status.state
+      return unhandledState
+    }
+  }
+}
+
+/**
  * Calculates how many listed servers the backend reports connected.
  *
  * @param servers - Listed servers.
@@ -973,13 +1182,21 @@ export function calculateConnectedMcpServerCount(
   list: McpServerListState,
   isBackendRunning: boolean
 ): number | undefined {
-  if (!isBackendRunning || list.status !== "loaded") return undefined
-  return servers.filter(
-    (server) =>
-      !(server.kind === "built-in" && server.isNameTaken) &&
-      findMcpServerStatus(list, getMcpListedServerName(server))?.state
-        .status === "connected"
-  ).length
+  if (!isBackendRunning) return undefined
+  switch (list.status) {
+    case "loaded":
+      return servers.filter((server) =>
+        isMcpListedServerConnected(server, list)
+      ).length
+    case "idle":
+    case "loading":
+    case "failed":
+      return undefined
+    default: {
+      const unhandledList: never = list
+      return unhandledList
+    }
+  }
 }
 
 /**

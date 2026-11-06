@@ -1,6 +1,7 @@
 import type {
   CheckEmailAccountApiRequestBody,
-  CheckEmailAccountApiResponse
+  CheckEmailAccountApiResponse,
+  EmailServerCheck
 } from "@lys/protocol"
 import type { EmailAccount, EmailPassword, EmailSettings } from "@lys/share"
 import type { StoreApi } from "zustand"
@@ -177,17 +178,111 @@ function buildEmailAccountSettings(
 }
 
 /**
- * Answers whether a check accepted the sign-in to both servers.
+ * Answers whether one server accepted the sign-in.
+ *
+ * @param check - Outcome of signing in to the server.
+ * @returns True when the server accepted.
+ */
+function isServerAccepted(check: EmailServerCheck): boolean {
+  switch (check.status) {
+    case "accepted":
+      return true
+    case "failed":
+      return false
+    default: {
+      const unhandledCheck: never = check
+      return unhandledCheck
+    }
+  }
+}
+
+/**
+ * Answers whether a check of an email account accepted the sign-in to both
+ * of its servers.
  *
  * @param outcome - What the backend answered.
  * @returns True when the check ran and both servers accepted.
  */
-function isAccountAccepted(outcome: CheckEmailAccountApiResponse): boolean {
-  return (
-    outcome.status === "checked" &&
-    outcome.imap.status === "accepted" &&
-    outcome.smtp.status === "accepted"
-  )
+export function isEmailAccountCheckAccepted(
+  outcome: CheckEmailAccountApiResponse
+): boolean {
+  switch (outcome.status) {
+    case "checked":
+      return isServerAccepted(outcome.imap) && isServerAccepted(outcome.smtp)
+    case "unavailable":
+      return false
+    default: {
+      const unhandledOutcome: never = outcome
+      return unhandledOutcome
+    }
+  }
+}
+
+/**
+ * Answers whether a save or removal of the email account runs.
+ *
+ * @param save - Latest save or removal.
+ * @returns True while it runs.
+ */
+export function isEmailAccountSaveRunning(
+  save: EmailAccountSaveState
+): boolean {
+  switch (save.status) {
+    case "saving":
+      return true
+    case "idle":
+    case "saved":
+    case "failed":
+      return false
+    default: {
+      const unhandledSave: never = save
+      return unhandledSave
+    }
+  }
+}
+
+/**
+ * Answers whether a check of an email account runs.
+ *
+ * @param check - Latest check.
+ * @returns True while it runs.
+ */
+export function isEmailAccountCheckRunning(
+  check: EmailAccountCheckState
+): boolean {
+  switch (check.status) {
+    case "checking":
+      return true
+    case "idle":
+    case "checked":
+    case "failed":
+      return false
+    default: {
+      const unhandledCheck: never = check
+      return unhandledCheck
+    }
+  }
+}
+
+/**
+ * Answers whether a save of the email account saved it.
+ *
+ * @param outcome - Outcome of the save.
+ * @returns True once the settings file holds the account and its password.
+ */
+export function isEmailAccountSaved(outcome: EmailAccountSaveOutcome): boolean {
+  switch (outcome) {
+    case "saved":
+      return true
+    case "refused":
+    case "failed":
+    case "busy":
+      return false
+    default: {
+      const unhandledOutcome: never = outcome
+      return unhandledOutcome
+    }
+  }
 }
 
 /**
@@ -217,8 +312,8 @@ export function createEmailSettingsSlice(
   function isBusy(): boolean {
     const { emailAccountSave, emailAccountCheck } = get()
     return (
-      emailAccountSave.status === "saving" ||
-      emailAccountCheck.status === "checking"
+      isEmailAccountSaveRunning(emailAccountSave) ||
+      isEmailAccountCheckRunning(emailAccountCheck)
     )
   }
 
@@ -277,7 +372,7 @@ export function createEmailSettingsSlice(
       outcome
     })
     set({ emailAccountCheck: checked })
-    if (!isAccountAccepted(outcome)) return "refused"
+    if (!isEmailAccountCheckAccepted(outcome)) return "refused"
     return await saveAccountWithPassword(account, password)
   }
 
@@ -293,9 +388,17 @@ export function createEmailSettingsSlice(
     set({ emailAccountCheck: IDLE_CHECK, emailAccountSave: SAVING })
     if (get().settings.mcp.builtIn.email.enabled) {
       const switchOutcome = await switchEmailServerOff()
-      if (switchOutcome !== "saved") {
-        set({ emailAccountSave: SWITCH_OFF_FAILED })
-        return "failed"
+      switch (switchOutcome) {
+        case "saved":
+          break
+        case "failed":
+        case "busy":
+          set({ emailAccountSave: SWITCH_OFF_FAILED })
+          return "failed"
+        default: {
+          const unhandledOutcome: never = switchOutcome
+          return unhandledOutcome
+        }
       }
     }
     return await saveAccountWithPassword(null, null)

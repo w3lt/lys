@@ -79,6 +79,67 @@ export type McpServerListFocusTarget =
     }
 
 /**
+ * Answers whether Lys ships a listed server.
+ *
+ * @param server - The listed server.
+ * @returns True for a server Lys ships; false for an added server.
+ */
+function isBuiltInMcpServer(server: McpListedServer): boolean {
+  switch (server.kind) {
+    case "built-in":
+      return true
+    case "added":
+      return false
+    default: {
+      const unhandledServer: never = server
+      return unhandledServer
+    }
+  }
+}
+
+/**
+ * Answers whether the person added a listed server.
+ *
+ * @param server - The listed server.
+ * @returns True for an added server; false for a server Lys ships.
+ */
+function isAddedMcpServer(server: McpListedServer): boolean {
+  switch (server.kind) {
+    case "added":
+      return true
+    case "built-in":
+      return false
+    default: {
+      const unhandledServer: never = server
+      return unhandledServer
+    }
+  }
+}
+
+/**
+ * Finds the server whose Edit button takes focus.
+ *
+ * @param focusTarget - Control that takes focus.
+ * @returns The server's name, or null while focus goes to Add server or
+ * stays where it is.
+ */
+function findFocusedServerName(
+  focusTarget: McpServerListFocusTarget
+): McpServerName | null {
+  switch (focusTarget.kind) {
+    case "server":
+      return focusTarget.serverName
+    case "none":
+    case "add-server":
+      return null
+    default: {
+      const unhandledTarget: never = focusTarget
+      return unhandledTarget
+    }
+  }
+}
+
+/**
  * Finds the connected state of a server whose details list skipped tools.
  *
  * @param list - Lifecycle of the list of applied servers.
@@ -172,7 +233,7 @@ function McpServerTitle({
       <span className="settings-view__mcp-name" id={nameId}>
         {getMcpListedServerName(server)}
       </span>
-      {server.kind === "built-in" ? (
+      {isBuiltInMcpServer(server) ? (
         <span className="settings-view__mcp-built-in-tag" id={builtInTagId}>
           built-in
         </span>
@@ -253,7 +314,7 @@ function McpServerToggle({
   const targetId = useId()
   const countId = useId()
   const descriptionIds = [
-    server.kind === "built-in" ? builtInTagId : undefined,
+    isBuiltInMcpServer(server) ? builtInTagId : undefined,
     transportId,
     stateId,
     targetId,
@@ -574,6 +635,28 @@ type McpConnectedToolFacts = Pick<
 >
 
 /**
+ * Answers whether the tool list was read.
+ *
+ * @param toolList - Lifecycle of the tool list.
+ * @returns True once both lists were read; false before, while they are
+ * read, or after the read failed.
+ */
+function isToolListLoaded(toolList: ToolListState): boolean {
+  switch (toolList.status) {
+    case "loaded":
+      return true
+    case "idle":
+    case "loading":
+    case "failed":
+      return false
+    default: {
+      const unhandledToolList: never = toolList
+      return unhandledToolList
+    }
+  }
+}
+
+/**
  * Lists the tools of the connected servers.
  *
  * @param facts - Listed servers, the lifecycles of the list of applied
@@ -585,7 +668,7 @@ function listConnectedMcpTools(
   facts: McpConnectedToolFacts
 ): readonly McpToolDefinition[] | undefined {
   const { servers, list, toolList, isBackendRunning } = facts
-  if (toolList.status !== "loaded") return undefined
+  if (!isToolListLoaded(toolList)) return undefined
 
   /**
    * Lists the tools of one server while it is connected.
@@ -909,7 +992,7 @@ export function McpServerSection({
 }: McpServerSectionProps): ReactElement {
   const headingId = useId()
   const addServerRef = useAddServerFocus(focusTarget)
-  const addedCount = servers.filter((server) => server.kind === "added").length
+  const addedCount = servers.filter(isAddedMcpServer).length
   const meta = formatMcpServerSectionMeta({
     servers,
     list,
@@ -930,9 +1013,7 @@ export function McpServerSection({
       <McpServerRows
         builtInPanels={builtInPanels}
         expandedServerKey={expandedServerKey}
-        focusedServerName={
-          focusTarget.kind === "server" ? focusTarget.serverName : null
-        }
+        focusedServerName={findFocusedServerName(focusTarget)}
         isBackendRunning={isBackendRunning}
         isSaving={isSaving}
         list={list}

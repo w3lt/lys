@@ -15,15 +15,20 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
-import { useLysStore } from "@/lib/store"
-import type {
-  EmailAccountRemovalOutcome,
-  EmailAccountSaveOutcome
+import { useLysStore, type BackendServerStatus } from "@/lib/store"
+import {
+  isEmailAccountSaved,
+  type EmailAccountRemovalOutcome,
+  type EmailAccountSaveOutcome
 } from "@/lib/store/email-settings"
 import {
   useMcpServerStore,
   type McpServerListState
 } from "@/lib/store/mcp-servers"
+import {
+  isMcpSettingsSaveRunning,
+  type McpSettingsSaveOutcome
+} from "@/lib/store/mcp-settings"
 import type { ToolApproval } from "@/lib/store/tool-settings"
 import { useToolStore } from "@/lib/store/tools"
 
@@ -109,6 +114,32 @@ const INITIAL_MCP_LIST_VIEW: McpListView = Object.freeze({
 })
 
 /**
+ * Calculates whose details the list shows once an editor closed.
+ *
+ * @param target - Control that takes focus once the list returns.
+ * @param expandedServerKey - Key of the server whose details are shown
+ * now, or null when none is.
+ * @returns The key of the added server whose Edit button takes focus, so
+ * its details show; otherwise the key shown now.
+ */
+function calculateExpandedServerKeyOnReturn(
+  target: McpServerListFocusTarget,
+  expandedServerKey: string | null
+): string | null {
+  switch (target.kind) {
+    case "server":
+      return buildMcpListedServerKey("added", target.serverName)
+    case "none":
+    case "add-server":
+      return expandedServerKey
+    default: {
+      const unhandledTarget: never = target
+      return unhandledTarget
+    }
+  }
+}
+
+/**
  * Calculates what the server list shows after one change.
  *
  * @param view - What the list shows now.
@@ -132,10 +163,10 @@ function calculateMcpListView(
       }
     case "editor-closed":
       return {
-        expandedServerKey:
-          change.target.kind === "server"
-            ? buildMcpListedServerKey("added", change.target.serverName)
-            : view.expandedServerKey,
+        expandedServerKey: calculateExpandedServerKeyOnReturn(
+          change.target,
+          view.expandedServerKey
+        ),
         focusTarget: change.target
       }
     case "server-removed": {
@@ -321,6 +352,26 @@ type McpServerListSaves = {
 }
 
 /**
+ * Answers whether a save of the MCP group saved it.
+ *
+ * @param outcome - Outcome of the save.
+ * @returns True once the settings file holds the group.
+ */
+function isMcpSettingsSaved(outcome: McpSettingsSaveOutcome): boolean {
+  switch (outcome) {
+    case "saved":
+      return true
+    case "failed":
+    case "busy":
+      return false
+    default: {
+      const unhandledOutcome: never = outcome
+      return unhandledOutcome
+    }
+  }
+}
+
+/**
  * Owns the saves the server list proposes: removing an added server,
  * switching a server on or off, and one approval for several tools.
  *
@@ -351,7 +402,7 @@ function useMcpServerListSaves(
     const outcome = await saveMcpServers(
       mcp.servers.filter((server) => server.name !== serverName)
     )
-    if (outcome === "saved") onRemoveServerComplete(serverName)
+    if (isMcpSettingsSaved(outcome)) onRemoveServerComplete(serverName)
   }
 
   /**
@@ -437,8 +488,8 @@ function McpServerListView({
 }: McpServerListViewProps): ReactElement {
   const mcp = useLysStore((state) => state.settings.mcp)
   const email = useLysStore((state) => state.settings.email)
-  const isSaving = useLysStore(
-    (state) => state.mcpSettingsSave.status === "saving"
+  const isSaving = useLysStore((state) =>
+    isMcpSettingsSaveRunning(state.mcpSettingsSave)
   )
   const toolSettings = useLysStore((state) => state.settings.tools)
   const updateToolOn = useLysStore((state) => state.updateToolOn)
@@ -480,6 +531,28 @@ function McpServerListView({
 }
 
 /**
+ * Answers whether the backend answers requests.
+ *
+ * @param status - The backend's lifecycle state.
+ * @returns True while it runs.
+ */
+function isBackendServerRunning(status: BackendServerStatus): boolean {
+  switch (status) {
+    case "running":
+      return true
+    case "starting":
+    case "stopping":
+    case "stopped":
+    case "unresponsive":
+      return false
+    default: {
+      const unhandledStatus: never = status
+      return unhandledStatus
+    }
+  }
+}
+
+/**
  * Presents the email account card and saves, checks, and removes the
  * account.
  *
@@ -502,8 +575,8 @@ function EmailAccountCardView(): ReactElement {
   )
   const saveState = useLysStore((state) => state.emailAccountSave)
   const checkState = useLysStore((state) => state.emailAccountCheck)
-  const isBackendRunning = useLysStore(
-    (state) => state.backendServerInfo.status === "running"
+  const isBackendRunning = useLysStore((state) =>
+    isBackendServerRunning(state.backendServerInfo.status)
   )
   const saveEmailAccount = useLysStore((state) => state.saveEmailAccount)
   const deleteEmailAccount = useLysStore((state) => state.deleteEmailAccount)
@@ -532,7 +605,7 @@ function EmailAccountCardView(): ReactElement {
     const outcome = await saveEmailAccount(account, password)
     const isOnAfterSave =
       useLysStore.getState().settings.mcp.builtIn.email.enabled
-    if (outcome === "saved" && isOnAfterSave) void sendMcpServerSync()
+    if (isEmailAccountSaved(outcome) && isOnAfterSave) void sendMcpServerSync()
     return outcome
   }
 
@@ -690,6 +763,26 @@ function useMcpPaneReads(isBackendRunning: boolean): void {
 }
 
 /**
+ * Builds the key that tells one editor instance from another.
+ *
+ * @param editor - What the editor is open for.
+ * @returns The saved server's name, or `:new` for a new server, which no
+ * name can take.
+ */
+function buildMcpEditorKey(editor: McpEditorTarget): string {
+  switch (editor.kind) {
+    case "server":
+      return editor.server.name
+    case "new":
+      return ":new"
+    default: {
+      const unhandledEditor: never = editor
+      return unhandledEditor
+    }
+  }
+}
+
+/**
  * Presents the MCP pane: the saved MCP servers with each one's state and
  * tools, and the editor that adds or changes one.
  *
@@ -719,8 +812,8 @@ function useMcpPaneReads(isBackendRunning: boolean): void {
  * @returns The MCP pane body.
  */
 export default function McpPane(): ReactElement {
-  const isBackendRunning = useLysStore(
-    (state) => state.backendServerInfo.status === "running"
+  const isBackendRunning = useLysStore((state) =>
+    isBackendServerRunning(state.backendServerInfo.status)
   )
   const list = useMcpServerStore((state) => state.list)
   const [editor, setEditor] = useState<McpEditorTarget | null>(null)
@@ -767,7 +860,7 @@ export default function McpPane(): ReactElement {
       ) : (
         <McpServerEditorView
           editor={editor}
-          key={editor.kind === "server" ? editor.server.name : ":new"}
+          key={buildMcpEditorKey(editor)}
           onClose={() => closeEditor(calculateEditorReturnTarget(editor))}
           onSaveServerComplete={(serverName) =>
             closeEditor({ kind: "server", serverName })

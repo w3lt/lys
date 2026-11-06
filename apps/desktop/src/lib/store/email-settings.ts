@@ -93,7 +93,7 @@ export type EmailSettingsSlice = {
    * removal starts meanwhile. A removal resets the check, so an outcome of
    * the removed account is no longer shown.
    */
-  readonly removeEmailAccount: (
+  readonly deleteEmailAccount: (
     switchEmailServerOff: () => Promise<McpSettingsSaveOutcome>
   ) => Promise<EmailAccountRemovalOutcome>
 }
@@ -282,11 +282,11 @@ export function createEmailSettingsSlice(
   }
 
   /**
-   * Implements {@link EmailSettingsSlice.removeEmailAccount}.
+   * Implements {@link EmailSettingsSlice.deleteEmailAccount}.
    * @param switchEmailServerOff - Saves the email server's switch as off.
    * @returns The removal outcome.
    */
-  async function removeEmailAccount(
+  async function deleteEmailAccount(
     switchEmailServerOff: () => Promise<McpSettingsSaveOutcome>
   ): Promise<EmailAccountRemovalOutcome> {
     if (isBusy()) return "busy"
@@ -305,6 +305,6 @@ export function createEmailSettingsSlice(
     emailAccountSave: IDLE_SAVE,
     emailAccountCheck: IDLE_CHECK,
     saveEmailAccount,
-    removeEmailAccount
+    deleteEmailAccount
   }
 }

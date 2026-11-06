@@ -338,7 +338,7 @@ describe("createEmailSettingsSlice", () => {
       })
       const store = createEmailStore()
 
-      const removal = store.getState().removeEmailAccount(createSwitchOffSpy())
+      const removal = store.getState().deleteEmailAccount(createSwitchOffSpy())
       await waitForMicrotasks()
       const save = await store
         .getState()
@@ -352,7 +352,7 @@ describe("createEmailSettingsSlice", () => {
     })
   })
 
-  describe("removeEmailAccount", () => {
+  describe("deleteEmailAccount", () => {
     it("removes the account and the password in one write and resets the check, leaving the switch of a server that is off alone", async () => {
       const { host, writes } = startControlledSettingsHost()
       startBackendFake({
@@ -362,7 +362,7 @@ describe("createEmailSettingsSlice", () => {
       await store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
       const switchEmailServerOff = createSwitchOffSpy()
 
-      const removal = store.getState().removeEmailAccount(switchEmailServerOff)
+      const removal = store.getState().deleteEmailAccount(switchEmailServerOff)
       await waitForMicrotasks()
       const whileWriting = store.getState().emailAccountSave
       writes[0]?.resolve(null)
@@ -395,7 +395,7 @@ describe("createEmailSettingsSlice", () => {
       const { writes } = startControlledSettingsHost()
       const store = createEmailStore()
 
-      const removal = store.getState().removeEmailAccount(createSwitchOffSpy())
+      const removal = store.getState().deleteEmailAccount(createSwitchOffSpy())
       await waitForMicrotasks()
       writes[0]?.reject("EACCES: /Users/someone/.lys/settings.json")
 
@@ -420,7 +420,7 @@ describe("createEmailSettingsSlice", () => {
       const switchEmailServerOff = createSwitchOffSpy()
       const removal = await store
         .getState()
-        .removeEmailAccount(switchEmailServerOff)
+        .deleteEmailAccount(switchEmailServerOff)
       await waitForMicrotasks()
       writes[0]?.resolve(null)
       await save
@@ -437,13 +437,13 @@ describe("createEmailSettingsSlice", () => {
       const switchOff = createControlledPromise<McpSettingsSaveOutcome>()
       const switchEmailServerOff = vi.fn(() => switchOff.promise)
 
-      const removal = store.getState().removeEmailAccount(switchEmailServerOff)
+      const removal = store.getState().deleteEmailAccount(switchEmailServerOff)
       await waitForMicrotasks()
       const whileSwitching = store.getState().emailAccountSave
       const writesWhileSwitching = listSettingsWrites(host.commands).length
       const secondRemoval = await store
         .getState()
-        .removeEmailAccount(createSwitchOffSpy())
+        .deleteEmailAccount(createSwitchOffSpy())
       const save = await store
         .getState()
         .saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
@@ -474,7 +474,7 @@ describe("createEmailSettingsSlice", () => {
         const store = createEmailStore(EMAIL_ON_SETTINGS)
 
         await expect(
-          store.getState().removeEmailAccount(createSwitchOffSpy(outcome))
+          store.getState().deleteEmailAccount(createSwitchOffSpy(outcome))
         ).resolves.toBe("failed")
 
         expect(store.getState().emailAccountSave).toEqual({

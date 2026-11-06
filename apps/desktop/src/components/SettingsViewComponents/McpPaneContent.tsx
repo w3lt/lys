@@ -506,7 +506,7 @@ function EmailAccountCardView(): ReactElement {
     (state) => state.backendServerInfo.status === "running"
   )
   const saveEmailAccount = useLysStore((state) => state.saveEmailAccount)
-  const removeEmailAccount = useLysStore((state) => state.removeEmailAccount)
+  const deleteEmailAccount = useLysStore((state) => state.deleteEmailAccount)
   const saveBuiltInMcpServerSwitch = useMcpServerStore(
     (state) => state.saveBuiltInMcpServerSwitch
   )
@@ -544,7 +544,7 @@ function EmailAccountCardView(): ReactElement {
    * could not be saved, in which case the account stays.
    */
   function handleRemoveEmailAccount(): Promise<EmailAccountRemovalOutcome> {
-    return removeEmailAccount(() => saveBuiltInMcpServerSwitch("email", false))
+    return deleteEmailAccount(() => saveBuiltInMcpServerSwitch("email", false))
   }
 
   return (

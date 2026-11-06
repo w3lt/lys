@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use tokio::time::timeout;
 
 use crate::support::binary::{
-    BinaryProcess, STEP_WAIT, follow_lines, read_to_end_in_thread, wait_for_stream_end,
+    BinaryProcess, STEP_WAIT_LIMIT, follow_lines, read_to_end_in_thread, wait_for_stream_end,
 };
 use crate::support::imap::{FakeImapServer, FakeMailbox, ImapFault, ImapMode, NewMessage};
 use crate::support::smtp::{DATA_END, FakeSmtpServer, SmtpFault, SmtpMode};
@@ -39,7 +39,7 @@ const TOOL_NAMES: [&str; 10] = [
 
 /// Longest the binary may take, in real time, to log a call it was told to
 /// cancel.
-const LOG_WAIT: Duration = Duration::from_secs(30);
+const LOG_WAIT_LIMIT: Duration = Duration::from_secs(30);
 
 /// Builds the JSON of `LYS_EMAIL_ACCOUNT` for fakes on the ports that
 /// talk without TLS.
@@ -67,7 +67,7 @@ struct Dialogue {
 
 /// Runs the binary over stdio, sends the messages, closes its input, and
 /// collects the answers to the requests among them; each answer, the exit,
-/// and the end of standard error come within [`STEP_WAIT`].
+/// and the end of standard error come within [`STEP_WAIT_LIMIT`].
 ///
 /// # Arguments
 ///
@@ -92,7 +92,7 @@ fn send_dialogue_messages(variable: String, messages: Vec<Value>) -> Dialogue {
             continue;
         };
         let line = lines
-            .recv_timeout(STEP_WAIT)
+            .recv_timeout(STEP_WAIT_LIMIT)
             .unwrap_or_else(|error| panic!("request {id} is not answered: {error}"));
         answers.push(serde_json::from_str(&line).expect("JSON"));
     }
@@ -106,7 +106,7 @@ fn send_dialogue_messages(variable: String, messages: Vec<Value>) -> Dialogue {
     }
 }
 
-/// Waits, at most [`LOG_WAIT`] in real time, for the line the binary logs
+/// Waits, at most [`LOG_WAIT_LIMIT`] in real time, for the line the binary logs
 /// for a call of the tool.
 ///
 /// # Returns
@@ -117,7 +117,7 @@ fn send_dialogue_messages(variable: String, messages: Vec<Value>) -> Dialogue {
 ///
 /// When no such line comes in time.
 fn wait_for_tool_line(lines: &mpsc::Receiver<String>, tool: &str) -> String {
-    let deadline = Instant::now() + LOG_WAIT;
+    let deadline = Instant::now() + LOG_WAIT_LIMIT;
     let prefix = format!("tool {tool}: ");
     loop {
         let line = lines
@@ -145,8 +145,8 @@ fn wait_for_tool_line(lines: &mpsc::Receiver<String>, tool: &str) -> String {
 ///
 /// # Panics
 ///
-/// When the binary does not answer `initialize` within [`STEP_WAIT`],
-/// `released` does not say within [`STEP_WAIT`] that the fake holds the
+/// When the binary does not answer `initialize` within [`STEP_WAIT_LIMIT`],
+/// `released` does not say within [`STEP_WAIT_LIMIT`] that the fake holds the
 /// call, or the binary does not log the call in time.
 fn cancel_held_call(variable: String, call: Value, released: mpsc::Receiver<()>) -> String {
     let tool = call["name"].as_str().expect("the tool's name").to_owned();
@@ -157,7 +157,7 @@ fn cancel_held_call(variable: String, call: Value, released: mpsc::Receiver<()>)
     let initialize = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "lys-test", "version": "0"}}});
     writeln!(input, "{initialize}").expect("written");
     answers
-        .recv_timeout(STEP_WAIT)
+        .recv_timeout(STEP_WAIT_LIMIT)
         .expect("initialize is answered in time");
     let messages = [
         json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
@@ -167,7 +167,7 @@ fn cancel_held_call(variable: String, call: Value, released: mpsc::Receiver<()>)
         writeln!(input, "{message}").expect("written");
     }
     released
-        .recv_timeout(STEP_WAIT)
+        .recv_timeout(STEP_WAIT_LIMIT)
         .expect("the fake holds the call in time");
     let cancel = json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 2, "reason": "The person stopped it."}});
     writeln!(input, "{cancel}").expect("written");
@@ -186,7 +186,7 @@ async fn logs_a_send_cancelled_after_the_hand_over_as_unconfirmed() {
     let (release, released) = mpsc::channel();
 
     let dialogue = tokio::task::spawn_blocking(move || cancel_held_call(variable, call, released));
-    timeout(STEP_WAIT, smtp.wait_for_fault())
+    timeout(STEP_WAIT_LIMIT, smtp.wait_for_fault())
         .await
         .expect("the fake holds the whole message in time");
     release.send(()).expect("the dialogue waits for the fake");
@@ -220,7 +220,7 @@ async fn logs_a_save_cancelled_once_storing_began_as_stopped_while_saving() {
     let (release, released) = mpsc::channel();
 
     let dialogue = tokio::task::spawn_blocking(move || cancel_held_call(variable, call, released));
-    timeout(STEP_WAIT, imap.wait_for_fault())
+    timeout(STEP_WAIT_LIMIT, imap.wait_for_fault())
         .await
         .expect("the fake stores the new draft in time");
     release.send(()).expect("the dialogue waits for the fake");

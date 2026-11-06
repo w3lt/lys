@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 /// Longest the binary may take, in real time, for one step of a test: to
 /// answer a request, to bring a call to the fault a fake holds it at, to
 /// exit once its input ended, or to close its output once it exited.
-pub const STEP_WAIT: Duration = Duration::from_secs(30);
+pub const STEP_WAIT_LIMIT: Duration = Duration::from_secs(30);
 
 /// How long [`BinaryProcess::wait_for_exit`] sleeps between two looks at
 /// the binary.
@@ -83,7 +83,7 @@ impl BinaryProcess {
         (process, streams)
     }
 
-    /// Waits, at most [`STEP_WAIT`] in real time, for the binary to exit,
+    /// Waits, at most [`STEP_WAIT_LIMIT`] in real time, for the binary to exit,
     /// and reaps it.
     ///
     /// # Returns
@@ -95,7 +95,7 @@ impl BinaryProcess {
     /// When the binary does not exit in time, or its state cannot be read;
     /// dropping the process as the panic unwinds then kills and reaps it.
     pub fn wait_for_exit(&mut self) -> ExitStatus {
-        let deadline = Instant::now() + STEP_WAIT;
+        let deadline = Instant::now() + STEP_WAIT_LIMIT;
         loop {
             let exited = self.child.try_wait().expect("the binary's state is read");
             if let Some(status) = exited {
@@ -104,7 +104,7 @@ impl BinaryProcess {
             if Instant::now() >= deadline {
                 panic!(
                     "the binary did not exit within {} seconds",
-                    STEP_WAIT.as_secs()
+                    STEP_WAIT_LIMIT.as_secs()
                 );
             }
             thread::sleep(EXIT_POLL_INTERVAL);
@@ -175,7 +175,7 @@ pub fn read_to_end_in_thread(
     receiver
 }
 
-/// Waits, at most [`STEP_WAIT`] in real time, for the end of a stream that
+/// Waits, at most [`STEP_WAIT_LIMIT`] in real time, for the end of a stream that
 /// [`read_to_end_in_thread`] reads.
 ///
 /// # Arguments
@@ -192,7 +192,7 @@ pub fn read_to_end_in_thread(
 /// When the stream does not end in time, or reading it failed.
 pub fn wait_for_stream_end(bytes: &mpsc::Receiver<io::Result<Vec<u8>>>, stream: &str) -> Vec<u8> {
     bytes
-        .recv_timeout(STEP_WAIT)
+        .recv_timeout(STEP_WAIT_LIMIT)
         .unwrap_or_else(|error| panic!("the binary's {stream} did not end: {error}"))
         .unwrap_or_else(|error| panic!("the binary's {stream} could not be read: {error}"))
 }

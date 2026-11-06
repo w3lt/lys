@@ -25,7 +25,7 @@ use crate::support::{
 /// # Panics
 ///
 /// When the binary does not exit within
-/// [`STEP_WAIT`](crate::support::binary::STEP_WAIT), or its output does not
+/// [`STEP_WAIT_LIMIT`](crate::support::binary::STEP_WAIT_LIMIT), or its output does not
 /// end in time once it exited.
 async fn read_binary_output(arguments: &[&str], variable: Option<&str>) -> Output {
     let (mut binary, streams) = BinaryProcess::start(arguments, variable);

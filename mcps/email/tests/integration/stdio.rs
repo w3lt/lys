@@ -148,7 +148,7 @@ fn wait_for_tool_line(lines: &mpsc::Receiver<String>, tool: &str) -> String {
 /// When the binary does not answer `initialize` within [`STEP_WAIT`],
 /// `released` does not say within [`STEP_WAIT`] that the fake holds the
 /// call, or the binary does not log the call in time.
-fn read_cancelled_call_line(variable: String, call: Value, released: mpsc::Receiver<()>) -> String {
+fn cancel_held_call(variable: String, call: Value, released: mpsc::Receiver<()>) -> String {
     let tool = call["name"].as_str().expect("the tool's name").to_owned();
     let (binary, streams) = BinaryProcess::start(&[], Some(&variable));
     let mut input = streams.input;
@@ -185,8 +185,7 @@ async fn logs_a_send_cancelled_after_the_hand_over_as_unconfirmed() {
     let call = json!({"name": "send_email", "arguments": {"to": ["jane@example.com"], "subject": "Hi", "body": "Hello"}});
     let (release, released) = mpsc::channel();
 
-    let dialogue =
-        tokio::task::spawn_blocking(move || read_cancelled_call_line(variable, call, released));
+    let dialogue = tokio::task::spawn_blocking(move || cancel_held_call(variable, call, released));
     timeout(STEP_WAIT, smtp.wait_for_fault())
         .await
         .expect("the fake holds the whole message in time");
@@ -220,8 +219,7 @@ async fn logs_a_save_cancelled_once_storing_began_as_stopped_while_saving() {
     let call = json!({"name": "save_draft", "arguments": {"draft_id": "1.1003.Drafts", "to": ["jane@example.com"], "subject": "Plans, again", "body": "Later."}});
     let (release, released) = mpsc::channel();
 
-    let dialogue =
-        tokio::task::spawn_blocking(move || read_cancelled_call_line(variable, call, released));
+    let dialogue = tokio::task::spawn_blocking(move || cancel_held_call(variable, call, released));
     timeout(STEP_WAIT, imap.wait_for_fault())
         .await
         .expect("the fake stores the new draft in time");

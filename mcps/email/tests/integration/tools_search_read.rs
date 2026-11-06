@@ -95,13 +95,13 @@ fn build_thread_message(name: &str, number: i64, body: &str) -> TestMessage {
     message
 }
 
-/// Reads the conversation of a message.
+/// Gets the conversation of a message, as text.
 ///
 /// # Arguments
 ///
 /// * `stack` - The running fakes and the tools' context.
 /// * `id` - The message's id.
-async fn read_conversation_text(stack: &Stack, id: &str) -> String {
+async fn get_conversation_text(stack: &Stack, id: &str) -> String {
     run_read_conversation(&stack.context, IdArguments { id: id.to_owned() })
         .await
         .expect("the conversation")
@@ -139,14 +139,14 @@ async fn search_inbox_with(stack: &Stack, arguments: SearchArguments) -> String 
         .text
 }
 
-/// Reads one attachment of a message.
+/// Gets one attachment of a message.
 ///
 /// # Arguments
 ///
 /// * `stack` - The running fakes and the tools' context.
 /// * `id` - The message's id.
 /// * `attachment` - The attachment's number, from 1.
-async fn read_attachment_number(stack: &Stack, id: &str, attachment: u32) -> ToolResult {
+async fn get_attachment(stack: &Stack, id: &str, attachment: u32) -> ToolResult {
     let arguments = AttachmentArguments {
         id: id.to_owned(),
         attachment,
@@ -628,11 +628,9 @@ async fn converts_html_lists_attachments_and_reads_text_ones() {
     let message = run_read_email(&stack.context, IdArguments { id: id.to_owned() })
         .await
         .expect("the message");
-    let csv = read_attachment_number(&stack, id, 1)
-        .await
-        .expect("the attachment");
-    let pdf = read_attachment_number(&stack, id, 2).await;
-    let missing = read_attachment_number(&stack, id, 3).await;
+    let csv = get_attachment(&stack, id, 1).await.expect("the attachment");
+    let pdf = get_attachment(&stack, id, 2).await;
+    let missing = get_attachment(&stack, id, 3).await;
 
     assert!(message.text.contains("Attachments: 2\n  #1 data.csv (text/csv, 8 B)\n  #2 report.pdf (application/pdf, 5 B)\n[The text was converted from HTML.]\n\nHello there."), "{}", message.text);
     assert_eq!(
@@ -689,7 +687,7 @@ async fn reads_a_conversation_across_folders_oldest_first() {
 async fn finds_a_conversation_by_its_identifiers_without_marking_anything() {
     let stack = start_stack(build_conversation_mailbox(), false).await;
 
-    read_conversation_text(&stack, "3.1001.INBOX").await;
+    get_conversation_text(&stack, "3.1001.INBOX").await;
 
     let commands = stack.imap.list_commands();
     assert!(
@@ -712,7 +710,7 @@ async fn fits_the_newest_messages_of_a_long_conversation_and_says_how_many_are_l
     }
     let stack = start_stack(mailbox, false).await;
 
-    let text = read_conversation_text(&stack, "12.1001.INBOX").await;
+    let text = get_conversation_text(&stack, "12.1001.INBOX").await;
 
     let ids = list_entry_ids(&text);
     let shown = ids.len();
@@ -755,7 +753,7 @@ async fn shows_the_newest_message_even_when_it_alone_is_longer_than_the_result()
     mailbox.add_message("INBOX", crowded.build_new_message(&[]));
     let stack = start_stack(mailbox, false).await;
 
-    let text = read_conversation_text(&stack, "2.1001.INBOX").await;
+    let text = get_conversation_text(&stack, "2.1001.INBOX").await;
 
     assert!(
         text.starts_with("The conversation has 2 messages, oldest first. Only the newest is shown; 1 older one is left out.\n\n----\nid 2.1001.INBOX\n"),
@@ -776,7 +774,7 @@ async fn shows_at_most_the_newest_50_messages_of_a_conversation_across_folders()
     }
     let stack = start_stack(mailbox, false).await;
 
-    let text = read_conversation_text(&stack, "30.1002.Sent").await;
+    let text = get_conversation_text(&stack, "30.1002.Sent").await;
 
     assert!(
         text.starts_with("The conversation has 60 messages, oldest first. Only the newest 50 are shown; 10 older ones are left out.\n\n----\nid 6.1001.INBOX\n"),
@@ -796,7 +794,7 @@ async fn says_when_a_folder_matched_more_messages_than_a_conversation_reads() {
     }
     let stack = start_stack(mailbox, false).await;
 
-    let text = read_conversation_text(&stack, "55.1001.INBOX").await;
+    let text = get_conversation_text(&stack, "55.1001.INBOX").await;
 
     assert!(
         text.starts_with("The conversation has at least 50 messages, oldest first.\nMore than 50 messages match in INBOX; only the newest 50 of each were read, so older ones may be missing.\n\n----\nid 6.1001.INBOX\n"),
@@ -829,7 +827,7 @@ async fn keeps_only_messages_whose_identifiers_equal_the_conversation_ones() {
     mailbox.add_message("INBOX", reply.build_new_message(&[]));
     let stack = start_stack(mailbox, false).await;
 
-    let text = read_conversation_text(&stack, "1.1001.INBOX").await;
+    let text = get_conversation_text(&stack, "1.1001.INBOX").await;
 
     assert!(
         text.starts_with("The conversation has 2 messages, oldest first.\n\n----\n"),
@@ -848,7 +846,7 @@ async fn finds_a_conversation_message_archived_in_the_all_mail_view_once() {
     mailbox.add_message("All Mail", archived.build_new_message(&["\\Seen"]));
     let stack = start_stack(mailbox, false).await;
 
-    let text = read_conversation_text(&stack, "1.1001.INBOX").await;
+    let text = get_conversation_text(&stack, "1.1001.INBOX").await;
 
     assert!(
         text.starts_with("The conversation has 2 messages, oldest first.\n\n----\n"),
@@ -870,7 +868,7 @@ async fn marks_a_message_removed_while_its_conversation_was_read() {
     mailbox.add_removal("UID FETCH 2 (UID FLAGS BODY.PEEK[])", "INBOX", 2);
     let stack = start_stack(mailbox, false).await;
 
-    let text = read_conversation_text(&stack, "3.1001.INBOX").await;
+    let text = get_conversation_text(&stack, "3.1001.INBOX").await;
 
     assert!(
         text.starts_with("The conversation has 3 messages, oldest first.\n\n----\n"),

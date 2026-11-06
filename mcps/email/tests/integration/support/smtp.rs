@@ -394,7 +394,11 @@ where
 
     /// Answers AUTH: accepted for the test account's credentials.
     async fn handle_auth(&mut self, rest: &str) -> Step {
-        let answer = if read_authentication(&mut self.reader, rest).await {
+        let credentials = read_credentials(&mut self.reader, rest).await;
+        let accepted = credentials.is_some_and(|(user, password)| {
+            user == USER_NAME.as_bytes() && password == PASSWORD.as_bytes()
+        });
+        let answer = if accepted {
             "235 2.7.0 Authentication successful\r\n"
         } else {
             "535 5.7.8 Authentication credentials invalid\r\n"
@@ -486,8 +490,20 @@ where
     }
 }
 
-/// Runs AUTH PLAIN or AUTH LOGIN and tells whether the credentials match.
-async fn read_authentication<S>(reader: &mut BufReader<S>, rest: &str) -> bool
+/// Reads the credentials of AUTH PLAIN or AUTH LOGIN, asking for them with
+/// `334` lines where the command line does not carry them.
+///
+/// # Arguments
+///
+/// * `reader` - The connection.
+/// * `rest` - What follows `AUTH `: the mechanism, and for PLAIN any
+///   initial response.
+///
+/// # Returns
+///
+/// The user name and password, decoded from base64, or `None` for another
+/// mechanism or a PLAIN response without exactly its three fields.
+async fn read_credentials<S>(reader: &mut BufReader<S>, rest: &str) -> Option<(Vec<u8>, Vec<u8>)>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -502,7 +518,10 @@ where
             };
             let decoded = STANDARD.decode(encoded.trim()).unwrap_or_default();
             let parts: Vec<&[u8]> = decoded.split(|byte| *byte == 0).collect();
-            parts.len() == 3 && parts[1] == USER_NAME.as_bytes() && parts[2] == PASSWORD.as_bytes()
+            let [_, user, password] = parts.as_slice() else {
+                return None;
+            };
+            Some((user.to_vec(), password.to_vec()))
         }
         "LOGIN" => {
             send_line(reader, "334 VXNlcm5hbWU6\r\n").await;
@@ -513,9 +532,9 @@ where
             let password = STANDARD
                 .decode(read_line(reader).await.trim())
                 .unwrap_or_default();
-            user == USER_NAME.as_bytes() && password == PASSWORD.as_bytes()
+            Some((user, password))
         }
-        _ => false,
+        _ => None,
     }
 }
 

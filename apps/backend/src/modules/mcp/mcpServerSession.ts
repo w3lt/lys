@@ -1,6 +1,6 @@
 import type { McpServerFailure, McpServerState } from "@lys/protocol"
 import type { McpServerSettings, McpToolDefinition } from "@lys/share"
-import { calculateMcpRequestFailure } from "./mcpError"
+import { calculateMcpRequestFailure, findUnknownError } from "./mcpError"
 import type McpServerConnection from "./mcpServerConnection"
 import type {
   McpServerConnectionContext,
@@ -271,9 +271,19 @@ export default class McpServerSession {
   ): Promise<McpToolCallOutcome> {
     const subject = buildCallSubject(definition)
     const { reportEvent } = this.#dependencies
-    if (this.#state.status !== "connected") {
-      reportEvent(buildCallNotSentEvent(definition, "server-not-connected"))
-      return buildFailedOutcome(formatMcpServerNotConnected(subject))
+    switch (this.#state.status) {
+      case "connecting":
+      case "failed":
+        reportEvent(buildCallNotSentEvent(definition, "server-not-connected"))
+        return buildFailedOutcome(formatMcpServerNotConnected(subject))
+      case "connected":
+        break
+      default: {
+        const unhandledState: never = this.#state
+        throw new TypeError(
+          `Unhandled MCP session state: ${JSON.stringify(unhandledState)}`
+        )
+      }
     }
     const listed = this.#state.toolsByName.get(definition.name)
     if (listed?.serverToolName !== definition.serverToolName) {
@@ -295,7 +305,7 @@ export default class McpServerSession {
         serverName: definition.server,
         serverToolName: definition.serverToolName,
         failure,
-        unknownError: failure.kind === "unknown" ? error : undefined
+        unknownError: findUnknownError(failure, error)
       })
       return buildFailedOutcome(
         this.#stopReason === undefined
@@ -321,9 +331,22 @@ export default class McpServerSession {
   public stop(reason: McpServerStopReason): Promise<void> {
     if (this.#stopReason === undefined) {
       this.#stopReason = reason
-      if (this.#state.status === "connecting") this.#controller.abort()
-      else if (this.#state.status === "connected")
-        this.#closeConnection(this.#state.connection)
+      switch (this.#state.status) {
+        case "connecting":
+          this.#controller.abort()
+          break
+        case "connected":
+          this.#closeConnection(this.#state.connection)
+          break
+        case "failed":
+          break
+        default: {
+          const unhandledState: never = this.#state
+          throw new TypeError(
+            `Unhandled MCP session state: ${JSON.stringify(unhandledState)}`
+          )
+        }
+      }
     }
     return this.#waitForWork()
   }
@@ -357,15 +380,11 @@ export default class McpServerSession {
    * connection that ended while its tools were read fails as `closed`.
    */
   #handleOpeningEnd(opening: McpServerOpening): void {
-    if (this.#stopReason !== undefined) {
-      if (opening.status === "connected")
-        this.#closeConnection(opening.connection)
-      return
-    }
     switch (opening.status) {
       case "cancelled":
         return
       case "failed":
+        if (this.#stopReason !== undefined) return
         this.#dependencies.reportEvent({
           kind: "opening-failed",
           serverName: this.#settings.name,
@@ -379,8 +398,16 @@ export default class McpServerSession {
         })
         return
       case "connected":
-        this.#handleOpeningConnected(opening)
+        if (this.#stopReason === undefined)
+          this.#handleOpeningConnected(opening)
+        else this.#closeConnection(opening.connection)
         return
+      default: {
+        const unhandledOpening: never = opening
+        throw new TypeError(
+          `Unhandled MCP server opening: ${JSON.stringify(unhandledOpening)}`
+        )
+      }
     }
   }
 

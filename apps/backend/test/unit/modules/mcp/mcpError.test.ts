@@ -9,7 +9,11 @@ import {
 import { spawn } from "node:child_process"
 import { once } from "node:events"
 import { describe, expect, it } from "vitest"
-import { calculateMcpRequestFailure } from "../../../../src/modules/mcp/mcpError"
+import {
+  calculateMcpRequestFailure,
+  findUnknownError,
+  type McpRequestFailure
+} from "../../../../src/modules/mcp/mcpError"
 import { McpResponseTooLargeError } from "../../../../src/modules/mcp/mcpResponseLimit"
 import { findClosedMcpUrl } from "../../support/mcpTestServers"
 
@@ -284,5 +288,26 @@ describe("calculateMcpRequestFailure", () => {
     expect(
       Object.isFrozen(calculateMcpRequestFailure(new ProtocolError(-1, "no")))
     ).toBe(true)
+  })
+})
+
+describe("findUnknownError", () => {
+  it("keeps what was thrown for an unknown failure", () => {
+    const error = new RangeError("odd failure")
+
+    expect(findUnknownError({ kind: "unknown" }, error)).toBe(error)
+  })
+
+  it.each<McpRequestFailure>([
+    { kind: "timed-out" },
+    { kind: "closed" },
+    { kind: "http-status", status: 500 },
+    { kind: "unreachable" },
+    { kind: "start-failed" },
+    { kind: "refused", message: "no" },
+    { kind: "invalid-answer" },
+    { kind: "too-large" }
+  ])("drops what was thrown for a $kind failure", (failure) => {
+    expect(findUnknownError(failure, new Error("known"))).toBeUndefined()
   })
 })

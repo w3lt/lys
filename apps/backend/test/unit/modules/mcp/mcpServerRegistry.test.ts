@@ -2256,6 +2256,65 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       )
     })
 
+    it("stops a running built-in server as removed when an added server takes its name with equal settings, and lists the added server", async () => {
+      const builtIn = createFakeBuiltInServer()
+      const harness = createRegistryHarness({
+        builtInServers: [builtIn.server]
+      })
+      harness.setServers([], EMAIL_ON)
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildEmailStatus(buildConnectedState(1))])
+      )
+      harness.setServers([buildFakeStdioServerSettings("email")], EMAIL_ON)
+
+      await harness.registry.updateServers()
+
+      expect(harness.registry.listServers()).toEqual(
+        buildList([buildStdioStatus("email", CONNECTING)])
+      )
+      expect(filterEvents(harness.events, "server-stopped")).toEqual([
+        { kind: "server-stopped", serverName: "email", reason: "removed" }
+      ])
+      expect(filterEvents(harness.events, "built-in-name-taken")).toEqual([
+        { kind: "built-in-name-taken", serverName: "email" }
+      ])
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("email", buildConnectedState(1))])
+      )
+      expect(harness.openServer).toHaveBeenCalledTimes(2)
+    })
+
+    it("stops a running added server as removed when the built-in server of its name returns with equal settings, and lists the built-in server", async () => {
+      const builtIn = createFakeBuiltInServer()
+      const harness = createRegistryHarness({
+        builtInServers: [builtIn.server]
+      })
+      harness.setServers([buildFakeStdioServerSettings("email")], EMAIL_ON)
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("email", buildConnectedState(1))])
+      )
+      harness.setServers([], EMAIL_ON)
+
+      await harness.registry.updateServers()
+
+      expect(harness.registry.listServers()).toEqual(
+        buildList([buildEmailStatus(CONNECTING)])
+      )
+      expect(filterEvents(harness.events, "server-stopped")).toEqual([
+        { kind: "server-stopped", serverName: "email", reason: "removed" }
+      ])
+      await waitForServerList(
+        harness.registry,
+        buildList([buildEmailStatus(buildConnectedState(1))])
+      )
+      expect(harness.openServer).toHaveBeenCalledTimes(2)
+    })
+
     it("tells the model the server was stopped when its session is stopped while a call runs, and reports the failed call", async () => {
       const harness = createRegistryHarness()
       const alpha = buildFakeStdioServerSettings("alpha", {

@@ -114,9 +114,9 @@ const UNKNOWN_TOOL_LOOKUP: McpSessionToolLookup = Object.freeze({
  * never reconnects, its owner starts a new one. Resource ownership: owns the
  * connection its opening led to until it closes it; a connection an opening
  * returns after {@link stop} is closed at once. Every close runs in the
- * background through `addTask`. Concurrency model: single-threaded; every
- * state change happens synchronously, so a reader always sees one
- * consistent state.
+ * background through `addTask`. Concurrency model: single-owner, on the
+ * backend's event loop; every state change happens synchronously, so a
+ * reader always sees one consistent state.
  */
 export default class McpServerSession {
   /** Validated settings the session opens. */

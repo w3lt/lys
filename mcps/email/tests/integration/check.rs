@@ -344,6 +344,19 @@ async fn reports_a_server_that_speaks_something_else() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn signs_in_to_smtp_with_login_where_the_server_offers_only_login() {
+    let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
+    smtp.add_withheld_mechanism("PLAIN");
+    let account = build_account_without_imap(&smtp).await;
+
+    let report =
+        offer_account_sign_ins(&account, &Trust::create_with_extra_roots(Vec::new())).await;
+
+    assert_eq!(report.smtp, CheckOutcome::Accepted);
+    assert!(smtp.list_commands().iter().any(|line| line == "AUTH LOGIN"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn accepts_an_smtp_sign_in_whose_quit_fails() {
     let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
     smtp.add_fault("QUIT", SmtpFault::Close);

@@ -1,7 +1,8 @@
 //! A fake SMTP server: EHLO, STARTTLS, AUTH PLAIN and LOGIN, MAIL, RCPT,
-//! DATA, and QUIT, recording every mail it accepts, and failing a command
-//! on request by never answering it, by closing the connection, or by
-//! answering something that is not a reply.
+//! DATA, and QUIT, recording every mail it accepts, withholding an AUTH
+//! mechanism on request, and failing a command on request by never
+//! answering it, by closing the connection, or by answering something that
+//! is not a reply.
 
 use std::fmt::Debug;
 use std::future::Future;
@@ -71,6 +72,8 @@ pub struct FakeSmtpState {
     pub commands: Vec<String>,
     /// The verbs, or [`DATA_END`], the fake fails, and how.
     pub faults: Vec<(String, SmtpFault)>,
+    /// The AUTH mechanisms, such as `PLAIN`, the fake does not offer.
+    pub withheld_mechanisms: Vec<String>,
 }
 
 /// The running fake.
@@ -143,6 +146,17 @@ impl FakeSmtpServer {
             .expect("the state")
             .refused_recipients
             .push(address.to_owned());
+    }
+
+    /// Withholds the AUTH mechanism, such as `PLAIN`, from now on: EHLO
+    /// leaves it out, and AUTH refuses it as a real server does a mechanism
+    /// it does not know.
+    pub fn add_withheld_mechanism(&self, mechanism: &str) {
+        self.state
+            .lock()
+            .expect("the state")
+            .withheld_mechanisms
+            .push(mechanism.to_owned());
     }
 
     /// Fails the command with the verb, such as `RCPT`, or the end of a
@@ -373,13 +387,39 @@ where
         self.mode == SmtpMode::StartTls && !self.secured
     }
 
-    /// Answers EHLO with the extensions, STARTTLS while it is offered.
+    /// Whether the fake withholds the AUTH mechanism.
+    fn is_withheld_mechanism(&self, mechanism: &str) -> bool {
+        self.state
+            .lock()
+            .expect("the state")
+            .withheld_mechanisms
+            .iter()
+            .any(|withheld| withheld.eq_ignore_ascii_case(mechanism))
+    }
+
+    /// The AUTH mechanisms the fake offers: PLAIN and LOGIN, less those it
+    /// withholds.
+    fn list_offered_mechanisms(&self) -> Vec<&'static str> {
+        ["PLAIN", "LOGIN"]
+            .into_iter()
+            .filter(|mechanism| !self.is_withheld_mechanism(mechanism))
+            .collect()
+    }
+
+    /// Answers EHLO with the extensions: STARTTLS while it is offered, and
+    /// AUTH with the mechanisms the fake offers, while it offers one.
     async fn handle_ehlo(&mut self) -> Step {
         let mut answer = String::from("250-localhost Hello\r\n");
         if self.is_starttls_offered() {
             answer.push_str("250-STARTTLS\r\n");
         }
-        answer.push_str("250-AUTH PLAIN LOGIN\r\n250 8BITMIME\r\n");
+        let mechanisms = self.list_offered_mechanisms();
+        if !mechanisms.is_empty() {
+            answer.push_str("250-AUTH ");
+            answer.push_str(&mechanisms.join(" "));
+            answer.push_str("\r\n");
+        }
+        answer.push_str("250 8BITMIME\r\n");
         self.send_reply(&answer).await
     }
 
@@ -392,8 +432,15 @@ where
         Step::StartTls
     }
 
-    /// Answers AUTH: accepted for the test account's credentials.
+    /// Answers AUTH: refused for a mechanism the fake withholds, else
+    /// accepted for the test account's credentials.
     async fn handle_auth(&mut self, rest: &str) -> Step {
+        let (mechanism, _) = rest.split_once(' ').unwrap_or((rest, ""));
+        if self.is_withheld_mechanism(mechanism) {
+            return self
+                .send_reply("504 5.5.4 Unrecognized authentication type\r\n")
+                .await;
+        }
         let credentials = read_credentials(&mut self.reader, rest).await;
         let accepted = credentials.is_some_and(|(user, password)| {
             user == USER_NAME.as_bytes() && password == PASSWORD.as_bytes()

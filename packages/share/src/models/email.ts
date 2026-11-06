@@ -222,6 +222,25 @@ export const emailSecuritySchema = z.enum(["tls", "starttls", "plain"])
 export type EmailSecurity = z.infer<typeof emailSecuritySchema>
 
 /**
+ * Answers whether a mail server's host may be reached with its security.
+ *
+ * @param server - The server's host and security, each valid.
+ * @returns True for TLS or STARTTLS to any host, and for a connection
+ * without TLS to `localhost`, `127.0.0.1`, or `[::1]`.
+ */
+function isSecurityAllowed(
+  server: Readonly<{ host: string; security: EmailSecurity }>
+): boolean {
+  switch (server.security) {
+    case "tls":
+    case "starttls":
+      return true
+    case "plain":
+      return isLoopbackEmailHost(server.host)
+  }
+}
+
+/**
  * Validates one mail server of an email account: its host, port, and how
  * the connection is secured. The output is frozen; unknown fields are
  * rejected.
@@ -245,7 +264,7 @@ const emailServerSettingsSchema = z
     security: emailSecuritySchema
   })
   .refine(
-    (server) => server.security !== "plain" || isLoopbackEmailHost(server.host),
+    isSecurityAllowed,
     `A connection without TLS is allowed only to ${LOOPBACK_EMAIL_HOSTS_TEXT}.`
   )
   .readonly()

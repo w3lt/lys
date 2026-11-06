@@ -19,11 +19,13 @@
 // and exits with code 1; `garbage` prints a line that is not a report;
 // `flood` prints far more than a report; `lock` holds `lock` in its folder
 // while it waits, as a check that must run alone, and exits with code 3
-// when another check holds it. It imports only Node's own modules and the
-// fake stdio server.
+// when another check holds it. It imports only Node's own modules, zod,
+// which checks its options and the account, and the fake stdio server.
 import { rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { setTimeout as wait } from "node:timers/promises"
+
+import * as z from "zod"
 
 /** Module of the fake stdio MCP server, which serves MCP in the fake's place. */
 const FAKE_STDIO_SERVER_URL = new URL(
@@ -31,22 +33,27 @@ const FAKE_STDIO_SERVER_URL = new URL(
   import.meta.url
 ).href
 
-/** What the fake does, from its first argument. */
-type FakeEmailServerOptions = {
+/**
+ * What the fake does, from its first argument; the options of the fake
+ * stdio server, which reads the same argument, are left to it.
+ */
+const fakeEmailServerOptionsSchema = z.object({
   /** Write the value of `LYS_EMAIL_ACCOUNT` to `variable` on start. */
-  recordsVariable?: boolean
+  recordsVariable: z.boolean().optional(),
   /** Write the process identifier to `pid` on start. */
-  recordsProcessId?: boolean
+  recordsProcessId: z.boolean().optional(),
   /** How long the `lock` check holds `lock`. */
-  holdMilliseconds?: number
-}
+  holdMilliseconds: z.number().optional()
+})
 
 /** The account the fake was started with, as far as it reads it. */
-type FakeAccount = {
-  address: string
-}
+const fakeAccountSchema = z.object({
+  address: z.string()
+})
 
-const options = JSON.parse(process.argv[2] ?? "{}") as FakeEmailServerOptions
+const options = fakeEmailServerOptionsSchema.parse(
+  JSON.parse(process.argv[2] ?? "{}")
+)
 const subcommand = process.argv[3]
 const variable = process.env.LYS_EMAIL_ACCOUNT
 
@@ -62,7 +69,9 @@ if (options.recordsProcessId === true)
 if (subcommand === undefined) {
   await import(FAKE_STDIO_SERVER_URL)
 } else if (subcommand === "check") {
-  await handleCheckCommand((JSON.parse(variable) as FakeAccount).address)
+  await handleCheckCommand(
+    fakeAccountSchema.parse(JSON.parse(variable)).address
+  )
 } else {
   process.stderr.write(`unexpected subcommand ${subcommand}\n`)
   process.exit(64)

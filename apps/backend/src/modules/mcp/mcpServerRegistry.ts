@@ -823,14 +823,21 @@ function listNewlyTakenBuiltInNames(
  * it.
  * @returns `removed` when the group no longer names it, or an added server
  * took the built-in server's name; `switched-off` when the group switches
- * it off; `changed` otherwise.
+ * it off; `changed` when it is to start with other settings, or is a
+ * built-in server that cannot start any more.
  */
 function findStopReason(
   entry: ServerEntry,
   server: ServerPlan | undefined
 ): StopReason {
   if (server?.isBuiltIn !== entry.isBuiltIn) return "removed"
-  return server.run.status === "off" ? "switched-off" : "changed"
+  switch (server.run.status) {
+    case "off":
+      return "switched-off"
+    case "start":
+    case "unusable":
+      return "changed"
+  }
 }
 
 /**

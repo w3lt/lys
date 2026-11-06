@@ -17,6 +17,8 @@ use std::fmt;
 
 use serde::Deserialize;
 
+use crate::failure::Protocol;
+
 /// Environment variable holding the account and its password as JSON.
 pub const ACCOUNT_VARIABLE_NAME: &str = "LYS_EMAIL_ACCOUNT";
 
@@ -266,8 +268,8 @@ pub fn parse_account_variable(text: &str) -> Result<Account, AccountProblem> {
             "password has 1 to 1024 characters and no control character",
         ));
     }
-    let imap = parse_server(stored.imap, "imap")?;
-    let smtp = parse_server(stored.smtp, "smtp")?;
+    let imap = parse_server(stored.imap, Protocol::Imap)?;
+    let smtp = parse_server(stored.smtp, Protocol::Smtp)?;
     Ok(Account {
         address: stored.address,
         display_name: stored.display_name,
@@ -284,30 +286,30 @@ pub fn parse_account_variable(text: &str) -> Result<Account, AccountProblem> {
 /// # Arguments
 ///
 /// * `stored` - The server as stored.
-/// * `name` - `imap` or `smtp`, named in a failed rule.
-fn parse_server(stored: StoredServer, name: &'static str) -> Result<MailServer, AccountProblem> {
+/// * `protocol` - Which server it is, named in a failed rule.
+fn parse_server(stored: StoredServer, protocol: Protocol) -> Result<MailServer, AccountProblem> {
     if !is_host_name(&stored.host) && !is_bracketed_ipv6(&stored.host) {
-        return Err(AccountProblem::Rule(match name {
-            "imap" => "imap.host is a host name or an IPv6 address in brackets",
-            _ => "smtp.host is a host name or an IPv6 address in brackets",
+        return Err(AccountProblem::Rule(match protocol {
+            Protocol::Imap => "imap.host is a host name or an IPv6 address in brackets",
+            Protocol::Smtp => "smtp.host is a host name or an IPv6 address in brackets",
         }));
     }
     let Some(port) = parse_port(stored.port) else {
-        return Err(AccountProblem::Rule(match name {
-            "imap" => "imap.port is a whole number from 1 to 65535",
-            _ => "smtp.port is a whole number from 1 to 65535",
+        return Err(AccountProblem::Rule(match protocol {
+            Protocol::Imap => "imap.port is a whole number from 1 to 65535",
+            Protocol::Smtp => "smtp.port is a whole number from 1 to 65535",
         }));
     };
     let Some(security) = Security::parse(&stored.security) else {
-        return Err(AccountProblem::Rule(match name {
-            "imap" => "imap.security is tls, starttls, or plain",
-            _ => "smtp.security is tls, starttls, or plain",
+        return Err(AccountProblem::Rule(match protocol {
+            Protocol::Imap => "imap.security is tls, starttls, or plain",
+            Protocol::Smtp => "smtp.security is tls, starttls, or plain",
         }));
     };
     if security == Security::Plain && !is_loopback_host(&stored.host) {
-        return Err(AccountProblem::Rule(match name {
-            "imap" => "imap.security may be plain only for localhost, 127.0.0.1, or [::1]",
-            _ => "smtp.security may be plain only for localhost, 127.0.0.1, or [::1]",
+        return Err(AccountProblem::Rule(match protocol {
+            Protocol::Imap => "imap.security may be plain only for localhost, 127.0.0.1, or [::1]",
+            Protocol::Smtp => "smtp.security may be plain only for localhost, 127.0.0.1, or [::1]",
         }));
     }
     Ok(MailServer {
@@ -782,6 +784,41 @@ mod tests {
                 "imap.host is a host name or an IPv6 address in brackets"
             ))
         );
+    }
+
+    #[test]
+    fn names_the_server_whose_host_port_or_security_breaks_its_rule() {
+        let broken = [
+            (
+                "{\"host\":\"-mail-\",\"port\":993,\"security\":\"tls\"}",
+                "host is a host name or an IPv6 address in brackets",
+            ),
+            (
+                "{\"host\":\"mail.example.com\",\"port\":0,\"security\":\"tls\"}",
+                "port is a whole number from 1 to 65535",
+            ),
+            (
+                "{\"host\":\"mail.example.com\",\"port\":993,\"security\":\"none\"}",
+                "security is tls, starttls, or plain",
+            ),
+            (
+                "{\"host\":\"mail.example.com\",\"port\":993,\"security\":\"plain\"}",
+                "security may be plain only for localhost, 127.0.0.1, or [::1]",
+            ),
+        ];
+        for server in ["imap", "smtp"] {
+            for (value, rule) in broken {
+                let problem = parse_account_variable(&build_variable(server, value))
+                    .map(|_| ())
+                    .expect_err(value);
+
+                assert_eq!(
+                    problem.to_string(),
+                    format!("breaks a rule: {server}.{rule}"),
+                    "{server}: {value}"
+                );
+            }
+        }
     }
 
     #[test]

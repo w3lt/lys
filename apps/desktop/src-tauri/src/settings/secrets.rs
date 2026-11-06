@@ -120,7 +120,11 @@ impl<'de> Deserialize<'de> for EmailPassword {
     {
         let password = match Value::deserialize(deserializer)? {
             Value::String(value) => Self::new(value),
-            _ => None,
+            Value::Null
+            | Value::Bool(_)
+            | Value::Number(_)
+            | Value::Array(_)
+            | Value::Object(_) => None,
         };
 
         password.ok_or_else(|| D::Error::custom(EMAIL_PASSWORD_RULE))

@@ -404,6 +404,25 @@ approve its public surface or establish an exception.
 | `toggleVariants`           | [desktop/src/components/ui/toggle.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/toggle.tsx)               | UI primitive adapter — supporting declaration; construct classification unreviewed |
 | `Toggle`                   | [desktop/src/components/ui/toggle.tsx](https://github.com/w3lt/lys/blob/main/apps/desktop/src/components/ui/toggle.tsx)               | UI primitive adapter                                                               |
 
+## Test support owners
+
+The classes of test support: fakes of a server, guards of a process, and helpers that keep state across one test. The test code keeps the class rules, so each records its category here as a production class does.
+
+| Declaration             | Source                                                                                                                                                        | Recorded classification            |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `BinaryProcess`         | [mcps/email/tests/integration/support/binary.rs](https://github.com/w3lt/lys/blob/main/mcps/email/tests/integration/support/binary.rs)                        | resource owner or boundary adapter |
+| `FakeImapServer`        | [mcps/email/tests/integration/support/imap.rs](https://github.com/w3lt/lys/blob/main/mcps/email/tests/integration/support/imap.rs)                            | resource owner or boundary adapter |
+| `ConnectionSetup`       | [mcps/email/tests/integration/support/imap.rs](https://github.com/w3lt/lys/blob/main/mcps/email/tests/integration/support/imap.rs)                            | resource owner or boundary adapter |
+| `FakeMailbox`           | [mcps/email/tests/integration/support/imap.rs](https://github.com/w3lt/lys/blob/main/mcps/email/tests/integration/support/imap.rs)                            | invariant owner                    |
+| `Session`               | [mcps/email/tests/integration/support/imap.rs](https://github.com/w3lt/lys/blob/main/mcps/email/tests/integration/support/imap.rs)                            | invariant owner                    |
+| `Tokenizer`             | [mcps/email/tests/integration/support/imap.rs](https://github.com/w3lt/lys/blob/main/mcps/email/tests/integration/support/imap.rs)                            | invariant owner                    |
+| `SearchKeys`            | [mcps/email/tests/integration/support/imap.rs](https://github.com/w3lt/lys/blob/main/mcps/email/tests/integration/support/imap.rs)                            | invariant owner                    |
+| `FakeSmtpServer`        | [mcps/email/tests/integration/support/smtp.rs](https://github.com/w3lt/lys/blob/main/mcps/email/tests/integration/support/smtp.rs)                            | resource owner or boundary adapter |
+| `Session`               | [mcps/email/tests/integration/support/smtp.rs](https://github.com/w3lt/lys/blob/main/mcps/email/tests/integration/support/smtp.rs)                            | resource owner or boundary adapter |
+| `TestAuthority`         | [mcps/email/tests/integration/support/tls.rs](https://github.com/w3lt/lys/blob/main/mcps/email/tests/integration/support/tls.rs)                              | resource owner or boundary adapter |
+| `HoldableServerOpener`  | [backend/test/unit/modules/mcp/mcpServerRegistry.test.ts](https://github.com/w3lt/lys/blob/main/apps/backend/test/unit/modules/mcp/mcpServerRegistry.test.ts) | invariant owner                    |
+| `UnstartedChildProcess` | [backend/test/unit/support/unstartedChildProcess.ts](https://github.com/w3lt/lys/blob/main/apps/backend/test/unit/support/unstartedChildProcess.ts)           | framework adapter                  |
+
 ## Handbook declarations
 
 | Declaration        | Source                                                                                                                                                | Recorded classification |

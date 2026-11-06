@@ -505,7 +505,7 @@ mod tests {
     }
 
     /// Returns the account with one field replaced.
-    fn get_account_with(field: &str, value: Value) -> Value {
+    fn build_account_with(field: &str, value: Value) -> Value {
         let mut account = get_account();
         account[field] = value;
 
@@ -513,7 +513,7 @@ mod tests {
     }
 
     /// Returns the account with one field of its IMAP server replaced.
-    fn get_account_with_imap(field: &str, value: Value) -> Value {
+    fn build_account_with_imap(field: &str, value: Value) -> Value {
         let mut account = get_account();
         account["imap"][field] = value;
 
@@ -629,14 +629,14 @@ mod tests {
             let mut missing = get_account();
             missing.as_object_mut().expect("an object").remove(field);
             assert_account_refused(missing, "person@example.com");
-            assert_account_refused(get_account_with(field, Value::Null), "person@example.com");
+            assert_account_refused(build_account_with(field, Value::Null), "person@example.com");
         }
         assert_account_refused(
-            get_account_with("signature", json!("Regards")),
+            build_account_with("signature", json!("Regards")),
             "person@example.com",
         );
         assert_account_refused(
-            get_account_with("serverKeepsSentCopy", json!("true")),
+            build_account_with("serverKeepsSentCopy", json!("true")),
             "person@example.com",
         );
     }
@@ -659,7 +659,7 @@ mod tests {
             "person@192.0.2.10",
             longest.as_str(),
         ] {
-            assert_account_accepted(get_account_with("address", json!(address)));
+            assert_account_accepted(build_account_with("address", json!(address)));
         }
     }
 
@@ -692,15 +692,15 @@ mod tests {
             "person@example.com\n".to_string(),
             "person@example.com ".to_string(),
         ] {
-            assert_account_refused(get_account_with("address", json!(address)), "person");
+            assert_account_refused(build_account_with("address", json!(address)), "person");
         }
-        assert_account_refused(get_account_with("address", json!(42)), "person");
+        assert_account_refused(build_account_with("address", json!(42)), "person");
     }
 
     #[test]
     fn accepts_display_names_up_to_100_characters_including_an_empty_one() {
         for name in ["", "A", "Jeanne d'Arc Épée", "東京 太郎", &"é".repeat(100)] {
-            assert_account_accepted(get_account_with("displayName", json!(name)));
+            assert_account_accepted(build_account_with("displayName", json!(name)));
         }
     }
 
@@ -715,9 +715,9 @@ mod tests {
             "Sec\tret".to_string(),
             "Sec\u{0000}ret".to_string(),
         ] {
-            assert_account_refused(get_account_with("displayName", json!(name)), "Secret");
+            assert_account_refused(build_account_with("displayName", json!(name)), "Secret");
         }
-        assert_account_refused(get_account_with("displayName", json!(1)), "Secret");
+        assert_account_refused(build_account_with("displayName", json!(1)), "Secret");
     }
 
     #[test]
@@ -729,7 +729,7 @@ mod tests {
             "DOMAIN\\person",
             &"é".repeat(254),
         ] {
-            assert_account_accepted(get_account_with("userName", json!(name)));
+            assert_account_accepted(build_account_with("userName", json!(name)));
         }
     }
 
@@ -743,7 +743,7 @@ mod tests {
             "sec\nret".to_string(),
             "sec\u{0000}ret".to_string(),
         ] {
-            assert_account_refused(get_account_with("userName", json!(name)), "secret");
+            assert_account_refused(build_account_with("userName", json!(name)), "secret");
         }
     }
 
@@ -769,7 +769,7 @@ mod tests {
             "[2001:0db8:0000:0000:0000:ffff:192.168.100.228]",
             longest_name.as_str(),
         ] {
-            assert_account_accepted(get_account_with_imap("host", json!(host)));
+            assert_account_accepted(build_account_with_imap("host", json!(host)));
         }
     }
 
@@ -801,9 +801,9 @@ mod tests {
             "[::1 ]".to_string(),
             "[secret]".to_string(),
         ] {
-            assert_account_refused(get_account_with_imap("host", json!(host)), "secret");
+            assert_account_refused(build_account_with_imap("host", json!(host)), "secret");
         }
-        assert_account_refused(get_account_with_imap("host", Value::Null), "secret");
+        assert_account_refused(build_account_with_imap("host", Value::Null), "secret");
     }
 
     #[test]
@@ -815,7 +815,7 @@ mod tests {
             json!(1.0),
             json!(65535.0),
         ] {
-            assert_account_accepted(get_account_with_imap("port", port));
+            assert_account_accepted(build_account_with_imap("port", port));
         }
         for port in [
             json!(0),
@@ -829,7 +829,7 @@ mod tests {
             Value::Null,
         ] {
             assert!(
-                parse_account(get_account_with_imap("port", port.clone())).is_err(),
+                parse_account(build_account_with_imap("port", port.clone())).is_err(),
                 "{port}"
             );
         }
@@ -862,7 +862,7 @@ mod tests {
             Value::Null,
             json!(true),
         ] {
-            assert_account_refused(get_account_with_imap("security", security), "person");
+            assert_account_refused(build_account_with_imap("security", security), "person");
         }
         for host in [
             "127.0.0.2",
@@ -890,8 +890,8 @@ mod tests {
             json!({ "host": "secret.example.com", "port": 993 }),
             json!({ "host": "secret.example.com", "port": 993, "security": "tls", "timeoutSeconds": 30 }),
         ] {
-            assert_account_refused(get_account_with("imap", server.clone()), "secret");
-            assert_account_refused(get_account_with("smtp", server), "secret");
+            assert_account_refused(build_account_with("imap", server.clone()), "secret");
+            assert_account_refused(build_account_with("smtp", server), "secret");
         }
     }
 
@@ -901,52 +901,55 @@ mod tests {
 
         for (account, rule) in [
             (
-                get_account_with("address", json!("person")),
+                build_account_with("address", json!("person")),
                 ADDRESS_RULE_TEXT,
             ),
             (
-                get_account_with("address", json!("pérson@example.com")),
+                build_account_with("address", json!("pérson@example.com")),
                 ADDRESS_RULE_TEXT,
             ),
             (
-                get_account_with("address", json!(long_name_address)),
+                build_account_with("address", json!(long_name_address)),
                 ADDRESS_RULE_TEXT,
             ),
             (
-                get_account_with("address", json!("person@bücher.example")),
+                build_account_with("address", json!("person@bücher.example")),
                 ADDRESS_RULE_TEXT,
             ),
             (
-                get_account_with("displayName", json!(" A Person")),
+                build_account_with("displayName", json!(" A Person")),
                 "a display name must be",
             ),
             (
-                get_account_with("userName", json!("")),
+                build_account_with("userName", json!("")),
                 "a user name must be",
             ),
-            (get_account_with_imap("host", json!("::1")), HOST_RULE_TEXT),
             (
-                get_account_with_imap("host", json!("imap.bücher.example")),
+                build_account_with_imap("host", json!("::1")),
                 HOST_RULE_TEXT,
             ),
             (
-                get_account_with_imap("port", json!(0)),
+                build_account_with_imap("host", json!("imap.bücher.example")),
+                HOST_RULE_TEXT,
+            ),
+            (
+                build_account_with_imap("port", json!(0)),
                 "a mail server port must be",
             ),
             (
-                get_account_with_imap("port", json!(65536)),
+                build_account_with_imap("port", json!(65536)),
                 "a mail server port must be",
             ),
             (
-                get_account_with_imap("port", json!(993.5)),
+                build_account_with_imap("port", json!(993.5)),
                 "a mail server port must be",
             ),
             (
-                get_account_with_imap("security", json!("ssl")),
+                build_account_with_imap("security", json!("ssl")),
                 "a mail server security must be",
             ),
             (
-                get_account_with("signature", json!("Regards")),
+                build_account_with("signature", json!("Regards")),
                 "an email account must be an object",
             ),
         ] {

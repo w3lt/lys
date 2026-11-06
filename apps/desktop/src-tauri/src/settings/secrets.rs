@@ -157,12 +157,9 @@ pub struct SecretsSettings {
 mod tests {
     use super::{ApiKey, EmailPassword, SecretsSettings};
 
-    /// Reads `text` as the `secrets` group, as the settings file is read,
-    /// and returns the text of the error it fails with.
-    fn get_secrets_failure(text: &str) -> String {
-        serde_json::from_str::<SecretsSettings>(text)
-            .expect_err("an unusable secrets group")
-            .to_string()
+    /// Reads `text` as the `secrets` group, as the settings file is read.
+    fn parse_secrets(text: &str) -> Result<SecretsSettings, serde_json::Error> {
+        serde_json::from_str(text)
     }
 
     #[test]
@@ -229,7 +226,9 @@ mod tests {
             ("{\"password\":\"synthetic-password-7f3a\"}", "synthetic"),
             ("\"synthetic\\npassword\"", "synthetic"),
         ] {
-            let failure = get_secrets_failure(&format!("{{\"emailPassword\":{stored}}}"));
+            let failure = parse_secrets(&format!("{{\"emailPassword\":{stored}}}"))
+                .expect_err("an unusable secrets group")
+                .to_string();
 
             assert!(failure.contains("an email password must be"), "{failure}");
             assert!(!failure.contains(value), "{failure}");
@@ -238,7 +237,9 @@ mod tests {
 
     #[test]
     fn keeps_the_json_reader_s_reason_for_a_password_that_is_not_valid_json() {
-        let failure = get_secrets_failure("{\"emailPassword\":\"synthetic\\qpassword\"}");
+        let failure = parse_secrets("{\"emailPassword\":\"synthetic\\qpassword\"}")
+            .expect_err("an unusable secrets group")
+            .to_string();
 
         assert!(failure.contains("invalid escape"), "{failure}");
     }

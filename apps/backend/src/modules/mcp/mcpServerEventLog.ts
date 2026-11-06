@@ -71,7 +71,7 @@ const MCP_LOG_OPTIONS = Object.freeze({
 /**
  * Writes one MCP server event to the backend log.
  *
- * @param logger - Backend logger, borrowed for the call.
+ * @param parentLogger - Backend logger, borrowed for the call.
  * @param event - Event the registry reported.
  * @remarks Each entry names the server as `mcpServer`. Failures Lys can tell
  * apart, ended connections, sessions a server did not end, a built-in

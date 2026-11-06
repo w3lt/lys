@@ -1891,6 +1891,41 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       ])
     })
 
+    it("reports a call that failed in a way Lys cannot tell apart with what was thrown", async () => {
+      const thrown = new RangeError("The connection has a defect.")
+      const harness = createRegistryHarness()
+      harness.setServers([buildFakeStdioServerSettings("alpha")])
+      await harness.registry.updateServers()
+      await waitForServerList(
+        harness.registry,
+        buildList([buildStdioStatus("alpha", buildConnectedState(1))])
+      )
+      vi.spyOn(
+        findOpenedConnection(harness.openedConnections, "alpha").connection,
+        "sendToolCall"
+      ).mockRejectedValue(thrown)
+
+      const outcome = await findTool(
+        harness.registry,
+        "mcp__alpha__echo"
+      ).sendToolCall({ text: "hi" }, NEVER_ABORTED)
+
+      expect(outcome).toEqual({
+        status: "failed",
+        content:
+          "The call of mcp__alpha__echo failed: Lys could not tell why the MCP server alpha did not return a result."
+      })
+      expect(filterEvents(harness.events, "tool-call-failed")).toEqual([
+        {
+          kind: "tool-call-failed",
+          serverName: "alpha",
+          serverToolName: "echo",
+          failure: { kind: "unknown" },
+          unknownError: thrown
+        }
+      ])
+    })
+
     it("rejects a call only once its signal aborted, and tells the server it was cancelled", async () => {
       const harness = createRegistryHarness()
       harness.setServers([

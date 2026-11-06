@@ -1,6 +1,8 @@
 import type { McpServerSettings } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
-import type { McpServerConnectionContext } from "../../../../src/modules/mcp/mcpServerConnection"
+import McpServerConnection, {
+  type McpServerConnectionContext
+} from "../../../../src/modules/mcp/mcpServerConnection"
 import { MAXIMUM_MCP_RESPONSE_BYTES } from "../../../../src/modules/mcp/mcpResponseLimit"
 import {
   openMcpServer,
@@ -643,6 +645,24 @@ describe("openMcpServer", () => {
       unknownError: undefined
     })
     expect(events.closedCount).toBe(0)
+  })
+
+  it("reports a failure Lys cannot tell apart as a protocol error, with what was thrown", async () => {
+    const thrown = new RangeError("The connection has a defect.")
+    vi.spyOn(McpServerConnection, "open").mockRejectedValue(thrown)
+    const { context } = createRecordingContext()
+
+    const opening = await openForTest(
+      buildFakeStdioServerSettings("fake"),
+      context
+    )
+
+    expect(opening).toEqual({
+      status: "failed",
+      reason: "protocol-error",
+      failure: { kind: "unknown" },
+      unknownError: thrown
+    })
   })
 
   it("reports an answer that is not JSON as a protocol error", async () => {

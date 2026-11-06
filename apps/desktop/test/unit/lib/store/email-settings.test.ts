@@ -252,6 +252,40 @@ describe("createEmailSettingsSlice", () => {
       }
     )
 
+    it("checks again on the next save after a check that could not be asked, saving once the new check accepts", async () => {
+      const { host, writes } = startControlledSettingsHost()
+      let checks = 0
+      startBackendFake({
+        [ACCOUNT_CHECK_ROUTE]: () => {
+          checks += 1
+          return checks === 1
+            ? Promise.reject(createTransportFailure())
+            : buildJsonResponse(200, ACCEPTED_CHECK)
+        }
+      })
+      const store = createEmailStore()
+      await store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+      const afterUnaskedCheck = store.getState().emailAccountCheck
+
+      const save = store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+      await waitForMicrotasks()
+      await waitForMicrotasks()
+      writes[0]?.resolve(null)
+
+      await expect(save).resolves.toBe("saved")
+      expect(afterUnaskedCheck).toEqual({
+        status: "failed",
+        error: "Lys couldn't reach its backend to check the account."
+      })
+      expect(checks).toBe(2)
+      expect(listSettingsWrites(host.commands)).toHaveLength(1)
+      expect(store.getState().emailAccountCheck).toEqual({
+        status: "checked",
+        outcome: ACCEPTED_CHECK
+      })
+      expect(store.getState().settings.email).toEqual({ account: NEW_ACCOUNT })
+    })
+
     it("keeps the stored account in memory and reports a failed save without the host's detail", async () => {
       const { writes } = startControlledSettingsHost()
       startBackendFake({

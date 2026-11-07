@@ -772,6 +772,14 @@ fn build_entry_refusal(field: &str, mailbox: &ParsedMailbox) -> ToolFailure {
 ///
 /// * `sender` - The account's address.
 /// * `fields` - The draft's fields.
+///
+/// # Returns
+///
+/// The envelope, or the refusal the model reads: a recipient that is not
+/// an email address lettre accepts, as
+/// [`CompositionProblem::InvalidRecipient`] writes it; a draft without a
+/// recipient; or an account address lettre does not accept as a sender,
+/// as [`CompositionProblem::InvalidSender`] writes it.
 fn build_draft_envelope(sender: &str, fields: &MessageArguments) -> Result<Envelope, ToolFailure> {
     let recipients = [&fields.to, &fields.cc, &fields.bcc]
         .into_iter()
@@ -784,12 +792,8 @@ fn build_draft_envelope(sender: &str, fields: &MessageArguments) -> Result<Envel
             "The draft has no recipient. Save it again with one.".to_owned(),
         ));
     }
-    let sender_address = Address::from_str(sender).map_err(|_| {
-        ToolFailure::Argument(
-            "The account's address cannot be used as a sender. Check it in Settings → MCP."
-                .to_owned(),
-        )
-    })?;
+    let sender_address = Address::from_str(sender)
+        .map_err(|_| ToolFailure::Argument(CompositionProblem::InvalidSender.format_sentence()))?;
     Envelope::new(Some(sender_address), recipients).map_err(|error| {
         ToolFailure::Argument(format!("The envelope could not be built: {error}."))
     })

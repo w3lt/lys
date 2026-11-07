@@ -1048,8 +1048,10 @@ fn find_fetched_attributes(response: &Response<'_>) -> Option<FetchedAttributes>
 }
 
 /// Puts a fetched body section's data where its section says: the whole
-/// message without a section, the header fields for `HEADER`, and nowhere
-/// for a part no query asks for.
+/// message without a section; the header fields for `HEADER`,
+/// `HEADER.FIELDS`, or `HEADER.FIELDS.NOT`, which imap-proto reads as
+/// `Header`; and nowhere for `TEXT`, `MIME`, or a part, which no query asks
+/// for.
 fn update_section_data(
     attributes: &mut FetchedAttributes,
     section: Option<&SectionPath>,

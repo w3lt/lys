@@ -281,10 +281,14 @@ pub async fn start_stack(mailbox: FakeMailbox, server_keeps_sent_copy: bool) -> 
 }
 
 /// Asserts that no command, so no message, reached the SMTP server.
-pub fn assert_nothing_sent(stack: &Stack) {
-    let commands = stack.smtp.list_commands();
+///
+/// # Arguments
+///
+/// * `smtp` - The SMTP fake that recorded the commands.
+pub fn assert_nothing_sent(smtp: &FakeSmtpServer) {
+    let commands = smtp.list_commands();
     assert!(commands.is_empty(), "{commands:?}");
-    assert!(stack.smtp.list_mails().is_empty());
+    assert!(smtp.list_mails().is_empty());
 }
 
 /// The fields of a test message; by default, an empty plain message from

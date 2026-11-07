@@ -6,13 +6,14 @@ use email::email_id::EmailId;
 use email::failure::ToolFailure;
 use email::folders::FolderRole;
 use email::smtp::SendProgress;
-use email::tools::ToolResult;
 use email::tools::drafts::{
     DraftIdArguments, DraftProgress, DraftStage, SaveDraftArguments, SendDraftArguments,
     run_delete_draft, run_save_draft, run_send_draft,
 };
+use email::tools::{ToolContext, ToolResult};
 
-use crate::support::imap::{FakeFolder, FakeMailbox, ImapFault, NewMessage};
+use crate::support::imap::{FakeFolder, FakeImapServer, FakeMailbox, ImapFault, NewMessage};
+use crate::support::smtp::FakeSmtpServer;
 use crate::support::{
     Stack, assert_about, assert_nothing_sent, calculate_trimmed_bytes, start_stack,
 };
@@ -61,23 +62,42 @@ fn build_unnamed_send(draft_id: &str) -> SendDraftArguments {
 }
 
 /// Sends a draft with the send_draft tool, without a stop.
-async fn send_draft(stack: &Stack, arguments: SendDraftArguments) -> ToolResult {
-    run_send_draft(&stack.context, arguments, &SendProgress::default()).await
+///
+/// # Arguments
+///
+/// * `context` - The account and trust the tool runs with.
+/// * `arguments` - The draft's id and the fields the call names.
+async fn send_draft(context: &ToolContext, arguments: SendDraftArguments) -> ToolResult {
+    run_send_draft(context, arguments, &SendProgress::default()).await
 }
 
 /// Asserts that nothing was sent and that the one draft is still in
 /// Drafts, not marked deleted, with no copy in Sent.
-fn assert_draft_kept_unsent(stack: &Stack) {
-    assert_nothing_sent(stack);
-    let drafts = stack.imap.list_messages("Drafts");
+///
+/// # Arguments
+///
+/// * `imap` - The IMAP fake that holds Drafts and Sent.
+/// * `smtp` - The SMTP fake nothing may reach.
+fn assert_draft_kept_unsent(imap: &FakeImapServer, smtp: &FakeSmtpServer) {
+    assert_nothing_sent(smtp);
+    let drafts = imap.list_messages("Drafts");
     assert_eq!(drafts.len(), 1);
     assert!(!drafts[0].has_flag("\\Deleted"));
-    assert!(stack.imap.list_messages("Sent").is_empty());
+    assert!(imap.list_messages("Sent").is_empty());
 }
 
 /// Saves the draft and gives its id.
-async fn save_draft(stack: &Stack, draft: SaveDraftArguments) -> String {
-    let report = run_save_draft(&stack.context, draft, &DraftProgress::default())
+///
+/// # Arguments
+///
+/// * `context` - The account and trust the tool runs with.
+/// * `draft` - The draft's fields.
+///
+/// # Panics
+///
+/// When the save fails, or its answer names no id.
+async fn save_draft(context: &ToolContext, draft: SaveDraftArguments) -> String {
+    let report = run_save_draft(context, draft, &DraftProgress::default())
         .await
         .expect("saved");
     report
@@ -117,10 +137,10 @@ async fn saves_a_draft_with_its_bcc_field_and_answers_its_id() {
 #[tokio::test(flavor = "multi_thread")]
 async fn replaces_a_draft_and_answers_the_new_id() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
-    let first = save_draft(&stack, build_draft("First")).await;
+    let first = save_draft(&stack.context, build_draft("First")).await;
 
     let second = save_draft(
-        &stack,
+        &stack.context,
         SaveDraftArguments {
             draft_id: Some(first.clone()),
             ..build_draft("Second")
@@ -164,14 +184,14 @@ async fn replaces_a_draft_and_answers_the_new_id() {
 #[tokio::test(flavor = "multi_thread")]
 async fn replaces_a_draft_when_the_server_sends_untagged_data_before_asking_for_it() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
-    let first = save_draft(&stack, build_draft("First")).await;
+    let first = save_draft(&stack.context, build_draft("First")).await;
     stack.imap.update_state(|state| {
         let size = state.find_folder("Drafts").expect("Drafts").messages.len();
         state.untagged_before_continuation = Some(format!("* {size} EXISTS"));
     });
 
     let second = save_draft(
-        &stack,
+        &stack.context,
         SaveDraftArguments {
             draft_id: Some(first),
             ..build_draft("Second")
@@ -189,7 +209,7 @@ async fn replaces_a_draft_when_the_server_sends_untagged_data_before_asking_for_
 #[tokio::test(flavor = "multi_thread")]
 async fn sends_a_draft_without_its_bcc_field_keeps_a_copy_and_deletes_it() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
-    let id = save_draft(&stack, build_draft("Ready")).await;
+    let id = save_draft(&stack.context, build_draft("Ready")).await;
 
     let report = run_send_draft(
         &stack.context,
@@ -235,7 +255,7 @@ async fn deletes_a_draft_and_refuses_ids_outside_drafts() {
         },
     );
     let stack = start_stack(mailbox, false).await;
-    let id = save_draft(&stack, build_draft("Gone")).await;
+    let id = save_draft(&stack.context, build_draft("Gone")).await;
 
     let deleted = run_delete_draft(
         &stack.context,
@@ -308,7 +328,7 @@ const MARKED_ONLY: &str = "is marked as deleted but stays in Drafts until the fo
 #[tokio::test(flavor = "multi_thread")]
 async fn without_uidplus_delete_draft_only_marks_the_draft() {
     let stack = start_stack(build_mailbox_without_uid_plus(), false).await;
-    let id = save_draft(&stack, build_draft("Gone")).await;
+    let id = save_draft(&stack.context, build_draft("Gone")).await;
 
     let deleted = run_delete_draft(&stack.context, DraftIdArguments { draft_id: id })
         .await
@@ -329,7 +349,7 @@ async fn without_uidplus_delete_draft_only_marks_the_draft() {
 #[tokio::test(flavor = "multi_thread")]
 async fn without_uidplus_send_draft_and_save_draft_only_mark_the_old_draft() {
     let stack = start_stack(build_mailbox_without_uid_plus(), false).await;
-    let first = save_draft(&stack, build_draft("First")).await;
+    let first = save_draft(&stack.context, build_draft("First")).await;
 
     let replaced = run_save_draft(
         &stack.context,
@@ -378,14 +398,14 @@ const READY_FIELDS: &str = "Its own fields are:\nto: [\"Jane Doe <jane@example.c
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_to_send_a_draft_whose_text_the_call_leaves_out_or_changes() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
-    let id = save_draft(&stack, build_draft("Ready")).await;
+    let id = save_draft(&stack.context, build_draft("Ready")).await;
     let rewritten = SendDraftArguments {
         body: "Not sent yet!".to_owned(),
         ..build_send(&id, &build_draft("Ready"))
     };
 
-    let unnamed = send_draft(&stack, build_unnamed_send(&id)).await;
-    let changed = send_draft(&stack, rewritten).await;
+    let unnamed = send_draft(&stack.context, build_unnamed_send(&id)).await;
+    let changed = send_draft(&stack.context, rewritten).await;
 
     assert_eq!(
         unnamed,
@@ -399,13 +419,13 @@ async fn refuses_to_send_a_draft_whose_text_the_call_leaves_out_or_changes() {
             "The draft differs from this call in body, so nothing was sent. {READY_FIELDS} differs from at character 13, counting a line break as one.\nCall send_draft with these to send it."
         )))
     );
-    assert_draft_kept_unsent(&stack);
+    assert_draft_kept_unsent(&stack.imap, &stack.smtp);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_to_send_a_draft_to_recipients_the_draft_does_not_hold() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
-    let id = save_draft(&stack, build_draft("Ready")).await;
+    let id = save_draft(&stack.context, build_draft("Ready")).await;
     let named = build_send(&id, &build_draft("Ready"));
     let added = SendDraftArguments {
         to: vec![
@@ -419,8 +439,8 @@ async fn refuses_to_send_a_draft_to_recipients_the_draft_does_not_hold() {
         ..named
     };
 
-    let redirected = send_draft(&stack, added).await;
-    let replaced = send_draft(&stack, substituted).await;
+    let redirected = send_draft(&stack.context, added).await;
+    let replaced = send_draft(&stack.context, substituted).await;
 
     assert_eq!(
         redirected,
@@ -434,7 +454,7 @@ async fn refuses_to_send_a_draft_to_recipients_the_draft_does_not_hold() {
             "The draft differs from this call in bcc, so nothing was sent. {READY_FIELDS} matches.\nCall send_draft with these to send it."
         )))
     );
-    assert_draft_kept_unsent(&stack);
+    assert_draft_kept_unsent(&stack.imap, &stack.smtp);
 }
 
 /// A draft another client saved, `1.1003.Drafts`: a quoted name, a group,
@@ -476,8 +496,8 @@ fn build_other_client_send() -> SendDraftArguments {
 async fn sends_a_draft_another_client_saved_with_the_fields_the_refusal_names() {
     let stack = start_with_other_client_draft().await;
 
-    let refused = send_draft(&stack, build_unnamed_send("1.1003.Drafts")).await;
-    let sent = send_draft(&stack, build_other_client_send())
+    let refused = send_draft(&stack.context, build_unnamed_send("1.1003.Drafts")).await;
+    let sent = send_draft(&stack.context, build_other_client_send())
         .await
         .expect("sent");
 
@@ -522,7 +542,7 @@ fn format_kept_draft_end(reason: &str) -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_a_draft_sent_before_the_imap_connection_ended_as_sent_and_kept() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
-    let id = save_draft(&stack, build_draft("Ready")).await;
+    let id = save_draft(&stack.context, build_draft("Ready")).await;
     stack.imap.add_fault("APPEND", ImapFault::Close);
 
     let report = run_send_draft(
@@ -552,7 +572,7 @@ async fn reports_a_draft_sent_before_the_imap_connection_ended_as_sent_and_kept(
 #[tokio::test]
 async fn sends_nothing_more_over_an_imap_session_whose_sent_copy_timed_out() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
-    let id = save_draft(&stack, build_draft("Ready")).await;
+    let id = save_draft(&stack.context, build_draft("Ready")).await;
     stack.imap.add_fault("APPEND", ImapFault::Stall);
     let progress = SendProgress::default();
 
@@ -586,12 +606,12 @@ async fn sends_nothing_more_over_an_imap_session_whose_sent_copy_timed_out() {
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_a_sent_draft_the_server_refuses_to_delete_as_sent_and_kept() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
-    let id = save_draft(&stack, build_draft("Ready")).await;
+    let id = save_draft(&stack.context, build_draft("Ready")).await;
     stack
         .imap
         .update_state(|mailbox| mailbox.add_refusal("STORE", "NO [CANNOT] Not allowed"));
 
-    let report = send_draft(&stack, build_send(&id, &build_draft("Ready")))
+    let report = send_draft(&stack.context, build_send(&id, &build_draft("Ready")))
         .await
         .expect("sent");
 
@@ -613,18 +633,18 @@ async fn reports_a_sent_draft_the_server_refuses_to_delete_as_sent_and_kept() {
 #[tokio::test(flavor = "multi_thread")]
 async fn sends_nothing_when_the_server_refuses_to_fetch_the_draft() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
-    let id = save_draft(&stack, build_draft("Ready")).await;
+    let id = save_draft(&stack.context, build_draft("Ready")).await;
     stack
         .imap
         .update_state(|mailbox| mailbox.add_refusal("FETCH", "NO [SERVERBUG] Not now"));
 
-    let sent = send_draft(&stack, build_send(&id, &build_draft("Ready"))).await;
+    let sent = send_draft(&stack.context, build_send(&id, &build_draft("Ready"))).await;
 
     assert_eq!(
         sent.map_err(|failure| failure.to_string()),
         Err("The IMAP server refused to fetch the draft: [SERVERBUG] Not now.".to_owned())
     );
-    assert_draft_kept_unsent(&stack);
+    assert_draft_kept_unsent(&stack.imap, &stack.smtp);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -665,7 +685,7 @@ async fn answers_a_stored_draft_as_saved_when_its_id_cannot_be_found() {
 #[tokio::test(flavor = "multi_thread")]
 async fn answers_a_replacing_draft_with_its_id_when_the_old_one_cannot_be_deleted() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
-    let first = save_draft(&stack, build_draft("First")).await;
+    let first = save_draft(&stack.context, build_draft("First")).await;
     stack
         .imap
         .update_state(|mailbox| mailbox.add_refusal("STORE", "NO [CANNOT] Not allowed"));
@@ -695,7 +715,7 @@ async fn answers_a_replacing_draft_with_its_id_when_the_old_one_cannot_be_delete
 #[tokio::test(flavor = "multi_thread")]
 async fn neither_replaces_nor_deletes_a_draft_whose_summary_the_server_refuses_to_fetch() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
-    let id = save_draft(&stack, build_draft("First")).await;
+    let id = save_draft(&stack.context, build_draft("First")).await;
     stack
         .imap
         .update_state(|mailbox| mailbox.add_refusal("FETCH", "NO [SERVERBUG] Not now"));
@@ -730,7 +750,7 @@ async fn neither_replaces_nor_deletes_a_draft_whose_summary_the_server_refuses_t
 #[tokio::test]
 async fn answers_a_stored_draft_as_saved_when_a_later_step_times_out() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
-    let first = save_draft(&stack, build_draft("First")).await;
+    let first = save_draft(&stack.context, build_draft("First")).await;
     stack.imap.add_fault("STORE", ImapFault::Stall);
 
     let (saved, timing) = stack
@@ -798,7 +818,7 @@ async fn answers_a_draft_whose_answer_never_came_once_all_of_it_was_sent_as_mayb
 #[tokio::test(flavor = "multi_thread")]
 async fn answers_a_replacing_draft_whose_answer_was_lost_with_the_draft_it_replaces() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
-    let first = save_draft(&stack, build_draft("First")).await;
+    let first = save_draft(&stack.context, build_draft("First")).await;
     stack
         .imap
         .add_fault("APPEND", ImapFault::CloseAfterHandling);

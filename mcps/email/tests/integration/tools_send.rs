@@ -8,7 +8,7 @@ use email::tools::send::{MessageArguments, run_send_email};
 use email::tools::{ToolContext, ToolResult};
 use email::trust::Trust;
 
-use crate::support::imap::{FakeMailbox, ImapFault, NewMessage};
+use crate::support::imap::{FakeImapServer, FakeMailbox, ImapFault, NewMessage};
 use crate::support::smtp::SentMail;
 use crate::support::{
     ADDRESS, Stack, TestMessage, assert_nothing_sent, calculate_trimmed_bytes, start_stack,
@@ -61,21 +61,31 @@ async fn start_with_originals(server_keeps_sent_copy: bool) -> Stack {
 }
 
 /// Sends a message with send_email, without a stop.
-async fn send_message(stack: &Stack, arguments: MessageArguments) -> ToolResult {
-    run_send_email(&stack.context, arguments, &SendProgress::default()).await
+///
+/// # Arguments
+///
+/// * `context` - The account and trust the tool runs with.
+/// * `arguments` - The message's fields.
+async fn send_message(context: &ToolContext, arguments: MessageArguments) -> ToolResult {
+    run_send_email(context, arguments, &SendProgress::default()).await
 }
 
 /// Asserts that Sent holds one read copy of the mail, which one APPEND
 /// put there.
-fn assert_one_read_copy_in_sent(stack: &Stack, mail: &SentMail) {
-    let sent = stack.imap.list_messages("Sent");
+///
+/// # Arguments
+///
+/// * `imap` - The IMAP fake that holds Sent.
+/// * `mail` - The mail as the SMTP fake received it.
+fn assert_one_read_copy_in_sent(imap: &FakeImapServer, mail: &SentMail) {
+    let sent = imap.list_messages("Sent");
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].flags, vec!["\\Seen"]);
     assert_eq!(
         calculate_trimmed_bytes(&sent[0].bytes),
         calculate_trimmed_bytes(&mail.bytes)
     );
-    let commands = stack.imap.list_commands();
+    let commands = imap.list_commands();
     let appends: Vec<&String> = commands
         .iter()
         .filter(|command| command.contains(" APPEND "))
@@ -118,7 +128,7 @@ async fn sends_a_message_and_keeps_one_read_copy_in_sent_without_the_bcc_field()
     let stack = start_with_originals(false).await;
 
     let report = send_message(
-        &stack,
+        &stack.context,
         MessageArguments {
             cc: vec!["cc@example.com".to_owned()],
             bcc: vec!["hidden@example.com".to_owned()],
@@ -158,7 +168,7 @@ async fn sends_a_message_and_keeps_one_read_copy_in_sent_without_the_bcc_field()
     let parsed = parse_message(&mails[0].bytes).expect("parsed");
     assert_eq!(parsed.headers.subject, "Grüße");
     assert_eq!(parsed.text, "Hello Jane,\r\n\r\nBye.\r\n");
-    assert_one_read_copy_in_sent(&stack, &mails[0]);
+    assert_one_read_copy_in_sent(&stack.imap, &mails[0]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -247,7 +257,7 @@ async fn refuses_a_reply_that_leaves_out_its_recipients_or_subject() {
             "A reply needs a subject, such as \"Re: Plans\".".to_owned()
         ))
     );
-    assert_nothing_sent(&stack);
+    assert_nothing_sent(&stack.smtp);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -264,7 +274,7 @@ async fn tells_a_reply_without_recipients_only_where_replies_go_when_no_sender_i
     let stack = start_stack(mailbox, false).await;
 
     let refused = send_message(
-        &stack,
+        &stack.context,
         MessageArguments {
             subject: "Re: Notice".to_owned(),
             body: "Done.".to_owned(),
@@ -280,14 +290,14 @@ async fn tells_a_reply_without_recipients_only_where_replies_go_when_no_sender_i
             "A reply needs its recipients in to, cc, or bcc. The message replied to asks for replies to go to [\"a@example.com\"].".to_owned()
         ))
     );
-    assert_nothing_sent(&stack);
+    assert_nothing_sent(&stack.smtp);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn replies_in_the_conversation_to_exactly_the_recipients_given() {
     let stack = start_with_originals(false).await;
 
-    let report = send_message(&stack, build_reply_to_plans())
+    let report = send_message(&stack.context, build_reply_to_plans())
         .await
         .expect("sent");
 
@@ -348,7 +358,7 @@ async fn refuses_a_forward_that_leaves_out_its_recipients_or_subject() {
             "A forward needs its recipients in to, cc, or bcc. A forward needs a subject, such as \"Fwd: Report\".".to_owned()
         ))
     );
-    assert_nothing_sent(&stack);
+    assert_nothing_sent(&stack.smtp);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -499,7 +509,7 @@ async fn refuses_arguments_that_break_a_rule_before_connecting() {
             "not an address is not an email address. Give addresses as name@example.com or Name <name@example.com>.".to_owned()
         ))
     );
-    assert_nothing_sent(&stack);
+    assert_nothing_sent(&stack.smtp);
     assert!(stack.imap.list_commands().is_empty());
 }
 
@@ -575,7 +585,7 @@ async fn reports_a_copy_whose_answer_was_lost_once_all_of_it_was_sent_as_maybe_s
         .imap
         .add_fault("APPEND", ImapFault::CloseAfterHandling);
 
-    let report = send_message(&stack, build_message_to_jane("Hi", "Hello"))
+    let report = send_message(&stack.context, build_message_to_jane("Hi", "Hello"))
         .await
         .expect("sent");
 

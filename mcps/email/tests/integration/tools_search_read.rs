@@ -6,7 +6,7 @@ use email::tools::read::{
     AttachmentArguments, IdArguments, run_read_attachment, run_read_conversation, run_read_email,
 };
 use email::tools::search::{SearchArguments, run_search_emails};
-use email::tools::{ToolReport, ToolResult};
+use email::tools::{ToolContext, ToolReport, ToolResult};
 
 use crate::support::imap::{FakeMailbox, NewMessage};
 use crate::support::{Stack, TestMessage, start_stack};
@@ -99,10 +99,14 @@ fn build_thread_message(name: &str, number: i64, body: &str) -> TestMessage {
 ///
 /// # Arguments
 ///
-/// * `stack` - The running fakes and the tools' context.
+/// * `context` - The account and trust the tool runs with.
 /// * `id` - The message's id.
-async fn get_conversation_text(stack: &Stack, id: &str) -> String {
-    run_read_conversation(&stack.context, IdArguments { id: id.to_owned() })
+///
+/// # Panics
+///
+/// When the conversation cannot be read.
+async fn get_conversation_text(context: &ToolContext, id: &str) -> String {
+    run_read_conversation(context, IdArguments { id: id.to_owned() })
         .await
         .expect("the conversation")
         .text
@@ -112,14 +116,18 @@ async fn get_conversation_text(stack: &Stack, id: &str) -> String {
 ///
 /// # Arguments
 ///
-/// * `stack` - The running fakes and the tools' context.
+/// * `context` - The account and trust the tool runs with.
 /// * `page` - The page, or `None` for the first.
-async fn get_inbox_page(stack: &Stack, page: Option<u32>) -> String {
+///
+/// # Panics
+///
+/// When the search fails.
+async fn get_inbox_page(context: &ToolContext, page: Option<u32>) -> String {
     let arguments = SearchArguments {
         page,
         ..SearchArguments::default()
     };
-    get_inbox_hits(stack, arguments).await
+    get_inbox_hits(context, arguments).await
 }
 
 /// Gets the hits of a search of INBOX with the arguments, whatever folder
@@ -127,14 +135,14 @@ async fn get_inbox_page(stack: &Stack, page: Option<u32>) -> String {
 ///
 /// # Arguments
 ///
-/// * `stack` - The running fakes and the tools' context.
+/// * `context` - The account and trust the tool runs with.
 /// * `arguments` - The search's other arguments.
 ///
 /// # Panics
 ///
 /// When the search fails.
-async fn get_inbox_hits(stack: &Stack, arguments: SearchArguments) -> String {
-    get_inbox_report(stack, arguments).await.text
+async fn get_inbox_hits(context: &ToolContext, arguments: SearchArguments) -> String {
+    get_inbox_report(context, arguments).await.text
 }
 
 /// Gets the report of a search of INBOX with the arguments, whatever
@@ -142,18 +150,18 @@ async fn get_inbox_hits(stack: &Stack, arguments: SearchArguments) -> String {
 ///
 /// # Arguments
 ///
-/// * `stack` - The running fakes and the tools' context.
+/// * `context` - The account and trust the tool runs with.
 /// * `arguments` - The search's other arguments.
 ///
 /// # Panics
 ///
 /// When the search fails.
-async fn get_inbox_report(stack: &Stack, arguments: SearchArguments) -> ToolReport {
+async fn get_inbox_report(context: &ToolContext, arguments: SearchArguments) -> ToolReport {
     let arguments = SearchArguments {
         folder: Some("INBOX".to_owned()),
         ..arguments
     };
-    run_search_emails(&stack.context, arguments)
+    run_search_emails(context, arguments)
         .await
         .expect("the report")
 }
@@ -162,15 +170,15 @@ async fn get_inbox_report(stack: &Stack, arguments: SearchArguments) -> ToolRepo
 ///
 /// # Arguments
 ///
-/// * `stack` - The running fakes and the tools' context.
+/// * `context` - The account and trust the tool runs with.
 /// * `id` - The message's id.
 /// * `attachment` - The attachment's number, from 1.
-async fn get_attachment(stack: &Stack, id: &str, attachment: u32) -> ToolResult {
+async fn get_attachment(context: &ToolContext, id: &str, attachment: u32) -> ToolResult {
     let arguments = AttachmentArguments {
         id: id.to_owned(),
         attachment,
     };
-    run_read_attachment(&stack.context, arguments).await
+    run_read_attachment(context, arguments).await
 }
 
 /// Builds a mailbox with a conversation of three messages across folders
@@ -266,7 +274,7 @@ async fn lists_the_last_page_of_one_folder_and_refuses_a_page_past_it() {
         ..SearchArguments::default()
     };
 
-    let second = get_inbox_page(&stack, Some(2)).await;
+    let second = get_inbox_page(&stack.context, Some(2)).await;
     let third = run_search_emails(&stack.context, past_the_end).await;
 
     assert!(
@@ -293,8 +301,8 @@ async fn searches_a_folder_without_marking_anything_and_signs_out_after_each_cal
         ..SearchArguments::default()
     };
 
-    get_inbox_page(&stack, None).await;
-    get_inbox_page(&stack, Some(2)).await;
+    get_inbox_page(&stack.context, None).await;
+    get_inbox_page(&stack.context, Some(2)).await;
     let refused = run_search_emails(&stack.context, past_the_end).await;
 
     assert!(refused.is_err(), "{refused:?}");
@@ -398,8 +406,8 @@ async fn lists_only_the_newest_200_hits_of_a_folder_and_says_so() {
     }
     let stack = start_stack(mailbox, false).await;
 
-    let first = get_inbox_page(&stack, None).await;
-    let last = get_inbox_page(&stack, Some(10)).await;
+    let first = get_inbox_page(&stack.context, None).await;
+    let last = get_inbox_page(&stack.context, Some(10)).await;
 
     assert!(
         first.starts_with("Page 1 of 10: 200 messages match, newest first. Ask for page 2 to see the next ones.\nMore than 200 messages match in INBOX; only the newest 200 of each are listed. Narrow the search to see others.\n\nid 205.1001.INBOX\n"),
@@ -422,8 +430,8 @@ async fn narrows_a_search_by_flags() {
         ..SearchArguments::default()
     };
 
-    let read = get_inbox_hits(&stack, read_only).await;
-    let flagged = get_inbox_hits(&stack, flagged_only).await;
+    let read = get_inbox_hits(&stack.context, read_only).await;
+    let flagged = get_inbox_hits(&stack.context, flagged_only).await;
 
     assert_eq!(calculate_hit_count(&read), 1);
     assert!(read.contains("subject Message 3\n"), "{read}");
@@ -452,8 +460,8 @@ async fn narrows_a_search_by_fields_and_dates() {
         ..SearchArguments::default()
     };
 
-    let by_fields = get_inbox_hits(&stack, fields).await;
-    let by_dates = get_inbox_hits(&stack, dates).await;
+    let by_fields = get_inbox_hits(&stack.context, fields).await;
+    let by_dates = get_inbox_hits(&stack.context, dates).await;
 
     assert_eq!(calculate_hit_count(&by_fields), 11);
     assert!(
@@ -497,8 +505,8 @@ async fn narrows_a_search_by_a_subject_that_is_not_ascii_or_finds_nothing() {
         ..SearchArguments::default()
     };
 
-    let non_ascii = get_inbox_hits(&stack, subject).await;
-    let none = get_inbox_report(&stack, unmatched_text).await;
+    let non_ascii = get_inbox_hits(&stack.context, subject).await;
+    let none = get_inbox_report(&stack.context, unmatched_text).await;
 
     assert_eq!(calculate_hit_count(&non_ascii), 1);
     assert!(
@@ -587,7 +595,7 @@ async fn searches_for_text_beyond_ascii_when_the_server_sends_untagged_data_befo
         ..SearchArguments::default()
     };
 
-    let found = get_inbox_hits(&stack, arguments).await;
+    let found = get_inbox_hits(&stack.context, arguments).await;
 
     assert_eq!(calculate_hit_count(&found), 1, "{found}");
     assert!(found.contains("subject Grüße aus Wien\n"), "{found}");
@@ -648,9 +656,11 @@ async fn converts_html_lists_attachments_and_reads_text_ones() {
     let message = run_read_email(&stack.context, IdArguments { id: id.to_owned() })
         .await
         .expect("the message");
-    let csv = get_attachment(&stack, id, 1).await.expect("the attachment");
-    let pdf = get_attachment(&stack, id, 2).await;
-    let missing = get_attachment(&stack, id, 3).await;
+    let csv = get_attachment(&stack.context, id, 1)
+        .await
+        .expect("the attachment");
+    let pdf = get_attachment(&stack.context, id, 2).await;
+    let missing = get_attachment(&stack.context, id, 3).await;
 
     assert!(message.text.contains("Attachments: 2\n  #1 data.csv (text/csv, 8 B)\n  #2 report.pdf (application/pdf, 5 B)\n[The text was converted from HTML.]\n\nHello there."), "{}", message.text);
     assert_eq!(
@@ -708,7 +718,7 @@ async fn reads_a_conversation_across_folders_oldest_first() {
 async fn finds_a_conversation_by_its_identifiers_without_marking_anything() {
     let stack = start_stack(build_conversation_mailbox(), false).await;
 
-    get_conversation_text(&stack, "3.1001.INBOX").await;
+    get_conversation_text(&stack.context, "3.1001.INBOX").await;
 
     let commands = stack.imap.list_commands();
     assert!(
@@ -731,7 +741,7 @@ async fn fits_the_newest_messages_of_a_long_conversation_and_says_how_many_are_l
     }
     let stack = start_stack(mailbox, false).await;
 
-    let text = get_conversation_text(&stack, "12.1001.INBOX").await;
+    let text = get_conversation_text(&stack.context, "12.1001.INBOX").await;
 
     let ids = list_entry_ids(&text);
     let shown = ids.len();
@@ -774,7 +784,7 @@ async fn shows_the_newest_message_even_when_it_alone_is_longer_than_the_result()
     mailbox.add_message("INBOX", crowded.build_new_message(&[]));
     let stack = start_stack(mailbox, false).await;
 
-    let text = get_conversation_text(&stack, "2.1001.INBOX").await;
+    let text = get_conversation_text(&stack.context, "2.1001.INBOX").await;
 
     assert!(
         text.starts_with("The conversation has 2 messages, oldest first. Only the newest is shown; 1 older one is left out.\n\n----\nid 2.1001.INBOX\n"),
@@ -795,7 +805,7 @@ async fn shows_at_most_the_newest_50_messages_of_a_conversation_across_folders()
     }
     let stack = start_stack(mailbox, false).await;
 
-    let text = get_conversation_text(&stack, "30.1002.Sent").await;
+    let text = get_conversation_text(&stack.context, "30.1002.Sent").await;
 
     assert!(
         text.starts_with("The conversation has 60 messages, oldest first. Only the newest 50 are shown; 10 older ones are left out.\n\n----\nid 6.1001.INBOX\n"),
@@ -815,7 +825,7 @@ async fn says_when_a_folder_matched_more_messages_than_a_conversation_reads() {
     }
     let stack = start_stack(mailbox, false).await;
 
-    let text = get_conversation_text(&stack, "55.1001.INBOX").await;
+    let text = get_conversation_text(&stack.context, "55.1001.INBOX").await;
 
     assert!(
         text.starts_with("The conversation has at least 50 messages, oldest first.\nMore than 50 messages match in INBOX; only the newest 50 of each were read, so older ones may be missing.\n\n----\nid 6.1001.INBOX\n"),
@@ -848,7 +858,7 @@ async fn keeps_only_messages_whose_identifiers_equal_the_conversation_ones() {
     mailbox.add_message("INBOX", reply.build_new_message(&[]));
     let stack = start_stack(mailbox, false).await;
 
-    let text = get_conversation_text(&stack, "1.1001.INBOX").await;
+    let text = get_conversation_text(&stack.context, "1.1001.INBOX").await;
 
     assert!(
         text.starts_with("The conversation has 2 messages, oldest first.\n\n----\n"),
@@ -867,7 +877,7 @@ async fn finds_a_conversation_message_archived_in_the_all_mail_view_once() {
     mailbox.add_message("All Mail", archived.build_new_message(&["\\Seen"]));
     let stack = start_stack(mailbox, false).await;
 
-    let text = get_conversation_text(&stack, "1.1001.INBOX").await;
+    let text = get_conversation_text(&stack.context, "1.1001.INBOX").await;
 
     assert!(
         text.starts_with("The conversation has 2 messages, oldest first.\n\n----\n"),
@@ -890,7 +900,7 @@ async fn shows_a_conversation_message_from_its_folder_listed_after_the_all_mail_
     mailbox.add_message("All Mail", filed.build_new_message(&["\\Seen"]));
     let stack = start_stack(mailbox, false).await;
 
-    let text = get_conversation_text(&stack, "1.1001.INBOX").await;
+    let text = get_conversation_text(&stack.context, "1.1001.INBOX").await;
 
     assert_eq!(
         list_entry_ids(&text),
@@ -908,7 +918,7 @@ async fn marks_a_message_removed_while_its_conversation_was_read() {
     mailbox.add_removal("UID FETCH 2 (UID FLAGS BODY.PEEK[])", "INBOX", 2);
     let stack = start_stack(mailbox, false).await;
 
-    let text = get_conversation_text(&stack, "3.1001.INBOX").await;
+    let text = get_conversation_text(&stack.context, "3.1001.INBOX").await;
 
     assert!(
         text.starts_with("The conversation has 3 messages, oldest first.\n\n----\n"),

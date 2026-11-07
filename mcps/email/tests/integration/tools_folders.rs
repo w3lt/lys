@@ -2,11 +2,11 @@
 
 use email::failure::ToolFailure;
 use email::folders::FolderRole;
-use email::tools::ToolResult;
 use email::tools::folders::{FolderAction, FolderArguments, run_list_folders, run_manage_folder};
+use email::tools::{ToolContext, ToolResult};
 
-use crate::support::imap::{FakeFolder, FakeMailbox};
-use crate::support::{Stack, TestMessage, start_stack};
+use crate::support::imap::{FakeFolder, FakeImapServer, FakeMailbox};
+use crate::support::{TestMessage, start_stack};
 
 /// Builds the arguments of manage_folder.
 ///
@@ -31,18 +31,20 @@ fn build_folder_arguments(
 ///
 /// # Arguments
 ///
-/// * `stack` - The running fakes and the tools' context.
+/// * `context` - The account and trust the tool runs with.
 /// * `name` - The folder's name.
-async fn delete_folder(stack: &Stack, name: &str) -> ToolResult {
+async fn delete_folder(context: &ToolContext, name: &str) -> ToolResult {
     let arguments = build_folder_arguments(FolderAction::Delete, name, None);
-    run_manage_folder(&stack.context, arguments).await
+    run_manage_folder(context, arguments).await
 }
 
 /// Lists the commands that create, rename, or delete a folder.
-fn list_folder_changes(stack: &Stack) -> Vec<String> {
-    stack
-        .imap
-        .list_commands()
+///
+/// # Arguments
+///
+/// * `imap` - The IMAP fake that recorded the commands.
+fn list_folder_changes(imap: &FakeImapServer) -> Vec<String> {
+    imap.list_commands()
         .into_iter()
         .filter(|command| {
             command.contains(" CREATE ")
@@ -116,7 +118,7 @@ async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
     let created = run_manage_folder(&stack.context, create).await;
     let listed = run_list_folders(&stack.context).await.expect("the folders");
     let renamed = run_manage_folder(&stack.context, rename).await;
-    let deleted = delete_folder(&stack, "Archive 2026").await;
+    let deleted = delete_folder(&stack.context, "Archive 2026").await;
 
     assert_eq!(
         created.map(|report| (report.text, report.log)),
@@ -144,7 +146,7 @@ async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
             "folder: deleted".to_owned()
         ))
     );
-    let changes = list_folder_changes(&stack);
+    let changes = list_folder_changes(&stack.imap);
     assert_eq!(changes.len(), 3, "{changes:?}");
     assert!(
         changes[0].ends_with(" CREATE \"Gr&APwA3w-e\""),
@@ -198,7 +200,7 @@ async fn refuses_to_change_role_folders_or_to_take_a_name_in_use() {
         renamed_onto_inbox,
         Err(ToolFailure::FolderExists("inbox".to_owned()))
     );
-    assert_eq!(list_folder_changes(&stack), Vec::<String>::new());
+    assert_eq!(list_folder_changes(&stack.imap), Vec::<String>::new());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -245,7 +247,7 @@ async fn refuses_missing_folders_folders_that_hold_messages_and_unusable_names()
             "name must be a folder name without whitespace at its edges.".to_owned()
         ))
     );
-    assert_eq!(list_folder_changes(&stack), Vec::<String>::new());
+    assert_eq!(list_folder_changes(&stack.imap), Vec::<String>::new());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -257,9 +259,9 @@ async fn refuses_to_delete_a_folder_that_holds_other_folders() {
     mailbox.folders.push(inner);
     let stack = start_stack(mailbox, false).await;
 
-    let refused = delete_folder(&stack, "Projects").await;
-    let inner_deleted = delete_folder(&stack, "Projects/2026").await;
-    let outer_deleted = delete_folder(&stack, "Projects").await;
+    let refused = delete_folder(&stack.context, "Projects").await;
+    let inner_deleted = delete_folder(&stack.context, "Projects/2026").await;
+    let outer_deleted = delete_folder(&stack.context, "Projects").await;
 
     assert_eq!(
         refused.as_ref().map_err(ToolFailure::class),

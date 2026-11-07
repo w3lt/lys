@@ -14,7 +14,7 @@ use email::trust::Trust;
 use crate::support::imap::{FakeImapServer, FakeMailbox, ImapMode};
 use crate::support::smtp::{DATA_END, FakeSmtpServer, SmtpFault, SmtpMode};
 use crate::support::tls::TestAuthority;
-use crate::support::{SecurityName, Stack, TestServers, assert_about, build_account, start_stack};
+use crate::support::{SecurityName, TestServers, assert_about, build_account, start_stack};
 
 /// A message to Jane.
 fn build_message() -> MessageArguments {
@@ -62,10 +62,15 @@ fn build_connection_failure(failure: ConnectionFailure) -> ToolFailure {
     }
 }
 
-/// Asserts that the fake has no mail and Sent no copy.
-fn assert_nothing_delivered(stack: &Stack) {
-    assert!(stack.smtp.list_mails().is_empty());
-    assert!(stack.imap.list_messages("Sent").is_empty());
+/// Asserts that the SMTP fake has no mail and Sent no copy.
+///
+/// # Arguments
+///
+/// * `imap` - The IMAP fake that holds Sent.
+/// * `smtp` - The SMTP fake that no mail may have reached.
+fn assert_nothing_delivered(imap: &FakeImapServer, smtp: &FakeSmtpServer) {
+    assert!(smtp.list_mails().is_empty());
+    assert!(imap.list_messages("Sent").is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -78,7 +83,7 @@ async fn a_connection_that_ends_before_the_data_ends_sends_nothing() {
 
     assert_eq!(sent, Err(build_connection_failure(ConnectionFailure::Lost)));
     assert_eq!(progress.stage(), SendStage::NotHandedOver);
-    assert_nothing_delivered(&stack);
+    assert_nothing_delivered(&stack.imap, &stack.smtp);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -123,7 +128,7 @@ async fn a_reply_that_is_not_smtp_fails_the_send_as_unreadable_and_sends_nothing
         Err(build_connection_failure(ConnectionFailure::Unreadable))
     );
     assert_eq!(progress.stage(), SendStage::NotHandedOver);
-    assert_nothing_delivered(&stack);
+    assert_nothing_delivered(&stack.imap, &stack.smtp);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -149,7 +154,7 @@ async fn a_send_stopped_while_a_recipient_waits_was_not_handed_over() {
         .await;
 
     assert_eq!(progress.stage(), SendStage::NotHandedOver);
-    assert_nothing_delivered(&stack);
+    assert_nothing_delivered(&stack.imap, &stack.smtp);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -196,7 +201,7 @@ async fn an_address_beyond_ascii_is_not_offered_to_a_server_without_smtputf8() {
         "{:?}",
         stack.smtp.list_commands()
     );
-    assert_nothing_delivered(&stack);
+    assert_nothing_delivered(&stack.imap, &stack.smtp);
 }
 
 #[tokio::test]
@@ -227,7 +232,7 @@ async fn a_greeting_without_an_answer_to_ehlo_fails_the_sign_in_after_30_seconds
 
     assert_eq!(sent, Err(build_sign_in_timeout()));
     assert_about(timing, Duration::from_secs(30));
-    assert_nothing_delivered(&stack);
+    assert_nothing_delivered(&stack.imap, &stack.smtp);
 }
 
 #[tokio::test]
@@ -259,7 +264,7 @@ async fn a_sign_in_without_an_answer_fails_after_30_seconds() {
 
     assert_eq!(sent, Err(build_sign_in_timeout()));
     assert_about(timing, Duration::from_secs(30));
-    assert_nothing_delivered(&stack);
+    assert_nothing_delivered(&stack.imap, &stack.smtp);
 }
 
 #[tokio::test]
@@ -278,7 +283,7 @@ async fn a_recipient_without_an_answer_fails_the_send_after_30_seconds_and_sends
         Err(build_connection_failure(ConnectionFailure::TimedOut))
     );
     assert_about(timing, Duration::from_secs(30));
-    assert_nothing_delivered(&stack);
+    assert_nothing_delivered(&stack.imap, &stack.smtp);
 }
 
 #[tokio::test]

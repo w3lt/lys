@@ -537,13 +537,13 @@ const INITIAL_EMAIL_ACCOUNT_EDIT: EmailAccountEdit = Object.freeze({
 const RESET_EDIT: EmailAccountEditChange = Object.freeze({ kind: "reset" })
 
 /**
- * Formats the identifiers of the elements that describe an input.
+ * Builds the identifiers of the elements that describe an input.
  *
  * @param ids - Identifiers, with undefined for a description not shown.
  * @returns The shown identifiers separated by spaces, or undefined when none
  * is shown.
  */
-function formatDescriptionIds(
+function buildDescriptionIds(
   ids: readonly (string | undefined)[]
 ): string | undefined {
   const shownIds = ids.filter((id) => id !== undefined)
@@ -708,7 +708,7 @@ function EmailTextField({
         target={{ kind: "control", controlId: fieldId }}
       />
       <Input
-        aria-describedby={formatDescriptionIds([
+        aria-describedby={buildDescriptionIds([
           hintId,
           problem === undefined ? undefined : problemId,
           noteId
@@ -826,7 +826,7 @@ function EmailPasswordField({
         target={{ kind: "control", controlId: fieldId }}
       />
       <EmailPasswordInput
-        descriptionIds={formatDescriptionIds([
+        descriptionIds={buildDescriptionIds([
           hintId,
           problem === undefined ? undefined : problemId,
           hasSavedPassword ? noteId : undefined

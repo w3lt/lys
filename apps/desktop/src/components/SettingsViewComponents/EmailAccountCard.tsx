@@ -1453,25 +1453,21 @@ function EmailAccountFooter({
 }
 
 /**
- * Finds the control focus moves to after the saves the fields' problems
+ * Finds the control focus moves to after a save the fields' problems
  * rejected.
  *
- * @param rejectedSaveCount - Count of the saves the fields' problems
- * rejected; 0 before the first one.
  * @param problemListings - Problems the fields show, in the card's order.
  * @param fieldRefs - Hosts of the card's inputs.
  * @param summaryRef - Host of the problem summary.
- * @returns Null before the first rejected save; after one, the summary
- * while two or more inputs have a problem, and otherwise the input of the
- * one problem; null without a problem or while that host is not attached.
+ * @returns The summary while two or more inputs have a problem, and
+ * otherwise the input of the one problem; null without a problem or while
+ * that host is not attached.
  */
 function findRejectedSaveFocusTarget(
-  rejectedSaveCount: number,
   problemListings: readonly McpDraftProblemListing<EmailAccountDraftField>[],
   fieldRefs: EmailFieldRefs,
   summaryRef: RefObject<HTMLFieldSetElement | null>
 ): HTMLElement | null {
-  if (rejectedSaveCount === 0) return null
   if (problemListings.length > 1) return summaryRef.current
   if (problemListings.length === 0) return null
   return fieldRefs[problemListings[0].field].current
@@ -1523,15 +1519,12 @@ function useEmailFieldHosts(
    * focus to the summary or to the input with the problem once a save was
    * rejected.
    *
-   * @param count - Count of the saves the fields' problems rejected.
+   * @param count - Count of the saves the fields' problems rejected; 0,
+   * before the first one, moves no focus.
    */
   function handleRejectedSaveCount(count: number): void {
-    findRejectedSaveFocusTarget(
-      count,
-      problemListings,
-      fieldRefs,
-      summaryRef
-    )?.focus()
+    if (count === 0) return
+    findRejectedSaveFocusTarget(problemListings, fieldRefs, summaryRef)?.focus()
   }
   const handleRejectedSave = useEffectEvent(handleRejectedSaveCount)
 

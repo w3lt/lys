@@ -20,6 +20,7 @@ pub struct EmailId {
 }
 
 impl fmt::Display for EmailId {
+    /// Formats the id as the tools give it: `<uid>.<uidvalidity>.<folder>`.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,

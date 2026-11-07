@@ -63,6 +63,15 @@ impl EmailServer {
         }
     }
 
+    /// Runs a `search_emails` call under the client's cancellation and
+    /// [`CALL_LIMIT`], logs its outcome, and answers the model with one
+    /// page of hits, or with the sentence of what failed or stopped the
+    /// call.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - What to search for, and which page.
+    /// * `token` - Cancelled when the client cancels the request.
     #[tool(
         name = "search_emails",
         description = "Finds messages, newest first, 20 per page. Searches one folder, or every folder but an All Mail view when none is given. Give text, from, to, subject, since, before, unread, or flagged to narrow the search; every argument is optional. Each page runs the search again, so mail that arrives, moves, or is deleted between two pages can repeat or skip a hit. Each hit shows its id for read_email.",
@@ -81,6 +90,15 @@ impl EmailServer {
         .await
     }
 
+    /// Runs a `read_email` call under the client's cancellation and
+    /// [`CALL_LIMIT`], logs its outcome, and answers the model with the
+    /// message's header fields, flags, attachments, and text, or with the
+    /// sentence of what failed or stopped the call.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - Which message.
+    /// * `token` - Cancelled when the client cancels the request.
     #[tool(
         name = "read_email",
         description = "Reads one message by id: its header fields, flags, text, and the list of its attachments. Does not mark it as read.",
@@ -99,6 +117,15 @@ impl EmailServer {
         .await
     }
 
+    /// Runs a `read_conversation` call under the client's cancellation and
+    /// [`CALL_LIMIT`], logs its outcome, and answers the model with the
+    /// conversation the message belongs to, oldest first, or with the
+    /// sentence of what failed or stopped the call.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - Which message.
+    /// * `token` - Cancelled when the client cancels the request.
     #[tool(
         name = "read_conversation",
         description = "Reads the conversation a message belongs to, oldest first, found through its Message-ID, In-Reply-To, and References fields in every folder: the newest messages that fit in the result, at most 50, each cut to 3,000 characters of text; it says how many older ones were left out.",
@@ -117,6 +144,15 @@ impl EmailServer {
         .await
     }
 
+    /// Runs a `read_attachment` call under the client's cancellation and
+    /// [`CALL_LIMIT`], logs its outcome, and answers the model with the
+    /// attachment's text, or with the sentence of what failed or stopped
+    /// the call.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - Which message, and which of its attachments.
+    /// * `token` - Cancelled when the client cancels the request.
     #[tool(
         name = "read_attachment",
         description = "Reads one attachment of a message as text: plain text, HTML, CSV, JSON, XML, and the like. Other kinds, such as PDF or images, cannot be read.",
@@ -135,6 +171,14 @@ impl EmailServer {
         .await
     }
 
+    /// Runs a `list_folders` call under the client's cancellation and
+    /// [`CALL_LIMIT`], logs its outcome, and answers the model with every
+    /// folder, its role, and how many messages it holds, or with the
+    /// sentence of what failed or stopped the call.
+    ///
+    /// # Arguments
+    ///
+    /// * `token` - Cancelled when the client cancels the request.
     #[tool(
         name = "list_folders",
         description = "Lists every folder of the account with its role (Inbox, Sent, Drafts, Trash, Junk, Archive, All) and how many messages it holds.",
@@ -149,6 +193,15 @@ impl EmailServer {
         .await
     }
 
+    /// Runs a `manage_folder` call under the client's cancellation and
+    /// [`CALL_LIMIT`], logs its outcome, and answers the model with the
+    /// folder created, renamed, or deleted, or with the sentence of what
+    /// failed or stopped the call.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - What to do with which folder.
+    /// * `token` - Cancelled when the client cancels the request.
     #[tool(
         name = "manage_folder",
         description = "Creates, renames, or deletes a folder. A folder with a role (Inbox, Sent, Drafts, Trash, Junk, Archive, All) cannot be renamed or deleted, and a folder holding messages or other folders cannot be deleted.",
@@ -172,6 +225,16 @@ impl EmailServer {
         .await
     }
 
+    /// Runs a `send_email` call under the client's cancellation and
+    /// [`CALL_LIMIT`], logs its outcome, and answers the model with what
+    /// was sent and what became of its Sent copy, or with the sentence of
+    /// what failed the call. A call stopped first is answered by how far
+    /// its send came, as [`calculate_send_outcome`] reports it.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - The message.
+    /// * `token` - Cancelled when the client cancels the request.
     #[tool(
         name = "send_email",
         description = "Sends a message from the person's account. With reply_to_id it is a reply in that conversation; with forward_id it forwards that message, quoting its text and attaching its attachments. The recipients and the subject are always this call's own, a reply's and a forward's too. A copy is kept in Sent. Sending is permanent.",
@@ -194,6 +257,17 @@ impl EmailServer {
         handle_tool_call_outcome("send_email", reported)
     }
 
+    /// Runs a `save_draft` call under the client's cancellation and
+    /// [`CALL_LIMIT`], logs its outcome, and answers the model with the
+    /// stored draft's id and fields, or with the sentence of what failed
+    /// the call. A call stopped first is answered by whether storing its
+    /// draft began, as [`calculate_save_outcome`] reports it.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - The draft's fields, and the draft it replaces, if
+    ///   any.
+    /// * `token` - Cancelled when the client cancels the request.
     #[tool(
         name = "save_draft",
         description = "Saves a message in the Drafts folder without sending it, with the same fields as send_email. With draft_id, replaces that draft. Answers the draft's id for send_draft, save_draft, and delete_draft.",
@@ -216,6 +290,18 @@ impl EmailServer {
         handle_tool_call_outcome("save_draft", reported)
     }
 
+    /// Runs a `send_draft` call under the client's cancellation and
+    /// [`CALL_LIMIT`], logs its outcome, and answers the model with what
+    /// was sent and what became of its Sent copy and of the draft, or with
+    /// the sentence of what failed the call. A call stopped first is
+    /// answered by how far its send came, as [`calculate_send_outcome`]
+    /// reports it.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - The draft, and the recipients, subject, and text it
+    ///   must hold.
+    /// * `token` - Cancelled when the client cancels the request.
     #[tool(
         name = "send_draft",
         description = "Sends a message of the Drafts folder as it is stored, keeps a copy in Sent, and deletes the draft, or only marks it as deleted on a server that cannot remove one message on its own. Give the draft's to, cc, bcc, subject, and body: it is sent only when each recipient field names the same addresses as the draft's, in any order, and the subject and the text equal its own; otherwise the answer names the draft's fields and nothing is sent. Sending is permanent.",
@@ -238,6 +324,15 @@ impl EmailServer {
         handle_tool_call_outcome("send_draft", reported)
     }
 
+    /// Runs a `delete_draft` call under the client's cancellation and
+    /// [`CALL_LIMIT`], logs its outcome, and answers the model with whether
+    /// the draft was deleted or only marked as deleted, or with the
+    /// sentence of what failed or stopped the call.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - Which draft.
+    /// * `token` - Cancelled when the client cancels the request.
     #[tool(
         name = "delete_draft",
         description = "Deletes a message of the Drafts folder, or only marks it as deleted on a server that cannot remove one message on its own. Only a message in the Drafts folder can be deleted here.",
@@ -264,6 +359,9 @@ impl EmailServer {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for EmailServer {
+    /// Describes the server to the client: its name, `lys-email`, and the
+    /// crate's version; tools, its only capability; and the instructions
+    /// the model reads about the server.
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new(SERVER_NAME, env!("CARGO_PKG_VERSION")))

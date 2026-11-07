@@ -255,6 +255,9 @@ pub struct ImapSession {
 }
 
 impl fmt::Debug for ImapSession {
+    /// Formats whether the server supports UIDPLUS, once asked, and what
+    /// ended the session, if a command did; the protocol session and its
+    /// connection are left out.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ImapSession")

@@ -26,6 +26,26 @@ enum Command {
     Check,
 }
 
+/// Runs the binary for the account in `LYS_EMAIL_ACCOUNT`: with no
+/// argument, it serves MCP over standard input and output until the
+/// service stops; with `check`, it signs in to both servers and prints
+/// the report on standard output as one JSON line.
+///
+/// It logs to standard error: `usage: email [check]` for any other
+/// arguments; the variable's name and its problem, never its value, when
+/// the account is missing or breaks a rule; `check: the report could not
+/// be written:` and the reason; `server: starting failed:` and the reason;
+/// `server: serving MCP over stdio` once it serves; and, once it stops,
+/// `server: stopped` with the reason, or `server: stopped with a failure:`
+/// and the failure.
+///
+/// # Returns
+///
+/// The exit code: [`USAGE_EXIT_CODE`] for other arguments,
+/// [`ACCOUNT_EXIT_CODE`] when the account is missing or breaks a rule, 1
+/// when the report could not be written, the server could not start, or
+/// its service failed, and 0 once the report is printed or the server
+/// stopped otherwise.
 #[tokio::main]
 async fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();

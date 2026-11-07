@@ -30,6 +30,8 @@ pub enum CheckOutcome {
 }
 
 impl From<Result<(), SignInFailure>> for CheckOutcome {
+    /// Converts a sign-in's result into its outcome: `Accepted` once the
+    /// server accepted the credentials, else `Failed` with the reason.
     fn from(result: Result<(), SignInFailure>) -> Self {
         match result {
             Ok(()) => Self::Accepted,

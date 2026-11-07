@@ -120,6 +120,7 @@ impl Password {
 }
 
 impl fmt::Debug for Password {
+    /// Formats the password as `<redacted>`, never as its text.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("<redacted>")
     }
@@ -179,6 +180,9 @@ pub enum AccountProblem {
 }
 
 impl fmt::Display for AccountProblem {
+    /// Formats the problem as the words that follow the variable's name,
+    /// such as `is not set`, or `breaks a rule:` and the rule; no part of
+    /// the variable's value is in them.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Missing => formatter.write_str("is not set"),

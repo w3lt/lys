@@ -84,8 +84,8 @@ async fn offer_sign_ins_to_fakes(
     (report.imap, report.smtp)
 }
 
-/// Finds a local port nothing listens on.
-async fn find_closed_port() -> u16 {
+/// Returns a local port that nothing listens on.
+async fn get_closed_port() -> u16 {
     let closed = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("a port");
@@ -97,7 +97,7 @@ async fn find_closed_port() -> u16 {
 async fn build_account_without_imap(smtp: &FakeSmtpServer) -> Account {
     build_account(
         TestServers {
-            imap_port: find_closed_port().await,
+            imap_port: get_closed_port().await,
             imap_security: SecurityName::Plain,
             smtp_port: smtp.port,
             smtp_security: SecurityName::Plain,
@@ -390,7 +390,7 @@ async fn ends_an_unanswered_logout_at_the_check_limit_and_accepts_the_sign_in() 
     let servers = TestServers {
         imap_port: imap.port,
         imap_security: SecurityName::Plain,
-        smtp_port: find_closed_port().await,
+        smtp_port: get_closed_port().await,
         smtp_security: SecurityName::Plain,
     };
     let account = build_account(servers, false);
@@ -410,7 +410,7 @@ async fn ends_an_imap_sign_in_without_a_greeting_at_the_check_limit() {
     let servers = TestServers {
         imap_port: imap.port,
         imap_security: SecurityName::Plain,
-        smtp_port: find_closed_port().await,
+        smtp_port: get_closed_port().await,
         smtp_security: SecurityName::Plain,
     };
     let account = build_account(servers, false);

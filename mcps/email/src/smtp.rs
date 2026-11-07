@@ -490,7 +490,7 @@ fn calculate_exchange_failure(error: &SmtpError) -> SmtpFailure {
     match error.status() {
         Some(code) => SmtpFailure::Refused {
             code: u16::from(code),
-            text: format_source(error),
+            text: build_source_text(error),
         },
         None => SmtpFailure::Connection(calculate_connection_failure(error)),
     }
@@ -503,16 +503,16 @@ fn calculate_exchange_failure(error: &SmtpError) -> SmtpFailure {
 fn calculate_connection_failure(error: &SmtpError) -> ConnectionFailure {
     if error.is_timeout() {
         ConnectionFailure::TimedOut
-    } else if error.is_response() && format_source(error) != INCOMPLETE_REPLY_TEXT {
+    } else if error.is_response() && build_source_text(error) != INCOMPLETE_REPLY_TEXT {
         ConnectionFailure::Unreadable
     } else {
         ConnectionFailure::Lost
     }
 }
 
-/// Formats the cause of lettre's error: the server's reply, or lettre's
-/// own words.
-fn format_source(error: &SmtpError) -> String {
+/// Builds the text of the cause of lettre's error: the server's reply, or
+/// lettre's own words.
+fn build_source_text(error: &SmtpError) -> String {
     error
         .source()
         .map_or_else(|| error.to_string(), ToString::to_string)

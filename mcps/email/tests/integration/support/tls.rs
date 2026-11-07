@@ -31,6 +31,8 @@ pub struct TestAuthority {
 }
 
 impl Default for TestAuthority {
+    /// Creates a fresh authority with its own key, as
+    /// [`TestAuthority::new`] does.
     fn default() -> Self {
         Self::new()
     }

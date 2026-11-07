@@ -307,6 +307,8 @@ pub struct TestMessage {
 }
 
 impl Default for TestMessage {
+    /// Builds an empty plain message from Jane to the account, dated at the
+    /// Unix epoch.
     fn default() -> Self {
         Self {
             from: "Jane Doe <jane@example.com>".to_owned(),

@@ -221,9 +221,18 @@ impl FakeMailbox {
 
     /// Adds a message to a folder.
     ///
+    /// # Arguments
+    ///
+    /// * `folder` - The folder's name.
+    /// * `message` - The message, with its flags and when it arrived.
+    ///
     /// # Returns
     ///
     /// The message's UID.
+    ///
+    /// # Panics
+    ///
+    /// When the mailbox has no folder of that name.
     pub fn add_message(&mut self, folder: &str, message: NewMessage<'_>) -> u32 {
         let folder = self.find_folder_mut(folder).expect("the folder exists");
         let uid = folder.next_uid;

@@ -224,6 +224,7 @@ function getSecurityChoice(server: string, label: string): HTMLElement {
  * Gets the password field.
  *
  * @returns The input labelled Password.
+ * @throws When the control labelled Password is not an input.
  */
 function getPasswordField(): HTMLInputElement {
   const field = screen.getByLabelText("Password")
@@ -291,6 +292,7 @@ function getShownServerChoices(): ShownServerChoices {
  * with the new address, then each character of the rest.
  *
  * @param address - Address the field holds afterwards.
+ * @throws When the Address textbox is not an input.
  */
 function updateAddressByKeystroke(address: string): void {
   const field = getField("Address")

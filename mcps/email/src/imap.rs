@@ -1314,6 +1314,14 @@ mod tests {
 
     /// The outcome the tagged line ends the command `A1` with, parsed as
     /// the session reads it.
+    ///
+    /// # Arguments
+    ///
+    /// * `line` - One response line, with its line end.
+    ///
+    /// # Panics
+    ///
+    /// When the line does not parse as an IMAP response.
     fn calculate_line_outcome(line: &[u8]) -> Option<Result<(), ImapFailure>> {
         let (_, response) = Response::parse(line).expect("an IMAP response");
         calculate_tagged_outcome(&response, &RequestId("A1".to_owned()))
@@ -1449,6 +1457,14 @@ mod tests {
 
     /// The fact one line of a `SELECT` answer holds, parsed as the session
     /// reads it.
+    ///
+    /// # Arguments
+    ///
+    /// * `line` - One response line, with its line end.
+    ///
+    /// # Panics
+    ///
+    /// When the line does not parse as an IMAP response.
     fn find_line_selection_fact(line: &[u8]) -> Option<SelectionFact> {
         let (_, response) = Response::parse(line).expect("an IMAP response");
         find_selection_fact(&response)
@@ -1476,6 +1492,15 @@ mod tests {
 
     /// The header fields and the whole message one `FETCH` line holds,
     /// parsed as the session reads it.
+    ///
+    /// # Arguments
+    ///
+    /// * `line` - The `FETCH` response, with its literals and line ends.
+    ///
+    /// # Panics
+    ///
+    /// When the line does not parse as an IMAP response, or is not a
+    /// `FETCH` answer.
     fn find_line_sections(line: &[u8]) -> FetchedSections {
         let (_, response) = Response::parse(line).expect("an IMAP response");
         let attributes = find_fetched_attributes(&response).expect("a FETCH answer");

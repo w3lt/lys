@@ -998,6 +998,16 @@ mod tests {
     }
 
     /// The compared form of a call's fields.
+    ///
+    /// # Arguments
+    ///
+    /// * `to` - The To recipients.
+    /// * `subject` - The subject.
+    /// * `body` - The text.
+    ///
+    /// # Panics
+    ///
+    /// When a recipient is not an email address lettre accepts.
     fn build_given(to: &[&str], subject: &str, body: &str) -> ComparedFields {
         build_compared_fields(&MessageArguments {
             to: to.iter().map(|recipient| (*recipient).to_owned()).collect(),

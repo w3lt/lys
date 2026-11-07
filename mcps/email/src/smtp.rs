@@ -526,6 +526,15 @@ mod tests {
     use super::*;
 
     /// What an EHLO answer offering the extensions, one per line, tells.
+    ///
+    /// # Arguments
+    ///
+    /// * `extensions` - The extensions, each as its line writes it.
+    ///
+    /// # Panics
+    ///
+    /// When lettre does not read the answer the extensions make as an EHLO
+    /// reply.
     fn build_server_info(extensions: &[&str]) -> ServerInfo {
         let mut answer = String::from("250-localhost Hello\r\n");
         for extension in extensions {
@@ -537,6 +546,16 @@ mod tests {
     }
 
     /// An envelope from the sender to the recipient.
+    ///
+    /// # Arguments
+    ///
+    /// * `sender` - The sender's address.
+    /// * `recipient` - The recipient's address.
+    ///
+    /// # Panics
+    ///
+    /// When lettre does not accept the sender or the recipient as an
+    /// address.
     fn build_envelope(sender: &str, recipient: &str) -> Envelope {
         let sender: Address = sender.parse().expect("an address");
         let recipient: Address = recipient.parse().expect("an address");

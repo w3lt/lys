@@ -110,17 +110,7 @@ impl FakeSmtpServer {
             state: Arc::clone(&state),
             faulted: Arc::clone(&faulted),
         };
-        tokio::spawn(async move {
-            loop {
-                let Ok((stream, _)) = listener.accept().await else {
-                    break;
-                };
-                let setup = setup.clone();
-                tokio::spawn(async move {
-                    handle_connection(stream, setup).await;
-                });
-            }
-        });
+        tokio::spawn(handle_incoming_connections(listener, setup));
         Self {
             port,
             state,
@@ -229,6 +219,22 @@ struct ConnectionSetup {
     state: Arc<Mutex<FakeSmtpState>>,
     /// Notified each time a fault strikes.
     faulted: Arc<Notify>,
+}
+
+/// Accepts the fake's connections until accepting one fails, and serves
+/// each in a task of its own.
+///
+/// Resource ownership: owns the listener, which closes when the test's
+/// runtime drops the task that runs this.
+///
+/// # Arguments
+///
+/// * `listener` - The fake's listener.
+/// * `setup` - What every connection shares; each one gets a copy.
+async fn handle_incoming_connections(listener: TcpListener, setup: ConnectionSetup) {
+    while let Ok((stream, _)) = listener.accept().await {
+        tokio::spawn(handle_connection(stream, setup.clone()));
+    }
 }
 
 /// Serves one connection in the setup's mode.

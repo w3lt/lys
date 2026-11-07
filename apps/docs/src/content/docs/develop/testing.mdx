@@ -94,6 +94,17 @@ contracts, schemas, or behavior that crosses package boundaries.
   the lifecycle contract's cases that need no VM, under an
   [approved exception](/reference/standard-application/#reader-vm-lifecycle-contract-exception).
   No workflow runs it.
+- `mcps/email` contains the email MCP server's tests: unit tests in its
+  modules under `src`, and an integration suite in `tests/integration` that
+  runs the tools, and the built `email` binary over stdio, against fake IMAP
+  and SMTP servers on loopback ports. Run both with
+  `cargo test --locked --manifest-path mcps/email/Cargo.toml`. They need no
+  mail account, network access, or `LYS_HOME`: the fakes speak plain text,
+  STARTTLS, and TLS, the last two with certificates from an in-memory
+  certificate authority, and the cases that wait out a time limit pause
+  Tokio's clock, so the limit passes at once. The cases that check a line
+  the server writes to standard error rerun other cases as child processes
+  of the integration test binary. No workflow runs them.
 - The `Desktop unit tests` workflow runs that typecheck and the desktop suite on
   every pull request and on every push to `main`.
 - The `Backend unit tests` workflow runs

@@ -440,7 +440,7 @@ pub async fn run_send_draft(
     let drafts = get_role_folder(&folders, FolderRole::Drafts)?.clone();
     let bytes = load_draft(&mut session, &drafts, &id).await?;
     let prepared = parse_stored_draft(&context.account.address, &bytes)?;
-    if let Some(refusal) = format_draft_difference(&given, &prepared) {
+    if let Some(refusal) = find_draft_difference(&given, &prepared) {
         return Err(ToolFailure::Argument(refusal));
     }
     send_composed(context, &prepared.message, progress).await?;
@@ -619,7 +619,7 @@ fn build_compared_text(text: &str) -> String {
     text.replace("\r\n", "\n").trim_end().to_owned()
 }
 
-/// Formats how a call's fields differ from the draft's.
+/// Finds how a call's fields differ from the draft's.
 ///
 /// # Arguments
 ///
@@ -630,7 +630,7 @@ fn build_compared_text(text: &str) -> String {
 ///
 /// The refusal the model reads: the fields that differ, and the draft's
 /// own fields to give instead; `None` when every field matches.
-fn format_draft_difference(given: &ComparedFields, draft: &PreparedDraft) -> Option<String> {
+fn find_draft_difference(given: &ComparedFields, draft: &PreparedDraft) -> Option<String> {
     let stored = &draft.compared;
     let mut differing: Vec<&str> = RECIPIENT_FIELDS
         .iter()
@@ -1005,14 +1005,14 @@ mod tests {
             "Hello\nthere",
         );
 
-        assert_eq!(format_draft_difference(&reordered, &draft), None);
-        assert_eq!(format_draft_difference(&with_names, &draft), None);
+        assert_eq!(find_draft_difference(&reordered, &draft), None);
+        assert_eq!(find_draft_difference(&with_names, &draft), None);
         assert_eq!(
-            format_draft_difference(&other_text, &draft),
+            find_draft_difference(&other_text, &draft),
             Some("The draft differs from this call in body, so nothing was sent. Its own fields are:\nto: [\"\\\"Doe, Jane\\\" <jane@example.com>\", \"b@example.com\"]\ncc: []\nbcc: []\nsubject: \"Hi\"\nbody: its text as read_email shows it, which the body given differs from at character 6, counting a line break as one.\nCall send_draft with these to send it.".to_owned())
         );
         assert!(
-            format_draft_difference(&extra, &draft)
+            find_draft_difference(&extra, &draft)
                 .is_some_and(|text| text.starts_with("The draft differs from this call in to, so")),
         );
         assert_eq!(

@@ -6,6 +6,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { onTestFinished, vi, type Mock, type MockInstance } from "vitest"
 import SqliteAgentRecordStore from "../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
+import type {
+  DatabaseFunctionRegistry,
+  DatabaseReader,
+  DatabaseWriter
+} from "../../../src/infrastructure/database/databaseTransactions"
 import AgentRuntimeService, {
   buildConversationTitleLookup
 } from "../../../src/modules/agent/agentRuntimeService"
@@ -15,6 +20,7 @@ import { buildBuiltInAgents } from "../../../src/modules/agent/builtInAgents"
 import ChatService from "../../../src/modules/chat/chatService"
 import LlmReplyContextMeter from "../../../src/modules/chat/llmReplyContextMeter"
 import OpenAiReplyModel from "../../../src/modules/chat/openAiReplyModel"
+import type { ConversationReader } from "../../../src/modules/conversation/capabilities"
 import type StoredConversationTurns from "../../../src/modules/conversation/turns"
 import ReplyGenerationRegistry from "../../../src/modules/chat/replyGenerationRegistry"
 import {
@@ -36,10 +42,7 @@ import {
   createFakeLlmRuntime
 } from "./fakeLlmRuntime"
 import { DEFAULT_LM_STUDIO_ACCESS } from "./llmFixtures"
-import {
-  openConversationTestServices,
-  type ConversationTestServices
-} from "./conversationDatabase"
+import { openConversationTestServices } from "./conversationDatabase"
 import type { TestFastify } from "./fastifyTestApp"
 import {
   runLookUpWordWithSource,
@@ -191,6 +194,33 @@ export type TestMcpServerRegistry = Readonly<{
    * a case configures it.
    */
   readMcpSettings: Mock<() => Promise<McpSettingsRead>>
+}>
+
+/**
+ * The parts of a case's application that a case updates its MCP servers
+ * through: the spy the registry reads its settings through, and the
+ * registry's update and list.
+ */
+export type McpServerUpdateTestApp = Readonly<{
+  /** Spy the registry reads its settings through. */
+  readMcpSettings: TestMcpServerRegistry["readMcpSettings"]
+  /** Application whose registry the case updates and lists. */
+  app: Readonly<{
+    /** The registry, through its update and its list of servers. */
+    mcpServerRegistry: Pick<McpServerRegistry, "updateServers" | "listServers">
+  }>
+}>
+
+/**
+ * What a case's agent services use of its conversation services: the
+ * database their records are kept on, and the history the agents title
+ * conversations from.
+ */
+export type AgentConversationTestServices = Readonly<{
+  /** Database the agent record store keeps its records on. */
+  database: DatabaseReader & DatabaseWriter & DatabaseFunctionRegistry
+  /** History the agents read the titles of conversations from. */
+  history: ConversationReader
 }>
 
 /**
@@ -422,7 +452,7 @@ async function openTestLlmRuntimeService(): Promise<LlmRuntimeService> {
  * @returns The two services.
  */
 function createTestAgentServices(
-  conversation: Pick<ConversationTestServices, "database" | "history">,
+  conversation: AgentConversationTestServices,
   chatService: Pick<ChatService, "completeChatStream">,
   llmService: Pick<LlmService, "findLlmContextMeasurement">
 ): Pick<ChatRouteTestServices, "agentService" | "agentRuntimeService"> {

@@ -36,14 +36,15 @@ import {
 } from "../../../support/attachmentFixtures"
 import {
   buildScriptedBuiltInTools,
-  createTestMcpServerRegistry
+  createTestMcpServerRegistry,
+  type AgentConversationTestServices,
+  type McpServerUpdateTestApp
 } from "../../../support/chatRouteTestApp"
 import {
   openConversationTestServices,
   saveAssistantMessageRow,
   saveConversationRow,
-  saveUserMessageRow,
-  type ConversationTestServices
+  saveUserMessageRow
 } from "../../../support/conversationDatabase"
 import {
   createFixtureUuidV7,
@@ -191,7 +192,7 @@ type ChatContextRouteTestOptions = Readonly<{
  * @returns The service.
  */
 function createTestAgentRuntimeService(
-  conversation: Pick<ConversationTestServices, "database" | "history">,
+  conversation: AgentConversationTestServices,
   replyContextMeter: ReplyContextMeter
 ): AgentRuntimeService {
   return new AgentRuntimeService({
@@ -239,12 +240,12 @@ function registerSerializedChatContextRoute(
  * Updates a case's registry to one MCP server and waits until its opening
  * ended.
  *
- * @param testApp - The case's application.
+ * @param testApp - The case's settings spy and registry.
  * @param settings - Settings of the only applied server.
  * @param status - State the opening is expected to end in.
  */
 async function updateMcpServer(
-  testApp: Awaited<ReturnType<typeof createChatContextRouteApp>>,
+  testApp: McpServerUpdateTestApp,
   settings: McpServerSettings,
   status: "connected" | "failed"
 ): Promise<void> {

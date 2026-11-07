@@ -36,7 +36,8 @@ import {
   createChatRouteTestApp,
   sendChatRequest,
   TEST_BUILT_IN_AGENT_PROMPTS,
-  type ChatRouteTestApp
+  type ChatRouteTestApp,
+  type McpServerUpdateTestApp
 } from "../../../support/chatRouteTestApp"
 import { parseSseEvents } from "../../../support/chatSseRoute"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
@@ -1287,12 +1288,12 @@ describe("updateFastifyWithChatRoute", () => {
      * Updates the test application's registry to one MCP server and waits
      * until its opening ended.
      *
-     * @param testApp - Test application without the chat route.
+     * @param testApp - The test application's settings spy and registry.
      * @param settings - Settings of the only applied server.
      * @param status - State the opening is expected to end in.
      */
     async function updateMcpServer(
-      testApp: ChatRouteTestApp,
+      testApp: McpServerUpdateTestApp,
       settings: McpServerSettings,
       status: "connected" | "failed"
     ): Promise<void> {

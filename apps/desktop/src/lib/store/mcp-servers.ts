@@ -1,4 +1,4 @@
-import type { McpServerList } from "@lys/protocol"
+import type { McpServerList, McpServerStatus } from "@lys/protocol"
 import type {
   BuiltInMcpServerName,
   McpServerName,
@@ -613,13 +613,32 @@ function handleBackendStatusChange(
 function buildConnectedToolsKey(
   list: Extract<McpServerListState, { readonly status: "loaded" }>
 ): string {
-  return list.servers
-    .flatMap((server) =>
-      server.state.status === "connected"
-        ? [`${server.name}:${server.state.toolCount}`]
-        : []
-    )
-    .join(" ")
+  return list.servers.flatMap(listConnectedToolsKeyParts).join(" ")
+}
+
+/**
+ * Lists what one applied server adds to the key of the connected servers'
+ * tools.
+ *
+ * @param server - Applied server and its state.
+ * @returns The server's name and tool count while it is connected; none
+ * while it connects, failed, or is off, since it adds no tools then.
+ */
+function listConnectedToolsKeyParts(
+  server: McpServerStatus
+): readonly string[] {
+  switch (server.state.status) {
+    case "connected":
+      return [`${server.name}:${server.state.toolCount}`]
+    case "connecting":
+    case "failed":
+    case "off":
+      return []
+    default: {
+      const unhandledState: never = server.state
+      return unhandledState
+    }
+  }
 }
 
 /**
@@ -629,10 +648,40 @@ function buildConnectedToolsKey(
  * @returns True when the list is loaded and a server is `connecting`.
  */
 function isAnyMcpServerConnecting(list: McpServerListState): boolean {
-  return (
-    list.status === "loaded" &&
-    list.servers.some((server) => server.state.status === "connecting")
-  )
+  switch (list.status) {
+    case "loaded":
+      return list.servers.some(isMcpServerConnecting)
+    case "idle":
+    case "loading":
+    case "failed":
+      return false
+    default: {
+      const unhandledList: never = list
+      return unhandledList
+    }
+  }
+}
+
+/**
+ * Answers whether an applied server is still connecting.
+ *
+ * @param server - Applied server and its state.
+ * @returns True while it is `connecting`; false once it is connected, has
+ * failed, or is off.
+ */
+function isMcpServerConnecting(server: McpServerStatus): boolean {
+  switch (server.state.status) {
+    case "connecting":
+      return true
+    case "connected":
+    case "failed":
+    case "off":
+      return false
+    default: {
+      const unhandledState: never = server.state
+      return unhandledState
+    }
+  }
 }
 
 /**

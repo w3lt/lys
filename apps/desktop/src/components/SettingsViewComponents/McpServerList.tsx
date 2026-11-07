@@ -152,9 +152,21 @@ function findSkippedToolsState(
   serverName: McpServerName
 ): ConnectedMcpServerState | undefined {
   const state = findMcpServerStatus(list, serverName)?.state
-  if (state?.status !== "connected") return undefined
-  const hasSkippedTools = state.skippedTools.length > 0
-  return hasSkippedTools || state.isToolListCut ? state : undefined
+  if (state === undefined) return undefined
+  switch (state.status) {
+    case "connected": {
+      const hasSkippedTools = state.skippedTools.length > 0
+      return hasSkippedTools || state.isToolListCut ? state : undefined
+    }
+    case "connecting":
+    case "failed":
+    case "off":
+      return undefined
+    default: {
+      const unhandledState: never = state
+      return unhandledState
+    }
+  }
 }
 
 /** Properties accepted by {@link McpToolOfferWarning}. */

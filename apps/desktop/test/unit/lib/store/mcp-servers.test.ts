@@ -18,7 +18,8 @@ import {
   buildMcpServerNotFoundProblem,
   buildMcpServerOffProblem,
   buildMcpServerStatus,
-  CONNECTING_MCP_STATE
+  CONNECTING_MCP_STATE,
+  OFF_MCP_STATE
 } from "../../support/mcpFixtures"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import {
@@ -860,38 +861,61 @@ describe("registerMcpServerRefresh", () => {
     expect(backend.requests).toEqual([])
   })
 
-  it("reads the list again each second while a server connects, and stops once none does", async () => {
-    useFakeTimersForCase()
-    const { backend } = startMcpBackend({
-      [LIST_ROUTE]: buildMcpServerListRoute([
-        CONNECTING_LIST,
-        CONNECTING_LIST,
-        CONNECTED_LIST
+  it.each([
+    { state: "connected", settledList: CONNECTED_LIST },
+    {
+      state: "failed",
+      settledList: buildMcpServerList([
+        CONNECTED_LIST.servers[0],
+        buildMcpServerStatus(
+          "notes",
+          "http",
+          buildFailedMcpState("unreachable")
+        )
       ])
-    })
-    const { useMcpServerStore } = await startRefresh(RUNNING_BACKEND)
-    await waitForMicrotasks()
-    const readsAtFirst = backend.requests.length
+    },
+    {
+      state: "off",
+      settledList: buildMcpServerList([
+        CONNECTED_LIST.servers[0],
+        buildMcpServerStatus("notes", "http", OFF_MCP_STATE)
+      ])
+    }
+  ] as const)(
+    "reads the list again each second while a server connects, and stops once it is $state",
+    async ({ settledList }) => {
+      useFakeTimersForCase()
+      const { backend } = startMcpBackend({
+        [LIST_ROUTE]: buildMcpServerListRoute([
+          CONNECTING_LIST,
+          CONNECTING_LIST,
+          settledList
+        ])
+      })
+      const { useMcpServerStore } = await startRefresh(RUNNING_BACKEND)
+      await waitForMicrotasks()
+      const readsAtFirst = backend.requests.length
 
-    await vi.advanceTimersByTimeAsync(999)
-    const readsBeforeASecond = backend.requests.length
-    await vi.advanceTimersByTimeAsync(1)
-    const readsAfterASecond = backend.requests.length
-    await vi.advanceTimersByTimeAsync(1000)
-    const readsAfterTwoSeconds = backend.requests.length
-    await vi.advanceTimersByTimeAsync(5000)
+      await vi.advanceTimersByTimeAsync(999)
+      const readsBeforeASecond = backend.requests.length
+      await vi.advanceTimersByTimeAsync(1)
+      const readsAfterASecond = backend.requests.length
+      await vi.advanceTimersByTimeAsync(1000)
+      const readsAfterTwoSeconds = backend.requests.length
+      await vi.advanceTimersByTimeAsync(5000)
 
-    expect([
-      readsAtFirst,
-      readsBeforeASecond,
-      readsAfterASecond,
-      readsAfterTwoSeconds
-    ]).toEqual([1, 1, 2, 3])
-    expect(backend.requests).toHaveLength(3)
-    expect(useMcpServerStore.getState().list).toEqual(
-      buildLoadedState(CONNECTED_LIST)
-    )
-  })
+      expect([
+        readsAtFirst,
+        readsBeforeASecond,
+        readsAfterASecond,
+        readsAfterTwoSeconds
+      ]).toEqual([1, 1, 2, 3])
+      expect(backend.requests).toHaveLength(3)
+      expect(useMcpServerStore.getState().list).toEqual(
+        buildLoadedState(settledList)
+      )
+    }
+  )
 
   it("lets a read due while a sync runs join it, so the sync's list is shown", async () => {
     useFakeTimersForCase()

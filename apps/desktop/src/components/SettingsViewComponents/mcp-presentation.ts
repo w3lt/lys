@@ -18,7 +18,8 @@ import {
   type McpServerName,
   type McpServerSettings,
   type McpServerTransport,
-  type McpToolDefinition
+  type McpToolDefinition,
+  type ToolDefinition
 } from "@lys/share"
 
 import { formatMcpCommandArguments } from "@/lib/models/mcp-command-arguments"
@@ -923,11 +924,68 @@ export function listMcpServerTools(
   serverName: McpServerName,
   condition: McpServerCondition
 ): readonly McpToolDefinition[] {
-  if (condition !== "connected" || toolList.status !== "loaded") return []
-  return toolList.tools.filter(
-    (tool): tool is McpToolDefinition =>
-      tool.runner === "mcp" && tool.server === serverName
-  )
+  switch (condition) {
+    case "connected":
+      return listReadMcpServerTools(toolList, serverName)
+    case "connecting":
+    case "failed":
+    case "off":
+    case "idle":
+      return []
+    default: {
+      const unhandledCondition: never = condition
+      return unhandledCondition
+    }
+  }
+}
+
+/**
+ * Lists the tools of one server that the tool list holds.
+ *
+ * @param toolList - Lifecycle of the tool list.
+ * @param serverName - Name of the server.
+ * @returns The server's tools in the backend's order once the tool list is
+ * read; none before, while it is read, or after the read failed.
+ */
+function listReadMcpServerTools(
+  toolList: ToolListState,
+  serverName: McpServerName
+): readonly McpToolDefinition[] {
+  switch (toolList.status) {
+    case "loaded":
+      return toolList.tools
+        .filter(isMcpToolDefinition)
+        .filter((tool) => tool.server === serverName)
+    case "idle":
+    case "loading":
+    case "failed":
+      return []
+    default: {
+      const unhandledToolList: never = toolList
+      return unhandledToolList
+    }
+  }
+}
+
+/**
+ * Answers whether an MCP server runs a listed tool.
+ *
+ * @param tool - Listed tool.
+ * @returns True for a tool of an MCP server; false for the desktop's and
+ * the backend's own tools.
+ */
+function isMcpToolDefinition(tool: ToolDefinition): tool is McpToolDefinition {
+  switch (tool.runner) {
+    case "mcp":
+      return true
+    case "client":
+    case "backend":
+      return false
+    default: {
+      const unhandledTool: never = tool
+      return unhandledTool
+    }
+  }
 }
 
 /**

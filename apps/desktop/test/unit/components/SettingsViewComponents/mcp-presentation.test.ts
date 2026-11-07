@@ -892,7 +892,7 @@ describe("listMcpServerTools", () => {
     ])
   })
 
-  it.each(["connecting", "failed", "idle"] as const)(
+  it.each(["connecting", "failed", "off", "idle"] as const)(
     "lists no tool of a server that is %s, even when the list still holds its tools",
     (condition) => {
       expect(listMcpServerTools(toolList, "github", condition)).toEqual([])

@@ -958,6 +958,39 @@ describe("registerMcpServerRefresh", () => {
     )
   })
 
+  it("schedules no read of the list after a read of it failed", async () => {
+    useFakeTimersForCase()
+    const { readRouteKeys } = startMcpBackend({
+      [LIST_ROUTE]: () => Promise.reject(createTransportFailure())
+    })
+    const { useMcpServerStore } = await startRefresh(RUNNING_BACKEND)
+    await waitForMicrotasks()
+    const statusAfterRead = useMcpServerStore.getState().list.status
+
+    await vi.advanceTimersByTimeAsync(5000)
+
+    expect(statusAfterRead).toBe("failed")
+    expect(readRouteKeys()).toEqual([LIST_ROUTE])
+  })
+
+  it("schedules no read of the list once the backend stopped and the list is forgotten", async () => {
+    useFakeTimersForCase()
+    const { readRouteKeys } = startMcpBackend({
+      [LIST_ROUTE]: answerList(CONNECTED_LIST)
+    })
+    const { useMcpServerStore, useLysStore } =
+      await startRefresh(RUNNING_BACKEND)
+    await waitForMicrotasks()
+    const listWhileRunning = useMcpServerStore.getState().list
+
+    useLysStore.setState({ backendServerInfo: STOPPED_BACKEND })
+    await vi.advanceTimersByTimeAsync(5000)
+
+    expect(listWhileRunning).toEqual(buildLoadedState(CONNECTED_LIST))
+    expect(readRouteKeys()).toEqual([LIST_ROUTE])
+    expect(useMcpServerStore.getState().list).toEqual({ status: "idle" })
+  })
+
   it("stops reading the list again once unsubscribed", async () => {
     useFakeTimersForCase()
     const { backend } = startMcpBackend({
@@ -1033,6 +1066,51 @@ describe("registerMcpServerRefresh", () => {
         TOOL_LIST_ROUTE
       ])
     })
+  })
+
+  it("leaves a tool list already read alone while a server moves among connecting, failed, and off", async () => {
+    startNativeHostFake({ list_tools: () => [] })
+    const { readRouteKeys } = startMcpBackend({
+      [TOOL_LIST_ROUTE]: () => buildJsonResponse(200, EMPTY_BACKEND_TOOL_LIST),
+      [LIST_ROUTE]: buildMcpServerListRoute([
+        CONNECTING_LIST,
+        buildMcpServerList([
+          CONNECTED_LIST.servers[0],
+          buildMcpServerStatus(
+            "notes",
+            "http",
+            buildFailedMcpState("unreachable")
+          )
+        ]),
+        buildMcpServerList([
+          CONNECTED_LIST.servers[0],
+          buildMcpServerStatus("notes", "http", OFF_MCP_STATE)
+        ]),
+        CONNECTING_LIST
+      ])
+    })
+    const { useMcpServerStore, useToolStore } =
+      await startRefresh(STOPPED_BACKEND)
+    await useToolStore.getState().loadTools()
+    await useMcpServerStore.getState().loadMcpServers()
+    await vi.waitFor(() => {
+      expect(readRouteKeys()).toHaveLength(3)
+    })
+
+    await useMcpServerStore.getState().loadMcpServers()
+    await useMcpServerStore.getState().loadMcpServers()
+    await useMcpServerStore.getState().loadMcpServers()
+    await waitForMicrotasks()
+
+    expect(readRouteKeys()).toEqual([
+      TOOL_LIST_ROUTE,
+      LIST_ROUTE,
+      TOOL_LIST_ROUTE,
+      LIST_ROUTE,
+      LIST_ROUTE,
+      LIST_ROUTE
+    ])
+    expect(useToolStore.getState().list.status).toBe("loaded")
   })
 
   it("reads the tool list again in a read that starts after a tool read in flight", async () => {

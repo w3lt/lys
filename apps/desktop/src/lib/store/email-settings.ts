@@ -80,7 +80,7 @@ export type EmailSettingsSlice = {
   /**
    * Switches the email server off while it is on, then removes the saved
    * account and its password together.
-   * @param switchEmailServerOff - Saves the email server's switch as off
+   * @param saveEmailServerSwitchOff - Saves the email server's switch as off
    * and has the running backend apply it; called only while the switch is
    * on, and expected never to reject.
    * @returns `saved` after the settings file holds neither and the store
@@ -95,7 +95,7 @@ export type EmailSettingsSlice = {
    * the removed account is no longer shown.
    */
   readonly deleteEmailAccount: (
-    switchEmailServerOff: () => Promise<McpSettingsSaveOutcome>
+    saveEmailServerSwitchOff: () => Promise<McpSettingsSaveOutcome>
   ) => Promise<EmailAccountRemovalOutcome>
 }
 
@@ -378,16 +378,16 @@ export function createEmailSettingsSlice(
 
   /**
    * Implements {@link EmailSettingsSlice.deleteEmailAccount}.
-   * @param switchEmailServerOff - Saves the email server's switch as off.
+   * @param saveEmailServerSwitchOff - Saves the email server's switch as off.
    * @returns The removal outcome.
    */
   async function deleteEmailAccount(
-    switchEmailServerOff: () => Promise<McpSettingsSaveOutcome>
+    saveEmailServerSwitchOff: () => Promise<McpSettingsSaveOutcome>
   ): Promise<EmailAccountRemovalOutcome> {
     if (isBusy()) return "busy"
     set({ emailAccountCheck: IDLE_CHECK, emailAccountSave: SAVING })
     if (get().settings.mcp.builtIn.email.enabled) {
-      const switchOutcome = await switchEmailServerOff()
+      const switchOutcome = await saveEmailServerSwitchOff()
       switch (switchOutcome) {
         case "saved":
           break

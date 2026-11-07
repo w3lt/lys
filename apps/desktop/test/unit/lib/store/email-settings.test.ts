@@ -76,7 +76,7 @@ const SWITCH_OFF_FAILURE =
  * @param outcome - What saving the switch answers; `saved` by default.
  * @returns The spy.
  */
-function createSwitchOffSpy(outcome: McpSettingsSaveOutcome = "saved") {
+function buildSwitchOffSpy(outcome: McpSettingsSaveOutcome = "saved") {
   return vi.fn(() => Promise.resolve(outcome))
 }
 
@@ -372,7 +372,7 @@ describe("createEmailSettingsSlice", () => {
       })
       const store = createEmailStore()
 
-      const removal = store.getState().deleteEmailAccount(createSwitchOffSpy())
+      const removal = store.getState().deleteEmailAccount(buildSwitchOffSpy())
       await waitForMicrotasks()
       const save = await store
         .getState()
@@ -394,15 +394,17 @@ describe("createEmailSettingsSlice", () => {
       })
       const store = createEmailStore()
       await store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
-      const switchEmailServerOff = createSwitchOffSpy()
+      const saveEmailServerSwitchOff = buildSwitchOffSpy()
 
-      const removal = store.getState().deleteEmailAccount(switchEmailServerOff)
+      const removal = store
+        .getState()
+        .deleteEmailAccount(saveEmailServerSwitchOff)
       await waitForMicrotasks()
       const whileWriting = store.getState().emailAccountSave
       writes[0]?.resolve(null)
 
       await expect(removal).resolves.toBe("saved")
-      expect(switchEmailServerOff).not.toHaveBeenCalled()
+      expect(saveEmailServerSwitchOff).not.toHaveBeenCalled()
       expect(whileWriting).toEqual({ status: "saving" })
       expect(store.getState().emailAccountCheck).toEqual({ status: "idle" })
       expect(store.getState().emailAccountSave).toEqual({ status: "saved" })
@@ -429,7 +431,7 @@ describe("createEmailSettingsSlice", () => {
       const { writes } = startControlledSettingsHost()
       const store = createEmailStore()
 
-      const removal = store.getState().deleteEmailAccount(createSwitchOffSpy())
+      const removal = store.getState().deleteEmailAccount(buildSwitchOffSpy())
       await waitForMicrotasks()
       writes[0]?.reject("EACCES: /Users/someone/.lys/settings.json")
 
@@ -451,16 +453,16 @@ describe("createEmailSettingsSlice", () => {
 
       const save = store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
       await waitForMicrotasks()
-      const switchEmailServerOff = createSwitchOffSpy()
+      const saveEmailServerSwitchOff = buildSwitchOffSpy()
       const removal = await store
         .getState()
-        .deleteEmailAccount(switchEmailServerOff)
+        .deleteEmailAccount(saveEmailServerSwitchOff)
       await waitForMicrotasks()
       writes[0]?.resolve(null)
       await save
 
       expect(removal).toBe("busy")
-      expect(switchEmailServerOff).not.toHaveBeenCalled()
+      expect(saveEmailServerSwitchOff).not.toHaveBeenCalled()
       expect(listSettingsWrites(host.commands)).toHaveLength(1)
       expect(store.getState().settings.email).toEqual({ account: NEW_ACCOUNT })
     })
@@ -469,15 +471,17 @@ describe("createEmailSettingsSlice", () => {
       const { host, writes } = startControlledSettingsHost()
       const store = createEmailStore(EMAIL_ON_SETTINGS)
       const switchOff = createControlledPromise<McpSettingsSaveOutcome>()
-      const switchEmailServerOff = vi.fn(() => switchOff.promise)
+      const saveEmailServerSwitchOff = vi.fn(() => switchOff.promise)
 
-      const removal = store.getState().deleteEmailAccount(switchEmailServerOff)
+      const removal = store
+        .getState()
+        .deleteEmailAccount(saveEmailServerSwitchOff)
       await waitForMicrotasks()
       const whileSwitching = store.getState().emailAccountSave
       const writesWhileSwitching = listSettingsWrites(host.commands).length
       const secondRemoval = await store
         .getState()
-        .deleteEmailAccount(createSwitchOffSpy())
+        .deleteEmailAccount(buildSwitchOffSpy())
       const save = await store
         .getState()
         .saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
@@ -487,7 +491,7 @@ describe("createEmailSettingsSlice", () => {
       writes[0]?.resolve(null)
 
       await expect(removal).resolves.toBe("saved")
-      expect(switchEmailServerOff).toHaveBeenCalledTimes(1)
+      expect(saveEmailServerSwitchOff).toHaveBeenCalledTimes(1)
       expect(whileSwitching).toEqual({ status: "saving" })
       expect(writesWhileSwitching).toBe(0)
       expect(secondRemoval).toBe("busy")
@@ -508,7 +512,7 @@ describe("createEmailSettingsSlice", () => {
         const store = createEmailStore(EMAIL_ON_SETTINGS)
 
         await expect(
-          store.getState().deleteEmailAccount(createSwitchOffSpy(outcome))
+          store.getState().deleteEmailAccount(buildSwitchOffSpy(outcome))
         ).resolves.toBe("failed")
 
         expect(store.getState().emailAccountSave).toEqual({

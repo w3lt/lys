@@ -363,15 +363,15 @@ async function openNewServerEditor(
 }
 
 /**
- * Types a local program into the editor of a new server: its name, its
- * command, and its arguments, then one environment variable, which add
- * variable adds and focuses.
+ * Updates the fields of a new server's editor to a local program, typing
+ * each: its name, its command, and its arguments, then one environment
+ * variable, which add variable adds and focuses.
  *
  * @param user - User-event session of the case.
  * @param form - The editor form.
  * @param program - What the person types.
  */
-async function typeLocalProgram(
+async function updateLocalProgramFields(
   user: ReturnType<typeof userEvent.setup>,
   form: HTMLElement,
   program: TypedLocalProgram
@@ -1371,7 +1371,7 @@ describe("McpPaneContent", () => {
     const user = userEvent.setup()
 
     const form = await openNewServerEditor(user)
-    await typeLocalProgram(user, form, {
+    await updateLocalProgramFields(user, form, {
       name: "tools",
       command: "/usr/bin/tools",
       arguments: '--stdio "two words"',

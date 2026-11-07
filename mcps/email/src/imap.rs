@@ -943,13 +943,16 @@ fn find_selection_fact(response: &Response<'_>) -> Option<SelectionFact> {
     match response {
         Response::MailboxData(MailboxDatum::Exists(count)) => Some(SelectionFact::Exists(*count)),
         Response::Data {
-            status: Status::Ok,
+            status,
             outcome:
                 Outcome {
                     code: Some(ResponseCode::UidValidity(uid_validity)),
                     ..
                 },
-        } => Some(SelectionFact::UidValidity(*uid_validity)),
+        } => match status {
+            Status::Ok => Some(SelectionFact::UidValidity(*uid_validity)),
+            Status::No | Status::Bad | Status::PreAuth | Status::Bye => None,
+        },
         _ => None,
     }
 }
@@ -1032,21 +1035,33 @@ fn find_fetched_attributes(response: &Response<'_>) -> Option<FetchedAttributes>
                 attributes.internal_date = parse_internal_date(text)
             }
             AttributeValue::BodySection {
-                section: Some(SectionPath::Full(MessageSection::Header)),
+                section,
                 data: Some(data),
                 ..
-            }
-            | AttributeValue::Rfc822Header(Some(data)) => attributes.header = Some(data.to_vec()),
-            AttributeValue::BodySection {
-                section: None,
-                data: Some(data),
-                ..
-            }
-            | AttributeValue::Rfc822(Some(data)) => attributes.body = Some(data.to_vec()),
+            } => update_section_data(&mut attributes, section.as_ref(), data),
+            AttributeValue::Rfc822Header(Some(data)) => attributes.header = Some(data.to_vec()),
+            AttributeValue::Rfc822(Some(data)) => attributes.body = Some(data.to_vec()),
             _ => {}
         }
     }
     Some(attributes)
+}
+
+/// Puts a fetched body section's data where its section says: the whole
+/// message without a section, the header fields for `HEADER`, and nowhere
+/// for a part no query asks for.
+fn update_section_data(
+    attributes: &mut FetchedAttributes,
+    section: Option<&SectionPath>,
+    data: &[u8],
+) {
+    match section {
+        None => attributes.body = Some(data.to_vec()),
+        Some(SectionPath::Full(MessageSection::Header)) => attributes.header = Some(data.to_vec()),
+        Some(
+            SectionPath::Full(MessageSection::Mime | MessageSection::Text) | SectionPath::Part(..),
+        ) => {}
+    }
 }
 
 /// Finds a summary in a `FETCH` answer of [`SUMMARY_QUERY`]; an answer

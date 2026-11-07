@@ -774,8 +774,8 @@ mod tests {
         serde_json::from_value(stored)
     }
 
-    /// Returns a valid stdio server named `name`, with every field written.
-    fn get_stdio_server(name: &str) -> Value {
+    /// Builds a valid stdio server named `name`, with every field written.
+    fn build_stdio_server(name: &str) -> Value {
         json!({
             "name": name,
             "transport": "stdio",
@@ -786,8 +786,8 @@ mod tests {
         })
     }
 
-    /// Returns a valid HTTP server named `name`, with every field written.
-    fn get_http_server(name: &str) -> Value {
+    /// Builds a valid HTTP server named `name`, with every field written.
+    fn build_http_server(name: &str) -> Value {
         json!({
             "name": name,
             "transport": "http",
@@ -823,17 +823,17 @@ mod tests {
         assert!(!failure.to_string().contains(secret), "{failure}");
     }
 
-    /// Returns a stdio server with one field replaced.
-    fn get_stdio_server_with(field: &str, value: Value) -> Value {
-        let mut server = get_stdio_server("files");
+    /// Builds a stdio server with one field replaced.
+    fn build_stdio_server_with(field: &str, value: Value) -> Value {
+        let mut server = build_stdio_server("files");
         server[field] = value;
 
         server
     }
 
-    /// Returns an HTTP server with one field replaced.
-    fn get_http_server_with(field: &str, value: Value) -> Value {
-        let mut server = get_http_server("docs");
+    /// Builds an HTTP server with one field replaced.
+    fn build_http_server_with(field: &str, value: Value) -> Value {
+        let mut server = build_http_server("docs");
         server[field] = value;
 
         server
@@ -943,7 +943,7 @@ mod tests {
     #[test]
     fn writes_both_transports_back_unchanged() {
         let stored = json!({
-            "servers": [get_stdio_server("files"), get_http_server("docs")],
+            "servers": [build_stdio_server("files"), build_http_server("docs")],
             "builtIn": get_built_in_off()
         });
 
@@ -976,8 +976,8 @@ mod tests {
     fn reads_missing_built_in_switches_as_off_and_writes_every_switch_back() {
         let stored = json!({
             "servers": [
-                get_stdio_server_with("enabled", json!(false)),
-                get_http_server("docs")
+                build_stdio_server_with("enabled", json!(false)),
+                build_http_server("docs")
             ],
             "builtIn": { "email": { "enabled": true } }
         });
@@ -1006,9 +1006,9 @@ mod tests {
             json!({ "builtIn": { "email": { "enabled": 1 } } }),
             json!({ "builtIn": { "email": { "enabled": true, "extra": 1 } } }),
             json!({ "builtIn": { "github": { "enabled": true } } }),
-            json!({ "servers": [get_stdio_server_with("enabled", Value::Null)] }),
-            json!({ "servers": [get_stdio_server_with("enabled", json!(1))] }),
-            json!({ "servers": [get_http_server_with("enabled", json!("on"))] }),
+            json!({ "servers": [build_stdio_server_with("enabled", Value::Null)] }),
+            json!({ "servers": [build_stdio_server_with("enabled", json!(1))] }),
+            json!({ "servers": [build_http_server_with("enabled", json!("on"))] }),
         ] {
             assert!(parse_mcp_settings(stored.clone()).is_err(), "{stored}");
         }
@@ -1022,8 +1022,8 @@ mod tests {
             json!({ "servers": [], "enabled": true }),
             json!({ "servers": [{ "name": "files", "transport": "sse", "url": "https://mcp.example.com" }] }),
             json!({ "servers": [{ "name": "files", "command": "npx" }] }),
-            json!({ "servers": [get_stdio_server_with("url", json!("https://mcp.example.com"))] }),
-            json!({ "servers": [get_http_server_with("command", json!("npx"))] }),
+            json!({ "servers": [build_stdio_server_with("url", json!("https://mcp.example.com"))] }),
+            json!({ "servers": [build_http_server_with("command", json!("npx"))] }),
         ] {
             assert!(parse_mcp_settings(stored.clone()).is_err(), "{stored}");
         }
@@ -1032,7 +1032,7 @@ mod tests {
     #[test]
     fn accepts_up_to_16_servers_with_distinct_names() {
         let servers: Vec<Value> = (0..16)
-            .map(|index| get_stdio_server(&format!("server-{index}")))
+            .map(|index| build_stdio_server(&format!("server-{index}")))
             .collect();
 
         assert!(parse_mcp_settings(json!({ "servers": servers })).is_ok());
@@ -1041,12 +1041,12 @@ mod tests {
     #[test]
     fn rejects_more_than_16_servers_and_repeated_names() {
         let servers: Vec<Value> = (0..17)
-            .map(|index| get_stdio_server(&format!("server-{index}")))
+            .map(|index| build_stdio_server(&format!("server-{index}")))
             .collect();
 
         for stored in [
             json!({ "servers": servers }),
-            json!({ "servers": [get_stdio_server("files"), get_http_server("files")] }),
+            json!({ "servers": [build_stdio_server("files"), build_http_server("files")] }),
         ] {
             assert!(parse_mcp_settings(stored.clone()).is_err(), "{stored}");
         }
@@ -1121,7 +1121,7 @@ mod tests {
     #[test]
     fn accepts_names_of_lowercase_letters_and_digits_in_hyphen_joined_runs() {
         for name in ["a", "files", "github-2", "a-b-c", "x".repeat(20).as_str()] {
-            assert_server_accepted(get_stdio_server(name));
+            assert_server_accepted(build_stdio_server(name));
         }
     }
 
@@ -1138,7 +1138,7 @@ mod tests {
             "fïles".to_string(),
             "my files".to_string(),
         ] {
-            assert!(parse_server(get_stdio_server(&name)).is_err(), "{name:?}");
+            assert!(parse_server(build_stdio_server(&name)).is_err(), "{name:?}");
         }
     }
 
@@ -1149,7 +1149,7 @@ mod tests {
             "/Applications/My App/bin/server".to_string(),
             "é".repeat(1024),
         ] {
-            assert_server_accepted(get_stdio_server_with("command", json!(command)));
+            assert_server_accepted(build_stdio_server_with("command", json!(command)));
         }
     }
 
@@ -1165,7 +1165,7 @@ mod tests {
             "n\npx".to_string(),
             "n\u{0000}px".to_string(),
         ] {
-            assert_server_refused(get_stdio_server_with("command", json!(command)), "npx");
+            assert_server_refused(build_stdio_server_with("command", json!(command)), "npx");
         }
     }
 
@@ -1178,7 +1178,7 @@ mod tests {
             json!(many_arguments),
             json!(["a", " padded ", "with\ttab", "é".repeat(1024)]),
         ] {
-            assert_server_accepted(get_stdio_server_with("arguments", arguments));
+            assert_server_accepted(build_stdio_server_with("arguments", arguments));
         }
     }
 
@@ -1195,7 +1195,7 @@ mod tests {
             json!(["secret\u{0085}"]),
             json!("--flag"),
         ] {
-            assert_server_refused(get_stdio_server_with("arguments", arguments), "secret");
+            assert_server_refused(build_stdio_server_with("arguments", arguments), "secret");
         }
     }
 
@@ -1214,7 +1214,7 @@ mod tests {
                 { "name": "x".repeat(128), "value": "é".repeat(4096) }
             ]),
         ] {
-            assert_server_accepted(get_stdio_server_with("environment", environment));
+            assert_server_accepted(build_stdio_server_with("environment", environment));
         }
     }
 
@@ -1237,7 +1237,10 @@ mod tests {
             json!(["secret"]),
             json!({ "TOKEN": "secret" }),
         ] {
-            assert_server_refused(get_stdio_server_with("environment", environment), "secret");
+            assert_server_refused(
+                build_stdio_server_with("environment", environment),
+                "secret",
+            );
         }
     }
 
@@ -1257,10 +1260,10 @@ mod tests {
             "https://xn--bcher-kva.example/mcp",
             "https://MCP.XN--9CA.COM/mcp",
         ] {
-            assert_server_accepted(get_http_server_with("url", json!(url)));
+            assert_server_accepted(build_http_server_with("url", json!(url)));
         }
         let long_url = format!("https://mcp.example.com/{}", "a".repeat(2048 - 24));
-        assert_server_accepted(get_http_server_with("url", json!(long_url)));
+        assert_server_accepted(build_http_server_with("url", json!(long_url)));
     }
 
     #[test]
@@ -1288,13 +1291,13 @@ mod tests {
             "https://secret.straße.example/mcp".to_string(),
             "https://secret.xn--zca.example/mcp".to_string(),
         ] {
-            assert_server_refused(get_http_server_with("url", json!(url)), "secret");
+            assert_server_refused(build_http_server_with("url", json!(url)), "secret");
         }
     }
 
     #[test]
     fn reports_a_refused_internationalized_host_with_its_rule() {
-        let failure = parse_server(get_http_server_with(
+        let failure = parse_server(build_http_server_with(
             "url",
             json!("https://bu\u{308}cher.example/mcp"),
         ))
@@ -1325,7 +1328,7 @@ mod tests {
                 { "name": "x".repeat(128), "value": "v".repeat(8192) }
             ]),
         ] {
-            assert_server_accepted(get_http_server_with("headers", headers));
+            assert_server_accepted(build_http_server_with("headers", headers));
         }
     }
 
@@ -1361,20 +1364,20 @@ mod tests {
             json!([{ "name": "X-Token", "value": "secret", "sensitive": true }]),
             json!(["secret"]),
         ] {
-            assert_server_refused(get_http_server_with("headers", headers), "secret");
+            assert_server_refused(build_http_server_with("headers", headers), "secret");
         }
     }
 
     #[test]
     fn debug_output_never_shows_arguments_url_queries_or_variable_and_header_values() {
-        let mut stdio_server = get_stdio_server_with(
+        let mut stdio_server = build_stdio_server_with(
             "environment",
             json!([{ "name": "API_TOKEN", "value": "env-secret-value" }]),
         );
         stdio_server["arguments"] = json!(["--token", "argument-secret"]);
         let settings = parse_mcp_settings(json!({ "servers": [
             stdio_server,
-            get_http_server_with("url", json!("https://mcp.example.com/mcp?key=query-secret"))
+            build_http_server_with("url", json!("https://mcp.example.com/mcp?key=query-secret"))
         ] }))
         .expect("a valid group");
 

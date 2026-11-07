@@ -591,7 +591,7 @@ fn build_backend_dev_script_command(
 /// # Errors
 ///
 /// Returns an error when the script cannot be spawned.
-fn run_backend_dev_script(
+fn start_backend_dev_script(
     backend_dir: &Path,
     lys_home: &LysHome,
     email_server_path: &Path,
@@ -617,7 +617,7 @@ fn run_backend_dev_script(
 /// MCP server process group list cannot be deleted, the script cannot be
 /// spawned, or the child cannot be inspected; nothing is started after a
 /// failed deletion.
-fn spawn_dev_backend_process(
+fn start_dev_backend_process(
     backend: &Backend,
     lys_home: &LysHome,
 ) -> Result<BackendProcessStatus, String> {
@@ -634,7 +634,7 @@ fn spawn_dev_backend_process(
     // groups that are not its servers'.
     delete_mcp_process_group_list(&backend.mcp_process_groups_path)?;
 
-    let backend_process = run_backend_dev_script(&backend_dir, lys_home, &email_server_path)?;
+    let backend_process = start_backend_dev_script(&backend_dir, lys_home, &email_server_path)?;
 
     *process = Some(backend_process);
 
@@ -662,7 +662,7 @@ fn spawn_dev_backend_process(
 /// cannot be spawned, for example because it is not installed under the Lys
 /// home, or the child cannot be inspected; nothing is started after a failed
 /// deletion.
-fn spawn_prod_backend_process(
+fn start_prod_backend_process(
     backend: &Backend,
     lys_home: &LysHome,
 ) -> Result<BackendProcessStatus, String> {
@@ -692,7 +692,7 @@ fn spawn_prod_backend_process(
     inspect_process(process.as_mut())
 }
 
-/// Spawns the backend child for the current build mode and records it under the
+/// Starts the backend child for the current build mode and records it under the
 /// backend mutex before inspecting it.
 ///
 /// Development builds run the repository's `pnpm run dev` script; release
@@ -709,14 +709,14 @@ fn spawn_prod_backend_process(
 /// development email server path cannot be resolved, process state cannot be
 /// locked, an earlier backend's MCP server process group list cannot be
 /// deleted, the child cannot be spawned, or the child cannot be inspected.
-fn spawn_backend_process(
+fn start_backend_process(
     backend: &Backend,
     lys_home: &LysHome,
 ) -> Result<BackendProcessStatus, String> {
     if tauri::is_dev() {
-        spawn_dev_backend_process(backend, lys_home)
+        start_dev_backend_process(backend, lys_home)
     } else {
-        spawn_prod_backend_process(backend, lys_home)
+        start_prod_backend_process(backend, lys_home)
     }
 }
 
@@ -749,7 +749,7 @@ pub fn start_backend(
     }
 
     // Step 3. If the backend process is not runnning, we spawn a new one
-    spawn_backend_process(&backend, &lys_home)
+    start_backend_process(&backend, &lys_home)
 }
 
 #[tauri::command]
@@ -811,7 +811,7 @@ mod tests {
 
     use super::{
         build_backend_dev_script_command, delete_mcp_process_group_list, format_list_line_problems,
-        get_dev_email_server_path, parse_mcp_server_group, spawn_prod_backend_process, Backend,
+        get_dev_email_server_path, parse_mcp_server_group, start_prod_backend_process, Backend,
         CommandExt, LIST_LINE_PROBLEM_LIMIT,
     };
     use crate::{tools::test_directory::TestDirectory, utils::lys_home::LysHome};
@@ -1346,7 +1346,7 @@ mod tests {
         let backend = Backend::new(lys_home.mcp_process_groups_path());
         let _stop = BackendStopGuard(&backend);
 
-        spawn_prod_backend_process(&backend, &lys_home).unwrap();
+        start_prod_backend_process(&backend, &lys_home).unwrap();
 
         wait_for_condition("the started backend saw no list", || {
             case.path().join("node-saw-no-list").exists()
@@ -1362,7 +1362,7 @@ mod tests {
         let backend = Backend::new(lys_home.mcp_process_groups_path());
         let _stop = BackendStopGuard(&backend);
 
-        spawn_prod_backend_process(&backend, &lys_home).unwrap();
+        start_prod_backend_process(&backend, &lys_home).unwrap();
 
         let seen_path = case.path().join("node-saw-email-server-path");
         wait_for_condition("the started backend saw the email server path", || {
@@ -1426,7 +1426,7 @@ mod tests {
         case.create_subdirectory(MCP_PROCESS_GROUPS_FILE);
         let backend = Backend::new(lys_home.mcp_process_groups_path());
 
-        let error = spawn_prod_backend_process(&backend, &lys_home).unwrap_err();
+        let error = start_prod_backend_process(&backend, &lys_home).unwrap_err();
 
         assert!(
             error.starts_with("Failed to delete the MCP server process group list"),

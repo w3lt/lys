@@ -46,12 +46,13 @@ fn build_refusal(operation: &'static str, text: &str) -> ToolFailure {
     }
 }
 
-/// Runs search_emails over INBOX against a fake that serves the mailbox.
+/// Gets the result of search_emails over INBOX from a fake that serves the
+/// mailbox.
 ///
 /// # Arguments
 ///
 /// * `mailbox` - What the fake serves, with its refusals.
-async fn run_inbox_search(mailbox: FakeMailbox) -> ToolResult {
+async fn get_inbox_result(mailbox: FakeMailbox) -> ToolResult {
     let stack = start_stack(mailbox, false).await;
     let arguments = SearchArguments {
         folder: Some("INBOX".to_owned()),
@@ -103,8 +104,8 @@ async fn a_search_whose_folder_or_summaries_are_refused_fails_instead_of_matchin
     let mut unfetchable = build_mailbox();
     unfetchable.add_refusal("FETCH", "NO [SERVERBUG] Internal error");
 
-    let opened = run_inbox_search(unopenable).await;
-    let fetched = run_inbox_search(unfetchable).await;
+    let opened = get_inbox_result(unopenable).await;
+    let fetched = get_inbox_result(unfetchable).await;
 
     assert_eq!(
         opened,

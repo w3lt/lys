@@ -176,8 +176,8 @@ async function createChatContextRouteApp() {
 
 /** What {@link registerSerializedChatContextRoute} reads. */
 type ChatContextRouteTestOptions = Readonly<{
-  /** LLM service whose downloaded models the capability lookup lists. */
-  llmService: LlmService
+  /** Lists the downloaded models the capability lookup reads. */
+  llmService: Pick<LlmService, "listDownloadedLlmModels">
 }>
 
 /**

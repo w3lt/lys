@@ -414,16 +414,17 @@ async function openTestLlmRuntimeService(): Promise<LlmRuntimeService> {
  * database and builds the built-in agents with
  * {@link TEST_BUILT_IN_AGENT_PROMPTS}, and the agent runtime service over it.
  *
- * @param conversation - The test's conversation services; the live agents
- * title their requests' conversations from its history.
- * @param chatService - Chat service every agent's model calls go through.
- * @param llmService - LLM service every agent's meter measures through.
+ * @param conversation - The test's database and the history the live
+ * agents title their requests' conversations from.
+ * @param chatService - Chat stream every agent's model calls go through.
+ * @param llmService - Context measurement every agent's meter measures
+ * through.
  * @returns The two services.
  */
 function createTestAgentServices(
-  conversation: ConversationTestServices,
-  chatService: ChatService,
-  llmService: LlmService
+  conversation: Pick<ConversationTestServices, "database" | "history">,
+  chatService: Pick<ChatService, "completeChatStream">,
+  llmService: Pick<LlmService, "findLlmContextMeasurement">
 ): Pick<ChatRouteTestServices, "agentService" | "agentRuntimeService"> {
   const agentService = new AgentService({
     recordStore: SqliteAgentRecordStore.create(conversation.database),

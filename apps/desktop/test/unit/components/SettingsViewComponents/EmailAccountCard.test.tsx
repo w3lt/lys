@@ -250,13 +250,14 @@ function getSaveButton(): HTMLElement {
 }
 
 /**
- * Formats what one server's fields show.
+ * Gets what one server's fields show.
  *
  * @param server - Legend of the server's fields.
  * @returns The host, the port, and the label of the pressed way to secure
  * the connection, separated by spaces.
+ * @throws When the server's fields have no host or port input.
  */
-function formatShownServer(server: string): string {
+function getShownServer(server: string): string {
   const group = within(screen.getByRole("group", { name: server }))
   const host = group.getByRole("textbox", { name: "Host" })
   const port = group.getByRole("textbox", { name: "Port" })
@@ -278,8 +279,8 @@ function getShownServerChoices(): ShownServerChoices {
     name: "Server keeps a copy of sent mail"
   })
   return {
-    imap: formatShownServer("IMAP server"),
-    smtp: formatShownServer("SMTP server"),
+    imap: getShownServer("IMAP server"),
+    smtp: getShownServer("SMTP server"),
     keepsSentCopy: sentCopy.getAttribute("aria-checked") === "true"
   }
 }

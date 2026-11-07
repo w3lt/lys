@@ -43,6 +43,7 @@ import {
   getMcpListedServerName,
   getMcpListedServerTransport,
   getMcpTransportPresentation,
+  hasMcpSignInTokenInput,
   isMcpListedServerOn,
   listMcpDraftProblems,
   listMcpPaneNotes,
@@ -1636,6 +1637,10 @@ describe("sign-in", () => {
     ]
   ] as const)("says what signing in with %s means", (signIn, note) => {
     expect(formatMcpSignInNote(signIn)).toBe(note)
+  })
+
+  it("shows the token input only while signing in with a token", () => {
+    expect(MCP_SIGN_INS.map(hasMcpSignInTokenInput)).toEqual([false, true])
   })
 })
 

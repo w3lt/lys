@@ -35,6 +35,7 @@ import {
   formatMcpToolNamePreview,
   getMcpEntryListPresentation,
   getMcpTransportPresentation,
+  hasMcpSignInTokenInput,
   MCP_SERVER_NAME_RULE,
   MCP_SERVER_TRANSPORTS
 } from "./mcp-presentation"
@@ -919,7 +920,7 @@ function McpSignInChoice({
       <p className="settings-view__mcp-field-note" id={noteId}>
         {formatMcpSignInNote(signIn)}
       </p>
-      {signIn === "token" ? (
+      {hasMcpSignInTokenInput(signIn) ? (
         <McpSecretInput
           descriptionIds={buildDescriptionIds([
             noteId,

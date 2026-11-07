@@ -259,6 +259,29 @@ const BUILT_IN_MCP_SERVER_PRESENTATIONS = Object.freeze({
   Record<BuiltInMcpServerName, BuiltInMcpServerPresentation>
 >)
 
+/**
+ * Tells whether the email server has what it needs before it runs.
+ *
+ * @param settings - The `email` group.
+ * @returns True once an email account is saved.
+ */
+function isEmailServerReady(settings: Pick<LysSettings, "email">): boolean {
+  return settings.email.account !== null
+}
+
+/**
+ * Tells whether each server Lys ships has what it needs before it runs; a
+ * new built-in server must add one.
+ */
+const BUILT_IN_MCP_SERVER_READINESS = Object.freeze({
+  email: isEmailServerReady
+} satisfies Readonly<
+  Record<
+    BuiltInMcpServerName,
+    (settings: Pick<LysSettings, "email">) => boolean
+  >
+>)
+
 /** State of a built-in server whose name an added server took. */
 const NAME_TAKEN_STATUS: McpServerStatusPresentation = Object.freeze({
   condition: "idle",
@@ -370,6 +393,12 @@ const MCP_SIGN_IN_NOTES = Object.freeze({
   token:
     "Sent as Authorization: Bearer … with each request, and saved in plain text."
 } satisfies Readonly<Record<McpSignIn, string>>)
+
+/** Whether each way to sign in shows the token input; a new way must add one. */
+const MCP_SIGN_IN_TOKEN_INPUTS = Object.freeze({
+  none: false,
+  token: true
+} satisfies Readonly<Record<McpSignIn, boolean>>)
 
 /** Label of each editor field; a new field must add one. */
 const MCP_DRAFT_FIELD_LABELS = Object.freeze({
@@ -545,7 +574,7 @@ export function listMcpServers(
     name,
     isOn: settings.mcp.builtIn[name].enabled,
     isNameTaken: addedNames.has(name),
-    isReady: settings.email.account !== null
+    isReady: BUILT_IN_MCP_SERVER_READINESS[name](settings)
   }))
   const added = settings.mcp.servers.map((server): McpListedServer => ({
     kind: "added",
@@ -1613,6 +1642,16 @@ export function formatMcpSignInLabel(signIn: McpSignIn): string {
  */
 export function formatMcpSignInNote(signIn: McpSignIn): string {
   return MCP_SIGN_IN_NOTES[signIn]
+}
+
+/**
+ * Tells whether a way to sign in shows the token input under its note.
+ *
+ * @param signIn - Way to sign in.
+ * @returns True for `token`, false for `none`.
+ */
+export function hasMcpSignInTokenInput(signIn: McpSignIn): boolean {
+  return MCP_SIGN_IN_TOKEN_INPUTS[signIn]
 }
 
 /**

@@ -56,6 +56,22 @@ export type SettingsDocument = Readonly<
   }
 >
 
+/** Arguments of a `save_settings` command that carry the document to write. */
+export type SettingsWriteArguments = Readonly<{
+  /** Settings document the renderer asks the host to write, unchecked. */
+  newSettings: unknown
+}>
+
+/**
+ * Answers whether a `save_settings` argument object carries a document.
+ *
+ * @param args - Arguments the renderer invoked the command with.
+ * @returns Whether `newSettings` is present.
+ */
+export function isSettingsWrite(args: unknown): args is SettingsWriteArguments {
+  return typeof args === "object" && args !== null && "newSettings" in args
+}
+
 /**
  * Load configuration a model whose maximum context is 8,192 tokens is loaded
  * with while no load setting is stored: the committed default's values,

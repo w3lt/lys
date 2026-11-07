@@ -17,6 +17,7 @@ import {
   type ControlledPromise
 } from "../../support/settlement"
 import {
+  isSettingsWrite,
   STORED_EMAIL_ACCOUNT,
   STORED_EMAIL_PASSWORD,
   STORED_MCP_SETTINGS,
@@ -32,16 +33,6 @@ const EDITED_LOAD_CONFIGURATION: LoadConfigurationSettings = Object.freeze({
   default: Object.freeze({}),
   models: new Map([["gemma-3", { evalBatchSize: 1024 }]])
 })
-
-/**
- * Answers whether a `save_settings` argument object carries a document.
- *
- * @param args - Arguments the renderer invoked the command with.
- * @returns Whether `newSettings` is present.
- */
-function isSettingsWrite(args: unknown): args is { newSettings: unknown } {
-  return typeof args === "object" && args !== null && "newSettings" in args
-}
 
 /**
  * Starts a native host that keeps one settings document as the settings file

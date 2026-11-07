@@ -304,9 +304,16 @@ export function formatEmailPresetNote(draft: EmailAccountDraft): string {
  * @returns `accepted`, or why the sign-in failed, as a clause.
  */
 function formatEmailServerCheck(check: EmailServerCheck): string {
-  return check.status === "accepted"
-    ? "accepted"
-    : EMAIL_SERVER_CHECK_FAILURE_TEXTS[check.reason]
+  switch (check.status) {
+    case "accepted":
+      return "accepted"
+    case "failed":
+      return EMAIL_SERVER_CHECK_FAILURE_TEXTS[check.reason]
+    default: {
+      const unhandledCheck: never = check
+      return unhandledCheck
+    }
+  }
 }
 
 /**
@@ -319,15 +326,21 @@ function formatEmailServerCheck(check: EmailServerCheck): string {
 function formatEmailCheckOutcome(
   outcome: CheckEmailAccountApiResponse
 ): EmailAccountMessage {
-  if (outcome.status === "unavailable") {
-    return {
-      text: EMAIL_CHECK_UNAVAILABLE_TEXTS[outcome.reason],
-      tone: "danger"
+  switch (outcome.status) {
+    case "checked":
+      return {
+        text: `IMAP: ${formatEmailServerCheck(outcome.imap)} · SMTP: ${formatEmailServerCheck(outcome.smtp)}`,
+        tone: isEmailAccountCheckAccepted(outcome) ? "success" : "danger"
+      }
+    case "unavailable":
+      return {
+        text: EMAIL_CHECK_UNAVAILABLE_TEXTS[outcome.reason],
+        tone: "danger"
+      }
+    default: {
+      const unhandledOutcome: never = outcome
+      return unhandledOutcome
     }
-  }
-  return {
-    text: `IMAP: ${formatEmailServerCheck(outcome.imap)} · SMTP: ${formatEmailServerCheck(outcome.smtp)}`,
-    tone: isEmailAccountCheckAccepted(outcome) ? "success" : "danger"
   }
 }
 

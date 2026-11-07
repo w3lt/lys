@@ -438,7 +438,16 @@ export function getMcpTransportPresentation(
  * @returns Its saved name, or the fixed name of a server Lys ships.
  */
 export function getMcpListedServerName(server: McpListedServer): McpServerName {
-  return server.kind === "added" ? server.settings.name : server.name
+  switch (server.kind) {
+    case "added":
+      return server.settings.name
+    case "built-in":
+      return server.name
+    default: {
+      const unhandledServer: never = server
+      return unhandledServer
+    }
+  }
 }
 
 /**
@@ -451,9 +460,16 @@ export function getMcpListedServerName(server: McpListedServer): McpServerName {
 export function getMcpListedServerTransport(
   server: McpListedServer
 ): McpServerTransport {
-  return server.kind === "added"
-    ? server.settings.transport
-    : BUILT_IN_MCP_SERVER_PRESENTATIONS[server.name].transport
+  switch (server.kind) {
+    case "added":
+      return server.settings.transport
+    case "built-in":
+      return BUILT_IN_MCP_SERVER_PRESENTATIONS[server.name].transport
+    default: {
+      const unhandledServer: never = server
+      return unhandledServer
+    }
+  }
 }
 
 /**
@@ -463,7 +479,16 @@ export function getMcpListedServerTransport(
  * @returns True when its switch is on.
  */
 export function isMcpListedServerOn(server: McpListedServer): boolean {
-  return server.kind === "added" ? server.settings.enabled : server.isOn
+  switch (server.kind) {
+    case "added":
+      return server.settings.enabled
+    case "built-in":
+      return server.isOn
+    default: {
+      const unhandledServer: never = server
+      return unhandledServer
+    }
+  }
 }
 
 /**
@@ -490,8 +515,16 @@ export function buildMcpListedServerKey(
  * what it needs.
  */
 export function canSwitchMcpServer(server: McpListedServer): boolean {
-  if (server.kind === "added") return true
-  return server.isOn || (!server.isNameTaken && server.isReady)
+  switch (server.kind) {
+    case "added":
+      return true
+    case "built-in":
+      return server.isOn || (!server.isNameTaken && server.isReady)
+    default: {
+      const unhandledServer: never = server
+      return unhandledServer
+    }
+  }
 }
 
 /**
@@ -562,14 +595,39 @@ function formatMcpServerHost(url: string): string {
  * which can be secrets, are never shown.
  */
 export function formatMcpServerTarget(server: McpListedServer): string {
-  if (server.kind === "built-in") {
-    return BUILT_IN_MCP_SERVER_PRESENTATIONS[server.name].blurb
+  switch (server.kind) {
+    case "added":
+      return formatMcpAddedServerTarget(server.settings)
+    case "built-in":
+      return BUILT_IN_MCP_SERVER_PRESENTATIONS[server.name].blurb
+    default: {
+      const unhandledServer: never = server
+      return unhandledServer
+    }
   }
-  const { settings } = server
-  if (settings.transport === "http") return formatMcpServerUrl(settings.url)
-  return [settings.command, formatMcpCommandArguments(settings.arguments)]
-    .filter((part) => part !== "")
-    .join(" ")
+}
+
+/**
+ * Formats what an added server's row says it runs or reaches.
+ *
+ * @param settings - Saved settings of the server.
+ * @returns The command followed by its arguments, quoted where needed, or
+ * the URL with its query hidden. Environment values, headers, and a URL's
+ * query, which can be secrets, are never shown.
+ */
+function formatMcpAddedServerTarget(settings: McpServerSettings): string {
+  switch (settings.transport) {
+    case "stdio":
+      return [settings.command, formatMcpCommandArguments(settings.arguments)]
+        .filter((part) => part !== "")
+        .join(" ")
+    case "http":
+      return formatMcpServerUrl(settings.url)
+    default: {
+      const unhandledSettings: never = settings
+      return unhandledSettings
+    }
+  }
 }
 
 /**

@@ -557,19 +557,26 @@ export function parseEmailAccountDraft(
       : account.error.issues.map(findPlacedAccountProblem)),
     findPlacedPasswordProblem(password)
   ])
-  if (!account.success || password.status === "invalid") {
-    return { status: "invalid", problems }
-  }
-  if (
-    draft.password === "" &&
-    isEmailAccountEqual(account.data, savedAccount)
-  ) {
-    return { status: "unchanged" }
-  }
-  return {
-    status: "changed",
-    account: account.data,
-    password: password.password
+  if (!account.success) return { status: "invalid", problems }
+  switch (password.status) {
+    case "valid":
+      if (
+        draft.password === "" &&
+        isEmailAccountEqual(account.data, savedAccount)
+      ) {
+        return { status: "unchanged" }
+      }
+      return {
+        status: "changed",
+        account: account.data,
+        password: password.password
+      }
+    case "invalid":
+      return { status: "invalid", problems }
+    default: {
+      const unhandledPassword: never = password
+      return unhandledPassword
+    }
   }
 }
 

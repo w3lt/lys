@@ -593,11 +593,7 @@ function EmailFieldTop({
   return (
     <div className="settings-view__email-field-top">
       <span className="settings-view__email-field-label">
-        {target.kind === "control" ? (
-          <label htmlFor={target.controlId}>{label}</label>
-        ) : (
-          <span id={target.labelId}>{label}</span>
-        )}
+        {buildEmailFieldLabel(target, label)}
         {isRequired ? (
           <span className="settings-view__email-field-rule">required</span>
         ) : null}
@@ -607,6 +603,30 @@ function EmailFieldTop({
       </span>
     </div>
   )
+}
+
+/**
+ * Builds the label of one field.
+ *
+ * @param target - Input or group the label names.
+ * @param label - Visible label of the field.
+ * @returns A `label` element for an input, or a span with the identifier
+ * that a group refers to.
+ */
+function buildEmailFieldLabel(
+  target: EmailFieldLabelTarget,
+  label: string
+): ReactElement {
+  switch (target.kind) {
+    case "control":
+      return <label htmlFor={target.controlId}>{label}</label>
+    case "group":
+      return <span id={target.labelId}>{label}</span>
+    default: {
+      const unhandledTarget: never = target
+      return unhandledTarget
+    }
+  }
 }
 
 /**

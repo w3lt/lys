@@ -844,16 +844,24 @@ function McpServerRows({
    * a server Lys ships.
    */
   function buildServerPanel(server: McpListedServer): ReactNode {
-    if (server.kind === "built-in") return builtInPanels[server.name]
-    return (
-      <McpAddedServerDetails
-        isEditFocusedOnAttach={server.settings.name === focusedServerName}
-        isSaving={isSaving}
-        onEdit={() => onEditServer(server.settings)}
-        onRemove={() => onRemoveServer(server.settings.name)}
-        server={server.settings}
-      />
-    )
+    switch (server.kind) {
+      case "added":
+        return (
+          <McpAddedServerDetails
+            isEditFocusedOnAttach={server.settings.name === focusedServerName}
+            isSaving={isSaving}
+            onEdit={() => onEditServer(server.settings)}
+            onRemove={() => onRemoveServer(server.settings.name)}
+            server={server.settings}
+          />
+        )
+      case "built-in":
+        return builtInPanels[server.name]
+      default: {
+        const unhandledServer: never = server
+        return unhandledServer
+      }
+    }
   }
 
   /**

@@ -242,11 +242,19 @@ function listOtherServerNames(
   editor: McpEditorTarget
 ): ReadonlySet<string> {
   const names = servers.map((server) => server.name)
-  const otherNames =
-    editor.kind === "new"
-      ? names
-      : names.filter((name) => name !== editor.server.name)
-  return new Set([...BUILT_IN_MCP_SERVER_NAMES, ...otherNames])
+  switch (editor.kind) {
+    case "new":
+      return new Set([...BUILT_IN_MCP_SERVER_NAMES, ...names])
+    case "server":
+      return new Set([
+        ...BUILT_IN_MCP_SERVER_NAMES,
+        ...names.filter((name) => name !== editor.server.name)
+      ])
+    default: {
+      const unhandledEditor: never = editor
+      return unhandledEditor
+    }
+  }
 }
 
 /** Properties accepted by {@link McpPaneStatus}. */
@@ -412,12 +420,19 @@ function useMcpServerListSaves(
    * @param isOn - Whether the backend connects it.
    */
   function handleServerOnChange(server: McpListedServer, isOn: boolean): void {
-    if (server.kind === "added") {
-      void saveMcpServers(
-        buildServersWithSwitch(mcp.servers, server.settings.name, isOn)
-      )
-    } else {
-      void saveBuiltInMcpServerSwitch(server.name, isOn)
+    switch (server.kind) {
+      case "added":
+        void saveMcpServers(
+          buildServersWithSwitch(mcp.servers, server.settings.name, isOn)
+        )
+        return
+      case "built-in":
+        void saveBuiltInMcpServerSwitch(server.name, isOn)
+        return
+      default: {
+        const unhandledServer: never = server
+        return unhandledServer
+      }
     }
   }
 

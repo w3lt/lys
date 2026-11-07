@@ -133,7 +133,7 @@ function registerSingletonServices(
   app.decorate("attachmentFileStore", singletonServices.attachmentFileStore)
 }
 
-/** Fastify plugin that installs application-scoped singleton services. */
+/** Fastify plugin that opens the application-scoped singleton services. */
 export default fastifyPlugin(openSingletonServices, {
   name: "singleton-services"
 })

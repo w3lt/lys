@@ -98,6 +98,16 @@ async fn lists_folders_with_roles_and_counts() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn answers_that_an_account_whose_server_lists_no_folder_has_none() {
+    let stack = start_stack(FakeMailbox::create_empty(), false).await;
+
+    let report = run_list_folders(&stack.context).await.expect("the answer");
+
+    assert_eq!(report.text, "The account has no folder.");
+    assert_eq!(report.log, "folders: 0 listed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
     let create = build_folder_arguments(FolderAction::Create, "Grüße", None);
@@ -109,8 +119,11 @@ async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
     let deleted = delete_folder(&stack, "Archive 2026").await;
 
     assert_eq!(
-        created.map(|report| report.text),
-        Ok("Folder Grüße created.".to_owned())
+        created.map(|report| (report.text, report.log)),
+        Ok((
+            "Folder Grüße created.".to_owned(),
+            "folder: created".to_owned()
+        ))
     );
     assert!(
         listed.text.contains("\n- Grüße: 0 messages"),
@@ -118,12 +131,18 @@ async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
         listed.text
     );
     assert_eq!(
-        renamed.map(|report| report.text),
-        Ok("Folder Grüße renamed to Archive 2026.".to_owned())
+        renamed.map(|report| (report.text, report.log)),
+        Ok((
+            "Folder Grüße renamed to Archive 2026.".to_owned(),
+            "folder: renamed".to_owned()
+        ))
     );
     assert_eq!(
-        deleted.map(|report| report.text),
-        Ok("Folder Archive 2026 deleted.".to_owned())
+        deleted.map(|report| (report.text, report.log)),
+        Ok((
+            "Folder Archive 2026 deleted.".to_owned(),
+            "folder: deleted".to_owned()
+        ))
     );
     let changes = list_folder_changes(&stack);
     assert_eq!(changes.len(), 3, "{changes:?}");

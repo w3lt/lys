@@ -24,6 +24,10 @@ const REPORT: &str = "From: Jane Doe <jane@example.com>\r\nTo: person@example.co
 /// replies to go to two other mailboxes.
 const REDIRECTED: &str = "From: \"Doe, Jane\" <jane@example.com>\r\nReply-To: a@example.com, Team <b@example.com>\r\nTo: person@example.com\r\nDate: Mon, 2 Nov 2026 12:05:00 +0000\r\nSubject: Plans\r\nMessage-ID: <plans@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nWhat do you think?\r\n";
 
+/// A message without a From field whose Reply-To asks for replies to go
+/// to one mailbox.
+const NO_SENDER: &str = "Reply-To: a@example.com\r\nTo: person@example.com\r\nDate: Mon, 2 Nov 2026 12:10:00 +0000\r\nSubject: Notice\r\nMessage-ID: <notice@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nPlease answer.\r\n";
+
 /// Starts the stack with one message from Jane in INBOX, `1.1001.INBOX`,
 /// the report, `2.1001.INBOX`, and the redirected message,
 /// `3.1001.INBOX`.
@@ -176,6 +180,10 @@ async fn keeps_no_copy_when_the_server_keeps_one() {
         "{}",
         report.text
     );
+    assert_eq!(
+        report.log,
+        "send: 1 recipient(s), 0 attachment(s), copy kept by the server"
+    );
     assert_eq!(stack.smtp.list_mails().len(), 1);
     assert!(stack.imap.list_messages("Sent").is_empty());
     assert!(
@@ -237,6 +245,39 @@ async fn refuses_a_reply_that_leaves_out_its_recipients_or_subject() {
         untitled,
         Err(ToolFailure::Argument(
             "A reply needs a subject, such as \"Re: Plans\".".to_owned()
+        ))
+    );
+    assert_nothing_sent(&stack);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tells_a_reply_without_recipients_only_where_replies_go_when_no_sender_is_named() {
+    let mut mailbox = FakeMailbox::create_standard();
+    mailbox.add_message(
+        "INBOX",
+        NewMessage {
+            bytes: NO_SENDER.as_bytes().to_vec(),
+            flags: &[],
+            timestamp: BASE,
+        },
+    );
+    let stack = start_stack(mailbox, false).await;
+
+    let refused = send_message(
+        &stack,
+        MessageArguments {
+            subject: "Re: Notice".to_owned(),
+            body: "Done.".to_owned(),
+            reply_to_id: Some("1.1001.INBOX".to_owned()),
+            ..MessageArguments::default()
+        },
+    )
+    .await;
+
+    assert_eq!(
+        refused,
+        Err(ToolFailure::Argument(
+            "A reply needs its recipients in to, cc, or bcc. The message replied to asks for replies to go to [\"a@example.com\"].".to_owned()
         ))
     );
     assert_nothing_sent(&stack);

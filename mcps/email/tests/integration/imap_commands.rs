@@ -3,6 +3,7 @@
 //! text instead of reading a refusal as an empty answer.
 
 use email::failure::ToolFailure;
+use email::tools::ToolResult;
 use email::tools::drafts::{
     DraftIdArguments, DraftProgress, SaveDraftArguments, run_delete_draft, run_save_draft,
 };
@@ -43,6 +44,20 @@ fn build_refusal(operation: &'static str, text: &str) -> ToolFailure {
     }
 }
 
+/// Runs search_emails over INBOX against a fake that serves the mailbox.
+///
+/// # Arguments
+///
+/// * `mailbox` - What the fake serves, with its refusals.
+async fn run_inbox_search(mailbox: FakeMailbox) -> ToolResult {
+    let stack = start_stack(mailbox, false).await;
+    let arguments = SearchArguments {
+        folder: Some("INBOX".to_owned()),
+        ..SearchArguments::default()
+    };
+    run_search_emails(&stack.context, arguments).await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_search_fails_instead_of_matching_nothing() {
     let mut mailbox = build_mailbox();
@@ -76,6 +91,32 @@ async fn a_refused_search_fails_instead_of_matching_nothing() {
     assert!(
         !commands.iter().any(|command| command.contains("Grüße")),
         "{commands:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_search_whose_folder_or_summaries_are_refused_fails_instead_of_matching_nothing() {
+    let mut unopenable = build_mailbox();
+    unopenable.add_refusal("EXAMINE", "NO [NONEXISTENT] Unknown mailbox");
+    let mut unfetchable = build_mailbox();
+    unfetchable.add_refusal("FETCH", "NO [SERVERBUG] Internal error");
+
+    let opened = run_inbox_search(unopenable).await;
+    let fetched = run_inbox_search(unfetchable).await;
+
+    assert_eq!(
+        opened,
+        Err(build_refusal(
+            "select the folder",
+            "[NONEXISTENT] Unknown mailbox"
+        ))
+    );
+    assert_eq!(
+        fetched,
+        Err(build_refusal(
+            "fetch the message summaries",
+            "[SERVERBUG] Internal error"
+        ))
     );
 }
 
@@ -223,6 +264,69 @@ async fn refusals_pass_on_the_server_code_and_text() {
             "create the folder",
             "[ALREADYEXISTS] Mailbox exists"
         ))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_rename_or_delete_fails_and_keeps_the_folder() {
+    let mut mailbox = build_mailbox();
+    mailbox.add_refusal("RENAME", "NO [CANNOT] Rename not allowed");
+    mailbox.add_refusal("DELETE", "NO [INUSE] Mailbox in use");
+    let stack = start_stack(mailbox, false).await;
+    let rename = FolderArguments {
+        action: FolderAction::Rename,
+        name: "Projects".to_owned(),
+        new_name: Some("Archive 2026".to_owned()),
+    };
+    let delete = FolderArguments {
+        action: FolderAction::Delete,
+        new_name: None,
+        ..rename.clone()
+    };
+
+    let renamed = run_manage_folder(&stack.context, rename).await;
+    let deleted = run_manage_folder(&stack.context, delete).await;
+
+    assert_eq!(
+        renamed,
+        Err(build_refusal(
+            "rename the folder",
+            "[CANNOT] Rename not allowed"
+        ))
+    );
+    assert_eq!(
+        deleted,
+        Err(build_refusal("delete the folder", "[INUSE] Mailbox in use"))
+    );
+    assert!(stack.imap.find_folder("Projects").is_some());
+    assert!(stack.imap.find_folder("Archive 2026").is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_count_fails_a_delete_before_the_folder_is_deleted() {
+    let mut mailbox = build_mailbox();
+    mailbox.add_refusal("STATUS", "NO [NOPERM] Permission denied");
+    let stack = start_stack(mailbox, false).await;
+    let delete = FolderArguments {
+        action: FolderAction::Delete,
+        name: "Projects".to_owned(),
+        new_name: None,
+    };
+
+    let deleted = run_manage_folder(&stack.context, delete).await;
+
+    assert_eq!(
+        deleted,
+        Err(build_refusal(
+            "count the messages",
+            "[NOPERM] Permission denied"
+        ))
+    );
+    assert!(stack.imap.find_folder("Projects").is_some());
+    let commands = stack.imap.list_commands();
+    assert!(
+        !commands.iter().any(|command| command.contains(" DELETE ")),
+        "{commands:?}"
     );
 }
 

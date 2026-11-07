@@ -2,11 +2,11 @@
 //! `read_attachment` against the fake IMAP server.
 
 use email::failure::ToolFailure;
-use email::tools::ToolResult;
 use email::tools::read::{
     AttachmentArguments, IdArguments, run_read_attachment, run_read_conversation, run_read_email,
 };
 use email::tools::search::{SearchArguments, run_search_emails};
+use email::tools::{ToolReport, ToolResult};
 
 use crate::support::imap::{FakeMailbox, NewMessage};
 use crate::support::{Stack, TestMessage, start_stack};
@@ -129,15 +129,33 @@ async fn get_inbox_page(stack: &Stack, page: Option<u32>) -> String {
 ///
 /// * `stack` - The running fakes and the tools' context.
 /// * `arguments` - The search's other arguments.
+///
+/// # Panics
+///
+/// When the search fails.
 async fn get_inbox_hits(stack: &Stack, arguments: SearchArguments) -> String {
+    get_inbox_report(stack, arguments).await.text
+}
+
+/// Gets the report of a search of INBOX with the arguments, whatever
+/// folder they name: the hits and the log line.
+///
+/// # Arguments
+///
+/// * `stack` - The running fakes and the tools' context.
+/// * `arguments` - The search's other arguments.
+///
+/// # Panics
+///
+/// When the search fails.
+async fn get_inbox_report(stack: &Stack, arguments: SearchArguments) -> ToolReport {
     let arguments = SearchArguments {
         folder: Some("INBOX".to_owned()),
         ..arguments
     };
     run_search_emails(&stack.context, arguments)
         .await
-        .expect("the hits")
-        .text
+        .expect("the report")
 }
 
 /// Gets one attachment of a message.
@@ -480,14 +498,15 @@ async fn narrows_a_search_by_a_subject_that_is_not_ascii_or_finds_nothing() {
     };
 
     let non_ascii = get_inbox_hits(&stack, subject).await;
-    let none = get_inbox_hits(&stack, unmatched_text).await;
+    let none = get_inbox_report(&stack, unmatched_text).await;
 
     assert_eq!(calculate_hit_count(&non_ascii), 1);
     assert!(
         non_ascii.contains("subject Grüße aus Wien\n"),
         "{non_ascii}"
     );
-    assert_eq!(none, "No message matches.");
+    assert_eq!(none.text, "No message matches.");
+    assert_eq!(none.log, "search: 1 folder(s), 0 hits");
     let commands = stack.imap.list_commands();
     assert!(
         commands
@@ -638,6 +657,7 @@ async fn converts_html_lists_attachments_and_reads_text_ones() {
         csv.text,
         "Attachment #1 data.csv (text/csv, 8 B)\n\na,b\r\n1,2"
     );
+    assert_eq!(csv.log, "attachment: #1 of 2, 8 byte(s)");
     assert_eq!(
         pdf,
         Err(ToolFailure::AttachmentNotText {
@@ -926,5 +946,28 @@ async fn refuses_ids_that_are_not_ids_or_no_longer_valid() {
     assert_eq!(
         unknown_folder,
         Err(ToolFailure::FolderMissing("Nowhere".to_owned()))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_to_search_a_folder_that_cannot_hold_messages_without_opening_it() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    let arguments = SearchArguments {
+        folder: Some("[Gmail]".to_owned()),
+        ..SearchArguments::default()
+    };
+
+    let searched = run_search_emails(&stack.context, arguments).await;
+
+    assert_eq!(
+        searched,
+        Err(ToolFailure::Argument(
+            "[Gmail] cannot hold messages. Use list_folders to see the folders.".to_owned()
+        ))
+    );
+    let commands = stack.imap.list_commands();
+    assert!(
+        !commands.iter().any(|command| command.contains("EXAMINE")),
+        "{commands:?}"
     );
 }

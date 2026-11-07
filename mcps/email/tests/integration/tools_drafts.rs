@@ -261,6 +261,7 @@ async fn deletes_a_draft_and_refuses_ids_outside_drafts() {
     .await;
 
     assert_eq!(deleted.text, "Draft 1.1003.Drafts was deleted from Drafts.");
+    assert_eq!(deleted.log, "draft: deleted");
     assert!(stack.imap.list_messages("Drafts").is_empty());
     assert_eq!(again, Err(ToolFailure::StaleId));
     assert_eq!(in_inbox, Err(ToolFailure::NotInDrafts));
@@ -583,6 +584,50 @@ async fn sends_nothing_more_over_an_imap_session_whose_sent_copy_timed_out() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn reports_a_sent_draft_the_server_refuses_to_delete_as_sent_and_kept() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    let id = save_draft(&stack, build_draft("Ready")).await;
+    stack
+        .imap
+        .update_state(|mailbox| mailbox.add_refusal("STORE", "NO [CANNOT] Not allowed"));
+
+    let report = send_draft(&stack, build_send(&id, &build_draft("Ready")))
+        .await
+        .expect("sent");
+
+    assert_eq!(
+        report.text,
+        "Sent draft 1.1003.Drafts.\nTo: Jane Doe <jane@example.com>\nBcc: hidden@example.com\nSubject: Ready\nA copy was saved in Sent.\nThe draft could not be deleted and may still be in Drafts: The IMAP server refused to delete the sent draft: [CANNOT] Not allowed. Delete it with delete_draft; do not send it again."
+    );
+    assert_eq!(
+        report.log,
+        "draft: sent to 2 recipient(s), copy saved, deleted false (imap-refused-to-delete-the-sent-draft)"
+    );
+    assert_eq!(stack.smtp.list_mails().len(), 1);
+    assert_eq!(stack.imap.list_messages("Sent").len(), 1);
+    let drafts = stack.imap.list_messages("Drafts");
+    assert_eq!(drafts.len(), 1);
+    assert!(!drafts[0].has_flag("\\Deleted"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sends_nothing_when_the_server_refuses_to_fetch_the_draft() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    let id = save_draft(&stack, build_draft("Ready")).await;
+    stack
+        .imap
+        .update_state(|mailbox| mailbox.add_refusal("FETCH", "NO [SERVERBUG] Not now"));
+
+    let sent = send_draft(&stack, build_send(&id, &build_draft("Ready"))).await;
+
+    assert_eq!(
+        sent.map_err(|failure| failure.to_string()),
+        Err("The IMAP server refused to fetch the draft: [SERVERBUG] Not now.".to_owned())
+    );
+    assert_draft_kept_unsent(&stack);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn answers_a_stored_draft_as_saved_when_its_id_cannot_be_found() {
     for (refused, operation) in [
         ("SELECT", "select the Drafts folder"),
@@ -645,6 +690,41 @@ async fn answers_a_replacing_draft_with_its_id_when_the_old_one_cannot_be_delete
         "draft: saved, replaced one not deleted (imap-refused-to-delete-the-replaced-draft), id found"
     );
     assert_eq!(stack.imap.list_messages("Drafts").len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn neither_replaces_nor_deletes_a_draft_whose_summary_the_server_refuses_to_fetch() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    let id = save_draft(&stack, build_draft("First")).await;
+    stack
+        .imap
+        .update_state(|mailbox| mailbox.add_refusal("FETCH", "NO [SERVERBUG] Not now"));
+    let progress = DraftProgress::default();
+
+    let replaced = run_save_draft(
+        &stack.context,
+        SaveDraftArguments {
+            draft_id: Some(id.clone()),
+            ..build_draft("Second")
+        },
+        &progress,
+    )
+    .await;
+    let deleted = run_delete_draft(&stack.context, DraftIdArguments { draft_id: id }).await;
+
+    let refusal = "The IMAP server refused to fetch the message summary: [SERVERBUG] Not now.";
+    assert_eq!(
+        replaced.map_err(|failure| failure.to_string()),
+        Err(refusal.to_owned())
+    );
+    assert_eq!(progress.stage(), DraftStage::BeforeStoring);
+    assert_eq!(
+        deleted.map_err(|failure| failure.to_string()),
+        Err(refusal.to_owned())
+    );
+    let drafts = stack.imap.list_messages("Drafts");
+    assert_eq!(drafts.len(), 1);
+    assert!(!drafts[0].has_flag("\\Deleted"));
 }
 
 #[tokio::test]

@@ -60,6 +60,7 @@ import {
   listEmailDraftProblems,
   type EmailAccountMessage
 } from "./email-presentation"
+import type { McpDraftProblemListing } from "./mcp-presentation"
 import { McpDraftProblemSummary } from "./McpDraftProblemSummary"
 
 /** Properties accepted by {@link EmailAccountCard}. */
@@ -1452,6 +1453,31 @@ function EmailAccountFooter({
 }
 
 /**
+ * Finds the control focus moves to after the saves the fields' problems
+ * rejected.
+ *
+ * @param rejectedSaveCount - Count of the saves the fields' problems
+ * rejected; 0 before the first one.
+ * @param problemListings - Problems the fields show, in the card's order.
+ * @param fieldRefs - Hosts of the card's inputs.
+ * @param summaryRef - Host of the problem summary.
+ * @returns Null before the first rejected save; after one, the summary
+ * while two or more inputs have a problem, and otherwise the input of the
+ * one problem; null without a problem or while that host is not attached.
+ */
+function findRejectedSaveFocusTarget(
+  rejectedSaveCount: number,
+  problemListings: readonly McpDraftProblemListing<EmailAccountDraftField>[],
+  fieldRefs: EmailFieldRefs,
+  summaryRef: RefObject<HTMLFieldSetElement | null>
+): HTMLElement | null {
+  if (rejectedSaveCount === 0) return null
+  if (problemListings.length > 1) return summaryRef.current
+  if (problemListings.length === 0) return null
+  return fieldRefs[problemListings[0].field].current
+}
+
+/**
  * Keeps the host of each field's input and of the problem summary, so a
  * rejected save can move focus to the only input with a problem or to the
  * summary, a summary button to its input, and a removal to the address.
@@ -1491,11 +1517,23 @@ function useEmailFieldHosts(
     smtpHost: smtpHostRef,
     smtpPort: smtpPortRef
   }
-  const handleRejectedSave = useEffectEvent((): void => {
-    if (problemListings.length > 1) summaryRef.current?.focus()
-    else if (problemListings.length === 1)
-      fieldRefs[problemListings[0].field].current?.focus()
-  })
+
+  /**
+   * Handles the count of rejected saves the layout effect sees, by moving
+   * focus to the summary or to the input with the problem once a save was
+   * rejected.
+   *
+   * @param count - Count of the saves the fields' problems rejected.
+   */
+  function handleRejectedSaveCount(count: number): void {
+    findRejectedSaveFocusTarget(
+      count,
+      problemListings,
+      fieldRefs,
+      summaryRef
+    )?.focus()
+  }
+  const handleRejectedSave = useEffectEvent(handleRejectedSaveCount)
 
   /**
    * Handles a summary button's choice of a field, by moving focus to its
@@ -1516,7 +1554,7 @@ function useEmailFieldHosts(
   }
 
   useLayoutEffect(() => {
-    if (rejectedSaveCount > 0) handleRejectedSave()
+    handleRejectedSave(rejectedSaveCount)
   }, [rejectedSaveCount])
 
   return { fieldRefs, summaryRef, handleFieldSelect, handleRemovedAccount }

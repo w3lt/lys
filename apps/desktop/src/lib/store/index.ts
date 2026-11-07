@@ -47,7 +47,7 @@ import {
   type LmStudioStatus,
   type LmStudioStatusSlice
 } from "./lm-studio-status"
-import { create } from "zustand"
+import { create, type StoreApi } from "zustand"
 import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
 import { getBackendStatus, startBackend, stopBackend } from "../apis"
 import { getVmoStatus } from "@/lib/apis/tauri/vmo"
@@ -175,6 +175,17 @@ type LysStore = LysState &
   VmoRuntimeSlice &
   LmStudioStatusSlice
 
+/** Settings slices of {@link LysStore}, each saving its own group. */
+type LysSettingsSlices = GenerationSettingsSlice &
+  LoadConfigurationSettingsSlice &
+  ToolSettingsSlice &
+  RuntimeAutoStartSettingsSlice &
+  SecretsSettingsSlice &
+  ProviderSettingsSlice &
+  LocationSettingsSlice &
+  McpSettingsSlice &
+  EmailSettingsSlice
+
 /** Initial renderer-side store state before Tauri initialization. */
 const initialState: LysState = {
   activeView: "chat",
@@ -211,9 +222,63 @@ const initialState: LysState = {
  * re-reads the provider status. Every load sends the stored load
  * configuration of the model being loaded.
  */
-export const useLysStore = create<LysStore>()((set, get) => {
-  const settingsGroupSaves = createSettingsGroupSaves()
+export const useLysStore = create<LysStore>()(createLysStoreState)
 
+/**
+ * Creates the settings slices of {@link useLysStore} over one queue of group
+ * writes, so one group's save never writes back another group's older
+ * value.
+ *
+ * @param set - Sets the store's state.
+ * @param get - Reads the store's state.
+ * @returns The generation, load configuration, tool, runtime autostart,
+ * secrets, provider, location, MCP server, and email account slices.
+ */
+function createLysSettingsSlices(
+  set: StoreApi<LysStore>["setState"],
+  get: StoreApi<LysStore>["getState"]
+): LysSettingsSlices {
+  const settingsGroupSaves = createSettingsGroupSaves()
+  return {
+    ...createGenerationSettingsSlice(set, get, settingsGroupSaves),
+    ...createLoadConfigurationSettingsSlice(set, get, settingsGroupSaves),
+    ...createToolSettingsSlice(set, get, settingsGroupSaves),
+    ...createRuntimeAutoStartSettingsSlice(set, get, settingsGroupSaves),
+    ...createSecretsSettingsSlice(set, get, {
+      saveSecretsSettings: settingsGroupSaves.saveSecretsSettings,
+      sendWebSearchKeyCheck: () =>
+        sendWebSearchKeyCheck({ backendUrl: get().backendUrl })
+    }),
+    ...createProviderSettingsSlice(set, get, {
+      saveProviderSettings: settingsGroupSaves.saveProviderSettings,
+      saveSecretsSettings: settingsGroupSaves.saveSecretsSettings,
+      connectLlmProvider: () => get().connectLmStudio()
+    }),
+    ...createLocationSettingsSlice(set, get, {
+      saveLocationSettings: settingsGroupSaves.saveLocationSettings
+    }),
+    ...createMcpSettingsSlice(set, get, {
+      saveMcpSettings: settingsGroupSaves.saveMcpSettings
+    }),
+    ...createEmailSettingsSlice(set, get, {
+      saveEmailAccountSettings: settingsGroupSaves.saveEmailAccountSettings,
+      sendEmailAccountCheck: (body) =>
+        sendEmailAccountCheck({ backendUrl: get().backendUrl }, body)
+    })
+  }
+}
+
+/**
+ * Creates the state and actions of {@link useLysStore}.
+ *
+ * @param set - Sets the store's state.
+ * @param get - Reads the store's state.
+ * @returns The initial state with every slice and the store's own actions.
+ */
+function createLysStoreState(
+  set: StoreApi<LysStore>["setState"],
+  get: StoreApi<LysStore>["getState"]
+): LysStore {
   /**
    * Publishes one readiness outcome unless the start transition was superseded.
    *
@@ -325,32 +390,8 @@ export const useLysStore = create<LysStore>()((set, get) => {
 
   return {
     ...initialState,
-    ...createGenerationSettingsSlice(set, get, settingsGroupSaves),
-    ...createLoadConfigurationSettingsSlice(set, get, settingsGroupSaves),
-    ...createToolSettingsSlice(set, get, settingsGroupSaves),
-    ...createRuntimeAutoStartSettingsSlice(set, get, settingsGroupSaves),
+    ...createLysSettingsSlices(set, get),
     ...createVmoRuntimeSlice(set, get),
-    ...createSecretsSettingsSlice(set, get, {
-      saveSecretsSettings: settingsGroupSaves.saveSecretsSettings,
-      sendWebSearchKeyCheck: () =>
-        sendWebSearchKeyCheck({ backendUrl: get().backendUrl })
-    }),
-    ...createProviderSettingsSlice(set, get, {
-      saveProviderSettings: settingsGroupSaves.saveProviderSettings,
-      saveSecretsSettings: settingsGroupSaves.saveSecretsSettings,
-      connectLlmProvider: () => get().connectLmStudio()
-    }),
-    ...createLocationSettingsSlice(set, get, {
-      saveLocationSettings: settingsGroupSaves.saveLocationSettings
-    }),
-    ...createMcpSettingsSlice(set, get, {
-      saveMcpSettings: settingsGroupSaves.saveMcpSettings
-    }),
-    ...createEmailSettingsSlice(set, get, {
-      saveEmailAccountSettings: settingsGroupSaves.saveEmailAccountSettings,
-      sendEmailAccountCheck: (body) =>
-        sendEmailAccountCheck({ backendUrl: get().backendUrl }, body)
-    }),
     ...createModelSlice(set, get, {
       getConnection: () => ({
         backendUrl: get().backendUrl,
@@ -482,4 +523,4 @@ export const useLysStore = create<LysStore>()((set, get) => {
       if (vmoStart.status === "rejected") throw vmoStart.reason
     }
   }
-})
+}

@@ -1055,16 +1055,17 @@ describe("registerMcpServerRefresh", () => {
     await vi.waitFor(() => {
       expect(readRouteKeys()).toHaveLength(3)
     })
+    const routeKeysAfterToolCountChange = [
+      TOOL_LIST_ROUTE,
+      LIST_ROUTE,
+      TOOL_LIST_ROUTE,
+      LIST_ROUTE,
+      TOOL_LIST_ROUTE
+    ]
 
     await useMcpServerStore.getState().loadMcpServers()
     await vi.waitFor(() => {
-      expect(readRouteKeys()).toEqual([
-        TOOL_LIST_ROUTE,
-        LIST_ROUTE,
-        TOOL_LIST_ROUTE,
-        LIST_ROUTE,
-        TOOL_LIST_ROUTE
-      ])
+      expect(readRouteKeys()).toEqual(routeKeysAfterToolCountChange)
     })
   })
 

@@ -8,7 +8,6 @@
 use std::fmt::Debug;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -16,8 +15,8 @@ use tokio::sync::Notify;
 use tokio_rustls::TlsAcceptor;
 
 use super::{
-    PASSWORD, USER_NAME, build_internal_date, get_current_timestamp, parse_search_date,
-    read_until_end, run_past_fault,
+    FaultTiming, PASSWORD, USER_NAME, build_internal_date, get_current_timestamp,
+    parse_search_date, read_until_end, run_past_fault,
 };
 
 /// How the fake protects its connections.
@@ -428,14 +427,24 @@ impl FakeImapServer {
         self.faulted.notified().await;
     }
 
-    /// Runs a future until a fault strikes, lets it take up the input it
-    /// already has, pauses the clock, and runs it to its end, as
-    /// [`run_past_fault`] does.
+    /// Runs a future until a fault strikes, or a connection was accepted
+    /// in the silent mode, lets it take up the input it already has, pauses
+    /// the clock, and runs it to its end, as [`run_past_fault`] does.
+    ///
+    /// # Arguments
+    ///
+    /// * `future` - The code under test, talking to this fake.
     ///
     /// # Returns
     ///
-    /// The future's output and how long it took, the paused part included.
-    pub async fn run_past_fault<F>(&self, future: F) -> (F::Output, Duration)
+    /// The future's output and how long the run took, on the real clock
+    /// until the pause and on the paused clock after it.
+    ///
+    /// # Panics
+    ///
+    /// As [`run_past_fault`] does: when the future ends before the clock
+    /// paused, or outwaits the guard limit on the paused clock.
+    pub async fn run_past_fault<F>(&self, future: F) -> (F::Output, FaultTiming)
     where
         F: Future,
         F::Output: Debug,

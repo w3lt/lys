@@ -375,12 +375,12 @@ async fn ends_an_unanswered_quit_at_the_check_limit_and_accepts_the_sign_in() {
     let account = build_account_without_imap(&smtp).await;
     let trust = Trust::create_with_extra_roots(Vec::new());
 
-    let (report, elapsed) = smtp
+    let (report, timing) = smtp
         .run_past_fault(offer_account_sign_ins(&account, &trust))
         .await;
 
     assert_eq!(report.smtp, CheckOutcome::Accepted);
-    assert_about(elapsed, Duration::from_secs(20));
+    assert_about(timing, Duration::from_secs(20));
 }
 
 #[tokio::test]
@@ -396,12 +396,12 @@ async fn ends_an_unanswered_logout_at_the_check_limit_and_accepts_the_sign_in() 
     let account = build_account(servers, false);
     let trust = Trust::create_with_extra_roots(Vec::new());
 
-    let (report, elapsed) = imap
+    let (report, timing) = imap
         .run_past_fault(offer_account_sign_ins(&account, &trust))
         .await;
 
     assert_eq!(report.imap, CheckOutcome::Accepted);
-    assert_about(elapsed, Duration::from_secs(20));
+    assert_about(timing, Duration::from_secs(20));
 }
 
 #[tokio::test]
@@ -416,7 +416,7 @@ async fn ends_an_imap_sign_in_without_a_greeting_at_the_check_limit() {
     let account = build_account(servers, false);
     let trust = Trust::create_with_extra_roots(Vec::new());
 
-    let (report, elapsed) = imap
+    let (report, timing) = imap
         .run_past_fault(offer_account_sign_ins(&account, &trust))
         .await;
 
@@ -432,7 +432,7 @@ async fn ends_an_imap_sign_in_without_a_greeting_at_the_check_limit() {
             reason: SignInFailure::Unreachable
         }
     );
-    assert_about(elapsed, Duration::from_secs(20));
+    assert_about(timing, Duration::from_secs(20));
 }
 
 #[tokio::test(flavor = "multi_thread")]

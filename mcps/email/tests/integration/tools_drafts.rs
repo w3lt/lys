@@ -556,7 +556,7 @@ async fn sends_nothing_more_over_an_imap_session_whose_sent_copy_timed_out() {
     stack.imap.add_fault("APPEND", ImapFault::Stall);
     let progress = SendProgress::default();
 
-    let (sent, elapsed) = stack
+    let (sent, timing) = stack
         .imap
         .run_past_fault(run_send_draft(
             &stack.context,
@@ -572,7 +572,7 @@ async fn sends_nothing_more_over_an_imap_session_whose_sent_copy_timed_out() {
             .is_some_and(|command| command.contains(" APPEND ")),
         "{commands:?}"
     );
-    assert_about(elapsed, Duration::from_secs(30));
+    assert_about(timing, Duration::from_secs(30));
     let report = sent.expect("sent");
     assert!(
         report.text.ends_with(&format_kept_draft_end(TIMED_OUT)),
@@ -733,7 +733,7 @@ async fn answers_a_stored_draft_as_saved_when_a_later_step_times_out() {
     let first = save_draft(&stack, build_draft("First")).await;
     stack.imap.add_fault("STORE", ImapFault::Stall);
 
-    let (saved, elapsed) = stack
+    let (saved, timing) = stack
         .imap
         .run_past_fault(run_save_draft(
             &stack.context,
@@ -752,7 +752,7 @@ async fn answers_a_stored_draft_as_saved_when_a_later_step_times_out() {
             .is_some_and(|command| command.contains(" UID STORE 1 ")),
         "{commands:?}"
     );
-    assert_about(elapsed, Duration::from_secs(30));
+    assert_about(timing, Duration::from_secs(30));
     let report = saved.expect("saved");
     assert_eq!(
         report.text,
@@ -775,7 +775,7 @@ async fn answers_a_draft_whose_answer_never_came_once_all_of_it_was_sent_as_mayb
         .add_fault("APPEND", ImapFault::StallAfterHandling);
     let progress = DraftProgress::default();
 
-    let (saved, elapsed) = stack
+    let (saved, timing) = stack
         .imap
         .run_past_fault(run_save_draft(
             &stack.context,
@@ -784,7 +784,7 @@ async fn answers_a_draft_whose_answer_never_came_once_all_of_it_was_sent_as_mayb
         ))
         .await;
 
-    assert_about(elapsed, Duration::from_secs(30));
+    assert_about(timing, Duration::from_secs(30));
     assert_eq!(
         saved.map_err(|failure| failure.to_string()),
         Err(format!(

@@ -52,6 +52,21 @@ const SETTLING_TURNS: usize = 3;
 /// limit fails the test instead of hanging it.
 const GUARD_LIMIT: Duration = Duration::from_secs(600);
 
+/// How long the wait a fault causes may have run before the fault struck,
+/// at most: under a second, so that a limit a second short still fails.
+/// The code starts a step's wait just before it writes the command the
+/// fake leaves unanswered, and an account check's wait when the check
+/// starts, before it connects, which the check's timing cases do in plain
+/// text; over loopback, either takes far less than this.
+const LONGEST_WAIT_BEFORE_FAULT: Duration = Duration::from_millis(500);
+
+/// How far past a timer's deadline the paused clock may land, at most.
+/// tokio's timers fire on whole milliseconds since the runtime started:
+/// a deadline is rounded up to the next one, and the paused clock moves
+/// by whole milliseconds from where it paused, keeping the part of a
+/// millisecond it stood at then; each adds less than a millisecond.
+const PAUSED_CLOCK_OVERSHOOT: Duration = Duration::from_millis(2);
+
 /// How a server of an account is reached, as the settings name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SecurityName {
@@ -84,6 +99,27 @@ pub struct TestServers {
     pub smtp_security: SecurityName,
 }
 
+/// How long a run past a fault took, on the two clocks it ran on.
+///
+/// The run starts on the real clock, which tokio's clock follows until
+/// the pause. The paused clock then stands still while the runtime has
+/// work and jumps to the next timer's deadline when it has none, so after
+/// the pause it counts the rest of the limit of the wait the fault caused
+/// and none of the real time.
+#[derive(Clone, Copy, Debug)]
+pub struct FaultTiming {
+    /// The whole run on tokio's clock: the real time until the pause, then
+    /// the paused clock's jumps.
+    pub elapsed: Duration,
+    /// The real time from the run's start until the fault struck, such as
+    /// connecting, a TLS handshake, and the steps before the fault.
+    pub real_before_fault: Duration,
+    /// The real time from the run's start until the clock paused: the
+    /// time before the fault, then the future taking up the input it
+    /// already had.
+    pub real_before_pause: Duration,
+}
+
 /// Runs a future until a fake's fault strikes, lets it take up the input
 /// it already has, pauses the clock, and runs it to its end, so that the
 /// limit of the wait the fault caused passes at once.
@@ -95,13 +131,17 @@ pub struct TestServers {
 ///
 /// # Returns
 ///
-/// The future's output and how long it took, the paused part included.
+/// The future's output and how long the run took, on the real clock until
+/// the pause and on the paused clock after it.
 ///
 /// # Panics
 ///
 /// When the future ends before the clock paused, or waits on the paused
 /// clock longer than [`GUARD_LIMIT`].
-pub async fn run_past_fault<F>(fault: impl Future<Output = ()>, future: F) -> (F::Output, Duration)
+pub async fn run_past_fault<F>(
+    fault: impl Future<Output = ()>,
+    future: F,
+) -> (F::Output, FaultTiming)
 where
     F: Future,
     F::Output: Debug,
@@ -112,17 +152,24 @@ where
         () = fault => {}
         outcome = &mut future => panic!("the future ended before the fault: {outcome:?}"),
     }
+    let real_before_fault = started.elapsed();
     for _ in 0..SETTLING_TURNS {
         tokio::select! {
             () = tokio::task::yield_now() => {}
             outcome = &mut future => panic!("the future ended before the clock paused: {outcome:?}"),
         }
     }
+    let real_before_pause = started.elapsed();
     tokio::time::pause();
     let outcome = timeout(GUARD_LIMIT, future)
         .await
         .expect("a limit of the code under test ends the future");
-    (outcome, started.elapsed())
+    let timing = FaultTiming {
+        elapsed: started.elapsed(),
+        real_before_fault,
+        real_before_pause,
+    };
+    (outcome, timing)
 }
 
 /// Reads and drops bytes, text or not, such as a TLS handshake, until the
@@ -135,12 +182,31 @@ where
     while reader.read(&mut buffer).await.is_ok_and(|count| count > 0) {}
 }
 
-/// Asserts that a duration measured across a pause of the clock is the
-/// limit, give or take the real time that passed before the pause.
-pub fn assert_about(elapsed: Duration, limit: Duration) {
+/// Asserts that a run past a fault took the limit of the wait the fault
+/// caused, counted from the fault, so that a limit wrong by a second fails
+/// however long the machine took before the fault, such as for a TLS
+/// handshake.
+///
+/// From the fault on, the run takes the limit:
+///
+/// - less the part of the wait that ran before the fault, at most
+///   [`LONGEST_WAIT_BEFORE_FAULT`];
+/// - plus at most the real time from the fault to the pause, in which a
+///   wait that starts after the fault, such as for a greeting, begins;
+/// - plus how far the paused clock lands past the deadline, at most
+///   [`PAUSED_CLOCK_OVERSHOOT`].
+///
+/// # Arguments
+///
+/// * `timing` - How long the run took, from [`run_past_fault`].
+/// * `limit` - The limit the code under test sets on the wait.
+pub fn assert_about(timing: FaultTiming, limit: Duration) {
+    let after_fault = timing.elapsed - timing.real_before_fault;
+    let settling = timing.real_before_pause - timing.real_before_fault;
     assert!(
-        elapsed >= limit && elapsed < limit + Duration::from_secs(1),
-        "{elapsed:?} is not about {limit:?}"
+        after_fault + LONGEST_WAIT_BEFORE_FAULT >= limit
+            && after_fault <= limit + settling + PAUSED_CLOCK_OVERSHOOT,
+        "{timing:?} is not about {limit:?}"
     );
 }
 

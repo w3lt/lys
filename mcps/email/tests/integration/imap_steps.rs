@@ -49,10 +49,10 @@ async fn a_server_that_never_answers_the_tls_handshake_fails_the_sign_in_after_1
     let imap = FakeImapServer::start(FakeMailbox::create_standard(), ImapMode::Silent, None).await;
     let context = build_imap_context(&imap, SecurityName::Tls, &authority);
 
-    let (listed, elapsed) = imap.run_past_fault(run_list_folders(&context)).await;
+    let (listed, timing) = imap.run_past_fault(run_list_folders(&context)).await;
 
     assert_eq!(listed, Err(build_sign_in_timeout()));
-    assert_about(elapsed, Duration::from_secs(15));
+    assert_about(timing, Duration::from_secs(15));
 }
 
 #[tokio::test]
@@ -61,10 +61,10 @@ async fn a_server_that_never_greets_fails_the_sign_in_after_30_seconds() {
     let imap = FakeImapServer::start(FakeMailbox::create_standard(), ImapMode::Silent, None).await;
     let context = build_imap_context(&imap, SecurityName::Plain, &authority);
 
-    let (listed, elapsed) = imap.run_past_fault(run_list_folders(&context)).await;
+    let (listed, timing) = imap.run_past_fault(run_list_folders(&context)).await;
 
     assert_eq!(listed, Err(build_sign_in_timeout()));
-    assert_about(elapsed, Duration::from_secs(30));
+    assert_about(timing, Duration::from_secs(30));
 }
 
 #[tokio::test]
@@ -72,13 +72,13 @@ async fn a_login_without_an_answer_fails_the_sign_in_after_30_seconds() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
     stack.imap.add_fault("LOGIN", ImapFault::Stall);
 
-    let (listed, elapsed) = stack
+    let (listed, timing) = stack
         .imap
         .run_past_fault(run_list_folders(&stack.context))
         .await;
 
     assert_eq!(listed, Err(build_sign_in_timeout()));
-    assert_about(elapsed, Duration::from_secs(30));
+    assert_about(timing, Duration::from_secs(30));
     assert!(
         !stack
             .imap
@@ -111,11 +111,11 @@ async fn a_logout_without_an_answer_lists_the_folders_after_30_seconds() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
     stack.imap.add_fault("LOGOUT", ImapFault::Stall);
 
-    let (listed, elapsed) = stack
+    let (listed, timing) = stack
         .imap
         .run_past_fault(run_list_folders(&stack.context))
         .await;
 
     assert_eq!(listed.expect("the folders").log, "folders: 7 listed");
-    assert_about(elapsed, Duration::from_secs(30));
+    assert_about(timing, Duration::from_secs(30));
 }

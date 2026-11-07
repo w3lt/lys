@@ -206,12 +206,12 @@ async fn a_server_that_never_answers_the_tls_handshake_fails_the_sign_in_after_1
     let context = build_smtp_context(&smtp, SecurityName::Tls, &authority).await;
     let progress = SendProgress::default();
 
-    let (sent, elapsed) = smtp
+    let (sent, timing) = smtp
         .run_past_fault(run_send_email(&context, build_message(), &progress))
         .await;
 
     assert_eq!(sent, Err(build_sign_in_timeout()));
-    assert_about(elapsed, Duration::from_secs(15));
+    assert_about(timing, Duration::from_secs(15));
 }
 
 #[tokio::test]
@@ -220,13 +220,13 @@ async fn a_greeting_without_an_answer_to_ehlo_fails_the_sign_in_after_30_seconds
     stack.smtp.add_fault("EHLO", SmtpFault::Stall);
     let progress = SendProgress::default();
 
-    let (sent, elapsed) = stack
+    let (sent, timing) = stack
         .smtp
         .run_past_fault(run_send_email(&stack.context, build_message(), &progress))
         .await;
 
     assert_eq!(sent, Err(build_sign_in_timeout()));
-    assert_about(elapsed, Duration::from_secs(30));
+    assert_about(timing, Duration::from_secs(30));
     assert_nothing_delivered(&stack);
 }
 
@@ -238,12 +238,12 @@ async fn starttls_without_an_answer_fails_the_sign_in_after_30_seconds() {
     let context = build_smtp_context(&smtp, SecurityName::StartTls, &authority).await;
     let progress = SendProgress::default();
 
-    let (sent, elapsed) = smtp
+    let (sent, timing) = smtp
         .run_past_fault(run_send_email(&context, build_message(), &progress))
         .await;
 
     assert_eq!(sent, Err(build_sign_in_timeout()));
-    assert_about(elapsed, Duration::from_secs(30));
+    assert_about(timing, Duration::from_secs(30));
 }
 
 #[tokio::test]
@@ -252,13 +252,13 @@ async fn a_sign_in_without_an_answer_fails_after_30_seconds() {
     stack.smtp.add_fault("AUTH", SmtpFault::Stall);
     let progress = SendProgress::default();
 
-    let (sent, elapsed) = stack
+    let (sent, timing) = stack
         .smtp
         .run_past_fault(run_send_email(&stack.context, build_message(), &progress))
         .await;
 
     assert_eq!(sent, Err(build_sign_in_timeout()));
-    assert_about(elapsed, Duration::from_secs(30));
+    assert_about(timing, Duration::from_secs(30));
     assert_nothing_delivered(&stack);
 }
 
@@ -268,7 +268,7 @@ async fn a_recipient_without_an_answer_fails_the_send_after_30_seconds_and_sends
     stack.smtp.add_fault("RCPT", SmtpFault::Stall);
     let progress = SendProgress::default();
 
-    let (sent, elapsed) = stack
+    let (sent, timing) = stack
         .smtp
         .run_past_fault(run_send_email(&stack.context, build_message(), &progress))
         .await;
@@ -277,7 +277,7 @@ async fn a_recipient_without_an_answer_fails_the_send_after_30_seconds_and_sends
         sent,
         Err(build_connection_failure(ConnectionFailure::TimedOut))
     );
-    assert_about(elapsed, Duration::from_secs(30));
+    assert_about(timing, Duration::from_secs(30));
     assert_nothing_delivered(&stack);
 }
 
@@ -287,13 +287,13 @@ async fn data_without_an_answer_leaves_the_send_unconfirmed_after_120_seconds() 
     stack.smtp.add_fault(DATA_END, SmtpFault::Stall);
     let progress = SendProgress::default();
 
-    let (sent, elapsed) = stack
+    let (sent, timing) = stack
         .smtp
         .run_past_fault(run_send_email(&stack.context, build_message(), &progress))
         .await;
 
     assert_eq!(sent, Err(ToolFailure::SendUnconfirmed));
-    assert_about(elapsed, Duration::from_secs(120));
+    assert_about(timing, Duration::from_secs(120));
     assert_eq!(progress.stage(), SendStage::HandedOver);
     assert_eq!(stack.smtp.list_mails().len(), 1);
     assert!(stack.imap.list_messages("Sent").is_empty());
@@ -305,7 +305,7 @@ async fn a_quit_without_an_answer_after_the_send_reports_it_sent_after_30_second
     stack.smtp.add_fault("QUIT", SmtpFault::Stall);
     let progress = SendProgress::default();
 
-    let (sent, elapsed) = stack
+    let (sent, timing) = stack
         .smtp
         .run_past_fault(run_send_email(&stack.context, build_message(), &progress))
         .await;
@@ -315,7 +315,7 @@ async fn a_quit_without_an_answer_after_the_send_reports_it_sent_after_30_second
         report.text.starts_with("Sent as Message-ID <"),
         "{report:?}"
     );
-    assert_about(elapsed, Duration::from_secs(30));
+    assert_about(timing, Duration::from_secs(30));
     assert_eq!(progress.stage(), SendStage::Accepted);
     assert_eq!(stack.smtp.list_mails().len(), 1);
 }

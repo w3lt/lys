@@ -849,6 +849,11 @@ mod tests {
     /// object, that takes exactly `bytes` as compact JSON: the most stdio
     /// servers, each with the most one-character arguments and the most
     /// variables, whose values take the remaining bytes in list order.
+    /// `bytes` is at most what the group takes with every value full.
+    ///
+    /// # Panics
+    ///
+    /// When `bytes` is less than the group takes with every value empty.
     fn build_unswitched_group_of_bytes(bytes: usize) -> Value {
         let mut servers: Vec<Value> = (0..SERVER_MAX_COUNT).map(build_full_stdio_server).collect();
         let mut remaining = bytes - calculate_compact_json_bytes(&json!({ "servers": servers }));
@@ -880,6 +885,10 @@ mod tests {
 
     /// Returns `group` with every switch written, as the host writes it:
     /// `server_switch` on each server and every server Lys ships off.
+    ///
+    /// # Panics
+    ///
+    /// When `group` is not an object whose `servers` is an array.
     fn build_switched_group(group: &Value, server_switch: bool) -> Value {
         let mut switched_group = group.clone();
         for server in switched_group["servers"].as_array_mut().expect("servers") {

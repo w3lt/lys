@@ -199,6 +199,30 @@ type SwitchedMcpGroup = {
 }
 
 /**
+ * Builds one stdio server of {@link buildUnswitchedMcpGroupOfBytes}: the
+ * most one-character arguments and the most environment variables, whose
+ * values are empty until the group fills them.
+ *
+ * @param serverIndex - Position of the server in the group, which names it.
+ * @returns The server, which a new call builds anew.
+ */
+function buildFilledStdioServer(serverIndex: number): FilledStdioServer {
+  return {
+    name: `server-${serverIndex}`,
+    transport: "stdio",
+    command: "c",
+    arguments: Array.from(
+      { length: MAXIMUM_MCP_COMMAND_ARGUMENT_COUNT },
+      () => "a"
+    ),
+    environment: Array.from(
+      { length: MAXIMUM_MCP_ENVIRONMENT_VARIABLE_COUNT },
+      (_, variableIndex) => ({ name: `V${variableIndex}`, value: "" })
+    )
+  }
+}
+
+/**
  * Builds an `mcp` group as the desktop host wrote it before the switches
  * existed, with every list but no switch, that takes exactly a number of
  * bytes as compact JSON: the most stdio servers, each with the most
@@ -213,19 +237,7 @@ type SwitchedMcpGroup = {
 function buildUnswitchedMcpGroupOfBytes(bytes: number): UnswitchedMcpGroup {
   const servers = Array.from(
     { length: MAXIMUM_MCP_SERVER_COUNT },
-    (_, serverIndex): FilledStdioServer => ({
-      name: `server-${serverIndex}`,
-      transport: "stdio",
-      command: "c",
-      arguments: Array.from(
-        { length: MAXIMUM_MCP_COMMAND_ARGUMENT_COUNT },
-        () => "a"
-      ),
-      environment: Array.from(
-        { length: MAXIMUM_MCP_ENVIRONMENT_VARIABLE_COUNT },
-        (_, variableIndex) => ({ name: `V${variableIndex}`, value: "" })
-      )
-    })
+    (_, serverIndex) => buildFilledStdioServer(serverIndex)
   )
   const group: UnswitchedMcpGroup = { servers }
   let remaining = bytes - Buffer.byteLength(JSON.stringify(group))

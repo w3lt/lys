@@ -116,6 +116,35 @@ const CONNECTING: McpServerState = Object.freeze({ status: "connecting" })
 const ONE_COPY_SHUTDOWN_MILLISECONDS = 1000
 
 /**
+ * Outcome events of the three servers the settings-order case opens, in no
+ * order: `alpha` connects with one of its three tools skipped, `beta`
+ * fails as it closes, and `gamma` connects with its tool list cut.
+ */
+const SETTINGS_ORDER_OUTCOME_EVENTS: readonly McpServerEvent[] = Object.freeze([
+  Object.freeze({
+    kind: "connected",
+    serverName: "alpha",
+    toolCount: 2,
+    skippedToolCount: 1,
+    isToolListCut: false
+  }),
+  Object.freeze({
+    kind: "opening-failed",
+    serverName: "beta",
+    reason: "closed",
+    failure: Object.freeze({ kind: "closed" }),
+    unknownError: undefined
+  }),
+  Object.freeze({
+    kind: "connected",
+    serverName: "gamma",
+    toolCount: MAXIMUM_MCP_SERVER_TOOL_COUNT,
+    skippedToolCount: 0,
+    isToolListCut: true
+  })
+])
+
+/**
  * Creates an empty folder for the stdio servers of one case, removed after
  * the case.
  *
@@ -797,34 +826,13 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
           )
         ])
       )
-      const outcomeEvents = harness.events.filter(
-        (event) => event.kind === "connected" || event.kind === "opening-failed"
-      )
+      const outcomeEvents = [
+        ...filterEvents(harness.events, "connected"),
+        ...filterEvents(harness.events, "opening-failed")
+      ]
       expect(outcomeEvents).toHaveLength(3)
       expect(outcomeEvents).toEqual(
-        expect.arrayContaining([
-          {
-            kind: "connected",
-            serverName: "alpha",
-            toolCount: 2,
-            skippedToolCount: 1,
-            isToolListCut: false
-          },
-          {
-            kind: "opening-failed",
-            serverName: "beta",
-            reason: "closed",
-            failure: { kind: "closed" },
-            unknownError: undefined
-          },
-          {
-            kind: "connected",
-            serverName: "gamma",
-            toolCount: MAXIMUM_MCP_SERVER_TOOL_COUNT,
-            skippedToolCount: 0,
-            isToolListCut: true
-          }
-        ])
+        expect.arrayContaining([...SETTINGS_ORDER_OUTCOME_EVENTS])
       )
     })
 

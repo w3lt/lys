@@ -1241,34 +1241,65 @@ describe("McpPaneContent", () => {
     )
   })
 
-  it("lists the saved servers without state while the backend is not running, and asks nothing of it", async () => {
-    startSettingsHost()
-    const { backend } = await startMcpPane(
-      {},
-      buildUnreachableRuntime("stopped")
-    )
-    const user = userEvent.setup()
+  it.each(["stopped", "starting", "stopping", "unresponsive"] as const)(
+    "lists the saved servers without state while the backend is %s, and asks nothing of it",
+    async (backendStatus) => {
+      startSettingsHost()
+      const { backend } = await startMcpPane(
+        {},
+        buildUnreachableRuntime(backendStatus)
+      )
+      const user = userEvent.setup()
 
-    expect(getPaneStatus()).toHaveTextContent(
-      "Start the backend in Settings → Runtime to connect to MCP servers."
+      expect(getPaneStatus()).toHaveTextContent(
+        "Start the backend in Settings → Runtime to connect to MCP servers."
+      )
+      expect(screen.getByRole("region", { name: "servers" })).toHaveTextContent(
+        "3 servers"
+      )
+      expect(getServerToggle("files")).toHaveAccessibleDescription(
+        expect.stringContaining("Not connected")
+      )
+      const files = await expandServer(user, "files")
+      expect(within(files).getByRole("status")).toHaveTextContent(
+        "files: Not connectedLys connects once the backend runs."
+      )
+      expect(
+        within(files).getByRole("button", { name: "Start files" })
+      ).toBeDisabled()
+      expect(
+        within(files).getByRole("button", { name: "Edit files" })
+      ).toBeEnabled()
+      expect(backend.requests).toEqual([])
+    }
+  )
+
+  it("shows the servers' tool totals only once the tool list is read", async () => {
+    startSettingsHost()
+    const toolRead = createControlledPromise<Response>()
+    await startMcpPane({ [TOOLS_ROUTE]: () => toolRead.promise })
+
+    expect(screen.getByText("1 of 3 connected")).toBeInTheDocument()
+
+    toolRead.resolve(
+      buildJsonResponse(200, { tools: FILES_TOOLS, unavailableTools: [] })
     )
-    expect(screen.getByRole("region", { name: "servers" })).toHaveTextContent(
-      "3 servers"
-    )
-    expect(getServerToggle("files")).toHaveAccessibleDescription(
-      expect.stringContaining("Not connected")
-    )
-    const files = await expandServer(user, "files")
-    expect(within(files).getByRole("status")).toHaveTextContent(
-      "files: Not connectedLys connects once the backend runs."
-    )
+    await waitForRenderedWork()
+
     expect(
-      within(files).getByRole("button", { name: "Start files" })
-    ).toBeDisabled()
-    expect(
-      within(files).getByRole("button", { name: "Edit files" })
-    ).toBeEnabled()
-    expect(backend.requests).toEqual([])
+      screen.getByText(
+        `1 of 3 connected · 3 tools · ${formatToolCost(FILES_TOOLS)} per request`
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("shows no tool totals after the tool list could not be read", async () => {
+    startSettingsHost()
+    await startMcpPane({
+      [TOOLS_ROUTE]: () => new Response(null, { status: 500 })
+    })
+
+    expect(screen.getByText("1 of 3 connected")).toBeInTheDocument()
   })
 
   it("offers the two kinds of server under the servers Lys ships while none is added, each opening its editor", async () => {
@@ -1927,7 +1958,7 @@ describe("McpPaneContent", () => {
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, SYNC_ROUTE])
   })
 
-  it("reports a failed removal in the status line and keeps the server", async () => {
+  it("reports a failed removal in the status line and keeps the server with its details open", async () => {
     startSettingsHost(() => Promise.reject("Disk full"))
     await startMcpPane()
     const user = userEvent.setup()
@@ -1938,6 +1969,8 @@ describe("McpPaneContent", () => {
       "Lys couldn't write the MCP servers to its settings file."
     )
     expect(getServerRow("files")).toBeInTheDocument()
+    expect(getServerToggle("files")).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByRole("button", { name: "Add server" })).not.toHaveFocus()
   })
 
   it("keeps the editor open with an alert when its save fails", async () => {

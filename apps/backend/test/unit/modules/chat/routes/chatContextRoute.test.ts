@@ -223,14 +223,14 @@ async function createChatContextRouteApp() {
 }
 
 /**
- * Applies one MCP server to a case's registry and waits until its opening
+ * Updates a case's registry to one MCP server and waits until its opening
  * ended.
  *
  * @param testApp - The case's application.
  * @param settings - Settings of the only applied server.
  * @param status - State the opening is expected to end in.
  */
-async function applyMcpServer(
+async function updateMcpServer(
   testApp: Awaited<ReturnType<typeof createChatContextRouteApp>>,
   settings: McpServerSettings,
   status: "connected" | "failed"
@@ -786,7 +786,7 @@ describe("registerChatContextRoute", () => {
 
   it("measures a connected MCP server's offered tool after the client and built-in tools, as a turn offers it", async () => {
     const testApp = await createChatContextRouteApp()
-    await applyMcpServer(
+    await updateMcpServer(
       testApp,
       buildFakeStdioServerSettings("files"),
       "connected"
@@ -823,7 +823,7 @@ describe("registerChatContextRoute", () => {
     testApp.listDownloadedLlmModels.mockResolvedValue([
       { ...VISION_MODEL_INFO, vision: false }
     ])
-    await applyMcpServer(
+    await updateMcpServer(
       testApp,
       buildFakeStdioServerSettings("files"),
       "connected"
@@ -855,7 +855,7 @@ describe("registerChatContextRoute", () => {
 
   it("leaves out an offered MCP tool whose server is not connected", async () => {
     const testApp = await createChatContextRouteApp()
-    await applyMcpServer(
+    await updateMcpServer(
       testApp,
       buildFakeStdioServerSettings("files", { exitOnStart: 1 }),
       "failed"
@@ -879,7 +879,7 @@ describe("registerChatContextRoute", () => {
 
   it("rejects an MCP tool no applied server lists without measuring", async () => {
     const testApp = await createChatContextRouteApp()
-    await applyMcpServer(
+    await updateMcpServer(
       testApp,
       buildFakeStdioServerSettings("files"),
       "connected"

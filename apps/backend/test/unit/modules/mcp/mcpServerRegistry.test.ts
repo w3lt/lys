@@ -229,7 +229,7 @@ type RegistryHarness = Readonly<{
    * @param builtIn - Switches of the built-in servers; every one off when
    * omitted.
    */
-  setServers: (
+  updateReadServers: (
     servers: readonly McpServerSettings[],
     builtIn?: BuiltInMcpSettings
   ) => void
@@ -238,14 +238,15 @@ type RegistryHarness = Readonly<{
    *
    * @param read - Outcome of each read.
    */
-  setSettingsRead: (read: McpSettingsRead) => void
+  updateSettingsRead: (read: McpSettingsRead) => void
   /**
-   * Holds every opening started from now on before it starts anything,
-   * until released, until its signal aborts, or until the case ends.
+   * Starts holding every opening started from now on before it starts
+   * anything, until released, until its signal aborts, or until the case
+   * ends.
    *
    * @returns Releases the held openings and stops holding new ones.
    */
-  holdOpenings: () => () => void
+  startOpeningHold: () => () => void
 }>
 
 /**
@@ -284,7 +285,7 @@ type FakeBuiltInServer = Readonly<{
    *
    * @param read - Outcome of each read.
    */
-  setRead: (read: BuiltInMcpServerRead) => void
+  updateRead: (read: BuiltInMcpServerRead) => void
 }>
 
 /**
@@ -309,7 +310,7 @@ function createFakeBuiltInServer(
   return Object.freeze({
     server,
     readServer,
-    setRead: (next) => {
+    updateRead: (next) => {
       nextRead = next
     }
   })
@@ -549,13 +550,13 @@ function createRegistryHarness(
     readSettings,
     openServer,
     openedConnections,
-    setServers: (servers, builtIn) => {
+    updateReadServers: (servers, builtIn) => {
       nextRead = () => buildSettingsRead(servers, builtIn)
     },
-    setSettingsRead: (read) => {
+    updateSettingsRead: (read) => {
       nextRead = () => read
     },
-    holdOpenings: () => serverOpener.startHold()
+    startOpeningHold: () => serverOpener.startHold()
   })
 }
 
@@ -657,7 +658,7 @@ async function createConnectedOneCopyHarness(
   serverFolder: string
 ): Promise<RegistryHarness> {
   const harness = createRegistryHarness({ workingDirectory: serverFolder })
-  harness.setServers([buildOneCopyServerSettings("alpha", [])])
+  harness.updateReadServers([buildOneCopyServerSettings("alpha", [])])
   await harness.registry.updateServers()
   await waitForServerList(
     harness.registry,
@@ -758,14 +759,14 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
           )
         )
       )
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", {
           tools: [ECHO_TOOL, LOOK_DOT_UP_TOOL, LOOK_UNDERSCORE_UP_TOOL]
         }),
         buildFakeStdioServerSettings("beta", { exitOnStart: 3 }),
         buildHttpServerSettings("gamma", cutServer.url)
       ])
-      const release = harness.holdOpenings()
+      const release = harness.startOpeningHold()
 
       await harness.registry.updateServers()
 
@@ -829,7 +830,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("reports what a stdio server writes to standard error, from the working folder it starts in", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", { reportEnvironment: [] })
       ])
 
@@ -855,7 +856,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("keeps the connection or failure of a server whose settings did not change", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha"),
         buildFakeStdioServerSettings("beta", { exitOnStart: 3 })
       ])
@@ -887,7 +888,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("closes and opens again a server whose settings changed", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([buildFakeStdioServerSettings("alpha")])
+      harness.updateReadServers([buildFakeStdioServerSettings("alpha")])
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
@@ -896,7 +897,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const changedSettings = buildFakeStdioServerSettings("alpha", {}, [
         { name: "LYS_TEST_MODE", value: "changed" }
       ])
-      harness.setServers([changedSettings])
+      harness.updateReadServers([changedSettings])
 
       await harness.registry.updateServers()
 
@@ -922,7 +923,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const changedSettings = buildOneCopyServerSettings("alpha", [
         { name: "LYS_TEST_MODE", value: "changed" }
       ])
-      harness.setServers([changedSettings])
+      harness.updateReadServers([changedSettings])
 
       await harness.registry.updateServers()
       await waitForMicrotasks()
@@ -942,7 +943,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     it("opens a renamed command server only once the process of its old name ended, so a server that runs one copy at a time connects", async () => {
       const harness = await createConnectedOneCopyHarness(createServerFolder())
       const renamedSettings = buildOneCopyServerSettings("beta", [])
-      harness.setServers([renamedSettings])
+      harness.updateReadServers([renamedSettings])
 
       await harness.registry.updateServers()
       await waitForMicrotasks()
@@ -961,9 +962,9 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("opens a command server named again only once the process of its removed session ended, so a server that runs one copy at a time connects", async () => {
       const harness = await createConnectedOneCopyHarness(createServerFolder())
-      harness.setServers([])
+      harness.updateReadServers([])
       await harness.registry.updateServers()
-      harness.setServers([buildOneCopyServerSettings("alpha", [])])
+      harness.updateReadServers([buildOneCopyServerSettings("alpha", [])])
 
       await harness.registry.updateServers()
       await waitForMicrotasks()
@@ -995,7 +996,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       })
       const one = { name: "LYS_TEST_MODE", value: "one" }
       const two = { name: "LYS_TEST_MODE", value: "two" }
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", {}, [one]),
         buildFakeStdioServerSettings("beta", {}, [two])
       ])
@@ -1007,7 +1008,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
           buildStdioStatus("beta", buildConnectedState(1))
         ])
       )
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", {}, [two]),
         buildFakeStdioServerSettings("beta", {}, [one])
       ])
@@ -1038,7 +1039,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("closes a server the settings no longer name", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha"),
         buildFakeStdioServerSettings("beta")
       ])
@@ -1050,7 +1051,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
           buildStdioStatus("beta", buildConnectedState(1))
         ])
       )
-      harness.setServers([buildFakeStdioServerSettings("beta")])
+      harness.updateReadServers([buildFakeStdioServerSettings("beta")])
 
       await harness.registry.updateServers()
 
@@ -1074,19 +1075,19 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("keeps the applied servers when the settings fail their rules or cannot be read", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([buildFakeStdioServerSettings("alpha")])
+      harness.updateReadServers([buildFakeStdioServerSettings("alpha")])
       await harness.registry.updateServers()
       const connected = [buildStdioStatus("alpha", buildConnectedState(1))]
       await waitForServerList(harness.registry, buildList(connected))
       const problems = ["servers.0.command: A command is 1 to 4096 characters."]
 
-      harness.setSettingsRead({ status: "invalid", problems })
+      harness.updateSettingsRead({ status: "invalid", problems })
       await harness.registry.updateServers()
       const afterInvalid = harness.registry.listServers()
-      harness.setSettingsRead({ status: "unreadable" })
+      harness.updateSettingsRead({ status: "unreadable" })
       await harness.registry.updateServers()
       const afterUnreadable = harness.registry.listServers()
-      harness.setServers([buildFakeStdioServerSettings("alpha")])
+      harness.updateReadServers([buildFakeStdioServerSettings("alpha")])
       await harness.registry.updateServers()
 
       expect(afterInvalid).toEqual(buildList(connected, "invalid"))
@@ -1120,7 +1121,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const [firstRead, secondRead] = reads
       if (firstRead === undefined || secondRead === undefined)
         throw new Error("The reads were not created.")
-      harness.holdOpenings()
+      harness.startOpeningHold()
 
       const first = harness.registry.updateServers()
       const second = harness.registry.updateServers()
@@ -1177,7 +1178,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const harness = createRegistryHarness({
         open: () => Promise.reject(defect)
       })
-      harness.setServers([buildFakeStdioServerSettings("alpha")])
+      harness.updateReadServers([buildFakeStdioServerSettings("alpha")])
 
       await harness.registry.updateServers()
 
@@ -1202,7 +1203,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
   describe("connection ends", () => {
     it("fails a connected server as closed when its connection ends by itself", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", { tools: [ECHO_TOOL, EXIT_TOOL] })
       ])
       await harness.registry.updateServers()
@@ -1246,7 +1247,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         })
       )
       const harness = createRegistryHarness()
-      harness.setServers([buildHttpServerSettings("remote", server.url)])
+      harness.updateReadServers([buildHttpServerSettings("remote", server.url)])
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
@@ -1283,14 +1284,14 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         else answer(request, body, response)
       })
       const harness = createRegistryHarness()
-      harness.setServers([buildHttpServerSettings("remote", server.url)])
+      harness.updateReadServers([buildHttpServerSettings("remote", server.url)])
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
         buildList([buildHttpStatus("remote", buildConnectedState(1))])
       )
 
-      harness.setServers([])
+      harness.updateReadServers([])
       await harness.registry.updateServers()
       await waitForRegistryClose(
         findOpenedConnection(harness.openedConnections, "remote")
@@ -1329,7 +1330,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
           return opening
         }
       })
-      harness.setServers([buildFakeStdioServerSettings("alpha")])
+      harness.updateReadServers([buildFakeStdioServerSettings("alpha")])
 
       await harness.registry.updateServers()
 
@@ -1351,8 +1352,8 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
   describe("reconnect", () => {
     it("answers not-found for a name no applied server has, and opens nothing", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([buildFakeStdioServerSettings("alpha")])
-      harness.holdOpenings()
+      harness.updateReadServers([buildFakeStdioServerSettings("alpha")])
+      harness.startOpeningHold()
       await harness.registry.updateServers()
 
       expect(harness.registry.openServerAgain("ghost")).toBe("not-found")
@@ -1366,7 +1367,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     it("closes a connected server and opens it again with its applied settings", async () => {
       const harness = createRegistryHarness()
       const settings = buildFakeStdioServerSettings("alpha")
-      harness.setServers([settings])
+      harness.updateReadServers([settings])
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
@@ -1414,7 +1415,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     it("opens a server a launcher runs again only once every process of its old group ended, even one that ignores its closed input and SIGTERM", async () => {
       const port = Number(new URL(await findClosedMcpUrl()).port)
       const harness = createRegistryHarness()
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeLauncherServerSettings("alpha", {
           holdPort: port,
           ignoreSigterm: true
@@ -1454,7 +1455,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     it("opens nothing for a server removed while its previous process ends", async () => {
       const harness = await createConnectedOneCopyHarness(createServerFolder())
       expect(harness.registry.openServerAgain("alpha")).toBe("reconnecting")
-      harness.setServers([])
+      harness.updateReadServers([])
 
       await harness.registry.updateServers()
       await harness.registry.close()
@@ -1483,7 +1484,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         route(request, body, response)
       })
       const harness = createRegistryHarness()
-      harness.setServers([buildHttpServerSettings("remote", server.url)])
+      harness.updateReadServers([buildHttpServerSettings("remote", server.url)])
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
@@ -1534,7 +1535,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
           return opening
         }
       })
-      harness.setServers([buildFakeStdioServerSettings("alpha")])
+      harness.updateReadServers([buildFakeStdioServerSettings("alpha")])
       await harness.registry.updateServers()
 
       expect(harness.registry.openServerAgain("alpha")).toBe("reconnecting")
@@ -1573,7 +1574,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("tells the model the server was restarted or reconnected when a reconnect stops its session while a call runs", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", { tools: [ECHO_TOOL, SLOW_TOOL] })
       ])
       await harness.registry.updateServers()
@@ -1610,7 +1611,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
   describe("tool lookup", () => {
     it("lists the tools of the connected servers in settings order", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", {
           tools: [ECHO_TOOL, LOOK_DOT_UP_TOOL]
         }),
@@ -1655,7 +1656,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("finds a listed tool of a connected server, and tells a server that is not connected from an unknown name", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", {
           tools: [ECHO_TOOL, LOOK_DOT_UP_TOOL]
         }),
@@ -1669,8 +1670,8 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
           buildStdioStatus("beta", buildFailedState("closed"))
         ])
       )
-      harness.holdOpenings()
-      harness.setServers([
+      harness.startOpeningHold()
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", {
           tools: [ECHO_TOOL, LOOK_DOT_UP_TOOL]
         }),
@@ -1712,7 +1713,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
   describe("tool calls", () => {
     it("returns the server's result, failed when the tool reports a failure", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", { tools: [ECHO_TOOL, FAIL_TOOL] })
       ])
       await harness.registry.updateServers()
@@ -1743,14 +1744,14 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("tells the model the server is not connected when it is not connected at call time, and reports the call as not sent", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([buildFakeStdioServerSettings("alpha")])
+      harness.updateReadServers([buildFakeStdioServerSettings("alpha")])
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
         buildList([buildStdioStatus("alpha", buildConnectedState(1))])
       )
       const tool = findTool(harness.registry, "mcp__alpha__echo")
-      harness.holdOpenings()
+      harness.startOpeningHold()
       harness.registry.openServerAgain("alpha")
 
       const outcome = await tool.sendToolCall({ text: "hi" }, NEVER_ABORTED)
@@ -1772,14 +1773,14 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("tells the model the server is not connected when the settings no longer name it at call time, and reports the call as not sent", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([buildFakeStdioServerSettings("alpha")])
+      harness.updateReadServers([buildFakeStdioServerSettings("alpha")])
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
         buildList([buildStdioStatus("alpha", buildConnectedState(1))])
       )
       const tool = findTool(harness.registry, "mcp__alpha__echo")
-      harness.setServers([])
+      harness.updateReadServers([])
       await harness.registry.updateServers()
 
       const outcome = await tool.sendToolCall({ text: "hi" }, NEVER_ABORTED)
@@ -1802,7 +1803,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("tells the model the server no longer lists the tool it was offered, and reports the call as not sent", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", {
           tools: [ECHO_TOOL, FAIL_TOOL, LOOK_DOT_UP_TOOL]
         })
@@ -1814,7 +1815,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       )
       const removedTool = findTool(harness.registry, "mcp__alpha__fail")
       const renamedTool = findTool(harness.registry, "mcp__alpha__look_up")
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", {
           tools: [ECHO_TOOL, LOOK_UNDERSCORE_UP_TOOL]
         })
@@ -1856,7 +1857,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("reports a call that failed before a result, and tells the model why", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", {
           tools: [ECHO_TOOL, REFUSE_TOOL]
         })
@@ -1894,7 +1895,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     it("reports a call that failed in a way Lys cannot tell apart with what was thrown", async () => {
       const thrown = new RangeError("The connection has a defect.")
       const harness = createRegistryHarness()
-      harness.setServers([buildFakeStdioServerSettings("alpha")])
+      harness.updateReadServers([buildFakeStdioServerSettings("alpha")])
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
@@ -1928,7 +1929,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("rejects a call only once its signal aborted, and tells the server it was cancelled", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", { tools: [ECHO_TOOL, SLOW_TOOL] })
       ])
       await harness.registry.updateServers()
@@ -1966,7 +1967,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
   describe("switches and built-in servers", () => {
     it("lists a switched-off added server as off, opens nothing for it, offers none of its tools, and answers not-connected for them", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([
+      harness.updateReadServers([
         buildSwitchedOffSettings(buildFakeStdioServerSettings("alpha")),
         buildFakeStdioServerSettings("beta")
       ])
@@ -2004,13 +2005,13 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     it("stops a connected server's session when it is switched off, reporting it, and opens it again once it is switched on", async () => {
       const harness = createRegistryHarness()
       const alpha = buildFakeStdioServerSettings("alpha")
-      harness.setServers([alpha])
+      harness.updateReadServers([alpha])
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
         buildList([buildStdioStatus("alpha", buildConnectedState(1))])
       )
-      harness.setServers([buildSwitchedOffSettings(alpha)])
+      harness.updateReadServers([buildSwitchedOffSettings(alpha)])
 
       await harness.registry.updateServers()
 
@@ -2023,7 +2024,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       expect(filterEvents(harness.events, "server-stopped")).toEqual([
         { kind: "server-stopped", serverName: "alpha", reason: "switched-off" }
       ])
-      harness.setServers([alpha])
+      harness.updateReadServers([alpha])
       await harness.registry.updateServers()
       expect(harness.registry.listServers()).toEqual(
         buildList([buildStdioStatus("alpha", CONNECTING)])
@@ -2037,7 +2038,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("reports a stopped session as removed when the settings no longer name its server, and as changed when they change it", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha"),
         buildFakeStdioServerSettings("beta")
       ])
@@ -2049,7 +2050,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
           buildStdioStatus("beta", buildConnectedState(1))
         ])
       )
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("beta", { tools: [ECHO_TOOL, FAIL_TOOL] })
       ])
 
@@ -2070,7 +2071,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const harness = createRegistryHarness({
         builtInServers: [builtIn.server]
       })
-      harness.setServers([buildFakeStdioServerSettings("alpha")])
+      harness.updateReadServers([buildFakeStdioServerSettings("alpha")])
 
       await harness.registry.updateServers()
 
@@ -2102,7 +2103,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const harness = createRegistryHarness({
         builtInServers: [builtIn.server]
       })
-      harness.setServers([], EMAIL_ON)
+      harness.updateReadServers([], EMAIL_ON)
 
       await harness.registry.updateServers()
 
@@ -2135,13 +2136,13 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const harness = createRegistryHarness({
         builtInServers: [builtIn.server]
       })
-      harness.setServers([], EMAIL_ON)
+      harness.updateReadServers([], EMAIL_ON)
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
         buildList([buildEmailStatus(buildConnectedState(1))])
       )
-      builtIn.setRead(
+      builtIn.updateRead(
         buildBuiltInRead(
           buildFakeStdioServerSettings("email", {
             tools: [ECHO_TOOL, FAIL_TOOL]
@@ -2166,7 +2167,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const harness = createRegistryHarness({
         builtInServers: [builtIn.server]
       })
-      harness.setServers([], EMAIL_ON)
+      harness.updateReadServers([], EMAIL_ON)
 
       await harness.registry.updateServers()
       await harness.registry.updateServers()
@@ -2186,13 +2187,15 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
           reason: "account-missing"
         }
       ])
-      builtIn.setRead(buildBuiltInRead(buildFakeStdioServerSettings("email")))
+      builtIn.updateRead(
+        buildBuiltInRead(buildFakeStdioServerSettings("email"))
+      )
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
         buildList([buildEmailStatus(buildConnectedState(1))])
       )
-      builtIn.setRead({ status: "account-invalid" })
+      builtIn.updateRead({ status: "account-invalid" })
       await harness.registry.updateServers()
       expect(harness.registry.listServers()).toEqual(
         buildList([buildEmailStatus(buildFailedState("account-invalid"))])
@@ -2221,7 +2224,10 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const harness = createRegistryHarness({
         builtInServers: [builtIn.server]
       })
-      harness.setServers([buildFakeStdioServerSettings("alpha")], EMAIL_ON)
+      harness.updateReadServers(
+        [buildFakeStdioServerSettings("alpha")],
+        EMAIL_ON
+      )
 
       await expect(harness.registry.updateServers()).rejects.toBe(failure)
 
@@ -2242,7 +2248,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const harness = createRegistryHarness({
         builtInServers: [builtIn.server]
       })
-      harness.setServers(
+      harness.updateReadServers(
         [
           buildFakeStdioServerSettings("email", {
             tools: [ECHO_TOOL, FAIL_TOOL]
@@ -2265,7 +2271,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         harness.registry,
         buildList([buildStdioStatus("email", buildConnectedState(2))])
       )
-      harness.setServers([], EMAIL_ON)
+      harness.updateReadServers([], EMAIL_ON)
       await harness.registry.updateServers()
       expect(filterEvents(harness.events, "server-stopped")).toEqual([
         { kind: "server-stopped", serverName: "email", reason: "removed" }
@@ -2282,12 +2288,12 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const harness = createRegistryHarness({
         builtInServers: [builtIn.server]
       })
-      harness.setServers([])
+      harness.updateReadServers([])
       await harness.registry.updateServers()
       expect(harness.registry.listServers()).toEqual(
         buildList([buildEmailStatus(OFF)])
       )
-      harness.setServers([buildFakeStdioServerSettings("email")])
+      harness.updateReadServers([buildFakeStdioServerSettings("email")])
 
       await harness.registry.updateServers()
 
@@ -2308,13 +2314,16 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const harness = createRegistryHarness({
         builtInServers: [builtIn.server]
       })
-      harness.setServers([], EMAIL_ON)
+      harness.updateReadServers([], EMAIL_ON)
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
         buildList([buildEmailStatus(buildConnectedState(1))])
       )
-      harness.setServers([buildFakeStdioServerSettings("email")], EMAIL_ON)
+      harness.updateReadServers(
+        [buildFakeStdioServerSettings("email")],
+        EMAIL_ON
+      )
 
       await harness.registry.updateServers()
 
@@ -2339,13 +2348,16 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const harness = createRegistryHarness({
         builtInServers: [builtIn.server]
       })
-      harness.setServers([buildFakeStdioServerSettings("email")], EMAIL_ON)
+      harness.updateReadServers(
+        [buildFakeStdioServerSettings("email")],
+        EMAIL_ON
+      )
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
         buildList([buildStdioStatus("email", buildConnectedState(1))])
       )
-      harness.setServers([], EMAIL_ON)
+      harness.updateReadServers([], EMAIL_ON)
 
       await harness.registry.updateServers()
 
@@ -2367,7 +2379,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       const alpha = buildFakeStdioServerSettings("alpha", {
         tools: [ECHO_TOOL, SLOW_TOOL]
       })
-      harness.setServers([alpha])
+      harness.updateReadServers([alpha])
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
@@ -2378,7 +2390,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         NEVER_ABORTED
       )
       await waitForMicrotasks()
-      harness.setServers([buildSwitchedOffSettings(alpha)])
+      harness.updateReadServers([buildSwitchedOffSettings(alpha)])
       await harness.registry.updateServers()
 
       const outcome = await call
@@ -2407,7 +2419,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       )
       const harness = createRegistryHarness()
       const remote = buildHttpServerSettings("remote", server.url)
-      harness.setServers([remote])
+      harness.updateReadServers([remote])
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
@@ -2422,7 +2434,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
           server.receivedRequests.map((request) => request.rpcMethod)
         ).toContain("tools/call")
       }, STATE_WAIT)
-      harness.setServers([buildSwitchedOffSettings(remote)])
+      harness.updateReadServers([buildSwitchedOffSettings(remote)])
 
       await harness.registry.updateServers()
       const outcome = await call
@@ -2459,14 +2471,14 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
   describe("close", () => {
     it("closes every connection, cancels every opening, and forgets every server", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([buildFakeStdioServerSettings("alpha")])
+      harness.updateReadServers([buildFakeStdioServerSettings("alpha")])
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
         buildList([buildStdioStatus("alpha", buildConnectedState(1))])
       )
-      harness.holdOpenings()
-      harness.setServers([
+      harness.startOpeningHold()
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha"),
         buildFakeStdioServerSettings("beta")
       ])
@@ -2508,7 +2520,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
           return opening
         }
       })
-      harness.setServers([buildFakeStdioServerSettings("alpha")])
+      harness.updateReadServers([buildFakeStdioServerSettings("alpha")])
       await harness.registry.updateServers()
 
       const closing = harness.registry.close()
@@ -2566,7 +2578,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("does nothing once closed, and closing again settles too", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([buildFakeStdioServerSettings("alpha")])
+      harness.updateReadServers([buildFakeStdioServerSettings("alpha")])
 
       await harness.registry.close()
       await harness.registry.updateServers()
@@ -2580,7 +2592,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("tells the model Lys was shutting down when closing stops a session while a call runs", async () => {
       const harness = createRegistryHarness()
-      harness.setServers([
+      harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", { tools: [ECHO_TOOL, SLOW_TOOL] })
       ])
       await harness.registry.updateServers()

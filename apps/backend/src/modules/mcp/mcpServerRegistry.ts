@@ -292,7 +292,9 @@ export default class McpServerRegistry {
    * {@link close}, it reads nothing.
    */
   public updateServers(): Promise<void> {
-    const applying = this.#settingsReads.then(() => this.#readAndApply())
+    const applying = this.#settingsReads.then(() =>
+      this.#updateServersFromSettings()
+    )
     this.#settingsReads = Promise.allSettled([applying])
     return applying
   }
@@ -438,13 +440,13 @@ export default class McpServerRegistry {
   }
 
   /**
-   * Reads the settings group, and what each built-in server it switches on
-   * needs, and applies what they hold.
+   * Updates the servers from a new read of the settings group and of what
+   * each built-in server it switches on needs.
    *
    * @returns A promise that settles once the read was applied.
    * @throws Only when closing the settings file fails.
    */
-  async #readAndApply(): Promise<void> {
+  async #updateServersFromSettings(): Promise<void> {
     if (this.#isClosed) return
     const read = await this.#dependencies.readSettings()
     if (this.#isClosed) return
@@ -508,7 +510,7 @@ export default class McpServerRegistry {
       this.#entries.set(
         server.name,
         keptEntries.get(server.name) ??
-          this.#startServer(server, previousEntries.get(server.name))
+          this.#createServerEntry(server, previousEntries.get(server.name))
       )
     const newlyTakenNames = listNewlyTakenBuiltInNames(
       previousEntries,
@@ -532,7 +534,7 @@ export default class McpServerRegistry {
   #stopDroppedEntry(entry: ServerEntry, server: ServerPlan | undefined): void {
     switch (entry.run.status) {
       case "running": {
-        const reason = findStopReason(entry, server)
+        const reason = calculateStopReason(entry, server)
         this.#stopSession(entry.run.session, reason)
         this.#dependencies.reportEvent({
           kind: "server-stopped",
@@ -554,7 +556,9 @@ export default class McpServerRegistry {
   }
 
   /**
-   * Starts, switches off, or reports one planned server.
+   * Creates one planned server's new entry: running a new session when
+   * the plan starts it, off when the plan switches it off, and unusable,
+   * which is reported, when it cannot start.
    *
    * @param server - The plan.
    * @param previousEntry - The server's entry before the apply, if any.
@@ -562,7 +566,7 @@ export default class McpServerRegistry {
    * @remarks A built-in server that cannot start is reported once per
    * reason: not again while a later apply finds the same reason.
    */
-  #startServer(
+  #createServerEntry(
     server: ServerPlan,
     previousEntry: ServerEntry | undefined
   ): ServerEntry {
@@ -936,7 +940,7 @@ function listNewlyTakenBuiltInNames(
 }
 
 /**
- * Finds why a running server's session is stopped by an apply.
+ * Calculates why a running server's session is stopped by an apply.
  *
  * @param entry - The running server.
  * @param server - Its plan from the group just read, if the group names
@@ -946,7 +950,7 @@ function listNewlyTakenBuiltInNames(
  * it off; `changed` when it is to start with other settings, or is a
  * built-in server that cannot start any more.
  */
-function findStopReason(
+function calculateStopReason(
   entry: ServerEntry,
   server: ServerPlan | undefined
 ): StopReason {

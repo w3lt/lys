@@ -79,7 +79,7 @@ function createLogReporters() {
     lmStudioSdk,
     reportMcpServerEvent: vi.fn(),
     reportMcpProcessGroupsSaveFailure: vi.fn(),
-    reportEmailAccountCheckEvent: vi.fn()
+    sendEmailAccountCheckEvent: vi.fn()
   } satisfies SingletonLogReporters
 }
 
@@ -105,14 +105,14 @@ function createAcquisition<Service>(
 }
 
 /**
- * Records each close of a tool service the bundle created, then lets the
- * close go on.
+ * Updates a tool service the bundle created so that each of its closes is
+ * logged under `name` before the close goes on.
  *
  * @param service - Service whose close is recorded.
  * @param name - Name recorded when the close starts.
  * @param closeLog - Shared log of cleanup calls in call order.
  */
-function recordServiceClose(
+function updateServiceClose(
   service: Readonly<{ close: () => Promise<void> }>,
   name: ClosedServiceName,
   closeLog: ClosedServiceName[]
@@ -661,12 +661,12 @@ describe("closeSingletonServices", () => {
 
   it("closes the email account checker, then the MCP server registry, before every acquisition", async () => {
     const { services, closeLog } = await createRecordedServices()
-    recordServiceClose(
+    updateServiceClose(
       services.emailAccountChecker,
       "email-account-checker",
       closeLog
     )
-    recordServiceClose(
+    updateServiceClose(
       services.mcpServerRegistry,
       "mcp-server-registry",
       closeLog

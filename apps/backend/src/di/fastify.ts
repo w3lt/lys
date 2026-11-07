@@ -19,11 +19,11 @@ type SingletonServicePluginOptions = {
 }
 
 /**
- * Installs application-scoped services and connects their disposal to Fastify shutdown.
+ * Opens the application-scoped services and connects their disposal to Fastify shutdown.
  *
  * @param app - Fastify application that receives the service decorations and close hook.
  * @param options - Configuration used to construct the singleton services.
- * @returns A promise that resolves after the services and shutdown hook are installed.
+ * @returns A promise that resolves after the services are open and the shutdown hook is registered.
  * @throws If service construction or Fastify decoration and hook registration fails.
  * @remarks The services are exposed as Fastify decorations and disposed when
  * Fastify closes. After the HTTP listener opens, an `onListen` hook performs
@@ -38,7 +38,7 @@ type SingletonServicePluginOptions = {
  * failures to save their process groups file are logged through the
  * application's logger.
  */
-const singletonPlugin: FastifyPluginAsync<
+const openSingletonServices: FastifyPluginAsync<
   SingletonServicePluginOptions
 > = async (app, { config }) => {
   const llmRuntime: LlmRuntimeFailureReporters = {
@@ -76,7 +76,7 @@ const singletonPlugin: FastifyPluginAsync<
         "The MCP servers' process groups file could not be saved; if the backend is killed, the desktop may not end every MCP server"
       )
     },
-    reportEmailAccountCheckEvent: (event) => {
+    sendEmailAccountCheckEvent: (event) => {
       handleEmailAccountCheckEvent(app.log, event)
     }
   })
@@ -134,6 +134,6 @@ function registerSingletonServices(
 }
 
 /** Fastify plugin that installs application-scoped singleton services. */
-export default fastifyPlugin(singletonPlugin, {
+export default fastifyPlugin(openSingletonServices, {
   name: "singleton-services"
 })

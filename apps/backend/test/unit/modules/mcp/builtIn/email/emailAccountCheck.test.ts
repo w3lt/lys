@@ -98,7 +98,7 @@ function createChecker(setup: CheckerSetup = {}) {
     workingDirectory: setup.workingDirectory ?? tmpdir(),
     timeoutMilliseconds:
       setup.timeoutMilliseconds ?? CHECK_TIMEOUT_MILLISECONDS,
-    reportEvent: (event) => events.push(event)
+    sendEvent: (event) => events.push(event)
   })
   onTestFinished(async () => {
     await checker.close()

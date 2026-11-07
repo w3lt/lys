@@ -133,7 +133,7 @@ export type EmailAccountCheckerDependencies = Readonly<{
   /** Longest one check may run before its process is killed. */
   timeoutMilliseconds: number
   /** Receives every {@link EmailAccountCheckEvent}. */
-  reportEvent: (event: EmailAccountCheckEvent) => void
+  sendEvent: (event: EmailAccountCheckEvent) => void
 }>
 
 /** How one run of the check subcommand ended. */
@@ -314,7 +314,7 @@ export default class EmailAccountChecker {
    * @returns The `busy` answer.
    */
   #handleBusyCheck(): CheckEmailAccountApiResponse {
-    this.#dependencies.reportEvent({ kind: "busy" })
+    this.#dependencies.sendEvent({ kind: "busy" })
     return BUSY
   }
 
@@ -327,7 +327,7 @@ export default class EmailAccountChecker {
    */
   #handleStartFailure(error: Error): CheckEmailAccountApiResponse {
     if (isMissingExecutable(error)) {
-      this.#dependencies.reportEvent({ kind: "server-missing" })
+      this.#dependencies.sendEvent({ kind: "server-missing" })
       return SERVER_MISSING
     }
     return this.#handleFailedRun(Object.freeze({ kind: "start-failed", error }))
@@ -360,7 +360,7 @@ export default class EmailAccountChecker {
       return this.#handleFailedRun(
         Object.freeze({ kind: "unreadable-output", errorLines: run.errorLines })
       )
-    this.#dependencies.reportEvent({
+    this.#dependencies.sendEvent({
       kind: "checked",
       imap: report.imap,
       smtp: report.smtp,
@@ -383,7 +383,7 @@ export default class EmailAccountChecker {
   #handleFailedRun(
     failure: EmailServerRunFailure
   ): CheckEmailAccountApiResponse {
-    this.#dependencies.reportEvent({ kind: "server-failed", failure })
+    this.#dependencies.sendEvent({ kind: "server-failed", failure })
     return SERVER_FAILED
   }
 }

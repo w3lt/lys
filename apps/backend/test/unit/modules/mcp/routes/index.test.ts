@@ -241,7 +241,7 @@ async function createMcpRouteApp(
     serverCommand: emailServerCommand,
     workingDirectory,
     timeoutMilliseconds: CHECK_TIMEOUT_MILLISECONDS,
-    reportEvent: (event) => checkEvents.push(event)
+    sendEvent: (event) => checkEvents.push(event)
   })
   onTestFinished(async () => {
     await checker.close()

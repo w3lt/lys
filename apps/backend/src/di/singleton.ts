@@ -122,7 +122,7 @@ export type SingletonLogReporters = Readonly<{
    * Receives the outcome of each email account check and why a check did
    * not report, without the account or the password.
    */
-  reportEmailAccountCheckEvent: (event: EmailAccountCheckEvent) => void
+  sendEmailAccountCheckEvent: (event: EmailAccountCheckEvent) => void
 }>
 
 /** Production factories used when the composition root supplies no substitutes. */
@@ -439,7 +439,7 @@ function createToolServices(
     | "pageRendering"
     | "reportMcpServerEvent"
     | "reportMcpProcessGroupsSaveFailure"
-    | "reportEmailAccountCheckEvent"
+    | "sendEmailAccountCheckEvent"
   >
 ): ToolServices {
   const webSearchToolProvider = new WebSearchToolProvider(
@@ -477,7 +477,7 @@ function createToolServices(
     serverCommand: emailServerCommand,
     workingDirectory: mcpWorkingDirectory,
     timeoutMilliseconds: EMAIL_ACCOUNT_CHECK_TIMEOUT_MILLISECONDS,
-    reportEvent: logReporters.reportEmailAccountCheckEvent
+    sendEvent: logReporters.sendEmailAccountCheckEvent
   })
   return {
     builtInTools,

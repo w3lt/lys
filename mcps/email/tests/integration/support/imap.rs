@@ -1401,6 +1401,19 @@ fn build_header_subset(bytes: &[u8], names: &[String]) -> Vec<u8> {
 }
 
 /// Searches the folder with the keys, answering UIDs in ascending order.
+///
+/// # Arguments
+///
+/// * `folder` - The folder to search.
+/// * `keys` - The SEARCH command's arguments: the keys, after a `CHARSET`
+///   and its name when they begin with one.
+///
+/// # Returns
+///
+/// The UIDs of the messages that match every key, or, as the text of the
+/// fake's `BAD` answer, why the keys cannot be read: an `OR` or a `NOT`
+/// without the keys it takes, a key without its argument, a date that
+/// does not parse, or a key the fake does not know.
 fn list_search_matches(folder: &FakeFolder, keys: &[String]) -> Result<Vec<u32>, String> {
     let start = if keys
         .first()
@@ -1436,7 +1449,15 @@ struct SearchKeys<'a> {
 }
 
 impl SearchKeys<'_> {
-    /// Reads the next key's argument, advancing past it.
+    /// Reads the argument after a key, advancing past it.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key the argument belongs to, for the failure's text.
+    ///
+    /// # Returns
+    ///
+    /// The argument, or `<key> needs an argument` when the keys end first.
     fn read_argument(&mut self, key: &str) -> Result<String, String> {
         let value = self
             .keys
@@ -1449,6 +1470,18 @@ impl SearchKeys<'_> {
 
     /// Calculates whether the message matches the next search key,
     /// advancing past the key and its arguments.
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - The message to match.
+    /// * `folder` - Its folder, whose highest UID a `*` in a UID set means.
+    ///
+    /// # Returns
+    ///
+    /// Whether it matches, or why the keys cannot be read: `a key is
+    /// missing` when no key is left, as after an `OR` or a `NOT` without
+    /// the keys it takes, `<key> needs an argument`, `a bad date` for a
+    /// date that does not parse, or `unknown search key <key>`.
     fn calculate_next_match(
         &mut self,
         message: &FakeMessage,
@@ -1485,14 +1518,18 @@ impl SearchKeys<'_> {
     /// Calculates whether the message matches a key that searches its text,
     /// `TEXT`, `BODY`, `HEADER`, or a header field such as `SUBJECT`,
     /// advancing past the key's arguments. Letter case is ignored.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key, in capitals.
+    /// * `message` - The message to match.
+    ///
+    /// # Returns
+    ///
+    /// Whether it matches, or `<key> needs an argument` when the keys end
+    /// before the key's arguments do.
     fn calculate_text_match(&mut self, key: &str, message: &FakeMessage) -> Result<bool, String> {
         let fields = parse_header_fields(&message.bytes);
-        let field_contains = |name: &str, needle: &str| {
-            fields
-                .iter()
-                .filter(|(field, _)| field == name)
-                .any(|(_, value)| value.to_lowercase().contains(&needle.to_lowercase()))
-        };
         Ok(match key {
             "TEXT" => {
                 let needle = self.read_argument(key)?.to_lowercase();
@@ -1510,14 +1547,29 @@ impl SearchKeys<'_> {
             "HEADER" => {
                 let name = self.read_argument(key)?.to_ascii_lowercase();
                 let needle = self.read_argument(key)?;
-                field_contains(&name, &needle)
+                has_field_containing(&fields, &name, &needle)
             }
             _ => {
                 let needle = self.read_argument(key)?;
-                field_contains(&key.to_ascii_lowercase(), &needle)
+                has_field_containing(&fields, &key.to_ascii_lowercase(), &needle)
             }
         })
     }
+}
+
+/// Whether a header field of the name holds the text, in any letter case.
+///
+/// # Arguments
+///
+/// * `fields` - A message's header fields, from [`parse_header_fields`].
+/// * `name` - The field's name, in lower case.
+/// * `needle` - The text to find.
+fn has_field_containing(fields: &[(String, String)], name: &str, needle: &str) -> bool {
+    let needle = needle.to_lowercase();
+    fields
+        .iter()
+        .filter(|(field, _)| field == name)
+        .any(|(_, value)| value.to_lowercase().contains(&needle))
 }
 
 /// Calculates whether the message matches `ALL` or a key that tests a flag,

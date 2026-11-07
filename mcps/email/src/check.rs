@@ -70,6 +70,19 @@ pub async fn offer_account_sign_ins(account: &Account, trust: &Trust) -> CheckRe
 /// Signs in to the IMAP server and logs out, both within [`CHECK_LIMIT`].
 /// Once the server accepted the sign-in, a LOGOUT that does not finish in
 /// time is logged, and the sign-in is still accepted.
+///
+/// # Arguments
+///
+/// * `account` - The account to check.
+/// * `trust` - Which server certificates are accepted.
+///
+/// # Returns
+///
+/// Nothing once the server accepted the sign-in; otherwise the reason
+/// [`open_imap_session`] gives (`Unreachable`, `CertificateRefused`,
+/// `EncryptionNotOffered`, `WrongPassword`, `TimedOut`, or
+/// `ProtocolError`), or `TimedOut` when the sign-in does not finish
+/// within the limit.
 async fn offer_imap_sign_in(account: &Account, trust: &Trust) -> Result<(), SignInFailure> {
     let deadline = Instant::now() + CHECK_LIMIT;
     let session = timeout_at(deadline, open_imap_session(account, trust))
@@ -84,6 +97,19 @@ async fn offer_imap_sign_in(account: &Account, trust: &Trust) -> Result<(), Sign
 /// Signs in to the SMTP server and says QUIT, both within [`CHECK_LIMIT`].
 /// Once the server accepted the sign-in, a QUIT that fails or does not
 /// finish in time is logged, and the sign-in is still accepted.
+///
+/// # Arguments
+///
+/// * `account` - The account to check.
+/// * `trust` - Which server certificates are accepted.
+///
+/// # Returns
+///
+/// Nothing once the server accepted the sign-in; otherwise the reason
+/// [`open_smtp_session`] gives (`Unreachable`, `CertificateRefused`,
+/// `EncryptionNotOffered`, `WrongPassword`, `TimedOut`, or
+/// `ProtocolError`), or `TimedOut` when the sign-in does not finish
+/// within the limit.
 async fn offer_smtp_sign_in(account: &Account, trust: &Trust) -> Result<(), SignInFailure> {
     let deadline = Instant::now() + CHECK_LIMIT;
     let session = timeout_at(deadline, open_smtp_session(account, trust))

@@ -187,6 +187,11 @@ fn build_imap_tool_failure(operation: &'static str, failure: ImapFailure) -> Too
 /// # Arguments
 ///
 /// * `session` - The signed-in session.
+///
+/// # Returns
+///
+/// The folders, or why the listing failed: the server's refusal
+/// (`ImapRefused`) or a failure of the IMAP connection (`Connection`).
 pub async fn load_folders(session: &mut ImapSession) -> Result<Vec<Folder>, ToolFailure> {
     let listings = session
         .list_folders()
@@ -247,8 +252,11 @@ pub fn get_changeable_folder<'a>(
 ///
 /// # Returns
 ///
-/// Nothing when the folder is open at the id, or `StaleId` when the
-/// folder is gone, cannot be opened, or its UIDVALIDITY changed.
+/// Nothing when the folder is open at the id; otherwise `StaleId` when no
+/// folder has the id's folder name any more, the folder cannot hold
+/// messages, or its UIDVALIDITY changed; the server's refusal of the
+/// EXAMINE (`ImapRefused`); or a failure of the IMAP connection
+/// (`Connection`).
 pub async fn open_id_folder(
     session: &mut ImapSession,
     folders: &[Folder],

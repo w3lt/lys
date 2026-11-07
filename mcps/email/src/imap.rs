@@ -323,6 +323,17 @@ pub async fn open_imap_session(
 }
 
 /// Reads the server's greeting within [`EXCHANGE_LIMIT`].
+///
+/// # Arguments
+///
+/// * `client` - The connection's client, before its first response.
+///
+/// # Returns
+///
+/// Nothing once the server's first response came; otherwise `TimedOut`
+/// when it did not come within the limit or the operating system timed
+/// the connection out, and `ProtocolError` when the connection ended,
+/// failed, or brought something that is not IMAP first.
 async fn read_greeting<T: AsyncStream>(client: &mut Client<T>) -> Result<(), SignInFailure> {
     match timeout(EXCHANGE_LIMIT, client.read_response()).await {
         Ok(Ok(Some(_))) => Ok(()),
@@ -332,7 +343,19 @@ async fn read_greeting<T: AsyncStream>(client: &mut Client<T>) -> Result<(), Sig
     }
 }
 
-/// Asks the server to start TLS; a refusal means it is not offered.
+/// Asks the server to start TLS, within [`EXCHANGE_LIMIT`].
+///
+/// # Arguments
+///
+/// * `client` - The client of the TCP connection, once it was greeted.
+///
+/// # Returns
+///
+/// Nothing once the server agreed; otherwise `EncryptionNotOffered` when
+/// it refused (`NO` or `BAD`), as a refusal means it does not offer TLS;
+/// `TimedOut` when it did not answer within the limit or the operating
+/// system timed the connection out; and `ProtocolError` when the
+/// connection ended or failed, or the answer could not be read.
 async fn start_tls(client: &mut Client<TcpStream>) -> Result<(), SignInFailure> {
     match timeout(
         EXCHANGE_LIMIT,
@@ -423,7 +446,12 @@ impl ImapSession {
     ///
     /// # Returns
     ///
-    /// The matching UIDs, highest first.
+    /// The matching UIDs, highest first, or why the search failed: the
+    /// server's code and text for `NO` or `BAD`, an unreadable answer for
+    /// another tagged status, a lost connection when it ends, fails, or
+    /// brings something that is not IMAP, an `OK` before the server asked
+    /// for a text's literal, the time limit, or, when an earlier command
+    /// ended the session, that command's failure.
     pub async fn list_matching_uids(
         &mut self,
         words: &[SearchWord],
@@ -448,6 +476,15 @@ impl ImapSession {
     ///
     /// * `uids` - The messages' UIDs; a UID that no longer exists is left
     ///   out of the answer.
+    ///
+    /// # Returns
+    ///
+    /// The summaries, none without a command when no UID is given; or why
+    /// the fetch failed: the server's code and text for `NO` or `BAD`, an
+    /// unreadable answer for another tagged status, a lost connection when
+    /// it ends, fails, or brings something that is not IMAP, the time
+    /// limit, or, when an earlier command ended the session, that command's
+    /// failure.
     pub async fn list_summaries(&mut self, uids: &[u32]) -> Result<Vec<Summary>, ImapFailure> {
         if uids.is_empty() {
             return Ok(Vec::new());
@@ -465,7 +502,12 @@ impl ImapSession {
     ///
     /// # Returns
     ///
-    /// The message, or `None` when no message has the UID any more.
+    /// The message, or `None` when no message has the UID any more; or why
+    /// the fetch failed: the server's code and text for `NO` or `BAD`, an
+    /// unreadable answer for another tagged status, a lost connection when
+    /// it ends, fails, or brings something that is not IMAP, the time
+    /// limit, or, when an earlier command ended the session, that command's
+    /// failure.
     pub async fn find_message(&mut self, uid: u32) -> Result<Option<FetchedMessage>, ImapFailure> {
         let command = format!("UID FETCH {uid} {MESSAGE_QUERY}");
         let messages = self.send_command(&command, find_fetched_message).await?;
@@ -548,6 +590,16 @@ impl ImapSession {
     /// # Arguments
     ///
     /// * `raw_name` - The new folder's name as the server expects it.
+    ///
+    /// # Returns
+    ///
+    /// Nothing once the server created the folder; otherwise an unreadable
+    /// answer, with nothing sent, for a name with a line break, or why the
+    /// command failed: the server's code and text for `NO` or `BAD`, an
+    /// unreadable answer for another tagged status, a lost connection when
+    /// it ends, fails, or brings something that is not IMAP, the time
+    /// limit, or, when an earlier command ended the session, that command's
+    /// failure.
     pub async fn create_folder(&mut self, raw_name: &str) -> Result<(), ImapFailure> {
         let command = format!("CREATE {}", build_quoted_folder_name(raw_name)?);
         self.run_status_command(&command).await
@@ -558,6 +610,16 @@ impl ImapSession {
     /// # Arguments
     ///
     /// * `raw_name` - The folder's name as the server wrote it.
+    ///
+    /// # Returns
+    ///
+    /// Nothing once the server deleted the folder; otherwise an unreadable
+    /// answer, with nothing sent, for a name with a line break, or why the
+    /// command failed: the server's code and text for `NO` or `BAD`, an
+    /// unreadable answer for another tagged status, a lost connection when
+    /// it ends, fails, or brings something that is not IMAP, the time
+    /// limit, or, when an earlier command ended the session, that command's
+    /// failure.
     pub async fn delete_folder(&mut self, raw_name: &str) -> Result<(), ImapFailure> {
         let command = format!("DELETE {}", build_quoted_folder_name(raw_name)?);
         self.run_status_command(&command).await
@@ -569,6 +631,16 @@ impl ImapSession {
     ///
     /// * `raw_name` - The folder's name as the server wrote it.
     /// * `new_raw_name` - The new name as the server expects it.
+    ///
+    /// # Returns
+    ///
+    /// Nothing once the server renamed the folder; otherwise an unreadable
+    /// answer, with nothing sent, when either name has a line break, or why
+    /// the command failed: the server's code and text for `NO` or `BAD`, an
+    /// unreadable answer for another tagged status, a lost connection when
+    /// it ends, fails, or brings something that is not IMAP, the time
+    /// limit, or, when an earlier command ended the session, that command's
+    /// failure.
     pub async fn update_folder_name(
         &mut self,
         raw_name: &str,
@@ -598,6 +670,14 @@ impl ImapSession {
 
     /// Asks the server once whether it supports UIDPLUS; an answer that
     /// does not list it, in any letter case, means it does not.
+    ///
+    /// # Returns
+    ///
+    /// Whether it does, or why CAPABILITY failed: the server's code and
+    /// text for `NO` or `BAD`, an unreadable answer for another tagged
+    /// status, a lost connection when it ends, fails, or brings something
+    /// that is not IMAP, the time limit, or, when an earlier command ended
+    /// the session, that command's failure.
     async fn find_uid_plus(&mut self) -> Result<bool, ImapFailure> {
         if let Some(supported) = self.supports_uid_plus {
             return Ok(supported);
@@ -623,8 +703,11 @@ impl ImapSession {
     /// # Returns
     ///
     /// The answers in the server's order, or why the command failed: the
-    /// server's code and text for `NO` or `BAD`, an ended connection, an
-    /// answer that is not IMAP, or the time limit.
+    /// server's code and text for `NO` or `BAD`, an unreadable answer for
+    /// another tagged status, a lost connection when it ends, fails, or
+    /// brings something that is not IMAP, or the time limit; and, once a
+    /// command ended the session, that command's failure, with nothing
+    /// sent.
     async fn send_command<T>(
         &mut self,
         command: &str,
@@ -643,6 +726,14 @@ impl ImapSession {
     /// # Arguments
     ///
     /// * `command` - The command, without its tag.
+    ///
+    /// # Returns
+    ///
+    /// Nothing once the server answered `OK`, or why the command failed:
+    /// the server's code and text for `NO` or `BAD`, an unreadable answer
+    /// for another tagged status, a lost connection when it ends, fails, or
+    /// brings something that is not IMAP, the time limit, or, when an
+    /// earlier command ended the session, that command's failure.
     async fn run_status_command(&mut self, command: &str) -> Result<(), ImapFailure> {
         self.send_command(command, |_| None::<()>).await.map(drop)
     }
@@ -796,6 +887,14 @@ async fn read_continuation(
 /// * `tag` - The command's tag.
 /// * `find_answer` - Finds the answer the command asked for in an untagged
 ///   response.
+///
+/// # Returns
+///
+/// The answers in the server's order once the tagged status is `OK`;
+/// otherwise the server's code and text for `NO` or `BAD`, an unreadable
+/// answer for any other tagged status, or a lost connection when the
+/// connection ends, fails, or brings a response that is not IMAP before
+/// the tagged status.
 async fn read_tagged_answers<T>(
     session: &mut Session<Stream>,
     tag: &RequestId,

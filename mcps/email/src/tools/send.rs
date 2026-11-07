@@ -106,6 +106,23 @@ impl SentCopy {
 /// * `arguments` - The message.
 /// * `progress` - Records how far the send came, for the caller that may
 ///   stop the call.
+///
+/// # Returns
+///
+/// The report of the sent message, with what became of its Sent copy,
+/// which never fails the call; otherwise why nothing was sent, or may
+/// have been: `Argument` for a field that breaks a rule, a reply or a
+/// forward without its own recipients or subject, or a message that
+/// cannot be built from the fields, such as one without a recipient;
+/// `InvalidId` for a `reply_to_id` or `forward_id` that is not one a tool
+/// gives; `StaleId` when that id no longer names a message; `SignIn` when
+/// signing in to the SMTP server failed, or to the IMAP server for a reply
+/// or a forward; the IMAP server's refusal (`ImapRefused`) or a failure of
+/// either connection (`Connection`); `SmtpRefused` when the SMTP server
+/// refused the sender, a recipient, or the message;
+/// `SmtpExtensionMissing` when the message needs an extension the server
+/// does not offer; and `SendUnconfirmed` when the server did not confirm
+/// the message it was handed.
 pub async fn run_send_email(
     context: &ToolContext,
     arguments: MessageArguments,
@@ -413,6 +430,20 @@ async fn offer_sent_copy(
 }
 
 /// Appends the copy to the Sent folder.
+///
+/// # Arguments
+///
+/// * `context` - The account and trust.
+/// * `session` - The IMAP session, opened here when none is open yet.
+/// * `bytes` - The message as sent.
+///
+/// # Returns
+///
+/// What became of the copy, as [`save_copy_in_sent`] says; otherwise
+/// `SignIn` when signing in to the IMAP server failed; the server's
+/// refusal of the listing or of the copy (`ImapRefused`); or a failure of
+/// the IMAP connection (`Connection`) during the listing or before all of
+/// the copy was sent.
 async fn save_sent_copy(
     context: &ToolContext,
     session: &mut Option<ImapSession>,

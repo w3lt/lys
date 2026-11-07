@@ -247,6 +247,21 @@ pub(crate) async fn open_smtp_session(
 
 /// Opens the TCP connection, with a TLS stream over it when the account
 /// protects the server from the first byte.
+///
+/// # Arguments
+///
+/// * `server` - The host, the port, and how the connection is protected.
+/// * `trust` - Which certificates are accepted.
+///
+/// # Returns
+///
+/// The stream; otherwise `Unreachable` when the host is unknown, the
+/// connection is refused, or it is not opened within 15 seconds, and, for
+/// TLS from the first byte, `CertificateRefused` when the certificate is
+/// refused, `TimedOut` when the handshake does not end within 15 seconds
+/// or the operating system timed the connection out, and `ProtocolError`
+/// for any other failure, such as a TLS configuration that cannot be
+/// built, which is logged, or a server that answers without TLS.
 async fn open_smtp_stream(
     server: &MailServer,
     trust: &Trust,
@@ -261,6 +276,18 @@ async fn open_smtp_stream(
 }
 
 /// Reads the server's greeting and says EHLO, within [`EXCHANGE_LIMIT`].
+///
+/// # Arguments
+///
+/// * `stream` - The open stream, over TCP or TLS from the first byte.
+///
+/// # Returns
+///
+/// The connection once the server greeted it and answered EHLO;
+/// otherwise `TimedOut` when that did not happen within the limit or the
+/// operating system timed the connection out, and `ProtocolError` when
+/// the greeting or the answer to EHLO refused the client, could not be
+/// read, or did not come before the connection ended.
 async fn start_smtp_dialogue(
     stream: Box<dyn AsyncTokioStream>,
 ) -> Result<AsyncSmtpConnection, SignInFailure> {
@@ -274,8 +301,24 @@ async fn start_smtp_dialogue(
 }
 
 /// Upgrades the connection with STARTTLS, within [`EXCHANGE_LIMIT`] for
-/// the command, the TLS handshake, and the second EHLO; a server whose
-/// EHLO does not offer STARTTLS fails as `EncryptionNotOffered`.
+/// the command, the TLS handshake, and the second EHLO.
+///
+/// # Arguments
+///
+/// * `connection` - The connection, greeted and answered by EHLO.
+/// * `server` - The host the certificate must be issued for.
+/// * `trust` - Which certificates are accepted.
+///
+/// # Returns
+///
+/// Nothing once the connection is protected and EHLO answered again;
+/// otherwise `EncryptionNotOffered` when the server's EHLO does not offer
+/// STARTTLS; `CertificateRefused` when the certificate is refused;
+/// `TimedOut` when the upgrade did not finish within the limit or the
+/// operating system timed the connection out; and `ProtocolError` for any
+/// other failure: a TLS configuration that cannot be built, which is
+/// logged, a refused STARTTLS or EHLO, a failed handshake, an answer that
+/// cannot be read, or an ended connection.
 async fn start_tls(
     connection: &mut AsyncSmtpConnection,
     server: &MailServer,
@@ -306,6 +349,21 @@ async fn start_tls(
 
 /// Sends the sign-in, with PLAIN or LOGIN, within [`EXCHANGE_LIMIT`] for
 /// the command and its challenges.
+///
+/// # Arguments
+///
+/// * `connection` - The connection, protected as the account says.
+/// * `account` - The user name and password to sign in with.
+///
+/// # Returns
+///
+/// Nothing once the server accepted the credentials; otherwise
+/// `WrongPassword` for a permanent reply with one of
+/// [`CREDENTIALS_REFUSED_CODES`]; `TimedOut` when the exchange did not
+/// finish within the limit or the operating system timed the connection
+/// out; and `ProtocolError` for any other failure: another refusal, a
+/// server that offers neither mechanism, an answer that cannot be read,
+/// or an ended connection.
 async fn send_sign_in(
     connection: &mut AsyncSmtpConnection,
     account: &Account,
@@ -398,6 +456,19 @@ impl SmtpSession {
     }
 
     /// Sends one command of the transaction within [`EXCHANGE_LIMIT`].
+    ///
+    /// # Arguments
+    ///
+    /// * `command` - The command: MAIL, RCPT, or DATA.
+    ///
+    /// # Returns
+    ///
+    /// Nothing once the server accepted the command; otherwise `Refused`
+    /// with the server's code and text when its reply refused it, or a
+    /// `Connection` failure: `TimedOut` when no reply came within the limit
+    /// or the operating system timed the connection out, `Unreadable` for
+    /// a reply lettre cannot read, and `Lost` when the connection ended or
+    /// failed.
     async fn send_command<C: fmt::Display>(&mut self, command: C) -> Result<(), SmtpFailure> {
         match timeout(EXCHANGE_LIMIT, self.connection.command(command)).await {
             Ok(Ok(_)) => Ok(()),
@@ -413,6 +484,22 @@ impl SmtpSession {
     /// next before it writes the line that ends the data. That question
     /// moves the progress to `HandedOver`, so the stage never shows less
     /// than the server may have received.
+    ///
+    /// # Arguments
+    ///
+    /// * `bytes` - The message (RFC 5322), without its `Bcc` field.
+    /// * `progress` - Moved to `HandedOver` before the line that ends the
+    ///   data is written, and to `Accepted` once the server accepts the
+    ///   message.
+    ///
+    /// # Returns
+    ///
+    /// Nothing once the server accepted the message; otherwise `Refused`
+    /// with the server's code and text when its reply refused it; before
+    /// the message was handed over, a `Connection` failure: `Lost`,
+    /// `Unreadable`, or `TimedOut` when the limit passed or the operating
+    /// system timed the connection out; and once it was, `Unconfirmed`
+    /// when the reply was lost, could not be read, or did not come in time.
     async fn send_message_data(
         &mut self,
         bytes: &[u8],

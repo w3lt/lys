@@ -165,6 +165,21 @@ impl DraftProgress {
 /// * `arguments` - The draft's fields.
 /// * `progress` - Records when storing the draft begins, with the draft it
 ///   replaces, for the caller that may stop the call.
+///
+/// # Returns
+///
+/// The report of the stored draft; otherwise why nothing was stored, or
+/// may have been: `Argument` for a field that breaks a rule, a reply or a
+/// forward without its own recipients or subject, or a draft that cannot
+/// be built from the fields, such as one without a recipient; `InvalidId`
+/// for an id that is not one a tool gives; `SignIn` when signing in to the
+/// IMAP server failed; `NoRoleFolder` when no folder has the Drafts role;
+/// `NotInDrafts` for a `draft_id` of another folder; `StaleId` when the
+/// message replied to or forwarded, or the draft to replace, is no longer
+/// where its id says; the server's refusal (`ImapRefused`) or a failure of
+/// the IMAP connection (`Connection`) before all of the draft was sent;
+/// and `DraftUnconfirmed` when the server did not confirm that it stored
+/// the draft it was handed.
 pub async fn run_save_draft(
     context: &ToolContext,
     arguments: SaveDraftArguments,
@@ -426,8 +441,22 @@ fn format_saved_draft_log(saved: &SavedDraft) -> String {
 ///
 /// # Returns
 ///
-/// The report, or the failure; when the draft's fields differ from the
-/// call's, the refusal names the draft's own and nothing is sent.
+/// The report of what was sent and what became of the Sent copy and of
+/// the draft, neither of which fails the call once the message is sent;
+/// otherwise why nothing was sent, or may have been: `InvalidId` for an
+/// id that is not one a tool gives; `Argument` for a field that breaks a
+/// rule or a recipient that is not an email address, a draft whose fields
+/// differ from the call's, with the draft's own fields in the refusal, or
+/// a draft that cannot be sent here; `SignIn` when signing in to the IMAP
+/// or the SMTP server failed; `NoRoleFolder` when no folder has the
+/// Drafts role; `NotInDrafts` for an id of another folder; `StaleId`
+/// when Drafts cannot hold messages, its UIDVALIDITY changed, or it no
+/// longer holds the draft; the IMAP server's refusal (`ImapRefused`) or a
+/// failure of either connection (`Connection`); `SmtpRefused` when the
+/// SMTP server refused the sender, a recipient, or the message;
+/// `SmtpExtensionMissing` when the message needs an extension the server
+/// does not offer; and `SendUnconfirmed` when the server did not confirm
+/// the message it was handed.
 pub async fn run_send_draft(
     context: &ToolContext,
     arguments: SendDraftArguments,
@@ -511,6 +540,17 @@ fn format_deletion_for_log(deleted: &Result<Deletion, ToolFailure>) -> String {
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - Which draft.
+///
+/// # Returns
+///
+/// The report: the draft was deleted, or only marked as deleted on a
+/// server without UIDPLUS; otherwise `InvalidId` for an id that is not one
+/// a tool gives; `SignIn` when signing in to the IMAP server failed;
+/// `NoRoleFolder` when no folder has the Drafts role; `NotInDrafts` for an
+/// id of another folder; `StaleId` when Drafts cannot hold messages, its
+/// UIDVALIDITY changed, or it no longer holds the draft; or the server's
+/// refusal (`ImapRefused`) or a failure of the IMAP connection
+/// (`Connection`). A refused expunge leaves the draft marked as deleted.
 pub async fn run_delete_draft(context: &ToolContext, arguments: DraftIdArguments) -> ToolResult {
     let id = parse_email_id(&arguments.draft_id)?;
     let mut session = context.open_imap().await?;
@@ -832,8 +872,10 @@ fn remove_bcc_fields(parsed: &Message<'_>, bytes: &[u8]) -> Vec<u8> {
 ///
 /// # Returns
 ///
-/// The draft as stored, or why it cannot be loaded, as
-/// [`open_draft_folder`] says, or `StaleId` when Drafts no longer holds it.
+/// The draft as stored; otherwise why it cannot be loaded, as
+/// [`open_draft_folder`] says; `StaleId` when Drafts no longer holds it;
+/// or the server's refusal of the fetch (`ImapRefused`) or a failure of
+/// the IMAP connection (`Connection`).
 async fn load_draft(
     session: &mut ImapSession,
     drafts: &Folder,
@@ -858,9 +900,10 @@ async fn load_draft(
 ///
 /// # Returns
 ///
-/// Nothing when Drafts is open at the id; `NotInDrafts` for an id of
-/// another folder; `StaleId` when Drafts cannot be opened or its
-/// UIDVALIDITY changed.
+/// Nothing when Drafts is open at the id; otherwise `NotInDrafts` for an
+/// id of another folder; `StaleId` when Drafts cannot hold messages or its
+/// UIDVALIDITY changed; the server's refusal of the SELECT
+/// (`ImapRefused`); or a failure of the IMAP connection (`Connection`).
 async fn open_draft_folder(
     session: &mut ImapSession,
     drafts: &Folder,
@@ -889,9 +932,16 @@ fn is_in_drafts(id: &EmailId, drafts: &Folder) -> bool {
 
 /// Finds the summary of a message of the open folder.
 ///
+/// # Arguments
+///
+/// * `session` - The session, with the message's folder open.
+/// * `uid` - The message's UID.
+///
 /// # Returns
 ///
-/// The summary, or `None` when the folder no longer holds the message.
+/// The summary, `None` when the folder no longer holds the message, or
+/// the server's refusal of the fetch (`ImapRefused`) or a failure of the
+/// IMAP connection (`Connection`).
 async fn find_message_summary(
     session: &mut ImapSession,
     uid: u32,

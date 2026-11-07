@@ -57,6 +57,15 @@ pub fn parse_email_id(text: &str) -> Result<EmailId, ToolFailure> {
 }
 
 /// Parses a positive decimal number of an id.
+///
+/// # Arguments
+///
+/// * `text` - The number's part of the id.
+///
+/// # Returns
+///
+/// The number, or `InvalidId` when the text is empty, holds anything but
+/// ASCII digits, is 0, or does not fit in 32 bits.
 fn parse_positive(text: &str) -> Result<u32, ToolFailure> {
     if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(ToolFailure::InvalidId);

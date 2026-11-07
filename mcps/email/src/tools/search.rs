@@ -79,6 +79,15 @@ pub struct Hit {
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - What to search for.
+///
+/// # Returns
+///
+/// The report of the page asked for, or that no message matches;
+/// otherwise `Argument` for an argument that breaks a rule, a folder that
+/// cannot hold messages, or a page past the last one; `SignIn` when
+/// signing in to the IMAP server failed; `FolderMissing` when no folder
+/// has the name given; or the server's refusal (`ImapRefused`) or a
+/// failure of the IMAP connection (`Connection`).
 pub async fn run_search_emails(context: &ToolContext, arguments: SearchArguments) -> ToolResult {
     let criteria = build_search_criteria(&arguments)?;
     let page = parse_page(arguments.page)?;
@@ -160,6 +169,13 @@ fn list_search_folders(folders: &[Folder], name: Option<&str>) -> Result<Vec<Fol
 /// * `session` - The signed-in session.
 /// * `targets` - The folders to search.
 /// * `criteria` - The search keys.
+///
+/// # Returns
+///
+/// The hits of every folder, and the folders where more matched than were
+/// kept; otherwise the server's refusal of a folder's EXAMINE, the
+/// search, or the fetch (`ImapRefused`), or a failure of the IMAP
+/// connection (`Connection`).
 async fn find_search_hits(
     session: &mut ImapSession,
     targets: &[Folder],
@@ -278,7 +294,10 @@ pub struct HitQuery<'a> {
 ///
 /// # Returns
 ///
-/// The hits, and whether more than the query's limit matched.
+/// The hits, and whether more than the query's limit matched; otherwise
+/// the server's refusal of the EXAMINE, the search, or the fetch of the
+/// summaries (`ImapRefused`), or a failure of the IMAP connection
+/// (`Connection`).
 pub async fn list_folder_hits(
     session: &mut ImapSession,
     folder: &Folder,

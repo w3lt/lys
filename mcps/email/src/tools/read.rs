@@ -51,6 +51,14 @@ pub struct AttachmentArguments {
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - Which message.
+///
+/// # Returns
+///
+/// The report: the message's header fields, flags, attachments, and
+/// text; otherwise `InvalidId` for an id that is not one a tool gives;
+/// `SignIn` when signing in to the IMAP server failed; `StaleId` when the
+/// id no longer names a message; or the server's refusal (`ImapRefused`)
+/// or a failure of the IMAP connection (`Connection`).
 pub async fn run_read_email(context: &ToolContext, arguments: IdArguments) -> ToolResult {
     let id = parse_email_id(&arguments.id)?;
     let mut session = context.open_imap().await?;
@@ -81,6 +89,15 @@ pub async fn run_read_email(context: &ToolContext, arguments: IdArguments) -> To
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - Which message.
+///
+/// # Returns
+///
+/// The report of the conversation; otherwise `InvalidId` for an id that
+/// is not one a tool gives; `SignIn` when signing in to the IMAP server
+/// failed; `StaleId` when the id no longer names a message, or a folder
+/// the conversation was found in was recreated before its messages were
+/// read; or the server's refusal (`ImapRefused`) or a failure of the IMAP
+/// connection (`Connection`).
 pub async fn run_read_conversation(context: &ToolContext, arguments: IdArguments) -> ToolResult {
     let id = parse_email_id(&arguments.id)?;
     let mut session = context.open_imap().await?;
@@ -119,7 +136,9 @@ struct ConversationHits {
 ///
 /// The hits whose identifiers equal one of the message's, each message
 /// once, as the folders were searched; none when the message has no
-/// identifier to search by.
+/// identifier to search by; or the server's refusal of a folder's
+/// EXAMINE, search, or fetch (`ImapRefused`), or a failure of the IMAP
+/// connection (`Connection`).
 async fn find_conversation_hits(
     session: &mut ImapSession,
     folders: &[Folder],
@@ -232,8 +251,11 @@ fn build_message_hit(id: &EmailId, view: &MessageView) -> Hit {
 ///
 /// # Returns
 ///
-/// The entries, newest first, or `StaleId` when a hit's folder is gone or
-/// was recreated since the search.
+/// The entries, newest first; otherwise `StaleId` when a hit's folder was
+/// recreated since the search, so that its UIDVALIDITY changed; the
+/// server's refusal of an EXAMINE, as of a folder deleted since, or of a
+/// fetch (`ImapRefused`); or a failure of the IMAP connection
+/// (`Connection`).
 async fn load_conversation_entries(
     session: &mut ImapSession,
     folders: &[Folder],
@@ -277,6 +299,12 @@ fn is_fitting_result(found: &ConversationHits, shown: usize, length: usize) -> b
 ///
 /// * `session` - The session, with the message's folder open.
 /// * `id` - The message's id.
+///
+/// # Returns
+///
+/// The entry; otherwise the server's refusal of the fetch
+/// (`ImapRefused`) or a failure of the IMAP connection (`Connection`),
+/// fetched bytes that are not a message counting as an unreadable answer.
 async fn load_conversation_entry(
     session: &mut ImapSession,
     id: &EmailId,
@@ -372,6 +400,16 @@ fn format_left_out_sentence(shown: usize, left_out: usize) -> String {
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - Which message and which attachment.
+///
+/// # Returns
+///
+/// The report: the attachment's name, type, size, and text; otherwise
+/// `InvalidId` for an id that is not one a tool gives; `SignIn` when
+/// signing in to the IMAP server failed; `StaleId` when the id no longer
+/// names a message; the server's refusal (`ImapRefused`) or a failure of
+/// the IMAP connection (`Connection`); `AttachmentMissing` when the
+/// message has no attachment with the number; or `AttachmentNotText` when
+/// the attachment cannot be read as text.
 pub async fn run_read_attachment(
     context: &ToolContext,
     arguments: AttachmentArguments,
@@ -423,8 +461,13 @@ pub async fn run_read_attachment(
 ///
 /// # Returns
 ///
-/// The fetched message and its view, or `StaleId` when the id no longer
-/// names a message.
+/// The fetched message and its view; otherwise `StaleId` when the id no
+/// longer names a message: no folder has the id's folder name any more,
+/// the folder cannot hold messages, its UIDVALIDITY changed, or no
+/// message has the id's UID; the server's refusal of the EXAMINE or the
+/// fetch (`ImapRefused`); or a failure of the IMAP connection
+/// (`Connection`), fetched bytes that are not a message counting as an
+/// unreadable answer.
 pub async fn get_message_view(
     session: &mut ImapSession,
     folders: &[Folder],

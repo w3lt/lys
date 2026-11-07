@@ -212,6 +212,12 @@ fn build_message_header(
 /// * `builder` - The header fields.
 /// * `composition` - The text and the attachments.
 /// * `message_id` - The message's identifier, without angle brackets.
+///
+/// # Returns
+///
+/// The message, or why it could not be built: `InvalidAttachmentType`
+/// for an attachment whose content type lettre does not accept, or
+/// `Build` with lettre's reason when lettre refuses the message.
 fn build_message_body(
     builder: MessageBuilder,
     composition: &Composition,
@@ -242,7 +248,17 @@ fn build_message_body(
     })
 }
 
-/// Builds the `From` mailbox of the account.
+/// Builds the `From` mailbox of the account, with its display name when
+/// it has one.
+///
+/// # Arguments
+///
+/// * `account` - The sender.
+///
+/// # Returns
+///
+/// The mailbox, or `InvalidSender` when lettre does not accept the
+/// account's address.
 fn build_sender(account: &Account) -> Result<Mailbox, CompositionProblem> {
     let address = lettre::Address::from_str(&account.address)
         .map_err(|_| CompositionProblem::InvalidSender)?;
@@ -256,6 +272,11 @@ fn build_sender(account: &Account) -> Result<Mailbox, CompositionProblem> {
 ///
 /// * `text` - The recipient, as `name@example.com` or
 ///   `Name <name@example.com>`.
+///
+/// # Returns
+///
+/// The mailbox, or `InvalidRecipient` with the text as given when lettre
+/// does not read it as a mailbox.
 pub(crate) fn parse_recipient(text: &str) -> Result<Mailbox, CompositionProblem> {
     Mailbox::from_str(text.trim())
         .map_err(|_| CompositionProblem::InvalidRecipient(text.to_owned()))

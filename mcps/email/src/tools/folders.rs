@@ -43,6 +43,14 @@ pub struct FolderArguments {
 /// # Arguments
 ///
 /// * `context` - The account and trust.
+///
+/// # Returns
+///
+/// The report: each folder with its role and how many messages it holds,
+/// or that it cannot hold any, or that the account has no folder;
+/// otherwise `SignIn` when signing in to the IMAP server failed, or the
+/// server's refusal of the listing or of a count (`ImapRefused`) or a
+/// failure of the IMAP connection (`Connection`).
 pub async fn run_list_folders(context: &ToolContext) -> ToolResult {
     let mut session = context.open_imap().await?;
     let folders = load_folders(&mut session).await?;
@@ -83,6 +91,18 @@ pub async fn run_list_folders(context: &ToolContext) -> ToolResult {
 ///
 /// * `context` - The account and trust.
 /// * `arguments` - What to do with which folder.
+///
+/// # Returns
+///
+/// The report of what was done; otherwise `Argument` for a name that
+/// breaks the folder name rules, or a rename without `new_name`; `SignIn`
+/// when signing in to the IMAP server failed; `FolderMissing` when no
+/// folder has the name to rename or delete; `RoleFolder` when that folder
+/// has a role; `FolderExists` when a folder already has the name to
+/// create, or the new name; `FolderHasSubfolders` or `FolderNotEmpty` for
+/// a folder to delete that holds other folders or messages; or the
+/// server's refusal (`ImapRefused`) or a failure of the IMAP connection
+/// (`Connection`).
 pub async fn run_manage_folder(context: &ToolContext, arguments: FolderArguments) -> ToolResult {
     parse_folder_name_argument("name", &arguments.name)?;
     if let Some(new_name) = &arguments.new_name {
@@ -108,6 +128,12 @@ pub async fn run_manage_folder(context: &ToolContext, arguments: FolderArguments
 /// * `session` - The signed-in session.
 /// * `folders` - The classified folders.
 /// * `name` - The new folder's name.
+///
+/// # Returns
+///
+/// The report; otherwise `FolderExists` when a folder has the name, or
+/// the server's refusal of the CREATE (`ImapRefused`) or a failure of the
+/// IMAP connection (`Connection`).
 async fn create_new_folder(
     session: &mut ImapSession,
     folders: &[Folder],
@@ -133,6 +159,14 @@ async fn create_new_folder(
 /// * `session` - The signed-in session.
 /// * `folders` - The classified folders.
 /// * `arguments` - The folder's name and its new name.
+///
+/// # Returns
+///
+/// The report; otherwise `Argument` when no new name is given;
+/// `FolderMissing` when no folder has the name; `RoleFolder` when the
+/// folder has a role; `FolderExists` when a folder has the new name; or
+/// the server's refusal of the RENAME (`ImapRefused`) or a failure of the
+/// IMAP connection (`Connection`).
 async fn update_folder_name(
     session: &mut ImapSession,
     folders: &[Folder],
@@ -164,6 +198,14 @@ async fn update_folder_name(
 /// * `session` - The signed-in session.
 /// * `folders` - The classified folders.
 /// * `name` - The folder's name.
+///
+/// # Returns
+///
+/// The report; otherwise `FolderMissing` when no folder has the name;
+/// `RoleFolder` when the folder has a role; `FolderHasSubfolders` when it
+/// holds other folders; `FolderNotEmpty` when it holds messages; or the
+/// server's refusal of the count or the DELETE (`ImapRefused`) or a
+/// failure of the IMAP connection (`Connection`).
 async fn delete_empty_folder(
     session: &mut ImapSession,
     folders: &[Folder],

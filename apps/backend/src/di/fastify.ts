@@ -12,7 +12,7 @@ import {
   type SingletonServices
 } from "./singleton"
 
-/** Options used to install application-scoped singleton services. */
+/** Options used to open the application-scoped singleton services. */
 type SingletonServicePluginOptions = {
   /** Runtime configuration used to construct the singleton services. */
   config: BackendConfig

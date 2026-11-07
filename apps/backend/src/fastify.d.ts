@@ -18,7 +18,7 @@ import type WebSearchToolProvider from "./modules/tool/builtIn/web/webSearchTool
 import type ToolApprovalService from "./modules/toolApproval/toolApprovalService"
 
 declare module "fastify" {
-  /** Fastify application services installed by the singleton-services plugin. */
+  /** Fastify application services registered by the singleton-services plugin. */
   interface FastifyInstance {
     /** Application-scoped service for OpenAI-compatible chat completion streams. */
     chatService: ChatService

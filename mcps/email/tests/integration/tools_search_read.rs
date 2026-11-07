@@ -860,6 +860,25 @@ async fn finds_a_conversation_message_archived_in_the_all_mail_view_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn shows_a_conversation_message_from_its_folder_listed_after_the_all_mail_view() {
+    let mut mailbox = FakeMailbox::create_standard();
+    let first = build_thread_message("t", 0, "Shall we?");
+    let filed = build_thread_message("t", 1, "Yes.");
+    mailbox.add_message("INBOX", first.build_new_message(&[]));
+    mailbox.add_message("All Mail", first.build_new_message(&[]));
+    mailbox.add_message("Projects", filed.build_new_message(&["\\Seen"]));
+    mailbox.add_message("All Mail", filed.build_new_message(&["\\Seen"]));
+    let stack = start_stack(mailbox, false).await;
+
+    let text = get_conversation_text(&stack, "1.1001.INBOX").await;
+
+    assert_eq!(
+        list_entry_ids(&text),
+        vec!["1.1001.INBOX", "1.1006.Projects"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn marks_a_message_removed_while_its_conversation_was_read() {
     let mut mailbox = FakeMailbox::create_standard();
     for number in 0..3 {

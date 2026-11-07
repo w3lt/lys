@@ -276,6 +276,27 @@ mod tests {
     }
 
     #[test]
+    fn says_that_every_role_but_the_all_view_holds_messages_of_its_own() {
+        let answers: Vec<(FolderRole, bool)> = FolderRole::ALL_ROLES
+            .into_iter()
+            .map(|role| (role, role.has_own_messages()))
+            .collect();
+
+        assert_eq!(
+            answers,
+            vec![
+                (FolderRole::Inbox, true),
+                (FolderRole::Sent, true),
+                (FolderRole::Drafts, true),
+                (FolderRole::Trash, true),
+                (FolderRole::Junk, true),
+                (FolderRole::Archive, true),
+                (FolderRole::All, false),
+            ]
+        );
+    }
+
+    #[test]
     fn finds_folders_by_name_with_inbox_in_any_case() {
         let folders = build_folders(&[build_listing("INBOX", &[]), build_listing("Sent", &[])]);
 

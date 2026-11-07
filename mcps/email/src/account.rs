@@ -608,6 +608,10 @@ mod tests {
             Err(AccountProblem::NotJson)
         );
         assert_eq!(
+            parse_account_variable("not json").map(|_| ()),
+            Err(AccountProblem::NotJson)
+        );
+        assert_eq!(
             parse_account_variable("[]").map(|_| ()),
             Err(AccountProblem::NotAnAccount)
         );

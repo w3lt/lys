@@ -1,7 +1,8 @@
 //! The binary over standard input and output, as the backend runs it:
 //! the MCP handshake, the tool list, a call, a cut result, a failed
 //! call, a cancelled send, a draft save cancelled while its draft is
-//! stored, and the exit on the end of input.
+//! stored, the exit on the end of input, and a start that fails as the
+//! input ends before the handshake.
 
 use std::io::Write;
 use std::sync::mpsc;
@@ -407,17 +408,20 @@ fn assert_draft_answers(unshown_draft: &Value, shown_draft: &Value, smtp: &FakeS
     assert_eq!(mails[0].to, vec!["jane@example.com", "hidden@example.com"]);
 }
 
-/// Asserts that the binary logged that it serves and the calls' outcomes,
-/// and logged neither the password nor an address.
+/// Asserts that the binary logged, each as a line of its own, that it
+/// serves and the calls' outcomes, and last that it stopped as its input
+/// closed, and that it logged neither the password nor an address.
 fn assert_logged_without_account(stderr: &str) {
+    let logged: Vec<&str> = stderr.lines().collect();
     let lines = [
-        "server: serving MCP over stdio\n",
-        "tool list_folders: done (folders: 7 listed)\n",
-        "tool read_email: failed (invalid-id)\n",
+        "server: serving MCP over stdio",
+        "tool list_folders: done (folders: 7 listed)",
+        "tool read_email: failed (invalid-id)",
     ];
     for line in lines {
-        assert!(stderr.contains(line), "{stderr}");
+        assert!(logged.contains(&line), "{stderr}");
     }
+    assert_eq!(logged.last(), Some(&"server: stopped (Closed)"), "{stderr}");
     assert!(!stderr.contains(crate::support::PASSWORD), "{stderr}");
     assert!(!stderr.contains("example.com"), "{stderr}");
 }
@@ -454,4 +458,24 @@ async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
     assert_failed_answers(bad_id, bad_page);
     assert_draft_answers(unshown_draft, shown_draft, &smtp);
     assert_logged_without_account(&dialogue.stderr);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn logs_a_failed_start_and_exits_with_1_when_its_input_ends_before_initialize() {
+    let imap = FakeImapServer::start(FakeMailbox::create_standard(), ImapMode::Plain, None).await;
+    let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
+    let variable = build_plain_account_json(imap.port, smtp.port);
+
+    let dialogue =
+        tokio::task::spawn_blocking(move || send_dialogue_messages(variable, Vec::new()))
+            .await
+            .expect("the dialogue ends");
+
+    assert_eq!(dialogue.exit_code, Some(1), "{}", dialogue.stderr);
+    assert_eq!(
+        dialogue.stderr,
+        "server: starting failed: connection closed: initialize request\n"
+    );
+    assert!(imap.list_commands().is_empty());
+    assert!(smtp.list_commands().is_empty());
 }

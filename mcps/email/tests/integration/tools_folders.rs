@@ -100,6 +100,25 @@ async fn lists_folders_with_roles_and_counts() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn lists_the_junk_and_archive_roles_the_server_declares() {
+    let mut mailbox = FakeMailbox::create_standard();
+    let unwanted = FakeFolder::new("Unwanted", &["\\HasNoChildren", "\\Junk"], 1008);
+    let filed = FakeFolder::new("Filed", &["\\HasNoChildren", "\\Archive"], 1009);
+    mailbox.folders.extend([unwanted, filed]);
+    let stack = start_stack(mailbox, false).await;
+
+    let report = run_list_folders(&stack.context).await.expect("the folders");
+
+    assert!(
+        report
+            .text
+            .ends_with("\n- Unwanted (Junk): 0 messages\n- Filed (Archive): 0 messages"),
+        "{}",
+        report.text
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn answers_that_an_account_whose_server_lists_no_folder_has_none() {
     let stack = start_stack(FakeMailbox::create_empty(), false).await;
 

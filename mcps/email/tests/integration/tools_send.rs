@@ -579,6 +579,31 @@ async fn reports_a_message_sent_before_its_copy_failed_as_sent() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn reports_a_message_sent_before_the_server_refused_its_copy_as_sent_with_the_reason() {
+    let mut mailbox = FakeMailbox::create_standard();
+    mailbox.add_refusal("APPEND", "NO [OVERQUOTA] Quota exceeded");
+    let stack = start_stack(mailbox, false).await;
+
+    let report = send_message(&stack.context, build_message_to_jane("Hi", "Hello"))
+        .await
+        .expect("sent");
+
+    assert!(
+        report.text.ends_with(
+            "\nThe copy could not be saved in Sent: The IMAP server refused to save the copy: [OVERQUOTA] Quota exceeded."
+        ),
+        "{}",
+        report.text
+    );
+    assert_eq!(
+        report.log,
+        "send: 1 recipient(s), 0 attachment(s), copy failed (imap-refused-to-save-the-copy)"
+    );
+    assert_eq!(stack.smtp.list_mails().len(), 1);
+    assert!(stack.imap.list_messages("Sent").is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn reports_a_copy_whose_answer_was_lost_once_all_of_it_was_sent_as_maybe_saved() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
     stack

@@ -376,6 +376,7 @@ async fn without_uidplus_send_draft_and_save_draft_only_mark_the_old_draft() {
         "{}",
         replaced.text
     );
+    assert_eq!(replaced.log, "draft: saved, replaced one, id found");
     assert!(
         sent.text.ends_with(&format!("\nThe draft {MARKED_ONLY}.")),
         "{}",
@@ -648,6 +649,29 @@ async fn sends_nothing_when_the_server_refuses_to_fetch_the_draft() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn neither_sends_nor_deletes_a_draft_when_the_server_refuses_to_select_drafts() {
+    let stack = start_stack(FakeMailbox::create_standard(), false).await;
+    let id = save_draft(&stack.context, build_draft("Ready")).await;
+    stack
+        .imap
+        .update_state(|mailbox| mailbox.add_refusal("SELECT", "NO [UNAVAILABLE] Not now"));
+
+    let sent = send_draft(&stack.context, build_send(&id, &build_draft("Ready"))).await;
+    let deleted = run_delete_draft(&stack.context, DraftIdArguments { draft_id: id }).await;
+
+    let refusal = "The IMAP server refused to select the Drafts folder: [UNAVAILABLE] Not now.";
+    assert_eq!(
+        sent.map_err(|failure| failure.to_string()),
+        Err(refusal.to_owned())
+    );
+    assert_eq!(
+        deleted.map_err(|failure| failure.to_string()),
+        Err(refusal.to_owned())
+    );
+    assert_draft_kept_unsent(&stack.imap, &stack.smtp);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn answers_a_stored_draft_as_saved_when_its_id_cannot_be_found() {
     for (refused, operation) in [
         ("SELECT", "select the Drafts folder"),
@@ -680,6 +704,28 @@ async fn answers_a_stored_draft_as_saved_when_its_id_cannot_be_found() {
         );
         assert_eq!(stack.imap.list_messages("Drafts").len(), 1);
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn answers_a_stored_draft_that_the_search_no_longer_finds_as_saved_without_an_id() {
+    let mut mailbox = FakeMailbox::create_standard();
+    mailbox.add_removal("HEADER MESSAGE-ID", "Drafts", 1);
+    let stack = start_stack(mailbox, false).await;
+
+    let report = run_save_draft(
+        &stack.context,
+        build_draft("First"),
+        &DraftProgress::default(),
+    )
+    .await
+    .expect("saved");
+
+    assert_eq!(
+        report.text,
+        "Draft saved in Drafts, but the server did not report its id. Search that folder to find it."
+    );
+    assert_eq!(report.log, "draft: saved, id not found");
+    assert!(stack.imap.list_messages("Drafts").is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]

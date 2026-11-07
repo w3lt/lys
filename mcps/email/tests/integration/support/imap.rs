@@ -179,6 +179,9 @@ pub struct FakeMailbox {
     /// The commands the fake refuses, by name, with what it answers after
     /// the tag.
     refusals: Vec<(String, String)>,
+    /// The commands the fake refuses by a text their line holds, with what
+    /// it answers after the tag.
+    line_refusals: Vec<(String, String)>,
     /// The commands the fake fails, by name, and how.
     faults: Vec<(String, ImapFault)>,
     /// The messages still to remove, each before the first command whose
@@ -198,6 +201,7 @@ impl FakeMailbox {
             untagged_before_continuation: None,
             next_uid_validity: 2001,
             refusals: Vec::new(),
+            line_refusals: Vec::new(),
             faults: Vec::new(),
             removals: Vec::new(),
         }
@@ -274,6 +278,22 @@ impl FakeMailbox {
         self.refusals.push((name.to_owned(), answer.to_owned()));
     }
 
+    /// Makes the fake refuse every command whose line holds a text instead
+    /// of handling it, such as the FETCH of one message among others; a
+    /// command with a synchronizing literal is refused before its literal
+    /// is sent when the text comes before the literal.
+    ///
+    /// # Arguments
+    ///
+    /// * `trigger` - Text of the command line, such as
+    ///   `UID FETCH 2 (UID FLAGS BODY.PEEK[])`.
+    /// * `answer` - What the fake answers after the tag, such as
+    ///   `NO [SERVERBUG] Internal error`.
+    pub fn add_line_refusal(&mut self, trigger: &str, answer: &str) {
+        self.line_refusals
+            .push((trigger.to_owned(), answer.to_owned()));
+    }
+
     /// Makes the fake remove a message just before it handles the first
     /// command whose line holds a text, as another client that expunged
     /// the message would; the fake announces no EXPUNGE response for it.
@@ -310,13 +330,27 @@ impl FakeMailbox {
         }
     }
 
-    /// Finds what the fake answers instead of handling a command of the
-    /// name, if it refuses it.
-    fn find_refusal(&self, name: &str) -> Option<String> {
-        self.refusals
+    /// Finds what the fake answers instead of handling a command, if it
+    /// refuses it by its name or by a text its line holds.
+    ///
+    /// # Arguments
+    ///
+    /// * `command` - The command, with its line.
+    ///
+    /// # Returns
+    ///
+    /// The answer after the tag, or `None` when the fake handles the
+    /// command.
+    fn find_refusal(&self, command: &Command) -> Option<String> {
+        let by_name = self
+            .refusals
             .iter()
-            .find(|(refused, _)| refused == name)
-            .map(|(_, answer)| answer.clone())
+            .find(|(refused, _)| *refused == command.name);
+        let by_line = self
+            .line_refusals
+            .iter()
+            .find(|(trigger, _)| command.line.contains(trigger.as_str()));
+        by_name.or(by_line).map(|(_, answer)| answer.clone())
     }
 
     /// Finds how the fake fails a command of the name, if it fails it.
@@ -546,6 +580,8 @@ struct Session {
 
 /// One command a client sent.
 struct Command {
+    /// Its line, with literals shown as quoted strings.
+    line: String,
     /// Its tag.
     tag: String,
     /// Its name in capitals; for `UID <name>`, the name after `UID`.
@@ -729,6 +765,7 @@ fn parse_command(text: &str, literals: Vec<Vec<u8>>) -> Option<Command> {
         arguments.remove(0);
     }
     Some(Command {
+        line: text.to_owned(),
         tag,
         name,
         by_uid,
@@ -741,7 +778,7 @@ impl Session {
     /// Handles one command over the mailbox, which it may change.
     fn handle_command(&mut self, command: &Command, mailbox: &mut FakeMailbox) -> Step {
         let tag = &command.tag;
-        if let Some(answer) = mailbox.find_refusal(&command.name) {
+        if let Some(answer) = mailbox.find_refusal(command) {
             return Step::Answer(format!("{tag} {answer}\r\n").into_bytes());
         }
         let selected = &mut self.selected;
@@ -1150,8 +1187,7 @@ fn is_answered_before_literal(text: &str, state: &Arc<Mutex<FakeMailbox>>) -> bo
     parse_command(text, Vec::new()).is_some_and(|command| {
         let mailbox = state.lock().expect("the state");
         let fault = mailbox.find_fault(&command.name);
-        mailbox.find_refusal(&command.name).is_some()
-            || fault.is_some_and(ImapFault::is_before_handling)
+        mailbox.find_refusal(&command).is_some() || fault.is_some_and(ImapFault::is_before_handling)
     })
 }
 

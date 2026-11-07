@@ -8,7 +8,9 @@ use email::tools::drafts::{
     DraftIdArguments, DraftProgress, SaveDraftArguments, run_delete_draft, run_save_draft,
 };
 use email::tools::folders::{FolderAction, FolderArguments, run_list_folders, run_manage_folder};
-use email::tools::read::{IdArguments, run_read_email};
+use email::tools::read::{
+    AttachmentArguments, IdArguments, run_read_attachment, run_read_conversation, run_read_email,
+};
 use email::tools::search::{SearchArguments, run_search_emails};
 
 use crate::support::imap::FakeMailbox;
@@ -200,6 +202,64 @@ async fn a_refused_fetch_fails_instead_of_reading_as_a_stale_id() {
     let stack = start_stack(mailbox, false).await;
 
     let read = run_read_email(
+        &stack.context,
+        IdArguments {
+            id: "1.1001.INBOX".to_owned(),
+        },
+    )
+    .await;
+
+    assert_eq!(
+        read,
+        Err(build_refusal(
+            "fetch the message",
+            "[SERVERBUG] Internal error"
+        ))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_examine_fails_each_read_by_id_instead_of_reading_as_a_stale_id() {
+    let mut mailbox = build_mailbox();
+    mailbox.add_refusal("EXAMINE", "NO [UNAVAILABLE] Try again later");
+    let stack = start_stack(mailbox, false).await;
+    let id = IdArguments {
+        id: "1.1001.INBOX".to_owned(),
+    };
+    let attachment = AttachmentArguments {
+        id: id.id.clone(),
+        attachment: 1,
+    };
+
+    let read = run_read_email(&stack.context, id.clone()).await;
+    let conversation = run_read_conversation(&stack.context, id).await;
+    let attachment = run_read_attachment(&stack.context, attachment).await;
+
+    let refusal = build_refusal("select the folder", "[UNAVAILABLE] Try again later");
+    assert_eq!(read, Err(refusal.clone()));
+    assert_eq!(conversation, Err(refusal.clone()));
+    assert_eq!(attachment, Err(refusal));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_fetch_of_a_message_of_the_conversation_fails_instead_of_reading_as_removed() {
+    let mut mailbox = build_mailbox();
+    let reply = TestMessage {
+        subject: "Re: Grüße".to_owned(),
+        message_id: "two@example.com".to_owned(),
+        in_reply_to: "one@example.com".to_owned(),
+        body: "Hello again".to_owned(),
+        timestamp: 60,
+        ..TestMessage::default()
+    };
+    mailbox.add_message("INBOX", reply.build_new_message(&[]));
+    mailbox.add_line_refusal(
+        "UID FETCH 2 (UID FLAGS BODY.PEEK[])",
+        "NO [SERVERBUG] Internal error",
+    );
+    let stack = start_stack(mailbox, false).await;
+
+    let read = run_read_conversation(
         &stack.context,
         IdArguments {
             id: "1.1001.INBOX".to_owned(),

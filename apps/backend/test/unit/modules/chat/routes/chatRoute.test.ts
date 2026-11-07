@@ -1328,22 +1328,20 @@ describe("updateFastifyWithChatRoute", () => {
         "connected"
       )
       testApp.createConversationTurn.mockRestore()
+      const callChunk = createChatCompletionChunk({
+        toolCalls: [
+          {
+            index: 0,
+            id: "call_0",
+            type: "function",
+            function: { name: ECHO_TOOL_NAME, arguments: '{"text":"moth"}' }
+          }
+        ]
+      })
       testApp.completeChatStream
         .mockImplementationOnce(async () =>
           createChunkStream(
-            createChatCompletionChunk({
-              toolCalls: [
-                {
-                  index: 0,
-                  id: "call_0",
-                  type: "function",
-                  function: {
-                    name: ECHO_TOOL_NAME,
-                    arguments: '{"text":"moth"}'
-                  }
-                }
-              ]
-            }),
+            callChunk,
             createChatCompletionChunk({ finishReason: "tool_calls" })
           )
         )

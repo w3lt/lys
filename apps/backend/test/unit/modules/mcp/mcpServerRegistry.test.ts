@@ -836,21 +836,20 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
       await harness.registry.updateServers()
 
+      const expectedLogLines = [
+        {
+          kind: "server-log-line",
+          serverName: "alpha",
+          line: "fake server started"
+        },
+        {
+          kind: "server-log-line",
+          serverName: "alpha",
+          line: `cwd ${WORKING_DIRECTORY}`
+        }
+      ]
       await vi.waitFor(() => {
-        expect(harness.events).toEqual(
-          expect.arrayContaining([
-            {
-              kind: "server-log-line",
-              serverName: "alpha",
-              line: "fake server started"
-            },
-            {
-              kind: "server-log-line",
-              serverName: "alpha",
-              line: `cwd ${WORKING_DIRECTORY}`
-            }
-          ])
-        )
+        expect(harness.events).toEqual(expect.arrayContaining(expectedLogLines))
       }, STATE_WAIT)
     })
 
@@ -1278,10 +1277,10 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
 
     it("reports a session an HTTP server does not end as its removed entry closes", async () => {
       const answer = answerAsMcpServer()
+      const refuse = answerWithStatus(500)
       const server = await startFakeMcpHttpServer((request, body, response) => {
-        if (request.method === "DELETE")
-          answerWithStatus(500)(request, body, response)
-        else answer(request, body, response)
+        const route = request.method === "DELETE" ? refuse : answer
+        route(request, body, response)
       })
       const harness = createRegistryHarness()
       harness.updateReadServers([buildHttpServerSettings("remote", server.url)])

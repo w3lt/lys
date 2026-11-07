@@ -8,6 +8,7 @@ mod support;
 mod check;
 mod imap_commands;
 mod imap_steps;
+mod log_lines;
 mod smtp_steps;
 mod stdio;
 mod tools_drafts;

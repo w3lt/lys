@@ -1,16 +1,19 @@
-//! The `email` binary as the integration tests run it: one process for a
-//! test, its standard streams piped, ended on every path the test takes,
-//! and waited for only within a bound.
+//! The `email` binary as the integration tests run it, and this test
+//! binary run again for one of its cases: one process for a test, its
+//! standard streams piped, ended on every path the test takes, and waited
+//! for only within a bound.
 
+use std::env;
 use std::io::{self, BufRead, BufReader, Read};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// Longest the binary may take, in real time, for one step of a test: to
+/// Longest a binary may take, in real time, for one step of a test: to
 /// answer a request, to bring a call to the fault a fake holds it at, to
-/// exit once its input ended, or to close its output once it exited.
+/// exit once its input ended or the one case it runs ended, or to close
+/// its output once it exited.
 pub const STEP_WAIT_LIMIT: Duration = Duration::from_secs(30);
 
 /// How long [`BinaryProcess::wait_for_exit`] sleeps between two looks at
@@ -21,13 +24,15 @@ const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(10);
 pub struct BinaryStreams {
     /// Its standard input; dropping it ends the binary's input.
     pub input: ChildStdin,
-    /// Its standard output, where it answers.
+    /// Its standard output, where the `email` binary answers and this test
+    /// binary reports the case it ran.
     pub output: ChildStdout,
     /// Its standard error, where it logs.
     pub log: ChildStderr,
 }
 
-/// The `email` binary's process, started for one test.
+/// The process of a binary started for one test: the `email` binary, or
+/// this test binary running one of its cases again.
 ///
 /// Owns the process of the binary one test runs. Invariant: once the value
 /// is gone, the process has ended and is reaped: [`Self::wait_for_exit`]
@@ -36,7 +41,8 @@ pub struct BinaryStreams {
 /// does, kills and reaps it. Concurrency model: single-owner; the thread
 /// that runs the test's dialogue with the binary holds it. Resource
 /// ownership: the process is the test's direct child and the whole scope,
-/// as the binary starts no process of its own; [`Self::start`] hands its
+/// as neither the `email` binary nor a case run again starts a process of
+/// its own; [`Self::start`] and [`Self::start_test_case`] hand its
 /// standard streams to the test, and the process's end closes them, which
 /// ends every read of them.
 pub struct BinaryProcess {
@@ -63,15 +69,56 @@ impl BinaryProcess {
     /// When the binary cannot be started.
     pub fn start(arguments: &[&str], variable: Option<&str>) -> (Self, BinaryStreams) {
         let mut command = Command::new(env!("CARGO_BIN_EXE_email"));
-        command
-            .args(arguments)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        command.args(arguments);
         match variable {
             Some(value) => command.env("LYS_EMAIL_ACCOUNT", value),
             None => command.env_remove("LYS_EMAIL_ACCOUNT"),
         };
+        Self::start_piped(command)
+    }
+
+    /// Starts this test binary again, running only one of its cases, with
+    /// its standard streams piped; from then on, the value ends it
+    /// whatever the test does next.
+    ///
+    /// # Arguments
+    ///
+    /// * `case` - The case's path in this test binary, such as
+    ///   `check::accepts_an_smtp_sign_in_whose_quit_fails`. The case must
+    ///   start no process of its own, so that ending this process ends
+    ///   everything the run started.
+    ///
+    /// # Returns
+    ///
+    /// The process and its standard streams: the test harness reports the
+    /// case on its standard output, and what the case's code writes to
+    /// standard error stays in its standard error.
+    ///
+    /// # Panics
+    ///
+    /// When the path of this test binary cannot be read, or the binary
+    /// cannot be started.
+    pub fn start_test_case(case: &str) -> (Self, BinaryStreams) {
+        let mut command = Command::new(env::current_exe().expect("the path of this test binary"));
+        command.args([case, "--exact", "--test-threads=1", "--color=never"]);
+        Self::start_piped(command)
+    }
+
+    /// Starts the command with its standard streams piped; from then on,
+    /// the value ends it whatever the test does next.
+    ///
+    /// # Returns
+    ///
+    /// The process and its standard streams.
+    ///
+    /// # Panics
+    ///
+    /// When the command cannot be started.
+    fn start_piped(mut command: Command) -> (Self, BinaryStreams) {
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         let mut process = Self {
             child: command.spawn().expect("the binary starts"),
         };

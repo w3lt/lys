@@ -633,20 +633,159 @@ impl std::error::Error for ToolFailure {}
 mod tests {
     use super::*;
 
+    /// Each sign-in failure, with its name and the clause the model reads.
+    const SIGN_IN_FAILURES: [(SignInFailure, &str, &str); 6] = [
+        (
+            SignInFailure::WrongPassword,
+            "wrong-password",
+            "the user name or password was refused",
+        ),
+        (
+            SignInFailure::Unreachable,
+            "unreachable",
+            "the host could not be reached",
+        ),
+        (
+            SignInFailure::CertificateRefused,
+            "certificate-refused",
+            "its certificate was refused by the operating system",
+        ),
+        (
+            SignInFailure::EncryptionNotOffered,
+            "encryption-not-offered",
+            "it does not offer STARTTLS",
+        ),
+        (
+            SignInFailure::TimedOut,
+            "timed-out",
+            "it did not answer in time",
+        ),
+        (
+            SignInFailure::ProtocolError,
+            "protocol-error",
+            "it answered something Lys could not read",
+        ),
+    ];
+
     #[test]
     fn names_and_describes_every_sign_in_failure() {
-        let failures = [
-            SignInFailure::WrongPassword,
-            SignInFailure::Unreachable,
-            SignInFailure::CertificateRefused,
-            SignInFailure::EncryptionNotOffered,
-            SignInFailure::TimedOut,
-            SignInFailure::ProtocolError,
-        ];
-        for failure in failures {
+        for (failure, name, clause) in SIGN_IN_FAILURES {
             let json = serde_json::to_string(&failure).expect("json");
-            assert_eq!(json, format!("\"{}\"", failure.name()));
-            assert!(!failure.format_clause().is_empty());
+            let sign_in = ToolFailure::SignIn {
+                protocol: Protocol::Imap,
+                failure,
+            };
+            assert_eq!(json, format!("\"{name}\""));
+            assert_eq!(
+                sign_in.to_string(),
+                format!(
+                    "Signing in to the IMAP server failed: {clause}. Check the email account in Settings → MCP."
+                )
+            );
+        }
+        assert_eq!(
+            ToolFailure::SignIn {
+                protocol: Protocol::Smtp,
+                failure: SignInFailure::TimedOut
+            }
+            .to_string(),
+            "Signing in to the SMTP server failed: it did not answer in time. Check the email account in Settings → MCP."
+        );
+    }
+
+    /// Each failure about a folder, with the class the log gives it and the
+    /// sentence the model reads.
+    fn build_folder_failures() -> [(ToolFailure, &'static str, &'static str); 5] {
+        [
+            (
+                ToolFailure::FolderMissing("Projects".to_owned()),
+                "folder-missing",
+                "There is no folder named Projects. Use list_folders to see the folders.",
+            ),
+            (
+                ToolFailure::NoRoleFolder(FolderRole::Sent),
+                "no-sent-folder",
+                "No Sent folder was found. Create one with manage_folder.",
+            ),
+            (
+                ToolFailure::RoleFolder {
+                    name: "INBOX".to_owned(),
+                    role: FolderRole::Inbox,
+                },
+                "role-folder",
+                "INBOX is the Inbox folder, which cannot be renamed or deleted.",
+            ),
+            (
+                ToolFailure::FolderNotEmpty("Projects".to_owned()),
+                "folder-not-empty",
+                "Projects holds messages, so it cannot be deleted. Empty it first.",
+            ),
+            (
+                ToolFailure::FolderExists("Projects".to_owned()),
+                "folder-exists",
+                "A folder named Projects already exists.",
+            ),
+        ]
+    }
+
+    /// Each failure about the SMTP server's refusal, a draft, or an
+    /// attachment, with the class the log gives it and the sentence the
+    /// model reads.
+    fn build_message_failures() -> [(ToolFailure, &'static str, &'static str); 5] {
+        [
+            (
+                ToolFailure::SmtpRefused {
+                    code: 550,
+                    text: "Mailbox unavailable".to_owned(),
+                },
+                "smtp-refused-550",
+                "The SMTP server refused the message (550): Mailbox unavailable.",
+            ),
+            (
+                ToolFailure::NotInDrafts,
+                "not-in-drafts",
+                "That id is not in the Drafts folder. Only a message in the Drafts folder can be sent or deleted as a draft.",
+            ),
+            (
+                ToolFailure::AttachmentNotText {
+                    name: "photo.png".to_owned(),
+                    content_type: "image/png".to_owned(),
+                },
+                "attachment-not-text",
+                "Attachment photo.png is image/png, not text, so it cannot be read.",
+            ),
+            (
+                ToolFailure::AttachmentMissing {
+                    number: 2,
+                    count: 0,
+                },
+                "attachment-missing",
+                "The message has no attachment, so there is no #2.",
+            ),
+            (
+                ToolFailure::AttachmentMissing {
+                    number: 4,
+                    count: 3,
+                },
+                "attachment-missing",
+                "The message has 3 attachments, so there is no #4.",
+            ),
+        ]
+    }
+
+    #[test]
+    fn names_the_folder_each_folder_failure_concerns() {
+        for (failure, class, sentence) in build_folder_failures() {
+            assert_eq!(failure.class(), class);
+            assert_eq!(failure.to_string(), sentence);
+        }
+    }
+
+    #[test]
+    fn describes_smtp_refusals_drafts_outside_drafts_and_missing_attachments() {
+        for (failure, class, sentence) in build_message_failures() {
+            assert_eq!(failure.class(), class);
+            assert_eq!(failure.to_string(), sentence);
         }
     }
 

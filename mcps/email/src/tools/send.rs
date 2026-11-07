@@ -533,6 +533,28 @@ mod tests {
     }
 
     #[test]
+    fn takes_a_body_of_500000_characters_and_refuses_a_longer_one() {
+        let longest = MessageArguments {
+            to: vec!["jane@example.com".to_owned()],
+            subject: "Hi".to_owned(),
+            body: "ä".repeat(MAXIMUM_BODY_LENGTH),
+            ..MessageArguments::default()
+        };
+        let longer = MessageArguments {
+            body: "a".repeat(MAXIMUM_BODY_LENGTH + 1),
+            ..longest.clone()
+        };
+
+        assert_eq!(parse_message_arguments(&longest), Ok(&longest));
+        assert_eq!(
+            parse_message_arguments(&longer),
+            Err(ToolFailure::Argument(
+                "body must be at most 500000 characters.".to_owned()
+            ))
+        );
+    }
+
+    #[test]
     fn describes_what_became_of_the_copy() {
         assert_eq!(
             SentCopy::Saved("Sent".to_owned()).format_sentence(),

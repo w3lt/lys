@@ -1444,4 +1444,58 @@ mod tests {
             Err(UNREADABLE)
         );
     }
+
+    /// The fact one line of a `SELECT` answer holds, parsed as the session
+    /// reads it.
+    fn find_line_selection_fact(line: &[u8]) -> Option<SelectionFact> {
+        let (_, response) = Response::parse(line).expect("an IMAP response");
+        find_selection_fact(&response)
+    }
+
+    #[test]
+    fn takes_the_uid_validity_only_from_an_ok_answer() {
+        assert_eq!(
+            find_line_selection_fact(b"* 3 EXISTS\r\n"),
+            Some(SelectionFact::Exists(3))
+        );
+        assert_eq!(
+            find_line_selection_fact(b"* OK [UIDVALIDITY 7] UIDs valid\r\n"),
+            Some(SelectionFact::UidValidity(7))
+        );
+        for status in ["NO", "BAD", "PREAUTH", "BYE"] {
+            let line = format!("* {status} [UIDVALIDITY 7] Not a selection\r\n");
+            assert_eq!(find_line_selection_fact(line.as_bytes()), None, "{status}");
+        }
+    }
+
+    /// The header fields and the whole message of a fetched message, in
+    /// that order.
+    type FetchedSections = (Option<Vec<u8>>, Option<Vec<u8>>);
+
+    /// The header fields and the whole message one `FETCH` line holds,
+    /// parsed as the session reads it.
+    fn find_line_sections(line: &[u8]) -> FetchedSections {
+        let (_, response) = Response::parse(line).expect("an IMAP response");
+        let attributes = find_fetched_attributes(&response).expect("a FETCH answer");
+        (attributes.header, attributes.body)
+    }
+
+    #[test]
+    fn puts_each_fetched_section_where_its_section_says() {
+        let data = Some(b"hi".to_vec());
+        let answers: [(&str, FetchedSections); 8] = [
+            ("BODY[]", (None, data.clone())),
+            ("BODY[HEADER]", (data.clone(), None)),
+            ("BODY[HEADER.FIELDS (SUBJECT)]", (data.clone(), None)),
+            ("BODY[TEXT]", (None, None)),
+            ("BODY[1.MIME]", (None, None)),
+            ("BODY[1]", (None, None)),
+            ("RFC822.HEADER", (data.clone(), None)),
+            ("RFC822", (None, data.clone())),
+        ];
+        for (item, sections) in answers {
+            let line = format!("* 1 FETCH (UID 5 {item} {{2}}\r\nhi)\r\n");
+            assert_eq!(find_line_sections(line.as_bytes()), sections, "{item}");
+        }
+    }
 }

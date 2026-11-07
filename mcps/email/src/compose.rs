@@ -429,9 +429,23 @@ mod tests {
 
     /// The account every test composes from.
     fn build_account() -> Account {
-        parse_account_variable(
-            "{\"address\":\"person@example.com\",\"displayName\":\"A Person\",\"userName\":\"person@example.com\",\"password\":\"correct horse\",\"imap\":{\"host\":\"imap.example.com\",\"port\":993,\"security\":\"tls\"},\"smtp\":{\"host\":\"smtp.example.com\",\"port\":587,\"security\":\"starttls\"},\"serverKeepsSentCopy\":false}",
-        )
+        build_account_with_address("person@example.com")
+    }
+
+    /// The account of [`build_account`] with another address, which the
+    /// account rules accept.
+    ///
+    /// # Arguments
+    ///
+    /// * `address` - The account's address.
+    ///
+    /// # Panics
+    ///
+    /// When the account rules refuse the address.
+    fn build_account_with_address(address: &str) -> Account {
+        parse_account_variable(&format!(
+            "{{\"address\":\"{address}\",\"displayName\":\"A Person\",\"userName\":\"person@example.com\",\"password\":\"correct horse\",\"imap\":{{\"host\":\"imap.example.com\",\"port\":993,\"security\":\"tls\"}},\"smtp\":{{\"host\":\"smtp.example.com\",\"port\":587,\"security\":\"starttls\"}},\"serverKeepsSentCopy\":false}}",
+        ))
         .expect("account")
     }
 
@@ -597,11 +611,51 @@ mod tests {
                 "not a type".to_owned()
             ))
         );
-        assert!(
-            CompositionProblem::NoRecipient
-                .format_sentence()
-                .starts_with("Give at least one")
+    }
+
+    #[test]
+    fn refuses_an_account_address_that_lettre_cannot_send_from() {
+        let account = build_account_with_address("john..doe@example.com");
+        let composition = build_plain_composition();
+
+        assert_eq!(
+            build_sent_message(&account, &composition, build_stamp(1)),
+            Err(CompositionProblem::InvalidSender)
         );
+        assert_eq!(
+            build_draft_message(&account, &composition, build_stamp(1)),
+            Err(CompositionProblem::InvalidSender)
+        );
+    }
+
+    #[test]
+    fn describes_every_composition_problem_as_the_model_reads_it() {
+        let sentences = [
+            (
+                CompositionProblem::NoRecipient,
+                "Give at least one recipient in to, cc, or bcc.",
+            ),
+            (
+                CompositionProblem::InvalidRecipient("nobody".to_owned()),
+                "nobody is not an email address. Give addresses as name@example.com or Name <name@example.com>.",
+            ),
+            (
+                CompositionProblem::InvalidSender,
+                "The account's address cannot be used as a sender. Check it in Settings → MCP.",
+            ),
+            (
+                CompositionProblem::InvalidAttachmentType("not a type".to_owned()),
+                "The attachment type not a type cannot be attached.",
+            ),
+            (
+                CompositionProblem::Build("missing To".to_owned()),
+                "The message could not be built: missing To.",
+            ),
+        ];
+
+        for (problem, sentence) in sentences {
+            assert_eq!(problem.format_sentence(), sentence, "{problem:?}");
+        }
     }
 
     #[test]

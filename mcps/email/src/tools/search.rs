@@ -564,6 +564,18 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_page_past_the_last_one_with_how_many_pages_match() {
+        assert_eq!(
+            build_page_failure(1),
+            ToolFailure::Argument("Only 1 page matches. Ask for page 1.".to_owned())
+        );
+        assert_eq!(
+            build_page_failure(3),
+            ToolFailure::Argument("Only 3 pages match. Ask for a page from 1 to 3.".to_owned())
+        );
+    }
+
+    #[test]
     fn parses_calendar_days_only() {
         assert_eq!(parse_day("2026-11-02"), Some((2026, 11, 2)));
         assert_eq!(parse_day("2024-02-29"), Some((2024, 2, 29)));

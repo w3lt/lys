@@ -973,6 +973,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn refuses_a_draft_that_is_not_a_message_or_whose_sender_lettre_refuses() {
+        let draft =
+            b"From: person@example.com\r\nTo: jane@example.com\r\nSubject: Hi\r\n\r\nHello\r\n";
+
+        assert_eq!(
+            parse_stored_draft("person@example.com", b"Hello"),
+            Err(ToolFailure::Argument(
+                "The draft is not a message.".to_owned()
+            ))
+        );
+        assert_eq!(
+            parse_stored_draft("john..doe@example.com", draft),
+            Err(ToolFailure::Argument(
+                "The account's address cannot be used as a sender. Check it in Settings → MCP."
+                    .to_owned()
+            ))
+        );
+    }
+
     /// The compared form of a call's fields.
     fn build_given(to: &[&str], subject: &str, body: &str) -> ComparedFields {
         build_compared_fields(&MessageArguments {

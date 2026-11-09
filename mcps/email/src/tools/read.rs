@@ -727,7 +727,9 @@ mod tests {
     }
 
     /// Checks that a message's own id, the id it replies to, and its
-    /// references are collected once each, in that order.
+    /// references are collected once each, in that order, and that an
+    /// empty identifier, one with a letter outside ASCII, and one with a
+    /// control character are skipped.
     #[test]
     fn collects_identifiers_once_each_and_skips_unusable_ones() {
         let mut view = parse_message(b"Message-ID: <one@example.com>\r\nIn-Reply-To: <zero@example.com>\r\nReferences: <minus@example.com> <zero@example.com> <one@example.com>\r\n\r\nx").expect("message");

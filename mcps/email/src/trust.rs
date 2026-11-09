@@ -142,8 +142,9 @@ mod tests {
         )));
     }
 
-    /// Checks that trust built with a list of extra roots, here empty,
-    /// gives a TLS connector and the TLS parameters for an SMTP host.
+    /// Checks that trust built with a self-signed root certificate as its
+    /// extra root gives a TLS connector and the TLS parameters for an SMTP
+    /// host.
     #[test]
     fn builds_a_connector_and_parameters_with_an_extra_root() {
         let key = KeyPair::generate().expect("root key");

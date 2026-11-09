@@ -888,7 +888,8 @@ mod tests {
     ///
     /// # Panics
     ///
-    /// When `group` is not an object whose `servers` is an array.
+    /// When `group` is not an object whose `servers` is an array, or an
+    /// element of `servers` is neither an object nor null.
     fn build_switched_group(group: &Value, server_switch: bool) -> Value {
         let mut switched_group = group.clone();
         for server in switched_group["servers"].as_array_mut().expect("servers") {

@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
-import { createLlmModelHealthDiagnostic } from "../../../../src/modules/llm/llmModelHealthDiagnostic"
+import { createLlmRuntimeFailureEvidence } from "../../../../src/modules/llm/llmRuntimeFailureEvidence"
 
-describe("createLlmModelHealthDiagnostic", () => {
+describe("createLlmRuntimeFailureEvidence", () => {
   it("reports the original failure value to the reporter", () => {
     const failure = new Error("inventory query failed")
     const reporter = vi.fn()
 
-    createLlmModelHealthDiagnostic(failure).handleLlmModelHealthFailureReport(
+    createLlmRuntimeFailureEvidence(failure).handleLlmRuntimeFailureReport(
       reporter
     )
 
@@ -18,7 +18,7 @@ describe("createLlmModelHealthDiagnostic", () => {
     const failure = { code: "ECONNREFUSED" }
     const reporter = vi.fn()
 
-    createLlmModelHealthDiagnostic(failure).handleLlmModelHealthFailureReport(
+    createLlmRuntimeFailureEvidence(failure).handleLlmRuntimeFailureReport(
       reporter
     )
 
@@ -27,15 +27,11 @@ describe("createLlmModelHealthDiagnostic", () => {
 
   it("reports the same value on every request", () => {
     const failure = new Error("inventory query failed")
-    const diagnostic = createLlmModelHealthDiagnostic(failure)
+    const evidence = createLlmRuntimeFailureEvidence(failure)
     const reported: unknown[] = []
 
-    diagnostic.handleLlmModelHealthFailureReport((value) =>
-      reported.push(value)
-    )
-    diagnostic.handleLlmModelHealthFailureReport((value) =>
-      reported.push(value)
-    )
+    evidence.handleLlmRuntimeFailureReport((value) => reported.push(value))
+    evidence.handleLlmRuntimeFailureReport((value) => reported.push(value))
 
     expect(reported).toEqual([failure, failure])
     expect(reported[1]).toBe(failure)
@@ -44,11 +40,11 @@ describe("createLlmModelHealthDiagnostic", () => {
   it("rejects with both failures when the reporter throws", () => {
     const failure = new Error("inventory query failed")
     const reporterFailure = new Error("logger unavailable")
-    const diagnostic = createLlmModelHealthDiagnostic(failure)
+    const evidence = createLlmRuntimeFailureEvidence(failure)
 
     let caught: unknown
     try {
-      diagnostic.handleLlmModelHealthFailureReport(() => {
+      evidence.handleLlmRuntimeFailureReport(() => {
         throw reporterFailure
       })
     } catch (error) {
@@ -61,12 +57,12 @@ describe("createLlmModelHealthDiagnostic", () => {
 
   it("exposes no failure evidence as passive data", () => {
     const failure = new Error("secret path")
-    const diagnostic = createLlmModelHealthDiagnostic(failure)
+    const evidence = createLlmRuntimeFailureEvidence(failure)
 
-    expect(Object.isFrozen(diagnostic)).toBe(true)
+    expect(Object.isFrozen(evidence)).toBe(true)
     expect(
-      Reflect.ownKeys(diagnostic).map((key) => Reflect.get(diagnostic, key))
+      Reflect.ownKeys(evidence).map((key) => Reflect.get(evidence, key))
     ).not.toContain(failure)
-    expect(JSON.stringify(diagnostic)).not.toContain("secret path")
+    expect(JSON.stringify(evidence)).not.toContain("secret path")
   })
 })

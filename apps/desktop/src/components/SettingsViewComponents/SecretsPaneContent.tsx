@@ -12,9 +12,10 @@ import TavilyKeyCard from "./TavilyKeyCard"
  *
  * @remarks The application store owns the saved key, its save, and its check;
  * the tool store owns the tool list. After a save or removal that succeeded,
- * the pane reads the tool list again before the card resets its edit, so
- * `web_search`'s availability in the Tools pane follows the saved key. The
- * pane accepts no props and is loaded lazily by the settings view.
+ * the pane reads the tool list again before the card resets its edit, in a
+ * read that starts after any read in flight, so `web_search`'s availability
+ * in the Tools pane follows the saved key rather than a list read before the
+ * save. The pane accepts no props and is loaded lazily by the settings view.
  * @returns The secrets pane body.
  */
 export default function SecretsPane(): ReactElement {
@@ -26,10 +27,11 @@ export default function SecretsPane(): ReactElement {
   const keyCheck = useLysStore((state) => state.tavilyKeyCheck)
   const saveTavilyApiKey = useLysStore((state) => state.saveTavilyApiKey)
   const sendTavilyKeyCheck = useLysStore((state) => state.sendTavilyKeyCheck)
-  const loadTools = useToolStore((state) => state.loadTools)
+  const loadToolsAgain = useToolStore((state) => state.loadToolsAgain)
 
   /**
-   * Saves or removes the key and, once saved, reads the tool list again.
+   * Saves or removes the key and, once saved, reads the tool list again in a
+   * read that starts after the read in flight, if any.
    *
    * @param apiKey - Key to save, or null to remove.
    * @returns The save outcome, after the tool list read when it saved.
@@ -38,7 +40,7 @@ export default function SecretsPane(): ReactElement {
     apiKey: TavilyApiKey | null
   ): Promise<SecretsSaveOutcome> {
     const outcome = await saveTavilyApiKey(apiKey)
-    if (outcome === "saved") await loadTools()
+    if (outcome === "saved") await loadToolsAgain()
     return outcome
   }
 

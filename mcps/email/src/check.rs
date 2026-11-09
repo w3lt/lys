@@ -125,6 +125,9 @@ async fn offer_smtp_sign_in(account: &Account, trust: &Trust) -> Result<(), Sign
 mod tests {
     use super::*;
 
+    /// Checks that a check report serializes to the JSON the backend reads,
+    /// with each server's status and a failure's reason, and that a sign-in
+    /// that succeeded reads as accepted.
     #[test]
     fn prints_the_report_as_the_backend_reads_it() {
         let report = CheckReport {

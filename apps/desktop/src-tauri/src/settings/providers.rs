@@ -14,6 +14,7 @@ use serde::de::Error;
 use serde::{Deserialize, Serialize};
 
 use super::host_name::is_host_name;
+use super::json::parse_json_object;
 
 /// Most digits a port may have. A five-digit port is still checked against
 /// the highest TCP port.
@@ -118,13 +119,16 @@ pub struct OllamaProviderSettings {
 /// object.
 ///
 /// A missing field takes its default: LM Studio active and both addresses
-/// `null`. The group may not be `null`, and unknown fields are rejected.
+/// `null`. The group may not be `null`, unknown fields are rejected, and each
+/// server is read from a JSON object only, as `@lys/share` reads it.
 pub struct ProvidersSettings {
     /// Provider every request goes to.
     active: LlmProvider,
     /// LM Studio's server.
+    #[serde(deserialize_with = "parse_json_object")]
     lm_studio: LmStudioProviderSettings,
     /// The local Ollama server.
+    #[serde(deserialize_with = "parse_json_object")]
     ollama: OllamaProviderSettings,
 }
 

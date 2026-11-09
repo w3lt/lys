@@ -1337,6 +1337,9 @@ mod tests {
         assert!(list.is_dir());
     }
 
+    /// Checks that a start deletes the MCP server process group list an
+    /// earlier backend left, and does so before it starts the backend, whose
+    /// Node.js stand-in then finds no list.
     #[test]
     fn a_start_deletes_the_list_an_earlier_backend_left_before_it_starts_the_backend() {
         let case = TestDirectory::create("backend-start-stale-list");
@@ -1354,6 +1357,9 @@ mod tests {
         assert!(!lys_home.mcp_process_groups_path().exists());
     }
 
+    /// Checks that a start gives the backend the installed email server's
+    /// path, `runtime/email/email` under the Lys home, in
+    /// `LYS_EMAIL_SERVER_PATH`, as the backend's Node.js stand-in records it.
     #[test]
     fn a_start_names_the_installed_email_server_to_the_backend() {
         let case = TestDirectory::create("backend-start-email-server");
@@ -1374,6 +1380,9 @@ mod tests {
         );
     }
 
+    /// Checks that the development email server path is absolute and ends in
+    /// `mcps/email/target/debug/email`, the debug build of a crate whose
+    /// directory holds a `Cargo.toml`.
     #[test]
     fn the_development_email_server_is_the_workspace_build() {
         let path = get_dev_email_server_path().unwrap();
@@ -1387,6 +1396,9 @@ mod tests {
         );
     }
 
+    /// Checks that the development command runs `pnpm run dev` in the
+    /// backend's directory and sets exactly `LYS_EMAIL_SERVER_PATH` and
+    /// `LYS_HOME`, to the email server and the Lys home.
     #[test]
     fn the_development_command_runs_the_backend_script_with_the_lys_home_and_the_email_server() {
         let lys_home = LysHome::from_test_directory(Path::new("/home/person/.lys"));
@@ -1418,6 +1430,9 @@ mod tests {
         );
     }
 
+    /// Checks that a start fails with an error about the MCP server process
+    /// group list, and starts no backend, when that list cannot be deleted
+    /// because it is a directory.
     #[test]
     fn a_start_that_cannot_delete_the_earlier_list_starts_no_backend() {
         let case = TestDirectory::create("backend-start-undeletable-list");

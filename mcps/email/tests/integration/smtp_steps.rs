@@ -73,6 +73,9 @@ fn assert_nothing_delivered(imap: &FakeImapServer, smtp: &FakeSmtpServer) {
     assert!(imap.list_messages("Sent").is_empty());
 }
 
+/// Checks that an SMTP connection that ends at `RCPT` fails `send_email` as
+/// lost before the message is handed over, with no mail at the server and
+/// no copy in Sent.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_connection_that_ends_before_the_data_ends_sends_nothing() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -86,6 +89,9 @@ async fn a_connection_that_ends_before_the_data_ends_sends_nothing() {
     assert_nothing_delivered(&stack.imap, &stack.smtp);
 }
 
+/// Checks that a plain-text SMTP connection that ends at `RCPT` also fails
+/// the send as lost before the message is handed over, with no mail at the
+/// server.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_plain_text_connection_that_ends_before_a_reply_is_lost_too() {
     let authority = TestAuthority::new();
@@ -101,6 +107,9 @@ async fn a_plain_text_connection_that_ends_before_a_reply_is_lost_too() {
     assert!(smtp.list_mails().is_empty());
 }
 
+/// Checks that a connection that ends after the end of the data leaves the
+/// send unconfirmed at the handed-over stage, with the message at the
+/// server and no copy in Sent.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_connection_that_ends_after_the_data_ended_leaves_the_send_unconfirmed() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -115,6 +124,9 @@ async fn a_connection_that_ends_after_the_data_ended_leaves_the_send_unconfirmed
     assert!(stack.imap.list_messages("Sent").is_empty());
 }
 
+/// Checks that a reply to `RCPT` that is not SMTP fails the send as
+/// unreadable before the message is handed over, with no mail at the server
+/// and no copy in Sent.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_reply_that_is_not_smtp_fails_the_send_as_unreadable_and_sends_nothing() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -131,6 +143,8 @@ async fn a_reply_that_is_not_smtp_fails_the_send_as_unreadable_and_sends_nothing
     assert_nothing_delivered(&stack.imap, &stack.smtp);
 }
 
+/// Checks that a send the fake SMTP server accepts succeeds at the accepted
+/// stage.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_send_the_server_accepted_reaches_the_accepted_stage() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -142,6 +156,9 @@ async fn a_send_the_server_accepted_reaches_the_accepted_stage() {
     assert_eq!(progress.stage(), SendStage::Accepted);
 }
 
+/// Checks that a send stopped while `RCPT` waits for its answer stays at
+/// the not-handed-over stage, with no mail at the server and no copy in
+/// Sent.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_send_stopped_while_a_recipient_waits_was_not_handed_over() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -157,6 +174,9 @@ async fn a_send_stopped_while_a_recipient_waits_was_not_handed_over() {
     assert_nothing_delivered(&stack.imap, &stack.smtp);
 }
 
+/// Checks that a send stopped while the server holds back its answer to the
+/// end of the data is at the handed-over stage, with the message at the
+/// server.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_send_stopped_while_the_server_answers_the_data_was_handed_over() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -172,6 +192,9 @@ async fn a_send_stopped_while_the_server_answers_the_data_was_handed_over() {
     assert_eq!(stack.smtp.list_mails().len(), 1);
 }
 
+/// Checks that a recipient address beyond ASCII fails the send as missing
+/// `SMTPUTF8` against a server that does not offer it, before any `MAIL`
+/// command and with nothing delivered.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_address_beyond_ascii_is_not_offered_to_a_server_without_smtputf8() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -204,6 +227,9 @@ async fn an_address_beyond_ascii_is_not_offered_to_a_server_without_smtputf8() {
     assert_nothing_delivered(&stack.imap, &stack.smtp);
 }
 
+/// Checks, on a paused clock, that a send to an SMTP server that never
+/// answers the TLS handshake fails as a sign-in that timed out, after the
+/// 15-second handshake limit.
 #[tokio::test]
 async fn a_server_that_never_answers_the_tls_handshake_fails_the_sign_in_after_15_seconds() {
     let authority = TestAuthority::new();
@@ -219,6 +245,8 @@ async fn a_server_that_never_answers_the_tls_handshake_fails_the_sign_in_after_1
     assert_about(timing, Duration::from_secs(15));
 }
 
+/// Checks, on a paused clock, that an unanswered `EHLO` fails the send as a
+/// sign-in that timed out after 30 seconds, with nothing delivered.
 #[tokio::test]
 async fn a_greeting_without_an_answer_to_ehlo_fails_the_sign_in_after_30_seconds() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -235,6 +263,8 @@ async fn a_greeting_without_an_answer_to_ehlo_fails_the_sign_in_after_30_seconds
     assert_nothing_delivered(&stack.imap, &stack.smtp);
 }
 
+/// Checks, on a paused clock, that an unanswered `STARTTLS` fails the send
+/// as a sign-in that timed out after 30 seconds.
 #[tokio::test]
 async fn starttls_without_an_answer_fails_the_sign_in_after_30_seconds() {
     let authority = TestAuthority::new();
@@ -251,6 +281,8 @@ async fn starttls_without_an_answer_fails_the_sign_in_after_30_seconds() {
     assert_about(timing, Duration::from_secs(30));
 }
 
+/// Checks, on a paused clock, that an unanswered `AUTH` fails the send as a
+/// sign-in that timed out after 30 seconds, with nothing delivered.
 #[tokio::test]
 async fn a_sign_in_without_an_answer_fails_after_30_seconds() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -267,6 +299,8 @@ async fn a_sign_in_without_an_answer_fails_after_30_seconds() {
     assert_nothing_delivered(&stack.imap, &stack.smtp);
 }
 
+/// Checks, on a paused clock, that an unanswered `RCPT` fails the send as a
+/// connection that timed out after 30 seconds, with nothing delivered.
 #[tokio::test]
 async fn a_recipient_without_an_answer_fails_the_send_after_30_seconds_and_sends_nothing() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -286,6 +320,9 @@ async fn a_recipient_without_an_answer_fails_the_send_after_30_seconds_and_sends
     assert_nothing_delivered(&stack.imap, &stack.smtp);
 }
 
+/// Checks, on a paused clock, that an unanswered end of the data leaves the
+/// send unconfirmed after 120 seconds at the handed-over stage, with the
+/// message at the server and no copy in Sent.
 #[tokio::test]
 async fn data_without_an_answer_leaves_the_send_unconfirmed_after_120_seconds() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -304,6 +341,9 @@ async fn data_without_an_answer_leaves_the_send_unconfirmed_after_120_seconds() 
     assert!(stack.imap.list_messages("Sent").is_empty());
 }
 
+/// Checks, on a paused clock, that an unanswered `QUIT` after an accepted
+/// send ends after 30 seconds, and that the call still reports the message
+/// as sent.
 #[tokio::test]
 async fn a_quit_without_an_answer_after_the_send_reports_it_sent_after_30_seconds() {
     let stack = start_stack(FakeMailbox::create_standard(), true).await;

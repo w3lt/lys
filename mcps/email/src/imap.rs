@@ -1347,6 +1347,11 @@ mod tests {
 
     use super::*;
 
+    /// Checks that flags read as `unread` or as a list such as
+    /// `read, answered, flagged`, that a search quotes its texts and sends
+    /// one with a line break or beyond ASCII as a literal, asking for UTF-8
+    /// only for the latter, and that dates and UID sets are written as IMAP
+    /// needs.
     #[test]
     fn formats_flag_lists_and_builds_search_parts_dates_and_uid_sets() {
         assert_eq!(Flags::default().format_flag_list(), "unread");
@@ -1396,6 +1401,9 @@ mod tests {
         assert_eq!(build_uid_set(&[3, 1, 2]), "3,1,2");
     }
 
+    /// Checks that a refused sign-in counts as a wrong password, a read
+    /// that timed out as a time-out, and a connection that ended as a
+    /// protocol error.
     #[test]
     fn classifies_sign_in_errors_by_kind() {
         assert_eq!(
@@ -1429,6 +1437,9 @@ mod tests {
         calculate_tagged_outcome(&response, &RequestId("A1".to_owned()))
     }
 
+    /// Checks that an answer line ends the command only when it carries the
+    /// command's own tag, `OK` succeeding and `BAD` refusing with its text,
+    /// while another tag's status and untagged lines leave it running.
     #[test]
     fn ends_a_command_only_at_its_own_tagged_status() {
         assert_eq!(calculate_line_outcome(b"A1 OK Done\r\n"), Some(Ok(())));
@@ -1441,6 +1452,9 @@ mod tests {
         );
     }
 
+    /// Checks that a `NO` answer is passed on as a refusal with its
+    /// response code, such as `[OVERQUOTA]`, and its text, or as
+    /// `no reason given` when it has neither.
     #[test]
     fn passes_on_the_code_and_text_of_a_refusal() {
         let cases: [(&[u8], &str); 6] = [
@@ -1473,6 +1487,9 @@ mod tests {
         }
     }
 
+    /// Checks that a refusal text is kept whole at `REFUSAL_TEXT_LIMIT`
+    /// characters and cut there with `…` past it, counting characters, not
+    /// bytes.
     #[test]
     fn cuts_a_refusal_text_after_its_limit() {
         let at_limit = "é".repeat(REFUSAL_TEXT_LIMIT);
@@ -1489,6 +1506,8 @@ mod tests {
         );
     }
 
+    /// Checks that system flags are read in any letter case and that other
+    /// keywords, such as `$Forwarded`, set none.
     #[test]
     fn reads_flags_in_any_letter_case() {
         let names = [
@@ -1510,6 +1529,10 @@ mod tests {
         );
     }
 
+    /// Checks that an `INTERNALDATE`, its day padded with a zero or a
+    /// space, parses to the instant its zone gives, and that other text, an
+    /// unknown month, a day or hour out of range, or a malformed zone gives
+    /// none.
     #[test]
     fn parses_internal_dates_with_their_zone() {
         let date = parse_internal_date("02-Nov-2026 14:03:00 +0100").expect("a date");
@@ -1527,6 +1550,8 @@ mod tests {
         assert_eq!(parse_internal_date("02-Nov-2026 10:00:00 +0é0"), None);
     }
 
+    /// Checks that a folder name is quoted with its quotes and backslashes
+    /// escaped, and that a name with a line break is refused as unreadable.
     #[test]
     fn quotes_folder_names_and_refuses_line_breaks() {
         assert_eq!(
@@ -1536,6 +1561,9 @@ mod tests {
         assert_eq!(build_quoted_folder_name("Bad\r\nName"), Err(UNREADABLE));
     }
 
+    /// Checks that a selection takes its UIDVALIDITY and the last `EXISTS`
+    /// count from the untagged answers, and that one without a UIDVALIDITY
+    /// is unreadable.
     #[test]
     fn reads_the_facts_of_a_selection() {
         let facts = [
@@ -1572,6 +1600,9 @@ mod tests {
         find_selection_fact(&response)
     }
 
+    /// Checks that `EXISTS` counts and a `[UIDVALIDITY]` code in an
+    /// untagged `OK` are read as selection facts, while the same code after
+    /// `NO`, `BAD`, `PREAUTH`, or `BYE` is not.
     #[test]
     fn takes_the_uid_validity_only_from_an_ok_answer() {
         assert_eq!(
@@ -1609,6 +1640,9 @@ mod tests {
         (attributes.header, attributes.body)
     }
 
+    /// Checks that a fetched `BODY[]` or `RFC822` is read as the whole
+    /// message, a header section as the header, and a text or part section
+    /// as neither.
     #[test]
     fn puts_each_fetched_section_where_its_section_says() {
         let data = Some(b"hi".to_vec());

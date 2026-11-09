@@ -17,6 +17,16 @@ import {
 } from "../../support/settingsFixtures"
 import { listKeystrokeTexts } from "../../support/typing"
 
+/** A change to a typed draft that breaks one field's rule. */
+type DraftFieldProblem = {
+  /** Fields replacing the typed Gmail draft's. */
+  readonly change: Partial<EmailAccountDraft>
+  /** Field whose input reports the problem. */
+  readonly field: string
+  /** Text the reported problem contains. */
+  readonly expectedProblem: string
+}
+
 /** The fields showing the stored account. */
 const SAVED_DRAFT = buildEmailAccountDraft(STORED_EMAIL_ACCOUNT)
 
@@ -468,84 +478,129 @@ describe("parseEmailAccountDraft", () => {
     })
   })
 
-  it.each<[string, Partial<EmailAccountDraft>, string, string]>([
-    ["an address", { address: "ada" }, "address", "address"],
+  it.each<[string, DraftFieldProblem]>([
+    [
+      "an address",
+      {
+        change: { address: "ada" },
+        field: "address",
+        expectedProblem: "address"
+      }
+    ],
     [
       "an address whose name holds a letter beyond ASCII",
-      { address: "josé@example.test" },
-      "address",
-      ADDRESS_PROBLEM
+      {
+        change: { address: "josé@example.test" },
+        field: "address",
+        expectedProblem: ADDRESS_PROBLEM
+      }
     ],
     [
       "an address whose name has two dots in a row",
-      { address: "ada..lovelace@example.test" },
-      "address",
-      ADDRESS_PROBLEM
+      {
+        change: { address: "ada..lovelace@example.test" },
+        field: "address",
+        expectedProblem: ADDRESS_PROBLEM
+      }
     ],
     [
       "an address whose name is over 64 characters",
-      { address: `${"a".repeat(65)}@example.test` },
-      "address",
-      ADDRESS_PROBLEM
+      {
+        change: { address: `${"a".repeat(65)}@example.test` },
+        field: "address",
+        expectedProblem: ADDRESS_PROBLEM
+      }
     ],
     [
       "an address whose host holds a letter beyond ASCII",
-      { address: "ada@bücher.example" },
-      "address",
-      ADDRESS_PROBLEM
+      {
+        change: { address: "ada@bücher.example" },
+        field: "address",
+        expectedProblem: ADDRESS_PROBLEM
+      }
     ],
     [
       "a display name over the limit",
-      { displayName: "a".repeat(201) },
-      "displayName",
-      "display name"
+      {
+        change: { displayName: "a".repeat(201) },
+        field: "displayName",
+        expectedProblem: "display name"
+      }
     ],
-    ["an empty user name", { userName: "" }, "userName", "user name"],
-    ["a host", { imap: SPACED_HOST_IMAP }, "imapHost", "host"],
+    [
+      "an empty user name",
+      {
+        change: { userName: "" },
+        field: "userName",
+        expectedProblem: "user name"
+      }
+    ],
+    [
+      "a host",
+      {
+        change: { imap: SPACED_HOST_IMAP },
+        field: "imapHost",
+        expectedProblem: "host"
+      }
+    ],
     [
       "a host that holds a letter beyond ASCII",
-      { imap: NON_ASCII_HOST_IMAP },
-      "imapHost",
-      HOST_PROBLEM
+      {
+        change: { imap: NON_ASCII_HOST_IMAP },
+        field: "imapHost",
+        expectedProblem: HOST_PROBLEM
+      }
     ],
     [
       "a port that is not a whole number in range",
-      { smtp: OUT_OF_RANGE_PORT_SMTP },
-      "smtpPort",
-      "A port is a whole number from 1 to 65535."
+      {
+        change: { smtp: OUT_OF_RANGE_PORT_SMTP },
+        field: "smtpPort",
+        expectedProblem: "A port is a whole number from 1 to 65535."
+      }
     ],
     [
       "a port with letters",
-      { smtp: LETTERED_PORT_SMTP },
-      "smtpPort",
-      "A port is a whole number from 1 to 65535."
+      {
+        change: { smtp: LETTERED_PORT_SMTP },
+        field: "smtpPort",
+        expectedProblem: "A port is a whole number from 1 to 65535."
+      }
     ],
     [
       "a port of zero",
-      { imap: ZERO_PORT_IMAP },
-      "imapPort",
-      "A port is a whole number from 1 to 65535."
+      {
+        change: { imap: ZERO_PORT_IMAP },
+        field: "imapPort",
+        expectedProblem: "A port is a whole number from 1 to 65535."
+      }
     ],
     [
       "a password with a line break",
-      { password: "app\npassword" },
-      "password",
-      "A password is 1 to 1024 characters, without line breaks or other control characters."
+      {
+        change: { password: "app\npassword" },
+        field: "password",
+        expectedProblem:
+          "A password is 1 to 1024 characters, without line breaks or other control characters."
+      }
     ]
-  ])("reports %s under its input", (_label, change, field, expectedProblem) => {
-    const parse = parseEmailAccountDraft(
-      { ...buildTypedGmailDraft(), ...change },
-      null,
-      null
-    )
+  ])(
+    "reports %s under its input",
+    (_label, { change, field, expectedProblem }) => {
+      const parse = parseEmailAccountDraft(
+        { ...buildTypedGmailDraft(), ...change },
+        null,
+        null
+      )
 
-    expect(parse.status).toBe("invalid")
-    if (parse.status !== "invalid") return
-    expect(Object.keys(parse.problems)).toEqual([field])
-    expect(parse.problems[field as keyof typeof parse.problems]).toContain(
-      expectedProblem
-    )
-  })
+      expect(parse.status).toBe("invalid")
+      if (parse.status !== "invalid") return
+      expect(Object.keys(parse.problems)).toEqual([field])
+      expect(parse.problems[field as keyof typeof parse.problems]).toContain(
+        expectedProblem
+      )
+    }
+  )
 
   it("places a connection without TLS to another machine on that server's host", () => {
     const smtp: EmailServerDraft = {

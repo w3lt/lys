@@ -8,12 +8,17 @@ import {
   type ChatImageNeedsVisionProblem,
   type MessageGenerationOptions
 } from "@lys/protocol"
-import type { Conversation, ToolDefinition } from "@lys/share"
+import type {
+  Conversation,
+  ConversationAssistantMessageStatus,
+  ToolDefinition
+} from "@lys/share"
 import type { FastifyBaseLogger, FastifyInstance } from "fastify"
 import { v7 as uuidv7 } from "uuid"
 import type { BackendConfig } from "../../../config"
 import type Agent from "../../agent/agent"
 import type { AgentTurn } from "../../agent/agent"
+import { AgentRequestLimitError } from "../../agent/agentActivity"
 import type { FindAttachmentImage } from "../../agent/agentContext"
 import type { UnofferedTools } from "../../agent/unofferedTools"
 import type AttachmentFileStore from "../../attachment/attachmentFileStore"
@@ -945,10 +950,12 @@ async function createTurnReplyTask(
  * @param context - Generation-owned cancellation, event sender, tool call
  * sender, and approval prompt sender.
  * @returns The agent turn, whose parts and final state go to the stored
- * reply, which numbers new sources after the conversation's stored ones,
+ * reply and whose reply state is read back from the stored conversation,
+ * which numbers new sources after the conversation's stored ones,
  * whose tool calls pass the approval gateway, and whose images are read
  * from the conversation's attachment files. With the request's logger, an
- * unreadable settings file is logged as a warning; a cancelled reply, and a
+ * unreadable settings file, and a reply refused because its agent's request
+ * slots and line were full, are logged as warnings; a cancelled reply, and a
  * round that was not sent because it did not fit or its model was not
  * loaded, at debug level; and any other reply failure as an error.
  */
@@ -991,6 +998,11 @@ function buildAgentTurn(
         assistantMessageId,
         completion
       ),
+    findReplyStatus: () =>
+      findStoredReplyStatus(
+        dependencies.findConversation(turn.conversation.id),
+        assistantMessageId
+      ),
     sendEvent,
     sendClientToolCall,
     createToolCallGate: () =>
@@ -1005,11 +1017,32 @@ function buildAgentTurn(
 }
 
 /**
+ * Finds the status one reply of a conversation has as stored.
+ *
+ * @param conversation - The stored conversation; undefined when it is not
+ * stored.
+ * @param assistantMessageId - UUIDv7 of the reply.
+ * @returns The reply's status; undefined when the conversation or the reply
+ * is not stored.
+ */
+function findStoredReplyStatus(
+  conversation: Conversation | undefined,
+  assistantMessageId: string
+): ConversationAssistantMessageStatus | undefined {
+  const message = conversation?.messages.find(
+    (stored) => stored.id === assistantMessageId
+  )
+  return message?.role === "assistant" ? message.status : undefined
+}
+
+/**
  * Builds the reporters that log how a reply ended without finishing.
  *
  * @param logger - Request logger, borrowed for the reply.
- * @returns Reporters that log a cancellation and a refused round as debug
- * entries and a failed stream as an error.
+ * @returns Reporters that log a reply refused because its agent's request
+ * slots and line were full as a warning, a cancellation and a round that was
+ * not sent because it did not fit or its model was not loaded as debug
+ * entries, and a failed stream as an error.
  */
 function buildReplyFailureReporters(
   logger: FastifyBaseLogger
@@ -1022,7 +1055,13 @@ function buildReplyFailureReporters(
       logger.debug({ err: failure }, "Chat completion was cancelled")
     },
     reportReplyRefusal: (failure) => {
-      logger.debug({ err: failure }, "Chat round was not sent to the model")
+      if (failure instanceof AgentRequestLimitError)
+        logger.warn(
+          { err: failure },
+          "Chat reply was refused because its agent was too busy"
+        )
+      else
+        logger.debug({ err: failure }, "Chat round was not sent to the model")
     },
     reportReplyFailure: (failure) => {
       logger.error({ err: failure }, "Chat completion stream failed")

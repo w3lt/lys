@@ -468,6 +468,10 @@ mod tests {
         }
     }
 
+    /// Checks that a composed message carries its sender, To, Cc, and reply
+    /// headers with no trace of Bcc. Its `Message-ID` holds the stamp's
+    /// time and count and the account's domain, and its non-ASCII subject
+    /// and its body parse back.
     #[test]
     fn composes_a_plain_message_with_every_field_but_bcc() {
         let composition = build_plain_composition();
@@ -509,6 +513,9 @@ mod tests {
         assert_eq!(parsed.text, "Hello Jane,\r\n\r\nBye.\r\n");
     }
 
+    /// Checks that a sent message's envelope goes from the account's
+    /// address to every To, Cc, and Bcc recipient, and that a draft of the
+    /// same composition keeps its `Bcc` header.
     #[test]
     fn sends_to_every_recipient_and_keeps_bcc_only_in_a_draft() {
         let composition = build_plain_composition();
@@ -534,6 +541,8 @@ mod tests {
         );
     }
 
+    /// Checks that a message with a CSV and a PDF attachment parses back to
+    /// its body, both names, the CSV's text, and the PDF's bytes.
     #[test]
     fn composes_a_message_with_attachments_that_parses_back() {
         let composition = Composition {
@@ -570,6 +579,9 @@ mod tests {
         assert_eq!(parsed.attachments[1].bytes, b"%PDF-");
     }
 
+    /// Checks that a composition without a recipient gives `NoRecipient`, a
+    /// recipient that is not an address `InvalidRecipient`, and a draft
+    /// attachment whose type does not parse `InvalidAttachmentType`.
     #[test]
     fn refuses_a_message_without_recipient_or_with_a_bad_one() {
         let account = build_account();
@@ -609,6 +621,8 @@ mod tests {
         );
     }
 
+    /// Checks that each `CompositionProblem` reads as the sentence the
+    /// model gets.
     #[test]
     fn describes_every_composition_problem_as_the_model_reads_it() {
         let sentences = [
@@ -635,6 +649,10 @@ mod tests {
         }
     }
 
+    /// Checks that a recipient built from a mailbox's name and address,
+    /// quoted and escaped where needed, parses back to the same address. A
+    /// blank name, or one with a control character, is left out, and a
+    /// mailbox without a usable address gives none.
     #[test]
     fn builds_recipients_that_read_back_to_the_same_mailbox() {
         let cases = [
@@ -688,6 +706,10 @@ mod tests {
         }
     }
 
+    /// Checks that a reply's subject gains `Re:` and a forward's `Fwd:`
+    /// unless one is there, that a reply refers to the original after its
+    /// references, and that a forward quotes the original's headers and
+    /// text below the note, with no attachment for a message that has none.
     #[test]
     fn builds_reply_and_forward_subjects_references_and_bodies() {
         assert_eq!(build_reply_subject("Hello"), "Re: Hello");

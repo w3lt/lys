@@ -3,10 +3,41 @@ import {
   llmUnloadModelApi,
   type LlmUnloadModelApiRoute
 } from "@lys/protocol"
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
+import type {
+  FastifyBaseLogger,
+  FastifyInstance,
+  FastifyReply,
+  FastifyRequest
+} from "fastify"
 import * as z from "zod"
 import type { LlmModelStopper } from "../llmModelCapabilities"
+import type { LlmModelStopDiagnostic } from "../stopLlmModelsByKey"
 import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
+
+/** Level of the log lines about the diagnostics of one stop outcome. */
+type LlmModelStopDiagnosticLevel = "warn" | "error"
+
+/**
+ * Fields that name what the log line about a diagnostic is about, besides the
+ * model key its logger carries.
+ */
+type LlmModelStopDiagnosticFields = Readonly<{
+  /** Operation that failed. */
+  operation: LlmModelStopDiagnostic["operation"]
+  /** Runtime identifier of a failed stop command; absent for an inventory. */
+  modelIdentifier?: string
+}>
+
+/** Message of the log line about a diagnostic, by its failed operation. */
+const LLM_MODEL_STOP_DIAGNOSTIC_MESSAGES: Readonly<
+  Record<LlmModelStopDiagnostic["operation"], string>
+> = Object.freeze({
+  "list-initial-model-instances":
+    "LLM runtime inventory could not be read before the model stop",
+  "stop-model-instance": "LLM model instance could not be stopped",
+  "list-reconciled-model-instances":
+    "LLM runtime inventory could not be read after the model stop"
+})
 
 /**
  * Adds the protocol-defined model-unload endpoint to a Fastify application.
@@ -78,12 +109,13 @@ function registerLlmModelUnloadRoute(app: FastifyInstance): void {
  * @throws If admission is refused, no LLM runtime is connected, or
  * application cleanup has begun. The route boundary translates only the
  * recognized service-busy and runtime-unavailable failures.
- * @remarks Runtime diagnostics and reconciled failures are written to the
- * request logger before their HTTP outcome is sent: a stopped outcome with
- * diagnostics is logged at warn level, and runtime-unavailable and stop-failed
- * outcomes at error level. Each record carries the canonical model key as
- * `modelKey` and the outcome's `diagnostics`; a stop-failed record also
- * carries `remainingModelIdentifiers`.
+ * @remarks Each diagnostic of the outcome is written to the request logger
+ * before the HTTP outcome is sent, with its retained failure as `err`, the
+ * canonical model key as `modelKey`, the failed `operation`, and, for a stop
+ * command, its `modelIdentifier`: at warn level when the stop reconciled
+ * anyway, and at error level for the runtime-unavailable and stop-failed
+ * outcomes. A stop-failed outcome also logs its `remainingModelIdentifiers`
+ * at error level. No failure detail reaches the response body.
  */
 async function handleLlmModelUnloadRequest(
   request: FastifyRequest<LlmUnloadModelApiRoute>,
@@ -92,15 +124,15 @@ async function handleLlmModelUnloadRequest(
 ): Promise<void> {
   const { modelId: modelKey } = request.body
   const stopOutcome = await llmModelStopper.stopLlmModelsByKey(modelKey)
+  const modelLogger = request.log.child({ modelKey })
 
   switch (stopOutcome.status) {
     case "stopped": {
-      if (stopOutcome.diagnostics.length > 0) {
-        request.log.warn(
-          { diagnostics: stopOutcome.diagnostics, modelKey },
-          "LLM model stop reconciled after runtime failures"
-        )
-      }
+      reportLlmModelStopDiagnostics(
+        stopOutcome.diagnostics,
+        modelLogger,
+        "warn"
+      )
 
       reply.code(204).send()
       return
@@ -115,9 +147,10 @@ async function handleLlmModelUnloadRequest(
       return
     }
     case "runtime-unavailable": {
-      request.log.error(
-        { diagnostics: stopOutcome.diagnostics, modelKey },
-        "LLM runtime state could not be established during model stop"
+      reportLlmModelStopDiagnostics(
+        stopOutcome.diagnostics,
+        modelLogger,
+        "error"
       )
 
       const problem = createLlmUnloadProblem({
@@ -129,9 +162,13 @@ async function handleLlmModelUnloadRequest(
       return
     }
     case "stop-failed": {
+      reportLlmModelStopDiagnostics(
+        stopOutcome.diagnostics,
+        modelLogger,
+        "error"
+      )
       request.log.error(
         {
-          diagnostics: stopOutcome.diagnostics,
           modelKey,
           remainingModelIdentifiers: stopOutcome.remainingModelIdentifiers
         },
@@ -146,5 +183,52 @@ async function handleLlmModelUnloadRequest(
       reply.type("application/problem+json").code(503).send(problem)
       return
     }
+  }
+}
+
+/**
+ * Reports each diagnostic of a stop outcome through a structured logger, in
+ * the outcome's order.
+ *
+ * @param diagnostics - Diagnostics of the outcome, each retaining its failure.
+ * @param modelLogger - Request logger that names the canonical model key whose
+ * stop the diagnostics belong to, as `modelKey`, on every line.
+ * @param level - Level of each line.
+ */
+function reportLlmModelStopDiagnostics(
+  diagnostics: readonly LlmModelStopDiagnostic[],
+  modelLogger: FastifyBaseLogger,
+  level: LlmModelStopDiagnosticLevel
+): void {
+  for (const diagnostic of diagnostics) {
+    const fields = buildLlmModelStopDiagnosticFields(diagnostic)
+    diagnostic.evidence.handleLlmRuntimeFailureReport((failure) =>
+      modelLogger[level](
+        { err: failure, ...fields },
+        LLM_MODEL_STOP_DIAGNOSTIC_MESSAGES[diagnostic.operation]
+      )
+    )
+  }
+}
+
+/**
+ * Builds the fields that name what a diagnostic's line is about.
+ *
+ * @param diagnostic - Diagnostic the line reports.
+ * @returns The failed operation, with the runtime identifier of a failed stop
+ * command.
+ */
+function buildLlmModelStopDiagnosticFields(
+  diagnostic: LlmModelStopDiagnostic
+): LlmModelStopDiagnosticFields {
+  switch (diagnostic.operation) {
+    case "stop-model-instance":
+      return Object.freeze({
+        operation: diagnostic.operation,
+        modelIdentifier: diagnostic.modelIdentifier
+      })
+    case "list-initial-model-instances":
+    case "list-reconciled-model-instances":
+      return Object.freeze({ operation: diagnostic.operation })
   }
 }

@@ -80,6 +80,9 @@ fn parse_positive(text: &str) -> Result<u32, ToolFailure> {
 mod tests {
     use super::*;
 
+    /// Checks that an email id whose folder name holds dots parses into its
+    /// UID, its UIDVALIDITY, and the whole folder name, and formats back to
+    /// the same text.
     #[test]
     fn parses_and_formats_ids_with_dots_in_the_folder_name() {
         let id = parse_email_id("12.345.Projects/2026.11").expect("id");
@@ -95,6 +98,9 @@ mod tests {
         assert_eq!(id.to_string(), "12.345.Projects/2026.11");
     }
 
+    /// Checks that `InvalidId` comes for an id missing a number or the
+    /// folder, with a number that is zero, signed, not a number, or past 32
+    /// bits, or with a line break in the folder name.
     #[test]
     fn refuses_ids_that_are_not_two_positive_numbers_and_a_folder() {
         for text in [

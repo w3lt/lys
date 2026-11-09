@@ -236,6 +236,10 @@ fn list_entry_ids(text: &str) -> Vec<&str> {
         .collect()
 }
 
+/// Checks that `search_emails` over one folder of 25 messages lists the
+/// newest 20 as page 1 of 2, pointing to page 2, with the newest hit's
+/// sender, subject, flags, and folder, and logs the folder, hit, and page
+/// counts.
 #[tokio::test(flavor = "multi_thread")]
 async fn lists_the_first_page_of_one_folder_newest_first() {
     let stack = start_filled_stack().await;
@@ -265,6 +269,9 @@ async fn lists_the_first_page_of_one_folder_newest_first() {
     assert_eq!(first.log, "search: 1 folder(s), 25 hit(s), page 1 of 2");
 }
 
+/// Checks that `search_emails` lists the last 5 of a folder's 25 messages
+/// as page 2 of 2 with their flags, and refuses page 3 with an argument
+/// failure that names the pages there are.
 #[tokio::test(flavor = "multi_thread")]
 async fn lists_the_last_page_of_one_folder_and_refuses_a_page_past_it() {
     let stack = start_filled_stack().await;
@@ -292,6 +299,9 @@ async fn lists_the_last_page_of_one_folder_and_refuses_a_page_past_it() {
     );
 }
 
+/// Checks that `search_emails` opens a folder with `EXAMINE` and fetches
+/// header fields with `BODY.PEEK`, sending no `STORE` or `SELECT`, and
+/// sends a `LOGOUT` for each of three calls, the refused one included.
 #[tokio::test(flavor = "multi_thread")]
 async fn searches_a_folder_without_marking_anything_and_signs_out_after_each_call() {
     let stack = start_filled_stack().await;
@@ -339,6 +349,9 @@ async fn searches_a_folder_without_marking_anything_and_signs_out_after_each_cal
     );
 }
 
+/// Checks that `search_emails` without a folder finds hits across the
+/// folders, Projects and Sent among them, and leaves out the all-mail view
+/// and a folder that cannot hold messages, naming neither to the server.
 #[tokio::test(flavor = "multi_thread")]
 async fn searches_every_folder_but_the_all_view_and_folders_that_hold_nothing() {
     let stack = start_filled_stack().await;
@@ -391,6 +404,9 @@ async fn searches_every_folder_but_the_all_view_and_folders_that_hold_nothing() 
     );
 }
 
+/// Checks that `search_emails` over a folder with 205 matching messages
+/// lists only the newest 200, over 10 pages, and says that more match there
+/// and that a narrower search shows the others.
 #[tokio::test(flavor = "multi_thread")]
 async fn lists_only_the_newest_200_hits_of_a_folder_and_says_so() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -418,6 +434,8 @@ async fn lists_only_the_newest_200_hits_of_a_folder_and_says_so() {
     assert!(!last.contains("id 5.1001.INBOX\n"), "{last}");
 }
 
+/// Checks that `search_emails` narrows a search to read messages, sending
+/// `SEEN`, and to flagged ones, finding the inbox's one message of each.
 #[tokio::test(flavor = "multi_thread")]
 async fn narrows_a_search_by_flags() {
     let stack = start_filled_stack().await;
@@ -446,6 +464,9 @@ async fn narrows_a_search_by_flags() {
     );
 }
 
+/// Checks that `search_emails` narrows a search by sender and subject, and
+/// by a date range, sending `FROM`, `SUBJECT`, `SINCE`, and `BEFORE` with
+/// the dates in IMAP's form, and finds the matching messages.
 #[tokio::test(flavor = "multi_thread")]
 async fn narrows_a_search_by_fields_and_dates() {
     let stack = start_filled_stack().await;
@@ -483,6 +504,9 @@ async fn narrows_a_search_by_fields_and_dates() {
     );
 }
 
+/// Checks that `search_emails` searches for a non-ASCII subject with
+/// `CHARSET UTF-8`, finding its message, and answers that no message
+/// matches a text that none holds, logging 0 hits.
 #[tokio::test(flavor = "multi_thread")]
 async fn narrows_a_search_by_a_subject_that_is_not_ascii_or_finds_nothing() {
     let stack = start_filled_stack().await;
@@ -524,6 +548,9 @@ async fn narrows_a_search_by_a_subject_that_is_not_ascii_or_finds_nothing() {
     );
 }
 
+/// Checks that `search_emails` sends a non-ASCII text and subject to a
+/// server without `LITERAL+` so that the server reads them in one
+/// `CHARSET UTF-8` search, which finds the one unread match.
 #[tokio::test(flavor = "multi_thread")]
 async fn sends_text_that_is_not_ascii_as_literals_a_server_without_literal_plus_reads() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -574,6 +601,9 @@ async fn sends_text_that_is_not_ascii_as_literals_a_server_without_literal_plus_
     );
 }
 
+/// Checks that `search_emails` finishes a non-ASCII search when the server
+/// sends an untagged `EXISTS` line before it asks for a literal, and finds
+/// the one match.
 #[tokio::test(flavor = "multi_thread")]
 async fn searches_for_text_beyond_ascii_when_the_server_sends_untagged_data_before_asking_for_it() {
     let stack = start_filled_stack().await;
@@ -601,6 +631,9 @@ async fn searches_for_text_beyond_ascii_when_the_server_sends_untagged_data_befo
     assert!(found.contains("subject Grüße aus Wien\n"), "{found}");
 }
 
+/// Checks that `read_email` gives a message's headers, flags, folder,
+/// attachments, and body, fetching it with `BODY.PEEK` and sending no
+/// `STORE` or `SELECT`, so the message stays unread.
 #[tokio::test(flavor = "multi_thread")]
 async fn reads_a_message_without_marking_it_as_read() {
     let stack = start_filled_stack().await;
@@ -640,6 +673,10 @@ async fn reads_a_message_without_marking_it_as_read() {
     );
 }
 
+/// Checks that `read_email` lists a message's attachments and converts its
+/// HTML body to text with a note saying so, and that `read_attachment`
+/// reads a text attachment and refuses one that is not text and a number
+/// past the last.
 #[tokio::test(flavor = "multi_thread")]
 async fn converts_html_lists_attachments_and_reads_text_ones() {
     let stack = start_filled_stack().await;
@@ -684,6 +721,9 @@ async fn converts_html_lists_attachments_and_reads_text_ones() {
     );
 }
 
+/// Checks that `read_conversation` from a conversation's last message shows
+/// its 3 messages from the inbox and Sent oldest first, leaves out an
+/// unrelated message, and logs how many it found and showed.
 #[tokio::test(flavor = "multi_thread")]
 async fn reads_a_conversation_across_folders_oldest_first() {
     let stack = start_stack(build_conversation_mailbox(), false).await;
@@ -714,6 +754,10 @@ async fn reads_a_conversation_across_folders_oldest_first() {
     assert_eq!(report.log, "conversation: 3 message(s), 3 shown");
 }
 
+/// Checks that `read_conversation` searches, in one `UID SEARCH`, for the
+/// message's identifier in the `Message-ID`, `In-Reply-To`, and
+/// `References` headers and for the identifier of the message it replies
+/// to, and sends no `STORE`.
 #[tokio::test(flavor = "multi_thread")]
 async fn finds_a_conversation_by_its_identifiers_without_marking_anything() {
     let stack = start_stack(build_conversation_mailbox(), false).await;
@@ -731,6 +775,9 @@ async fn finds_a_conversation_by_its_identifiers_without_marking_anything() {
     );
 }
 
+/// Checks that `read_conversation` shows as many of a long conversation's
+/// newest messages as fit in 20,000 UTF-16 code units, so that one more
+/// entry would not fit, and says how many older ones it leaves out.
 #[tokio::test(flavor = "multi_thread")]
 async fn fits_the_newest_messages_of_a_long_conversation_and_says_how_many_are_left_out() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -771,6 +818,9 @@ async fn fits_the_newest_messages_of_a_long_conversation_and_says_how_many_are_l
     );
 }
 
+/// Checks that `read_conversation` shows the newest message, and says that
+/// one older one is left out, when that message alone takes more than
+/// 20,000 UTF-16 code units.
 #[tokio::test(flavor = "multi_thread")]
 async fn shows_the_newest_message_even_when_it_alone_is_longer_than_the_result() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -795,6 +845,9 @@ async fn shows_the_newest_message_even_when_it_alone_is_longer_than_the_result()
     assert!(text.encode_utf16().count() > 20_000);
 }
 
+/// Checks that `read_conversation` over a conversation of 60 messages split
+/// between the inbox and Sent shows only the newest 50 and says that 10
+/// older ones are left out.
 #[tokio::test(flavor = "multi_thread")]
 async fn shows_at_most_the_newest_50_messages_of_a_conversation_across_folders() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -816,6 +869,9 @@ async fn shows_at_most_the_newest_50_messages_of_a_conversation_across_folders()
     assert_eq!(ids.last(), Some(&"30.1002.Sent"), "{text}");
 }
 
+/// Checks that `read_conversation` over 55 matching messages of one folder
+/// reads only the newest 50, says the conversation has at least 50, and
+/// says that older ones of that folder may be missing.
 #[tokio::test(flavor = "multi_thread")]
 async fn says_when_a_folder_matched_more_messages_than_a_conversation_reads() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -834,6 +890,9 @@ async fn says_when_a_folder_matched_more_messages_than_a_conversation_reads() {
     assert_eq!(list_entry_ids(&text).len(), 50, "{text}");
 }
 
+/// Checks that `read_conversation` keeps only messages whose identifiers
+/// equal the conversation's, leaving out ones whose identifiers merely
+/// contain them, such as `11@x.example` for `1@x.example`.
 #[tokio::test(flavor = "multi_thread")]
 async fn keeps_only_messages_whose_identifiers_equal_the_conversation_ones() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -867,6 +926,8 @@ async fn keeps_only_messages_whose_identifiers_equal_the_conversation_ones() {
     assert_eq!(list_entry_ids(&text), vec!["1.1001.INBOX", "4.1001.INBOX"]);
 }
 
+/// Checks that `read_conversation` finds a message that only the all-mail
+/// view holds, and shows once, from the inbox, a message that both hold.
 #[tokio::test(flavor = "multi_thread")]
 async fn finds_a_conversation_message_archived_in_the_all_mail_view_once() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -889,6 +950,9 @@ async fn finds_a_conversation_message_archived_in_the_all_mail_view_once() {
     );
 }
 
+/// Checks that `read_conversation` shows a message that both a folder and
+/// the all-mail view hold from that folder, even when the server lists the
+/// folder after the view.
 #[tokio::test(flavor = "multi_thread")]
 async fn shows_a_conversation_message_from_its_folder_listed_after_the_all_mail_view() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -908,6 +972,9 @@ async fn shows_a_conversation_message_from_its_folder_listed_after_the_all_mail_
     );
 }
 
+/// Checks that `read_conversation` keeps a message that the server removes
+/// as it is fetched in its place, as an entry noting that it was removed
+/// while the conversation was read.
 #[tokio::test(flavor = "multi_thread")]
 async fn marks_a_message_removed_while_its_conversation_was_read() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -934,6 +1001,10 @@ async fn marks_a_message_removed_while_its_conversation_was_read() {
     );
 }
 
+/// Checks that `read_email` refuses a malformed id or one with UID 0 as
+/// invalid, and as stale an id whose message or folder no longer exists,
+/// whose UID validity has changed, or whose folder cannot hold messages. It
+/// also checks that `search_emails` refuses a folder that does not exist.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_ids_that_are_not_ids_or_no_longer_valid() {
     let stack = start_filled_stack().await;
@@ -959,6 +1030,9 @@ async fn refuses_ids_that_are_not_ids_or_no_longer_valid() {
     );
 }
 
+/// Checks that `search_emails` refuses a folder that cannot hold messages
+/// with an argument failure that points to `list_folders`, sending no
+/// `EXAMINE`.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_to_search_a_folder_that_cannot_hold_messages_without_opening_it() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;

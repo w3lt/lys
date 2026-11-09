@@ -784,44 +784,44 @@ describe("formatMcpServerStatus", () => {
   )
 
   it.each([
-    [
-      "local program",
-      "Running",
-      "3 tools listed",
-      "Restart",
-      COMMAND_SERVER,
-      buildConnectedMcpState(3)
-    ],
-    [
-      "remote server",
-      "Connected",
-      "1 tool listed",
-      "Reconnect",
-      URL_SERVER,
-      buildConnectedMcpState(1)
-    ],
-    [
-      "remote server",
-      "Connected",
-      "0 tools listed",
-      "Reconnect",
-      URL_SERVER,
-      buildConnectedMcpState(0)
-    ],
-    [
-      "local program",
-      "Running",
-      "4 tools listed · 2 skipped",
-      "Restart",
-      COMMAND_SERVER,
-      buildConnectedMcpState(4, [
+    {
+      kind: "local program",
+      heading: "Running",
+      detail: "3 tools listed",
+      reconnectLabel: "Restart",
+      server: COMMAND_SERVER,
+      state: buildConnectedMcpState(3)
+    },
+    {
+      kind: "remote server",
+      heading: "Connected",
+      detail: "1 tool listed",
+      reconnectLabel: "Reconnect",
+      server: URL_SERVER,
+      state: buildConnectedMcpState(1)
+    },
+    {
+      kind: "remote server",
+      heading: "Connected",
+      detail: "0 tools listed",
+      reconnectLabel: "Reconnect",
+      server: URL_SERVER,
+      state: buildConnectedMcpState(0)
+    },
+    {
+      kind: "local program",
+      heading: "Running",
+      detail: "4 tools listed · 2 skipped",
+      reconnectLabel: "Restart",
+      server: COMMAND_SERVER,
+      state: buildConnectedMcpState(4, [
         { name: "a", reason: "unsupported-name" },
         { name: "b", reason: "duplicate-name" }
       ])
-    ]
+    }
   ])(
-    "says a connected %s is %s, counts its tools: %s, and offers %s",
-    (_, heading, detail, reconnectLabel, server, state) => {
+    "says a connected $kind is $heading, counts its tools: $detail, and offers $reconnectLabel",
+    ({ heading, detail, reconnectLabel, server, state }) => {
       expect(
         formatMcpServerStatus(buildAppliedRowFacts(server, state))
       ).toEqual({

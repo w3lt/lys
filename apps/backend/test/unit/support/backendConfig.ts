@@ -10,9 +10,9 @@ import { backendConfigSchema } from "../../../src/config"
  * beside it is ever written: a case that starts a stdio MCP server through
  * this configuration replaces that path with one in a folder it owns. The
  * email server path names no file, so the built-in email server cannot
- * start and no account check runs through it.
- * The LM Studio host and port are distinct from the production defaults so
- * endpoint derivation is observable. The vmo port differs from vmo's
+ * start and no account check runs through it. The agent request limits (3
+ * slots, 1 waiting request) differ from the production defaults, so a case
+ * can observe that they are forwarded. The vmo port differs from vmo's
  * production port, so no case reaches a vmo running on this machine there; a
  * case that needs vmo starts a fake one on a free port and passes that port.
  * Prompts are short fixed strings.
@@ -31,5 +31,7 @@ export const TEST_BACKEND_CONFIG = backendConfigSchema.parse({
   lysipteraSystemPrompt: "Configured Lysiptera prompt",
   titleGenerationPrompt: "Configured title prompt",
   titleGenerationMaxAttempts: 2,
-  generatedTitleMaxLength: 40
+  generatedTitleMaxLength: 40,
+  agentRequestSlotCount: 3,
+  agentWaitingRequestLimit: 1
 })

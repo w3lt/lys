@@ -961,6 +961,10 @@ mod tests {
         Address::new("person", "example.com").expect("an address lettre sends from")
     }
 
+    /// Checks that a stored draft prepared for sending goes from the
+    /// account's address to every To, group, Cc, and Bcc recipient, leaves
+    /// out its Bcc header, keeps its Message-ID, and reads its own fields,
+    /// Bcc included.
     #[test]
     fn prepares_a_draft_with_every_recipient_in_the_envelope_and_no_bcc_field() {
         let draft = b"From: A Person <person@example.com>\r\nTo: Jane <jane@example.com>, Team: a@example.com;\r\nCc: cc@example.com\r\nBcc: hidden@example.com\r\nSubject: Hi\r\nMessage-ID: <one@example.com>\r\nContent-Type: text/plain\r\n\r\nHello\r\n";
@@ -1011,6 +1015,9 @@ mod tests {
         );
     }
 
+    /// Checks that a stored draft whose To field holds a name without an
+    /// address, or whose only recipient is an empty group, is refused with
+    /// a sentence that says why.
     #[test]
     fn refuses_a_draft_with_an_entry_that_is_not_an_address_or_without_recipients() {
         let bare_name = b"From: person@example.com\r\nTo: jane@example.com, nobody\r\nSubject: Hi\r\n\r\nHello\r\n";
@@ -1031,6 +1038,9 @@ mod tests {
         );
     }
 
+    /// Checks that a stored draft that does not parse as a message, and a
+    /// draft whose account address lettre refuses, `john..doe@example.com`,
+    /// are refused with the sentence the model reads.
     #[test]
     fn refuses_a_draft_that_is_not_a_message() {
         assert_eq!(
@@ -1062,6 +1072,11 @@ mod tests {
         .expect("compared")
     }
 
+    /// Checks that a draft matches a call that lists its addresses in
+    /// another order or with other names, or differs only in the subject's
+    /// edge spaces and the body's line breaks. Another body or an extra
+    /// recipient gives the difference with the draft's own fields, and an
+    /// entry that is not an address is refused.
     #[test]
     fn matches_a_draft_by_addresses_in_any_order_and_by_its_text_with_any_line_breaks() {
         let draft = parse_stored_draft(
@@ -1104,6 +1119,8 @@ mod tests {
         );
     }
 
+    /// Checks that an id counts as in the Drafts folder only when it names
+    /// that folder.
     #[test]
     fn checks_that_an_id_is_in_drafts() {
         let drafts = Folder {

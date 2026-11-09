@@ -665,6 +665,9 @@ mod tests {
     use super::*;
     use crate::message::parse_message;
 
+    /// Checks that a conversation search matches each of its message ids in
+    /// `Message-ID`, `In-Reply-To`, or `References` through one chain of
+    /// `OR`s, and that no id gives no search.
     #[test]
     fn builds_an_or_chain_over_every_identifier() {
         let plain = |word: &str| SearchWord::Plain(word.to_owned());
@@ -696,6 +699,10 @@ mod tests {
         );
     }
 
+    /// Checks that a conversation's heading counts the messages shown and
+    /// left out and names the folders whose matches were cut, and that
+    /// entries fit only in the room the heading leaves within the result
+    /// limit.
     #[test]
     fn fits_entries_after_the_heading_within_the_result_limit() {
         let view = parse_message(b"Message-ID: <one@example.com>\r\n\r\nx").expect("message");
@@ -719,9 +726,19 @@ mod tests {
         assert!(!is_fitting_result(&found, 2, free + 1));
     }
 
+    /// Checks that a message's own id, the id it replies to, and its
+    /// references are collected once each, in that order, and that an
+    /// empty identifier, one with a letter outside ASCII, and one with a
+    /// control character are skipped.
     #[test]
     fn collects_identifiers_once_each_and_skips_unusable_ones() {
-        let view = parse_message(b"Message-ID: <one@example.com>\r\nIn-Reply-To: <zero@example.com>\r\nReferences: <minus@example.com> <zero@example.com> <one@example.com>\r\n\r\nx").expect("message");
+        let mut view = parse_message(b"Message-ID: <one@example.com>\r\nIn-Reply-To: <zero@example.com>\r\nReferences: <minus@example.com> <zero@example.com> <one@example.com>\r\n\r\nx").expect("message");
+        // Unusable: empty, with a letter outside ASCII, and with a control
+        // character.
+        view.headers.in_reply_to.insert(0, String::new());
+        let references = &mut view.headers.references;
+        references.insert(0, "ünïcode@example.com".to_owned());
+        references.insert(2, "bell\u{7}@example.com".to_owned());
 
         assert_eq!(
             list_conversation_identifiers(&view),
@@ -729,6 +746,10 @@ mod tests {
         );
     }
 
+    /// Checks that a message reads with its id, headers, flags, folder, and
+    /// attachment list before its text, and that a text past the given
+    /// length is cut with a note pointing to `read_email`, while a shorter
+    /// one stays whole.
     #[test]
     fn formats_a_message_with_its_attachments_and_cuts_the_text_when_asked() {
         let view = parse_message(b"From: Jane <jane@example.com>\r\nTo: person@example.com\r\nCc: cc@example.com\r\nReply-To: reply@example.com\r\nDate: Sun, 2 Nov 2026 10:30:00 +0000\r\nSubject: Hello\r\nMessage-ID: <one@example.com>\r\nIn-Reply-To: <zero@example.com>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nHello there, this is the text.\r\n--b\r\nContent-Type: text/csv\r\nContent-Disposition: attachment; filename=\"data.csv\"\r\n\r\na,b\r\n--b--\r\n").expect("message");

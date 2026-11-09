@@ -99,15 +99,6 @@ export const EMAIL_ACCOUNT_DRAFT_FIELDS: readonly EmailAccountDraftField[] =
     "smtpPort"
   ])
 
-/** Problem of a port that is not a whole number in the TCP range. */
-const PORT_PROBLEM = `A port is a whole number from 1 to ${MAXIMUM_TCP_PORT}.`
-
-/** Problem of an empty password while none is saved. */
-const EMPTY_PASSWORD_PROBLEM = "Enter the password."
-
-/** Finds a port as typed: one to five digits. */
-const PORT_PATTERN = /^\d{1,5}$/
-
 /** Fields of a server with nothing typed, which Lys reaches with TLS. */
 const EMPTY_SERVER_DRAFT: EmailServerDraft = Object.freeze({
   host: "",
@@ -131,24 +122,6 @@ const EMPTY_ACCOUNT_DRAFT: EmailAccountDraft = Object.freeze({
 type EmailServerFields = Readonly<
   Record<"host" | "port", EmailAccountDraftField>
 >
-
-/** Host and port inputs of the IMAP server. */
-const IMAP_SERVER_FIELDS = Object.freeze({
-  host: "imapHost",
-  port: "imapPort"
-} satisfies EmailServerFields)
-
-/** Host and port inputs of the SMTP server. */
-const SMTP_SERVER_FIELDS = Object.freeze({
-  host: "smtpHost",
-  port: "smtpPort"
-} satisfies EmailServerFields)
-
-/** Host and port inputs of each server side. */
-const SERVER_FIELDS = Object.freeze({
-  imap: IMAP_SERVER_FIELDS,
-  smtp: SMTP_SERVER_FIELDS
-} satisfies Readonly<Record<EmailServerSide, EmailServerFields>>)
 
 /** One problem placed on an input. */
 type PlacedProblem = readonly [EmailAccountDraftField, string]
@@ -359,7 +332,10 @@ export function updateEmailAccountAddress(
  * digits, which the shared rules refuse at the port.
  */
 function parsePort(port: string): number {
-  return PORT_PATTERN.test(port) ? Number(port) : Number.NaN
+  /** Finds a port as typed: one to five digits. */
+  const portPattern = /^\d{1,5}$/
+
+  return portPattern.test(port) ? Number(port) : Number.NaN
 }
 
 /**
@@ -414,8 +390,29 @@ function buildPlacedServerProblem(
   part: PropertyKey | undefined,
   message: string
 ): PlacedProblem {
-  const fields = SERVER_FIELDS[side]
-  if (part === "port") return [fields.port, PORT_PROBLEM]
+  /** Problem of a port that is not a whole number in the TCP range. */
+  const portProblem = `A port is a whole number from 1 to ${MAXIMUM_TCP_PORT}.`
+
+  /** Host and port inputs of the IMAP server. */
+  const imapServerFields = Object.freeze({
+    host: "imapHost",
+    port: "imapPort"
+  } satisfies EmailServerFields)
+
+  /** Host and port inputs of the SMTP server. */
+  const smtpServerFields = Object.freeze({
+    host: "smtpHost",
+    port: "smtpPort"
+  } satisfies EmailServerFields)
+
+  /** Host and port inputs of each server side. */
+  const serverFields = Object.freeze({
+    imap: imapServerFields,
+    smtp: smtpServerFields
+  } satisfies Readonly<Record<EmailServerSide, EmailServerFields>>)
+
+  const fields = serverFields[side]
+  if (part === "port") return [fields.port, portProblem]
   return [fields.host, message]
 }
 
@@ -457,8 +454,11 @@ function parsePasswordDraft(
   savedPassword: EmailPassword | null
 ): PasswordDraftParse {
   if (password === "") {
+    /** Problem of an empty password while none is saved. */
+    const emptyPasswordProblem = "Enter the password."
+
     return savedPassword === null
-      ? { status: "invalid", problem: EMPTY_PASSWORD_PROBLEM }
+      ? { status: "invalid", problem: emptyPasswordProblem }
       : { status: "valid", password: savedPassword }
   }
   const parsed = emailPasswordSchema.safeParse(password)

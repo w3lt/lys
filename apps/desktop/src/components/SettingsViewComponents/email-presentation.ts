@@ -8,12 +8,6 @@ import {
   emailAddressSchema,
   emailSecuritySchema,
   LOOPBACK_EMAIL_HOSTS,
-  MAXIMUM_EMAIL_ADDRESS_LENGTH,
-  MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH,
-  MAXIMUM_EMAIL_LOCAL_PART_LENGTH,
-  MAXIMUM_EMAIL_PASSWORD_LENGTH,
-  MAXIMUM_EMAIL_USER_NAME_LENGTH,
-  MAXIMUM_TCP_PORT,
   type EmailAccount,
   type EmailSecurity
 } from "@lys/share"
@@ -73,43 +67,6 @@ type EmailAccountStatusInput = {
   readonly isBackendRunning: boolean
 }
 
-/** Note under the account card's heading. */
-export const EMAIL_ACCOUNT_NOTE =
-  "Lys signs in to IMAP and SMTP before saving. Gmail, iCloud, Yahoo, and Fastmail need an app password."
-
-/** Note of the password field while a password is saved. */
-export const EMAIL_PASSWORD_KEPT_NOTE =
-  "Leave empty to keep the saved password."
-
-/** Note under the Sent copy switch. */
-export const EMAIL_SENT_COPY_NOTE =
-  "On when the server files sent mail itself, as Gmail does. Off makes Lys file the copy in Sent."
-
-/**
- * Rule of an address, shown beside its label before entry: its shape, in
- * ASCII, the length of the name before `@`, and its length in all.
- */
-export const EMAIL_ADDRESS_HINT = `name@host in ASCII · name up to ${MAXIMUM_EMAIL_LOCAL_PART_LENGTH} · up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH} in all`
-
-/** Rule of a display name, shown beside its label before entry. */
-export const EMAIL_DISPLAY_NAME_HINT = `optional · up to ${MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH}`
-
-/** Rule of a user name, shown beside its label before entry. */
-export const EMAIL_USER_NAME_HINT = `up to ${MAXIMUM_EMAIL_USER_NAME_LENGTH}`
-
-/** Rule of a password, shown beside its label before entry. */
-export const EMAIL_PASSWORD_HINT = `up to ${MAXIMUM_EMAIL_PASSWORD_LENGTH}`
-
-/** Rule of a mail server host, shown beside its label before entry. */
-export const EMAIL_HOST_HINT = "ASCII host name, IPv4, or [IPv6]"
-
-/** Rule of a port, shown beside its label before entry. */
-export const EMAIL_PORT_HINT = `1–${MAXIMUM_TCP_PORT}`
-
-/** Question asked before removing the account. */
-export const EMAIL_ACCOUNT_REMOVAL_QUESTION =
-  "Remove the email account and its password? The email server is switched off."
-
 /** Ways to secure a connection, in the order the card offers them. */
 export const EMAIL_SECURITIES: readonly EmailSecurity[] =
   emailSecuritySchema.options
@@ -126,87 +83,6 @@ const EMAIL_SECURITY_LABELS = Object.freeze({
  * server before a choice: the hosts it is allowed for.
  */
 export const EMAIL_SECURITY_HINT = `${EMAIL_SECURITY_LABELS.plain} only for ${LOOPBACK_EMAIL_HOSTS.join(", ")}`
-
-/** Label of each server's fields; a new side must add one. */
-const EMAIL_SERVER_SIDE_LABELS = Object.freeze({
-  imap: "IMAP server",
-  smtp: "SMTP server"
-} satisfies Readonly<Record<EmailServerSide, string>>)
-
-/**
- * Label of each input as the problem summary names it, with the server of
- * a host or port; a new input must add one.
- */
-const EMAIL_DRAFT_FIELD_LABELS = Object.freeze({
-  address: "Address",
-  displayName: "Display name",
-  userName: "User name",
-  password: "Password",
-  imapHost: "IMAP host",
-  imapPort: "IMAP port",
-  smtpHost: "SMTP host",
-  smtpPort: "SMTP port"
-} satisfies Readonly<Record<EmailAccountDraftField, string>>)
-
-/** Why a sign-in failed, by reason, as a clause; a new reason must add one. */
-const EMAIL_SERVER_CHECK_FAILURE_TEXTS = Object.freeze({
-  "wrong-password": "the user name or password was refused",
-  unreachable: "the host could not be reached",
-  "certificate-refused": "its certificate was refused",
-  "encryption-not-offered": "it does not offer STARTTLS",
-  "timed-out": "it did not answer in time",
-  "protocol-error": "it answered something Lys could not read"
-} satisfies Readonly<Record<EmailServerCheckFailure, string>>)
-
-/** Why no sign-in was tried, by reason; a new reason must add one. */
-const EMAIL_CHECK_UNAVAILABLE_TEXTS = Object.freeze({
-  "server-missing":
-    "Lys couldn't start its email server to check the account. Run build.sh to install it.",
-  "server-failed": "Lys's email server failed while checking the account.",
-  busy: "Another account check is still running. Try again in a minute."
-} satisfies Readonly<Record<EmailAccountCheckUnavailableReason, string>>)
-
-/** Line shown while no account is saved and nothing is edited. */
-const NO_ACCOUNT_MESSAGE: EmailAccountMessage = Object.freeze({
-  text: "No account yet. The email server stays off until you save one.",
-  tone: "muted"
-})
-
-/** Line shown after the account and its password were saved. */
-const ACCOUNT_SAVED_MESSAGE: EmailAccountMessage = Object.freeze({
-  text: "Account saved.",
-  tone: "success"
-})
-
-/** Line shown while the fields differ from the saved account. */
-const UNSAVED_MESSAGE: EmailAccountMessage = Object.freeze({
-  text: "Unsaved · Save signs in to both servers first.",
-  tone: "attention"
-})
-
-/** Line shown while the fields differ and the backend is not running. */
-const BACKEND_STOPPED_MESSAGE: EmailAccountMessage = Object.freeze({
-  text: "Unsaved · start the backend in Settings → Runtime to sign in and save.",
-  tone: "attention"
-})
-
-/** Line shown after a save was tried while a field breaks a rule. */
-const INVALID_MESSAGE: EmailAccountMessage = Object.freeze({
-  text: "Fix the marked fields to save.",
-  tone: "danger"
-})
-
-/** Line shown while Lys signs in to the servers. */
-const SIGNING_IN_MESSAGE: EmailAccountMessage = Object.freeze({
-  text: "Signing in…",
-  tone: "pending"
-})
-
-/** Line shown while the account is written or removed. */
-const SAVING_MESSAGE: EmailAccountMessage = Object.freeze({
-  text: "Saving…",
-  tone: "pending"
-})
 
 /**
  * Formats the label of a way to secure a connection.
@@ -225,7 +101,13 @@ export function formatEmailSecurityLabel(security: EmailSecurity): string {
  * @returns `IMAP server` or `SMTP server`.
  */
 export function formatEmailServerSideLabel(side: EmailServerSide): string {
-  return EMAIL_SERVER_SIDE_LABELS[side]
+  /** Label of each server's fields; a new side must add one. */
+  const emailServerSideLabels = Object.freeze({
+    imap: "IMAP server",
+    smtp: "SMTP server"
+  } satisfies Readonly<Record<EmailServerSide, string>>)
+
+  return emailServerSideLabels[side]
 }
 
 /**
@@ -240,9 +122,24 @@ function listEmailDraftFieldProblem(
   problems: EmailAccountDraftProblems,
   field: EmailAccountDraftField
 ): readonly McpDraftProblemListing<EmailAccountDraftField>[] {
+  /**
+   * Label of each input as the problem summary names it, with the server of
+   * a host or port; a new input must add one.
+   */
+  const emailDraftFieldLabels = Object.freeze({
+    address: "Address",
+    displayName: "Display name",
+    userName: "User name",
+    password: "Password",
+    imapHost: "IMAP host",
+    imapPort: "IMAP port",
+    smtpHost: "SMTP host",
+    smtpPort: "SMTP port"
+  } satisfies Readonly<Record<EmailAccountDraftField, string>>)
+
   const problem = problems[field]
   if (problem === undefined) return []
-  return [{ field, label: EMAIL_DRAFT_FIELD_LABELS[field], problem }]
+  return [{ field, label: emailDraftFieldLabels[field], problem }]
 }
 
 /**
@@ -304,11 +201,23 @@ export function formatEmailPresetNote(draft: EmailAccountDraft): string {
  * @returns `accepted`, or why the sign-in failed, as a clause.
  */
 function formatEmailServerCheck(check: EmailServerCheck): string {
+  /**
+   * Why a sign-in failed, by reason, as a clause; a new reason must add one.
+   */
+  const emailServerCheckFailureTexts = Object.freeze({
+    "wrong-password": "the user name or password was refused",
+    unreachable: "the host could not be reached",
+    "certificate-refused": "its certificate was refused",
+    "encryption-not-offered": "it does not offer STARTTLS",
+    "timed-out": "it did not answer in time",
+    "protocol-error": "it answered something Lys could not read"
+  } satisfies Readonly<Record<EmailServerCheckFailure, string>>)
+
   switch (check.status) {
     case "accepted":
       return "accepted"
     case "failed":
-      return EMAIL_SERVER_CHECK_FAILURE_TEXTS[check.reason]
+      return emailServerCheckFailureTexts[check.reason]
     default: {
       const unhandledCheck: never = check
       return unhandledCheck
@@ -326,6 +235,14 @@ function formatEmailServerCheck(check: EmailServerCheck): string {
 function formatEmailCheckOutcome(
   outcome: CheckEmailAccountApiResponse
 ): EmailAccountMessage {
+  /** Why no sign-in was tried, by reason; a new reason must add one. */
+  const emailCheckUnavailableTexts = Object.freeze({
+    "server-missing":
+      "Lys couldn't start its email server to check the account. Run build.sh to install it.",
+    "server-failed": "Lys's email server failed while checking the account.",
+    busy: "Another account check is still running. Try again in a minute."
+  } satisfies Readonly<Record<EmailAccountCheckUnavailableReason, string>>)
+
   switch (outcome.status) {
     case "checked":
       return {
@@ -334,7 +251,7 @@ function formatEmailCheckOutcome(
       }
     case "unavailable":
       return {
-        text: EMAIL_CHECK_UNAVAILABLE_TEXTS[outcome.reason],
+        text: emailCheckUnavailableTexts[outcome.reason],
         tone: "danger"
       }
     default: {
@@ -353,9 +270,15 @@ function formatEmailCheckOutcome(
 function formatSavingMessage(
   saveState: EmailAccountSaveState
 ): EmailAccountMessage | undefined {
+  /** Line shown while the account is written or removed. */
+  const savingMessage: EmailAccountMessage = Object.freeze({
+    text: "Saving…",
+    tone: "pending"
+  })
+
   switch (saveState.status) {
     case "saving":
-      return SAVING_MESSAGE
+      return savingMessage
     case "idle":
     case "saved":
     case "failed":
@@ -378,9 +301,15 @@ function formatPendingMessage(
   saveState: EmailAccountSaveState,
   checkState: EmailAccountCheckState
 ): EmailAccountMessage | undefined {
+  /** Line shown while Lys signs in to the servers. */
+  const signingInMessage: EmailAccountMessage = Object.freeze({
+    text: "Signing in…",
+    tone: "pending"
+  })
+
   switch (checkState.status) {
     case "checking":
-      return SIGNING_IN_MESSAGE
+      return signingInMessage
     case "idle":
     case "checked":
     case "failed":
@@ -532,9 +461,21 @@ function isAcceptedAccountSaved(
 function formatRestingMessage(
   input: EmailAccountStatusInput
 ): EmailAccountMessage {
-  if (input.savedAccount === null) return NO_ACCOUNT_MESSAGE
+  /** Line shown while no account is saved and nothing is edited. */
+  const noAccountMessage: EmailAccountMessage = Object.freeze({
+    text: "No account yet. The email server stays off until you save one.",
+    tone: "muted"
+  })
+
+  if (input.savedAccount === null) return noAccountMessage
   if (isAcceptedAccountSaved(input.saveState, input.checkState)) {
-    return ACCOUNT_SAVED_MESSAGE
+    /** Line shown after the account and its password were saved. */
+    const accountSavedMessage: EmailAccountMessage = Object.freeze({
+      text: "Account saved.",
+      tone: "success"
+    })
+
+    return accountSavedMessage
   }
   return { text: `Saved · ${input.savedAccount.address}`, tone: "muted" }
 }
@@ -570,14 +511,32 @@ function formatSettledMessage(
 export function formatEmailAccountMessage(
   input: EmailAccountStatusInput
 ): EmailAccountMessage {
+  /** Line shown while the fields differ from the saved account. */
+  const unsavedMessage: EmailAccountMessage = Object.freeze({
+    text: "Unsaved · Save signs in to both servers first.",
+    tone: "attention"
+  })
+
+  /** Line shown while the fields differ and the backend is not running. */
+  const backendStoppedMessage: EmailAccountMessage = Object.freeze({
+    text: "Unsaved · start the backend in Settings → Runtime to sign in and save.",
+    tone: "attention"
+  })
+
+  /** Line shown after a save was tried while a field breaks a rule. */
+  const invalidMessage: EmailAccountMessage = Object.freeze({
+    text: "Fix the marked fields to save.",
+    tone: "danger"
+  })
+
   const pending = formatPendingMessage(input.saveState, input.checkState)
   if (pending !== undefined) return pending
-  if (isWaitingForBackend(input)) return BACKEND_STOPPED_MESSAGE
+  if (isWaitingForBackend(input)) return backendStoppedMessage
   switch (input.draftParse.status) {
     case "invalid":
-      return input.hasSubmitted ? INVALID_MESSAGE : formatSettledMessage(input)
+      return input.hasSubmitted ? invalidMessage : formatSettledMessage(input)
     case "changed":
-      return formatOutcomeMessage(input) ?? UNSAVED_MESSAGE
+      return formatOutcomeMessage(input) ?? unsavedMessage
     case "unchanged":
       return formatSettledMessage(input)
     default: {

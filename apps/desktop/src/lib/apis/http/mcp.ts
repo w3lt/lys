@@ -68,20 +68,6 @@ type McpReconnectRefusal = Exclude<
   { readonly status: "reconnected" }
 >
 
-/** Outcome of a reconnect naming a server the backend has not applied. */
-const MCP_RECONNECT_NOT_FOUND: McpReconnectRefusal = Object.freeze({
-  status: "not-found"
-})
-
-/** Outcome of a reconnect of a server that is off or cannot start. */
-const MCP_RECONNECT_OFF: McpReconnectRefusal = Object.freeze({ status: "off" })
-
-/** Outcome each declared problem of a reconnect stands for, by its status. */
-const MCP_RECONNECT_REFUSALS = Object.freeze({
-  [HTTP_NOT_FOUND_STATUS]: MCP_RECONNECT_NOT_FOUND,
-  [HTTP_CONFLICT_STATUS]: MCP_RECONNECT_OFF
-} satisfies Readonly<Record<McpReconnectProblemStatus, McpReconnectRefusal>>)
-
 /**
  * Body of every sync and reconnect: the empty JSON object the protocol
  * requires.
@@ -254,6 +240,20 @@ async function parseMcpReconnectProblem(
   response: Response,
   status: McpReconnectProblemStatus
 ): Promise<McpReconnectRefusal> {
+  /** Outcome of a reconnect naming a server the backend has not applied. */
+  const mcpReconnectNotFound: McpReconnectRefusal = Object.freeze({
+    status: "not-found"
+  })
+
+  /** Outcome of a reconnect of a server that is off or cannot start. */
+  const mcpReconnectOff: McpReconnectRefusal = Object.freeze({ status: "off" })
+
+  /** Outcome each declared problem of a reconnect stands for, by its status. */
+  const mcpReconnectRefusals = Object.freeze({
+    [HTTP_NOT_FOUND_STATUS]: mcpReconnectNotFound,
+    [HTTP_CONFLICT_STATUS]: mcpReconnectOff
+  } satisfies Readonly<Record<McpReconnectProblemStatus, McpReconnectRefusal>>)
+
   let body: unknown
   try {
     body = await response.json()
@@ -263,5 +263,5 @@ async function parseMcpReconnectProblem(
   if (!reconnectMcpServerApi.responses[status].safeParse(body).success) {
     throw createMcpResponseError(status)
   }
-  return MCP_RECONNECT_REFUSALS[status]
+  return mcpReconnectRefusals[status]
 }

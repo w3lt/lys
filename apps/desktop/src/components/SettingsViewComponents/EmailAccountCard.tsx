@@ -1,4 +1,14 @@
-import type { EmailAccount, EmailPassword, EmailSecurity } from "@lys/share"
+import {
+  MAXIMUM_EMAIL_ADDRESS_LENGTH,
+  MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH,
+  MAXIMUM_EMAIL_LOCAL_PART_LENGTH,
+  MAXIMUM_EMAIL_PASSWORD_LENGTH,
+  MAXIMUM_EMAIL_USER_NAME_LENGTH,
+  MAXIMUM_TCP_PORT,
+  type EmailAccount,
+  type EmailPassword,
+  type EmailSecurity
+} from "@lys/share"
 import { Eye } from "lucide-react"
 import {
   useEffectEvent,
@@ -40,18 +50,8 @@ import {
 } from "@/lib/store/email-settings"
 
 import {
-  EMAIL_ACCOUNT_NOTE,
-  EMAIL_ACCOUNT_REMOVAL_QUESTION,
-  EMAIL_ADDRESS_HINT,
-  EMAIL_DISPLAY_NAME_HINT,
-  EMAIL_HOST_HINT,
-  EMAIL_PASSWORD_HINT,
-  EMAIL_PASSWORD_KEPT_NOTE,
-  EMAIL_PORT_HINT,
   EMAIL_SECURITIES,
   EMAIL_SECURITY_HINT,
-  EMAIL_SENT_COPY_NOTE,
-  EMAIL_USER_NAME_HINT,
   findEmailSecurity,
   formatEmailAccountMessage,
   formatEmailPresetNote,
@@ -520,9 +520,6 @@ type EmailAccountEditing = EmailAccountEditView & {
 /** No problem shown, before the first save attempt or for a valid draft. */
 const NO_PROBLEMS: EmailAccountDraftProblems = Object.freeze({})
 
-/** Bullets standing for the saved password in the empty password field. */
-const PASSWORD_PLACEHOLDER = "••••••••"
-
 /** No save tried since the edit last started afresh. */
 const NO_SAVE_TRY: EmailAccountSaveTry = Object.freeze({ status: "none" })
 
@@ -756,6 +753,9 @@ function EmailPasswordInput({
   onIsPasswordShownChange,
   onDiscardEdit
 }: EmailPasswordInputProps): ReactElement {
+  /** Bullets standing for the saved password in the empty password field. */
+  const passwordPlaceholder = "••••••••"
+
   return (
     <div className="settings-view__secret-field">
       <Input
@@ -766,7 +766,7 @@ function EmailPasswordInput({
         id={fieldId}
         onChange={(event) => onTextChange(event.target.value)}
         onKeyDown={(event) => handleFieldKeyDown(event, onDiscardEdit)}
-        placeholder={hasSavedPassword ? PASSWORD_PLACEHOLDER : undefined}
+        placeholder={hasSavedPassword ? passwordPlaceholder : undefined}
         ref={fieldRef}
         spellCheck={false}
         type={isPasswordShown ? "text" : "password"}
@@ -812,6 +812,12 @@ function EmailPasswordField({
   onIsPasswordShownChange,
   onDiscardEdit
 }: EmailPasswordFieldProps): ReactElement {
+  /** Note of the password field while a password is saved. */
+  const emailPasswordKeptNote = "Leave empty to keep the saved password."
+
+  /** Rule of a password, shown beside its label before entry. */
+  const emailPasswordHint = `up to ${MAXIMUM_EMAIL_PASSWORD_LENGTH}`
+
   const fieldId = useId()
   const hintId = `${fieldId}-hint`
   const problemId = `${fieldId}-problem`
@@ -820,7 +826,7 @@ function EmailPasswordField({
   return (
     <div className="settings-view__email-field">
       <EmailFieldTop
-        hint={EMAIL_PASSWORD_HINT}
+        hint={emailPasswordHint}
         hintId={hintId}
         isRequired={!hasSavedPassword}
         label="Password"
@@ -845,7 +851,7 @@ function EmailPasswordField({
       <EmailFieldProblem id={problemId} problem={problem} />
       <EmailFieldNote
         id={noteId}
-        note={hasSavedPassword ? EMAIL_PASSWORD_KEPT_NOTE : ""}
+        note={hasSavedPassword ? emailPasswordKeptNote : ""}
       />
     </div>
   )
@@ -931,13 +937,19 @@ function EmailServerFields({
   onServerChange,
   onDiscardEdit
 }: EmailServerFieldsProps): ReactElement {
+  /** Rule of a mail server host, shown beside its label before entry. */
+  const emailHostHint = "ASCII host name, IPv4, or [IPv6]"
+
+  /** Rule of a port, shown beside its label before entry. */
+  const emailPortHint = `1–${MAXIMUM_TCP_PORT}`
+
   return (
     <fieldset className="settings-view__email-server">
       <legend>{formatEmailServerSideLabel(side)}</legend>
       <EmailTextField
         autoComplete="off"
         fieldRef={hostRef}
-        hint={EMAIL_HOST_HINT}
+        hint={emailHostHint}
         isRequired
         label="Host"
         onDiscardEdit={onDiscardEdit}
@@ -948,7 +960,7 @@ function EmailServerFields({
       <EmailTextField
         autoComplete="off"
         fieldRef={portRef}
-        hint={EMAIL_PORT_HINT}
+        hint={emailPortHint}
         inputMode="numeric"
         isRequired
         label="Port"
@@ -981,6 +993,10 @@ function EmailSentCopyField({
   isBusy,
   onServerKeepsSentCopyChange
 }: EmailSentCopyFieldProps): ReactElement {
+  /** Note under the Sent copy switch. */
+  const emailSentCopyNote =
+    "On when the server files sent mail itself, as Gmail does. Off makes Lys file the copy in Sent."
+
   const noteId = useId()
 
   return (
@@ -989,7 +1005,7 @@ function EmailSentCopyField({
         <span className="settings-view__email-switch-label">
           Server keeps a copy of sent mail
         </span>
-        <p id={noteId}>{EMAIL_SENT_COPY_NOTE}</p>
+        <p id={noteId}>{emailSentCopyNote}</p>
       </div>
       <Switch
         aria-describedby={noteId}
@@ -1024,6 +1040,18 @@ function EmailIdentityFields({
   onDraftChange,
   onDiscardEdit
 }: EmailIdentityFieldsProps): ReactElement {
+  /**
+   * Rule of an address, shown beside its label before entry: its shape, in
+   * ASCII, the length of the name before `@`, and its length in all.
+   */
+  const emailAddressHint = `name@host in ASCII · name up to ${MAXIMUM_EMAIL_LOCAL_PART_LENGTH} · up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH} in all`
+
+  /** Rule of a display name, shown beside its label before entry. */
+  const emailDisplayNameHint = `optional · up to ${MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH}`
+
+  /** Rule of a user name, shown beside its label before entry. */
+  const emailUserNameHint = `up to ${MAXIMUM_EMAIL_USER_NAME_LENGTH}`
+
   const presetId = useId()
   const presetNote = formatEmailPresetNote(draft)
 
@@ -1032,7 +1060,7 @@ function EmailIdentityFields({
       <EmailTextField
         autoComplete="email"
         fieldRef={fieldRefs.address}
-        hint={EMAIL_ADDRESS_HINT}
+        hint={emailAddressHint}
         isRequired
         label="Address"
         noteId={presetNote === "" ? undefined : presetId}
@@ -1047,7 +1075,7 @@ function EmailIdentityFields({
       <EmailTextField
         autoComplete="name"
         fieldRef={fieldRefs.displayName}
-        hint={EMAIL_DISPLAY_NAME_HINT}
+        hint={emailDisplayNameHint}
         isRequired={false}
         label="Display name"
         onDiscardEdit={onDiscardEdit}
@@ -1058,7 +1086,7 @@ function EmailIdentityFields({
       <EmailTextField
         autoComplete="username"
         fieldRef={fieldRefs.userName}
-        hint={EMAIL_USER_NAME_HINT}
+        hint={emailUserNameHint}
         isRequired
         label="User name"
         onDiscardEdit={onDiscardEdit}
@@ -1210,6 +1238,10 @@ function EmailAccountRemovalQuestion({
   onKeepEmailAccount,
   onRemoveEmailAccount
 }: EmailAccountRemovalQuestionProps): ReactElement {
+  /** Question asked before removing the account. */
+  const emailAccountRemovalQuestion =
+    "Remove the email account and its password? The email server is switched off."
+
   const questionId = useId()
 
   /**
@@ -1230,7 +1262,7 @@ function EmailAccountRemovalQuestion({
       className="settings-view__mcp-confirm"
       disabled={isBusy}
     >
-      <span id={questionId}>{EMAIL_ACCOUNT_REMOVAL_QUESTION}</span>
+      <span id={questionId}>{emailAccountRemovalQuestion}</span>
       <Button
         aria-label="Keep the email account"
         autoFocus
@@ -1913,6 +1945,10 @@ export default function EmailAccountCard({
   onSaveEmailAccount,
   onRemoveEmailAccount
 }: EmailAccountCardProps): ReactElement {
+  /** Note under the account card's heading. */
+  const emailAccountNote =
+    "Lys signs in to IMAP and SMTP before saving. Gmail, iCloud, Yahoo, and Fastmail need an app password."
+
   const headingId = useId()
   const edit = useEmailAccountEdit(
     { savedAccount, savedPassword, saveState, checkState, isBackendRunning },
@@ -1937,7 +1973,7 @@ export default function EmailAccountCard({
     >
       <div className="settings-view__identity-lines">
         <h3 id={headingId}>Email account</h3>
-        <p>{EMAIL_ACCOUNT_NOTE}</p>
+        <p>{emailAccountNote}</p>
       </div>
       <EmailAccountFields
         draft={edit.draft}

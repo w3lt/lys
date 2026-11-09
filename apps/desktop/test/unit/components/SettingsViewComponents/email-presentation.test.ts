@@ -62,9 +62,6 @@ const INVALID_PARSE: EmailAccountDraftParse = Object.freeze({
 /** Save state before any save or removal. */
 const IDLE_SAVE_STATE: EmailAccountSaveState = Object.freeze({ status: "idle" })
 
-/** Save state while the account is written. */
-const SAVING_STATE: EmailAccountSaveState = Object.freeze({ status: "saving" })
-
 /** Save state once the file holds the account and its password, or none. */
 const SAVED_STATE: EmailAccountSaveState = Object.freeze({ status: "saved" })
 
@@ -77,17 +74,6 @@ const FAILED_SAVE_STATE: EmailAccountSaveState = Object.freeze({
 /** Check state before any check. */
 const IDLE_CHECK_STATE: EmailAccountCheckState = Object.freeze({
   status: "idle"
-})
-
-/** Check state while Lys signs in to both servers. */
-const CHECKING_STATE: EmailAccountCheckState = Object.freeze({
-  status: "checking"
-})
-
-/** Check state of a check the backend could not be asked. */
-const FAILED_CHECK_STATE: EmailAccountCheckState = Object.freeze({
-  status: "failed",
-  error: "Lys couldn't reach."
 })
 
 /** The stored account shown, nothing edited, nothing tried, backend running. */
@@ -296,21 +282,31 @@ describe("formatEmailAccountMessage", () => {
   })
 
   it("says Lys signs in before anything else", () => {
+    /** Check state while Lys signs in to both servers. */
+    const checkingState: EmailAccountCheckState = Object.freeze({
+      status: "checking"
+    })
+
     expect(
       formatEmailAccountMessage({
         ...SUBMITTED_INPUT,
         draftParse: INVALID_PARSE,
-        checkState: CHECKING_STATE,
+        checkState: checkingState,
         saveState: FAILED_SAVE_STATE
       })
     ).toEqual({ text: "Signing in…", tone: "pending" })
   })
 
   it("says Lys saves while the write runs", () => {
+    /** Save state while the account is written. */
+    const savingState: EmailAccountSaveState = Object.freeze({
+      status: "saving"
+    })
+
     expect(
       formatEmailAccountMessage({
         ...SUBMITTED_INPUT,
-        saveState: SAVING_STATE,
+        saveState: savingState,
         checkState: buildChecked(ACCEPTED_CHECK)
       })
     ).toEqual({ text: "Saving…", tone: "pending" })
@@ -470,10 +466,16 @@ describe("formatEmailAccountMessage", () => {
   )
 
   it("reports that the check could not be asked", () => {
+    /** Check state of a check the backend could not be asked. */
+    const failedCheckState: EmailAccountCheckState = Object.freeze({
+      status: "failed",
+      error: "Lys couldn't reach."
+    })
+
     expect(
       formatEmailAccountMessage({
         ...SUBMITTED_INPUT,
-        checkState: FAILED_CHECK_STATE
+        checkState: failedCheckState
       })
     ).toEqual({ text: "Lys couldn't reach.", tone: "danger" })
   })

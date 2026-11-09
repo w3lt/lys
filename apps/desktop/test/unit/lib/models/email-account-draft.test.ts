@@ -34,36 +34,10 @@ const HOST_PROBLEM =
 /** Preset of the stored account's provider. */
 const FASTMAIL = findEmailPreset(STORED_EMAIL_ACCOUNT.address)
 
-/** Preset of a Gmail address. */
-const GMAIL = findEmailPreset("ada@gmail.com")
-
-/** Preset of an iCloud address. */
-const ICLOUD = findEmailPreset("ada@icloud.com")
-
-/** Fastmail's IMAP server, as the person types it for a domain of their own. */
-const TYPED_FASTMAIL_IMAP: EmailServerDraft = Object.freeze({
-  host: "imap.fastmail.com",
-  port: "993",
-  security: "tls"
-})
-
-/** Fastmail's SMTP server, as the person types it for a domain of their own. */
-const TYPED_FASTMAIL_SMTP: EmailServerDraft = Object.freeze({
-  host: "smtp.fastmail.com",
-  port: "465",
-  security: "tls"
-})
-
 /** The saved IMAP server with a host of the person's own. */
 const SAVED_IMAP_ON_OWN_HOST: EmailServerDraft = Object.freeze({
   ...SAVED_DRAFT.imap,
   host: "mail.example.test"
-})
-
-/** The saved SMTP server on port 587. */
-const SAVED_SMTP_ON_PORT_587: EmailServerDraft = Object.freeze({
-  ...SAVED_DRAFT.smtp,
-  port: "587"
 })
 
 /** The saved SMTP server secured with STARTTLS. */
@@ -184,6 +158,12 @@ describe("buildEmailAccountDraft", () => {
 })
 
 describe("hasEmailPresetServers", () => {
+  /** The saved SMTP server on port 587. */
+  const savedSmtpOnPort587: EmailServerDraft = Object.freeze({
+    ...SAVED_DRAFT.smtp,
+    port: "587"
+  })
+
   it("is true while both servers equal the preset's", () => {
     if (FASTMAIL === undefined) throw new Error("No Fastmail preset")
 
@@ -192,7 +172,7 @@ describe("hasEmailPresetServers", () => {
 
   it.each([
     ["the IMAP host", { imap: SAVED_IMAP_ON_OWN_HOST }],
-    ["a port", { smtp: SAVED_SMTP_ON_PORT_587 }],
+    ["a port", { smtp: savedSmtpOnPort587 }],
     ["the security", { smtp: SAVED_SMTP_WITH_STARTTLS }]
   ] as const)("is false once %s differs", (_label, change) => {
     if (FASTMAIL === undefined) throw new Error("No Fastmail preset")
@@ -205,13 +185,16 @@ describe("hasEmailPresetServers", () => {
 
 describe("updateEmailAccountAddress", () => {
   it("fills empty server fields and the Sent copy from the address's preset, and records it as the applied one", () => {
+    /** Preset of an iCloud address. */
+    const icloudPreset = findEmailPreset("ada@icloud.com")
+
     expect(updateEmailAccountAddress(EMPTY_DRAFT, "ada@icloud.com")).toEqual({
       ...EMPTY_DRAFT,
       address: "ada@icloud.com",
       imap: { host: "imap.mail.me.com", port: "993", security: "tls" },
       smtp: { host: "smtp.mail.me.com", port: "587", security: "starttls" },
       serverKeepsSentCopy: false,
-      appliedPreset: ICLOUD
+      appliedPreset: icloudPreset
     })
   })
 
@@ -299,12 +282,21 @@ describe("updateEmailAccountAddress", () => {
   })
 
   it("replaces saved servers that hold the saved address's preset when the address changes to another provider's at once", () => {
+    /** Preset of a Gmail address. */
+    const gmailPreset = findEmailPreset("ada@gmail.com")
+
     expect(updateEmailAccountAddress(SAVED_DRAFT, "ada@gmail.com")).toEqual({
       ...SAVED_DRAFT,
       address: "ada@gmail.com",
-      imap: GMAIL === undefined ? undefined : { ...GMAIL.imap, port: "993" },
-      smtp: GMAIL === undefined ? undefined : { ...GMAIL.smtp, port: "465" },
-      appliedPreset: GMAIL
+      imap:
+        gmailPreset === undefined
+          ? undefined
+          : { ...gmailPreset.imap, port: "993" },
+      smtp:
+        gmailPreset === undefined
+          ? undefined
+          : { ...gmailPreset.smtp, port: "465" },
+      appliedPreset: gmailPreset
     })
   })
 
@@ -374,11 +366,29 @@ describe("updateEmailAccountAddress", () => {
   })
 
   it("keeps servers the person typed that equal another provider's preset when the address moves to a provider with a preset", () => {
+    /**
+     * Fastmail's IMAP server, as the person types it for a domain of their own.
+     */
+    const typedFastmailImap: EmailServerDraft = Object.freeze({
+      host: "imap.fastmail.com",
+      port: "993",
+      security: "tls"
+    })
+
+    /**
+     * Fastmail's SMTP server, as the person types it for a domain of their own.
+     */
+    const typedFastmailSmtp: EmailServerDraft = Object.freeze({
+      host: "smtp.fastmail.com",
+      port: "465",
+      security: "tls"
+    })
+
     const typed: EmailAccountDraft = {
       ...EMPTY_DRAFT,
       address: "ada@example.test",
-      imap: TYPED_FASTMAIL_IMAP,
-      smtp: TYPED_FASTMAIL_SMTP,
+      imap: typedFastmailImap,
+      smtp: typedFastmailSmtp,
       serverKeepsSentCopy: true
     }
 

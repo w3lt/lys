@@ -121,40 +121,6 @@ type EmailSettingsDependencies = {
   ) => Promise<CheckEmailAccountApiResponse>
 }
 
-/** Save state before any save. */
-const IDLE_SAVE: EmailAccountSaveState = Object.freeze({ status: "idle" })
-
-/** Save state while a save or removal runs. */
-const SAVING: EmailAccountSaveState = Object.freeze({ status: "saving" })
-
-/** Save state after a save or removal. */
-const SAVED: EmailAccountSaveState = Object.freeze({ status: "saved" })
-
-/** Save state after a failed save or removal. */
-const SAVE_FAILED: EmailAccountSaveState = Object.freeze({
-  status: "failed",
-  error: "Lys couldn't write the email account to its settings file."
-})
-
-/** Save state after a removal that kept the account, because the email server stayed on. */
-const SWITCH_OFF_FAILED: EmailAccountSaveState = Object.freeze({
-  status: "failed",
-  error:
-    "Lys couldn't switch the email server off, so the account wasn't removed."
-})
-
-/** Check state before any check, or after a removal. */
-const IDLE_CHECK: EmailAccountCheckState = Object.freeze({ status: "idle" })
-
-/** Check state while a check runs. */
-const CHECKING: EmailAccountCheckState = Object.freeze({ status: "checking" })
-
-/** Check state when the backend could not be asked. */
-const CHECK_FAILED: EmailAccountCheckState = Object.freeze({
-  status: "failed",
-  error: "Lys couldn't reach its backend to check the account."
-})
-
 /**
  * Builds the settings that hold an account and its password, or neither.
  *
@@ -304,6 +270,15 @@ export function createEmailSettingsSlice(
   get: StoreApi<EmailSettingsStore>["getState"],
   dependencies: EmailSettingsDependencies
 ): EmailSettingsSlice {
+  /** Save state before any save. */
+  const idleSave: EmailAccountSaveState = Object.freeze({ status: "idle" })
+
+  /** Save state while a save or removal runs. */
+  const saving: EmailAccountSaveState = Object.freeze({ status: "saving" })
+
+  /** Check state before any check, or after a removal. */
+  const idleCheck: EmailAccountCheckState = Object.freeze({ status: "idle" })
+
   /**
    * Answers whether a save or removal, or the check of a save, runs now.
    *
@@ -330,11 +305,20 @@ export function createEmailSettingsSlice(
     account: EmailAccount | null,
     password: EmailPassword | null
   ): Promise<"saved" | "failed"> {
-    set({ emailAccountSave: SAVING })
+    /** Save state after a save or removal. */
+    const saved: EmailAccountSaveState = Object.freeze({ status: "saved" })
+
+    set({ emailAccountSave: saving })
     try {
       await dependencies.saveEmailAccountSettings(account, password)
     } catch {
-      set({ emailAccountSave: SAVE_FAILED })
+      /** Save state after a failed save or removal. */
+      const saveFailed: EmailAccountSaveState = Object.freeze({
+        status: "failed",
+        error: "Lys couldn't write the email account to its settings file."
+      })
+
+      set({ emailAccountSave: saveFailed })
       return "failed"
     }
     set((state) => {
@@ -343,7 +327,7 @@ export function createEmailSettingsSlice(
         account,
         password
       )
-      return { settings, emailAccountSave: SAVED }
+      return { settings, emailAccountSave: saved }
     })
     return "saved"
   }
@@ -358,13 +342,24 @@ export function createEmailSettingsSlice(
     account: EmailAccount,
     password: EmailPassword
   ): Promise<EmailAccountSaveOutcome> {
+    /** Check state while a check runs. */
+    const checking: EmailAccountCheckState = Object.freeze({
+      status: "checking"
+    })
+
     if (isBusy()) return "busy"
-    set({ emailAccountCheck: CHECKING, emailAccountSave: IDLE_SAVE })
+    set({ emailAccountCheck: checking, emailAccountSave: idleSave })
     let outcome: CheckEmailAccountApiResponse
     try {
       outcome = await dependencies.sendEmailAccountCheck({ account, password })
     } catch {
-      set({ emailAccountCheck: CHECK_FAILED })
+      /** Check state when the backend could not be asked. */
+      const checkFailed: EmailAccountCheckState = Object.freeze({
+        status: "failed",
+        error: "Lys couldn't reach its backend to check the account."
+      })
+
+      set({ emailAccountCheck: checkFailed })
       return "failed"
     }
     const checked: EmailAccountCheckState = Object.freeze({
@@ -385,15 +380,25 @@ export function createEmailSettingsSlice(
     saveEmailServerSwitchOff: () => Promise<McpSettingsSaveOutcome>
   ): Promise<EmailAccountRemovalOutcome> {
     if (isBusy()) return "busy"
-    set({ emailAccountCheck: IDLE_CHECK, emailAccountSave: SAVING })
+    set({ emailAccountCheck: idleCheck, emailAccountSave: saving })
     if (get().settings.mcp.builtIn.email.enabled) {
+      /**
+       * Save state after a removal that kept the account, because the email
+       * server stayed on.
+       */
+      const switchOffFailed: EmailAccountSaveState = Object.freeze({
+        status: "failed",
+        error:
+          "Lys couldn't switch the email server off, so the account wasn't removed."
+      })
+
       const switchOutcome = await saveEmailServerSwitchOff()
       switch (switchOutcome) {
         case "saved":
           break
         case "failed":
         case "busy":
-          set({ emailAccountSave: SWITCH_OFF_FAILED })
+          set({ emailAccountSave: switchOffFailed })
           return "failed"
         default: {
           const unhandledOutcome: never = switchOutcome
@@ -405,8 +410,8 @@ export function createEmailSettingsSlice(
   }
 
   return {
-    emailAccountSave: IDLE_SAVE,
-    emailAccountCheck: IDLE_CHECK,
+    emailAccountSave: idleSave,
+    emailAccountCheck: idleCheck,
     saveEmailAccount,
     deleteEmailAccount
   }

@@ -116,30 +116,12 @@ const NO_LOCATION_SETTINGS: LocationSettings = Object.freeze({
 })
 
 /**
- * The store's settings once one edit changed the four groups the store saves
- * by itself: the startup switches, generation, the per-model load settings,
- * and the tools.
- */
-const AUTOSAVED_GROUPS_EDITED_SETTINGS: LysSettings = Object.freeze({
-  ...DISK_SETTINGS,
-  runtime: VMO_AUTOSTART_RUNTIME_SETTINGS,
-  generation: EDITED_GENERATION_SETTINGS,
-  loadConfiguration: {
-    default: DISK_SETTINGS.loadConfiguration.default,
-    models: new Map([["gemma-3", { evalBatchSize: 1024 }]])
-  },
-  tools: {
-    justRunToolNames: new Set(["find_files"]),
-    switches: new Map([["web_search", true]])
-  }
-})
-
-/**
- * Settings document on disk once {@link AUTOSAVED_GROUPS_EDITED_SETTINGS} is
- * saved, the Tavily key is removed, {@link EDITED_PROVIDERS_SETTINGS} is
- * chosen, the location and the added MCP servers are removed, and the email
- * account is removed with its password: every group differs from
- * {@link DISK_SETTINGS_DOCUMENT}.
+ * Settings document on disk once one edit of the four groups the store
+ * saves by itself, the startup switches, generation, the per-model load
+ * settings, and the tools, is saved, the Tavily key is removed,
+ * {@link EDITED_PROVIDERS_SETTINGS} is chosen, the location and the added
+ * MCP servers are removed, and the email account is removed with its
+ * password: every group differs from {@link DISK_SETTINGS_DOCUMENT}.
  */
 const EVERY_GROUP_EDITED_DOCUMENT: SettingsDocument = Object.freeze({
   runtime: VMO_AUTOSTART_RUNTIME_SETTINGS,
@@ -158,13 +140,6 @@ const EVERY_GROUP_EDITED_DOCUMENT: SettingsDocument = Object.freeze({
   location: NO_LOCATION_SETTINGS,
   mcp: { ...DISK_SETTINGS_DOCUMENT.mcp, servers: [] },
   email: { account: null }
-})
-
-/** Answer of an email account check whose SMTP server refused the password. */
-const REFUSED_EMAIL_CHECK = checkEmailAccountApiResponseSchema.parse({
-  status: "checked",
-  imap: { status: "accepted" },
-  smtp: { status: "failed", reason: "wrong-password" }
 })
 
 /** Inventory listed once LM Studio is connected. */
@@ -924,13 +899,32 @@ describe("useLysStore", () => {
 
   describe("settings group saves", () => {
     it("applies the saves of all nine settings groups one at a time, so the file keeps every group's change", async () => {
+      /**
+       * The store's settings once one edit changed the four groups the store
+       * saves by itself: the startup switches, generation, the per-model load
+       * settings, and the tools.
+       */
+      const autosavedGroupsEditedSettings: LysSettings = Object.freeze({
+        ...DISK_SETTINGS,
+        runtime: VMO_AUTOSTART_RUNTIME_SETTINGS,
+        generation: EDITED_GENERATION_SETTINGS,
+        loadConfiguration: {
+          default: DISK_SETTINGS.loadConfiguration.default,
+          models: new Map([["gemma-3", { evalBatchSize: 1024 }]])
+        },
+        tools: {
+          justRunToolNames: new Set(["find_files"]),
+          switches: new Map([["web_search", true]])
+        }
+      })
+
       const file = startDesktopHostHoldingWrites(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
       await useLysStore.getState().initialize()
       const store = useLysStore.getState()
       const commandCountBeforeSaves = file.host.commands.length
 
-      store.setSettings(AUTOSAVED_GROUPS_EDITED_SETTINGS)
+      store.setSettings(autosavedGroupsEditedSettings)
       const outcomes = Promise.all([
         store.saveTavilyApiKey(null),
         store.saveProviderSettings(EDITED_PROVIDERS_SETTINGS),
@@ -1010,9 +1004,19 @@ describe("useLysStore", () => {
 
   describe("email account", () => {
     it("checks an account at the application store's current backend", async () => {
+      /**
+       * Answer of an email account check whose SMTP server refused the
+       * password.
+       */
+      const refusedEmailCheck = checkEmailAccountApiResponseSchema.parse({
+        status: "checked",
+        imap: { status: "accepted" },
+        smtp: { status: "failed", reason: "wrong-password" }
+      })
+
       const backend = startBackendFake({
         "POST /api/v1/mcp/email/account-check": () =>
-          buildJsonResponse(200, REFUSED_EMAIL_CHECK)
+          buildJsonResponse(200, refusedEmailCheck)
       })
       const useLysStore = await loadFreshLysStore()
       useLysStore.setState({ backendUrl: FIXTURE_BACKEND_URL })
@@ -1027,7 +1031,7 @@ describe("useLysStore", () => {
       expect(outcome).toBe("refused")
       expect(useLysStore.getState().emailAccountCheck).toEqual({
         status: "checked",
-        outcome: REFUSED_EMAIL_CHECK
+        outcome: refusedEmailCheck
       })
     })
   })

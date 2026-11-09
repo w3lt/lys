@@ -813,6 +813,10 @@ mod tests {
         }
     }
 
+    /// Checks that loading fails with a parse failure, leaving the file's
+    /// text as it was, when an array stands in place of a group or of an
+    /// object inside one, the built-in MCP switches and the email objects
+    /// among them, or when the whole document is an array or null.
     #[test]
     fn fails_when_the_document_or_an_object_in_it_is_not_a_json_object_without_rewriting_it() {
         // Each pointer names an object of the complete settings (`~1` escapes

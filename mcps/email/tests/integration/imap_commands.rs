@@ -61,6 +61,10 @@ async fn get_inbox_result(mailbox: FakeMailbox) -> ToolResult {
     run_search_emails(&stack.context, arguments).await
 }
 
+/// Checks that a `SEARCH` the fake IMAP server refuses fails
+/// `search_emails` with the server's code and text instead of matching
+/// nothing, and that the non-ASCII subject went as a literal under
+/// `CHARSET UTF-8`, not in the command line.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_search_fails_instead_of_matching_nothing() {
     let mut mailbox = build_mailbox();
@@ -97,6 +101,9 @@ async fn a_refused_search_fails_instead_of_matching_nothing() {
     );
 }
 
+/// Checks that a search whose folder the fake IMAP server refuses to open,
+/// or whose summaries it refuses to fetch, fails with the server's code and
+/// text instead of matching nothing.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_search_whose_folder_or_summaries_are_refused_fails_instead_of_matching_nothing() {
     let mut unopenable = build_mailbox();
@@ -123,6 +130,9 @@ async fn a_search_whose_folder_or_summaries_are_refused_fails_instead_of_matchin
     );
 }
 
+/// Checks that `delete_draft` fails with the server's refusal of `STORE`,
+/// on each of two tries, and leaves the draft in the Drafts folder without
+/// `\Deleted`.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_store_fails_and_keeps_the_draft() {
     let mut mailbox = build_mailbox();
@@ -143,6 +153,8 @@ async fn a_refused_store_fails_and_keeps_the_draft() {
     assert!(!drafts[0].has_flag("\\Deleted"));
 }
 
+/// Checks that `delete_draft` fails with the server's refusal of `EXPUNGE`,
+/// and that the draft stays in the Drafts folder.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_expunge_fails() {
     let mut mailbox = build_mailbox();
@@ -164,6 +176,8 @@ async fn a_refused_expunge_fails() {
     assert_eq!(stack.imap.list_messages("Drafts").len(), 1);
 }
 
+/// Checks that `delete_draft` fails with the server's refusal of
+/// `CAPABILITY` before it sends any `STORE`, so the draft stays unflagged.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_capability_fails_before_anything_changes() {
     let mut mailbox = build_mailbox();
@@ -196,6 +210,8 @@ async fn a_refused_capability_fails_before_anything_changes() {
     );
 }
 
+/// Checks that `read_email` fails with the server's refusal of `FETCH`
+/// instead of calling the id stale.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_fetch_fails_instead_of_reading_as_a_stale_id() {
     let mut mailbox = build_mailbox();
@@ -219,6 +235,9 @@ async fn a_refused_fetch_fails_instead_of_reading_as_a_stale_id() {
     );
 }
 
+/// Checks that `read_email`, `read_conversation`, and `read_attachment`
+/// each fail with the server's refusal of `EXAMINE` instead of calling the
+/// id stale.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_examine_fails_each_read_by_id_instead_of_reading_as_a_stale_id() {
     let mut mailbox = build_mailbox();
@@ -242,6 +261,9 @@ async fn a_refused_examine_fails_each_read_by_id_instead_of_reading_as_a_stale_i
     assert_eq!(attachment, Err(refusal));
 }
 
+/// Checks that `read_conversation` fails with the server's refusal to fetch
+/// one of the conversation's messages instead of leaving that message out
+/// as removed.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_fetch_of_a_message_of_the_conversation_fails_instead_of_reading_as_removed() {
     let mut mailbox = build_mailbox();
@@ -277,6 +299,8 @@ async fn a_refused_fetch_of_a_message_of_the_conversation_fails_instead_of_readi
     );
 }
 
+/// Checks that `list_folders` fails with the server's refusal of `LIST`
+/// instead of answering that there is no folder.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_listing_fails_instead_of_reading_as_no_folder() {
     let mut mailbox = build_mailbox();
@@ -294,6 +318,8 @@ async fn a_refused_listing_fails_instead_of_reading_as_no_folder() {
     );
 }
 
+/// Checks that a refused `STATUS` fails `list_folders`, and a refused
+/// `CREATE` fails `manage_folder`, each with the server's code and text.
 #[tokio::test(flavor = "multi_thread")]
 async fn refusals_pass_on_the_server_code_and_text() {
     let mut mailbox = build_mailbox();
@@ -328,6 +354,8 @@ async fn refusals_pass_on_the_server_code_and_text() {
     );
 }
 
+/// Checks that `manage_folder` fails with the server's refusal of `RENAME`
+/// or `DELETE` and leaves the folder as it was.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_rename_or_delete_fails_and_keeps_the_folder() {
     let mut mailbox = build_mailbox();
@@ -363,6 +391,8 @@ async fn a_refused_rename_or_delete_fails_and_keeps_the_folder() {
     assert!(stack.imap.find_folder("Archive 2026").is_none());
 }
 
+/// Checks that a delete whose `STATUS` count the server refuses fails with
+/// that refusal before any `DELETE` is sent, so the folder stays.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_count_fails_a_delete_before_the_folder_is_deleted() {
     let mut mailbox = build_mailbox();
@@ -391,6 +421,8 @@ async fn a_refused_count_fails_a_delete_before_the_folder_is_deleted() {
     );
 }
 
+/// Checks that `save_draft` fails with the server's refusal of `APPEND`,
+/// given before the literal, and adds no draft.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_append_refused_before_its_literal_passes_on_the_reason() {
     let mut mailbox = build_mailbox();

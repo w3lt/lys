@@ -54,10 +54,15 @@ const GUARD_LIMIT: Duration = Duration::from_secs(600);
 
 /// How long the wait a fault causes may have run before the fault struck,
 /// at most: under a second, so that a limit a second short still fails.
-/// The code starts a step's wait just before it writes the command the
-/// fake leaves unanswered, and an account check's wait when the check
-/// starts, before it connects, which the check's timing cases do in plain
-/// text; over loopback, either takes far less than this.
+/// It holds while nothing slow comes before the fault within its wait.
+/// The code starts a step's wait just before the step's first exchange,
+/// the command it writes or the greeting it reads, and an account check's
+/// wait when the check starts, before it connects, which the check's
+/// timing cases do in plain text; over loopback, either takes far less
+/// than this. A TLS handshake can take seconds, so a case must not strike
+/// after one within the same wait, such as at the second EHLO of SMTP's
+/// STARTTLS step, whose one wait also covers the STARTTLS command and the
+/// handshake.
 const LONGEST_WAIT_BEFORE_FAULT: Duration = Duration::from_millis(500);
 
 /// How far past a timer's deadline the paused clock may land, at most.

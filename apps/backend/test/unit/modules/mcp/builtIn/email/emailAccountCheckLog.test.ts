@@ -11,9 +11,6 @@ import {
   type CapturedLogRecord
 } from "../../../../support/fastifyTestApp"
 
-/** Fields every backend log line has, whatever was logged. */
-const COMMON_FIELDS = ["time", "pid", "hostname"] as const
-
 /**
  * Gets the fields of the one line the backend's logger writes for an event.
  *
@@ -25,6 +22,9 @@ const COMMON_FIELDS = ["time", "pid", "hostname"] as const
 function getLoggedFields(
   event: EmailAccountCheckEvent
 ): Record<string, unknown> {
+  /** Fields every backend log line has, whatever was logged. */
+  const commonFields = ["time", "pid", "hostname"] as const
+
   const destination = new CapturedLogDestination()
   handleEmailAccountCheckEvent(createBackendLogger(destination), event)
   const records = destination.records
@@ -33,7 +33,7 @@ function getLoggedFields(
   const fields: Record<string, unknown> = {
     ...(records[0] as CapturedLogRecord)
   }
-  for (const name of COMMON_FIELDS) delete fields[name]
+  for (const name of commonFields) delete fields[name]
   return fields
 }
 

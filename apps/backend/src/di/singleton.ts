@@ -42,7 +42,6 @@ import {
 import type { PageRenderingFailureReporters } from "../modules/tool/builtIn/web/pageRendering"
 import WebSearchToolProvider from "../modules/tool/builtIn/web/webSearchToolProvider"
 import EmailAccountChecker, {
-  EMAIL_ACCOUNT_CHECK_TIMEOUT_MILLISECONDS,
   type EmailAccountCheckEvent
 } from "../modules/mcp/builtIn/email/emailAccountCheck"
 import {
@@ -442,6 +441,12 @@ function createToolServices(
     | "sendEmailAccountCheckEvent"
   >
 ): ToolServices {
+  /**
+   * Longest one check may run before its process is killed: past two
+   * sign-ins that each wait the email server's own connect and answer limits.
+   */
+  const emailAccountCheckTimeoutMilliseconds = 60_000
+
   const webSearchToolProvider = new WebSearchToolProvider(
     () => readTavilyApiKey(config.settingsFilePath),
     buildTavilyRequestDependencies()
@@ -476,7 +481,7 @@ function createToolServices(
   const emailAccountChecker = new EmailAccountChecker({
     serverCommand: emailServerCommand,
     workingDirectory: mcpWorkingDirectory,
-    timeoutMilliseconds: EMAIL_ACCOUNT_CHECK_TIMEOUT_MILLISECONDS,
+    timeoutMilliseconds: emailAccountCheckTimeoutMilliseconds,
     sendEvent: logReporters.sendEmailAccountCheckEvent
   })
   return {

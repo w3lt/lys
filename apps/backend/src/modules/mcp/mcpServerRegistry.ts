@@ -198,19 +198,8 @@ type SettingsStatus = McpServerList["settings"]
 /** Lookup of a name no applied server has. */
 const UNKNOWN_TOOL: McpTurnToolLookup = Object.freeze({ status: "unknown" })
 
-/** Lookup of a tool whose server is switched off or cannot start. */
-const NOT_CONNECTED_TOOL: McpTurnToolLookup = Object.freeze({
-  status: "not-connected"
-})
-
-/** Run of a server that is switched off. */
-const OFF_RUN: ServerRun = Object.freeze({ status: "off" })
-
 /** Plan of a server that is to stay off. */
 const OFF_PLAN: PlannedRun = Object.freeze({ status: "off" })
-
-/** State the list reports for a server that is switched off. */
-const OFF_STATE: McpServerState = Object.freeze({ status: "off" })
 
 /**
  * Owns the MCP servers the settings file names and the servers Lys ships,
@@ -381,6 +370,11 @@ export default class McpServerRegistry {
    * calls run on the server's session as it is when each call runs.
    */
   public findTurnTool(toolName: string): McpTurnToolLookup {
+    /** Lookup of a tool whose server is switched off or cannot start. */
+    const notConnectedTool: McpTurnToolLookup = Object.freeze({
+      status: "not-connected"
+    })
+
     const serverName = findMcpServerName(toolName)
     const entry =
       serverName === undefined ? undefined : this.#entries.get(serverName)
@@ -390,7 +384,7 @@ export default class McpServerRegistry {
         return this.#findSessionTool(entry.run.session, toolName)
       case "off":
       case "unusable":
-        return NOT_CONNECTED_TOOL
+        return notConnectedTool
     }
   }
 
@@ -570,6 +564,9 @@ export default class McpServerRegistry {
     server: ServerPlan,
     previousEntry: ServerEntry | undefined
   ): ServerEntry {
+    /** Run of a server that is switched off. */
+    const offRun: ServerRun = Object.freeze({ status: "off" })
+
     const { name, transport, isBuiltIn } = server
     switch (server.run.status) {
       case "start": {
@@ -582,7 +579,7 @@ export default class McpServerRegistry {
         return Object.freeze({ name, transport, isBuiltIn, run })
       }
       case "off":
-        return Object.freeze({ name, transport, isBuiltIn, run: OFF_RUN })
+        return Object.freeze({ name, transport, isBuiltIn, run: offRun })
       case "unusable": {
         const { reason } = server.run
         if (!isUnusableFor(previousEntry, reason))
@@ -989,11 +986,14 @@ function listRunToolDefinitions(run: ServerRun): readonly McpToolDefinition[] {
  * built-in server cannot start.
  */
 function buildReportedState(run: ServerRun): McpServerState {
+  /** State the list reports for a server that is switched off. */
+  const offState: McpServerState = Object.freeze({ status: "off" })
+
   switch (run.status) {
     case "running":
       return run.session.reportedState
     case "off":
-      return OFF_STATE
+      return offState
     case "unusable":
       return Object.freeze({ status: "failed", reason: run.reason })
   }

@@ -11,11 +11,6 @@ import { fileURLToPath } from "node:url"
 import type { EmailServerCommand } from "../../../src/modules/mcp/builtIn/email/emailServer"
 import type { FakeEmailServerOptions } from "./fakeEmailServer"
 
-/** Path of the fake email server script. */
-const FAKE_EMAIL_SERVER_PATH = fileURLToPath(
-  new URL("./fakeEmailServer.ts", import.meta.url)
-)
-
 export type { FakeEmailServerOptions }
 
 /** Synthetic password standing in for a secret; not a real credential. */
@@ -31,11 +26,16 @@ export const SYNTHETIC_EMAIL_PASSWORD: EmailPassword =
 export function buildFakeEmailServerCommand(
   options: FakeEmailServerOptions = {}
 ): EmailServerCommand {
+  /** Path of the fake email server script. */
+  const fakeEmailServerPath = fileURLToPath(
+    new URL("./fakeEmailServer.ts", import.meta.url)
+  )
+
   return Object.freeze({
     command: process.execPath,
     arguments: Object.freeze([
       "--no-warnings",
-      FAKE_EMAIL_SERVER_PATH,
+      fakeEmailServerPath,
       JSON.stringify(options)
     ])
   })

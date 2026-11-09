@@ -54,45 +54,6 @@ function buildSettingsTextOfGroup(
   })
 }
 
-/** Validates the group the desktop host writes back for an accepted one. */
-const writtenEmailGroupSchema = z.strictObject({ account: z.unknown() })
-
-/**
- * Validates one case of the groups shared with the desktop host: an
- * accepted group comes with what the host writes back for it.
- */
-const sharedEmailGroupCaseSchema = z.discriminatedUnion("accepted", [
-  z.strictObject({
-    case: z.string(),
-    group: z.unknown(),
-    accepted: z.literal(true),
-    written: writtenEmailGroupSchema
-  }),
-  z.strictObject({
-    case: z.string(),
-    group: z.unknown(),
-    accepted: z.literal(false)
-  })
-])
-
-/**
- * Groups that this reader and the desktop host must judge alike; the host's
- * tests in `src-tauri/src/settings/email.rs` read the same file.
- */
-const SHARED_EMAIL_GROUP_CASES = z
-  .array(sharedEmailGroupCaseSchema)
-  .parse(
-    JSON.parse(
-      readFileSync(
-        new URL(
-          "../../../../../../packages/share/test/fixtures/email-settings-groups.json",
-          import.meta.url
-        ),
-        "utf8"
-      )
-    )
-  )
-
 describe("readEmailAccount", () => {
   it("reads a saved account and its password, ignoring every other group and field", async () => {
     const path = await writeSettingsFile(
@@ -283,7 +244,46 @@ describe("readEmailAccount", () => {
 })
 
 describe("readEmailAccount on the groups shared with the desktop host", () => {
-  it.each(SHARED_EMAIL_GROUP_CASES.filter((sharedCase) => sharedCase.accepted))(
+  /** Validates the group the desktop host writes back for an accepted one. */
+  const writtenEmailGroupSchema = z.strictObject({ account: z.unknown() })
+
+  /**
+   * Validates one case of the groups shared with the desktop host: an
+   * accepted group comes with what the host writes back for it.
+   */
+  const sharedEmailGroupCaseSchema = z.discriminatedUnion("accepted", [
+    z.strictObject({
+      case: z.string(),
+      group: z.unknown(),
+      accepted: z.literal(true),
+      written: writtenEmailGroupSchema
+    }),
+    z.strictObject({
+      case: z.string(),
+      group: z.unknown(),
+      accepted: z.literal(false)
+    })
+  ])
+
+  /**
+   * Groups that this reader and the desktop host must judge alike; the host's
+   * tests in `src-tauri/src/settings/email.rs` read the same file.
+   */
+  const sharedEmailGroupCases = z
+    .array(sharedEmailGroupCaseSchema)
+    .parse(
+      JSON.parse(
+        readFileSync(
+          new URL(
+            "../../../../../../packages/share/test/fixtures/email-settings-groups.json",
+            import.meta.url
+          ),
+          "utf8"
+        )
+      )
+    )
+
+  it.each(sharedEmailGroupCases.filter((sharedCase) => sharedCase.accepted))(
     "reads $case, and reads what the host writes back as the same account",
     async ({ group, written }) => {
       const read = await readEmailAccount(
@@ -310,15 +310,16 @@ describe("readEmailAccount on the groups shared with the desktop host", () => {
     }
   )
 
-  it.each(
-    SHARED_EMAIL_GROUP_CASES.filter((sharedCase) => !sharedCase.accepted)
-  )("reports $case as invalid", async ({ group }) => {
-    const read = await readEmailAccount(
-      await writeSettingsFile(
-        buildSettingsTextOfGroup(group, SYNTHETIC_PASSWORD)
+  it.each(sharedEmailGroupCases.filter((sharedCase) => !sharedCase.accepted))(
+    "reports $case as invalid",
+    async ({ group }) => {
+      const read = await readEmailAccount(
+        await writeSettingsFile(
+          buildSettingsTextOfGroup(group, SYNTHETIC_PASSWORD)
+        )
       )
-    )
 
-    expect(read).toEqual({ status: "invalid" })
-  })
+      expect(read).toEqual({ status: "invalid" })
+    }
+  )
 })

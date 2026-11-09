@@ -59,9 +59,6 @@ const SYNC_URL = "/api/v1/mcp/servers/sync"
 /** Path of the email account check. */
 const ACCOUNT_CHECK_URL = "/api/v1/mcp/email/account-check"
 
-/** Longest one account check may run. */
-const CHECK_TIMEOUT_MILLISECONDS = 10_000
-
 /** An account check that reports both sign-ins accepted. */
 const ACCEPTED_CHECK = Object.freeze({
   account: buildEmailAccount("accepted@example.com"),
@@ -211,6 +208,9 @@ async function createMcpRouteApp(
   settingsFilePath: string,
   options: McpRouteAppOptions = {}
 ) {
+  /** Longest one account check may run. */
+  const checkTimeoutMilliseconds = 10_000
+
   const events: McpServerEvent[] = []
   const checkEvents: EmailAccountCheckEvent[] = []
   const emailServerCommand =
@@ -240,7 +240,7 @@ async function createMcpRouteApp(
   const checker = new EmailAccountChecker({
     serverCommand: emailServerCommand,
     workingDirectory,
-    timeoutMilliseconds: CHECK_TIMEOUT_MILLISECONDS,
+    timeoutMilliseconds: checkTimeoutMilliseconds,
     sendEvent: (event) => checkEvents.push(event)
   })
   onTestFinished(async () => {

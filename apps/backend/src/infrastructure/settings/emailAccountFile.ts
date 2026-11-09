@@ -58,25 +58,8 @@ const settingsEmailSchema = z.object({
 /** The part of the settings document this reader uses. */
 type SettingsEmail = z.infer<typeof settingsEmailSchema>
 
-/**
- * Validates the part of the `secrets` group this reader uses: the password
- * of the saved account.
- *
- * @remarks Every other secret is dropped unread. A missing or `null`
- * password fails, because an account is read only with its password.
- */
-const secretsEmailPasswordSchema = z.object({
-  emailPassword: emailPasswordSchema
-})
-
-/** The `email` group of a file that has none. */
-const NO_EMAIL_GROUP: unknown = Object.freeze({})
-
 /** Read result when no account is saved. */
 const MISSING_ACCOUNT: EmailAccountRead = Object.freeze({ status: "missing" })
-
-/** Read result when the saved account or password fails its rules. */
-const INVALID_ACCOUNT: EmailAccountRead = Object.freeze({ status: "invalid" })
 
 /** Read result when the file cannot be read as a settings document. */
 const UNREADABLE_SETTINGS: EmailAccountRead = Object.freeze({
@@ -123,15 +106,32 @@ export async function readEmailAccount(
  * breaks them is `invalid` even when it holds no account.
  */
 function parseEmailAccount(text: string): EmailAccountRead {
+  /**
+   * Validates the part of the `secrets` group this reader uses: the password
+   * of the saved account.
+   *
+   * @remarks Every other secret is dropped unread. A missing or `null`
+   * password fails, because an account is read only with its password.
+   */
+  const secretsEmailPasswordSchema = z.object({
+    emailPassword: emailPasswordSchema
+  })
+
+  /** The `email` group of a file that has none. */
+  const noEmailGroup: unknown = Object.freeze({})
+
+  /** Read result when the saved account or password fails its rules. */
+  const invalidAccount: EmailAccountRead = Object.freeze({ status: "invalid" })
+
   const document = parseSettingsEmail(text)
   if (document === undefined) return UNREADABLE_SETTINGS
   const group = emailSettingsSchema.safeParse(
-    document.email === undefined ? NO_EMAIL_GROUP : document.email
+    document.email === undefined ? noEmailGroup : document.email
   )
-  if (!group.success) return INVALID_ACCOUNT
+  if (!group.success) return invalidAccount
   if (group.data.account === null) return MISSING_ACCOUNT
   const secrets = secretsEmailPasswordSchema.safeParse(document.secrets)
-  if (!secrets.success) return INVALID_ACCOUNT
+  if (!secrets.success) return invalidAccount
   return Object.freeze({
     status: "read",
     account: group.data.account,

@@ -1038,9 +1038,8 @@ mod tests {
         );
     }
 
-    /// Checks that a stored draft that does not parse as a message, and a
-    /// draft whose account address lettre refuses, `john..doe@example.com`,
-    /// are refused with the sentence the model reads.
+    /// Checks that a stored draft that does not parse as a message is
+    /// refused with the sentence the model reads.
     #[test]
     fn refuses_a_draft_that_is_not_a_message() {
         assert_eq!(

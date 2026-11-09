@@ -663,9 +663,10 @@ mod tests {
         );
     }
 
-    /// Checks that an account accepts addresses of visible ASCII characters
-    /// before `@` and a host name or IPv4 address after it, up to the
-    /// longest: 254 characters, with a 64-character name.
+    /// Checks that an account accepts addresses whose name before `@` is a
+    /// dot-atom, every symbol it may hold and dots between atoms included,
+    /// and whose host is a host name or IPv4 address, up to the longest:
+    /// 254 characters, with a 64-character name.
     #[test]
     fn accepts_addresses_of_a_dot_atom_name_and_a_host_name_up_to_254_characters() {
         let longest = format!(
@@ -692,9 +693,10 @@ mod tests {
 
     /// Checks that an account refuses an address that is empty, over 254
     /// characters, or has a name over 64, that lacks a name, a host, or a
-    /// single `@`, that holds a space, a line feed, or a non-ASCII letter,
-    /// or whose host is not an ASCII host name or IPv4 address, and a number
-    /// in its place. No failure quotes the address.
+    /// single `@`, whose name has a dot at either end or two in a row, a
+    /// `(`, or quotes, that holds a space, a line feed, or a non-ASCII
+    /// letter, or whose host is not an ASCII host name or IPv4 address, and
+    /// a number in its place. No failure quotes the address.
     #[test]
     fn rejects_other_addresses_without_quoting_them() {
         let too_long = format!(

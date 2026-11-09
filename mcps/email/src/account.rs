@@ -913,6 +913,9 @@ mod tests {
                 .is_ok()
     }
 
+    /// Checks that every local part of 1 to 3 visible ASCII characters
+    /// passes the rule at `example.com` exactly when lettre sends from it
+    /// and it is not quoted.
     #[test]
     fn accepts_exactly_the_unquoted_local_parts_lettre_sends_from_of_up_to_three_characters() {
         let visible: Vec<char> = ('!'..='~').collect();
@@ -933,6 +936,10 @@ mod tests {
         );
     }
 
+    /// Checks that every address the rule accepts parses as a lettre
+    /// address, over hosts of up to four of `a`, `Z`, `0`, `-`, and `.`,
+    /// the longest host a 254-character address holds, and a mixed-case
+    /// host, and that the rule accepts the longest and more than 100 in all.
     #[test]
     fn accepts_only_hosts_lettre_sends_to_up_to_the_longest_an_address_holds() {
         let label = "b".repeat(63);

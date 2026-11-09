@@ -761,13 +761,9 @@ fn parse_command(text: &str, literals: Vec<Vec<u8>>) -> Option<Command> {
         .map(|token| token.to_ascii_uppercase())
         .unwrap_or_default();
     let mut arguments: Vec<String> = tokens.collect();
-    let by_uid = name == "UID";
+    let by_uid = name == "UID" && !arguments.is_empty();
     if by_uid {
-        name = arguments
-            .first()
-            .map(|token| token.to_ascii_uppercase())
-            .unwrap_or_default();
-        arguments.remove(0);
+        name = arguments.remove(0).to_ascii_uppercase();
     }
     Some(Command {
         line: text.to_owned(),
@@ -783,6 +779,9 @@ impl Session {
     /// Handles one command over the mailbox, which it may change.
     fn handle_command(&mut self, command: &Command, mailbox: &mut FakeMailbox) -> Step {
         let tag = &command.tag;
+        if matches!(command.name.as_str(), "SELECT" | "EXAMINE") {
+            self.selected = None;
+        }
         if let Some(answer) = mailbox.find_refusal(command) {
             return Step::Answer(format!("{tag} {answer}\r\n").into_bytes());
         }
@@ -1809,6 +1808,61 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A session on a plain connection, with no folder selected.
+    fn build_session() -> Session {
+        Session {
+            mode: ImapMode::Plain,
+            secured: false,
+            capabilities: String::new(),
+            selected: None,
+        }
+    }
+
+    /// Gives the fake's answer to one command line without a literal.
+    ///
+    /// # Panics
+    ///
+    /// When the line has no tag, or the session upgrades the connection or
+    /// ends instead of answering.
+    fn answer_command(session: &mut Session, mailbox: &mut FakeMailbox, line: &str) -> String {
+        let command = parse_command(line, Vec::new()).expect("a tagged command");
+        match session.handle_command(&command, mailbox) {
+            Step::Answer(answer) => String::from_utf8_lossy(&answer).into_owned(),
+            Step::StartTls(_) | Step::Logout(_) => panic!("the session did not answer {line}"),
+        }
+    }
+
+    #[test]
+    fn answers_bad_to_uid_without_a_command_name() {
+        let mut mailbox = FakeMailbox::create_standard();
+        let mut session = build_session();
+
+        let answer = answer_command(&mut session, &mut mailbox, "a1 UID");
+
+        assert_eq!(answer, "a1 BAD Error in IMAP command: Unknown command\r\n");
+    }
+
+    #[test]
+    fn leaves_no_folder_selected_after_a_select_that_fails_or_is_refused() {
+        let mut mailbox = FakeMailbox::create_standard();
+        mailbox.add_refusal("EXAMINE", "NO [UNAVAILABLE] Try again later");
+        let mut session = build_session();
+
+        answer_command(&mut session, &mut mailbox, "a1 SELECT INBOX");
+        let selected = answer_command(&mut session, &mut mailbox, "a2 UID SEARCH ALL");
+        let missing = answer_command(&mut session, &mut mailbox, "a3 SELECT Missing");
+        let after_missing = answer_command(&mut session, &mut mailbox, "a4 UID SEARCH ALL");
+        answer_command(&mut session, &mut mailbox, "a5 SELECT INBOX");
+        let refused = answer_command(&mut session, &mut mailbox, "a6 EXAMINE INBOX");
+        let after_refused = answer_command(&mut session, &mut mailbox, "a7 UID SEARCH ALL");
+
+        assert_eq!(selected, "* SEARCH\r\na2 OK Search completed\r\n");
+        assert_eq!(missing, "a3 NO Mailbox doesn't exist\r\n");
+        assert_eq!(after_missing, "a4 BAD No mailbox selected\r\n");
+        assert_eq!(refused, "a6 NO [UNAVAILABLE] Try again later\r\n");
+        assert_eq!(after_refused, "a7 BAD No mailbox selected\r\n");
+    }
 
     #[test]
     fn answers_a_folder_without_messages_with_no_uids_or_bad_for_keys_it_cannot_read() {

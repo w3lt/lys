@@ -71,7 +71,7 @@ async fn main() -> ExitCode {
     match command {
         Command::Check => {
             let report = offer_account_sign_ins(&account, &trust).await;
-            match write_report_line(&report) {
+            match send_report_line(&report) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
                     send_log_line(&format!("check: the report could not be written: {error}"));
@@ -111,7 +111,7 @@ async fn main() -> ExitCode {
 ///
 /// When the report cannot be serialized, or the line cannot be written or
 /// flushed, as when the reader of standard output has closed.
-fn write_report_line(report: &CheckReport) -> io::Result<()> {
+fn send_report_line(report: &CheckReport) -> io::Result<()> {
     let json = serde_json::to_string(report)?;
     let mut output = io::stdout().lock();
     writeln!(output, "{json}")?;

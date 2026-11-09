@@ -374,7 +374,8 @@ pub struct FakeImapServer {
     pub port: u16,
     /// Its state.
     pub state: Arc<Mutex<FakeMailbox>>,
-    /// Notified each time a fault strikes.
+    /// Notified each time a fault strikes, or a connection is accepted in
+    /// the silent mode.
     faulted: Arc<Notify>,
 }
 
@@ -501,7 +502,8 @@ struct ConnectionSetup {
     acceptor: Option<TlsAcceptor>,
     /// The folders, the messages, and what the fake has seen.
     state: Arc<Mutex<FakeMailbox>>,
-    /// Notified each time a fault strikes.
+    /// Notified each time a fault strikes, or a connection is accepted in
+    /// the silent mode.
     faulted: Arc<Notify>,
 }
 

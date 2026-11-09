@@ -220,7 +220,8 @@ struct ConnectionSetup {
     acceptor: Option<TlsAcceptor>,
     /// The fake's state, shared with the test.
     state: Arc<Mutex<FakeSmtpState>>,
-    /// Notified each time a fault strikes.
+    /// Notified each time a fault strikes, or a connection is accepted in
+    /// the silent mode.
     faulted: Arc<Notify>,
 }
 

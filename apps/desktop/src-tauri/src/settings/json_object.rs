@@ -76,6 +76,8 @@ mod tests {
         serde_json::from_value(stored)
     }
 
+    /// Checks that `parse_json_object` reads an object into its shape and
+    /// `parse_json_objects` reads a list of objects into theirs.
     #[test]
     fn reads_objects_and_lists_of_objects() {
         let holder = parse_holder(json!({
@@ -93,6 +95,10 @@ mod tests {
         );
     }
 
+    /// Checks that `parse_json_object` refuses an array, null, or text, that
+    /// `parse_json_objects` refuses an item that is not an object and an
+    /// object in place of the list, and that a shape's unknown field is still
+    /// refused.
     #[test]
     fn refuses_arrays_and_other_values_where_an_object_is_read() {
         for stored in [

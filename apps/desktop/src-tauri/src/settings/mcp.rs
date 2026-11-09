@@ -935,6 +935,9 @@ mod tests {
         }
     }
 
+    /// Checks that an MCP group without a server list reads as no server and
+    /// writes an empty list with every server Lys ships switched off, as the
+    /// default group does.
     #[test]
     fn reads_a_missing_group_list_as_no_server_and_writes_an_empty_list_with_every_built_in_server_off(
     ) {
@@ -950,6 +953,8 @@ mod tests {
         );
     }
 
+    /// Checks that an MCP group with a stdio server, an HTTP server, and its
+    /// built-in switches writes back exactly as it was stored.
     #[test]
     fn writes_both_transports_back_unchanged() {
         let stored = json!({
@@ -962,6 +967,9 @@ mod tests {
         assert_eq!(serde_json::to_value(&settings).expect("serialize"), stored);
     }
 
+    /// Checks that a stdio or HTTP server stored without its lists or its
+    /// switch reads with empty lists and switched on, in a group that writes
+    /// every built-in server off.
     #[test]
     fn reads_missing_lists_of_a_server_as_empty_and_a_missing_switch_as_on() {
         let settings = parse_mcp_settings(json!({ "servers": [
@@ -982,6 +990,9 @@ mod tests {
         );
     }
 
+    /// Checks that an MCP group writes back each server switch and the email
+    /// server's switch as stored, and reads a `builtIn` object without a
+    /// switch as every built-in server off.
     #[test]
     fn reads_missing_built_in_switches_as_off_and_writes_every_switch_back() {
         let stored = json!({
@@ -1002,6 +1013,10 @@ mod tests {
         );
     }
 
+    /// Checks that an MCP group is refused when its `builtIn` value or a
+    /// built-in server's entry is null or not an object, when a switch is
+    /// null or not a boolean, when a built-in entry has an unknown field, and
+    /// when it names a server Lys does not ship.
     #[test]
     fn rejects_null_and_non_boolean_switches_unknown_built_in_servers_and_list_shaped_switches() {
         for stored in [
@@ -1024,6 +1039,9 @@ mod tests {
         }
     }
 
+    /// Checks that an MCP group is refused when it or its server list is
+    /// null, when it has an unknown field, and when a server has an unknown
+    /// or missing transport or a field of the other transport.
     #[test]
     fn rejects_a_null_group_a_null_list_unknown_fields_and_unknown_transports() {
         for stored in [
@@ -1039,6 +1057,8 @@ mod tests {
         }
     }
 
+    /// Checks that an MCP group of 16 servers with distinct names is
+    /// accepted.
     #[test]
     fn accepts_up_to_16_servers_with_distinct_names() {
         let servers: Vec<Value> = (0..16)
@@ -1048,6 +1068,8 @@ mod tests {
         assert!(parse_mcp_settings(json!({ "servers": servers })).is_ok());
     }
 
+    /// Checks that an MCP group of 17 servers is refused, as is one where two
+    /// servers share a name, even across transports.
     #[test]
     fn rejects_more_than_16_servers_and_repeated_names() {
         let servers: Vec<Value> = (0..17)
@@ -1062,6 +1084,10 @@ mod tests {
         }
     }
 
+    /// Checks that an MCP group written before the switches existed is
+    /// accepted at exactly 512 KiB of compact JSON, reading every server as
+    /// on and every built-in server as off, and refused one byte over with a
+    /// failure naming the limit.
     #[test]
     fn accepts_a_group_written_before_the_switches_of_512_kib_and_rejects_one_byte_more() {
         let group = build_unswitched_group_of_bytes(SETTINGS_MAX_BYTES);
@@ -1078,6 +1104,10 @@ mod tests {
         assert!(failure.to_string().contains("512 KiB"), "{failure}");
     }
 
+    /// Checks that the 512 KiB limit leaves out every switch, so that a group
+    /// at the limit with all its switches written is accepted and writes back
+    /// as it was, while one byte more of servers is refused with a failure
+    /// naming the limit.
     #[test]
     fn leaves_every_switch_out_of_the_512_kib_and_rejects_one_byte_more() {
         let group =
@@ -1100,6 +1130,9 @@ mod tests {
         assert!(failure.to_string().contains("512 KiB"), "{failure}");
     }
 
+    /// Checks that the 512 KiB limit counts UTF-8 bytes: a group at the limit
+    /// whose first value is replaced by 2,049 two-byte letters is refused,
+    /// though its characters stay under it.
     #[test]
     fn counts_the_group_in_utf8_bytes_not_in_characters() {
         let mut group = build_unswitched_group_of_bytes(SETTINGS_MAX_BYTES);
@@ -1128,6 +1161,8 @@ mod tests {
         }
     }
 
+    /// Checks that a server name of 1 to 20 lowercase letters and digits, in
+    /// runs joined by single hyphens, is accepted.
     #[test]
     fn accepts_names_of_lowercase_letters_and_digits_in_hyphen_joined_runs() {
         for name in ["a", "files", "github-2", "a-b-c", "x".repeat(20).as_str()] {
@@ -1135,6 +1170,9 @@ mod tests {
         }
     }
 
+    /// Checks that a server name is refused when it is empty or over 20
+    /// characters, or holds a capital, an underscore, a non-ASCII letter, a
+    /// space, an edge hyphen, or two hyphens in a row.
     #[test]
     fn rejects_other_server_names() {
         for name in [
@@ -1152,6 +1190,8 @@ mod tests {
         }
     }
 
+    /// Checks that a stdio server's command of 1 to 1,024 characters is
+    /// accepted, inner spaces and accented letters included.
     #[test]
     fn accepts_commands_of_one_to_1024_characters_with_inner_spaces() {
         for command in [
@@ -1163,6 +1203,10 @@ mod tests {
         }
     }
 
+    /// Checks that a stdio server's command is refused, without being quoted,
+    /// when it is empty or over 1,024 characters, has white space at an edge,
+    /// a no-break space included, or holds a tab or another control
+    /// character.
     #[test]
     fn rejects_empty_long_padded_tabbed_and_control_character_commands() {
         for command in [
@@ -1179,6 +1223,8 @@ mod tests {
         }
     }
 
+    /// Checks that a stdio server accepts no arguments or up to 64, each of 1
+    /// to 1,024 characters, spaces at the edges and tabs included.
     #[test]
     fn accepts_up_to_64_arguments_of_one_to_1024_characters_with_tabs() {
         let many_arguments: Vec<String> = (0..64).map(|index| format!("--flag-{index}")).collect();
@@ -1192,6 +1238,9 @@ mod tests {
         }
     }
 
+    /// Checks that a stdio server is refused, without quoting its arguments,
+    /// for 65 arguments, an empty or over-long one, one with a line feed or a
+    /// C1 control character, and arguments written as text instead of a list.
     #[test]
     fn rejects_too_many_empty_long_and_control_character_arguments() {
         let too_many_arguments: Vec<String> =
@@ -1209,6 +1258,9 @@ mod tests {
         }
     }
 
+    /// Checks that a stdio server accepts no variables or up to 32 distinct
+    /// ones, with names such as `_PRIVATE` and one of 128 characters, and
+    /// values that are empty, hold a tab, or take 4,096 characters.
     #[test]
     fn accepts_up_to_32_distinct_variables_with_empty_and_tabbed_values() {
         let many_variables: Vec<Value> = (0..32)
@@ -1228,6 +1280,11 @@ mod tests {
         }
     }
 
+    /// Checks that a stdio server is refused, without quoting a value, for 33
+    /// variables, a name that is empty, over 128 characters, starts with a
+    /// digit, or holds a hyphen, a value with a line feed or over 4,096
+    /// characters, a repeated name, an unknown field, and variables not
+    /// written as a list of objects.
     #[test]
     fn rejects_bad_variables_without_quoting_their_values() {
         let too_many_variables: Vec<Value> = (0..33)
@@ -1254,6 +1311,10 @@ mod tests {
         }
     }
 
+    /// Checks that an HTTP server accepts an HTTPS URL of up to 2,048
+    /// characters, with a port, a query, capitals, or an internationalized
+    /// host, and a plain HTTP URL to `localhost`, `127.0.0.1`, or `[::1]`, in
+    /// any of their forms.
     #[test]
     fn accepts_https_urls_and_http_urls_to_loopback_hosts() {
         for url in [
@@ -1276,6 +1337,11 @@ mod tests {
         assert_server_accepted(build_http_server_with("url", json!(long_url)));
     }
 
+    /// Checks that an HTTP server is refused, without quoting its URL, for a
+    /// URL that is empty, over 2,048 characters, or not absolute, plain HTTP
+    /// to a host that is not loopback, another scheme, user information, a
+    /// fragment, a space or control character, and an internationalized host
+    /// with capitals or `ß`, in either form.
     #[test]
     fn rejects_other_urls_without_quoting_them() {
         let too_long_url = format!("https://secret.example.com/{}", "a".repeat(2048 - 26));
@@ -1305,6 +1371,9 @@ mod tests {
         }
     }
 
+    /// Checks that a URL whose host the URL parser changes, here a `u` with a
+    /// combining diaeresis, is refused with the rule for internationalized
+    /// hosts.
     #[test]
     fn reports_a_refused_internationalized_host_with_its_rule() {
         let failure = parse_server(build_http_server_with(
@@ -1321,6 +1390,9 @@ mod tests {
         );
     }
 
+    /// Checks that an HTTP server accepts no headers or up to 32, with token
+    /// names of up to 128 characters, every token mark included, and values
+    /// that are empty, hold a tab or a space, or take 8,192 characters.
     #[test]
     fn accepts_up_to_32_token_named_headers_with_empty_and_tabbed_values() {
         let many_headers: Vec<Value> = (0..32)
@@ -1342,6 +1414,12 @@ mod tests {
         }
     }
 
+    /// Checks that an HTTP server is refused, without quoting a value, for 33
+    /// headers, a name that is empty, over 128 characters, or not a token, a
+    /// name the transport sets itself or cannot send, in any case, a value
+    /// with white space at an edge, a line break, a non-ASCII letter, or over
+    /// 8,192 characters, a name repeated in another case, an unknown field,
+    /// and a header written as text.
     #[test]
     fn rejects_bad_headers_without_quoting_their_values() {
         let too_many_headers: Vec<Value> = (0..33)
@@ -1378,6 +1456,9 @@ mod tests {
         }
     }
 
+    /// Checks that an MCP group's `Debug` output shows variable and header
+    /// names, the argument count, the URL without its query, and the switch,
+    /// never a variable or header value, an argument, or the query.
     #[test]
     fn debug_output_never_shows_arguments_url_queries_or_variable_and_header_values() {
         let mut stdio_server = build_stdio_server_with(

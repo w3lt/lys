@@ -46,6 +46,9 @@ fn is_host_label(label: &str) -> bool {
 mod tests {
     use super::is_host_name;
 
+    /// Checks that `is_host_name` accepts names of letters, digits, and
+    /// inner hyphens in any case, an A-label, a dotted IPv4 address, and
+    /// a name of the longest length, 253 characters.
     #[test]
     fn accepts_names_of_letters_digits_and_inner_hyphens_and_dotted_ipv4_addresses() {
         let longest_name = format!(
@@ -68,6 +71,10 @@ mod tests {
         }
     }
 
+    /// Checks that `is_host_name` refuses an empty name, one over 253
+    /// characters or with a label over 63, and names with a space, a
+    /// scheme, a port, a path, an IPv6 address, an edge hyphen, an empty
+    /// label, an underscore, or a non-ASCII letter.
     #[test]
     fn rejects_empty_long_spaced_schemed_ported_bracketed_and_non_ascii_names() {
         let too_long_name = format!(

@@ -8,14 +8,6 @@
 //! email server accepts, and requires a coordinated release of the desktop
 //! host, the backend, and the email server.
 
-/// Most characters a host name may have, inclusive. Matches
-/// `MAXIMUM_HOST_NAME_LENGTH` in `@lys/share`.
-const HOST_NAME_MAX_LENGTH: usize = 253;
-
-/// Most characters one host name label may have, inclusive. Matches
-/// `MAXIMUM_HOST_LABEL_LENGTH` in `@lys/share`.
-const HOST_LABEL_MAX_LENGTH: usize = 63;
-
 /// Reports whether `host` is a host name: 1 to 253 characters of labels
 /// separated by dots, each label 1 to 63 ASCII letters, digits, or inner
 /// hyphens, which also covers a dotted IPv4 address.
@@ -23,12 +15,20 @@ const HOST_LABEL_MAX_LENGTH: usize = 63;
 /// An empty text, a scheme, a path, a port, an IPv6 address, and a label
 /// outside the rule are not host names.
 pub fn is_host_name(host: &str) -> bool {
+    /// Most characters a host name may have, inclusive. Matches
+    /// `maximumHostNameLength` in `isHostName` of `@lys/share`.
+    const HOST_NAME_MAX_LENGTH: usize = 253;
+
     !host.is_empty() && host.len() <= HOST_NAME_MAX_LENGTH && host.split('.').all(is_host_label)
 }
 
 /// Reports whether `label` is one host name label: 1 to 63 ASCII letters,
 /// digits, or hyphens, starting and ending with a letter or digit.
 fn is_host_label(label: &str) -> bool {
+    /// Most characters one host name label may have, inclusive. Matches
+    /// `maximumHostLabelLength` in `isHostName` of `@lys/share`.
+    const HOST_LABEL_MAX_LENGTH: usize = 63;
+
     let bytes = label.as_bytes();
     let (Some(first), Some(last)) = (bytes.first(), bytes.last()) else {
         return false;

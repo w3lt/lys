@@ -17,18 +17,6 @@ use lettre::message::{Attachment, Mailbox, Message, MessageBuilder, MultiPart, S
 use crate::account::Account;
 use crate::message::{MessageView, ParsedMailbox};
 
-/// The prefix a reply's subject gets, unless it has one.
-const REPLY_PREFIX: &str = "Re: ";
-
-/// The prefix a forward's subject gets, unless it has one.
-const FORWARD_PREFIX: &str = "Fwd: ";
-
-/// Prefixes that mean a subject is already a reply's, in lower case.
-const REPLY_PREFIXES: [&str; 3] = ["re:", "aw:", "antw:"];
-
-/// Prefixes that mean a subject is already a forward's, in lower case.
-const FORWARD_PREFIXES: [&str; 3] = ["fwd:", "fw:", "wg:"];
-
 /// An attachment of an outgoing message.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutgoingAttachment {
@@ -340,6 +328,12 @@ fn create_message_id(address: &lettre::Address, stamp: MessageStamp) -> String {
 ///
 /// * `subject` - The original's subject.
 pub fn build_reply_subject(subject: &str) -> String {
+    /// The prefix a reply's subject gets, unless it has one.
+    const REPLY_PREFIX: &str = "Re: ";
+
+    /// Prefixes that mean a subject is already a reply's, in lower case.
+    const REPLY_PREFIXES: [&str; 3] = ["re:", "aw:", "antw:"];
+
     build_prefixed_subject(subject, REPLY_PREFIX, &REPLY_PREFIXES)
 }
 
@@ -350,6 +344,12 @@ pub fn build_reply_subject(subject: &str) -> String {
 ///
 /// * `subject` - The original's subject.
 pub fn build_forward_subject(subject: &str) -> String {
+    /// The prefix a forward's subject gets, unless it has one.
+    const FORWARD_PREFIX: &str = "Fwd: ";
+
+    /// Prefixes that mean a subject is already a forward's, in lower case.
+    const FORWARD_PREFIXES: [&str; 3] = ["fwd:", "fw:", "wg:"];
+
     build_prefixed_subject(subject, FORWARD_PREFIX, &FORWARD_PREFIXES)
 }
 

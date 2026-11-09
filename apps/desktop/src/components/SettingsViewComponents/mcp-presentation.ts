@@ -236,10 +236,6 @@ const MCP_CONNECTION_WORDS = Object.freeze({
   })
 } satisfies Readonly<Record<McpServerTransport, McpConnectionWords>>)
 
-/** Detail of a server that is switched off. */
-const MCP_SERVER_OFF_DETAIL =
-  "Switched off. Its tools are not offered to the agents."
-
 /** What the email server needs before it runs, and why it failed without it. */
 const EMAIL_ACCOUNT_MISSING_NOTE = "Needs an email account. Add one below."
 
@@ -269,29 +265,6 @@ function isEmailServerReady(settings: Pick<LysSettings, "email">): boolean {
   return settings.email.account !== null
 }
 
-/**
- * Tells whether each server Lys ships has what it needs before it runs; a
- * new built-in server must add one.
- */
-const BUILT_IN_MCP_SERVER_READINESS = Object.freeze({
-  email: isEmailServerReady
-} satisfies Readonly<
-  Record<
-    BuiltInMcpServerName,
-    (settings: Pick<LysSettings, "email">) => boolean
-  >
->)
-
-/** State of a built-in server whose name an added server took. */
-const NAME_TAKEN_STATUS: McpServerStatusPresentation = Object.freeze({
-  condition: "idle",
-  chip: "name taken",
-  heading: "Name taken",
-  detail:
-    "An added server has this name. Rename or remove it to use the built-in server.",
-  reconnectLabel: ""
-})
-
 /** State of a server whose command is starting. */
 const STARTING_STATUS: McpServerStatusPresentation = Object.freeze({
   condition: "connecting",
@@ -300,25 +273,6 @@ const STARTING_STATUS: McpServerStatusPresentation = Object.freeze({
   detail: "started · waiting for initialize",
   reconnectLabel: MCP_CONNECTION_WORDS.stdio.reconnectLabel
 })
-
-/**
- * Label of the button that connects a server again after each failure; a
- * new reason must add one. It is empty after a failure the backend refuses
- * to reconnect a server after, because the server cannot start until its
- * settings change: the email server's missing or unusable account, which
- * saving an account applies again.
- */
-const MCP_FAILURE_RECONNECT_LABELS = Object.freeze({
-  "start-failed": "Retry",
-  closed: "Retry",
-  "timed-out": "Retry",
-  unauthorized: "Retry",
-  unreachable: "Retry",
-  "http-error": "Retry",
-  "protocol-error": "Retry",
-  "account-missing": "",
-  "account-invalid": ""
-} satisfies Readonly<Record<McpServerFailure, string>>)
 
 /** Why a server is not connected; a new reason must add one. */
 const MCP_SERVER_FAILURE_TEXTS = Object.freeze({
@@ -393,12 +347,6 @@ const MCP_SIGN_IN_NOTES = Object.freeze({
   token:
     "Sent as Authorization: Bearer … with each request, and saved in plain text."
 } satisfies Readonly<Record<McpSignIn, string>>)
-
-/** Whether each way to sign in shows the token input; a new way must add one. */
-const MCP_SIGN_IN_TOKEN_INPUTS = Object.freeze({
-  none: false,
-  token: true
-} satisfies Readonly<Record<McpSignIn, boolean>>)
 
 /** Label of each editor field; a new field must add one. */
 const MCP_DRAFT_FIELD_LABELS = Object.freeze({
@@ -568,13 +516,26 @@ export function canSwitchMcpServer(server: McpListedServer): boolean {
 export function listMcpServers(
   settings: Pick<LysSettings, "mcp" | "email">
 ): readonly McpListedServer[] {
+  /**
+   * Tells whether each server Lys ships has what it needs before it runs; a
+   * new built-in server must add one.
+   */
+  const builtInMcpServerReadiness = Object.freeze({
+    email: isEmailServerReady
+  } satisfies Readonly<
+    Record<
+      BuiltInMcpServerName,
+      (settings: Pick<LysSettings, "email">) => boolean
+    >
+  >)
+
   const addedNames = new Set(settings.mcp.servers.map((server) => server.name))
   const builtIn = BUILT_IN_MCP_SERVER_NAMES.map((name): McpListedServer => ({
     kind: "built-in",
     name,
     isOn: settings.mcp.builtIn[name].enabled,
     isNameTaken: addedNames.has(name),
-    isReady: BUILT_IN_MCP_SERVER_READINESS[name](settings)
+    isReady: builtInMcpServerReadiness[name](settings)
   }))
   const added = settings.mcp.servers.map((server): McpListedServer => ({
     kind: "added",
@@ -833,13 +794,17 @@ function formatConnectedStatus(
  * on; otherwise that its tools are not offered.
  */
 function formatOffDetail(server: McpListedServer): string {
+  /** Detail of a server that is switched off. */
+  const mcpServerOffDetail =
+    "Switched off. Its tools are not offered to the agents."
+
   switch (server.kind) {
     case "built-in":
       return server.isReady
-        ? MCP_SERVER_OFF_DETAIL
+        ? mcpServerOffDetail
         : BUILT_IN_MCP_SERVER_PRESENTATIONS[server.name].needsNote
     case "added":
-      return MCP_SERVER_OFF_DETAIL
+      return mcpServerOffDetail
     default: {
       const unhandledServer: never = server
       return unhandledServer
@@ -932,12 +897,31 @@ function formatFailedStatus(
   server: McpListedServer,
   reason: McpServerFailure
 ): McpServerStatusPresentation {
+  /**
+   * Label of the button that connects a server again after each failure; a
+   * new reason must add one. It is empty after a failure the backend refuses
+   * to reconnect a server after, because the server cannot start until its
+   * settings change: the email server's missing or unusable account, which
+   * saving an account applies again.
+   */
+  const mcpFailureReconnectLabels = Object.freeze({
+    "start-failed": "Retry",
+    closed: "Retry",
+    "timed-out": "Retry",
+    unauthorized: "Retry",
+    unreachable: "Retry",
+    "http-error": "Retry",
+    "protocol-error": "Retry",
+    "account-missing": "",
+    "account-invalid": ""
+  } satisfies Readonly<Record<McpServerFailure, string>>)
+
   return {
     condition: "failed",
     chip: "failed",
     heading: "Failed",
     detail: formatFailedDetail(server, reason),
-    reconnectLabel: MCP_FAILURE_RECONNECT_LABELS[reason]
+    reconnectLabel: mcpFailureReconnectLabels[reason]
   }
 }
 
@@ -976,8 +960,18 @@ function isBuiltInNameTaken(server: McpListedServer): boolean {
 export function formatMcpServerStatus(
   facts: McpServerRowFacts
 ): McpServerStatusPresentation {
+  /** State of a built-in server whose name an added server took. */
+  const nameTakenStatus: McpServerStatusPresentation = Object.freeze({
+    condition: "idle",
+    chip: "name taken",
+    heading: "Name taken",
+    detail:
+      "An added server has this name. Rename or remove it to use the built-in server.",
+    reconnectLabel: ""
+  })
+
   const { server } = facts
-  if (isBuiltInNameTaken(server)) return NAME_TAKEN_STATUS
+  if (isBuiltInNameTaken(server)) return nameTakenStatus
   if (!isMcpListedServerOn(server)) return formatOffStatus(server)
   const status = facts.isBackendRunning
     ? findMcpServerStatus(facts.list, getMcpListedServerName(server))
@@ -1651,7 +1645,15 @@ export function formatMcpSignInNote(signIn: McpSignIn): string {
  * @returns True for `token`, false for `none`.
  */
 export function hasMcpSignInTokenInput(signIn: McpSignIn): boolean {
-  return MCP_SIGN_IN_TOKEN_INPUTS[signIn]
+  /**
+   * Whether each way to sign in shows the token input; a new way must add one.
+   */
+  const mcpSignInTokenInputs = Object.freeze({
+    none: false,
+    token: true
+  } satisfies Readonly<Record<McpSignIn, boolean>>)
+
+  return mcpSignInTokenInputs[signIn]
 }
 
 /**

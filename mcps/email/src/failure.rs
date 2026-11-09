@@ -423,26 +423,22 @@ impl From<Stop> for ToolFailure {
     }
 }
 
-/// The sentence of an id that is not a message id.
-const INVALID_ID_SENTENCE: &str =
-    "That is not a message id. Use an id from search_emails, such as 12.345.INBOX.";
-
-/// The sentence of an id that no longer names its message.
-const STALE_ID_SENTENCE: &str = "That message id is no longer valid. Search again.";
-
-/// The sentence of an id outside the Drafts folder.
-const NOT_IN_DRAFTS_SENTENCE: &str = "That id is not in the Drafts folder. Only a message in the Drafts folder can be sent or deleted as a draft.";
-
-/// What a send that may have gone out tells the model to do.
-const UNCONFIRMED_SENTENCE: &str =
-    "The message may or may not have been sent; do not send it again without asking the person.";
-
 /// What a draft that may have been stored tells the model to do.
 const UNCONFIRMED_DRAFT_ADVICE: &str = "search that folder before saving it again.";
 
 impl fmt::Display for ToolFailure {
     /// Formats the failure as the sentence the model reads.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        /// The sentence of an id that is not a message id.
+        const INVALID_ID_SENTENCE: &str =
+            "That is not a message id. Use an id from search_emails, such as 12.345.INBOX.";
+
+        /// The sentence of an id that no longer names its message.
+        const STALE_ID_SENTENCE: &str = "That message id is no longer valid. Search again.";
+
+        /// The sentence of an id outside the Drafts folder.
+        const NOT_IN_DRAFTS_SENTENCE: &str = "That id is not in the Drafts folder. Only a message in the Drafts folder can be sent or deleted as a draft.";
+
         let sentence = match self {
             Self::SignIn { protocol, failure } => format_sign_in_sentence(*protocol, *failure),
             Self::ImapRefused { operation, text } => {
@@ -512,6 +508,9 @@ fn format_sign_in_sentence(protocol: Protocol, failure: SignInFailure) -> String
 /// * `stop` - What stopped the call while it waited for the server's
 ///   answer, or `None` when the answer did not come or could not be read.
 fn format_unconfirmed_sentence(stop: Option<Stop>) -> String {
+    /// What a send that may have gone out tells the model to do.
+    const UNCONFIRMED_SENTENCE: &str = "The message may or may not have been sent; do not send it again without asking the person.";
+
     match stop {
         None => format!(
             "The whole message was handed to the SMTP server, but the server did not confirm the send. {UNCONFIRMED_SENTENCE}"
@@ -633,46 +632,46 @@ impl std::error::Error for ToolFailure {}
 mod tests {
     use super::*;
 
-    /// Each sign-in failure, with its name and the clause the model reads.
-    const SIGN_IN_FAILURES: [(SignInFailure, &str, &str); 6] = [
-        (
-            SignInFailure::WrongPassword,
-            "wrong-password",
-            "the user name or password was refused",
-        ),
-        (
-            SignInFailure::Unreachable,
-            "unreachable",
-            "the host could not be reached",
-        ),
-        (
-            SignInFailure::CertificateRefused,
-            "certificate-refused",
-            "its certificate was refused by the operating system",
-        ),
-        (
-            SignInFailure::EncryptionNotOffered,
-            "encryption-not-offered",
-            "it does not offer STARTTLS",
-        ),
-        (
-            SignInFailure::TimedOut,
-            "timed-out",
-            "it did not answer in time",
-        ),
-        (
-            SignInFailure::ProtocolError,
-            "protocol-error",
-            "it answered something Lys could not read",
-        ),
-    ];
-
     /// Checks that each sign-in failure serializes to its name and, in a
     /// `SignIn` failure, reads as the sentence that names the IMAP or SMTP
     /// server, gives the failure's clause, and points to the account in
     /// Settings.
     #[test]
     fn names_and_describes_every_sign_in_failure() {
+        /// Each sign-in failure, with its name and the clause the model reads.
+        const SIGN_IN_FAILURES: [(SignInFailure, &str, &str); 6] = [
+            (
+                SignInFailure::WrongPassword,
+                "wrong-password",
+                "the user name or password was refused",
+            ),
+            (
+                SignInFailure::Unreachable,
+                "unreachable",
+                "the host could not be reached",
+            ),
+            (
+                SignInFailure::CertificateRefused,
+                "certificate-refused",
+                "its certificate was refused by the operating system",
+            ),
+            (
+                SignInFailure::EncryptionNotOffered,
+                "encryption-not-offered",
+                "it does not offer STARTTLS",
+            ),
+            (
+                SignInFailure::TimedOut,
+                "timed-out",
+                "it did not answer in time",
+            ),
+            (
+                SignInFailure::ProtocolError,
+                "protocol-error",
+                "it answered something Lys could not read",
+            ),
+        ];
+
         for (failure, name, clause) in SIGN_IN_FAILURES {
             let json = serde_json::to_string(&failure).expect("json");
             let sign_in = ToolFailure::SignIn {
@@ -909,48 +908,48 @@ mod tests {
         ),
     ];
 
-    /// Each way a draft that replaces none can end unconfirmed, with the
-    /// class the log gives it and the sentence the model reads.
-    const UNCONFIRMED_DRAFTS: [(ToolFailure, &str, &str); 4] = [
-        (
-            ToolFailure::DraftUnconfirmed {
-                failure: ConnectionFailure::Lost,
-                replaced: None,
-            },
-            "save-unconfirmed-lost",
-            "The connection to the IMAP server ended before it answered. The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again.",
-        ),
-        (
-            ToolFailure::DraftUnconfirmed {
-                failure: ConnectionFailure::Unreadable,
-                replaced: None,
-            },
-            "save-unconfirmed-unreadable",
-            "The IMAP server answered something Lys could not read. The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again.",
-        ),
-        (
-            ToolFailure::StoppedWhileSaving {
-                stop: Stop::Cancelled,
-                replaced: None,
-            },
-            "cancelled-while-saving",
-            "The call was cancelled after saving the draft began, so the draft may be in the Drafts folder; search that folder before saving it again.",
-        ),
-        (
-            ToolFailure::StoppedWhileSaving {
-                stop: Stop::TimedOut,
-                replaced: None,
-            },
-            "timed-out-while-saving",
-            "The call did not finish within 240 seconds and was stopped after saving the draft began, so the draft may be in the Drafts folder; search that folder before saving it again.",
-        ),
-    ];
-
     /// Checks that each way a new draft's save can end unconfirmed has its
     /// log class and a sentence that says the draft may be stored, without
     /// advice to try again.
     #[test]
     fn describes_a_draft_that_may_be_stored_without_advice_to_try_again() {
+        /// Each way a draft that replaces none can end unconfirmed, with the
+        /// class the log gives it and the sentence the model reads.
+        const UNCONFIRMED_DRAFTS: [(ToolFailure, &str, &str); 4] = [
+            (
+                ToolFailure::DraftUnconfirmed {
+                    failure: ConnectionFailure::Lost,
+                    replaced: None,
+                },
+                "save-unconfirmed-lost",
+                "The connection to the IMAP server ended before it answered. The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again.",
+            ),
+            (
+                ToolFailure::DraftUnconfirmed {
+                    failure: ConnectionFailure::Unreadable,
+                    replaced: None,
+                },
+                "save-unconfirmed-unreadable",
+                "The IMAP server answered something Lys could not read. The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again.",
+            ),
+            (
+                ToolFailure::StoppedWhileSaving {
+                    stop: Stop::Cancelled,
+                    replaced: None,
+                },
+                "cancelled-while-saving",
+                "The call was cancelled after saving the draft began, so the draft may be in the Drafts folder; search that folder before saving it again.",
+            ),
+            (
+                ToolFailure::StoppedWhileSaving {
+                    stop: Stop::TimedOut,
+                    replaced: None,
+                },
+                "timed-out-while-saving",
+                "The call did not finish within 240 seconds and was stopped after saving the draft began, so the draft may be in the Drafts folder; search that folder before saving it again.",
+            ),
+        ];
+
         for (failure, class, sentence) in UNCONFIRMED_DRAFTS {
             assert_eq!(failure.class(), class);
             assert_eq!(failure.to_string(), sentence);

@@ -53,30 +53,6 @@ export const MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH = 100
  */
 export const MAXIMUM_EMAIL_USER_NAME_LENGTH = 254
 
-/** Most characters an IPv6 address in brackets may have, inclusive. */
-const MAXIMUM_BRACKETED_IPV6_LENGTH = 47
-
-/**
- * Finds one atom of an email address's name, a run between its dots: ASCII
- * letters, digits, and ``! # $ % & ' * + - / = ? ^ _ ` { | } ~``.
- */
-const EMAIL_ATOM_PATTERN = /^[\w!#$%&'*+/=?^`{|}~-]+$/
-
-/** Finds a control character (Unicode general category Cc), such as a line break. */
-const CONTROL_CHARACTER_PATTERN = /\p{Cc}/u
-
-/** Finds white space at the start or the end of a text. */
-const EDGE_WHITE_SPACE_PATTERN = /^\p{White_Space}|\p{White_Space}$/u
-
-/** Finds a lone surrogate: half of a UTF-16 pair without the other half. */
-const LONE_SURROGATE_PATTERN = /\p{Cs}/u
-
-/**
- * Finds an IPv6 address in brackets: hexadecimal digits, colons, and the
- * dots of an embedded IPv4 address, with at least one colon.
- */
-const BRACKETED_IPV6_PATTERN = /^\[[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*\]$/
-
 /**
  * Hosts a mail server may be reached on without TLS, in lowercase: the
  * machine Lys runs on.
@@ -110,11 +86,23 @@ const LOOPBACK_EMAIL_HOSTS_TEXT = new Intl.ListFormat("en", {
  * @returns True when the text follows the rule; an empty text does.
  */
 function isAccountText(value: string, maximumLength: number): boolean {
+  /**
+   * Finds a control character (Unicode general category Cc), such as a line
+   * break.
+   */
+  const controlCharacterPattern = /\p{Cc}/u
+
+  /** Finds white space at the start or the end of a text. */
+  const edgeWhiteSpacePattern = /^\p{White_Space}|\p{White_Space}$/u
+
+  /** Finds a lone surrogate: half of a UTF-16 pair without the other half. */
+  const loneSurrogatePattern = /\p{Cs}/u
+
   return (
     [...value].length <= maximumLength &&
-    !CONTROL_CHARACTER_PATTERN.test(value) &&
-    !EDGE_WHITE_SPACE_PATTERN.test(value) &&
-    !LONE_SURROGATE_PATTERN.test(value)
+    !controlCharacterPattern.test(value) &&
+    !edgeWhiteSpacePattern.test(value) &&
+    !loneSurrogatePattern.test(value)
   )
 }
 
@@ -134,13 +122,19 @@ function isAccountText(value: string, maximumLength: number): boolean {
  * typed, without the extension that carries them.
  */
 function isEmailAddress(value: string): boolean {
+  /**
+   * Finds one atom of an email address's name, a run between its dots: ASCII
+   * letters, digits, and ``! # $ % & ' * + - / = ? ^ _ ` { | } ~``.
+   */
+  const emailAtomPattern = /^[\w!#$%&'*+/=?^`{|}~-]+$/
+
   if (value.length > MAXIMUM_EMAIL_ADDRESS_LENGTH) return false
   const separator = value.lastIndexOf("@")
   if (separator <= 0) return false
   const localPart = value.slice(0, separator)
   return (
     localPart.length <= MAXIMUM_EMAIL_LOCAL_PART_LENGTH &&
-    localPart.split(".").every((atom) => EMAIL_ATOM_PATTERN.test(atom)) &&
+    localPart.split(".").every((atom) => emailAtomPattern.test(atom)) &&
     isHostName(value.slice(separator + 1))
   )
 }
@@ -153,10 +147,19 @@ function isEmailAddress(value: string): boolean {
  * @returns True for such a host.
  */
 function isEmailHost(value: string): boolean {
+  /** Most characters an IPv6 address in brackets may have, inclusive. */
+  const maximumBracketedIpv6Length = 47
+
+  /**
+   * Finds an IPv6 address in brackets: hexadecimal digits, colons, and the
+   * dots of an embedded IPv4 address, with at least one colon.
+   */
+  const bracketedIpv6Pattern = /^\[[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*\]$/
+
   if (isHostName(value)) return true
   return (
-    value.length <= MAXIMUM_BRACKETED_IPV6_LENGTH &&
-    BRACKETED_IPV6_PATTERN.test(value)
+    value.length <= maximumBracketedIpv6Length &&
+    bracketedIpv6Pattern.test(value)
   )
 }
 

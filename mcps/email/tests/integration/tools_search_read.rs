@@ -14,9 +14,6 @@ use crate::support::{Stack, TestMessage, start_stack};
 /// The time the first message was sent.
 const BASE: i64 = 1_793_611_800;
 
-/// A message with an HTML body, a text attachment, and a binary one.
-const MIXED: &str = "From: Jane Doe <jane@example.com>\r\nTo: person@example.com\r\nDate: Mon, 2 Nov 2026 12:00:00 +0000\r\nSubject: Report\r\nMessage-ID: <report@example.com>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body><p>Hello <b>there</b>.</p></body></html>\r\n--b\r\nContent-Type: text/csv; name=\"data.csv\"\r\nContent-Disposition: attachment; filename=\"data.csv\"\r\n\r\na,b\r\n1,2\r\n--b\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--b--\r\n";
-
 /// Starts the stack with 25 messages in INBOX, two in Projects, one in
 /// Sent, and one in the All Mail view.
 async fn start_filled_stack() -> Stack {
@@ -679,6 +676,9 @@ async fn reads_a_message_without_marking_it_as_read() {
 /// past the last.
 #[tokio::test(flavor = "multi_thread")]
 async fn converts_html_lists_attachments_and_reads_text_ones() {
+    /// A message with an HTML body, a text attachment, and a binary one.
+    const MIXED: &str = "From: Jane Doe <jane@example.com>\r\nTo: person@example.com\r\nDate: Mon, 2 Nov 2026 12:00:00 +0000\r\nSubject: Report\r\nMessage-ID: <report@example.com>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body><p>Hello <b>there</b>.</p></body></html>\r\n--b\r\nContent-Type: text/csv; name=\"data.csv\"\r\nContent-Disposition: attachment; filename=\"data.csv\"\r\n\r\na,b\r\n1,2\r\n--b\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--b--\r\n";
+
     let stack = start_filled_stack().await;
     let mixed = NewMessage {
         bytes: MIXED.as_bytes().to_vec(),

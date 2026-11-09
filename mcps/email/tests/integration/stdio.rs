@@ -18,30 +18,6 @@ use crate::support::imap::{FakeImapServer, FakeMailbox, ImapFault, ImapMode, New
 use crate::support::smtp::{DATA_END, FakeSmtpServer, SmtpFault, SmtpMode};
 use crate::support::{SecurityName, TestMessage, TestServers, build_account_json};
 
-/// The note a cut result ends with.
-const CUT_NOTE: &str = "\n\n[The result was cut at 20,000 characters.]";
-
-/// A draft another client saved, `1.1003.Drafts`.
-const DRAFT: &str = "From: A Person <person@example.com>\r\nTo: Jane Doe <jane@example.com>\r\nBcc: hidden@example.com\r\nSubject: Plans\r\nMessage-ID: <draft@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nSee you there.\r\n";
-
-/// The names of the tools.
-const TOOL_NAMES: [&str; 10] = [
-    "delete_draft",
-    "list_folders",
-    "manage_folder",
-    "read_attachment",
-    "read_conversation",
-    "read_email",
-    "save_draft",
-    "search_emails",
-    "send_draft",
-    "send_email",
-];
-
-/// Longest the binary may take, in real time, to log a call it was told to
-/// cancel.
-const LOG_WAIT_LIMIT: Duration = Duration::from_secs(30);
-
 /// Builds the JSON of `LYS_EMAIL_ACCOUNT` for fakes on the ports that
 /// talk without TLS.
 fn build_plain_account_json(imap_port: u16, smtp_port: u16) -> String {
@@ -107,8 +83,8 @@ fn send_dialogue_messages(variable: String, messages: Vec<Value>) -> Dialogue {
     }
 }
 
-/// Waits, at most [`LOG_WAIT_LIMIT`] in real time, for the line the binary logs
-/// for a call of the tool.
+/// Waits, at most 30 seconds in real time, for the line the binary logs for a
+/// call of the tool.
 ///
 /// # Returns
 ///
@@ -118,6 +94,10 @@ fn send_dialogue_messages(variable: String, messages: Vec<Value>) -> Dialogue {
 ///
 /// When no such line comes in time.
 fn wait_for_tool_line(lines: &mpsc::Receiver<String>, tool: &str) -> String {
+    /// Longest the binary may take, in real time, to log a call it was told to
+    /// cancel.
+    const LOG_WAIT_LIMIT: Duration = Duration::from_secs(30);
+
     let deadline = Instant::now() + LOG_WAIT_LIMIT;
     let prefix = format!("tool {tool}: ");
     loop {
@@ -203,8 +183,12 @@ async fn logs_a_send_cancelled_after_the_hand_over_as_unconfirmed() {
     assert_eq!(smtp.list_mails().len(), 1);
 }
 
-/// [`DRAFT`] as the fake stores it, with the `\Draft` flag.
+/// A draft another client saved, `1.1003.Drafts`, as the fake stores it, with
+/// the `\Draft` flag.
 fn build_draft_message() -> NewMessage<'static> {
+    /// A draft another client saved, `1.1003.Drafts`.
+    const DRAFT: &str = "From: A Person <person@example.com>\r\nTo: Jane Doe <jane@example.com>\r\nBcc: hidden@example.com\r\nSubject: Plans\r\nMessage-ID: <draft@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nSee you there.\r\n";
+
     NewMessage {
         bytes: DRAFT.as_bytes().to_vec(),
         flags: &["\\Draft"],
@@ -241,7 +225,8 @@ async fn logs_a_save_cancelled_once_storing_began_as_stopped_while_saving() {
 }
 
 /// Builds the mailbox the dialogue reads: a short and a long message in
-/// INBOX, `1.1001.INBOX` and `2.1001.INBOX`, and [`DRAFT`] in Drafts.
+/// INBOX, `1.1001.INBOX` and `2.1001.INBOX`, and the draft of
+/// [`build_draft_message`] in Drafts.
 fn build_dialogue_mailbox() -> FakeMailbox {
     let mut mailbox = FakeMailbox::create_standard();
     let short = TestMessage {
@@ -315,6 +300,20 @@ fn get_listed_tool<'a>(listed: &'a Value, name: &str) -> &'a Value {
 /// object schema and a description, and that `search_emails` reads only
 /// and takes a page.
 fn assert_tools_listed(listed: &Value) {
+    /// The names of the tools.
+    const TOOL_NAMES: [&str; 10] = [
+        "delete_draft",
+        "list_folders",
+        "manage_folder",
+        "read_attachment",
+        "read_conversation",
+        "read_email",
+        "save_draft",
+        "search_emails",
+        "send_draft",
+        "send_email",
+    ];
+
     let tools = listed["result"]["tools"].as_array().expect("tools");
     let mut names: Vec<&str> = tools
         .iter()
@@ -367,6 +366,9 @@ fn assert_draft_tool_fields(listed: &Value) {
 /// Asserts that the folders were listed and that the long message's text
 /// was cut to the result limit, in UTF-16 code units, with the note.
 fn assert_read_answers(folders: &Value, long_read: &Value) {
+    /// The note a cut result ends with.
+    const CUT_NOTE: &str = "\n\n[The result was cut at 20,000 characters.]";
+
     assert_ne!(folders["result"]["isError"], true, "{folders}");
     assert!(
         folders["result"]["content"][0]["text"]

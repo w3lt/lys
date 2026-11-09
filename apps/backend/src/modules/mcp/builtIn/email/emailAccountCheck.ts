@@ -12,25 +12,9 @@ import { isSpawnFailure } from "../../mcpError"
 import McpServerLogLines from "../../mcpServerLogLines"
 import {
   EMAIL_ACCOUNT_VARIABLE_NAME,
-  EMAIL_SERVER_CHECK_SUBCOMMAND,
   buildEmailAccountVariable,
   type EmailServerCommand
 } from "./emailServer"
-
-/**
- * Longest one check may run before its process is killed: past two
- * sign-ins that each wait the email server's own connect and answer limits.
- */
-export const EMAIL_ACCOUNT_CHECK_TIMEOUT_MILLISECONDS = 60_000
-
-/**
- * Most characters of the check's standard output the checker reads; the
- * report is one short JSON line, so more is not a report.
- */
-const MAXIMUM_OUTPUT_LENGTH = 65_536
-
-/** Most standard error lines kept to log with a check's outcome. */
-const MAXIMUM_ERROR_LINE_COUNT = 32
 
 /** Validates what the check subcommand prints: both sign-ins' outcomes. */
 const checkOutputSchema = z
@@ -196,24 +180,6 @@ type CheckChildProcess = Omit<
     stderr: Readable | undefined
   }>
 
-/** Answer when the email server is not installed. */
-const SERVER_MISSING: CheckEmailAccountApiResponse = Object.freeze({
-  status: "unavailable",
-  reason: "server-missing"
-})
-
-/** Answer when the email server did not report. */
-const SERVER_FAILED: CheckEmailAccountApiResponse = Object.freeze({
-  status: "unavailable",
-  reason: "server-failed"
-})
-
-/** Answer when another check runs. */
-const BUSY: CheckEmailAccountApiResponse = Object.freeze({
-  status: "unavailable",
-  reason: "busy"
-})
-
 /** Failure of a check the closed checker did not run, or killed. */
 const CLOSED_FAILURE: EmailServerRunFailure = Object.freeze({ kind: "closed" })
 
@@ -314,8 +280,14 @@ export default class EmailAccountChecker {
    * @returns The `busy` answer.
    */
   #handleBusyCheck(): CheckEmailAccountApiResponse {
+    /** Answer when another check runs. */
+    const busy: CheckEmailAccountApiResponse = Object.freeze({
+      status: "unavailable",
+      reason: "busy"
+    })
+
     this.#dependencies.sendEvent({ kind: "busy" })
-    return BUSY
+    return busy
   }
 
   /**
@@ -327,8 +299,14 @@ export default class EmailAccountChecker {
    */
   #handleStartFailure(error: Error): CheckEmailAccountApiResponse {
     if (isMissingExecutable(error)) {
+      /** Answer when the email server is not installed. */
+      const serverMissing: CheckEmailAccountApiResponse = Object.freeze({
+        status: "unavailable",
+        reason: "server-missing"
+      })
+
       this.#dependencies.sendEvent({ kind: "server-missing" })
-      return SERVER_MISSING
+      return serverMissing
     }
     return this.#handleFailedRun(Object.freeze({ kind: "start-failed", error }))
   }
@@ -383,8 +361,14 @@ export default class EmailAccountChecker {
   #handleFailedRun(
     failure: EmailServerRunFailure
   ): CheckEmailAccountApiResponse {
+    /** Answer when the email server did not report. */
+    const serverFailed: CheckEmailAccountApiResponse = Object.freeze({
+      status: "unavailable",
+      reason: "server-failed"
+    })
+
     this.#dependencies.sendEvent({ kind: "server-failed", failure })
-    return SERVER_FAILED
+    return serverFailed
   }
 }
 
@@ -518,9 +502,15 @@ class EmailServerCheckRun {
    * @param chunk - Text it printed next.
    */
   #readOutput(chunk: string): void {
+    /**
+     * Most characters of the check's standard output the checker reads; the
+     * report is one short JSON line, so more is not a report.
+     */
+    const maximumOutputLength = 65_536
+
     if (this.#output === undefined) return
     this.#output =
-      this.#output.length + chunk.length > MAXIMUM_OUTPUT_LENGTH
+      this.#output.length + chunk.length > maximumOutputLength
         ? undefined
         : this.#output + chunk
   }
@@ -584,9 +574,15 @@ function startCheckProcess(
     [EMAIL_ACCOUNT_VARIABLE_NAME]: start.accountVariableValue
   }
   try {
+    /**
+     * Subcommand under which the email server signs in to the account's servers
+     * and reports the outcome, instead of serving MCP.
+     */
+    const emailServerCheckSubcommand = "check"
+
     return spawn(
       start.serverCommand.command,
-      [...start.serverCommand.arguments, EMAIL_SERVER_CHECK_SUBCOMMAND],
+      [...start.serverCommand.arguments, emailServerCheckSubcommand],
       {
         cwd: start.workingDirectory,
         env: environment,
@@ -609,7 +605,10 @@ function startCheckProcess(
  * @param line - The next line.
  */
 function addErrorLine(errorLines: string[], line: string): void {
-  if (errorLines.length < MAXIMUM_ERROR_LINE_COUNT) errorLines.push(line)
+  /** Most standard error lines kept to log with a check's outcome. */
+  const maximumErrorLineCount = 32
+
+  if (errorLines.length < maximumErrorLineCount) errorLines.push(line)
 }
 
 /**

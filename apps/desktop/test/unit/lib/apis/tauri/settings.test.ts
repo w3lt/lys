@@ -41,14 +41,6 @@ import {
   type SettingsDocument
 } from "../../../support/settingsFixtures"
 
-/** Secrets group of a settings file that saves no key and no password. */
-const NO_SAVED_KEYS = Object.freeze({
-  tavilyApiKey: null,
-  ollamaApiKey: null,
-  groqApiKey: null,
-  emailPassword: null
-})
-
 /** Secrets group of the stored document without the email password. */
 const NO_EMAIL_PASSWORD = Object.freeze({
   ...STORED_SETTINGS_DOCUMENT.secrets,
@@ -139,16 +131,24 @@ describe("loadSettings", () => {
   })
 
   it("reads a settings file without a saved key as no key", async () => {
+    /** Secrets group of a settings file that saves no key and no password. */
+    const noSavedKeys = Object.freeze({
+      tavilyApiKey: null,
+      ollamaApiKey: null,
+      groqApiKey: null,
+      emailPassword: null
+    })
+
     startNativeHostFake({
       load_settings: () => ({
         ...STORED_SETTINGS_DOCUMENT,
-        secrets: NO_SAVED_KEYS
+        secrets: noSavedKeys
       })
     })
 
     const settings = await loadSettings()
 
-    expect(settings.secrets).toEqual(NO_SAVED_KEYS)
+    expect(settings.secrets).toEqual(noSavedKeys)
   })
 
   it.each([

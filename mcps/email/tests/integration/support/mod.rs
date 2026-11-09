@@ -30,47 +30,10 @@ pub const USER_NAME: &str = "person@example.com";
 /// The password the fakes accept; a synthetic value, not a credential.
 pub const PASSWORD: &str = "synthetic-password-7f3a";
 
-/// The display name of the account.
-pub const DISPLAY_NAME: &str = "A Person";
-
 /// Month names as mail writes them.
 pub const MONTH_NAMES: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
-
-/// Weekday names as mail writes them, from Sunday.
-pub const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-/// How many times a future may take up input its connection already has,
-/// after a fake met its fault and before the clock pauses: enough for a
-/// connection the fake accepted to finish connecting, so that only the
-/// wait the fault caused is left.
-const SETTLING_TURNS: usize = 3;
-
-/// Longest a future may wait on the paused clock before the test fails it:
-/// longer than any limit of the code under test, so that a step without a
-/// limit fails the test instead of hanging it.
-const GUARD_LIMIT: Duration = Duration::from_secs(600);
-
-/// How long the wait a fault causes may have run before the fault struck,
-/// at most: under a second, so that a limit a second short still fails.
-/// It holds while nothing slow comes before the fault within its wait.
-/// The code starts a step's wait just before the step's first exchange,
-/// the command it writes or the greeting it reads, and an account check's
-/// wait when the check starts, before it connects, which the check's
-/// timing cases do in plain text; over loopback, either takes far less
-/// than this. A TLS handshake can take seconds, so a case must not strike
-/// after one within the same wait, such as at the second EHLO of SMTP's
-/// STARTTLS step, whose one wait also covers the STARTTLS command and the
-/// handshake.
-const LONGEST_WAIT_BEFORE_FAULT: Duration = Duration::from_millis(500);
-
-/// How far past a timer's deadline the paused clock may land, at most.
-/// tokio's timers fire on whole milliseconds since the runtime started:
-/// a deadline is rounded up to the next one, and the paused clock moves
-/// by whole milliseconds from where it paused, keeping the part of a
-/// millisecond it stood at then; each adds less than a millisecond.
-const LONGEST_PAUSED_CLOCK_OVERSHOOT: Duration = Duration::from_millis(2);
 
 /// How a server of an account is reached, as the settings name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,7 +112,7 @@ pub struct FaultTiming {
 /// default of `#[tokio::test]`, or the clock is already paused, as by an
 /// earlier run in the same case: tokio's `pause` panics then. Also when
 /// the future ends before the clock paused, or waits on the paused clock
-/// longer than [`GUARD_LIMIT`].
+/// longer than 600 seconds.
 pub async fn run_past_fault<F>(
     fault: impl Future<Output = ()>,
     future: F,
@@ -158,6 +121,17 @@ where
     F: Future,
     F::Output: Debug,
 {
+    /// How many times a future may take up input its connection already has,
+    /// after a fake met its fault and before the clock pauses: enough for a
+    /// connection the fake accepted to finish connecting, so that only the
+    /// wait the fault caused is left.
+    const SETTLING_TURNS: usize = 3;
+
+    /// Longest a future may wait on the paused clock before the test fails it:
+    /// longer than any limit of the code under test, so that a step without a
+    /// limit fails the test instead of hanging it.
+    const GUARD_LIMIT: Duration = Duration::from_secs(600);
+
     let started = Instant::now();
     tokio::pin!(future);
     tokio::select! {
@@ -201,18 +175,38 @@ where
 ///
 /// From the fault on, the run takes the limit:
 ///
-/// - less the part of the wait that ran before the fault, at most
-///   [`LONGEST_WAIT_BEFORE_FAULT`];
+/// - less the part of the wait that ran before the fault, at most 500
+///   milliseconds;
 /// - plus at most the real time from the fault to the pause, in which a
 ///   wait that starts after the fault, such as for a greeting, begins;
-/// - plus how far the paused clock lands past the deadline, at most
-///   [`LONGEST_PAUSED_CLOCK_OVERSHOOT`].
+/// - plus how far the paused clock lands past the deadline, at most 2
+///   milliseconds.
 ///
 /// # Arguments
 ///
 /// * `timing` - How long the run took, from [`run_past_fault`].
 /// * `limit` - The limit the code under test sets on the wait.
 pub fn assert_about(timing: FaultTiming, limit: Duration) {
+    /// How long the wait a fault causes may have run before the fault struck,
+    /// at most: under a second, so that a limit a second short still fails.
+    /// It holds while nothing slow comes before the fault within its wait.
+    /// The code starts a step's wait just before the step's first exchange,
+    /// the command it writes or the greeting it reads, and an account check's
+    /// wait when the check starts, before it connects, which the check's
+    /// timing cases do in plain text; over loopback, either takes far less
+    /// than this. A TLS handshake can take seconds, so a case must not strike
+    /// after one within the same wait, such as at the second EHLO of SMTP's
+    /// STARTTLS step, whose one wait also covers the STARTTLS command and the
+    /// handshake.
+    const LONGEST_WAIT_BEFORE_FAULT: Duration = Duration::from_millis(500);
+
+    /// How far past a timer's deadline the paused clock may land, at most.
+    /// tokio's timers fire on whole milliseconds since the runtime started:
+    /// a deadline is rounded up to the next one, and the paused clock moves
+    /// by whole milliseconds from where it paused, keeping the part of a
+    /// millisecond it stood at then; each adds less than a millisecond.
+    const LONGEST_PAUSED_CLOCK_OVERSHOOT: Duration = Duration::from_millis(2);
+
     let after_fault = timing.elapsed - timing.real_before_fault;
     let settling = timing.real_before_pause - timing.real_before_fault;
     assert!(
@@ -233,6 +227,9 @@ pub fn build_account_json_for(
     servers: TestServers,
     server_keeps_sent_copy: bool,
 ) -> String {
+    /// The display name of the account.
+    const DISPLAY_NAME: &str = "A Person";
+
     format!(
         r#"{{"address":"{ADDRESS}","displayName":"{DISPLAY_NAME}","userName":"{USER_NAME}","password":"{PASSWORD}","imap":{{"host":"{host}","port":{},"security":"{}"}},"smtp":{{"host":"{host}","port":{},"security":"{}"}},"serverKeepsSentCopy":{server_keeps_sent_copy}}}"#,
         servers.imap_port,
@@ -382,9 +379,6 @@ pub fn calculate_trimmed_bytes(bytes: &[u8]) -> &[u8] {
     &bytes[..end]
 }
 
-/// Seconds in one day of the Unix clock, which has no leap seconds.
-pub const SECONDS_PER_DAY: i64 = 86_400;
-
 /// Seconds since the Unix epoch, now.
 pub fn get_current_timestamp() -> i64 {
     i64::try_from(
@@ -433,6 +427,9 @@ pub fn calculate_epoch_days(year: i64, month: u8, day: u8) -> i64 {
 
 /// Builds the text a `Date` field writes for a timestamp, in UTC.
 pub fn build_rfc2822_date(timestamp: i64) -> String {
+    /// Weekday names as mail writes them, from Sunday.
+    const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
     let days = timestamp.div_euclid(86_400);
     let seconds = timestamp.rem_euclid(86_400);
     let (year, month, day) = calculate_civil_day(days);

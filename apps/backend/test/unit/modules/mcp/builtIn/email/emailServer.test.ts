@@ -43,37 +43,6 @@ const EXPECTED_SETTINGS = mcpServerSettingsSchema.parse({
   enabled: true
 })
 
-/**
- * Validates one case of the account variables shared with the email
- * server's tests: an account, its password, and the JSON the variable
- * holds for them.
- */
-const sharedAccountVariableCaseSchema = z.strictObject({
-  case: z.string(),
-  account: emailAccountSchema,
-  password: emailPasswordSchema,
-  variable: z.record(z.string(), z.unknown())
-})
-
-/**
- * Accounts with the value of `LYS_EMAIL_ACCOUNT` the backend writes for
- * each, which the email server's tests in `mcps/email/src/account.rs`
- * parse.
- */
-const SHARED_ACCOUNT_VARIABLE_CASES = z
-  .array(sharedAccountVariableCaseSchema)
-  .parse(
-    JSON.parse(
-      readFileSync(
-        new URL(
-          "../../../../../../../../packages/share/test/fixtures/email-account-variables.json",
-          import.meta.url
-        ),
-        "utf8"
-      )
-    )
-  )
-
 describe("buildEmailServerCommand", () => {
   it("runs the installed server without arguments", () => {
     expect(INSTALLED_COMMAND).toEqual({
@@ -85,7 +54,38 @@ describe("buildEmailServerCommand", () => {
 })
 
 describe("buildEmailAccountVariable", () => {
-  it.each(SHARED_ACCOUNT_VARIABLE_CASES)(
+  /**
+   * Validates one case of the account variables shared with the email
+   * server's tests: an account, its password, and the JSON the variable
+   * holds for them.
+   */
+  const sharedAccountVariableCaseSchema = z.strictObject({
+    case: z.string(),
+    account: emailAccountSchema,
+    password: emailPasswordSchema,
+    variable: z.record(z.string(), z.unknown())
+  })
+
+  /**
+   * Accounts with the value of `LYS_EMAIL_ACCOUNT` the backend writes for
+   * each, which the email server's tests in `mcps/email/src/account.rs`
+   * parse.
+   */
+  const sharedAccountVariableCases = z
+    .array(sharedAccountVariableCaseSchema)
+    .parse(
+      JSON.parse(
+        readFileSync(
+          new URL(
+            "../../../../../../../../packages/share/test/fixtures/email-account-variables.json",
+            import.meta.url
+          ),
+          "utf8"
+        )
+      )
+    )
+
+  it.each(sharedAccountVariableCases)(
     "writes the shared variable of $case as one line of JSON",
     ({ account, password, variable }) => {
       const value = buildEmailAccountVariable(account, password)

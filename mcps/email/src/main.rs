@@ -12,12 +12,6 @@ use email::tools::ToolContext;
 use email::trust::Trust;
 use rmcp::ServiceExt;
 
-/// Exit code when the account variable is missing or breaks a rule.
-const ACCOUNT_EXIT_CODE: u8 = 2;
-
-/// Exit code when the arguments are not understood (EX_USAGE).
-const USAGE_EXIT_CODE: u8 = 64;
-
 /// What the process was started to do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Command {
@@ -42,13 +36,12 @@ enum Command {
 ///
 /// # Returns
 ///
-/// The exit code: [`USAGE_EXIT_CODE`] for other arguments,
-/// [`ACCOUNT_EXIT_CODE`] when the account is missing or breaks a rule, 1
-/// when the report could not be written, the server could not start, or
-/// its service failed, and 0 once the report is printed or the server
-/// stopped otherwise. The report cannot be written when the reader of
-/// standard output has closed; a closed standard output takes it as
-/// printed.
+/// The exit code: 64 (EX_USAGE) for other arguments, 2 when the account is
+/// missing or breaks a rule, 1 when the report could not be written, the
+/// server could not start, or its service failed, and 0 once the report is
+/// printed or the server stopped otherwise. The report cannot be written
+/// when the reader of standard output has closed; a closed standard output
+/// takes it as printed.
 #[tokio::main]
 async fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
@@ -56,6 +49,9 @@ async fn main() -> ExitCode {
         [] => Command::Serve,
         [argument] if argument == "check" => Command::Check,
         _ => {
+            /// Exit code when the arguments are not understood (EX_USAGE).
+            const USAGE_EXIT_CODE: u8 = 64;
+
             send_log_line("usage: email [check]");
             return ExitCode::from(USAGE_EXIT_CODE);
         }
@@ -63,6 +59,9 @@ async fn main() -> ExitCode {
     let account = match read_account_variable().and_then(|text| parse_account_variable(&text)) {
         Ok(account) => account,
         Err(problem) => {
+            /// Exit code when the account variable is missing or breaks a rule.
+            const ACCOUNT_EXIT_CODE: u8 = 2;
+
             send_log_line(&format!("{ACCOUNT_VARIABLE_NAME}: {problem}"));
             return ExitCode::from(ACCOUNT_EXIT_CODE);
         }

@@ -126,26 +126,6 @@ const HANDSHAKE_ONLY_SERVER_SCRIPT = [
   "})"
 ].join("\n")
 
-/** Settings of a stdio server that connects but never lists its tools. */
-const HANDSHAKE_ONLY_SERVER_SETTINGS: McpServerSettings = Object.freeze({
-  name: "handshake-only",
-  transport: "stdio",
-  command: process.execPath,
-  arguments: Object.freeze(["-e", HANDSHAKE_ONLY_SERVER_SCRIPT]),
-  environment: Object.freeze([]),
-  enabled: true
-})
-
-/** Settings of a stdio server whose command no folder of `PATH` holds. */
-const MISSING_COMMAND_SETTINGS: McpServerSettings = Object.freeze({
-  name: "missing",
-  transport: "stdio",
-  command: "lys-test-missing-command-7f3a",
-  arguments: Object.freeze([]),
-  environment: Object.freeze([]),
-  enabled: true
-})
-
 /**
  * Nesting depth of the input schema of {@link DEEP_SCHEMA_TOOL_TEXT}, deep
  * enough that the SDK's check of a tool runs out of stack.
@@ -602,9 +582,19 @@ describe("openMcpServer", () => {
   })
 
   it("reports a command that is not found as start-failed", async () => {
+    /** Settings of a stdio server whose command no folder of `PATH` holds. */
+    const missingCommandSettings: McpServerSettings = Object.freeze({
+      name: "missing",
+      transport: "stdio",
+      command: "lys-test-missing-command-7f3a",
+      arguments: Object.freeze([]),
+      environment: Object.freeze([]),
+      enabled: true
+    })
+
     const { context } = createRecordingContext()
 
-    const opening = await openForTest(MISSING_COMMAND_SETTINGS, context)
+    const opening = await openForTest(missingCommandSettings, context)
 
     expect(opening).toEqual({
       status: "failed",
@@ -760,13 +750,19 @@ describe("openMcpServer", () => {
   })
 
   it("closes a connected server whose tool list does not arrive within the limit", async () => {
+    /** Settings of a stdio server that connects but never lists its tools. */
+    const handshakeOnlyServerSettings: McpServerSettings = Object.freeze({
+      name: "handshake-only",
+      transport: "stdio",
+      command: process.execPath,
+      arguments: Object.freeze(["-e", HANDSHAKE_ONLY_SERVER_SCRIPT]),
+      environment: Object.freeze([]),
+      enabled: true
+    })
+
     const { context, events } = createRecordingContext()
 
-    const opening = await openForTest(
-      HANDSHAKE_ONLY_SERVER_SETTINGS,
-      context,
-      300
-    )
+    const opening = await openForTest(handshakeOnlyServerSettings, context, 300)
     const pid = await waitForReportedPid(events)
 
     expect(opening).toEqual({

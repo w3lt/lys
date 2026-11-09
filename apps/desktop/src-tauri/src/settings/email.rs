@@ -28,57 +28,6 @@ use serde::{Deserialize, Deserializer, Serialize};
 use super::host_name::is_host_name;
 use super::json::parse_json_object;
 
-/// Most characters an email address may have, inclusive. Matches
-/// `MAXIMUM_EMAIL_ADDRESS_LENGTH` in `@lys/share`.
-const ADDRESS_MAX_LENGTH: usize = 254;
-
-/// Most characters the part of an address before `@` may have, inclusive.
-/// Matches `MAXIMUM_EMAIL_LOCAL_PART_LENGTH` in `@lys/share`.
-const ADDRESS_NAME_MAX_LENGTH: usize = 64;
-
-/// Most characters, counted as Unicode scalar values, a display name may
-/// have, inclusive. Matches `MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH` in
-/// `@lys/share`.
-const DISPLAY_NAME_MAX_LENGTH: usize = 100;
-
-/// Most characters, counted as Unicode scalar values, a user name may have,
-/// inclusive. Matches `MAXIMUM_EMAIL_USER_NAME_LENGTH` in `@lys/share`.
-const USER_NAME_MAX_LENGTH: usize = 254;
-
-/// Most characters an IPv6 address in brackets may have, inclusive. Matches
-/// `MAXIMUM_BRACKETED_IPV6_LENGTH` in `@lys/share`.
-const BRACKETED_IPV6_MAX_LENGTH: usize = 47;
-
-/// Hosts a mail server may be reached on without TLS, in lowercase: the
-/// machine Lys runs on. Matches `LOOPBACK_EMAIL_HOSTS` in `@lys/share`.
-const LOOPBACK_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
-
-/// Error for an account value that is not an account object.
-const ACCOUNT_SHAPE_ERROR: &str = "an email account must be an object holding address, displayName, userName, imap, smtp, and serverKeepsSentCopy of the right types, and no other field";
-
-/// Rule of an address, as an error message.
-const ADDRESS_RULE: &str = "an email address must be a name of 1 to 64 ASCII letters, digits, dots, and ! # $ % & ' * + - / = ? ^ _ ` { | } ~, with no dot at either end or two in a row, then @ and an ASCII host name, up to 254 characters in all";
-
-/// Rule of a display name, as an error message.
-const DISPLAY_NAME_RULE: &str = "a display name must be up to 100 characters, without control characters or white space at either end";
-
-/// Rule of a user name, as an error message.
-const USER_NAME_RULE: &str = "a user name must be 1 to 254 characters, without control characters or white space at either end";
-
-/// Rule of a mail server host, as an error message.
-const HOST_RULE: &str =
-    "a mail server host must be an ASCII host name, an IPv4 address, or an IPv6 address in brackets";
-
-/// Rule of a mail server port, as an error message.
-const PORT_RULE: &str = "a mail server port must be a whole number from 1 to 65535";
-
-/// Rule of a mail server's security, as an error message.
-const SECURITY_RULE: &str = "a mail server security must be tls, starttls, or plain";
-
-/// Rule of a connection without TLS, as an error message.
-const PLAIN_RULE: &str =
-    "a connection without TLS is allowed only to localhost, 127.0.0.1, or [::1]";
-
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 /// Email account persisted under the `email` JSON object.
 ///
@@ -154,6 +103,9 @@ impl<'de> Deserialize<'de> for EmailAccount {
     where
         D: Deserializer<'de>,
     {
+        /// Error for an account value that is not an account object.
+        const ACCOUNT_SHAPE_ERROR: &str = "an email account must be an object holding address, displayName, userName, imap, smtp, and serverKeepsSentCopy of the right types, and no other field";
+
         let stored: StoredEmailAccount =
             parse_json_object(deserializer).map_err(|_| D::Error::custom(ACCOUNT_SHAPE_ERROR))?;
 
@@ -190,6 +142,15 @@ impl TryFrom<StoredEmailAccount> for EmailAccount {
     ///
     /// Returns the message of the first broken rule, without any value.
     fn try_from(stored: StoredEmailAccount) -> Result<Self, Self::Error> {
+        /// Rule of an address, as an error message.
+        const ADDRESS_RULE: &str = "an email address must be a name of 1 to 64 ASCII letters, digits, dots, and ! # $ % & ' * + - / = ? ^ _ ` { | } ~, with no dot at either end or two in a row, then @ and an ASCII host name, up to 254 characters in all";
+
+        /// Rule of a display name, as an error message.
+        const DISPLAY_NAME_RULE: &str = "a display name must be up to 100 characters, without control characters or white space at either end";
+
+        /// Rule of a user name, as an error message.
+        const USER_NAME_RULE: &str = "a user name must be 1 to 254 characters, without control characters or white space at either end";
+
         Ok(Self {
             address: EmailAddress::new(stored.address).ok_or(ADDRESS_RULE)?,
             display_name: DisplayName::new(stored.display_name).ok_or(DISPLAY_NAME_RULE)?,
@@ -238,10 +199,24 @@ impl TryFrom<StoredMailServer> for MailServer {
     ///
     /// Returns the message of the first broken rule, without any value.
     fn try_from(stored: StoredMailServer) -> Result<Self, Self::Error> {
+        /// Rule of a mail server host, as an error message.
+        const HOST_RULE: &str =
+            "a mail server host must be an ASCII host name, an IPv4 address, or an IPv6 address in brackets";
+
+        /// Rule of a mail server port, as an error message.
+        const PORT_RULE: &str = "a mail server port must be a whole number from 1 to 65535";
+
+        /// Rule of a mail server's security, as an error message.
+        const SECURITY_RULE: &str = "a mail server security must be tls, starttls, or plain";
+
         let host = MailHost::new(stored.host).ok_or(HOST_RULE)?;
         let port = parse_port(stored.port).ok_or(PORT_RULE)?;
         let security = Security::parse(&stored.security).ok_or(SECURITY_RULE)?;
         if !security.is_allowed_for(&host) {
+            /// Rule of a connection without TLS, as an error message.
+            const PLAIN_RULE: &str =
+                "a connection without TLS is allowed only to localhost, 127.0.0.1, or [::1]";
+
             return Err(PLAIN_RULE);
         }
 
@@ -317,6 +292,10 @@ impl EmailAddress {
     ///
     /// Returns `None` otherwise; the value is never trimmed or changed.
     fn new(value: String) -> Option<Self> {
+        /// Most characters an email address may have, inclusive. Matches
+        /// `MAXIMUM_EMAIL_ADDRESS_LENGTH` in `@lys/share`.
+        const ADDRESS_MAX_LENGTH: usize = 254;
+
         let is_valid = value.len() <= ADDRESS_MAX_LENGTH
             && value
                 .rsplit_once('@')
@@ -350,6 +329,11 @@ impl DisplayName {
     ///
     /// Returns `None` otherwise; the value is never trimmed or changed.
     fn new(value: String) -> Option<Self> {
+        /// Most characters, counted as Unicode scalar values, a display name
+        /// may have, inclusive. Matches `MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH` in
+        /// `@lys/share`.
+        const DISPLAY_NAME_MAX_LENGTH: usize = 100;
+
         is_account_text(&value, DISPLAY_NAME_MAX_LENGTH).then_some(Self(value))
     }
 }
@@ -378,6 +362,11 @@ impl UserName {
     ///
     /// Returns `None` otherwise; the value is never trimmed or changed.
     fn new(value: String) -> Option<Self> {
+        /// Most characters, counted as Unicode scalar values, a user name may
+        /// have, inclusive. Matches `MAXIMUM_EMAIL_USER_NAME_LENGTH` in
+        /// `@lys/share`.
+        const USER_NAME_MAX_LENGTH: usize = 254;
+
         let is_valid = !value.is_empty() && is_account_text(&value, USER_NAME_MAX_LENGTH);
 
         is_valid.then_some(Self(value))
@@ -417,6 +406,10 @@ impl MailHost {
     /// reached without TLS: `localhost`, `127.0.0.1`, or `[::1]`, in any
     /// case.
     fn is_loopback(&self) -> bool {
+        /// Hosts a mail server may be reached on without TLS, in lowercase: the
+        /// machine Lys runs on. Matches `LOOPBACK_EMAIL_HOSTS` in `@lys/share`.
+        const LOOPBACK_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
+
         LOOPBACK_HOSTS.contains(&self.0.to_ascii_lowercase().as_str())
     }
 }
@@ -431,6 +424,10 @@ impl fmt::Debug for MailHost {
 /// Reports whether `name` is the part of an address before `@`: 1 to 64
 /// characters of atoms joined by single dots.
 fn is_address_name(name: &str) -> bool {
+    /// Most characters the part of an address before `@` may have, inclusive.
+    /// Matches `MAXIMUM_EMAIL_LOCAL_PART_LENGTH` in `@lys/share`.
+    const ADDRESS_NAME_MAX_LENGTH: usize = 64;
+
     name.len() <= ADDRESS_NAME_MAX_LENGTH && name.split('.').all(is_address_atom)
 }
 
@@ -458,6 +455,10 @@ fn is_account_text(value: &str, max_length: usize) -> bool {
 /// characters, `[`, hexadecimal digits, colons, and the dots of an embedded
 /// IPv4 address with at least one colon, and `]`.
 fn is_bracketed_ipv6(value: &str) -> bool {
+    /// Most characters an IPv6 address in brackets may have, inclusive. Matches
+    /// `maximumBracketedIpv6Length` in `isEmailHost` of `@lys/share`.
+    const BRACKETED_IPV6_MAX_LENGTH: usize = 47;
+
     value.len() <= BRACKETED_IPV6_MAX_LENGTH
         && value
             .strip_prefix('[')
@@ -489,13 +490,6 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::EmailSettings;
-
-    /// The address rule, as an error about an address states it.
-    const ADDRESS_RULE_TEXT: &str = "an email address must be a name of 1 to 64 ASCII letters, digits, dots, and ! # $ % & ' * + - / = ? ^ _ ` { | } ~, with no dot at either end or two in a row, then @ and an ASCII host name, up to 254 characters in all";
-
-    /// The host rule, as an error about a mail server host states it.
-    const HOST_RULE_TEXT: &str =
-        "a mail server host must be an ASCII host name, an IPv4 address, or an IPv6 address in brackets";
 
     /// Reads `stored` as the `email` group.
     fn parse_email_settings(stored: Value) -> Result<EmailSettings, serde_json::Error> {
@@ -550,12 +544,6 @@ mod tests {
 
         assert!(!failure.to_string().contains(personal), "{failure}");
     }
-
-    /// Groups that the host and `emailSettingsSchema` in `@lys/share` must
-    /// judge alike; the backend's tests of its account reader read the same
-    /// file.
-    const SHARED_CASES: &str =
-        include_str!("../../../../../packages/share/test/fixtures/email-settings-groups.json");
 
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -971,6 +959,13 @@ mod tests {
     /// that an unknown field fails with the account's own rule.
     #[test]
     fn reports_the_broken_rule_of_a_field() {
+        /// The address rule, as an error about an address states it.
+        const ADDRESS_RULE_TEXT: &str = "an email address must be a name of 1 to 64 ASCII letters, digits, dots, and ! # $ % & ' * + - / = ? ^ _ ` { | } ~, with no dot at either end or two in a row, then @ and an ASCII host name, up to 254 characters in all";
+
+        /// The host rule, as an error about a mail server host states it.
+        const HOST_RULE_TEXT: &str =
+            "a mail server host must be an ASCII host name, an IPv4 address, or an IPv6 address in brackets";
+
         let long_name_address = format!("{}@example.com", "a".repeat(65));
 
         for (account, rule) in [
@@ -1067,6 +1062,12 @@ mod tests {
     /// accepted one back as the fixture states.
     #[test]
     fn judges_and_writes_every_shared_group_as_the_share_package_rules_do() {
+        /// Groups that the host and `emailSettingsSchema` in `@lys/share` must
+        /// judge alike; the backend's tests of its account reader read the same
+        /// file.
+        const SHARED_CASES: &str =
+            include_str!("../../../../../packages/share/test/fixtures/email-settings-groups.json");
+
         let cases: Vec<SharedCase> = serde_json::from_str(SHARED_CASES).expect("the shared groups");
         assert!(cases.len() >= 100, "{}", cases.len());
 

@@ -9,14 +9,6 @@ use serde_json::Value;
 /// backend check.
 const API_KEY_MAX_LENGTH: usize = 256;
 
-/// Most characters, counted as Unicode scalar values, an email password may
-/// have, inclusive. Matches `MAXIMUM_EMAIL_PASSWORD_LENGTH` in `@lys/share`,
-/// which the renderer and the backend check.
-const EMAIL_PASSWORD_MAX_LENGTH: usize = 1024;
-
-/// Rule of an email password, as an error message.
-const EMAIL_PASSWORD_RULE: &str = "an email password must be text of 1 to 1024 characters, without line breaks or other control characters";
-
 #[derive(Clone, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 /// API key of a service Lys sends requests to, such as Tavily, Ollama's
@@ -89,6 +81,11 @@ impl EmailPassword {
     ///
     /// Returns `None` otherwise; the value is never trimmed or changed.
     pub fn new(value: String) -> Option<Self> {
+        /// Most characters, counted as Unicode scalar values, an email password
+        /// may have, inclusive. Matches `MAXIMUM_EMAIL_PASSWORD_LENGTH` in
+        /// `@lys/share`, which the renderer and the backend check.
+        const EMAIL_PASSWORD_MAX_LENGTH: usize = 1024;
+
         let is_valid = (1..=EMAIL_PASSWORD_MAX_LENGTH).contains(&value.chars().count())
             && !value.chars().any(char::is_control);
 
@@ -118,6 +115,9 @@ impl<'de> Deserialize<'de> for EmailPassword {
     where
         D: serde::Deserializer<'de>,
     {
+        /// Rule of an email password, as an error message.
+        const EMAIL_PASSWORD_RULE: &str = "an email password must be text of 1 to 1024 characters, without line breaks or other control characters";
+
         let password = match Value::deserialize(deserializer)? {
             Value::String(value) => Self::new(value),
             Value::Null

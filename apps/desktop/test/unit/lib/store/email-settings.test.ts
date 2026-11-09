@@ -59,16 +59,6 @@ const REFUSED_CHECK = checkEmailAccountApiResponseSchema.parse({
   smtp: { status: "failed", reason: "wrong-password" }
 })
 
-/** Answer of a check that could not sign in because the email server is missing. */
-const UNAVAILABLE_CHECK = checkEmailAccountApiResponseSchema.parse({
-  status: "unavailable",
-  reason: "server-missing"
-})
-
-/** Why a removal kept the account because the server stayed on. */
-const SWITCH_OFF_FAILURE =
-  "Lys couldn't switch the email server off, so the account wasn't removed."
-
 /**
  * Builds a spy for the capability a removal switches the email server off
  * with.
@@ -146,6 +136,15 @@ describe("createEmailSettingsSlice", () => {
   })
 
   describe("saveEmailAccount", () => {
+    /**
+     * Answer of a check that could not sign in because the email server is
+     * missing.
+     */
+    const unavailableCheck = checkEmailAccountApiResponseSchema.parse({
+      status: "unavailable",
+      reason: "server-missing"
+    })
+
     it("reports checking, then saving until the write completes, then holds the account and the password, keeping the other groups on disk", async () => {
       const { host, writes } = startControlledSettingsHost()
       const accountCheck = createControlledRoute()
@@ -196,7 +195,7 @@ describe("createEmailSettingsSlice", () => {
 
     it.each([
       ["a server refused the sign-in", REFUSED_CHECK],
-      ["no sign-in could be tried", UNAVAILABLE_CHECK]
+      ["no sign-in could be tried", unavailableCheck]
     ])(
       "answers refused and writes nothing when %s, keeping the outcome",
       async (_label, outcome) => {
@@ -505,6 +504,10 @@ describe("createEmailSettingsSlice", () => {
     it.each(["failed", "busy"] as const)(
       "keeps the account and says why when switching the email server off answers %s, writing nothing",
       async (outcome) => {
+        /** Why a removal kept the account because the server stayed on. */
+        const switchOffFailure =
+          "Lys couldn't switch the email server off, so the account wasn't removed."
+
         const host = startNativeHostFake({
           load_settings: () => STORED_SETTINGS_DOCUMENT,
           save_settings: () => null
@@ -517,7 +520,7 @@ describe("createEmailSettingsSlice", () => {
 
         expect(store.getState().emailAccountSave).toEqual({
           status: "failed",
-          error: SWITCH_OFF_FAILURE
+          error: switchOffFailure
         })
         expect(store.getState().settings.email).toEqual(STORED_SETTINGS.email)
         expect(store.getState().settings.secrets).toEqual(

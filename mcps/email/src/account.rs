@@ -28,34 +28,6 @@ pub const ACCOUNT_VARIABLE_NAME: &str = "LYS_EMAIL_ACCOUNT";
 /// carries.
 const MAXIMUM_ADDRESS_LENGTH: usize = 254;
 
-/// Most bytes the part of an address before `@` may have, inclusive.
-const MAXIMUM_LOCAL_PART_LENGTH: usize = 64;
-
-/// Most characters, counted as Unicode code points, a display name may
-/// have, inclusive.
-const MAXIMUM_DISPLAY_NAME_LENGTH: usize = 100;
-
-/// Most characters, counted as Unicode code points, a user name may have,
-/// inclusive.
-const MAXIMUM_USER_NAME_LENGTH: usize = 254;
-
-/// Most characters, counted as Unicode code points, a password may have,
-/// inclusive.
-const MAXIMUM_PASSWORD_LENGTH: usize = 1024;
-
-/// Most bytes a host name may have, inclusive.
-const MAXIMUM_HOST_NAME_LENGTH: usize = 253;
-
-/// Most bytes one label of a host name may have, inclusive.
-const MAXIMUM_HOST_LABEL_LENGTH: usize = 63;
-
-/// Most bytes an IPv6 address in brackets may have, inclusive.
-const MAXIMUM_BRACKETED_IPV6_LENGTH: usize = 47;
-
-/// Hosts a mail server may be reached on without TLS, in lowercase: the
-/// machine Lys runs on.
-const LOOPBACK_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
-
 /// How a connection to a mail server is protected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Security {
@@ -361,12 +333,14 @@ fn parse_address(value: &str) -> Option<Address> {
 }
 
 /// Whether the text is an email address by the shared rule: at most
-/// [`MAXIMUM_ADDRESS_LENGTH`] bytes, a local part of 1 to
-/// [`MAXIMUM_LOCAL_PART_LENGTH`] bytes of atoms joined by single dots,
-/// `@`, and a host name. The local part is RFC 5322's dot-atom. The only
-/// other local part lettre sends from is a quoted one, which the rule
-/// refuses.
+/// [`MAXIMUM_ADDRESS_LENGTH`] bytes, a local part of 1 to 64 bytes of
+/// atoms joined by single dots, `@`, and a host name. The local part is
+/// RFC 5322's dot-atom. The only other local part lettre sends from is a
+/// quoted one, which the rule refuses.
 fn is_address(value: &str) -> bool {
+    /// Most bytes the part of an address before `@` may have, inclusive.
+    const MAXIMUM_LOCAL_PART_LENGTH: usize = 64;
+
     if value.len() > MAXIMUM_ADDRESS_LENGTH {
         return false;
     }
@@ -388,24 +362,35 @@ fn is_atom(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-/=?^_`{|}~".contains(&byte))
 }
 
-/// Whether the text is a display name: at most
-/// [`MAXIMUM_DISPLAY_NAME_LENGTH`] characters, no control character, and no
-/// white space at its ends. It may be empty.
+/// Whether the text is a display name: at most 100 characters, no control
+/// character, and no white space at its ends. It may be empty.
 fn is_display_name(value: &str) -> bool {
+    /// Most characters, counted as Unicode code points, a display name may
+    /// have, inclusive.
+    const MAXIMUM_DISPLAY_NAME_LENGTH: usize = 100;
+
     is_account_text(value, MAXIMUM_DISPLAY_NAME_LENGTH) && !has_edge_white_space(value)
 }
 
-/// Whether the text is a user name: 1 to [`MAXIMUM_USER_NAME_LENGTH`]
-/// characters, no control character, and no white space at its ends.
+/// Whether the text is a user name: 1 to 254 characters, no control
+/// character, and no white space at its ends.
 fn is_user_name(value: &str) -> bool {
+    /// Most characters, counted as Unicode code points, a user name may have,
+    /// inclusive.
+    const MAXIMUM_USER_NAME_LENGTH: usize = 254;
+
     !value.is_empty()
         && is_account_text(value, MAXIMUM_USER_NAME_LENGTH)
         && !has_edge_white_space(value)
 }
 
-/// Whether the text is a password: 1 to [`MAXIMUM_PASSWORD_LENGTH`]
-/// characters and no control character.
+/// Whether the text is a password: 1 to 1024 characters and no control
+/// character.
 fn is_password(value: &str) -> bool {
+    /// Most characters, counted as Unicode code points, a password may have,
+    /// inclusive.
+    const MAXIMUM_PASSWORD_LENGTH: usize = 1024;
+
     !value.is_empty() && is_account_text(value, MAXIMUM_PASSWORD_LENGTH)
 }
 
@@ -432,6 +417,9 @@ fn is_security_allowed(security: Security, host: &str) -> bool {
 /// Whether the text is a host name: labels of ASCII letters, digits, and
 /// inner hyphens, 63 bytes each, joined by dots, 253 bytes at most.
 fn is_host_name(value: &str) -> bool {
+    /// Most bytes a host name may have, inclusive.
+    const MAXIMUM_HOST_NAME_LENGTH: usize = 253;
+
     !value.is_empty()
         && value.len() <= MAXIMUM_HOST_NAME_LENGTH
         && value.split('.').all(is_host_label)
@@ -439,6 +427,9 @@ fn is_host_name(value: &str) -> bool {
 
 /// Whether the text is one label of a host name.
 fn is_host_label(label: &str) -> bool {
+    /// Most bytes one label of a host name may have, inclusive.
+    const MAXIMUM_HOST_LABEL_LENGTH: usize = 63;
+
     !label.is_empty()
         && label.len() <= MAXIMUM_HOST_LABEL_LENGTH
         && label
@@ -452,6 +443,9 @@ fn is_host_label(label: &str) -> bool {
 /// colons, and the dots of an embedded IPv4 address, with at least one
 /// colon.
 fn is_bracketed_ipv6(value: &str) -> bool {
+    /// Most bytes an IPv6 address in brackets may have, inclusive.
+    const MAXIMUM_BRACKETED_IPV6_LENGTH: usize = 47;
+
     let Some(inner) = value
         .strip_prefix('[')
         .and_then(|rest| rest.strip_suffix(']'))
@@ -467,6 +461,10 @@ fn is_bracketed_ipv6(value: &str) -> bool {
 
 /// Whether the host names the machine itself, in any letter case.
 fn is_loopback_host(host: &str) -> bool {
+    /// Hosts a mail server may be reached on without TLS, in lowercase: the
+    /// machine Lys runs on.
+    const LOOPBACK_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
+
     let lowercase = host.to_ascii_lowercase();
     LOOPBACK_HOSTS.contains(&lowercase.as_str())
 }
@@ -479,16 +477,6 @@ mod tests {
 
     /// Password of the test account; not a real credential.
     const SYNTHETIC_PASSWORD: &str = "correct horse battery staple";
-
-    /// Accounts with the value of `LYS_EMAIL_ACCOUNT` the backend writes for
-    /// each; the backend's tests check that it writes these values.
-    const SHARED_VARIABLES: &str =
-        include_str!("../../../packages/share/test/fixtures/email-account-variables.json");
-
-    /// Groups of the settings file that `emailSettingsSchema` in
-    /// `@lys/share`, the host, and the backend judge alike.
-    const SHARED_GROUPS: &str =
-        include_str!("../../../packages/share/test/fixtures/email-settings-groups.json");
 
     /// One shared account variable; the account and the password the
     /// backend writes it from are the backend's to check.
@@ -779,6 +767,11 @@ mod tests {
     /// writes back the same JSON.
     #[test]
     fn parses_each_variable_the_backend_writes_into_the_same_fields() {
+        /// Accounts with the value of `LYS_EMAIL_ACCOUNT` the backend writes
+        /// for each; the backend's tests check that it writes these values.
+        const SHARED_VARIABLES: &str =
+            include_str!("../../../packages/share/test/fixtures/email-account-variables.json");
+
         let shared: Vec<SharedVariable> =
             serde_json::from_str(SHARED_VARIABLES).expect("the shared variables");
 
@@ -799,6 +792,11 @@ mod tests {
     /// both outcomes.
     #[test]
     fn judges_each_account_of_the_shared_groups_as_the_shared_rules_do() {
+        /// Groups of the settings file that `emailSettingsSchema` in
+        /// `@lys/share`, the host, and the backend judge alike.
+        const SHARED_GROUPS: &str =
+            include_str!("../../../packages/share/test/fixtures/email-settings-groups.json");
+
         let shared: Vec<SharedGroup> =
             serde_json::from_str(SHARED_GROUPS).expect("the shared groups");
 

@@ -51,19 +51,6 @@ use crate::trust::{Trust, is_certificate_refusal};
 /// Longest one exchange may take, from the command to the whole answer.
 const EXCHANGE_LIMIT: Duration = Duration::from_secs(30);
 
-/// Longest handing over a message's content and reading the server's
-/// answer to it may take.
-const MESSAGE_LIMIT: Duration = Duration::from_secs(120);
-
-/// Reply codes that mean the credentials were refused: 535 (RFC 4954)
-/// and 534, which Gmail answers when an app password is required.
-const CREDENTIALS_REFUSED_CODES: [u16; 2] = [535, 534];
-
-/// The text of lettre's error for a connection that ended before a whole
-/// reply; lettre has no other way to tell that case apart from a reply it
-/// cannot read.
-const INCOMPLETE_REPLY_TEXT: &str = "incomplete response";
-
 /// Why a send did not complete.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SmtpFailure {
@@ -358,12 +345,11 @@ async fn start_tls(
 /// # Returns
 ///
 /// Nothing once the server accepted the credentials; otherwise
-/// `WrongPassword` for a permanent reply with one of
-/// [`CREDENTIALS_REFUSED_CODES`]; `TimedOut` when the exchange did not
-/// finish within the limit or the operating system timed the connection
-/// out; and `ProtocolError` for any other failure: another refusal, a
-/// server that offers neither mechanism, an answer that cannot be read,
-/// or an ended connection.
+/// `WrongPassword` for a permanent reply with code 535 or 534; `TimedOut`
+/// when the exchange did not finish within the limit or the operating
+/// system timed the connection out; and `ProtocolError` for any other
+/// failure: another refusal, a server that offers neither mechanism, an
+/// answer that cannot be read, or an ended connection.
 async fn send_sign_in(
     connection: &mut AsyncSmtpConnection,
     account: &Account,
@@ -381,9 +367,13 @@ async fn send_sign_in(
     }
 }
 
-/// Whether the server refused the credentials: a permanent reply with one
-/// of [`CREDENTIALS_REFUSED_CODES`].
+/// Whether the server refused the credentials: a permanent reply with code
+/// 535 or 534.
 fn is_credentials_refusal(error: &SmtpError) -> bool {
+    /// Reply codes that mean the credentials were refused: 535 (RFC 4954)
+    /// and 534, which Gmail answers when an app password is required.
+    const CREDENTIALS_REFUSED_CODES: [u16; 2] = [535, 534];
+
     error.is_permanent()
         && error
             .status()
@@ -411,7 +401,7 @@ fn calculate_sign_in_failure(error: &SmtpError) -> SignInFailure {
 impl SmtpSession {
     /// Sends one message: MAIL, each RCPT, and DATA, each within
     /// [`EXCHANGE_LIMIT`], then the message and the server's answer to it,
-    /// within [`MESSAGE_LIMIT`].
+    /// within 120 seconds.
     ///
     /// After any failure the session is not used again: the caller drops
     /// it, which ends the transaction.
@@ -478,7 +468,7 @@ impl SmtpSession {
     }
 
     /// Sends the message's data, handing the message over, and reads the
-    /// server's answer, within [`MESSAGE_LIMIT`].
+    /// server's answer, within 120 seconds.
     ///
     /// lettre writes each part of the message it is given and asks for the
     /// next before it writes the line that ends the data. That question
@@ -505,6 +495,10 @@ impl SmtpSession {
         bytes: &[u8],
         progress: &SendProgress,
     ) -> Result<(), SmtpFailure> {
+        /// Longest handing over a message's content and reading the server's
+        /// answer to it may take.
+        const MESSAGE_LIMIT: Duration = Duration::from_secs(120);
+
         let content = iter::once(bytes).chain(iter::from_fn(|| {
             progress.update_stage(SendStage::HandedOver);
             None
@@ -588,6 +582,11 @@ fn calculate_exchange_failure(error: &SmtpError) -> SmtpFailure {
 /// `Unreadable`, except a reply that the end of the connection cut short,
 /// which is `Lost`, as is any failure of the network.
 fn calculate_connection_failure(error: &SmtpError) -> ConnectionFailure {
+    /// The text of lettre's error for a connection that ended before a whole
+    /// reply; lettre has no other way to tell that case apart from a reply it
+    /// cannot read.
+    const INCOMPLETE_REPLY_TEXT: &str = "incomplete response";
+
     if error.is_timeout() {
         ConnectionFailure::TimedOut
     } else if error.is_response() && build_source_text(error) != INCOMPLETE_REPLY_TEXT {

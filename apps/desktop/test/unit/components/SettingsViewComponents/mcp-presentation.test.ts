@@ -260,12 +260,6 @@ const EMAIL_SERVER_WITHOUT_ACCOUNT: McpListedServer = Object.freeze({
   isReady: false
 })
 
-/** Listed servers by transport, for the cases that vary only the transport. */
-const SERVER_BY_TRANSPORT = Object.freeze({
-  stdio: buildAddedListedServer(COMMAND_SERVER),
-  http: buildAddedListedServer(URL_SERVER)
-})
-
 /** Two tools of the command server whose token estimates differ. */
 const GITHUB_SEARCH = buildMcpToolDefinition("github", "search")
 const GITHUB_ISSUES = buildMcpToolDefinition("github", "issues", {
@@ -527,7 +521,16 @@ describe("formatMcpServerStatus", () => {
   ] as const)(
     "says a saved $transport server the backend did not apply is not applied, naming its $button button",
     ({ transport, button }) => {
-      const server = SERVER_BY_TRANSPORT[transport]
+      /**
+       * Listed servers by transport, for the cases that vary only the
+       * transport.
+       */
+      const serverByTransport = Object.freeze({
+        stdio: buildAddedListedServer(COMMAND_SERVER),
+        http: buildAddedListedServer(URL_SERVER)
+      })
+
+      const server = serverByTransport[transport]
 
       expect(
         formatMcpServerStatus({

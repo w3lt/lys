@@ -34,9 +34,6 @@ const AGENT_WAITING_REQUEST_LIMIT = 8
 /** Validates a TCP port that names one fixed endpoint, from 1 to 65535 inclusive. */
 const tcpPortSchema = z.int().min(1).max(65_535)
 
-/** Finds a control character (Unicode general category Cc), such as a line break. */
-const CONTROL_CHARACTER_PATTERN = /\p{Cc}/u
-
 /** Validates non-empty prompt text that has no leading or trailing whitespace. */
 const promptTextSchema = z
   .string()
@@ -123,10 +120,15 @@ export const backendConfigSchema = z
       .string()
       .max(MAXIMUM_MCP_COMMAND_LENGTH)
       .refine(isAbsolute, "Email server path must be absolute.")
-      .refine(
-        (path) => path === path.trim() && !CONTROL_CHARACTER_PATTERN.test(path),
-        "Email server path must have no control character or surrounding whitespace."
-      ),
+      .refine((path) => {
+        /**
+         * Finds a control character (Unicode general category Cc), such as a
+         * line break.
+         */
+        const controlCharacterPattern = /\p{Cc}/u
+
+        return path === path.trim() && !controlCharacterPattern.test(path)
+      }, "Email server path must have no control character or surrounding whitespace."),
     /**
      * IPv4 loopback address of vmo, which reads every `read_page` page in a
      * micro VM.

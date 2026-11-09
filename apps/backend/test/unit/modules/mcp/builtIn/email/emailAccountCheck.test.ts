@@ -31,19 +31,8 @@ vi.mock("node:child_process", async (importOriginal) => {
   return { ...actual, spawn: vi.fn(actual.spawn) }
 })
 
-/** Longest one check may run in a case that expects it to end. */
-const CHECK_TIMEOUT_MILLISECONDS = 10_000
-
 /** Longest one case may run; a case starts a check process. */
 const CASE_TIMEOUT_MILLISECONDS = 30_000
-
-/**
- * Whether the tests run on macOS, where Node throws as it starts an
- * executable file that is not a program (`ENOEXEC`). On Linux, libuv
- * starts a command through glibc's `execvp`, which runs such a file with
- * `/bin/sh` instead.
- */
-const IS_MACOS = process.platform === "darwin"
 
 /** Every reason a sign-in can fail for. */
 const FAILURE_REASONS: readonly EmailServerCheckFailure[] = [
@@ -79,7 +68,7 @@ type CheckerSetup = Readonly<{
    * temporary folder when omitted, for a case that records nothing.
    */
   workingDirectory?: string
-  /** Longest one check may run; {@link CHECK_TIMEOUT_MILLISECONDS} when omitted. */
+  /** Longest one check may run; 10 seconds when omitted. */
   timeoutMilliseconds?: number
 }>
 
@@ -91,13 +80,15 @@ type CheckerSetup = Readonly<{
  * @returns The checker and the events it reported.
  */
 function createChecker(setup: CheckerSetup = {}) {
+  /** Longest one check may run in a case that expects it to end. */
+  const checkTimeoutMilliseconds = 10_000
+
   const events: EmailAccountCheckEvent[] = []
   const checker = new EmailAccountChecker({
     serverCommand:
       setup.serverCommand ?? buildFakeEmailServerCommand(setup.fake),
     workingDirectory: setup.workingDirectory ?? tmpdir(),
-    timeoutMilliseconds:
-      setup.timeoutMilliseconds ?? CHECK_TIMEOUT_MILLISECONDS,
+    timeoutMilliseconds: setup.timeoutMilliseconds ?? checkTimeoutMilliseconds,
     sendEvent: (event) => events.push(event)
   })
   onTestFinished(async () => {
@@ -147,6 +138,14 @@ function buildCheckLogRecords(
 }
 
 describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
+  /**
+   * Whether the tests run on macOS, where Node throws as it starts an
+   * executable file that is not a program (`ENOEXEC`). On Linux, libuv
+   * starts a command through glibc's `execvp`, which runs such a file with
+   * `/bin/sh` instead.
+   */
+  const isMacos = process.platform === "darwin"
+
   it("answers both sign-ins' outcomes, starting the server in the working folder with the account and the password in its variable", async () => {
     const folder = await createCaseFolder()
     const fake: FakeEmailServerOptions = { recordsVariable: true }
@@ -384,7 +383,7 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     }
   )
 
-  it.runIf(IS_MACOS)(
+  it.runIf(isMacos)(
     "answers server-failed with Node's error when Node throws as it starts an executable file that is not a program",
     async () => {
       const folder = await createCaseFolder()

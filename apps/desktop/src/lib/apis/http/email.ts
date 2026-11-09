@@ -10,9 +10,6 @@ type EmailApiConnection = {
   readonly backendUrl: string
 }
 
-/** HTTP status of an answered account check. */
-const HTTP_OK_STATUS = 200
-
 /**
  * Asks the backend to sign in to the IMAP and SMTP servers of an email
  * account with its password, without reading or sending mail.
@@ -37,17 +34,17 @@ export async function sendEmailAccountCheck(
   const response = await sendEmailAccountCheckRequest(connection, body)
   const mediaType = response.headers.get("content-type")?.split(";")[0].trim()
   try {
-    if (
-      response.status !== HTTP_OK_STATUS ||
-      mediaType !== "application/json"
-    ) {
+    /** HTTP status of an answered account check. */
+    const httpOkStatus = 200
+
+    if (response.status !== httpOkStatus || mediaType !== "application/json") {
       await response.body?.cancel()
       throw new Error(
         `Unexpected account check response (HTTP ${response.status}).`
       )
     }
     const payload: unknown = await response.json()
-    return checkEmailAccountApi.responses[HTTP_OK_STATUS].parse(payload)
+    return checkEmailAccountApi.responses[httpOkStatus].parse(payload)
   } catch (cause) {
     throw new Error("The backend returned an invalid account check.", {
       cause

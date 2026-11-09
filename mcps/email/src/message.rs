@@ -13,19 +13,6 @@ use mail_parser::{
     Address, AddressList, ContentType, Message, MessageParser, MessagePart, PartKind, TextList,
 };
 
-/// Content types read as text besides `text/*`.
-const TEXT_LIKE_TYPES: [&str; 5] = [
-    "application/json",
-    "application/xml",
-    "application/csv",
-    "application/x-yaml",
-    "application/yaml",
-];
-
-/// Suffixes of structured content types read as text, such as
-/// `application/ld+json`.
-const TEXT_LIKE_SUFFIXES: [&str; 2] = ["+json", "+xml"];
-
 /// The header fields the tools show, from a whole message or from a
 /// fetched header block.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -326,6 +313,19 @@ fn build_attachment(index: usize, part: &MessagePart<'_>) -> Attachment {
 ///
 /// * `content_type` - The type as `type/subtype`, in lower case.
 fn is_text_like(content_type: &str) -> bool {
+    /// Content types read as text besides `text/*`.
+    const TEXT_LIKE_TYPES: [&str; 5] = [
+        "application/json",
+        "application/xml",
+        "application/csv",
+        "application/x-yaml",
+        "application/yaml",
+    ];
+
+    /// Suffixes of structured content types read as text, such as
+    /// `application/ld+json`.
+    const TEXT_LIKE_SUFFIXES: [&str; 2] = ["+json", "+xml"];
+
     content_type.starts_with("text/")
         || TEXT_LIKE_TYPES.contains(&content_type)
         || TEXT_LIKE_SUFFIXES
@@ -353,17 +353,14 @@ pub fn format_size(size: usize) -> String {
 mod tests {
     use super::*;
 
-    /// A plain message with every field the tools read.
-    const PLAIN: &str = "From: Jane Doe <jane@example.com>\r\nTo: person@example.com, Team: a@example.com, b@example.com;\r\nCc: =?UTF-8?Q?J=C3=BCrgen?= <juergen@example.com>\r\nDate: Sun, 2 Nov 2026 10:30:00 +0100\r\nSubject: =?UTF-8?B?R3LDvMOfZQ==?= from Jane\r\nMessage-ID: <one@example.com>\r\nIn-Reply-To: <zero@example.com>\r\nReferences: <minus@example.com> <zero@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello there.\r\n";
-
-    /// A message with an HTML body, a text attachment, and a binary one.
-    const MIXED: &str = "From: jane@example.com\r\nTo: person@example.com\r\nSubject: Report\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body><p>Hello <b>there</b>.</p><p>Bye &amp; thanks.</p></body></html>\r\n--b\r\nContent-Type: text/csv; name=\"data.csv\"\r\nContent-Disposition: attachment; filename=\"data.csv\"\r\n\r\na,b\r\n1,2\r\n--b\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--b--\r\n";
-
     /// Checks that a plain message is read into its address headers, a
     /// group included, its date and timestamp, its decoded subject, its
     /// message ids, and its text, with no attachment.
     #[test]
     fn reads_the_headers_and_the_text_of_a_plain_message() {
+        /// A plain message with every field the tools read.
+        const PLAIN: &str = "From: Jane Doe <jane@example.com>\r\nTo: person@example.com, Team: a@example.com, b@example.com;\r\nCc: =?UTF-8?Q?J=C3=BCrgen?= <juergen@example.com>\r\nDate: Sun, 2 Nov 2026 10:30:00 +0100\r\nSubject: =?UTF-8?B?R3LDvMOfZQ==?= from Jane\r\nMessage-ID: <one@example.com>\r\nIn-Reply-To: <zero@example.com>\r\nReferences: <minus@example.com> <zero@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello there.\r\n";
+
         let message = parse_message(PLAIN.as_bytes()).expect("message");
 
         assert_eq!(message.headers.from, "Jane Doe <jane@example.com>");
@@ -432,6 +429,9 @@ mod tests {
     /// CSV with its text and the PDF with its bytes and no text.
     #[test]
     fn converts_html_to_text_and_lists_attachments_with_text_when_text_like() {
+        /// A message with an HTML body, a text attachment, and a binary one.
+        const MIXED: &str = "From: jane@example.com\r\nTo: person@example.com\r\nSubject: Report\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body><p>Hello <b>there</b>.</p><p>Bye &amp; thanks.</p></body></html>\r\n--b\r\nContent-Type: text/csv; name=\"data.csv\"\r\nContent-Disposition: attachment; filename=\"data.csv\"\r\n\r\na,b\r\n1,2\r\n--b\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--b--\r\n";
+
         let message = parse_message(MIXED.as_bytes()).expect("message");
 
         assert!(message.text_from_html);

@@ -15,9 +15,6 @@ use crate::folders::{Folder, FolderRole};
 use crate::imap::{Flags, FolderAccess, ImapSession, SearchWord, Summary, build_search_date};
 use crate::message::{Headers, parse_headers};
 
-/// Messages per page.
-const PAGE_SIZE: usize = 20;
-
 /// Most hits taken from one folder: the newest ones.
 const FOLDER_HIT_LIMIT: usize = 200;
 
@@ -208,6 +205,9 @@ async fn find_search_hits(
 ///
 /// The page, or the pages there are when the one asked for is past them.
 fn build_search_report(found: &SearchHits, page: usize, folder_count: usize) -> ToolResult {
+    /// Messages per page.
+    const PAGE_SIZE: usize = 20;
+
     let total = found.hits.len();
     if total == 0 {
         return Ok(ToolReport {

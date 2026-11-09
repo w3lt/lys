@@ -28,12 +28,6 @@ use crate::tools::{
 /// Longest one tool call may take as a whole.
 const CALL_LIMIT: Duration = Duration::from_secs(240);
 
-/// The name the server reports to the client.
-const SERVER_NAME: &str = "lys-email";
-
-/// What the server tells the model about itself.
-const INSTRUCTIONS: &str = "Reads, searches, sends, and files the person's email over their own account. Message ids come from search_emails and read_email and look like 12.345.INBOX; an id is valid until the folder changes, then search again. Reading never marks a message as read. Sending and deleting are permanent.";
-
 /// The MCP server over the account's mail servers.
 ///
 /// Concurrency model: concurrent; the MCP service may run several calls at
@@ -395,6 +389,12 @@ impl ServerHandler for EmailServer {
     /// crate's version; tools, its only capability; and the instructions
     /// the model reads about the server.
     fn get_info(&self) -> ServerConfig {
+        /// The name the server reports to the client.
+        const SERVER_NAME: &str = "lys-email";
+
+        /// What the server tells the model about itself.
+        const INSTRUCTIONS: &str = "Reads, searches, sends, and files the person's email over their own account. Message ids come from search_emails and read_email and look like 12.345.INBOX; an id is valid until the folder changes, then search again. Reading never marks a message as read. Sending and deleting are permanent.";
+
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new(SERVER_NAME, env!("CARGO_PKG_VERSION")))
             .with_instructions(INSTRUCTIONS)
@@ -757,25 +757,25 @@ mod tests {
         );
     }
 
-    /// The names of the tools, in the order the spec lists them.
-    const TOOL_NAMES: [&str; 10] = [
-        "search_emails",
-        "read_email",
-        "read_conversation",
-        "read_attachment",
-        "list_folders",
-        "send_email",
-        "save_draft",
-        "send_draft",
-        "delete_draft",
-        "manage_folder",
-    ];
-
     /// Checks that the server lists exactly its ten tools, each with a
     /// description and an object input schema, and that `search_emails`
     /// takes a page and is marked read-only.
     #[test]
     fn routes_every_tool_with_a_description_and_a_schema() {
+        /// The names of the tools, in the order the spec lists them.
+        const TOOL_NAMES: [&str; 10] = [
+            "search_emails",
+            "read_email",
+            "read_conversation",
+            "read_attachment",
+            "list_folders",
+            "send_email",
+            "save_draft",
+            "send_draft",
+            "delete_draft",
+            "manage_folder",
+        ];
+
         let router = EmailServer::tool_router();
         let tools = router.list_all();
 

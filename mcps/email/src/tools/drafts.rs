@@ -29,9 +29,6 @@ use crate::imap::{AppendFailure, Deletion, FolderAccess, ImapSession, SearchWord
 use crate::message::{ParsedMailbox, build_message_view};
 use crate::smtp::SendProgress;
 
-/// The flags a draft is stored with.
-const DRAFT_FLAGS: &str = "(\\Draft)";
-
 /// The arguments of `save_draft`.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -184,6 +181,9 @@ pub async fn run_save_draft(
     arguments: SaveDraftArguments,
     progress: &DraftProgress,
 ) -> ToolResult {
+    /// The flags a draft is stored with.
+    const DRAFT_FLAGS: &str = "(\\Draft)";
+
     let message = MessageArguments {
         to: arguments.to,
         cc: arguments.cc,
@@ -605,10 +605,6 @@ fn build_given_fields(arguments: SendDraftArguments) -> MessageArguments {
     }
 }
 
-/// The names of the recipient fields, in the order
-/// [`ComparedFields::recipients`] keeps them.
-const RECIPIENT_FIELDS: [&str; 3] = ["to", "cc", "bcc"];
-
 /// A message's fields in the form `send_draft` compares them in: two
 /// messages match when each recipient field names the same addresses, in
 /// any order, and the subjects and the texts are equal.
@@ -670,6 +666,10 @@ fn build_compared_text(text: &str) -> String {
 /// The refusal the model reads: the fields that differ, and the draft's
 /// own fields to give instead; `None` when every field matches.
 fn find_draft_difference(given: &ComparedFields, draft: &PreparedDraft) -> Option<String> {
+    /// The names of the recipient fields, in the order
+    /// [`ComparedFields::recipients`] keeps them.
+    const RECIPIENT_FIELDS: [&str; 3] = ["to", "cc", "bcc"];
+
     let stored = &draft.compared;
     let mut differing: Vec<&str> = RECIPIENT_FIELDS
         .iter()

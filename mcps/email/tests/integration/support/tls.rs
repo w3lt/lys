@@ -13,10 +13,7 @@ use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::rustls::crypto::ring;
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 
-use super::{SECONDS_PER_DAY, calculate_civil_day, get_current_timestamp};
-
-/// Days a certificate stays valid after the day the test runs.
-const VALIDITY_DAYS: i64 = 365;
+use super::{calculate_civil_day, get_current_timestamp};
 
 /// A root certificate and the key signing server certificates with it.
 ///
@@ -93,13 +90,19 @@ impl TestAuthority {
 }
 
 /// Makes certificate parameters valid from the day before today, in UTC,
-/// so that a clock a little behind still accepts them, to
-/// [`VALIDITY_DAYS`] after today.
+/// so that a clock a little behind still accepts them, to 365 days after
+/// today.
 ///
 /// # Arguments
 ///
 /// * `params` - The parameters to change.
 fn update_validity_from_today(params: &mut CertificateParams) {
+    /// Days a certificate stays valid after the day the test runs.
+    const VALIDITY_DAYS: i64 = 365;
+
+    /// Seconds in one day of the Unix clock, which has no leap seconds.
+    const SECONDS_PER_DAY: i64 = 86_400;
+
     let today = get_current_timestamp().div_euclid(SECONDS_PER_DAY);
     let (year, month, day) = calculate_certificate_day(today - 1);
     params.not_before = date_time_ymd(year, month, day);

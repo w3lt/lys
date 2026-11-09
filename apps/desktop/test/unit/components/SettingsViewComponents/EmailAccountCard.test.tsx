@@ -33,9 +33,6 @@ type ShownServerChoices = Readonly<{
   keepsSentCopy: boolean
 }>
 
-/** Problem of an address that is not one. */
-const ADDRESS_PROBLEM = /address/i
-
 /** Rule the Address field states before entry. */
 const ADDRESS_HINT = "name@host in ASCII · name up to 64 · up to 254 in all"
 
@@ -47,9 +44,6 @@ const HOST_HINT = "ASCII host name, IPv4, or [IPv6]"
 
 /** Rule each Port field states before entry. */
 const PORT_HINT = "1–65535"
-
-/** Rule of None that each Security choice states before a choice. */
-const PLAIN_SECURITY_HINT = "None only for localhost, 127.0.0.1, [::1]"
 
 /** Save state before any save or removal. */
 const IDLE_SAVE_STATE: EmailAccountSaveState = Object.freeze({ status: "idle" })
@@ -70,44 +64,11 @@ const CHECKING_STATE: EmailAccountCheckState = Object.freeze({
   status: "checking"
 })
 
-/** Answer of a check both servers accepted. */
-const ACCEPTED_CHECK = checkEmailAccountApiResponseSchema.parse({
-  status: "checked",
-  imap: { status: "accepted" },
-  smtp: { status: "accepted" }
-})
-
-/** Check state once both servers accepted the sign-in. */
-const ACCEPTED_CHECK_STATE: EmailAccountCheckState = Object.freeze({
-  status: "checked",
-  outcome: ACCEPTED_CHECK
-})
-
-/** Answer of a check whose IMAP server refused the user name or password. */
-const IMAP_REFUSED_CHECK = checkEmailAccountApiResponseSchema.parse({
-  status: "checked",
-  imap: { status: "failed", reason: "wrong-password" },
-  smtp: { status: "accepted" }
-})
-
-/** Check state once the IMAP server refused the sign-in. */
-const IMAP_REFUSED_CHECK_STATE: EmailAccountCheckState = Object.freeze({
-  status: "checked",
-  outcome: IMAP_REFUSED_CHECK
-})
-
 /** What the fields show once the Gmail preset filled them. */
 const GMAIL_CHOICES: ShownServerChoices = Object.freeze({
   imap: "imap.gmail.com 993 TLS",
   smtp: "smtp.gmail.com 465 TLS",
   keepsSentCopy: true
-})
-
-/** What the fields show once the iCloud preset filled them. */
-const ICLOUD_CHOICES: ShownServerChoices = Object.freeze({
-  imap: "imap.mail.me.com 993 TLS",
-  smtp: "smtp.mail.me.com 587 STARTTLS",
-  keepsSentCopy: false
 })
 
 /** What the fields show once the Fastmail preset filled them. */
@@ -383,6 +344,9 @@ describe("EmailAccountCard", () => {
   })
 
   it("marks the required fields and states the rule of each field and of None before entry", () => {
+    /** Rule of None that each Security choice states before a choice. */
+    const plainSecurityHint = "None only for localhost, 127.0.0.1, [::1]"
+
     startEmptyEmailAccountCard()
 
     expect(getField("Address")).toBeRequired()
@@ -404,7 +368,7 @@ describe("EmailAccountCard", () => {
       PORT_HINT
     )
     expect(getSecurityGroup("IMAP server")).toHaveAccessibleDescription(
-      PLAIN_SECURITY_HINT
+      plainSecurityHint
     )
     expect(getServerField("SMTP server", "Host")).toBeRequired()
     expect(getServerField("SMTP server", "Host")).toHaveAccessibleDescription(
@@ -415,7 +379,7 @@ describe("EmailAccountCard", () => {
       PORT_HINT
     )
     expect(getSecurityGroup("SMTP server")).toHaveAccessibleDescription(
-      PLAIN_SECURITY_HINT
+      plainSecurityHint
     )
     expect(within(getCard()).getAllByText("required")).toHaveLength(7)
   })
@@ -478,9 +442,16 @@ describe("EmailAccountCard", () => {
   })
 
   it("replaces the iCloud preset with Gmail's, its port, security, and Sent copy included, when the address is retyped one character at a time", () => {
+    /** What the fields show once the iCloud preset filled them. */
+    const icloudChoices: ShownServerChoices = Object.freeze({
+      imap: "imap.mail.me.com 993 TLS",
+      smtp: "smtp.mail.me.com 587 STARTTLS",
+      keepsSentCopy: false
+    })
+
     startEmptyEmailAccountCard()
     updateAddressByKeystroke("ada@icloud.com")
-    expect(getShownServerChoices()).toEqual(ICLOUD_CHOICES)
+    expect(getShownServerChoices()).toEqual(icloudChoices)
 
     updateAddressByKeystroke("ada@gmail.com")
 
@@ -588,6 +559,9 @@ describe("EmailAccountCard", () => {
   })
 
   it("marks the fields that break a rule on Save, moves focus to a summary that leads to each, and asks for no save", async () => {
+    /** Problem of an address that is not one. */
+    const addressProblem = /address/i
+
     const { requests } = startEmptyEmailAccountCard()
     const user = userEvent.setup()
 
@@ -614,7 +588,7 @@ describe("EmailAccountCard", () => {
       "SMTP port: A port is a whole number from 1 to 65535."
     ])
     expect(getField("Address")).toHaveAttribute("aria-invalid", "true")
-    expect(getField("Address")).toHaveAccessibleDescription(ADDRESS_PROBLEM)
+    expect(getField("Address")).toHaveAccessibleDescription(addressProblem)
     expect(getServerField("IMAP server", "Host")).toHaveAttribute(
       "aria-invalid",
       "true"
@@ -1049,9 +1023,22 @@ describe("EmailAccountCard", () => {
   })
 
   it("shows the account as saved once the parent reports the save", () => {
+    /** Answer of a check both servers accepted. */
+    const acceptedCheck = checkEmailAccountApiResponseSchema.parse({
+      status: "checked",
+      imap: { status: "accepted" },
+      smtp: { status: "accepted" }
+    })
+
+    /** Check state once both servers accepted the sign-in. */
+    const acceptedCheckState: EmailAccountCheckState = Object.freeze({
+      status: "checked",
+      outcome: acceptedCheck
+    })
+
     startEmailAccountCard({
       saveState: SAVED_STATE,
-      checkState: ACCEPTED_CHECK_STATE
+      checkState: acceptedCheckState
     })
 
     expect(getStatusLine()).toHaveTextContent("Account saved.")
@@ -1059,6 +1046,21 @@ describe("EmailAccountCard", () => {
   })
 
   it("says which server refused the sign-in after a tried save, until the fields change", async () => {
+    /**
+     * Answer of a check whose IMAP server refused the user name or password.
+     */
+    const imapRefusedCheck = checkEmailAccountApiResponseSchema.parse({
+      status: "checked",
+      imap: { status: "failed", reason: "wrong-password" },
+      smtp: { status: "accepted" }
+    })
+
+    /** Check state once the IMAP server refused the sign-in. */
+    const imapRefusedCheckState: EmailAccountCheckState = Object.freeze({
+      status: "checked",
+      outcome: imapRefusedCheck
+    })
+
     const onSaveEmailAccount = vi.fn(() =>
       Promise.resolve<EmailAccountSaveOutcome>("refused")
     )
@@ -1069,7 +1071,7 @@ describe("EmailAccountCard", () => {
     await waitForMicrotasks()
     rendered.rerender(
       <EmailAccountCard
-        checkState={IMAP_REFUSED_CHECK_STATE}
+        checkState={imapRefusedCheckState}
         isBackendRunning
         onRemoveEmailAccount={requests.onRemoveEmailAccount}
         onSaveEmailAccount={onSaveEmailAccount}

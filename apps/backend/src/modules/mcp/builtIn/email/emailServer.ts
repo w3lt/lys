@@ -21,12 +21,6 @@ export const EMAIL_SERVER_NAME = "email" satisfies BuiltInMcpServerName
  */
 export const EMAIL_ACCOUNT_VARIABLE_NAME = "LYS_EMAIL_ACCOUNT"
 
-/**
- * Subcommand under which the email server signs in to the account's servers
- * and reports the outcome, instead of serving MCP.
- */
-export const EMAIL_SERVER_CHECK_SUBCOMMAND = "check"
-
 /** How the email server Lys ships is run, before any subcommand. */
 export type EmailServerCommand = Readonly<{
   /**
@@ -37,16 +31,6 @@ export type EmailServerCommand = Readonly<{
   /** Arguments before the subcommand; none for the installed server. */
   arguments: readonly string[]
 }>
-
-/** Read of a built-in server whose account is not saved. */
-const ACCOUNT_MISSING: BuiltInMcpServerRead = Object.freeze({
-  status: "account-missing"
-})
-
-/** Read of a built-in server whose saved account is not usable. */
-const ACCOUNT_INVALID: BuiltInMcpServerRead = Object.freeze({
-  status: "account-invalid"
-})
 
 /**
  * Builds the command that runs the installed email server.
@@ -87,6 +71,16 @@ export function createEmailMcpServer(
     name: EMAIL_SERVER_NAME,
     transport: "stdio",
     readServer: async (): Promise<BuiltInMcpServerRead> => {
+      /** Read of a built-in server whose account is not saved. */
+      const accountMissing: BuiltInMcpServerRead = Object.freeze({
+        status: "account-missing"
+      })
+
+      /** Read of a built-in server whose saved account is not usable. */
+      const accountInvalid: BuiltInMcpServerRead = Object.freeze({
+        status: "account-invalid"
+      })
+
       const read = await readAccount()
       switch (read.status) {
         case "read":
@@ -99,10 +93,10 @@ export function createEmailMcpServer(
             )
           })
         case "missing":
-          return ACCOUNT_MISSING
+          return accountMissing
         case "invalid":
         case "unreadable":
-          return ACCOUNT_INVALID
+          return accountInvalid
       }
     }
   })

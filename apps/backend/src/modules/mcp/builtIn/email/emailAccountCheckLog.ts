@@ -4,9 +4,6 @@ import type {
   EmailServerRunFailure
 } from "./emailAccountCheck"
 
-/** Message of every entry about a check that did not report. */
-const CHECK_FAILED_MESSAGE = "The email server's account check failed"
-
 /**
  * Writes one email account check event to the backend log.
  *
@@ -63,6 +60,9 @@ function handleRunFailure(
   logger: FastifyBaseLogger,
   failure: EmailServerRunFailure
 ): void {
+  /** Message of every entry about a check that did not report. */
+  const checkFailedMessage = "The email server's account check failed"
+
   switch (failure.kind) {
     case "closed":
       logger.warn(
@@ -76,14 +76,14 @@ function handleRunFailure(
       }
       logger.error(
         { failure: loggedFailure, err: failure.error },
-        CHECK_FAILED_MESSAGE
+        checkFailedMessage
       )
       return
     }
     case "timed-out":
     case "exited":
     case "unreadable-output":
-      logger.error({ failure }, CHECK_FAILED_MESSAGE)
+      logger.error({ failure }, checkFailedMessage)
       return
     default: {
       const unhandledFailure: never = failure

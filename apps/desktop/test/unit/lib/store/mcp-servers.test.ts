@@ -95,22 +95,6 @@ const INVALID_SETTINGS_LIST = buildMcpServerList(
 )
 
 /**
- * Declared problems the backend refuses a reconnect of `notes` with, each
- * changing nothing: the server is not applied, or it is switched off or
- * cannot start.
- */
-const RECONNECT_REFUSALS = [
-  [
-    "has not applied the server",
-    () => buildJsonResponse(404, buildMcpServerNotFoundProblem("notes"))
-  ],
-  [
-    "says the server is switched off or cannot start",
-    () => buildJsonResponse(409, buildMcpServerOffProblem("notes"))
-  ]
-] as const
-
-/**
  * Builds a route that answers with a server list.
  *
  * @param list - List the backend answers with.
@@ -188,6 +172,22 @@ function startSettingsHost(saveSettings: () => unknown = () => null) {
 }
 
 describe("useMcpServerStore", () => {
+  /**
+   * Declared problems the backend refuses a reconnect of `notes` with, each
+   * changing nothing: the server is not applied, or it is switched off or
+   * cannot start.
+   */
+  const reconnectRefusals = [
+    [
+      "has not applied the server",
+      () => buildJsonResponse(404, buildMcpServerNotFoundProblem("notes"))
+    ],
+    [
+      "says the server is switched off or cannot start",
+      () => buildJsonResponse(409, buildMcpServerOffProblem("notes"))
+    ]
+  ] as const
+
   describe("loadMcpServers", () => {
     it("starts with no list and no failure", async () => {
       const { useMcpServerStore } = await loadFreshMcpServerStore()
@@ -460,7 +460,7 @@ describe("useMcpServerStore", () => {
       }
     )
 
-    it.each(RECONNECT_REFUSALS)(
+    it.each(reconnectRefusals)(
       "applies the saved servers when the backend %s",
       async (_label, refusal) => {
         const { readRouteKeys } = startMcpBackend({
@@ -627,7 +627,7 @@ describe("useMcpServerStore", () => {
       )
     })
 
-    it.each(RECONNECT_REFUSALS)(
+    it.each(reconnectRefusals)(
       "discards the answer of a reconnect arriving after the reset, applying nothing, when the backend %s",
       async (_label, refusal) => {
         const reconnectAnswer = createControlledPromise<Response>()
@@ -708,16 +708,16 @@ describe("useMcpServerStore", () => {
   })
 
   describe("saveBuiltInMcpServerSwitch", () => {
-    /** The stored servers with the email server switched on and starting. */
-    const EMAIL_STARTING_LIST = buildMcpServerList([
-      buildBuiltInMcpServerStatus("email", CONNECTING_MCP_STATE),
-      ...CONNECTED_LIST.servers
-    ])
-
     it("saves the switch, then asks the running backend to apply the group", async () => {
+      /** The stored servers with the email server switched on and starting. */
+      const emailStartingList = buildMcpServerList([
+        buildBuiltInMcpServerStatus("email", CONNECTING_MCP_STATE),
+        ...CONNECTED_LIST.servers
+      ])
+
       const host = startSettingsHost()
       const { readRouteKeys } = startMcpBackend({
-        [SYNC_ROUTE]: answerList(EMAIL_STARTING_LIST)
+        [SYNC_ROUTE]: answerList(emailStartingList)
       })
       const { useMcpServerStore, useLysStore } = await loadFreshMcpServerStore()
 
@@ -726,7 +726,7 @@ describe("useMcpServerStore", () => {
       ).resolves.toBe("saved")
       await vi.waitFor(() => {
         expect(useMcpServerStore.getState().list).toEqual(
-          buildLoadedState(EMAIL_STARTING_LIST)
+          buildLoadedState(emailStartingList)
         )
       })
 

@@ -41,6 +41,10 @@ fn assert_logged_by_case(case: &str, line: &str) {
     assert!(log.lines().any(|logged| logged == line), "{log}");
 }
 
+/// Checks that the check case whose `LOGOUT` goes unanswered passes again
+/// as a child process and writes
+/// `imap: logout did not finish within the check's limit` on standard
+/// error.
 #[test]
 fn logs_an_imap_logout_past_the_check_limit() {
     assert_logged_by_case(
@@ -49,6 +53,9 @@ fn logs_an_imap_logout_past_the_check_limit() {
     );
 }
 
+/// Checks that the check case whose `QUIT` goes unanswered passes again as
+/// a child process and writes
+/// `smtp: quit did not finish within the check's limit` on standard error.
 #[test]
 fn logs_an_smtp_quit_past_the_check_limit() {
     assert_logged_by_case(
@@ -57,6 +64,9 @@ fn logs_an_smtp_quit_past_the_check_limit() {
     );
 }
 
+/// Checks that the check case whose `QUIT` closes the connection passes
+/// again as a child process and writes `smtp: quit failed` on standard
+/// error.
 #[test]
 fn logs_a_failed_smtp_quit() {
     assert_logged_by_case(
@@ -65,6 +75,9 @@ fn logs_a_failed_smtp_quit() {
     );
 }
 
+/// Checks that the send case whose `QUIT` goes unanswered after the send
+/// passes again as a child process and writes `smtp: quit timed out` on
+/// standard error.
 #[test]
 fn logs_an_smtp_quit_that_times_out_after_a_send() {
     assert_logged_by_case(
@@ -73,6 +86,9 @@ fn logs_an_smtp_quit_that_times_out_after_a_send() {
     );
 }
 
+/// Checks that the case whose `LOGOUT` the server refuses after
+/// `list_folders` passes again as a child process and writes
+/// `imap: logout refused` on standard error.
 #[test]
 fn logs_a_refused_imap_logout_after_a_call() {
     assert_logged_by_case(
@@ -81,6 +97,9 @@ fn logs_a_refused_imap_logout_after_a_call() {
     );
 }
 
+/// Checks that the case whose `LOGOUT` goes unanswered after `list_folders`
+/// passes again as a child process and writes `imap: logout timed out` on
+/// standard error.
 #[test]
 fn logs_an_imap_logout_that_times_out_after_a_call() {
     assert_logged_by_case(

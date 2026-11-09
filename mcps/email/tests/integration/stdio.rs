@@ -157,6 +157,9 @@ fn cancel_held_call(variable: String, call: Value, released: mpsc::Receiver<()>)
     logged
 }
 
+/// Checks that a `send_email` call cancelled over stdio, while the fake
+/// SMTP server holds its answer to the end of the data, is logged as
+/// `cancelled-after-hand-over`, with the message at the server.
 #[tokio::test(flavor = "multi_thread")]
 async fn logs_a_send_cancelled_after_the_hand_over_as_unconfirmed() {
     let imap = FakeImapServer::start(FakeMailbox::create_standard(), ImapMode::Plain, None).await;
@@ -193,6 +196,9 @@ fn build_draft_message() -> NewMessage<'static> {
     }
 }
 
+/// Checks that a `save_draft` call cancelled over stdio after the fake IMAP
+/// server stored the new draft is logged as `cancelled-while-saving`, and
+/// that the draft it replaces stays, not marked deleted.
 #[tokio::test(flavor = "multi_thread")]
 async fn logs_a_save_cancelled_once_storing_began_as_stopped_while_saving() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -428,6 +434,10 @@ fn assert_logged_without_account(stderr: &str) {
     assert!(!stderr.contains("example.com"), "{stderr}");
 }
 
+/// Checks that the binary, run over stdio as the backend runs it, answers
+/// the MCP handshake, the tool list, a folder list, a cut read, two failed
+/// calls, and a draft sent first without and then with its fields, logs
+/// nothing of the account, and exits 0 when its input ends.
 #[tokio::test(flavor = "multi_thread")]
 async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
     let imap = FakeImapServer::start(build_dialogue_mailbox(), ImapMode::Plain, None).await;
@@ -462,6 +472,9 @@ async fn serves_mcp_over_stdio_and_exits_when_its_input_ends() {
     assert_logged_without_account(&dialogue.stderr);
 }
 
+/// Checks that the binary, whose standard input ends before the MCP
+/// `initialize` request, logs that starting failed, exits 1, and sends no
+/// command to either server.
 #[tokio::test(flavor = "multi_thread")]
 async fn logs_a_failed_start_and_exits_with_1_when_its_input_ends_before_initialize() {
     let imap = FakeImapServer::start(FakeMailbox::create_standard(), ImapMode::Plain, None).await;

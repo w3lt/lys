@@ -235,6 +235,10 @@ mod tests {
         }
     }
 
+    /// Checks that listed folders take a role from a special-use attribute
+    /// before one from their name, each role going to one folder, and that
+    /// names are decoded, `\Noselect` folders are not selectable, and a
+    /// role without a folder finds none.
     #[test]
     fn gives_roles_by_attribute_before_name_and_each_role_once() {
         let listings = [
@@ -275,6 +279,7 @@ mod tests {
         );
     }
 
+    /// Checks that every folder role but All holds messages of its own.
     #[test]
     fn says_that_every_role_but_the_all_view_holds_messages_of_its_own() {
         let answers: Vec<(FolderRole, bool)> = FolderRole::ALL_ROLES
@@ -296,6 +301,8 @@ mod tests {
         );
     }
 
+    /// Checks that a folder is found by its exact name, and the inbox by
+    /// `INBOX` in any letter case.
     #[test]
     fn finds_folders_by_name_with_inbox_in_any_case() {
         let folders = build_folders(&[build_listing("INBOX", &[]), build_listing("Sent", &[])]);
@@ -311,6 +318,9 @@ mod tests {
         assert_eq!(find_folder(&folders, "sent"), None);
     }
 
+    /// Checks that a folder has subfolders only when a listed name starts
+    /// with its name and its delimiter, so that `Notes 2025` is not below
+    /// `Notes` and a folder without a delimiter has none.
     #[test]
     fn finds_subfolders_only_below_the_folder_name_and_its_delimiter() {
         let flat = FolderListing {

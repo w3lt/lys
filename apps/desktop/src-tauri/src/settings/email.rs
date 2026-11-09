@@ -26,7 +26,7 @@ use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::host_name::is_host_name;
-use super::json_object::parse_json_object;
+use super::json::parse_json_object;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 /// Email account persisted under the `email` JSON object.
@@ -143,7 +143,7 @@ impl TryFrom<StoredEmailAccount> for EmailAccount {
     /// Returns the message of the first broken rule, without any value.
     fn try_from(stored: StoredEmailAccount) -> Result<Self, Self::Error> {
         /// Rule of an address, as an error message.
-        const ADDRESS_RULE: &str = "an email address must be a name of 1 to 64 visible ASCII characters other than @, then @ and an ASCII host name, up to 254 characters in all";
+        const ADDRESS_RULE: &str = "an email address must be a name of 1 to 64 ASCII letters, digits, dots, and ! # $ % & ' * + - / = ? ^ _ ` { | } ~, with no dot at either end or two in a row, then @ and an ASCII host name, up to 254 characters in all";
 
         /// Rule of a display name, as an error message.
         const DISPLAY_NAME_RULE: &str = "a display name must be up to 100 characters, without control characters or white space at either end";
@@ -273,11 +273,15 @@ impl Security {
 #[serde(transparent)]
 /// Address of the account, as the person typed it.
 ///
-/// Holds a name of 1 to 64 visible ASCII characters other than `@`, then
-/// `@`, then a host name, at most 254 characters in all. A host with letters
-/// beyond ASCII is not accepted: SMTP sends the address as typed, without
-/// the extension that carries them. It serializes as a JSON string. `Debug`
-/// never shows the address.
+/// Holds a name of 1 to 64 ASCII letters, digits, dots, and
+/// ``! # $ % & ' * + - / = ? ^ _ ` { | } ~``, with no dot at either end or
+/// two in a row, then `@`, then a host name, at most 254 characters in all.
+/// The name is RFC 5322's dot-atom. The only other name lettre, the email
+/// server's mail library, sends from is a quoted one, which is not accepted.
+/// A host with letters beyond ASCII is not accepted: SMTP sends the address
+/// as typed, without the extension that carries them. It serializes as a
+/// JSON string.
+/// `Debug` never shows the address.
 struct EmailAddress(
     /// The validated address.
     String,
@@ -418,16 +422,23 @@ impl fmt::Debug for MailHost {
 }
 
 /// Reports whether `name` is the part of an address before `@`: 1 to 64
-/// visible ASCII characters other than `@`.
+/// characters of atoms joined by single dots.
 fn is_address_name(name: &str) -> bool {
     /// Most characters the part of an address before `@` may have, inclusive.
     /// Matches `MAXIMUM_EMAIL_LOCAL_PART_LENGTH` in `@lys/share`.
     const ADDRESS_NAME_MAX_LENGTH: usize = 64;
 
-    (1..=ADDRESS_NAME_MAX_LENGTH).contains(&name.len())
-        && name
+    name.len() <= ADDRESS_NAME_MAX_LENGTH && name.split('.').all(is_address_atom)
+}
+
+/// Reports whether `atom` is one atom of an address's name, a run between
+/// its dots: at least one ASCII letter, digit, or
+/// ``! # $ % & ' * + - / = ? ^ _ ` { | } ~``.
+fn is_address_atom(atom: &str) -> bool {
+    !atom.is_empty()
+        && atom
             .bytes()
-            .all(|byte| byte.is_ascii_graphic() && byte != b'@')
+            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-/=?^_`{|}~".contains(&byte))
 }
 
 /// Reports whether `value` is a saved text of the account: at most
@@ -564,6 +575,9 @@ mod tests {
         }
     }
 
+    /// Checks that an email group without an account, or with a null one,
+    /// reads as no account and writes `account` as null, as the default
+    /// group does.
     #[test]
     fn reads_a_missing_account_as_none_and_writes_a_null_account() {
         for stored in [json!({}), json!({ "account": null })] {
@@ -580,6 +594,8 @@ mod tests {
         );
     }
 
+    /// Checks that an email group with a valid account writes back exactly
+    /// as it was stored.
     #[test]
     fn writes_an_account_back_unchanged() {
         let stored = json!({ "account": get_account() });
@@ -589,6 +605,9 @@ mod tests {
         assert_eq!(serde_json::to_value(&settings).expect("serialize"), stored);
     }
 
+    /// Checks that an email group is refused when it is null, an array, or
+    /// text, when it has an unknown field, and when its account is an array,
+    /// text, or an object without fields.
     #[test]
     fn rejects_a_null_group_unknown_fields_and_accounts_that_are_not_objects() {
         for stored in [
@@ -604,6 +623,9 @@ mod tests {
         }
     }
 
+    /// Checks that an account missing any field, or holding null in one, an
+    /// unknown field, or a sent-copy switch written as text is refused, with
+    /// no failure quoting the address.
     #[test]
     fn rejects_an_account_with_a_missing_null_or_unknown_field_without_quoting_it() {
         for field in [
@@ -629,8 +651,12 @@ mod tests {
         );
     }
 
+    /// Checks that an account accepts addresses whose name before `@` is a
+    /// dot-atom, every symbol it may hold and dots between atoms included,
+    /// and whose host is a host name or IPv4 address, up to the longest:
+    /// 254 characters, with a 64-character name.
     #[test]
-    fn accepts_addresses_of_a_visible_name_and_a_host_name_up_to_254_characters() {
+    fn accepts_addresses_of_a_dot_atom_name_and_a_host_name_up_to_254_characters() {
         let longest = format!(
             "{}@{}.{}.{}",
             "a".repeat(64),
@@ -643,6 +669,8 @@ mod tests {
             "a@b",
             "person@example.com",
             "o'neil+tag.1_2-3@example.com",
+            "!#$%&'*+-/=?^_`{|}~@example.com",
+            "per.son.a@example.com",
             "person@Mail-2.Example.COM",
             "person@192.0.2.10",
             longest.as_str(),
@@ -651,6 +679,12 @@ mod tests {
         }
     }
 
+    /// Checks that an account refuses an address that is empty, over 254
+    /// characters, or has a name over 64, that lacks a name, a host, or a
+    /// single `@`, whose name has a dot at either end or two in a row, a
+    /// `(`, or quotes, that holds a space, a line feed, or a non-ASCII
+    /// letter, or whose host is not an ASCII host name or IPv4 address, and
+    /// a number in its place. No failure quotes the address.
     #[test]
     fn rejects_other_addresses_without_quoting_them() {
         let too_long = format!(
@@ -671,6 +705,11 @@ mod tests {
             "person@".to_string(),
             "per@son@example.com".to_string(),
             "per son@example.com".to_string(),
+            "per..son@example.com".to_string(),
+            ".person@example.com".to_string(),
+            "person.@example.com".to_string(),
+            "per(son@example.com".to_string(),
+            "\"person\"@example.com".to_string(),
             "pérson@example.com".to_string(),
             "person@exämple.com".to_string(),
             "person@example..com".to_string(),
@@ -685,6 +724,8 @@ mod tests {
         assert_account_refused(build_account_with("address", json!(42)), "person");
     }
 
+    /// Checks that an account accepts a display name of 0 to 100 characters,
+    /// accented or in a non-Latin script with an inner space.
     #[test]
     fn accepts_display_names_up_to_100_characters_including_an_empty_one() {
         for name in ["", "A", "Jeanne d'Arc Épée", "東京 太郎", &"é".repeat(100)] {
@@ -692,6 +733,10 @@ mod tests {
         }
     }
 
+    /// Checks that an account refuses, without quoting it, a display name
+    /// over 100 characters, one with white space at an edge, a no-break
+    /// space included, or with a control character, and a number in its
+    /// place.
     #[test]
     fn rejects_long_padded_and_control_character_display_names_without_quoting_them() {
         for name in [
@@ -708,6 +753,8 @@ mod tests {
         assert_account_refused(build_account_with("displayName", json!(1)), "Secret");
     }
 
+    /// Checks that an account accepts a user name of 1 to 254 characters, an
+    /// address or a backslashed domain name among them.
     #[test]
     fn accepts_user_names_of_one_to_254_characters() {
         for name in [
@@ -721,6 +768,9 @@ mod tests {
         }
     }
 
+    /// Checks that an account refuses, without quoting it, a user name that
+    /// is empty or over 254 characters, has a space at an edge, or holds a
+    /// control character.
     #[test]
     fn rejects_empty_long_padded_and_control_character_user_names_without_quoting_them() {
         for name in [
@@ -735,6 +785,9 @@ mod tests {
         }
     }
 
+    /// Checks that an account accepts a server host that is an ASCII host
+    /// name in any case, up to 253 characters, an IPv4 address, or an IPv6
+    /// address in brackets, in full, compressed, or with an IPv4 tail.
     #[test]
     fn accepts_host_names_ipv4_addresses_and_bracketed_ipv6_addresses() {
         let longest_name = format!(
@@ -761,6 +814,10 @@ mod tests {
         }
     }
 
+    /// Checks that an account refuses, without quoting it, a server host
+    /// that is empty, over 253 characters, holds a port, a scheme, a space,
+    /// or a non-ASCII letter, is an IPv6 address without both brackets, or
+    /// puts anything but an IPv6 address in brackets, and a null host.
     #[test]
     fn rejects_other_hosts_without_quoting_them() {
         let too_long_name = format!(
@@ -794,6 +851,9 @@ mod tests {
         assert_account_refused(build_account_with_imap("host", Value::Null), "secret");
     }
 
+    /// Checks that an account accepts a server port from 1 to 65,535, also
+    /// written with a zero fraction such as `1.0`, and refuses one outside
+    /// that range, a fraction, text, and null.
     #[test]
     fn accepts_ports_from_1_to_65535_and_rejects_the_rest() {
         for port in [
@@ -823,6 +883,9 @@ mod tests {
         }
     }
 
+    /// Checks that an account accepts TLS and STARTTLS for remote servers,
+    /// and plain text for both servers on `localhost` in any case,
+    /// `127.0.0.1`, or `[::1]`.
     #[test]
     fn accepts_tls_and_starttls_everywhere_and_plain_only_on_loopback_hosts() {
         for (host, security) in [
@@ -840,6 +903,11 @@ mod tests {
         }
     }
 
+    /// Checks that an account refuses a security other than `tls`,
+    /// `starttls`, and `plain` in lower case, and a plain IMAP connection to
+    /// a host other than `localhost`, `127.0.0.1`, and `[::1]` in that short
+    /// form, with a failure about the lack of TLS. A plain SMTP connection
+    /// to a remote host is refused too.
     #[test]
     fn rejects_other_securities_and_plain_connections_to_other_hosts() {
         for security in [
@@ -868,6 +936,9 @@ mod tests {
         assert!(parse_account(plain_smtp).is_err());
     }
 
+    /// Checks that an account refuses, without quoting it, an IMAP or SMTP
+    /// server that is null, an array, or text, or an object that lacks a
+    /// field or has an unknown one.
     #[test]
     fn rejects_servers_that_are_not_objects_or_have_other_fields_without_quoting_them() {
         for server in [
@@ -883,10 +954,13 @@ mod tests {
         }
     }
 
+    /// Checks that an account's failure states the rule that its address,
+    /// display name, user name, server host, port, or security breaks, and
+    /// that an unknown field fails with the account's own rule.
     #[test]
     fn reports_the_broken_rule_of_a_field() {
         /// The address rule, as an error about an address states it.
-        const ADDRESS_RULE_TEXT: &str = "an email address must be a name of 1 to 64 visible ASCII characters other than @, then @ and an ASCII host name, up to 254 characters in all";
+        const ADDRESS_RULE_TEXT: &str = "an email address must be a name of 1 to 64 ASCII letters, digits, dots, and ! # $ % & ' * + - / = ? ^ _ ` { | } ~, with no dot at either end or two in a row, then @ and an ASCII host name, up to 254 characters in all";
 
         /// The host rule, as an error about a mail server host states it.
         const HOST_RULE_TEXT: &str =
@@ -901,6 +975,10 @@ mod tests {
             ),
             (
                 build_account_with("address", json!("pérson@example.com")),
+                ADDRESS_RULE_TEXT,
+            ),
+            (
+                build_account_with("address", json!("per..son@example.com")),
                 ADDRESS_RULE_TEXT,
             ),
             (
@@ -954,6 +1032,9 @@ mod tests {
         }
     }
 
+    /// Checks that an email group's `Debug` output shows the address and the
+    /// hosts as `<redacted>` and none of the account's texts, and shows the
+    /// ports as numbers, the SMTP security, and the sent-copy switch.
     #[test]
     fn debug_output_hides_every_text_and_shows_ports_and_securities() {
         let settings =
@@ -976,6 +1057,9 @@ mod tests {
         }
     }
 
+    /// Checks that the host judges each email group of the shared fixture,
+    /// which holds at least 100, as `@lys/share`'s rules do, and writes each
+    /// accepted one back as the fixture states.
     #[test]
     fn judges_and_writes_every_shared_group_as_the_share_package_rules_do() {
         /// Groups that the host and `emailSettingsSchema` in `@lys/share` must

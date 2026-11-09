@@ -68,8 +68,6 @@ pub enum CompositionProblem {
     NoRecipient,
     /// A recipient is not an email address; the text is the one given.
     InvalidRecipient(String),
-    /// The account's own address is not one lettre accepts.
-    InvalidSender,
     /// An attachment's content type is not one lettre accepts.
     InvalidAttachmentType(String),
     /// lettre refused the message, with its reason.
@@ -84,10 +82,6 @@ impl CompositionProblem {
             Self::InvalidRecipient(text) => format!(
                 "{text} is not an email address. Give addresses as name@example.com or Name <name@example.com>."
             ),
-            Self::InvalidSender => {
-                "The account's address cannot be used as a sender. Check it in Settings → MCP."
-                    .to_owned()
-            }
             Self::InvalidAttachmentType(content_type) => {
                 format!("The attachment type {content_type} cannot be attached.")
             }
@@ -163,7 +157,7 @@ fn build_message_header(
     if composition.to.is_empty() && composition.cc.is_empty() && composition.bcc.is_empty() {
         return Err(CompositionProblem::NoRecipient);
     }
-    let sender = build_sender(account)?;
+    let sender = build_sender(account);
     let message_id = create_message_id(&account.address, stamp);
     let mut builder = Message::builder()
         .from(sender)
@@ -245,13 +239,10 @@ fn build_message_body(
 ///
 /// # Returns
 ///
-/// The mailbox, or `InvalidSender` when lettre does not accept the
-/// account's address.
-fn build_sender(account: &Account) -> Result<Mailbox, CompositionProblem> {
-    let address = lettre::Address::from_str(&account.address)
-        .map_err(|_| CompositionProblem::InvalidSender)?;
+/// The mailbox of the account's address.
+fn build_sender(account: &Account) -> Mailbox {
     let name = (!account.display_name.is_empty()).then(|| account.display_name.clone());
-    Ok(Mailbox::new(name, address))
+    Mailbox::new(name, account.address.clone())
 }
 
 /// Parses a recipient the model gave.
@@ -318,10 +309,8 @@ fn build_readable_mailbox(mailbox: Mailbox) -> Option<String> {
 ///
 /// The identifier without angle brackets, such as
 /// `lys-1793611800.123456789-4242-7@example.com`.
-fn create_message_id(address: &str, stamp: MessageStamp) -> String {
-    let domain = address
-        .rsplit_once('@')
-        .map_or("localhost", |(_, domain)| domain);
+fn create_message_id(address: &lettre::Address, stamp: MessageStamp) -> String {
+    let domain = address.domain();
     let since_epoch = stamp.now.duration_since(UNIX_EPOCH).unwrap_or_default();
     format!(
         "lys-{}.{:09}-{}-{}@{domain}",
@@ -450,23 +439,9 @@ mod tests {
 
     /// The account every test composes from.
     fn build_account() -> Account {
-        build_account_with_address("person@example.com")
-    }
-
-    /// The account of [`build_account`] with another address, which the
-    /// account rules accept.
-    ///
-    /// # Arguments
-    ///
-    /// * `address` - The account's address.
-    ///
-    /// # Panics
-    ///
-    /// When the account rules refuse the address.
-    fn build_account_with_address(address: &str) -> Account {
-        parse_account_variable(&format!(
-            "{{\"address\":\"{address}\",\"displayName\":\"A Person\",\"userName\":\"person@example.com\",\"password\":\"correct horse\",\"imap\":{{\"host\":\"imap.example.com\",\"port\":993,\"security\":\"tls\"}},\"smtp\":{{\"host\":\"smtp.example.com\",\"port\":587,\"security\":\"starttls\"}},\"serverKeepsSentCopy\":false}}",
-        ))
+        parse_account_variable(
+            r#"{"address":"person@example.com","displayName":"A Person","userName":"person@example.com","password":"correct horse","imap":{"host":"imap.example.com","port":993,"security":"tls"},"smtp":{"host":"smtp.example.com","port":587,"security":"starttls"},"serverKeepsSentCopy":false}"#,
+        )
         .expect("account")
     }
 
@@ -493,6 +468,10 @@ mod tests {
         }
     }
 
+    /// Checks that a composed message carries its sender, To, Cc, and reply
+    /// headers with no trace of Bcc. Its `Message-ID` holds the stamp's
+    /// time and count and the account's domain, and its non-ASCII subject
+    /// and its body parse back.
     #[test]
     fn composes_a_plain_message_with_every_field_but_bcc() {
         let composition = build_plain_composition();
@@ -534,6 +513,9 @@ mod tests {
         assert_eq!(parsed.text, "Hello Jane,\r\n\r\nBye.\r\n");
     }
 
+    /// Checks that a sent message's envelope goes from the account's
+    /// address to every To, Cc, and Bcc recipient, and that a draft of the
+    /// same composition keeps its `Bcc` header.
     #[test]
     fn sends_to_every_recipient_and_keeps_bcc_only_in_a_draft() {
         let composition = build_plain_composition();
@@ -559,6 +541,8 @@ mod tests {
         );
     }
 
+    /// Checks that a message with a CSV and a PDF attachment parses back to
+    /// its body, both names, the CSV's text, and the PDF's bytes.
     #[test]
     fn composes_a_message_with_attachments_that_parses_back() {
         let composition = Composition {
@@ -595,6 +579,9 @@ mod tests {
         assert_eq!(parsed.attachments[1].bytes, b"%PDF-");
     }
 
+    /// Checks that a composition without a recipient gives `NoRecipient`, a
+    /// recipient that is not an address `InvalidRecipient`, and a draft
+    /// attachment whose type does not parse `InvalidAttachmentType`.
     #[test]
     fn refuses_a_message_without_recipient_or_with_a_bad_one() {
         let account = build_account();
@@ -634,21 +621,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn refuses_an_account_address_that_lettre_cannot_send_from() {
-        let account = build_account_with_address("john..doe@example.com");
-        let composition = build_plain_composition();
-
-        assert_eq!(
-            build_sent_message(&account, &composition, build_stamp(1)),
-            Err(CompositionProblem::InvalidSender)
-        );
-        assert_eq!(
-            build_draft_message(&account, &composition, build_stamp(1)),
-            Err(CompositionProblem::InvalidSender)
-        );
-    }
-
+    /// Checks that each `CompositionProblem` reads as the sentence the
+    /// model gets.
     #[test]
     fn describes_every_composition_problem_as_the_model_reads_it() {
         let sentences = [
@@ -659,10 +633,6 @@ mod tests {
             (
                 CompositionProblem::InvalidRecipient("nobody".to_owned()),
                 "nobody is not an email address. Give addresses as name@example.com or Name <name@example.com>.",
-            ),
-            (
-                CompositionProblem::InvalidSender,
-                "The account's address cannot be used as a sender. Check it in Settings → MCP.",
             ),
             (
                 CompositionProblem::InvalidAttachmentType("not a type".to_owned()),
@@ -679,6 +649,10 @@ mod tests {
         }
     }
 
+    /// Checks that a recipient built from a mailbox's name and address,
+    /// quoted and escaped where needed, parses back to the same address. A
+    /// blank name, or one with a control character, is left out, and a
+    /// mailbox without a usable address gives none.
     #[test]
     fn builds_recipients_that_read_back_to_the_same_mailbox() {
         let cases = [
@@ -732,6 +706,10 @@ mod tests {
         }
     }
 
+    /// Checks that a reply's subject gains `Re:` and a forward's `Fwd:`
+    /// unless one is there, that a reply refers to the original after its
+    /// references, and that a forward quotes the original's headers and
+    /// text below the note, with no attachment for a message that has none.
     #[test]
     fn builds_reply_and_forward_subjects_references_and_bodies() {
         assert_eq!(build_reply_subject("Hello"), "Re: Hello");

@@ -520,6 +520,9 @@ pub fn format_copy_for_log(copy: &SentCopy) -> String {
 mod tests {
     use super::*;
 
+    /// Checks that valid message fields pass, while both `reply_to_id` and
+    /// `forward_id`, more than 50 recipients in one field, or a line break
+    /// in the subject are refused with the sentence the model reads.
     #[test]
     fn checks_the_message_fields() {
         let fine = MessageArguments {
@@ -563,6 +566,9 @@ mod tests {
         );
     }
 
+    /// Checks that a body of 500,000 characters is taken, counted in
+    /// characters even when each takes two bytes, and that one more is
+    /// refused.
     #[test]
     fn takes_a_body_of_500000_characters_and_refuses_a_longer_one() {
         let longest = MessageArguments {
@@ -585,6 +591,9 @@ mod tests {
         );
     }
 
+    /// Checks that a saved, missing, or unconfirmed copy of a sent message
+    /// reads as its sentence and its log text, and that an optional address
+    /// line is left out when its list is empty.
     #[test]
     fn describes_what_became_of_the_copy() {
         assert_eq!(

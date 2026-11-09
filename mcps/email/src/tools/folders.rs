@@ -238,6 +238,8 @@ async fn delete_empty_folder(
 mod tests {
     use super::*;
 
+    /// Checks that `manage_folder` reads its action by name, such as
+    /// `rename`, and refuses an unknown action or an unknown argument.
     #[test]
     fn parses_the_action_names() {
         let arguments: FolderArguments =

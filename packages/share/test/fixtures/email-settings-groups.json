@@ -538,6 +538,86 @@
     }
   },
   {
+    "case": "an account whose address name holds every symbol a name may hold",
+    "group": {
+      "account": {
+        "address": "!#$%&'*+-/=?^_`{|}~@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "!#$%&'*+-/=?^_`{|}~@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account whose address name has single dots between its parts",
+    "group": {
+      "account": {
+        "address": "a.b.c@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "a.b.c@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
     "case": "an account whose address host has capitals and digits",
     "group": {
       "account": {
@@ -1325,6 +1405,116 @@
     "group": {
       "account": {
         "address": "per son@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address whose name has two dots in a row",
+    "group": {
+      "account": {
+        "address": "john..doe@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address whose name starts with a dot",
+    "group": {
+      "account": {
+        "address": ".john@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address whose name ends with a dot",
+    "group": {
+      "account": {
+        "address": "john.@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address whose name has a parenthesis",
+    "group": {
+      "account": {
+        "address": "a(b@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address whose name is quoted",
+    "group": {
+      "account": {
+        "address": "\"john\"@example.com",
         "displayName": "A Person",
         "userName": "person@example.com",
         "imap": {

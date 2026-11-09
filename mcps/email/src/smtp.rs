@@ -648,6 +648,11 @@ mod tests {
         Envelope::new(Some(sender), vec![recipient]).expect("an envelope")
     }
 
+    /// Checks that a message asks for `SMTPUTF8` when an address goes
+    /// beyond ASCII and for `8BITMIME` when its body does, only from a
+    /// server that offers them, that a message needing one the server lacks
+    /// fails with that extension, and that an ASCII message asks for
+    /// neither.
     #[test]
     fn asks_for_each_extension_a_message_needs_only_from_a_server_that_offers_it() {
         let neither = build_server_info(&[]);

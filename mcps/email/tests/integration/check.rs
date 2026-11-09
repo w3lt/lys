@@ -106,6 +106,8 @@ async fn build_account_without_imap(smtp: &FakeSmtpServer) -> Account {
     )
 }
 
+/// Checks that the account check accepts both sign-ins to the fake IMAP and
+/// SMTP servers over implicit TLS, over STARTTLS, and in plain text.
 #[tokio::test(flavor = "multi_thread")]
 async fn accepts_both_sign_ins_over_tls_and_starttls() {
     let authority = TestAuthority::new();
@@ -149,6 +151,8 @@ async fn accepts_both_sign_ins_over_tls_and_starttls() {
     assert_eq!(plain, (CheckOutcome::Accepted, CheckOutcome::Accepted));
 }
 
+/// Checks that the account check reports a wrong password for both fake
+/// servers when the account's password is not theirs.
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_a_wrong_password_on_each_server() {
     let authority = TestAuthority::new();
@@ -191,6 +195,8 @@ async fn reports_a_wrong_password_on_each_server() {
     );
 }
 
+/// Checks that the account check reports both servers as unreachable on a
+/// port where nothing listens.
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_servers_that_cannot_be_reached() {
     let authority = TestAuthority::new();
@@ -229,6 +235,9 @@ async fn reports_servers_that_cannot_be_reached() {
     );
 }
 
+/// Checks that the account check reports a refused certificate for both
+/// servers, over TLS and STARTTLS, when an authority other than the trusted
+/// one signed their certificates.
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_certificates_the_trust_refuses() {
     let authority = TestAuthority::new();
@@ -270,6 +279,8 @@ async fn reports_certificates_the_trust_refuses() {
     );
 }
 
+/// Checks that the account check reports that encryption is not offered
+/// when STARTTLS sign-ins meet fake servers that do not offer it.
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_servers_that_do_not_offer_starttls() {
     let authority = TestAuthority::new();
@@ -298,6 +309,8 @@ async fn reports_servers_that_do_not_offer_starttls() {
     );
 }
 
+/// Checks that the account check reports a protocol error on both servers
+/// when a TLS account meets fake servers that speak plain text.
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_a_tls_account_against_a_plain_text_server_as_a_protocol_error() {
     let authority = TestAuthority::new();
@@ -319,6 +332,9 @@ async fn reports_a_tls_account_against_a_plain_text_server_as_a_protocol_error()
     assert_eq!(outcome, (protocol_error, protocol_error));
 }
 
+/// Checks that the account check reports a protocol error for an IMAP
+/// server that answers with something other than IMAP, and still accepts
+/// the SMTP sign-in.
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_a_server_that_speaks_something_else() {
     let authority = TestAuthority::new();
@@ -343,6 +359,8 @@ async fn reports_a_server_that_speaks_something_else() {
     assert_eq!(outcome.1, CheckOutcome::Accepted);
 }
 
+/// Checks that the SMTP sign-in uses `AUTH LOGIN`, and is accepted, when
+/// the fake server withholds `PLAIN`.
 #[tokio::test(flavor = "multi_thread")]
 async fn signs_in_to_smtp_with_login_where_the_server_offers_only_login() {
     let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
@@ -356,6 +374,8 @@ async fn signs_in_to_smtp_with_login_where_the_server_offers_only_login() {
     assert!(smtp.list_commands().iter().any(|line| line == "AUTH LOGIN"));
 }
 
+/// Checks that an SMTP sign-in is accepted when the fake server closes the
+/// connection at `QUIT`.
 #[tokio::test(flavor = "multi_thread")]
 async fn accepts_an_smtp_sign_in_whose_quit_fails() {
     let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
@@ -368,6 +388,8 @@ async fn accepts_an_smtp_sign_in_whose_quit_fails() {
     assert_eq!(report.smtp, CheckOutcome::Accepted);
 }
 
+/// Checks, on a paused clock, that an unanswered SMTP `QUIT` ends at the
+/// 20-second check limit and leaves the sign-in accepted.
 #[tokio::test]
 async fn ends_an_unanswered_quit_at_the_check_limit_and_accepts_the_sign_in() {
     let smtp = FakeSmtpServer::start(SmtpMode::Plain, None).await;
@@ -383,6 +405,8 @@ async fn ends_an_unanswered_quit_at_the_check_limit_and_accepts_the_sign_in() {
     assert_about(timing, Duration::from_secs(20));
 }
 
+/// Checks, on a paused clock, that an unanswered IMAP `LOGOUT` ends at the
+/// 20-second check limit and leaves the sign-in accepted.
 #[tokio::test]
 async fn ends_an_unanswered_logout_at_the_check_limit_and_accepts_the_sign_in() {
     let imap = FakeImapServer::start(FakeMailbox::create_standard(), ImapMode::Plain, None).await;
@@ -404,6 +428,9 @@ async fn ends_an_unanswered_logout_at_the_check_limit_and_accepts_the_sign_in() 
     assert_about(timing, Duration::from_secs(20));
 }
 
+/// Checks, on a paused clock, that an IMAP server that never greets times
+/// out at the 20-second check limit, while the closed SMTP port reads as
+/// unreachable.
 #[tokio::test]
 async fn ends_an_imap_sign_in_without_a_greeting_at_the_check_limit() {
     let imap = FakeImapServer::start(FakeMailbox::create_standard(), ImapMode::Silent, None).await;
@@ -435,6 +462,8 @@ async fn ends_an_imap_sign_in_without_a_greeting_at_the_check_limit() {
     assert_about(timing, Duration::from_secs(20));
 }
 
+/// Checks that `email check` prints the report as one JSON line, exits 0,
+/// and keeps the password out of its standard error.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_check_subcommand_prints_one_json_line_and_exits_0() {
     let authority = TestAuthority::new();
@@ -462,6 +491,9 @@ async fn the_check_subcommand_prints_one_json_line_and_exits_0() {
     assert!(!stderr.contains(crate::support::PASSWORD), "{stderr}");
 }
 
+/// Checks that `email check`, whose standard output's reader closed before
+/// it started, logs the broken pipe as its one line on standard error and
+/// exits 1.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_check_subcommand_logs_a_report_it_cannot_write_and_exits_1() {
     let json = build_account_json(
@@ -491,6 +523,9 @@ async fn the_check_subcommand_logs_a_report_it_cannot_write_and_exits_1() {
     );
 }
 
+/// Checks that the binary exits 2 for a missing, malformed, or
+/// rule-breaking account, naming the variable's problem without the host or
+/// the password, and exits 64 with its usage line for an unknown argument.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_to_start_without_a_usable_account_and_names_the_rule_only() {
     let missing = read_binary_output(&["check"], None).await;

@@ -98,6 +98,8 @@ not find a runtime that `build.sh` installed under another directory.
 | Title-generation prompt        | `src/utils/prompts/title-generation.txt`, as `titleGenerationPrompt`                                                                                                                                                                                                                                                                                                                                                                                              |
 | Title-generation attempt limit | `3`, from `titleGenerationMaxAttempts` in `src/config.ts`; must be a positive integer                                                                                                                                                                                                                                                                                                                                                                             |
 | Generated title length limit   | `100`, from `generatedTitleMaxLength` in `src/config.ts`; must be a positive integer                                                                                                                                                                                                                                                                                                                                                                              |
+| Agent request slots            | `2`, from `agentRequestSlotCount` in `src/config.ts`; replies each live agent works on at once; must be a positive integer                                                                                                                                                                                                                                                                                                                                        |
+| Agent waiting request limit    | `8`, from `agentWaitingRequestLimit` in `src/config.ts`; replies that may wait per live agent for a free request slot; must be a non-negative integer, `0` meaning no reply waits                                                                                                                                                                                                                                                                                 |
 
 `loadBackendConfig()` builds these values once when the backend starts, so a
 changed `LYS_HOME`, prompt file, or limit takes effect after a restart. The
@@ -105,7 +107,9 @@ model provider is not among them: the backend reads it from the settings file
 at each connection attempt, and builds its URLs from the
 [provider settings](#providers). The
 attempt limit applies to each chat turn. The title length limit counts Unicode
-code points before surrounding whitespace is trimmed.
+code points before surrounding whitespace is trimmed. Every live agent gets
+the same request slots and waiting limit, each agent its own; see
+[request slots](/architecture/backend/#request-slots).
 
 ### Backend configuration validation
 
@@ -123,7 +127,8 @@ and no defaults are applied.
 | `databaseFilePath`, `settingsFilePath`, `attachmentsDirectoryPath`, `mcpProcessGroupsFilePath` | An absolute path                                                                                       |
 | `emailServerPath`                                                                              | An absolute path of at most 1,024 characters, without a control character or white space at either end |
 | `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `titleGenerationPrompt`                      | Non-empty text without leading or trailing whitespace                                                  |
-| `titleGenerationMaxAttempts`, `generatedTitleMaxLength`                                        | A positive integer                                                                                     |
+| `titleGenerationMaxAttempts`, `generatedTitleMaxLength`, `agentRequestSlotCount`               | A positive integer                                                                                     |
+| `agentWaitingRequestLimit`                                                                     | A non-negative integer                                                                                 |
 
 A value outside these rules stops the backend at startup with a `ZodError`
 whose issues name each failing key. The shared constants, the `LYS_HOME`
@@ -215,9 +220,13 @@ location, for `mcp` it lists no server and keeps every server Lys ships
 off, and for `email` it holds no account. A `model` group, which
 older files hold for a context-size estimate Lys no longer has, is ignored,
 and the next save leaves it out. Loading never rewrites an
-existing file. Invalid JSON or invalid field values, including a temperature
-outside `[0, 1]`, cause loading to fail, and the file is left as it is. Loading
-a missing file creates the parent directory and writes the default document.
+existing file. Invalid JSON, a JSON array in place of the document, of a
+group, or of an object inside a group, or invalid field values, including a
+temperature outside `[0, 1]`, cause loading to fail, and the file is left as
+it is; the error names the line and column where reading stopped. The host
+reads the document and every object in it from a JSON object only, as the
+`@lys/share` schemas the backend reads them with do. Loading a missing file
+creates the parent directory and writes the default document.
 
 Every save writes a temporary file beside `settings.json`, readable and
 writable only by its owner on Unix, flushes it to disk, and renames it over the
@@ -576,7 +585,7 @@ with, saved on the server's card in Settings → MCP, with its password in
 
 | Field                 | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `address`             | The account's address, at most 254 characters: 1 to 64 visible ASCII characters other than `@`, then `@`, then a host name; a domain with a character outside ASCII is refused                                                                                                                                                                                                                                                                                                                                                                                   |
+| `address`             | The account's address, at most 254 characters: a name of 1 to 64 ASCII letters, digits, dots, and ``! # $ % & ' * + - / = ? ^ _ ` { \| } ~``, with no dot at either end or two in a row, then `@`, then a host name. The name is RFC 5322's dot-atom, so the email server can send from every address the rule accepts; a quoted name such as `"john doe"@example.com` is refused, as is a domain with a character outside ASCII                                                                                                                                 |
 | `displayName`         | The name shown as the sender, up to 100 characters without a control character or white space at either end                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `userName`            | The name the mail servers are signed in with, usually the address: 1 to 254 characters, without a control character or white space at either end                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `imap`, `smtp`        | The servers, each `{ host, port, security }`: a host name or a dotted IPv4 address, at most 253 characters of labels of ASCII letters, digits, and inner hyphens, each label at most 63 characters, or a bracketed IPv6 address, at most 47 characters; a port, a whole number from 1 to 65535 however the JSON number is written, so `993.0` reads as `993`, which the host writes back; and `tls` (TLS from the first byte), `starttls` (STARTTLS before any credential), or `plain` (no TLS), which is allowed only for `localhost`, `127.0.0.1`, and `[::1]` |

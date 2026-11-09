@@ -260,6 +260,7 @@ describe("buildAgentStateTools", () => {
               name: "Researcher",
               role: "member",
               deletedAt: null,
+              requestSlotCount: 2,
               requests: [OWN_REQUEST]
             }
           }
@@ -288,6 +289,7 @@ describe("buildAgentStateTools", () => {
             name: "Caliginia",
             role: "leader",
             deletedAt: null,
+            requestSlotCount: 2,
             requests: [
               buildRequest(102, {
                 startedAt: "2026-10-24T09:58:10.000Z",
@@ -320,7 +322,7 @@ describe("buildAgentStateTools", () => {
         content: [
           "You are Caliginia (code caliginia), a leader. As a leader you can find other agents with find_agents and read their state with read_agent_state.",
           "Now: 2026-10-24T10:05:30.000Z.",
-          "Working on 2 requests:",
+          "Request slots: 2 of 2 in use.",
           `1. In "Weekly plan": started 2026-10-24T09:58:10.000Z (7 minutes ago) with qwen/qwen3-14b; using tools: web_search done, read_page waiting for the person's approval.`,
           "2. This reply, in this conversation: started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; getting ready to answer."
         ].join("\n"),
@@ -341,6 +343,7 @@ describe("buildAgentStateTools", () => {
             name: "Researcher",
             role: "member",
             deletedAt: null,
+            requestSlotCount: 2,
             requests: [OWN_REQUEST]
           }
         }
@@ -358,7 +361,7 @@ describe("buildAgentStateTools", () => {
         content: [
           "You are Researcher (code researcher), a member. As a member you can see only your own state.",
           "Now: 2026-10-24T10:05:30.000Z.",
-          "Working on 1 request:",
+          "Request slots: 1 of 2 in use.",
           "1. This reply, in this conversation: started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; getting ready to answer.",
           "Nothing else is in progress."
         ].join("\n")
@@ -374,6 +377,7 @@ describe("buildAgentStateTools", () => {
             name: "Researcher",
             role: "member",
             deletedAt: "2026-10-24T10:04:00.000Z",
+            requestSlotCount: 2,
             requests: [OWN_REQUEST]
           }
         }
@@ -402,6 +406,7 @@ describe("buildAgentStateTools", () => {
             name: "Caliginia",
             role: "leader",
             deletedAt: null,
+            requestSlotCount: 2,
             requests: [OWN_REQUEST]
           }
         }
@@ -423,7 +428,7 @@ describe("buildAgentStateTools", () => {
 
       expect(result).toMatchObject({
         content: expect.stringContaining(
-          "Now: 2026-10-24T10:07:00.000Z.\nWorking on 1 request:\n1. This reply, in this conversation: started 2026-10-24T10:05:00.000Z (2 minutes ago)"
+          "Now: 2026-10-24T10:07:00.000Z.\nRequest slots: 1 of 2 in use.\n1. This reply, in this conversation: started 2026-10-24T10:05:00.000Z (2 minutes ago)"
         )
       })
     })
@@ -439,6 +444,7 @@ describe("buildAgentStateTools", () => {
             name: "Lysiptera",
             role: "leader",
             deletedAt: null,
+            requestSlotCount: 2,
             requests: []
           }
         }
@@ -488,6 +494,7 @@ describe("buildAgentStateTools", () => {
               name: "Web\nresearcher",
               role: "member",
               deletedAt: null,
+              requestSlotCount: 2,
               requests: [
                 buildRequest(104, {
                   conversationTitle: {
@@ -509,7 +516,7 @@ describe("buildAgentStateTools", () => {
         content: [
           "Web researcher (code researcher) is a member.",
           "Now: 2026-10-24T10:05:30.000Z.",
-          "Working on 1 request:",
+          "Request slots: 1 of 2 in use.",
           `1. In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; getting ready to answer.`
         ].join("\n")
       })
@@ -564,6 +571,7 @@ describe("buildAgentStateTools", () => {
             name: "Lysiptera",
             role: "leader",
             deletedAt: null,
+            requestSlotCount: 2,
             requests: [buildRequest(103, variation)]
           }
         }
@@ -583,7 +591,7 @@ describe("buildAgentStateTools", () => {
         content: [
           "Lysiptera (code lysiptera) is a leader.",
           "Now: 2026-10-24T10:05:30.000Z.",
-          "Working on 1 request:",
+          "Request slots: 1 of 2 in use.",
           `1. ${line}`
         ].join("\n"),
         sources: []
@@ -592,6 +600,102 @@ describe("buildAgentStateTools", () => {
         LEADER,
         "lysiptera"
       )
+    })
+
+    it.each<readonly [string, number, string]>([
+      [
+        "one request",
+        1,
+        "Request slots: 2 of 2 in use; 1 request waits for a free slot."
+      ],
+      [
+        "two requests",
+        2,
+        "Request slots: 2 of 2 in use; 2 requests wait for a free slot."
+      ]
+    ])(
+      "tells how many slots are in use when %s wait, and each waiting request's place in line",
+      async (_label, waitingCount, slotLine) => {
+        const waiting = Array.from({ length: waitingCount }, (_unused, index) =>
+          buildRequest(110 + index, {
+            startedAt: "2026-10-24T10:05:10.000Z",
+            step: { kind: "waiting" },
+            conversationTitle: { status: "found", title: `Errand ${index + 1}` }
+          })
+        )
+        const reader = createReader({
+          state: {
+            status: "found",
+            state: {
+              code: "lysiptera",
+              name: "Lysiptera",
+              role: "leader",
+              deletedAt: null,
+              requestSlotCount: 2,
+              requests: [
+                buildRequest(103, { step: { kind: "thinking", round: 0 } }),
+                buildRequest(104, { step: { kind: "writing", round: 1 } }),
+                ...waiting
+              ]
+            }
+          }
+        })
+        const tools = buildAgentStateTools({
+          self: LEADER,
+          requestId: OWN_REQUEST_ID,
+          reader
+        })
+
+        const result = await runStateTool(tools, "read_agent_state", {
+          code: "lysiptera"
+        })
+
+        expect(result).toEqual({
+          status: "succeeded",
+          content: [
+            "Lysiptera (code lysiptera) is a leader.",
+            "Now: 2026-10-24T10:05:30.000Z.",
+            slotLine,
+            `1. In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; thinking.`,
+            `2. In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; writing the reply.`,
+            ...waiting.map(
+              (_request, index) =>
+                `${index + 3}. In "Errand ${index + 1}": started 2026-10-24T10:05:10.000Z (less than a minute ago) with qwen/qwen3-8b; waiting for a free request slot, number ${index + 1} in line.`
+            )
+          ].join("\n"),
+          sources: []
+        })
+      }
+    )
+
+    it("tells the slots of an agent with one request slot", async () => {
+      const tools = buildAgentStateTools({
+        self: LEADER,
+        requestId: OWN_REQUEST_ID,
+        reader: createReader({
+          state: {
+            status: "found",
+            state: {
+              code: "lysiptera",
+              name: "Lysiptera",
+              role: "leader",
+              deletedAt: null,
+              requestSlotCount: 1,
+              requests: []
+            }
+          }
+        })
+      })
+
+      const result = await runStateTool(tools, "read_agent_state", {
+        code: "lysiptera"
+      })
+
+      expect(result).toMatchObject({
+        content: expect.stringContaining(
+          "\nRequest slots: 0 of 1 in use.\nNo requests in progress."
+        )
+      })
     })
 
     it("tells an idle, deleted agent's state", async () => {
@@ -603,6 +707,7 @@ describe("buildAgentStateTools", () => {
             name: "Researcher",
             role: "member",
             deletedAt: "2026-10-20T08:00:00.000Z",
+            requestSlotCount: 2,
             requests: []
           }
         }
@@ -622,6 +727,7 @@ describe("buildAgentStateTools", () => {
         content: [
           "Researcher (code researcher) is a member. It was deleted on 2026-10-20T08:00:00.000Z.",
           "Now: 2026-10-24T10:05:30.000Z.",
+          "Request slots: 0 of 2 in use.",
           "No requests in progress."
         ].join("\n"),
         sources: []

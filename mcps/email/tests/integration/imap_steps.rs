@@ -43,6 +43,9 @@ fn build_sign_in_timeout() -> ToolFailure {
     }
 }
 
+/// Checks, on a paused clock, that `list_folders` against an IMAP server
+/// that never answers the TLS handshake fails as a sign-in that timed out,
+/// after the 15-second handshake limit.
 #[tokio::test]
 async fn a_server_that_never_answers_the_tls_handshake_fails_the_sign_in_after_15_seconds() {
     let authority = TestAuthority::new();
@@ -55,6 +58,9 @@ async fn a_server_that_never_answers_the_tls_handshake_fails_the_sign_in_after_1
     assert_about(timing, Duration::from_secs(15));
 }
 
+/// Checks, on a paused clock, that `list_folders` against a plain-text IMAP
+/// server that never greets fails as a sign-in that timed out after 30
+/// seconds.
 #[tokio::test]
 async fn a_server_that_never_greets_fails_the_sign_in_after_30_seconds() {
     let authority = TestAuthority::new();
@@ -67,6 +73,9 @@ async fn a_server_that_never_greets_fails_the_sign_in_after_30_seconds() {
     assert_about(timing, Duration::from_secs(30));
 }
 
+/// Checks, on a paused clock, that an unanswered `LOGIN` fails
+/// `list_folders` as a sign-in that timed out after 30 seconds, before any
+/// `LIST` is sent.
 #[tokio::test]
 async fn a_login_without_an_answer_fails_the_sign_in_after_30_seconds() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -90,6 +99,8 @@ async fn a_login_without_an_answer_fails_the_sign_in_after_30_seconds() {
     );
 }
 
+/// Checks that `list_folders` keeps its listing when the fake IMAP server
+/// refuses the `LOGOUT` sent after it.
 #[tokio::test]
 async fn a_logout_the_server_refuses_still_lists_the_folders() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -106,6 +117,8 @@ async fn a_logout_the_server_refuses_still_lists_the_folders() {
     );
 }
 
+/// Checks, on a paused clock, that an unanswered `LOGOUT` ends after 30
+/// seconds and leaves the listing of `list_folders` as it was.
 #[tokio::test]
 async fn a_logout_without_an_answer_lists_the_folders_after_30_seconds() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;

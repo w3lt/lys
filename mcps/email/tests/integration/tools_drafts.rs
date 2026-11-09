@@ -108,6 +108,9 @@ async fn save_draft(context: &ToolContext, draft: SaveDraftArguments) -> String 
         .unwrap_or_else(|| panic!("{}", report.text))
 }
 
+/// Checks that `save_draft` stores the draft in the IMAP fake's Drafts
+/// folder with the `\Draft` flag and its Bcc field, sends nothing, and
+/// answers with its id and fields.
 #[tokio::test(flavor = "multi_thread")]
 async fn saves_a_draft_with_its_bcc_field_and_answers_its_id() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -134,6 +137,9 @@ async fn saves_a_draft_with_its_bcc_field_and_answers_its_id() {
     assert!(stack.smtp.list_mails().is_empty());
 }
 
+/// Checks that `save_draft` with a draft id stores the new draft, deletes
+/// and expunges the old one, and answers the new id, while the replaced id,
+/// given again, fails as stale before storing begins.
 #[tokio::test(flavor = "multi_thread")]
 async fn replaces_a_draft_and_answers_the_new_id() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -181,6 +187,8 @@ async fn replaces_a_draft_and_answers_the_new_id() {
     );
 }
 
+/// Checks that replacing a draft still works when the server sends an
+/// untagged `EXISTS` before it asks for the `APPEND` literal.
 #[tokio::test(flavor = "multi_thread")]
 async fn replaces_a_draft_when_the_server_sends_untagged_data_before_asking_for_it() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -206,6 +214,9 @@ async fn replaces_a_draft_when_the_server_sends_untagged_data_before_asking_for_
     assert!(String::from_utf8_lossy(&drafts[0].bytes).contains("Subject: Second\r\n"));
 }
 
+/// Checks that `send_draft` sends the draft to its To and Bcc recipients
+/// without a Bcc header, saves the same bytes as a read copy in Sent, and
+/// deletes the draft.
 #[tokio::test(flavor = "multi_thread")]
 async fn sends_a_draft_without_its_bcc_field_keeps_a_copy_and_deletes_it() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -243,6 +254,9 @@ async fn sends_a_draft_without_its_bcc_field_keeps_a_copy_and_deletes_it() {
     assert!(stack.imap.list_messages("Drafts").is_empty());
 }
 
+/// Checks that `delete_draft` deletes a draft, whose id then reads as
+/// stale, and that deleting or sending an Inbox id fails as not in the
+/// Drafts folder, leaving the Inbox and the SMTP fake untouched.
 #[tokio::test(flavor = "multi_thread")]
 async fn deletes_a_draft_and_refuses_ids_outside_drafts() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -290,6 +304,8 @@ async fn deletes_a_draft_and_refuses_ids_outside_drafts() {
     assert!(stack.smtp.list_mails().is_empty());
 }
 
+/// Checks that `save_draft` on an account without a Drafts folder fails as
+/// missing that folder before storing begins.
 #[tokio::test(flavor = "multi_thread")]
 async fn needs_a_drafts_folder() {
     let mut mailbox = FakeMailbox::create_empty();
@@ -325,6 +341,8 @@ fn build_mailbox_without_uid_plus() -> FakeMailbox {
 /// The clause that says a draft is only marked as deleted.
 const MARKED_ONLY: &str = "is marked as deleted but stays in Drafts until the folder is expunged, as the server cannot remove one message on its own";
 
+/// Checks that `delete_draft` on a server without UIDPLUS only marks the
+/// draft `\Deleted`, says so, and sends no `EXPUNGE`.
 #[tokio::test(flavor = "multi_thread")]
 async fn without_uidplus_delete_draft_only_marks_the_draft() {
     let stack = start_stack(build_mailbox_without_uid_plus(), false).await;
@@ -346,6 +364,9 @@ async fn without_uidplus_delete_draft_only_marks_the_draft() {
     );
 }
 
+/// Checks that, on a server without UIDPLUS, a replacing `save_draft` and
+/// `send_draft` only mark the old draft `\Deleted`, say so, and send no
+/// `EXPUNGE`.
 #[tokio::test(flavor = "multi_thread")]
 async fn without_uidplus_send_draft_and_save_draft_only_mark_the_old_draft() {
     let stack = start_stack(build_mailbox_without_uid_plus(), false).await;
@@ -396,6 +417,9 @@ async fn without_uidplus_send_draft_and_save_draft_only_mark_the_old_draft() {
 /// send it names them, up to what it says of the body.
 const READY_FIELDS: &str = "Its own fields are:\nto: [\"Jane Doe <jane@example.com>\"]\ncc: []\nbcc: [\"hidden@example.com\"]\nsubject: \"Ready\"\nbody: its text as read_email shows it, which the body given";
 
+/// Checks that `send_draft` sends nothing and keeps the draft when the call
+/// leaves out the draft's fields or changes its body, answering with the
+/// fields that differ, the draft's own fields, and where the body differs.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_to_send_a_draft_whose_text_the_call_leaves_out_or_changes() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -423,6 +447,9 @@ async fn refuses_to_send_a_draft_whose_text_the_call_leaves_out_or_changes() {
     assert_draft_kept_unsent(&stack.imap, &stack.smtp);
 }
 
+/// Checks that `send_draft` sends nothing and keeps the draft when the call
+/// adds a To recipient or replaces the Bcc one, answering with the field
+/// that differs.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_to_send_a_draft_to_recipients_the_draft_does_not_hold() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -493,6 +520,10 @@ fn build_other_client_send() -> SendDraftArguments {
     }
 }
 
+/// Checks that a draft another client saved, with a group, quoted and
+/// non-ASCII names, and a Bcc, is refused for a call without its fields,
+/// and sent to every recipient without a Bcc header for a call with the
+/// fields the refusal names.
 #[tokio::test(flavor = "multi_thread")]
 async fn sends_a_draft_another_client_saved_with_the_fields_the_refusal_names() {
     let stack = start_with_other_client_draft().await;
@@ -540,6 +571,9 @@ fn format_kept_draft_end(reason: &str) -> String {
     )
 }
 
+/// Checks that a draft sent before the IMAP connection ends at the copy's
+/// `APPEND` is reported as sent, with no copy in Sent and the draft kept,
+/// and that the log names the lost connection.
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_a_draft_sent_before_the_imap_connection_ended_as_sent_and_kept() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -570,6 +604,9 @@ async fn reports_a_draft_sent_before_the_imap_connection_ended_as_sent_and_kept(
     assert_eq!(stack.imap.list_messages("Drafts").len(), 1);
 }
 
+/// Checks, on a paused clock, that a sent draft whose copy's `APPEND` goes
+/// unanswered for 30 seconds is reported as sent with the draft kept, and
+/// that this `APPEND` is the session's last command.
 #[tokio::test]
 async fn sends_nothing_more_over_an_imap_session_whose_sent_copy_timed_out() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -604,6 +641,9 @@ async fn sends_nothing_more_over_an_imap_session_whose_sent_copy_timed_out() {
     assert_eq!(stack.imap.list_messages("Drafts").len(), 1);
 }
 
+/// Checks that a sent draft whose deletion the server refuses is reported
+/// as sent, with its copy saved, the refusal, and advice not to send it
+/// again, while the draft stays unflagged in the Drafts folder.
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_a_sent_draft_the_server_refuses_to_delete_as_sent_and_kept() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -631,6 +671,8 @@ async fn reports_a_sent_draft_the_server_refuses_to_delete_as_sent_and_kept() {
     assert!(!drafts[0].has_flag("\\Deleted"));
 }
 
+/// Checks that `send_draft` fails with the server's refusal to fetch the
+/// draft, sending nothing and keeping the draft.
 #[tokio::test(flavor = "multi_thread")]
 async fn sends_nothing_when_the_server_refuses_to_fetch_the_draft() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -648,6 +690,9 @@ async fn sends_nothing_when_the_server_refuses_to_fetch_the_draft() {
     assert_draft_kept_unsent(&stack.imap, &stack.smtp);
 }
 
+/// Checks that `send_draft` and `delete_draft` both fail with the server's
+/// refusal to select the Drafts folder, sending nothing and keeping the
+/// draft.
 #[tokio::test(flavor = "multi_thread")]
 async fn neither_sends_nor_deletes_a_draft_when_the_server_refuses_to_select_drafts() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -671,6 +716,9 @@ async fn neither_sends_nor_deletes_a_draft_when_the_server_refuses_to_select_dra
     assert_draft_kept_unsent(&stack.imap, &stack.smtp);
 }
 
+/// Checks that a draft stored while the server refuses the `SELECT` or the
+/// `SEARCH` that would find its id is answered as saved without an id, with
+/// the refusal and advice to search the folder.
 #[tokio::test(flavor = "multi_thread")]
 async fn answers_a_stored_draft_as_saved_when_its_id_cannot_be_found() {
     for (refused, operation) in [
@@ -706,6 +754,9 @@ async fn answers_a_stored_draft_as_saved_when_its_id_cannot_be_found() {
     }
 }
 
+/// Checks that a stored draft that is gone by the time the search for its
+/// Message-ID runs is answered as saved without an id, with advice to
+/// search the folder.
 #[tokio::test(flavor = "multi_thread")]
 async fn answers_a_stored_draft_that_the_search_no_longer_finds_as_saved_without_an_id() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -728,6 +779,9 @@ async fn answers_a_stored_draft_that_the_search_no_longer_finds_as_saved_without
     assert!(stack.imap.list_messages("Drafts").is_empty());
 }
 
+/// Checks that a replacing draft is answered with its new id when the
+/// server refuses to delete the old one, naming the old draft and the
+/// refusal, and that both drafts stay.
 #[tokio::test(flavor = "multi_thread")]
 async fn answers_a_replacing_draft_with_its_id_when_the_old_one_cannot_be_deleted() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -758,6 +812,9 @@ async fn answers_a_replacing_draft_with_its_id_when_the_old_one_cannot_be_delete
     assert_eq!(stack.imap.list_messages("Drafts").len(), 2);
 }
 
+/// Checks that a replacing `save_draft` and a `delete_draft` both fail
+/// before storing with the server's refusal to fetch the draft's summary,
+/// and that the draft stays unflagged.
 #[tokio::test(flavor = "multi_thread")]
 async fn neither_replaces_nor_deletes_a_draft_whose_summary_the_server_refuses_to_fetch() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -793,6 +850,9 @@ async fn neither_replaces_nor_deletes_a_draft_whose_summary_the_server_refuses_t
     assert!(!drafts[0].has_flag("\\Deleted"));
 }
 
+/// Checks, on a paused clock, that a replacing draft stored before the old
+/// one's `STORE` goes unanswered for 30 seconds is answered as saved,
+/// without an id and with the old draft kept, both for the time-out.
 #[tokio::test]
 async fn answers_a_stored_draft_as_saved_when_a_later_step_times_out() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -833,6 +893,9 @@ async fn answers_a_stored_draft_as_saved_when_a_later_step_times_out() {
     assert_eq!(stack.imap.list_messages("Drafts").len(), 2);
 }
 
+/// Checks, on a paused clock, that a draft whose `APPEND` the server stores
+/// but never answers fails after 30 seconds, at the storing stage, saying
+/// the draft may or may not be in the Drafts folder.
 #[tokio::test]
 async fn answers_a_draft_whose_answer_never_came_once_all_of_it_was_sent_as_maybe_saved() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -861,6 +924,9 @@ async fn answers_a_draft_whose_answer_never_came_once_all_of_it_was_sent_as_mayb
     assert_eq!(progress.stage(), DraftStage::Storing { replaced: None });
 }
 
+/// Checks that a replacing draft whose `APPEND` the server stores before
+/// the connection ends fails, saying the draft may be in the Drafts folder
+/// and the draft it replaces is still there, with both kept unflagged.
 #[tokio::test(flavor = "multi_thread")]
 async fn answers_a_replacing_draft_whose_answer_was_lost_with_the_draft_it_replaces() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;

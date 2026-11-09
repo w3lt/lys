@@ -119,6 +119,9 @@ fn build_message_to_jane(subject: &str, body: &str) -> MessageArguments {
     }
 }
 
+/// Checks that `send_email` sends one mail to the `To`, `Cc`, and `Bcc`
+/// recipients, with no `Bcc` field in it, saves one read copy of it in Sent
+/// with one `APPEND`, and reports the Message-ID, the fields, and the copy.
 #[tokio::test(flavor = "multi_thread")]
 async fn sends_a_message_and_keeps_one_read_copy_in_sent_without_the_bcc_field() {
     let stack = start_with_originals(false).await;
@@ -167,6 +170,9 @@ async fn sends_a_message_and_keeps_one_read_copy_in_sent_without_the_bcc_field()
     assert_one_read_copy_in_sent(&stack.imap, &mails[0]);
 }
 
+/// Checks that `send_email`, for an account whose server keeps a copy of
+/// sent mail, sends the mail, sends no IMAP command, and says that the
+/// server keeps the copy.
 #[tokio::test(flavor = "multi_thread")]
 async fn keeps_no_copy_when_the_server_keeps_one() {
     let stack = start_with_originals(true).await;
@@ -199,6 +205,9 @@ async fn keeps_no_copy_when_the_server_keeps_one() {
     );
 }
 
+/// Checks that `send_email` refuses a reply without recipients, naming the
+/// original's sender and any `Reply-To` mailboxes, and one with a blank
+/// subject, suggesting a `Re:` subject, and sends no SMTP command.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_a_reply_that_leaves_out_its_recipients_or_subject() {
     let stack = start_with_originals(false).await;
@@ -256,6 +265,9 @@ async fn refuses_a_reply_that_leaves_out_its_recipients_or_subject() {
     assert_nothing_sent(&stack.smtp);
 }
 
+/// Checks that `send_email` refuses a reply without recipients to a message
+/// with no `From` field by naming only its `Reply-To` mailbox, and sends no
+/// SMTP command.
 #[tokio::test(flavor = "multi_thread")]
 async fn tells_a_reply_without_recipients_only_where_replies_go_when_no_sender_is_named() {
     /// A message without a From field whose Reply-To asks for replies to go
@@ -293,6 +305,9 @@ async fn tells_a_reply_without_recipients_only_where_replies_go_when_no_sender_i
     assert_nothing_sent(&stack.smtp);
 }
 
+/// Checks that `send_email` sends a reply to exactly the recipients given,
+/// in the original's conversation through `In-Reply-To` and `References`,
+/// fetching the original with `BODY.PEEK` and sending no `STORE`.
 #[tokio::test(flavor = "multi_thread")]
 async fn replies_in_the_conversation_to_exactly_the_recipients_given() {
     let stack = start_with_originals(false).await;
@@ -337,6 +352,9 @@ async fn replies_in_the_conversation_to_exactly_the_recipients_given() {
     );
 }
 
+/// Checks that `send_email` refuses a forward without recipients and
+/// subject with one failure that names both and suggests a `Fwd:` subject,
+/// and sends no SMTP command.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_a_forward_that_leaves_out_its_recipients_or_subject() {
     let stack = start_with_originals(false).await;
@@ -361,6 +379,9 @@ async fn refuses_a_forward_that_leaves_out_its_recipients_or_subject() {
     assert_nothing_sent(&stack.smtp);
 }
 
+/// Checks that `send_email` forwards a message with the given text, then
+/// the original's header fields and text, and the original's two
+/// attachments with their contents.
 #[tokio::test(flavor = "multi_thread")]
 async fn forwards_the_original_text_and_attachments() {
     let stack = start_with_originals(false).await;
@@ -402,6 +423,9 @@ async fn forwards_the_original_text_and_attachments() {
     assert_eq!(parsed.attachments[1].bytes, b"%PDF-");
 }
 
+/// Checks that `send_email` reports a recipient the SMTP server refuses
+/// with the server's code and text, and a refused SMTP sign-in as a wrong
+/// password, with no mail received and no copy in Sent.
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_a_refused_recipient_and_a_refused_sign_in_without_a_sent_copy() {
     let stack = start_with_originals(false).await;
@@ -457,6 +481,9 @@ async fn reports_a_refused_recipient_and_a_refused_sign_in_without_a_sent_copy()
     assert!(stack.imap.list_messages("Sent").is_empty());
 }
 
+/// Checks that `send_email` refuses both a reply and a forward id, no
+/// recipient, and a recipient that is not an address, each with its own
+/// sentence, and sends no SMTP or IMAP command.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_arguments_that_break_a_rule_before_connecting() {
     let stack = start_with_originals(false).await;
@@ -513,6 +540,8 @@ async fn refuses_arguments_that_break_a_rule_before_connecting() {
     assert!(stack.imap.list_commands().is_empty());
 }
 
+/// Checks that `send_email` sends the mail when no folder is the Sent one,
+/// says that no copy was saved, and sends no `APPEND`.
 #[tokio::test(flavor = "multi_thread")]
 async fn sends_a_message_without_a_copy_when_no_folder_is_the_sent_one() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -550,6 +579,9 @@ async fn sends_a_message_without_a_copy_when_no_folder_is_the_sent_one() {
     );
 }
 
+/// Checks that `send_email` reports a mail as sent when the IMAP server
+/// closes the connection on its copy's `APPEND` without saving it, says why
+/// the copy could not be saved, and logs the failure's class.
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_a_message_sent_before_its_copy_failed_as_sent() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -578,6 +610,9 @@ async fn reports_a_message_sent_before_its_copy_failed_as_sent() {
     assert!(stack.imap.list_messages("Sent").is_empty());
 }
 
+/// Checks that `send_email` reports a mail as sent when the IMAP server
+/// refuses its copy's `APPEND`, giving the server's reason, and logs the
+/// failure's class.
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_a_message_sent_before_the_server_refused_its_copy_as_sent_with_the_reason() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -603,6 +638,9 @@ async fn reports_a_message_sent_before_the_server_refused_its_copy_as_sent_with_
     assert!(stack.imap.list_messages("Sent").is_empty());
 }
 
+/// Checks that `send_email` says a copy may or may not have been saved when
+/// the IMAP server saves it but closes the connection before answering the
+/// `APPEND`, and logs the copy as unconfirmed.
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_a_copy_whose_answer_was_lost_once_all_of_it_was_sent_as_maybe_saved() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;

@@ -4,7 +4,7 @@ import {
 } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
 import type { LlmModelHealthOutcome } from "../../../../../src/modules/llm/getLlmModelHealth"
-import { createLlmModelHealthDiagnostic } from "../../../../../src/modules/llm/llmModelHealthDiagnostic"
+import { createLlmRuntimeFailureEvidence } from "../../../../../src/modules/llm/llmRuntimeFailureEvidence"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import updateFastifyWithLlmTestModelRoute from "../../../../../src/modules/llm/routes/testModelRoute"
@@ -80,7 +80,7 @@ describe("updateFastifyWithLlmTestModelRoute", () => {
         reason: "runtime-unavailable",
         latencyMs: 0
       },
-      diagnostics: [createLlmModelHealthDiagnostic(failure)]
+      diagnostics: [createLlmRuntimeFailureEvidence(failure)]
     }
     vi.spyOn(testApp.service, "getLlmModelHealth").mockResolvedValue(outcome)
     await updateFastifyWithLlmTestModelRoute(testApp.app)

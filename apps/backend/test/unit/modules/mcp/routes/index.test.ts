@@ -941,19 +941,23 @@ describe("registerMcpRoutes", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     it.each([
       [
         "a POST of plain text",
-        { "content-type": "text/plain" },
-        JSON.stringify(ACCEPTED_CHECK),
-        400
+        400,
+        {
+          headers: { "content-type": "text/plain" },
+          payload: JSON.stringify(ACCEPTED_CHECK)
+        }
       ],
       [
         "a POST of a form",
-        { "content-type": "application/x-www-form-urlencoded" },
-        "account=accepted%40example.com",
-        415
+        415,
+        {
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          payload: "account=accepted%40example.com"
+        }
       ]
     ])(
       "refuses %s with HTTP %i, and runs no check",
-      async (_label, headers, payload, statusCode) => {
+      async (_label, statusCode, { headers, payload }) => {
         const { app, checkEvents } = await createMcpRouteApp(
           await createSettingsFilePath()
         )

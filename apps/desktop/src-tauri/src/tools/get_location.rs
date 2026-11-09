@@ -171,8 +171,13 @@ mod tests {
     #[test]
     fn fails_when_the_settings_file_is_not_valid_settings_json() {
         let padded_city: Value = json!({ "location": { "city": "Lyon " } });
+        let location_list: Value = json!({ "location": ["Lyon", null, null] });
 
-        for stored_text in [String::from("{ not json"), padded_city.to_string()] {
+        for stored_text in [
+            String::from("{ not json"),
+            padded_city.to_string(),
+            location_list.to_string(),
+        ] {
             let directory = TestDirectory::create("location-unusable");
             let settings_path = directory.create_file(SETTINGS_FILE_NAME, &stored_text);
 

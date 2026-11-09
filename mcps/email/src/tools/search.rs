@@ -491,6 +491,10 @@ fn calculate_days_in_month(year: u16, month: u8) -> u8 {
 mod tests {
     use super::*;
 
+    /// Checks that each search argument becomes its IMAP search key in a
+    /// fixed order, days written as IMAP writes them, that no argument
+    /// searches `ALL`, and that `unread: false` and `flagged: true` give
+    /// `SEEN` and `FLAGGED`.
     #[test]
     fn builds_the_search_keys_of_every_argument() {
         let arguments = SearchArguments {
@@ -541,6 +545,9 @@ mod tests {
         );
     }
 
+    /// Checks that an empty text, a subject with a line break, and a day
+    /// that is not a calendar day as `YYYY-MM-DD` are refused with a
+    /// sentence naming the argument.
     #[test]
     fn refuses_arguments_that_break_a_rule() {
         let cases = [
@@ -582,6 +589,8 @@ mod tests {
         }
     }
 
+    /// Checks that a page past the last one is refused with how many pages
+    /// match and which to ask for, worded for one page and for more.
     #[test]
     fn refuses_a_page_past_the_last_one_with_how_many_pages_match() {
         assert_eq!(
@@ -594,6 +603,10 @@ mod tests {
         );
     }
 
+    /// Checks that a day is read only as a calendar day written
+    /// `YYYY-MM-DD` from the year 1000 on, with leap days by the Gregorian
+    /// rule, and refused with a time, a part without its leading zero, or
+    /// full-width digits.
     #[test]
     fn parses_calendar_days_only() {
         assert_eq!(parse_day("2026-11-02"), Some((2026, 11, 2)));
@@ -628,6 +641,9 @@ mod tests {
         }
     }
 
+    /// Checks that hits sort newest first, the higher UID first between
+    /// equal dates, and that a hit reads as its id, date, sender, subject,
+    /// flags, and folder.
     #[test]
     fn sorts_hits_newest_first_and_formats_them() {
         let mut hits = [

@@ -355,6 +355,9 @@ pub(crate) fn format_list_argument(texts: &[String]) -> String {
 mod tests {
     use super::*;
 
+    /// Checks that a result of `RESULT_LIMIT` UTF-16 units stays whole and
+    /// a longer one is cut to end with `CUT_NOTE` within the limit, never
+    /// splitting a surrogate pair.
     #[test]
     fn cuts_long_results_to_the_limit_in_utf16_units_with_the_note() {
         let kept_length = RESULT_LIMIT - CUT_NOTE.encode_utf16().count();
@@ -382,6 +385,8 @@ mod tests {
         assert_eq!(cut_mid_pair.encode_utf16().count(), RESULT_LIMIT - 1);
     }
 
+    /// Checks that a text argument is written as a JSON string and a list
+    /// as a JSON array of strings, with their quotes escaped.
     #[test]
     fn formats_texts_and_lists_as_json_arguments() {
         assert_eq!(format_text_argument("Re: \"Hi\""), "\"Re: \\\"Hi\\\"\"");
@@ -395,6 +400,9 @@ mod tests {
         );
     }
 
+    /// Checks that a text argument with a line break or past its limit is
+    /// refused with a sentence naming the argument, and that an empty
+    /// folder name or one with white space at an end is refused.
     #[test]
     fn checks_text_and_folder_name_arguments() {
         assert_eq!(parse_text_argument("text", "fine", 10), Ok("fine"));
@@ -418,6 +426,9 @@ mod tests {
         assert!(parse_folder_name_argument("name", " Projects").is_err());
     }
 
+    /// Checks that a folder without a role can be changed, while a role
+    /// folder such as the Inbox gives `RoleFolder` and an unknown name
+    /// `FolderMissing`.
     #[test]
     fn gets_folders_that_can_change_and_refuses_role_and_missing_ones() {
         let folders = vec![
@@ -451,6 +462,9 @@ mod tests {
         );
     }
 
+    /// Checks that an IMAP refusal becomes `ImapRefused` with the operation
+    /// and the server's text, and a lost IMAP connection a `Connection`
+    /// failure.
     #[test]
     fn converts_imap_failures() {
         assert_eq!(

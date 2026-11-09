@@ -196,6 +196,12 @@ export type TestMcpServerRegistry = Readonly<{
   readMcpSettings: Mock<() => Promise<McpSettingsRead>>
 }>
 
+/** A case's application, as the case updates and lists its MCP servers. */
+type McpServerRegistryTestApp = Readonly<{
+  /** The registry, through its update and its list of servers. */
+  mcpServerRegistry: Pick<McpServerRegistry, "updateServers" | "listServers">
+}>
+
 /**
  * The parts of a case's application that a case updates its MCP servers
  * through: the spy the registry reads its settings through, and the
@@ -205,10 +211,7 @@ export type McpServerUpdateTestApp = Readonly<{
   /** Spy the registry reads its settings through. */
   readMcpSettings: TestMcpServerRegistry["readMcpSettings"]
   /** Application whose registry the case updates and lists. */
-  app: Readonly<{
-    /** The registry, through its update and its list of servers. */
-    mcpServerRegistry: Pick<McpServerRegistry, "updateServers" | "listServers">
-  }>
+  app: McpServerRegistryTestApp
 }>
 
 /**

@@ -65,7 +65,7 @@ const LONGEST_WAIT_BEFORE_FAULT: Duration = Duration::from_millis(500);
 /// a deadline is rounded up to the next one, and the paused clock moves
 /// by whole milliseconds from where it paused, keeping the part of a
 /// millisecond it stood at then; each adds less than a millisecond.
-const PAUSED_CLOCK_OVERSHOOT: Duration = Duration::from_millis(2);
+const LONGEST_PAUSED_CLOCK_OVERSHOOT: Duration = Duration::from_millis(2);
 
 /// How a server of an account is reached, as the settings name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -194,7 +194,7 @@ where
 /// - plus at most the real time from the fault to the pause, in which a
 ///   wait that starts after the fault, such as for a greeting, begins;
 /// - plus how far the paused clock lands past the deadline, at most
-///   [`PAUSED_CLOCK_OVERSHOOT`].
+///   [`LONGEST_PAUSED_CLOCK_OVERSHOOT`].
 ///
 /// # Arguments
 ///
@@ -205,7 +205,7 @@ pub fn assert_about(timing: FaultTiming, limit: Duration) {
     let settling = timing.real_before_pause - timing.real_before_fault;
     assert!(
         after_fault + LONGEST_WAIT_BEFORE_FAULT >= limit
-            && after_fault <= limit + settling + PAUSED_CLOCK_OVERSHOOT,
+            && after_fault <= limit + settling + LONGEST_PAUSED_CLOCK_OVERSHOOT,
         "{timing:?} is not about {limit:?}"
     );
 }

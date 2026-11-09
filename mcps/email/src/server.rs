@@ -65,8 +65,11 @@ impl EmailServer {
 
     /// Runs a `search_emails` call under the client's cancellation and
     /// [`CALL_LIMIT`], logs its outcome, and answers the model with one
-    /// page of hits, or with the sentence of what failed or stopped the
-    /// call.
+    /// page of hits, or that no message matches, as
+    /// [`search::run_search_emails`] reports them; or with the sentence of
+    /// what failed or stopped the call. An answer other than that sentence
+    /// is cut to end with [`CUT_NOTE`](crate::tools::CUT_NOTE) when it is
+    /// longer than [`RESULT_LIMIT`](crate::tools::RESULT_LIMIT).
     ///
     /// # Arguments
     ///
@@ -93,7 +96,10 @@ impl EmailServer {
     /// Runs a `read_email` call under the client's cancellation and
     /// [`CALL_LIMIT`], logs its outcome, and answers the model with the
     /// message's header fields, flags, attachments, and text, or with the
-    /// sentence of what failed or stopped the call.
+    /// sentence of what failed or stopped the call. An answer other than
+    /// that sentence is cut to end with
+    /// [`CUT_NOTE`](crate::tools::CUT_NOTE) when it is longer than
+    /// [`RESULT_LIMIT`](crate::tools::RESULT_LIMIT).
     ///
     /// # Arguments
     ///
@@ -119,8 +125,13 @@ impl EmailServer {
 
     /// Runs a `read_conversation` call under the client's cancellation and
     /// [`CALL_LIMIT`], logs its outcome, and answers the model with the
-    /// conversation the message belongs to, oldest first, or with the
-    /// sentence of what failed or stopped the call.
+    /// conversation the message belongs to: the newest of its messages that
+    /// fit in the answer, at most 50, oldest first, with how many older
+    /// ones were left out, as [`read::run_read_conversation`] reports it;
+    /// or with the sentence of what failed or stopped the call. An answer
+    /// other than that sentence is cut to end with
+    /// [`CUT_NOTE`](crate::tools::CUT_NOTE) when it is longer than
+    /// [`RESULT_LIMIT`](crate::tools::RESULT_LIMIT).
     ///
     /// # Arguments
     ///
@@ -146,8 +157,10 @@ impl EmailServer {
 
     /// Runs a `read_attachment` call under the client's cancellation and
     /// [`CALL_LIMIT`], logs its outcome, and answers the model with the
-    /// attachment's text, or with the sentence of what failed or stopped
-    /// the call.
+    /// attachment's name, type, size, and text, or with the sentence of
+    /// what failed or stopped the call. An answer other than that sentence
+    /// is cut to end with [`CUT_NOTE`](crate::tools::CUT_NOTE) when it is
+    /// longer than [`RESULT_LIMIT`](crate::tools::RESULT_LIMIT).
     ///
     /// # Arguments
     ///
@@ -173,8 +186,11 @@ impl EmailServer {
 
     /// Runs a `list_folders` call under the client's cancellation and
     /// [`CALL_LIMIT`], logs its outcome, and answers the model with every
-    /// folder, its role, and how many messages it holds, or with the
-    /// sentence of what failed or stopped the call.
+    /// folder, its role, and how many messages it holds or that it cannot
+    /// hold any, or that the account has no folder; or with the sentence of
+    /// what failed or stopped the call. An answer other than that sentence
+    /// is cut to end with [`CUT_NOTE`](crate::tools::CUT_NOTE) when it is
+    /// longer than [`RESULT_LIMIT`](crate::tools::RESULT_LIMIT).
     ///
     /// # Arguments
     ///
@@ -196,7 +212,9 @@ impl EmailServer {
     /// Runs a `manage_folder` call under the client's cancellation and
     /// [`CALL_LIMIT`], logs its outcome, and answers the model with the
     /// folder created, renamed, or deleted, or with the sentence of what
-    /// failed or stopped the call.
+    /// failed or stopped the call. An answer other than that sentence is
+    /// cut to end with [`CUT_NOTE`](crate::tools::CUT_NOTE) when it is
+    /// longer than [`RESULT_LIMIT`](crate::tools::RESULT_LIMIT).
     ///
     /// # Arguments
     ///
@@ -229,7 +247,10 @@ impl EmailServer {
     /// [`CALL_LIMIT`], logs its outcome, and answers the model with what
     /// was sent and what became of its Sent copy, or with the sentence of
     /// what failed the call. A call stopped first is answered by how far
-    /// its send came, as [`calculate_send_outcome`] reports it.
+    /// its send came, as [`calculate_send_outcome`] reports it. An answer
+    /// other than the sentence of a failure or a stop is cut to end with
+    /// [`CUT_NOTE`](crate::tools::CUT_NOTE) when it is longer than
+    /// [`RESULT_LIMIT`](crate::tools::RESULT_LIMIT).
     ///
     /// # Arguments
     ///
@@ -259,9 +280,15 @@ impl EmailServer {
 
     /// Runs a `save_draft` call under the client's cancellation and
     /// [`CALL_LIMIT`], logs its outcome, and answers the model with the
-    /// stored draft's id and fields, or with the sentence of what failed
-    /// the call. A call stopped first is answered by whether storing its
-    /// draft began, as [`calculate_save_outcome`] reports it.
+    /// stored draft's id and fields, or, when the server did not report the
+    /// id or it could not be found, with the Drafts folder and why; then
+    /// with what became of the draft it replaces, if any. A failed call is
+    /// answered with the sentence of what failed it, and a call stopped
+    /// first by whether storing its draft began, as
+    /// [`calculate_save_outcome`] reports it. An answer other than the
+    /// sentence of a failure or a stop is cut to end with
+    /// [`CUT_NOTE`](crate::tools::CUT_NOTE) when it is longer than
+    /// [`RESULT_LIMIT`](crate::tools::RESULT_LIMIT).
     ///
     /// # Arguments
     ///
@@ -295,7 +322,9 @@ impl EmailServer {
     /// was sent and what became of its Sent copy and of the draft, or with
     /// the sentence of what failed the call. A call stopped first is
     /// answered by how far its send came, as [`calculate_send_outcome`]
-    /// reports it.
+    /// reports it. An answer other than the sentence of a failure or a stop
+    /// is cut to end with [`CUT_NOTE`](crate::tools::CUT_NOTE) when it is
+    /// longer than [`RESULT_LIMIT`](crate::tools::RESULT_LIMIT).
     ///
     /// # Arguments
     ///
@@ -327,7 +356,10 @@ impl EmailServer {
     /// Runs a `delete_draft` call under the client's cancellation and
     /// [`CALL_LIMIT`], logs its outcome, and answers the model with whether
     /// the draft was deleted or only marked as deleted, or with the
-    /// sentence of what failed or stopped the call.
+    /// sentence of what failed or stopped the call. An answer other than
+    /// that sentence is cut to end with
+    /// [`CUT_NOTE`](crate::tools::CUT_NOTE) when it is longer than
+    /// [`RESULT_LIMIT`](crate::tools::RESULT_LIMIT).
     ///
     /// # Arguments
     ///
@@ -369,8 +401,11 @@ impl ServerHandler for EmailServer {
     }
 }
 
-/// Runs one tool call under the cancellation token and [`CALL_LIMIT`],
-/// logs its outcome, and answers the model.
+/// Runs one tool call under the cancellation token and [`CALL_LIMIT`], logs
+/// its outcome, and answers the model with the call's report, cut to end
+/// with [`CUT_NOTE`](crate::tools::CUT_NOTE) when it is longer than
+/// [`RESULT_LIMIT`](crate::tools::RESULT_LIMIT), or with the sentence of
+/// what failed or stopped the call.
 ///
 /// # Arguments
 ///

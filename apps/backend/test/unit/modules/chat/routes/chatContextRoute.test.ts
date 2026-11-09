@@ -78,6 +78,12 @@ const CALIGINIA: BuiltInAgent = Object.freeze({
 /** Model every case names. */
 const MODEL = "qwen/qwen3-8b"
 
+/**
+ * Request limits of the live agents; a measurement takes no request slot, so
+ * no case depends on them.
+ */
+const REQUEST_LIMITS = Object.freeze({ slotCount: 2, waitingLimit: 1 })
+
 /** Model access the chat-context route never uses. */
 const UNUSED_REPLY_MODEL = Object.freeze({
   openReplyStream: () =>
@@ -205,7 +211,8 @@ function createTestAgentRuntimeService(
     findConversationTitle: (conversationId) =>
       buildConversationTitleLookup(
         conversation.history.getConversation(conversationId)
-      )
+      ),
+    requestLimits: REQUEST_LIMITS
   })
 }
 

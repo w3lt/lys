@@ -63,7 +63,8 @@ export type AppView = "chat" | "settings"
  *
  * @remarks `running` means the backend's HTTP health route answered.
  * `unresponsive` means the process stayed alive without answering within the
- * readiness timeout; stopping it is the recovery path.
+ * readiness timeout, or a start or stop failed while it still ran or while
+ * its status could not be read; stopping it is the recovery path.
  */
 export type BackendServerStatus =
   "running" | "starting" | "stopping" | "stopped" | "unresponsive"
@@ -137,7 +138,9 @@ type LysActions = {
    *
    * @returns A promise resolving after the status is `running`,
    * `unresponsive`, or `stopped`, and after the LM Studio status is read when running.
-   * @throws The Tauri status or start rejection; the status then stays `starting`.
+   * @throws The Tauri status or start rejection, after `stopped` is
+   * published when no backend process remains, or `unresponsive` while one
+   * runs or its status cannot be read, so Start or Stop is offered again.
    */
   startBackend: () => Promise<void>
   /**
@@ -146,7 +149,10 @@ type LysActions = {
    * unresponsive, is published as stopped.
    *
    * @returns A promise resolving after the status command and any stop command settle.
-   * @throws The Tauri status or stop rejection.
+   * @throws The Tauri status or stop rejection; after a failed stop,
+   * `stopped` is published when no backend process remains, or
+   * `unresponsive` while one runs or its status cannot be read, so Start or
+   * Stop is offered again.
    */
   stopBackend: () => Promise<void>
   /**
@@ -197,6 +203,24 @@ const initialState: LysState = {
     status: "stopped",
     startedAt: undefined,
     stoppedAt: undefined
+  }
+}
+
+/**
+ * Gets the readiness to publish for the backend after a failed start or
+ * stop.
+ *
+ * @returns `exited` once the host owns no running backend process;
+ * `unresponsive` while one runs or its status cannot be read, so Stop
+ * stays offered as the recovery path.
+ */
+async function getBackendReadinessAfterFailure(): Promise<
+  "exited" | "unresponsive"
+> {
+  try {
+    return (await getBackendStatus()).running ? "unresponsive" : "exited"
+  } catch {
+    return "unresponsive"
   }
 }
 
@@ -469,11 +493,19 @@ function createLysStoreState(
           stoppedAt: undefined
         }
       })
-      const isProcessRunning =
-        (await getBackendStatus()).running || (await startBackend()).running
-      const readiness = isProcessRunning
-        ? await getBackendReadiness(get().backendUrl)
-        : "exited"
+      let readiness: BackendReadiness
+      try {
+        const isProcessRunning =
+          (await getBackendStatus()).running || (await startBackend()).running
+        readiness = isProcessRunning
+          ? await getBackendReadiness(get().backendUrl)
+          : "exited"
+      } catch (error) {
+        await updateBackendServerReadiness(
+          await getBackendReadinessAfterFailure()
+        )
+        throw error
+      }
       await updateBackendServerReadiness(readiness)
     },
 
@@ -494,7 +526,23 @@ function createLysStoreState(
       }))
       get().resetLmStudioStatus()
       get().releaseModelRuntime()
-      const processStatus = await stopBackend()
+      let processStatus: Awaited<ReturnType<typeof stopBackend>>
+      try {
+        processStatus = await stopBackend()
+      } catch (error) {
+        if ((await getBackendReadinessAfterFailure()) === "exited") {
+          handleBackendProcessExit(new Date())
+        } else {
+          set((prev) => ({
+            ...prev,
+            backendServerInfo: {
+              ...prev.backendServerInfo,
+              status: "unresponsive"
+            }
+          }))
+        }
+        throw error
+      }
       const now = new Date()
       if (!processStatus.running) handleBackendProcessExit(now)
     },

@@ -1,0 +1,286 @@
+/**
+ * Journey: a chat turn over the API streams the reply as timed events, the
+ * backend stores it, and the provider saw one streamed reply request and
+ * one title request.
+ */
+
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { readServerSentEvents, sendJsonRequest } from "../lib/httpProbe.mjs"
+import { rejectUnless } from "../lib/journey.mjs"
+import { readConversationRows } from "../lib/sqliteEvidence.mjs"
+import {
+  VERIFICATION_MODEL_NAME,
+  VERIFICATION_REPLY_TEXT,
+  VERIFICATION_TITLE,
+  formatComparableText
+} from "../lib/verificationProvider.mjs"
+import { waitForCondition } from "../lib/waiting.mjs"
+
+/** The user message every chat journey sends. */
+export const VERIFICATION_MESSAGE = "Please stream a short verification reply."
+
+/** Fewest delta events a streamed reply must arrive in. */
+const MINIMUM_DELTA_COUNT = 10
+
+/** Shortest spread between first and last delta, in milliseconds. */
+const MINIMUM_SPREAD_MS = 1000
+
+/**
+ * Builds the chat request body for a new conversation with the default
+ * agent.
+ *
+ * @param {string} model - Model key from the backend's list.
+ * @returns {object} The request body.
+ */
+export function buildChatRequestBody(model) {
+  return {
+    conversation: { kind: "new", agentCode: "caliginia" },
+    message: VERIFICATION_MESSAGE,
+    model,
+    generationOptions: { temperature: 0.7, replyCeiling: 2048 }
+  }
+}
+
+/**
+ * Reads every event of one chat turn.
+ *
+ * @param {string} backendUrl - The backend origin.
+ * @param {string} model - Model key.
+ * @returns {Promise<import("../lib/httpProbe.mjs").TimedServerSentEvent[]>}
+ * The events in arrival order, each with its arrival time.
+ */
+async function readChatTurnEvents(backendUrl, model) {
+  const events = []
+  for await (const event of readServerSentEvents(`${backendUrl}/api/v1/chat`, {
+    method: "POST",
+    json: buildChatRequestBody(model),
+    timeoutMs: 60_000
+  }))
+    events.push(event)
+  return events
+}
+
+/**
+ * Checks the shape and timing of a turn's events.
+ *
+ * @param {import("../lib/httpProbe.mjs").TimedServerSentEvent[]} events - The
+ * turn's events.
+ * @returns {Record<string, unknown>} The facts the later steps use.
+ * @throws {import("../lib/journey.mjs").JourneyFailure} If the turn did not
+ * stream, complete, or get its title.
+ */
+function parseChatTurn(events) {
+  const types = events.map((event) => event.data?.type)
+  const start = events[0]
+  rejectUnless(
+    start?.data?.type === "start-new-conversation-turn",
+    "The first event must be start-new-conversation-turn.",
+    types
+  )
+  const textPart = events.find(
+    (event) =>
+      event.data?.type === "reply-part" && event.data.part?.kind === "text"
+  )
+  rejectUnless(
+    textPart !== undefined,
+    "A reply-part event must open the text part.",
+    types
+  )
+  const deltas = events.filter(
+    (event) =>
+      event.data?.type === "reply-part-delta" &&
+      event.data.partId === textPart.data.part.id
+  )
+  rejectUnless(
+    deltas.length >= MINIMUM_DELTA_COUNT,
+    `The reply must arrive in at least ${MINIMUM_DELTA_COUNT} reply-part-delta events.`,
+    { deltaCount: deltas.length, types }
+  )
+  const spreadMs = deltas.at(-1).atMs - textPart.atMs
+  rejectUnless(
+    spreadMs >= MINIMUM_SPREAD_MS,
+    `The fragments must be spread over at least ${MINIMUM_SPREAD_MS} ms, which proves the reply streamed.`,
+    { spreadMs }
+  )
+  // The text part opens with its first fragment; every later fragment is a delta.
+  const text =
+    textPart.data.part.content +
+    deltas.map((delta) => delta.data.content).join("")
+  rejectUnless(
+    formatComparableText(text) ===
+      formatComparableText(VERIFICATION_REPLY_TEXT),
+    "The text part's opening content plus its deltas must equal the provider's reply.",
+    text
+  )
+  const done = events.find((event) => event.data?.type === "done")
+  rejectUnless(
+    done?.data.finishReason === "stop",
+    "A done event with finishReason stop must end the reply.",
+    done ?? types
+  )
+  const title = events.find((event) => event.data?.type === "title")
+  rejectUnless(
+    title?.data.title === VERIFICATION_TITLE,
+    "A title event must carry the generated title.",
+    title ?? types
+  )
+  return {
+    conversationId: start.data.conversation.id,
+    assistantMessageId: start.data.assistantMessage.id,
+    textPartId: textPart.data.part.id,
+    openingContent: textPart.data.part.content,
+    deltaCount: deltas.length,
+    textPartAtMs: textPart.atMs,
+    firstDeltaAtMs: deltas[0].atMs,
+    lastDeltaAtMs: deltas.at(-1).atMs,
+    spreadMs,
+    eventTypes: types
+  }
+}
+
+/**
+ * Reads the provider's request log entries written after a time.
+ *
+ * @param {string} logPath - The NDJSON request log.
+ * @param {string} sinceIso - ISO time; earlier entries are skipped.
+ * @returns {object[]} The chat completion requests, oldest first.
+ */
+function listProviderChatRequests(logPath, sinceIso) {
+  return readFileSync(logPath, "utf8")
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => JSON.parse(line))
+    .filter(
+      (entry) => entry.at >= sinceIso && entry.path === "/v1/chat/completions"
+    )
+}
+
+export default Object.freeze({
+  id: "chat-stream-api",
+  feature: "chat-streaming",
+  title:
+    "POST /api/v1/chat streams the reply as a reply-part event followed by timed reply-part-delta events, ending in done and a title; the conversation route and the SQLite rows hold the same reply; the provider saw one streamed reply request and one title request",
+  needsRenderer: false,
+  needsNative: false,
+  async run(steps, context) {
+    const startedAt = new Date().toISOString()
+    const turn = await steps.step(
+      "POST /api/v1/chat streams a new conversation's reply",
+      async (evidence) => {
+        const events = await readChatTurnEvents(
+          context.backendUrl,
+          VERIFICATION_MODEL_NAME
+        )
+        evidence.saveJson("events.json", events)
+        const facts = parseChatTurn(events)
+        evidence.saveJson("timeline.json", facts)
+        return facts
+      }
+    )
+    await steps.step(
+      "GET /api/v1/conversations/:id returns the stored reply and title",
+      async (evidence) => {
+        const url = `${context.backendUrl}/api/v1/conversations/${turn.conversationId}`
+        const conversation = await waitForCondition({
+          description: "the stored assistant message to be finished",
+          timeoutMs: 10_000,
+          check: async () => {
+            const exchange = await sendJsonRequest(url)
+            const assistant = exchange.body?.messages?.find(
+              (message) => message.role === "assistant"
+            )
+            return assistant?.finishReason === "stop" ? exchange.body : false
+          }
+        })
+        evidence.saveJson("conversation.json", conversation)
+        const assistant = conversation.messages.find(
+          (message) => message.role === "assistant"
+        )
+        const textPart = assistant.parts.find((part) => part.kind === "text")
+        rejectUnless(
+          conversation.title === VERIFICATION_TITLE,
+          "The stored title must be the generated one.",
+          conversation.title
+        )
+        rejectUnless(
+          textPart !== undefined &&
+            formatComparableText(textPart.content) ===
+              formatComparableText(VERIFICATION_REPLY_TEXT),
+          "The stored text part must hold the whole reply.",
+          assistant.parts
+        )
+        return {
+          title: conversation.title,
+          messageCount: conversation.messages.length
+        }
+      }
+    )
+    await steps.step(
+      "the SQLite rows hold the conversation, its title, and the reply text",
+      async (evidence) => {
+        const rows = readConversationRows(
+          join(context.paths.lysHome, "lys_db.sqlite"),
+          turn.conversationId
+        )
+        evidence.saveJson("sqlite-rows.json", rows)
+        rejectUnless(
+          rows.conversation !== undefined,
+          "The conversations table must hold the conversation.",
+          rows
+        )
+        rejectUnless(
+          rows.conversation.title === VERIFICATION_TITLE,
+          "The stored title row must be the generated title.",
+          rows.conversation
+        )
+        const replyRow = rows.messages.find(
+          (row) =>
+            typeof row.content === "string" &&
+            formatComparableText(row.content) ===
+              formatComparableText(VERIFICATION_REPLY_TEXT)
+        )
+        rejectUnless(
+          replyRow !== undefined,
+          "A message row must hold the whole reply text.",
+          rows.messages
+        )
+        return {
+          conversationRow: rows.conversation,
+          replyRole: replyRow.role,
+          rowCount: rows.messages.length
+        }
+      }
+    )
+    await steps.step(
+      "the provider saw one streamed reply request and one title request",
+      async (evidence) => {
+        const requests = listProviderChatRequests(
+          join(context.paths.logsDir, "provider-requests.ndjson"),
+          startedAt
+        )
+        evidence.saveJson("provider-requests.json", requests)
+        const replies = requests.filter((entry) => entry.stream === true)
+        const titles = requests.filter(
+          (entry) => entry.stream !== true && entry.hasResponseFormat
+        )
+        rejectUnless(
+          replies.length === 1,
+          "Exactly one streamed chat completion must have been requested.",
+          requests
+        )
+        rejectUnless(
+          titles.length === 1,
+          "Exactly one title completion with a response format must have been requested.",
+          requests
+        )
+        rejectUnless(
+          replies[0].lastUserContent === VERIFICATION_MESSAGE,
+          "The reply request must carry the user message.",
+          replies[0]
+        )
+        return { replyRequests: replies.length, titleRequests: titles.length }
+      }
+    )
+  }
+})

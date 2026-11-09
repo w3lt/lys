@@ -120,6 +120,7 @@ pub fn is_certificate_refusal(error: &(dyn Error + 'static)) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair};
     use tokio_rustls::rustls::CertificateError;
 
     /// Checks that a certificate refusal wrapped in an I/O error is found,
@@ -145,7 +146,11 @@ mod tests {
     /// gives a TLS connector and the TLS parameters for an SMTP host.
     #[test]
     fn builds_a_connector_and_parameters_with_an_extra_root() {
-        let trust = Trust::create_with_extra_roots(Vec::new());
+        let key = KeyPair::generate().expect("root key");
+        let mut params = CertificateParams::new(Vec::<String>::new()).expect("root parameters");
+        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let root = params.self_signed(&key).expect("root certificate");
+        let trust = Trust::create_with_extra_roots(vec![root.der().clone()]);
 
         assert!(trust.build_tls_connector().is_ok());
         assert!(trust.build_smtp_parameters("smtp.example.com").is_ok());

@@ -1,3 +1,7 @@
+import {
+  createLlmRuntimeFailureEvidence,
+  type LlmRuntimeFailureEvidence
+} from "./llmRuntimeFailureEvidence"
 import type { LoadedLlmModelInstance } from "./llmRuntimeTypes"
 
 /** Queries the latest loaded-instance snapshot from the model runtime. */
@@ -10,27 +14,33 @@ export type StopLoadedLlmModelInstance = (
   modelIdentifier: string
 ) => Promise<void>
 
-/** Immutable operational detail retained when a model-stop dependency fails. */
+/**
+ * Immutable operational detail retained when a model-stop dependency fails.
+ *
+ * @remarks The evidence keeps the original failure, with its stack and
+ * causes, for the logging boundary that reports it; it is never part of a
+ * public response.
+ */
 export type LlmModelStopDiagnostic =
   | Readonly<{
       /** Inventory operation that could not establish initial runtime state. */
       operation: "list-initial-model-instances"
-      /** Non-empty failure summary suitable for structured application logs. */
-      message: string
+      /** Original failure of the operation, reported at the logging boundary. */
+      evidence: LlmRuntimeFailureEvidence
     }>
   | Readonly<{
       /** Stop command that failed before the runtime was reconciled. */
       operation: "stop-model-instance"
       /** Runtime identifier supplied to the failed stop command. */
       modelIdentifier: string
-      /** Non-empty failure summary suitable for structured application logs. */
-      message: string
+      /** Original failure of the command, reported at the logging boundary. */
+      evidence: LlmRuntimeFailureEvidence
     }>
   | Readonly<{
       /** Inventory operation that could not establish reconciled runtime state. */
       operation: "list-reconciled-model-instances"
-      /** Non-empty failure summary suitable for structured application logs. */
-      message: string
+      /** Original failure of the operation, reported at the logging boundary. */
+      evidence: LlmRuntimeFailureEvidence
     }>
 
 /**
@@ -94,9 +104,6 @@ type LlmModelInstanceListOutcome =
       diagnostic: LlmModelInstanceListDiagnostic
     }>
 
-/** Fallback summary for a non-Error rejection from a runtime dependency. */
-const UNKNOWN_LLM_RUNTIME_FAILURE_MESSAGE = "Unknown LLM runtime failure."
-
 /** Immutable empty diagnostic collection shared by failure-free outcomes. */
 const EMPTY_LLM_MODEL_STOP_DIAGNOSTICS = Object.freeze([])
 
@@ -110,11 +117,13 @@ const EMPTY_LLM_MODEL_STOP_DIAGNOSTICS = Object.freeze([])
  * @remarks Stop attempts for every matching instance run concurrently, start
  * in ascending runtime-identifier order, and are not affected by individual
  * failures; reconciliation starts after all of them settle, and stop
- * diagnostics keep that identifier order. The result describes the final
- * observable reconciliation snapshot, not a durable guarantee against later
- * loads by another runtime client. Unloading is completion-only by product
- * design. The calling application service owns and awaits the inventory, stop,
- * and reconciliation work even after the requesting client disconnects.
+ * diagnostics keep that identifier order. Each diagnostic retains the
+ * original failure as evidence for the logging boundary. The result describes
+ * the final observable reconciliation snapshot, not a durable guarantee
+ * against later loads by another runtime client. Unloading is completion-only
+ * by product design. The calling application service owns and awaits the
+ * inventory, stop, and reconciliation work even after the requesting client
+ * disconnects.
  */
 export async function stopLlmModelsByKey(
   modelKey: string,
@@ -214,16 +223,16 @@ async function listLlmModelInstancesByKey(
       modelInstances: Object.freeze(matchingModelInstances)
     })
   } catch (error) {
-    const message = formatLlmRuntimeFailureMessage(error)
+    const evidence = createLlmRuntimeFailureEvidence(error)
     const diagnostic =
       operation === "list-initial-model-instances"
         ? Object.freeze({
             operation: "list-initial-model-instances",
-            message
+            evidence
           } as const satisfies LlmModelInstanceListDiagnostic)
         : Object.freeze({
             operation: "list-reconciled-model-instances",
-            message
+            evidence
           } as const satisfies LlmModelInstanceListDiagnostic)
 
     return Object.freeze({
@@ -280,7 +289,7 @@ async function stopLlmModelInstance(
     return Object.freeze({
       operation: "stop-model-instance",
       modelIdentifier,
-      message: formatLlmRuntimeFailureMessage(error)
+      evidence: createLlmRuntimeFailureEvidence(error)
     } as const satisfies LlmModelStopDiagnostic)
   }
 }
@@ -304,16 +313,4 @@ function calculateLoadedLlmModelInstanceOrder(
     return 1
   }
   return 0
-}
-
-/**
- * Formats an opaque dependency rejection without publishing its mutable value.
- *
- * @param failure - Rejection received from an external runtime operation.
- * @returns The Error message when non-empty; otherwise a stable fallback summary.
- */
-function formatLlmRuntimeFailureMessage(failure: unknown): string {
-  return failure instanceof Error && failure.message.length > 0
-    ? failure.message
-    : UNKNOWN_LLM_RUNTIME_FAILURE_MESSAGE
 }

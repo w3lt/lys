@@ -9,7 +9,7 @@ pub mod commands;
 pub mod email;
 pub mod generation;
 pub mod host_name;
-pub mod json_object;
+mod json;
 pub mod load_configuration;
 pub mod location;
 pub mod mcp;
@@ -20,6 +20,7 @@ pub mod tools;
 
 use email::EmailSettings;
 use generation::GenerationSettings;
+use json::parse_json_object;
 use load_configuration::LoadConfigurationSettings;
 use location::LocationSettings;
 use mcp::McpSettings;
@@ -37,7 +38,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::utils::lys_home::LysHome;
 
@@ -45,23 +46,25 @@ use crate::utils::lys_home::LysHome;
 /// running at once in one process never share a temporary file.
 static TEMPORARY_FILE_COUNT: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
 /// Complete persisted Lys settings value.
 ///
 /// The private fields group runtime, generation, load configuration, secrets,
 /// tools, location, MCP server, provider, and email settings in the
 /// serialized JSON representation while keeping those groups behind the
-/// settings module's API boundary. A missing group takes that group's
-/// defaults; the load configuration group's default is empty, the secrets
-/// group's default holds no key and no password, the tools group's default
-/// puts no tool on Just run and saves no tool switch, the location group's
-/// default saves no location, the MCP group's default lists no server and
-/// switches every server Lys ships off, the providers group's default is LM
-/// Studio at its default address, and the email group's default saves no
-/// account. A group the value does not hold, such as the `model` group of
-/// files written before the local context estimate was removed, is ignored
-/// when loading and left out of the next save.
+/// settings module's API boundary. The value, each group, and each object
+/// inside a group are read from a JSON object only, as the `@lys/share`
+/// schemas read them: an array in their place is refused. A missing group
+/// takes that group's defaults; the load configuration group's default is
+/// empty, the secrets group's default holds no key and no password, the
+/// tools group's default puts no tool on Just run and saves no tool switch,
+/// the location group's default saves no location, the MCP group's default
+/// lists no server and switches every server Lys ships off, the providers
+/// group's default is LM Studio at its default address, and the email
+/// group's default saves no account. A group the value does not hold, such
+/// as the `model` group of files written before the local context estimate
+/// was removed, is ignored when loading and left out of the next save.
 pub struct LysSettings {
     /// Process settings and default-model selection in the `runtime` object.
     runtime: RunTimeSettings,
@@ -82,6 +85,79 @@ pub struct LysSettings {
     providers: ProvidersSettings,
     /// Email account the person saved, in the `email` object.
     email: EmailSettings,
+}
+
+/// Deserializes the settings from a JSON object only.
+impl<'de> Deserialize<'de> for LysSettings {
+    /// Reads the settings object, each group from a JSON object only.
+    ///
+    /// # Errors
+    ///
+    /// Returns the deserializer's error when the input or a group is not a
+    /// JSON object, or a group breaks its own rules.
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let stored: StoredLysSettings = parse_json_object(deserializer)?;
+
+        Ok(Self::from(stored))
+    }
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+/// The settings JSON object with each group read from a JSON object only.
+///
+/// Serde's derived groups would also read a JSON array as their fields in
+/// order; the `@lys/share` schemas refuse that form, so each group is read
+/// from an object first, as the `mcp` group's own reader does. A missing
+/// group takes its default, and an unknown group is ignored.
+struct StoredLysSettings {
+    /// The `runtime` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    runtime: RunTimeSettings,
+    /// The `generation` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    generation: GenerationSettings,
+    /// The `loadConfiguration` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    load_configuration: LoadConfigurationSettings,
+    /// The `secrets` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    secrets: SecretsSettings,
+    /// The `tools` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    tools: ToolSettings,
+    /// The `location` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    location: LocationSettings,
+    /// The `mcp` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    mcp: McpSettings,
+    /// The `providers` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    providers: ProvidersSettings,
+    /// The `email` object.
+    #[serde(deserialize_with = "parse_json_object")]
+    email: EmailSettings,
+}
+
+impl From<StoredLysSettings> for LysSettings {
+    /// Takes every group as stored.
+    fn from(stored: StoredLysSettings) -> Self {
+        Self {
+            runtime: stored.runtime,
+            generation: stored.generation,
+            load_configuration: stored.load_configuration,
+            secrets: stored.secrets,
+            tools: stored.tools,
+            location: stored.location,
+            mcp: stored.mcp,
+            providers: stored.providers,
+            email: stored.email,
+        }
+    }
 }
 
 impl LysSettings {
@@ -459,6 +535,23 @@ mod tests {
         serde_json::to_value(settings).expect("settings that serialize")
     }
 
+    /// Loads `stored_text` from a settings file of its own, and checks that
+    /// loading fails and leaves the file as it was.
+    ///
+    /// Returns the load failure's message.
+    fn assert_loading_fails_without_rewriting(stored_text: &str) -> String {
+        let directory = TestDirectory::create("settings-unusable");
+        let path = directory.create_file("settings.json", stored_text);
+
+        let failure = load_settings_file(&path).expect_err("an unusable settings file");
+
+        assert_eq!(
+            fs::read_to_string(&path).expect("read the settings file"),
+            stored_text
+        );
+        failure
+    }
+
     /// Lists the names of the temporary files in `directory`.
     fn list_temporary_file_names(directory: &Path) -> Vec<String> {
         fs::read_dir(directory)
@@ -716,6 +809,97 @@ mod tests {
             assert_eq!(
                 fs::read_to_string(&path).expect("read the settings file"),
                 stored_text
+            );
+        }
+    }
+
+    #[test]
+    fn fails_when_the_document_or_an_object_in_it_is_not_a_json_object_without_rewriting_it() {
+        // Each pointer names an object of the complete settings (`~1` escapes
+        // the `/` of a model key); an array in its place is refused.
+        let arrays_in_place_of_objects = [
+            (
+                "/runtime",
+                json!([false, false, "qwen/qwen3-8b", "http://127.0.0.1:23456"]),
+            ),
+            ("/generation", json!([0.2, 512])),
+            ("/loadConfiguration", json!([{}, {}])),
+            ("/loadConfiguration/default", json!([4096])),
+            ("/loadConfiguration/models/qwen~1qwen3-8b", json!([16384])),
+            ("/secrets", json!(["tvly-synthetic-0123456789"])),
+            ("/secrets", json!([])),
+            ("/tools", json!([[], {}])),
+            ("/location", json!(["Paris", null, null])),
+            ("/location", json!([])),
+            ("/mcp", json!([[]])),
+            (
+                "/providers",
+                json!(["groq", { "address": null }, { "address": null }]),
+            ),
+            ("/providers/lmStudio", json!(["10.0.0.5:1234"])),
+            ("/providers/ollama", json!([null])),
+            ("/mcp/builtIn", json!([{ "enabled": true }])),
+            ("/mcp/builtIn/email", json!([true])),
+            ("/email", json!([null])),
+            (
+                "/email/account",
+                json!(["person@example.com", "A Person", "person@example.com"]),
+            ),
+            (
+                "/email/account/imap",
+                json!(["imap.example.com", 993, "tls"]),
+            ),
+            (
+                "/email/account/smtp",
+                json!(["smtp.example.com", 587, "starttls"]),
+            ),
+        ];
+        let mut unusable_files: Vec<String> = arrays_in_place_of_objects
+            .into_iter()
+            .map(|(pointer, array)| {
+                let mut settings = get_complete_settings();
+                *settings
+                    .pointer_mut(pointer)
+                    .expect("an object of the settings") = array;
+                settings.to_string()
+            })
+            .collect();
+        unusable_files.extend([String::from("[]"), String::from("null")]);
+
+        for stored_text in unusable_files {
+            let failure = assert_loading_fails_without_rewriting(&stored_text);
+
+            assert!(failure.starts_with("Failed to parse "), "{failure}");
+        }
+    }
+
+    #[test]
+    fn a_load_failure_names_the_line_where_reading_stopped() {
+        // Pretty-printed, as saves write the file, so each value has a line
+        // of its own. A value of the wrong type stops reading on its own
+        // line. A rule a string breaks is found once the string is read, and
+        // the JSON reader then names the end of the string's object.
+        let unusable_values = [
+            (json!({ "generation": { "temperature": "hot" } }), 3),
+            (
+                json!({ "providers": { "lmStudio": { "address": "http://127.0.0.1:1234" } } }),
+                5,
+            ),
+            (
+                json!({ "loadConfiguration": { "models": { "qwen/qwen3-8b": { "contextLength": 0 } } } }),
+                5,
+            ),
+        ];
+
+        for (settings, line) in unusable_values {
+            let stored_text =
+                serde_json::to_string_pretty(&settings).expect("settings that serialize");
+
+            let failure = assert_loading_fails_without_rewriting(&stored_text);
+
+            assert!(
+                failure.contains(&format!(" at line {line} column ")),
+                "{failure}"
             );
         }
     }

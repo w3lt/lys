@@ -474,7 +474,8 @@ async fn the_check_subcommand_logs_a_report_it_cannot_write_and_exits_1() {
         false,
     );
 
-    let (mut binary, stderr) = BinaryProcess::start_with_closed_output(&["check"], Some(&json));
+    let (mut binary, stderr) =
+        BinaryProcess::start_with_output_reader_closed(&["check"], Some(&json));
     let stderr_bytes = read_to_end_in_thread(stderr);
     let (status, log) = tokio::task::spawn_blocking(move || {
         let status = binary.wait_for_exit();

@@ -43,9 +43,9 @@ pub struct BinaryStreams {
 /// ownership: the process is the test's direct child and the whole scope,
 /// as neither the `email` binary nor a case run again starts a process of
 /// its own; [`Self::start`] and [`Self::start_test_case`] hand its
-/// standard streams to the test, and [`Self::start_with_closed_output`]
-/// its standard error; the process's end closes them, which ends every
-/// read of them.
+/// standard streams to the test, and
+/// [`Self::start_with_output_reader_closed`] its standard error; the
+/// process's end closes them, which ends every read of them.
 pub struct BinaryProcess {
     /// The process.
     child: Child,
@@ -91,7 +91,7 @@ impl BinaryProcess {
     /// # Panics
     ///
     /// When the pipe cannot be made or the binary cannot be started.
-    pub fn start_with_closed_output(
+    pub fn start_with_output_reader_closed(
         arguments: &[&str],
         variable: Option<&str>,
     ) -> (Self, ChildStderr) {

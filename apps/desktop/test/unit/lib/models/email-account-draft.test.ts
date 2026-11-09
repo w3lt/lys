@@ -25,7 +25,7 @@ const EMPTY_DRAFT = buildEmailAccountDraft(null)
 
 /** Problem of an address that breaks the address rule. */
 const ADDRESS_PROBLEM =
-  "An email address is a name of 1 to 64 visible ASCII characters other than @, then @ and an ASCII host name, up to 254 characters in all."
+  "An email address is a name of 1 to 64 ASCII letters, digits, dots, and ! # $ % & ' * + - / = ? ^ _ ` { | } ~, with no dot at either end or two in a row, then @ and an ASCII host name, up to 254 characters in all."
 
 /** Problem of a mail server host that breaks the host rule. */
 const HOST_PROBLEM =
@@ -473,6 +473,12 @@ describe("parseEmailAccountDraft", () => {
     [
       "an address whose name holds a letter beyond ASCII",
       { address: "josé@example.test" },
+      "address",
+      ADDRESS_PROBLEM
+    ],
+    [
+      "an address whose name has two dots in a row",
+      { address: "ada..lovelace@example.test" },
       "address",
       ADDRESS_PROBLEM
     ],

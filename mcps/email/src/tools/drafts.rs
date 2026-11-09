@@ -2,7 +2,6 @@
 //! Drafts folder, sent as stored once the call names what they hold.
 
 use std::collections::BTreeSet;
-use std::str::FromStr;
 use std::sync::{Mutex, PoisonError};
 use std::time::SystemTime;
 
@@ -740,8 +739,8 @@ struct PreparedDraft {
 ///
 /// The draft to send, or why it cannot be sent here: it is not a message,
 /// an entry of a recipient field is not an email address lettre accepts,
-/// it has no recipient, or lettre refuses the sender address.
-fn parse_stored_draft(sender: &str, bytes: &[u8]) -> Result<PreparedDraft, ToolFailure> {
+/// or it has no recipient.
+fn parse_stored_draft(sender: &Address, bytes: &[u8]) -> Result<PreparedDraft, ToolFailure> {
     let parsed = MessageParser::default()
         .parse(bytes)
         .ok_or_else(|| ToolFailure::Argument("The draft is not a message.".to_owned()))?;
@@ -817,10 +816,12 @@ fn build_entry_refusal(field: &str, mailbox: &ParsedMailbox) -> ToolFailure {
 ///
 /// The envelope, or the refusal the model reads: a recipient that is not
 /// an email address lettre accepts, as
-/// [`CompositionProblem::InvalidRecipient`] writes it; a draft without a
-/// recipient; or an account address lettre does not accept as a sender,
-/// as [`CompositionProblem::InvalidSender`] writes it.
-fn build_draft_envelope(sender: &str, fields: &MessageArguments) -> Result<Envelope, ToolFailure> {
+/// [`CompositionProblem::InvalidRecipient`] writes it, or a draft without
+/// a recipient.
+fn build_draft_envelope(
+    sender: &Address,
+    fields: &MessageArguments,
+) -> Result<Envelope, ToolFailure> {
     let recipients = [&fields.to, &fields.cc, &fields.bcc]
         .into_iter()
         .flatten()
@@ -832,9 +833,7 @@ fn build_draft_envelope(sender: &str, fields: &MessageArguments) -> Result<Envel
             "The draft has no recipient. Save it again with one.".to_owned(),
         ));
     }
-    let sender_address = Address::from_str(sender)
-        .map_err(|_| ToolFailure::Argument(CompositionProblem::InvalidSender.format_sentence()))?;
-    Envelope::new(Some(sender_address), recipients).map_err(|error| {
+    Envelope::new(Some(sender.clone()), recipients).map_err(|error| {
         ToolFailure::Argument(format!("The envelope could not be built: {error}."))
     })
 }
@@ -957,11 +956,16 @@ async fn find_message_summary(
 mod tests {
     use super::*;
 
+    /// The address of the account the drafts are sent from.
+    fn build_sender_address() -> Address {
+        Address::new("person", "example.com").expect("an address lettre sends from")
+    }
+
     #[test]
     fn prepares_a_draft_with_every_recipient_in_the_envelope_and_no_bcc_field() {
         let draft = b"From: A Person <person@example.com>\r\nTo: Jane <jane@example.com>, Team: a@example.com;\r\nCc: cc@example.com\r\nBcc: hidden@example.com\r\nSubject: Hi\r\nMessage-ID: <one@example.com>\r\nContent-Type: text/plain\r\n\r\nHello\r\n";
 
-        let prepared = parse_stored_draft("person@example.com", draft).expect("prepared");
+        let prepared = parse_stored_draft(&build_sender_address(), draft).expect("prepared");
 
         let text = String::from_utf8(prepared.message.bytes.clone()).expect("utf-8");
         assert!(!text.contains("hidden"), "{text}");
@@ -1013,14 +1017,14 @@ mod tests {
         let empty_group = b"From: person@example.com\r\nTo: undisclosed-recipients:;\r\nSubject: Hi\r\n\r\nHello\r\n";
 
         assert_eq!(
-            parse_stored_draft("person@example.com", bare_name),
+            parse_stored_draft(&build_sender_address(), bare_name),
             Err(ToolFailure::Argument(
                 "The draft's To field holds \"nobody\", which is not an email address, so the draft cannot be sent here."
                     .to_owned()
             ))
         );
         assert_eq!(
-            parse_stored_draft("person@example.com", empty_group),
+            parse_stored_draft(&build_sender_address(), empty_group),
             Err(ToolFailure::Argument(
                 "The draft has no recipient. Save it again with one.".to_owned()
             ))
@@ -1028,21 +1032,11 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_draft_that_is_not_a_message_or_whose_sender_lettre_refuses() {
-        let draft =
-            b"From: person@example.com\r\nTo: jane@example.com\r\nSubject: Hi\r\n\r\nHello\r\n";
-
+    fn refuses_a_draft_that_is_not_a_message() {
         assert_eq!(
-            parse_stored_draft("person@example.com", b"Hello"),
+            parse_stored_draft(&build_sender_address(), b"Hello"),
             Err(ToolFailure::Argument(
                 "The draft is not a message.".to_owned()
-            ))
-        );
-        assert_eq!(
-            parse_stored_draft("john..doe@example.com", draft),
-            Err(ToolFailure::Argument(
-                "The account's address cannot be used as a sender. Check it in Settings → MCP."
-                    .to_owned()
             ))
         );
     }
@@ -1071,7 +1065,7 @@ mod tests {
     #[test]
     fn matches_a_draft_by_addresses_in_any_order_and_by_its_text_with_any_line_breaks() {
         let draft = parse_stored_draft(
-            "person@example.com",
+            &build_sender_address(),
             b"From: person@example.com\r\nTo: \"Doe, Jane\" <jane@example.com>, b@example.com\r\nSubject: Hi \r\n\r\nHello\r\nthere\r\n\r\n",
         )
         .expect("prepared");

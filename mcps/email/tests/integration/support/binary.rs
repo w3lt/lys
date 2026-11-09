@@ -16,10 +16,6 @@ use std::time::{Duration, Instant};
 /// its output once it exited.
 pub const STEP_WAIT_LIMIT: Duration = Duration::from_secs(30);
 
-/// How long [`BinaryProcess::wait_for_exit`] sleeps between two looks at
-/// the binary.
-const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(10);
-
 /// The standard streams of a started binary, each piped to the test.
 pub struct BinaryStreams {
     /// Its standard input; dropping it ends the binary's input.
@@ -176,6 +172,10 @@ impl BinaryProcess {
     pub fn wait_for_exit(&mut self) -> ExitStatus {
         let deadline = Instant::now() + STEP_WAIT_LIMIT;
         loop {
+            /// How long [`BinaryProcess::wait_for_exit`] sleeps between two
+            /// looks at the binary.
+            const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
             let exited = self.child.try_wait().expect("the binary's state is read");
             if let Some(status) = exited {
                 return status;

@@ -21,12 +21,6 @@ use crate::message::{MessageView, format_size, parse_message};
 /// reads from one folder, the newest by UID.
 const CONVERSATION_LIMIT: usize = 50;
 
-/// Most characters of a message's text shown inside a conversation.
-const CONVERSATION_TEXT_LIMIT: usize = 3_000;
-
-/// Most identifiers a conversation search asks the server about.
-const CONVERSATION_ID_LIMIT: usize = 30;
-
 /// The arguments of `read_email` and `read_conversation`.
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -507,7 +501,7 @@ fn format_message_view(id: &EmailId, flags: Flags, view: &MessageView) -> String
 }
 
 /// Formats a message as a conversation shows it: as `read_email` does,
-/// with the text cut at [`CONVERSATION_TEXT_LIMIT`] characters.
+/// with the text cut at 3,000 characters.
 ///
 /// # Arguments
 ///
@@ -515,6 +509,9 @@ fn format_message_view(id: &EmailId, flags: Flags, view: &MessageView) -> String
 /// * `flags` - Its flags.
 /// * `view` - The message.
 fn format_conversation_entry(id: &EmailId, flags: Flags, view: &MessageView) -> String {
+    /// Most characters of a message's text shown inside a conversation.
+    const CONVERSATION_TEXT_LIMIT: usize = 3_000;
+
     let mut text = format_view_heading(id, flags, view);
     text.push_str(&format_cut_text(
         id,
@@ -609,6 +606,9 @@ fn format_cut_text(id: &EmailId, body: &str, limit: usize) -> String {
 /// Collects the identifiers a conversation is searched by: the message's
 /// own, the ones it replies to, and the ones it references.
 fn list_conversation_identifiers(view: &MessageView) -> Vec<String> {
+    /// Most identifiers a conversation search asks the server about.
+    const CONVERSATION_ID_LIMIT: usize = 30;
+
     let headers = &view.headers;
     let mut identifiers: Vec<String> = Vec::new();
     for identifier in headers

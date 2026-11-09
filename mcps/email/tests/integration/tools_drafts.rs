@@ -458,12 +458,12 @@ async fn refuses_to_send_a_draft_to_recipients_the_draft_does_not_hold() {
     assert_draft_kept_unsent(&stack.imap, &stack.smtp);
 }
 
-/// A draft another client saved, `1.1003.Drafts`: a quoted name, a group,
-/// an encoded subject, and a Bcc field.
-const OTHER_CLIENT_DRAFT: &str = "From: A Person <person@example.com>\r\nTo: \"Doe, Jane\" <jane@example.com>, Team: a@example.com, B <b@example.com>;\r\nCc: =?UTF-8?Q?J=C3=BCrgen?= <juergen@example.com>\r\nBcc: hidden@example.com\r\nSubject: =?UTF-8?Q?Gr=C3=BC=C3=9Fe?=\r\nMessage-ID: <other@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nLine one\r\nLine two\r\n";
-
 /// Starts the stack with the other client's draft in Drafts.
 async fn start_with_other_client_draft() -> Stack {
+    /// A draft another client saved, `1.1003.Drafts`: a quoted name, a group,
+    /// an encoded subject, and a Bcc field.
+    const OTHER_CLIENT_DRAFT: &str = "From: A Person <person@example.com>\r\nTo: \"Doe, Jane\" <jane@example.com>, Team: a@example.com, B <b@example.com>;\r\nCc: =?UTF-8?Q?J=C3=BCrgen?= <juergen@example.com>\r\nBcc: hidden@example.com\r\nSubject: =?UTF-8?Q?Gr=C3=BC=C3=9Fe?=\r\nMessage-ID: <other@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nLine one\r\nLine two\r\n";
+
     let mut mailbox = FakeMailbox::create_standard();
     mailbox.add_message(
         "Drafts",

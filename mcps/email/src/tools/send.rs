@@ -30,9 +30,6 @@ const MAXIMUM_RECIPIENTS: usize = 50;
 /// Longest body, in characters.
 const MAXIMUM_BODY_LENGTH: usize = 500_000;
 
-/// The flags a Sent copy is stored with.
-const SENT_FLAGS: &str = "(\\Seen)";
-
 /// The fields of a message to send or to save as a draft, as the model
 /// gives them; also a stored draft's, which `send_draft` compares with
 /// its call.
@@ -476,6 +473,9 @@ pub(super) async fn save_copy_in_sent(
     folders: &[Folder],
     bytes: &[u8],
 ) -> Result<SentCopy, ToolFailure> {
+    /// The flags a Sent copy is stored with.
+    const SENT_FLAGS: &str = "(\\Seen)";
+
     let Some(sent) = find_role_folder(folders, FolderRole::Sent) else {
         return Ok(SentCopy::NoFolder);
     };

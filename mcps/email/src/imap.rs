@@ -46,13 +46,6 @@ use crate::trust::Trust;
 /// Longest one command may take to be answered in full.
 const EXCHANGE_LIMIT: Duration = Duration::from_secs(30);
 
-/// Header fields fetched for a listing, enough for a search hit, a
-/// conversation link, and a reply.
-const SUMMARY_QUERY: &str = "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (DATE FROM TO CC SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES)])";
-
-/// What is fetched to read a message without marking it as read.
-const MESSAGE_QUERY: &str = "(UID FLAGS BODY.PEEK[])";
-
 /// Month names as IMAP dates write them.
 const MONTH_NAMES: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -68,9 +61,6 @@ const LOST: ImapFailure = ImapFailure::Connection(ConnectionFailure::Lost);
 
 /// A command the server answered with something that is not its answer.
 const UNREADABLE: ImapFailure = ImapFailure::Connection(ConnectionFailure::Unreadable);
-
-/// A command that was not answered within [`EXCHANGE_LIMIT`].
-const TIMED_OUT: ImapFailure = ImapFailure::Connection(ConnectionFailure::TimedOut);
 
 /// A stream an IMAP session runs over: TCP, or TLS over TCP.
 pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin + Send + fmt::Debug {}
@@ -486,6 +476,10 @@ impl ImapSession {
     /// limit, or, when an earlier command ended the session, that command's
     /// failure.
     pub async fn list_summaries(&mut self, uids: &[u32]) -> Result<Vec<Summary>, ImapFailure> {
+        /// Header fields fetched for a listing, enough for a search hit, a
+        /// conversation link, and a reply.
+        const SUMMARY_QUERY: &str = "(UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (DATE FROM TO CC SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES)])";
+
         if uids.is_empty() {
             return Ok(Vec::new());
         }
@@ -509,6 +503,9 @@ impl ImapSession {
     /// limit, or, when an earlier command ended the session, that command's
     /// failure.
     pub async fn find_message(&mut self, uid: u32) -> Result<Option<FetchedMessage>, ImapFailure> {
+        /// What is fetched to read a message without marking it as read.
+        const MESSAGE_QUERY: &str = "(UID FLAGS BODY.PEEK[])";
+
         let command = format!("UID FETCH {uid} {MESSAGE_QUERY}");
         let messages = self.send_command(&command, find_fetched_message).await?;
         Ok(messages.into_iter().find(|message| message.uid == uid))
@@ -757,6 +754,9 @@ async fn run_exchange<T>(
     ended_by: &mut Option<ConnectionFailure>,
     exchange: impl Future<Output = Result<T, ImapFailure>>,
 ) -> Result<T, ImapFailure> {
+    /// A command that was not answered within [`EXCHANGE_LIMIT`].
+    const TIMED_OUT: ImapFailure = ImapFailure::Connection(ConnectionFailure::TimedOut);
+
     if let Some(failure) = *ended_by {
         return Err(ImapFailure::Connection(failure));
     }
@@ -1168,9 +1168,9 @@ fn update_section_data(
     }
 }
 
-/// Finds a summary in a `FETCH` answer of [`SUMMARY_QUERY`]; an answer
-/// without a UID, such as a flag change the server reports on its own, is
-/// skipped.
+/// Finds a summary in an answer to the `FETCH` of
+/// [`ImapSession::list_summaries`]; an answer without a UID, such as a flag
+/// change the server reports on its own, is skipped.
 fn find_summary(response: &Response<'_>) -> Option<Summary> {
     let attributes = find_fetched_attributes(response)?;
     Some(Summary {
@@ -1183,8 +1183,8 @@ fn find_summary(response: &Response<'_>) -> Option<Summary> {
     })
 }
 
-/// Finds a whole message in a `FETCH` answer of [`MESSAGE_QUERY`]; an
-/// answer without a UID or the message is skipped.
+/// Finds a whole message in a `FETCH` answer of `(UID FLAGS BODY.PEEK[])`;
+/// an answer without a UID or the message is skipped.
 fn find_fetched_message(response: &Response<'_>) -> Option<FetchedMessage> {
     let attributes = find_fetched_attributes(response)?;
     Some(FetchedMessage {

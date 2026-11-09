@@ -17,21 +17,17 @@ use crate::support::{
 /// The time the original message was sent.
 const BASE: i64 = 1_793_611_800;
 
-/// A message with an HTML body and two attachments, to forward.
-const REPORT: &str = "From: Jane Doe <jane@example.com>\r\nTo: person@example.com\r\nDate: Mon, 2 Nov 2026 12:00:00 +0000\r\nSubject: Report\r\nMessage-ID: <report@example.com>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nPlease find the report attached.\r\n--b\r\nContent-Type: text/csv; name=\"data.csv\"\r\nContent-Disposition: attachment; filename=\"data.csv\"\r\n\r\na,b\r\n1,2\r\n--b\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--b--\r\n";
-
-/// A message whose sender's name needs quotes and whose Reply-To asks for
-/// replies to go to two other mailboxes.
-const REDIRECTED: &str = "From: \"Doe, Jane\" <jane@example.com>\r\nReply-To: a@example.com, Team <b@example.com>\r\nTo: person@example.com\r\nDate: Mon, 2 Nov 2026 12:05:00 +0000\r\nSubject: Plans\r\nMessage-ID: <plans@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nWhat do you think?\r\n";
-
-/// A message without a From field whose Reply-To asks for replies to go
-/// to one mailbox.
-const NO_SENDER: &str = "Reply-To: a@example.com\r\nTo: person@example.com\r\nDate: Mon, 2 Nov 2026 12:10:00 +0000\r\nSubject: Notice\r\nMessage-ID: <notice@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nPlease answer.\r\n";
-
 /// Starts the stack with one message from Jane in INBOX, `1.1001.INBOX`,
 /// the report, `2.1001.INBOX`, and the redirected message,
 /// `3.1001.INBOX`.
 async fn start_with_originals(server_keeps_sent_copy: bool) -> Stack {
+    /// A message with an HTML body and two attachments, to forward.
+    const REPORT: &str = "From: Jane Doe <jane@example.com>\r\nTo: person@example.com\r\nDate: Mon, 2 Nov 2026 12:00:00 +0000\r\nSubject: Report\r\nMessage-ID: <report@example.com>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nPlease find the report attached.\r\n--b\r\nContent-Type: text/csv; name=\"data.csv\"\r\nContent-Disposition: attachment; filename=\"data.csv\"\r\n\r\na,b\r\n1,2\r\n--b\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--b--\r\n";
+
+    /// A message whose sender's name needs quotes and whose Reply-To asks for
+    /// replies to go to two other mailboxes.
+    const REDIRECTED: &str = "From: \"Doe, Jane\" <jane@example.com>\r\nReply-To: a@example.com, Team <b@example.com>\r\nTo: person@example.com\r\nDate: Mon, 2 Nov 2026 12:05:00 +0000\r\nSubject: Plans\r\nMessage-ID: <plans@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nWhat do you think?\r\n";
+
     let mut mailbox = FakeMailbox::create_standard();
     let original = TestMessage {
         subject: "Hello".to_owned(),
@@ -262,6 +258,10 @@ async fn refuses_a_reply_that_leaves_out_its_recipients_or_subject() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn tells_a_reply_without_recipients_only_where_replies_go_when_no_sender_is_named() {
+    /// A message without a From field whose Reply-To asks for replies to go
+    /// to one mailbox.
+    const NO_SENDER: &str = "Reply-To: a@example.com\r\nTo: person@example.com\r\nDate: Mon, 2 Nov 2026 12:10:00 +0000\r\nSubject: Notice\r\nMessage-ID: <notice@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nPlease answer.\r\n";
+
     let mut mailbox = FakeMailbox::create_standard();
     mailbox.add_message(
         "INBOX",

@@ -721,7 +721,13 @@ mod tests {
 
     #[test]
     fn collects_identifiers_once_each_and_skips_unusable_ones() {
-        let view = parse_message(b"Message-ID: <one@example.com>\r\nIn-Reply-To: <zero@example.com>\r\nReferences: <minus@example.com> <zero@example.com> <one@example.com>\r\n\r\nx").expect("message");
+        let mut view = parse_message(b"Message-ID: <one@example.com>\r\nIn-Reply-To: <zero@example.com>\r\nReferences: <minus@example.com> <zero@example.com> <one@example.com>\r\n\r\nx").expect("message");
+        // Unusable: empty, with a letter outside ASCII, and with a control
+        // character.
+        view.headers.in_reply_to.insert(0, String::new());
+        let references = &mut view.headers.references;
+        references.insert(0, "ünïcode@example.com".to_owned());
+        references.insert(2, "bell\u{7}@example.com".to_owned());
 
         assert_eq!(
             list_conversation_identifiers(&view),

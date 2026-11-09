@@ -44,10 +44,11 @@ enum Command {
 ///
 /// The exit code: [`USAGE_EXIT_CODE`] for other arguments,
 /// [`ACCOUNT_EXIT_CODE`] when the account is missing or breaks a rule, 1
-/// when the report could not be written, as when the reader of standard
-/// output has closed, the server could not start, or its service failed,
-/// and 0 once the report is printed or the server stopped otherwise. A
-/// closed standard output takes the report as printed.
+/// when the report could not be written, the server could not start, or
+/// its service failed, and 0 once the report is printed or the server
+/// stopped otherwise. The report cannot be written when the reader of
+/// standard output has closed; a closed standard output takes it as
+/// printed.
 #[tokio::main]
 async fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();

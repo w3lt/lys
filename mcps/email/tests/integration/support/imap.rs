@@ -190,7 +190,10 @@ pub struct FakeMailbox {
 }
 
 impl FakeMailbox {
-    /// A mailbox without folders.
+    /// A mailbox without folders that advertises UIDPLUS and LITERAL+, uses
+    /// `/` as its hierarchy delimiter, gives the folders that CREATE makes
+    /// UIDVALIDITY 2001 and up, writes no untagged line before a
+    /// continuation request, and refuses, fails, and removes nothing.
     pub fn create_empty() -> Self {
         Self {
             folders: Vec::new(),
@@ -207,8 +210,10 @@ impl FakeMailbox {
         }
     }
 
-    /// The usual folders: INBOX, Sent, Drafts, Trash, an All Mail view, a
-    /// plain Projects folder, and a parent that cannot hold messages.
+    /// The usual folders, all without messages, in a mailbox with the
+    /// defaults of [`Self::create_empty`]: INBOX, Sent, Drafts, Trash, an
+    /// All Mail view, a plain Projects folder, and a parent that cannot hold
+    /// messages, with UIDVALIDITY 1001 to 1007 in that order.
     pub fn create_standard() -> Self {
         let mut mailbox = Self::create_empty();
         mailbox.folders = vec![
@@ -747,7 +752,17 @@ where
     }
 }
 
-/// Splits a command's text into its tag, name, and arguments.
+/// Splits a command's text into its tag, name, and arguments, and keeps
+/// the whole text as the command's line, which line refusals match. A
+/// command sent as `UID <name>` is marked so, takes the token after `UID`
+/// as its name, and has its arguments start after that token; `UID` alone
+/// stays a command of that name, which the fake does not know.
+///
+/// # Arguments
+///
+/// * `text` - The command's text, its literals shown as quoted strings, as
+///   [`read_command`] gives it.
+/// * `literals` - The literals it carried, in order.
 ///
 /// # Returns
 ///
@@ -777,6 +792,24 @@ fn parse_command(text: &str, literals: Vec<Vec<u8>>) -> Option<Command> {
 
 impl Session {
     /// Handles one command over the mailbox, which it may change.
+    ///
+    /// A command the mailbox refuses, by its name or by a text of its line,
+    /// gets the refusal instead of being handled, and a command the fake
+    /// does not know gets `BAD`. SELECT and EXAMINE, refused or not, first
+    /// leave no folder selected, as RFC 3501 (section 6.3.1) has a server
+    /// do, then select the folder they name when it can hold messages;
+    /// CLOSE leaves none selected.
+    ///
+    /// # Arguments
+    ///
+    /// * `command` - The command, with its line.
+    /// * `mailbox` - The folders and messages, and what the fake refuses.
+    ///
+    /// # Returns
+    ///
+    /// What the session does next: write the answer and read the next
+    /// command; for an accepted STARTTLS, write the line and hand the
+    /// stream back for the upgrade; or, for LOGOUT, write the lines and end.
     fn handle_command(&mut self, command: &Command, mailbox: &mut FakeMailbox) -> Step {
         let tag = &command.tag;
         if matches!(command.name.as_str(), "SELECT" | "EXAMINE") {
@@ -1116,16 +1149,28 @@ fn build_capabilities(mode: ImapMode, secured: bool, state: &Arc<Mutex<FakeMailb
 }
 
 /// Reads one command, with its literals, which are shown in the text as
-/// quoted strings; a refused or failed command ends before a synchronizing
-/// literal, which the client then never sends, and any other is asked for
-/// as [`send_continuation`] does. Without LITERAL+, a line that ends in
-/// `{n+}` ends the command there, its marker kept in the text.
+/// quoted strings.
+///
+/// A command ends before a synchronizing literal, which the client then
+/// never sends, when the fake refuses it by its name or by a text of the
+/// line before that literal, or fails it with [`ImapFault::Stall`] or
+/// [`ImapFault::Close`]. Every other synchronizing literal is asked for as
+/// [`send_continuation`] does, and read: that of a command refused by a
+/// text after it, which [`Session::handle_command`] then refuses, and that
+/// of a command failed after handling. A non-synchronizing literal, `{n+}`,
+/// is read without being asked for; without LITERAL+, a line that ends in
+/// one ends the command there, its marker kept in the text.
 ///
 /// # Arguments
 ///
 /// * `reader` - The connection.
 /// * `state` - The mailbox, which says which commands are refused or
 ///   failed, and what to write before a continuation request.
+///
+/// # Returns
+///
+/// The command's text and its literals; `None` when the connection fails,
+/// or ends before the command or within a literal.
 async fn read_command<S>(
     reader: &mut BufReader<S>,
     state: &Arc<Mutex<FakeMailbox>>,

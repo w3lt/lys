@@ -598,7 +598,7 @@ struct Command {
     name: String,
     /// Whether it came as `UID <name>`.
     by_uid: bool,
-    /// Its arguments, as [`tokenize`] splits them.
+    /// Its arguments, as [`parse_tokens`] splits them.
     arguments: Vec<String>,
     /// The literals it carried, in order.
     literals: Vec<Vec<u8>>,
@@ -1275,9 +1275,9 @@ fn parse_tokens(text: &str) -> Vec<String> {
     tokenizer.list_tokens()
 }
 
-/// What [`tokenize`] has read of a command so far.
+/// What [`parse_tokens`] has read of a command so far.
 ///
-/// Concurrency model: single-owner; one [`tokenize`] call owns it and
+/// Concurrency model: single-owner; one [`parse_tokens`] call owns it and
 /// feeds it one character at a time.
 #[derive(Default)]
 struct Tokenizer {

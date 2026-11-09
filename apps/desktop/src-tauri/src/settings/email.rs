@@ -57,7 +57,7 @@ const LOOPBACK_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
 const ACCOUNT_SHAPE_ERROR: &str = "an email account must be an object holding address, displayName, userName, imap, smtp, and serverKeepsSentCopy of the right types, and no other field";
 
 /// Rule of an address, as an error message.
-const ADDRESS_RULE: &str = "an email address must be a name of 1 to 64 visible ASCII characters other than @, then @ and an ASCII host name, up to 254 characters in all";
+const ADDRESS_RULE: &str = "an email address must be a name of 1 to 64 ASCII letters, digits, dots, and ! # $ % & ' * + - / = ? ^ _ ` { | } ~, with no dot at either end or two in a row, then @ and an ASCII host name, up to 254 characters in all";
 
 /// Rule of a display name, as an error message.
 const DISPLAY_NAME_RULE: &str = "a display name must be up to 100 characters, without control characters or white space at either end";
@@ -298,11 +298,15 @@ impl Security {
 #[serde(transparent)]
 /// Address of the account, as the person typed it.
 ///
-/// Holds a name of 1 to 64 visible ASCII characters other than `@`, then
-/// `@`, then a host name, at most 254 characters in all. A host with letters
-/// beyond ASCII is not accepted: SMTP sends the address as typed, without
-/// the extension that carries them. It serializes as a JSON string. `Debug`
-/// never shows the address.
+/// Holds a name of 1 to 64 ASCII letters, digits, dots, and
+/// ``! # $ % & ' * + - / = ? ^ _ ` { | } ~``, with no dot at either end or
+/// two in a row, then `@`, then a host name, at most 254 characters in all.
+/// The name is RFC 5322's dot-atom. The only other name lettre, the email
+/// server's mail library, sends from is a quoted one, which is not accepted.
+/// A host with letters beyond ASCII is not accepted: SMTP sends the address
+/// as typed, without the extension that carries them. It serializes as a
+/// JSON string.
+/// `Debug` never shows the address.
 struct EmailAddress(
     /// The validated address.
     String,
@@ -425,12 +429,19 @@ impl fmt::Debug for MailHost {
 }
 
 /// Reports whether `name` is the part of an address before `@`: 1 to 64
-/// visible ASCII characters other than `@`.
+/// characters of atoms joined by single dots.
 fn is_address_name(name: &str) -> bool {
-    (1..=ADDRESS_NAME_MAX_LENGTH).contains(&name.len())
-        && name
+    name.len() <= ADDRESS_NAME_MAX_LENGTH && name.split('.').all(is_address_atom)
+}
+
+/// Reports whether `atom` is one atom of an address's name, a run between
+/// its dots: at least one ASCII letter, digit, or
+/// ``! # $ % & ' * + - / = ? ^ _ ` { | } ~``.
+fn is_address_atom(atom: &str) -> bool {
+    !atom.is_empty()
+        && atom
             .bytes()
-            .all(|byte| byte.is_ascii_graphic() && byte != b'@')
+            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-/=?^_`{|}~".contains(&byte))
 }
 
 /// Reports whether `value` is a saved text of the account: at most
@@ -480,7 +491,7 @@ mod tests {
     use super::EmailSettings;
 
     /// The address rule, as an error about an address states it.
-    const ADDRESS_RULE_TEXT: &str = "an email address must be a name of 1 to 64 visible ASCII characters other than @, then @ and an ASCII host name, up to 254 characters in all";
+    const ADDRESS_RULE_TEXT: &str = "an email address must be a name of 1 to 64 ASCII letters, digits, dots, and ! # $ % & ' * + - / = ? ^ _ ` { | } ~, with no dot at either end or two in a row, then @ and an ASCII host name, up to 254 characters in all";
 
     /// The host rule, as an error about a mail server host states it.
     const HOST_RULE_TEXT: &str =
@@ -652,11 +663,12 @@ mod tests {
         );
     }
 
-    /// Checks that an account accepts addresses of visible ASCII characters
-    /// before `@` and a host name or IPv4 address after it, up to the
-    /// longest: 254 characters, with a 64-character name.
+    /// Checks that an account accepts addresses whose name before `@` is a
+    /// dot-atom, every symbol it may hold and dots between atoms included,
+    /// and whose host is a host name or IPv4 address, up to the longest:
+    /// 254 characters, with a 64-character name.
     #[test]
-    fn accepts_addresses_of_a_visible_name_and_a_host_name_up_to_254_characters() {
+    fn accepts_addresses_of_a_dot_atom_name_and_a_host_name_up_to_254_characters() {
         let longest = format!(
             "{}@{}.{}.{}",
             "a".repeat(64),
@@ -669,6 +681,8 @@ mod tests {
             "a@b",
             "person@example.com",
             "o'neil+tag.1_2-3@example.com",
+            "!#$%&'*+-/=?^_`{|}~@example.com",
+            "per.son.a@example.com",
             "person@Mail-2.Example.COM",
             "person@192.0.2.10",
             longest.as_str(),
@@ -679,9 +693,10 @@ mod tests {
 
     /// Checks that an account refuses an address that is empty, over 254
     /// characters, or has a name over 64, that lacks a name, a host, or a
-    /// single `@`, that holds a space, a line feed, or a non-ASCII letter,
-    /// or whose host is not an ASCII host name or IPv4 address, and a number
-    /// in its place. No failure quotes the address.
+    /// single `@`, whose name has a dot at either end or two in a row, a
+    /// `(`, or quotes, that holds a space, a line feed, or a non-ASCII
+    /// letter, or whose host is not an ASCII host name or IPv4 address, and
+    /// a number in its place. No failure quotes the address.
     #[test]
     fn rejects_other_addresses_without_quoting_them() {
         let too_long = format!(
@@ -702,6 +717,11 @@ mod tests {
             "person@".to_string(),
             "per@son@example.com".to_string(),
             "per son@example.com".to_string(),
+            "per..son@example.com".to_string(),
+            ".person@example.com".to_string(),
+            "person.@example.com".to_string(),
+            "per(son@example.com".to_string(),
+            "\"person\"@example.com".to_string(),
             "pérson@example.com".to_string(),
             "person@exämple.com".to_string(),
             "person@example..com".to_string(),
@@ -960,6 +980,10 @@ mod tests {
             ),
             (
                 build_account_with("address", json!("pérson@example.com")),
+                ADDRESS_RULE_TEXT,
+            ),
+            (
+                build_account_with("address", json!("per..son@example.com")),
                 ADDRESS_RULE_TEXT,
             ),
             (

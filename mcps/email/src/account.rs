@@ -15,6 +15,7 @@
 use std::env;
 use std::fmt;
 
+use lettre::Address;
 use serde::Deserialize;
 use serde_json::error::Category;
 
@@ -129,8 +130,9 @@ impl fmt::Debug for Password {
 /// The account the server signs in with, as the backend wrote it.
 #[derive(Clone)]
 pub struct Account {
-    /// Address mail is sent from and received at.
-    pub address: String,
+    /// Address mail is sent from and received at, in the form lettre sends
+    /// from.
+    pub address: Address,
     /// Name sent with the address; may be empty.
     pub display_name: String,
     /// User name the account signs in with on both servers.
@@ -257,11 +259,11 @@ pub fn parse_account_variable(text: &str) -> Result<Account, AccountProblem> {
             });
         }
     };
-    if !is_address(&stored.address) {
+    let Some(address) = parse_address(&stored.address) else {
         return Err(AccountProblem::Rule(
-            "address is a local part of 1 to 64 visible ASCII characters, @, and an ASCII host name, 254 characters at most",
+            "address is at most 254 characters: a local part of 1 to 64 ASCII letters, digits, dots, and ! # $ % & ' * + - / = ? ^ _ ` { | } ~, without a dot at either end or two in a row, then @ and an ASCII host name",
         ));
-    }
+    };
     if !is_display_name(&stored.display_name) {
         return Err(AccountProblem::Rule(
             "displayName has at most 100 characters, no control character, and no white space at its ends",
@@ -280,7 +282,7 @@ pub fn parse_account_variable(text: &str) -> Result<Account, AccountProblem> {
     let imap = parse_server(stored.imap, Protocol::Imap)?;
     let smtp = parse_server(stored.smtp, Protocol::Smtp)?;
     Ok(Account {
-        address: stored.address,
+        address,
         display_name: stored.display_name,
         user_name: stored.user_name,
         password: Password(stored.password),
@@ -343,7 +345,27 @@ fn parse_port(number: f64) -> Option<u16> {
     Some(number as u16)
 }
 
-/// Whether the text is an email address by the shared rule.
+/// Parses an email address by the shared rule into the form lettre sends
+/// from.
+///
+/// # Returns
+///
+/// The address, or `None` when it breaks the rule. lettre accepts every
+/// address that the rule accepts, which the tests check, so the account
+/// never holds an address that the server cannot send from.
+fn parse_address(value: &str) -> Option<Address> {
+    if !is_address(value) {
+        return None;
+    }
+    value.parse().ok()
+}
+
+/// Whether the text is an email address by the shared rule: at most
+/// [`MAXIMUM_ADDRESS_LENGTH`] bytes, a local part of 1 to
+/// [`MAXIMUM_LOCAL_PART_LENGTH`] bytes of atoms joined by single dots,
+/// `@`, and a host name. The local part is RFC 5322's dot-atom. The only
+/// other local part lettre sends from is a quoted one, which the rule
+/// refuses.
 fn is_address(value: &str) -> bool {
     if value.len() > MAXIMUM_ADDRESS_LENGTH {
         return false;
@@ -351,12 +373,19 @@ fn is_address(value: &str) -> bool {
     let Some((local_part, host)) = value.rsplit_once('@') else {
         return false;
     };
-    !local_part.is_empty()
-        && local_part.len() <= MAXIMUM_LOCAL_PART_LENGTH
-        && local_part
-            .bytes()
-            .all(|byte| (b'!'..=b'~').contains(&byte) && byte != b'@')
+    local_part.len() <= MAXIMUM_LOCAL_PART_LENGTH
+        && local_part.split('.').all(is_atom)
         && is_host_name(host)
+}
+
+/// Whether the text is one atom of a local part, a run between its dots:
+/// at least one ASCII letter, digit, or
+/// ``! # $ % & ' * + - / = ? ^ _ ` { | } ~``.
+fn is_atom(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-/=?^_`{|}~".contains(&byte))
 }
 
 /// Whether the text is a display name: at most
@@ -499,7 +528,7 @@ mod tests {
         let imap = build_server_value(&account.imap);
         let smtp = build_server_value(&account.smtp);
         json!({
-            "address": account.address,
+            "address": account.address.to_string(),
             "displayName": account.display_name,
             "userName": account.user_name,
             "password": account.password.as_str(),
@@ -580,7 +609,7 @@ mod tests {
     fn parses_the_account_the_backend_writes() {
         let account = parse_account_variable(&build_variable("", "")).expect("account");
 
-        assert_eq!(account.address, "person@example.com");
+        assert_eq!(account.address.to_string(), "person@example.com");
         assert_eq!(account.display_name, "A Person");
         assert_eq!(account.user_name, "person@example.com");
         assert_eq!(account.password.as_str(), SYNTHETIC_PASSWORD);
@@ -649,6 +678,8 @@ mod tests {
         let cases = [
             ("address", "\"person\""),
             ("address", "\"a@b@example.com\""),
+            ("address", "\"john..doe@example.com\""),
+            ("address", "\"\\\"john\\\"@example.com\""),
             ("displayName", "\" A Person\""),
             ("displayName", "\"A\\nPerson\""),
             ("userName", "\"\""),
@@ -847,9 +878,91 @@ mod tests {
         assert_eq!(
             refused.map(|_| ()),
             Err(AccountProblem::Rule(
-                "address is a local part of 1 to 64 visible ASCII characters, @, and an ASCII host name, 254 characters at most"
+                "address is at most 254 characters: a local part of 1 to 64 ASCII letters, digits, dots, and ! # $ % & ' * + - / = ? ^ _ ` { | } ~, without a dot at either end or two in a row, then @ and an ASCII host name"
             ))
         );
+    }
+
+    /// Lists every text of 1 to `longest` characters of `alphabet`.
+    fn list_texts(alphabet: &[char], longest: usize) -> Vec<String> {
+        let mut texts = Vec::new();
+        let mut last = vec![String::new()];
+        for _ in 0..longest {
+            last = last
+                .iter()
+                .flat_map(|text| {
+                    alphabet
+                        .iter()
+                        .map(move |character| format!("{text}{character}"))
+                })
+                .collect();
+            texts.extend_from_slice(&last);
+        }
+        texts
+    }
+
+    /// Whether lettre sends from the local part at `example.com` and the
+    /// local part is not quoted: the shared rule refuses a quoted local
+    /// part, such as `"a"`, which lettre accepts.
+    fn is_sendable_unquoted_local_part(local_part: &str) -> bool {
+        let is_quoted =
+            local_part.len() > 1 && local_part.starts_with('"') && local_part.ends_with('"');
+        !is_quoted
+            && format!("{local_part}@example.com")
+                .parse::<Address>()
+                .is_ok()
+    }
+
+    /// Checks that every local part of 1 to 3 visible ASCII characters
+    /// passes the rule at `example.com` exactly when lettre sends from it
+    /// and it is not quoted.
+    #[test]
+    fn accepts_exactly_the_unquoted_local_parts_lettre_sends_from_of_up_to_three_characters() {
+        let visible: Vec<char> = ('!'..='~').collect();
+
+        let mismatches: Vec<String> = list_texts(&visible, 3)
+            .into_iter()
+            .filter(|local_part| {
+                is_address(&format!("{local_part}@example.com"))
+                    != is_sendable_unquoted_local_part(local_part)
+            })
+            .collect();
+
+        assert!(
+            mismatches.is_empty(),
+            "{} local parts, such as {:?}",
+            mismatches.len(),
+            &mismatches[..mismatches.len().min(12)]
+        );
+    }
+
+    /// Checks that every address the rule accepts parses as a lettre
+    /// address, over hosts of up to four of `a`, `Z`, `0`, `-`, and `.`,
+    /// the longest host a 254-character address holds, and a mixed-case
+    /// host, and that the rule accepts the longest and more than 100 in all.
+    #[test]
+    fn accepts_only_hosts_lettre_sends_to_up_to_the_longest_an_address_holds() {
+        let label = "b".repeat(63);
+        let longest = format!("a@{label}.{label}.{label}.{}", "c".repeat(60));
+        let mut addresses: Vec<String> = list_texts(&['a', 'Z', '0', '-', '.'], 4)
+            .into_iter()
+            .map(|host| format!("a@{host}"))
+            .collect();
+        addresses.extend([longest.clone(), "a@Mail-2.Example.COM".to_owned()]);
+
+        let accepted: Vec<&String> = addresses
+            .iter()
+            .filter(|address| is_address(address))
+            .collect();
+        let refused_by_lettre: Vec<&&String> = accepted
+            .iter()
+            .filter(|address| address.parse::<Address>().is_err())
+            .collect();
+
+        assert_eq!(longest.len(), MAXIMUM_ADDRESS_LENGTH);
+        assert!(accepted.contains(&&longest), "{longest}");
+        assert!(accepted.len() > 100, "{}", accepted.len());
+        assert!(refused_by_lettre.is_empty(), "{refused_by_lettre:?}");
     }
 
     /// Checks that a host, port, or security that breaks its rule reads as

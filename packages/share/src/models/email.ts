@@ -57,10 +57,10 @@ export const MAXIMUM_EMAIL_USER_NAME_LENGTH = 254
 const MAXIMUM_BRACKETED_IPV6_LENGTH = 47
 
 /**
- * Finds the part of an email address before `@`: visible ASCII characters
- * other than `@`.
+ * Finds one atom of an email address's name, a run between its dots: ASCII
+ * letters, digits, and ``! # $ % & ' * + - / = ? ^ _ ` { | } ~``.
  */
-const EMAIL_LOCAL_PART_PATTERN = /^[!-?A-~]+$/
+const EMAIL_ATOM_PATTERN = /^[\w!#$%&'*+/=?^`{|}~-]+$/
 
 /** Finds a control character (Unicode general category Cc), such as a line break. */
 const CONTROL_CHARACTER_PATTERN = /\p{Cc}/u
@@ -120,14 +120,18 @@ function isAccountText(value: string, maximumLength: number): boolean {
 
 /**
  * Answers whether a text is an email address Lys can send from and to: a
- * part of 1 to {@link MAXIMUM_EMAIL_LOCAL_PART_LENGTH} visible ASCII
- * characters, `@`, and a host name, at most
+ * name of 1 to {@link MAXIMUM_EMAIL_LOCAL_PART_LENGTH} ASCII letters,
+ * digits, dots, and ``! # $ % & ' * + - / = ? ^ _ ` { | } ~``, with no dot
+ * at either end or two in a row, then `@` and a host name, at most
  * {@link MAXIMUM_EMAIL_ADDRESS_LENGTH} characters in all.
  *
  * @param value - Text to inspect, as typed.
  * @returns True for such an address.
- * @remarks A domain with letters beyond ASCII is not accepted: SMTP sends
- * the address as typed, without the extension that carries them.
+ * @remarks The name is RFC 5322's dot-atom. The only other name lettre, the
+ * library the email server builds its messages with, sends from is a quoted
+ * one, such as `"john doe"@example.com`, which is not accepted. A domain
+ * with letters beyond ASCII is not accepted: SMTP sends the address as
+ * typed, without the extension that carries them.
  */
 function isEmailAddress(value: string): boolean {
   if (value.length > MAXIMUM_EMAIL_ADDRESS_LENGTH) return false
@@ -136,7 +140,7 @@ function isEmailAddress(value: string): boolean {
   const localPart = value.slice(0, separator)
   return (
     localPart.length <= MAXIMUM_EMAIL_LOCAL_PART_LENGTH &&
-    EMAIL_LOCAL_PART_PATTERN.test(localPart) &&
+    localPart.split(".").every((atom) => EMAIL_ATOM_PATTERN.test(atom)) &&
     isHostName(value.slice(separator + 1))
   )
 }
@@ -178,7 +182,7 @@ export const emailAddressSchema = z
   .string()
   .refine(
     isEmailAddress,
-    `An email address is a name of 1 to ${MAXIMUM_EMAIL_LOCAL_PART_LENGTH} visible ASCII characters other than @, then @ and an ASCII host name, up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH} characters in all.`
+    `An email address is a name of 1 to ${MAXIMUM_EMAIL_LOCAL_PART_LENGTH} ASCII letters, digits, dots, and ! # $ % & ' * + - / = ? ^ _ \` { | } ~, with no dot at either end or two in a row, then @ and an ASCII host name, up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH} characters in all.`
   )
 
 /**

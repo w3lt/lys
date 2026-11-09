@@ -359,6 +359,9 @@ mod tests {
     /// A message with an HTML body, a text attachment, and a binary one.
     const MIXED: &str = "From: jane@example.com\r\nTo: person@example.com\r\nSubject: Report\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body><p>Hello <b>there</b>.</p><p>Bye &amp; thanks.</p></body></html>\r\n--b\r\nContent-Type: text/csv; name=\"data.csv\"\r\nContent-Disposition: attachment; filename=\"data.csv\"\r\n\r\na,b\r\n1,2\r\n--b\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--b--\r\n";
 
+    /// Checks that a plain message is read into its address headers, a
+    /// group included, its date and timestamp, its decoded subject, its
+    /// message ids, and its text, with no attachment.
     #[test]
     fn reads_the_headers_and_the_text_of_a_plain_message() {
         let message = parse_message(PLAIN.as_bytes()).expect("message");
@@ -397,6 +400,9 @@ mod tests {
         }
     }
 
+    /// Checks that each address field lists its mailboxes in order, a
+    /// group's members and a name without an address included, and that the
+    /// From header reads without its quotes.
     #[test]
     fn lists_the_mailboxes_of_every_address_field_in_order() {
         let message = parse_message(b"From: \"Doe, Jane\" <jane@example.com>\r\nReply-To: a@example.com, b@example.com\r\nTo: Team: c@example.com, D <d@example.com>;, nobody\r\nBcc: hidden@example.com\r\nSubject: Hi\r\n\r\nHello\r\n").expect("message");
@@ -421,6 +427,9 @@ mod tests {
         assert_eq!(message.headers.from, "Doe, Jane <jane@example.com>");
     }
 
+    /// Checks that a message's HTML part is turned into its text, and that
+    /// its attachments are numbered from 1 with their names and types, the
+    /// CSV with its text and the PDF with its bytes and no text.
     #[test]
     fn converts_html_to_text_and_lists_attachments_with_text_when_text_like() {
         let message = parse_message(MIXED.as_bytes()).expect("message");
@@ -440,6 +449,9 @@ mod tests {
         assert_eq!(message.attachments[1].text, None);
     }
 
+    /// Checks that a fetched header block is read into its subject, sender,
+    /// and date, and that empty input or bytes that are no message give no
+    /// message or empty fields instead of a failure.
     #[test]
     fn reads_a_fetched_header_block_and_tolerates_what_is_not_a_message() {
         let headers = parse_headers(
@@ -457,6 +469,9 @@ mod tests {
         );
     }
 
+    /// Checks that `text/*` and JSON types count as text-like while PDF and
+    /// images do not, and that sizes read in B, kB, and MB with one
+    /// decimal.
     #[test]
     fn classifies_text_like_types_and_formats_sizes() {
         assert!(is_text_like("text/plain"));

@@ -557,6 +557,10 @@ mod tests {
             .unwrap_or_default()
     }
 
+    /// Checks that a cancelled call and a call past its time limit answer
+    /// with their error sentences, that a long result is cut to end with
+    /// `CUT_NOTE`, and that a failure answers with its sentence as an
+    /// error.
     #[tokio::test]
     async fn answers_a_cancelled_call_a_timed_out_call_and_a_long_result() {
         let cancelled = CancellationToken::new();
@@ -602,6 +606,10 @@ mod tests {
         );
     }
 
+    /// Checks that a send's result passes through at every stage, while a
+    /// cancellation or time-out reads as plain before the message was
+    /// handed over, as unconfirmed once it was, and as stopped after the
+    /// send once the server accepted it.
     #[test]
     fn reports_a_stopped_send_by_how_far_it_came() {
         let report = || -> ToolResult {
@@ -661,6 +669,10 @@ mod tests {
         }
     }
 
+    /// Checks that a save's result passes through at every stage, while a
+    /// cancellation or time-out reads as plain before storing began and,
+    /// once it began, as stopped while saving, with the draft it replaces
+    /// if any.
     #[test]
     fn reports_a_stopped_save_by_whether_storing_its_draft_began() {
         let report = || -> ToolResult {
@@ -707,6 +719,9 @@ mod tests {
         }
     }
 
+    /// Checks that a save cancelled or timed out after storing began
+    /// answers, as an error, that the draft may be in the Drafts folder and
+    /// that the draft it replaces may still be there too.
     #[tokio::test]
     async fn answers_a_save_stopped_once_storing_began_with_the_draft_it_replaces() {
         let cancelled = CancellationToken::new();
@@ -756,6 +771,9 @@ mod tests {
         "manage_folder",
     ];
 
+    /// Checks that the server lists exactly its ten tools, each with a
+    /// description and an object input schema, and that `search_emails`
+    /// takes a page and is marked read-only.
     #[test]
     fn routes_every_tool_with_a_description_and_a_schema() {
         let router = EmailServer::tool_router();

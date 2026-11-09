@@ -134,6 +134,8 @@ fn parse_encoded_run(run: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// Checks that an ASCII folder name is encoded as it is, except `&`,
+    /// which is written `&-` and decoded back.
     #[test]
     fn keeps_plain_ascii_names_and_escapes_the_ampersand() {
         assert_eq!(build_encoded_folder_name("INBOX"), "INBOX");
@@ -142,6 +144,9 @@ mod tests {
         assert_eq!(parse_encoded_folder_name("Tom &- Jerry"), "Tom & Jerry");
     }
 
+    /// Checks that non-ASCII folder names encode to modified UTF-7 as RFC
+    /// 3501's own example shows and decode back, and that a name mixing `&`
+    /// and non-ASCII characters makes the round trip.
     #[test]
     fn encodes_and_decodes_non_ascii_names_as_rfc_3501_shows() {
         assert_eq!(
@@ -160,6 +165,9 @@ mod tests {
         );
     }
 
+    /// Checks that decoding keeps a run after `&` as it is when it is not
+    /// modified UTF-7: unterminated, with a character outside its base64,
+    /// or with bits left over.
     #[test]
     fn keeps_a_run_that_is_not_modified_utf7() {
         assert_eq!(parse_encoded_folder_name("Open&Run"), "Open&Run");

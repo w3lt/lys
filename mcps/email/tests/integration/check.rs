@@ -474,18 +474,18 @@ async fn the_check_subcommand_logs_a_report_it_cannot_write_and_exits_1() {
         false,
     );
 
-    let (mut binary, log) = BinaryProcess::start_with_closed_output(&["check"], Some(&json));
-    let log = read_to_end_in_thread(log);
-    let (status, stderr) = tokio::task::spawn_blocking(move || {
+    let (mut binary, stderr) = BinaryProcess::start_with_closed_output(&["check"], Some(&json));
+    let stderr_bytes = read_to_end_in_thread(stderr);
+    let (status, log) = tokio::task::spawn_blocking(move || {
         let status = binary.wait_for_exit();
-        (status, wait_for_stream_end(&log, "standard error"))
+        (status, wait_for_stream_end(&stderr_bytes, "standard error"))
     })
     .await
     .expect("the task finishes");
 
     assert_eq!(status.code(), Some(1));
     assert_eq!(
-        String::from_utf8_lossy(&stderr),
+        String::from_utf8_lossy(&log),
         "check: the report could not be written: Broken pipe (os error 32)\n"
     );
 }

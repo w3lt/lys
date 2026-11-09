@@ -227,14 +227,14 @@ async fn a_refused_examine_fails_each_read_by_id_instead_of_reading_as_a_stale_i
     let id = IdArguments {
         id: "1.1001.INBOX".to_owned(),
     };
-    let attachment = AttachmentArguments {
+    let attachment_arguments = AttachmentArguments {
         id: id.id.clone(),
         attachment: 1,
     };
 
     let read = run_read_email(&stack.context, id.clone()).await;
     let conversation = run_read_conversation(&stack.context, id).await;
-    let attachment = run_read_attachment(&stack.context, attachment).await;
+    let attachment = run_read_attachment(&stack.context, attachment_arguments).await;
 
     let refusal = build_refusal("select the folder", "[UNAVAILABLE] Try again later");
     assert_eq!(read, Err(refusal.clone()));

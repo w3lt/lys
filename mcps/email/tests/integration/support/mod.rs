@@ -110,14 +110,14 @@ pub struct TestServers {
 pub struct FaultTiming {
     /// The whole run on tokio's clock: the real time until the pause, then
     /// the paused clock's jumps.
-    pub elapsed: Duration,
+    elapsed: Duration,
     /// The real time from the run's start until the fault struck, such as
     /// connecting, a TLS handshake, and the steps before the fault.
-    pub real_before_fault: Duration,
+    real_before_fault: Duration,
     /// The real time from the run's start until the clock paused: the
     /// time before the fault, then the future taking up the input it
     /// already had.
-    pub real_before_pause: Duration,
+    real_before_pause: Duration,
 }
 
 /// Runs a future until a fake's fault strikes, lets it take up the input

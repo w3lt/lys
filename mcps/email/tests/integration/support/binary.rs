@@ -1,7 +1,7 @@
 //! The `email` binary as the integration tests run it, and this test
 //! binary run again for one of its cases: one process for a test, its
-//! standard streams piped, ended on every path the test takes, and waited
-//! for only within a bound.
+//! standard streams piped or its output a pipe without a reader, ended on
+//! every path the test takes, and waited for only within a bound.
 
 use std::env;
 use std::io::{self, BufRead, BufReader, Read};
@@ -43,8 +43,9 @@ pub struct BinaryStreams {
 /// ownership: the process is the test's direct child and the whole scope,
 /// as neither the `email` binary nor a case run again starts a process of
 /// its own; [`Self::start`] and [`Self::start_test_case`] hand its
-/// standard streams to the test, and the process's end closes them, which
-/// ends every read of them.
+/// standard streams to the test, and [`Self::start_with_closed_output`]
+/// its standard error; the process's end closes them, which ends every
+/// read of them.
 pub struct BinaryProcess {
     /// The process.
     child: Child,
@@ -68,13 +69,44 @@ impl BinaryProcess {
     ///
     /// When the binary cannot be started.
     pub fn start(arguments: &[&str], variable: Option<&str>) -> (Self, BinaryStreams) {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_email"));
-        command.args(arguments);
-        match variable {
-            Some(value) => command.env("LYS_EMAIL_ACCOUNT", value),
-            None => command.env_remove("LYS_EMAIL_ACCOUNT"),
+        Self::start_piped(build_email_binary_command(arguments, variable))
+    }
+
+    /// Starts the binary with its standard input ended, its standard error
+    /// piped, and its standard output a pipe whose reader closed before the
+    /// binary started, so that each write to that output fails with a
+    /// broken pipe; from then on, the value ends it whatever the test does
+    /// next.
+    ///
+    /// # Arguments
+    ///
+    /// * `arguments` - The binary's command-line arguments.
+    /// * `variable` - The JSON of `LYS_EMAIL_ACCOUNT`, or `None` to start
+    ///   the binary without the variable.
+    ///
+    /// # Returns
+    ///
+    /// The process and its standard error.
+    ///
+    /// # Panics
+    ///
+    /// When the pipe cannot be made or the binary cannot be started.
+    pub fn start_with_closed_output(
+        arguments: &[&str],
+        variable: Option<&str>,
+    ) -> (Self, ChildStderr) {
+        let (reader, writer) = io::pipe().expect("a pipe");
+        drop(reader);
+        let mut command = build_email_binary_command(arguments, variable);
+        command
+            .stdin(Stdio::null())
+            .stdout(writer)
+            .stderr(Stdio::piped());
+        let mut process = Self {
+            child: command.spawn().expect("the binary starts"),
         };
-        Self::start_piped(command)
+        let log = process.child.stderr.take().expect("standard error");
+        (process, log)
     }
 
     /// Starts this test binary again, running only one of its cases, with
@@ -167,6 +199,23 @@ impl BinaryProcess {
         self.child.kill().expect("the binary is killed");
         self.child.wait().expect("the binary is reaped");
     }
+}
+
+/// Builds the command that runs the `email` binary.
+///
+/// # Arguments
+///
+/// * `arguments` - The binary's command-line arguments.
+/// * `variable` - The JSON of `LYS_EMAIL_ACCOUNT`, or `None` to run the
+///   binary without the variable.
+fn build_email_binary_command(arguments: &[&str], variable: Option<&str>) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_email"));
+    command.args(arguments);
+    match variable {
+        Some(value) => command.env("LYS_EMAIL_ACCOUNT", value),
+        None => command.env_remove("LYS_EMAIL_ACCOUNT"),
+    };
+    command
 }
 
 impl Drop for BinaryProcess {

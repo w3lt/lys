@@ -1,10 +1,11 @@
 //! The entry point: serves MCP over standard input and output, or runs
 //! the account check, for the account in `LYS_EMAIL_ACCOUNT`.
 
+use std::io::{self, Write};
 use std::process::ExitCode;
 
 use email::account::{ACCOUNT_VARIABLE_NAME, parse_account_variable, read_account_variable};
-use email::check::offer_account_sign_ins;
+use email::check::{CheckReport, offer_account_sign_ins};
 use email::log::send_log_line;
 use email::server::EmailServer;
 use email::tools::ToolContext;
@@ -43,9 +44,10 @@ enum Command {
 ///
 /// The exit code: [`USAGE_EXIT_CODE`] for other arguments,
 /// [`ACCOUNT_EXIT_CODE`] when the account is missing or breaks a rule, 1
-/// when the report could not be written, the server could not start, or
-/// its service failed, and 0 once the report is printed or the server
-/// stopped otherwise.
+/// when the report could not be written, as when the reader of standard
+/// output has closed, the server could not start, or its service failed,
+/// and 0 once the report is printed or the server stopped otherwise. A
+/// closed standard output takes the report as printed.
 #[tokio::main]
 async fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
@@ -68,11 +70,8 @@ async fn main() -> ExitCode {
     match command {
         Command::Check => {
             let report = offer_account_sign_ins(&account, &trust).await;
-            match serde_json::to_string(&report) {
-                Ok(json) => {
-                    println!("{json}");
-                    ExitCode::SUCCESS
-                }
+            match write_report_line(&report) {
+                Ok(()) => ExitCode::SUCCESS,
                 Err(error) => {
                     send_log_line(&format!("check: the report could not be written: {error}"));
                     ExitCode::FAILURE
@@ -101,4 +100,19 @@ async fn main() -> ExitCode {
             }
         }
     }
+}
+
+/// Writes the report on standard output as one JSON line, and flushes it.
+/// A closed standard output takes the line as written, as Rust's standard
+/// library treats a closed descriptor.
+///
+/// # Errors
+///
+/// When the report cannot be serialized, or the line cannot be written or
+/// flushed, as when the reader of standard output has closed.
+fn write_report_line(report: &CheckReport) -> io::Result<()> {
+    let json = serde_json::to_string(report)?;
+    let mut output = io::stdout().lock();
+    writeln!(output, "{json}")?;
+    output.flush()
 }

@@ -463,6 +463,34 @@ async fn the_check_subcommand_prints_one_json_line_and_exits_0() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_check_subcommand_logs_a_report_it_cannot_write_and_exits_1() {
+    let json = build_account_json(
+        TestServers {
+            imap_port: get_closed_port().await,
+            imap_security: SecurityName::Plain,
+            smtp_port: get_closed_port().await,
+            smtp_security: SecurityName::Plain,
+        },
+        false,
+    );
+
+    let (mut binary, log) = BinaryProcess::start_with_closed_output(&["check"], Some(&json));
+    let log = read_to_end_in_thread(log);
+    let (status, stderr) = tokio::task::spawn_blocking(move || {
+        let status = binary.wait_for_exit();
+        (status, wait_for_stream_end(&log, "standard error"))
+    })
+    .await
+    .expect("the task finishes");
+
+    assert_eq!(status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&stderr),
+        "check: the report could not be written: Broken pipe (os error 32)\n"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn refuses_to_start_without_a_usable_account_and_names_the_rule_only() {
     let missing = read_binary_output(&["check"], None).await;
     let plain_remote = read_binary_output(

@@ -1864,13 +1864,14 @@ mod tests {
         }
     }
 
-    /// Gives the fake's answer to one command line without a literal.
+    /// Sends one command line without a literal to the session, and gives
+    /// the fake's answer.
     ///
     /// # Panics
     ///
     /// When the line has no tag, or the session upgrades the connection or
     /// ends instead of answering.
-    fn answer_command(session: &mut Session, mailbox: &mut FakeMailbox, line: &str) -> String {
+    fn send_command(session: &mut Session, mailbox: &mut FakeMailbox, line: &str) -> String {
         let command = parse_command(line, Vec::new()).expect("a tagged command");
         match session.handle_command(&command, mailbox) {
             Step::Answer(answer) => String::from_utf8_lossy(&answer).into_owned(),
@@ -1883,24 +1884,24 @@ mod tests {
         let mut mailbox = FakeMailbox::create_standard();
         let mut session = build_session();
 
-        let answer = answer_command(&mut session, &mut mailbox, "a1 UID");
+        let answer = send_command(&mut session, &mut mailbox, "a1 UID");
 
         assert_eq!(answer, "a1 BAD Error in IMAP command: Unknown command\r\n");
     }
 
     #[test]
-    fn leaves_no_folder_selected_after_a_select_that_fails_or_is_refused() {
+    fn leaves_no_folder_selected_after_a_failed_select_or_a_refused_examine() {
         let mut mailbox = FakeMailbox::create_standard();
         mailbox.add_refusal("EXAMINE", "NO [UNAVAILABLE] Try again later");
         let mut session = build_session();
 
-        answer_command(&mut session, &mut mailbox, "a1 SELECT INBOX");
-        let selected = answer_command(&mut session, &mut mailbox, "a2 UID SEARCH ALL");
-        let missing = answer_command(&mut session, &mut mailbox, "a3 SELECT Missing");
-        let after_missing = answer_command(&mut session, &mut mailbox, "a4 UID SEARCH ALL");
-        answer_command(&mut session, &mut mailbox, "a5 SELECT INBOX");
-        let refused = answer_command(&mut session, &mut mailbox, "a6 EXAMINE INBOX");
-        let after_refused = answer_command(&mut session, &mut mailbox, "a7 UID SEARCH ALL");
+        send_command(&mut session, &mut mailbox, "a1 SELECT INBOX");
+        let selected = send_command(&mut session, &mut mailbox, "a2 UID SEARCH ALL");
+        let missing = send_command(&mut session, &mut mailbox, "a3 SELECT Missing");
+        let after_missing = send_command(&mut session, &mut mailbox, "a4 UID SEARCH ALL");
+        send_command(&mut session, &mut mailbox, "a5 SELECT INBOX");
+        let refused = send_command(&mut session, &mut mailbox, "a6 EXAMINE INBOX");
+        let after_refused = send_command(&mut session, &mut mailbox, "a7 UID SEARCH ALL");
 
         assert_eq!(selected, "* SEARCH\r\na2 OK Search completed\r\n");
         assert_eq!(missing, "a3 NO Mailbox doesn't exist\r\n");

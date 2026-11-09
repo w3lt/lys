@@ -123,6 +123,9 @@ mod tests {
     use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair};
     use tokio_rustls::rustls::CertificateError;
 
+    /// Checks that a certificate refusal wrapped in an I/O error is found,
+    /// and that neither another I/O error nor another TLS error is taken
+    /// for one.
     #[test]
     fn finds_a_certificate_refusal_inside_an_io_error() {
         let refusal = TlsError::InvalidCertificate(CertificateError::UnknownIssuer);
@@ -139,6 +142,9 @@ mod tests {
         )));
     }
 
+    /// Checks that trust built with a self-signed root certificate as its
+    /// extra root gives a TLS connector and the TLS parameters for an SMTP
+    /// host.
     #[test]
     fn builds_a_connector_and_parameters_with_an_extra_root() {
         let key = KeyPair::generate().expect("root key");

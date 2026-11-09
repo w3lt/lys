@@ -189,6 +189,9 @@ mod tests {
         assert_eq!(format!("{key:?}"), "ApiKey(<redacted>)");
     }
 
+    /// Checks that `EmailPassword::new` accepts passwords of 1 to 1,024
+    /// characters, with spaces at the edges or inside and with accented
+    /// letters.
     #[test]
     fn accepts_passwords_of_one_to_1024_characters_with_spaces_and_accents() {
         for value in [
@@ -202,6 +205,8 @@ mod tests {
         }
     }
 
+    /// Checks that `EmailPassword::new` refuses an empty password, one of
+    /// 1,025 characters, and one with a line feed, a tab, or a NUL.
     #[test]
     fn rejects_empty_long_and_control_character_passwords() {
         for value in [
@@ -215,6 +220,9 @@ mod tests {
         }
     }
 
+    /// Checks that reading the secrets group refuses a saved email password
+    /// that is not text, or text that breaks the password's rule, naming the
+    /// rule but not the value.
     #[test]
     fn refuses_a_saved_password_that_is_not_valid_text_by_its_rule_without_quoting_it() {
         for (stored, value) in [
@@ -235,6 +243,9 @@ mod tests {
         }
     }
 
+    /// Checks that reading the secrets group with a password that is not
+    /// valid JSON fails with the JSON reader's reason, here an invalid
+    /// escape.
     #[test]
     fn keeps_the_json_reader_s_reason_for_a_password_that_is_not_valid_json() {
         let failure = parse_secrets("{\"emailPassword\":\"synthetic\\qpassword\"}")
@@ -244,6 +255,8 @@ mod tests {
         assert!(failure.contains("invalid escape"), "{failure}");
     }
 
+    /// Checks that an `EmailPassword`'s `Debug` output is
+    /// `EmailPassword(<redacted>)`, never the password.
     #[test]
     fn debug_output_never_shows_the_password() {
         let password =

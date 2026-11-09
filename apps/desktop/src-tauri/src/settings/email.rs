@@ -576,6 +576,9 @@ mod tests {
         }
     }
 
+    /// Checks that an email group without an account, or with a null one,
+    /// reads as no account and writes `account` as null, as the default
+    /// group does.
     #[test]
     fn reads_a_missing_account_as_none_and_writes_a_null_account() {
         for stored in [json!({}), json!({ "account": null })] {
@@ -592,6 +595,8 @@ mod tests {
         );
     }
 
+    /// Checks that an email group with a valid account writes back exactly
+    /// as it was stored.
     #[test]
     fn writes_an_account_back_unchanged() {
         let stored = json!({ "account": get_account() });
@@ -601,6 +606,9 @@ mod tests {
         assert_eq!(serde_json::to_value(&settings).expect("serialize"), stored);
     }
 
+    /// Checks that an email group is refused when it is null, an array, or
+    /// text, when it has an unknown field, and when its account is an array,
+    /// text, or an object without fields.
     #[test]
     fn rejects_a_null_group_unknown_fields_and_accounts_that_are_not_objects() {
         for stored in [
@@ -616,6 +624,9 @@ mod tests {
         }
     }
 
+    /// Checks that an account missing any field, or holding null in one, an
+    /// unknown field, or a sent-copy switch written as text is refused, with
+    /// no failure quoting the address.
     #[test]
     fn rejects_an_account_with_a_missing_null_or_unknown_field_without_quoting_it() {
         for field in [
@@ -641,6 +652,9 @@ mod tests {
         );
     }
 
+    /// Checks that an account accepts addresses of visible ASCII characters
+    /// before `@` and a host name or IPv4 address after it, up to the
+    /// longest: 254 characters, with a 64-character name.
     #[test]
     fn accepts_addresses_of_a_visible_name_and_a_host_name_up_to_254_characters() {
         let longest = format!(
@@ -663,6 +677,11 @@ mod tests {
         }
     }
 
+    /// Checks that an account refuses an address that is empty, over 254
+    /// characters, or has a name over 64, that lacks a name, a host, or a
+    /// single `@`, that holds a space, a line feed, or a non-ASCII letter,
+    /// or whose host is not an ASCII host name or IPv4 address, and a number
+    /// in its place. No failure quotes the address.
     #[test]
     fn rejects_other_addresses_without_quoting_them() {
         let too_long = format!(
@@ -697,6 +716,8 @@ mod tests {
         assert_account_refused(build_account_with("address", json!(42)), "person");
     }
 
+    /// Checks that an account accepts a display name of 0 to 100 characters,
+    /// accented or in a non-Latin script with an inner space.
     #[test]
     fn accepts_display_names_up_to_100_characters_including_an_empty_one() {
         for name in ["", "A", "Jeanne d'Arc Épée", "東京 太郎", &"é".repeat(100)] {
@@ -704,6 +725,10 @@ mod tests {
         }
     }
 
+    /// Checks that an account refuses, without quoting it, a display name
+    /// over 100 characters, one with white space at an edge, a no-break
+    /// space included, or with a control character, and a number in its
+    /// place.
     #[test]
     fn rejects_long_padded_and_control_character_display_names_without_quoting_them() {
         for name in [
@@ -720,6 +745,8 @@ mod tests {
         assert_account_refused(build_account_with("displayName", json!(1)), "Secret");
     }
 
+    /// Checks that an account accepts a user name of 1 to 254 characters, an
+    /// address or a backslashed domain name among them.
     #[test]
     fn accepts_user_names_of_one_to_254_characters() {
         for name in [
@@ -733,6 +760,9 @@ mod tests {
         }
     }
 
+    /// Checks that an account refuses, without quoting it, a user name that
+    /// is empty or over 254 characters, has a space at an edge, or holds a
+    /// control character.
     #[test]
     fn rejects_empty_long_padded_and_control_character_user_names_without_quoting_them() {
         for name in [
@@ -747,6 +777,9 @@ mod tests {
         }
     }
 
+    /// Checks that an account accepts a server host that is an ASCII host
+    /// name in any case, up to 253 characters, an IPv4 address, or an IPv6
+    /// address in brackets, in full, compressed, or with an IPv4 tail.
     #[test]
     fn accepts_host_names_ipv4_addresses_and_bracketed_ipv6_addresses() {
         let longest_name = format!(
@@ -773,6 +806,10 @@ mod tests {
         }
     }
 
+    /// Checks that an account refuses, without quoting it, a server host
+    /// that is empty, over 253 characters, holds a port, a scheme, a space,
+    /// or a non-ASCII letter, is an IPv6 address without both brackets, or
+    /// puts anything but an IPv6 address in brackets, and a null host.
     #[test]
     fn rejects_other_hosts_without_quoting_them() {
         let too_long_name = format!(
@@ -806,6 +843,9 @@ mod tests {
         assert_account_refused(build_account_with_imap("host", Value::Null), "secret");
     }
 
+    /// Checks that an account accepts a server port from 1 to 65,535, also
+    /// written with a zero fraction such as `1.0`, and refuses one outside
+    /// that range, a fraction, text, and null.
     #[test]
     fn accepts_ports_from_1_to_65535_and_rejects_the_rest() {
         for port in [
@@ -835,6 +875,9 @@ mod tests {
         }
     }
 
+    /// Checks that an account accepts TLS and STARTTLS for remote servers,
+    /// and plain text for both servers on `localhost` in any case,
+    /// `127.0.0.1`, or `[::1]`.
     #[test]
     fn accepts_tls_and_starttls_everywhere_and_plain_only_on_loopback_hosts() {
         for (host, security) in [
@@ -852,6 +895,11 @@ mod tests {
         }
     }
 
+    /// Checks that an account refuses a security other than `tls`,
+    /// `starttls`, and `plain` in lower case, and a plain IMAP connection to
+    /// a host other than `localhost`, `127.0.0.1`, and `[::1]` in that short
+    /// form, with a failure about the lack of TLS. A plain SMTP connection
+    /// to a remote host is refused too.
     #[test]
     fn rejects_other_securities_and_plain_connections_to_other_hosts() {
         for security in [
@@ -880,6 +928,9 @@ mod tests {
         assert!(parse_account(plain_smtp).is_err());
     }
 
+    /// Checks that an account refuses, without quoting it, an IMAP or SMTP
+    /// server that is null, an array, or text, or an object that lacks a
+    /// field or has an unknown one.
     #[test]
     fn rejects_servers_that_are_not_objects_or_have_other_fields_without_quoting_them() {
         for server in [
@@ -895,6 +946,9 @@ mod tests {
         }
     }
 
+    /// Checks that an account's failure states the rule that its address,
+    /// display name, user name, server host, port, or security breaks, and
+    /// that an unknown field fails with the account's own rule.
     #[test]
     fn reports_the_broken_rule_of_a_field() {
         let long_name_address = format!("{}@example.com", "a".repeat(65));
@@ -959,6 +1013,9 @@ mod tests {
         }
     }
 
+    /// Checks that an email group's `Debug` output shows the address and the
+    /// hosts as `<redacted>` and none of the account's texts, and shows the
+    /// ports as numbers, the SMTP security, and the sent-copy switch.
     #[test]
     fn debug_output_hides_every_text_and_shows_ports_and_securities() {
         let settings =
@@ -981,6 +1038,9 @@ mod tests {
         }
     }
 
+    /// Checks that the host judges each email group of the shared fixture,
+    /// which holds at least 100, as `@lys/share`'s rules do, and writes each
+    /// accepted one back as the fixture states.
     #[test]
     fn judges_and_writes_every_shared_group_as_the_share_package_rules_do() {
         let cases: Vec<SharedCase> = serde_json::from_str(SHARED_CASES).expect("the shared groups");

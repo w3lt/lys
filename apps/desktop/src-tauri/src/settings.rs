@@ -562,6 +562,9 @@ mod tests {
             .collect()
     }
 
+    /// Checks that loading a missing settings file writes the loaded settings
+    /// to it: each group empty, the email group among them, and the providers
+    /// at their defaults.
     #[test]
     fn creates_a_missing_file_with_an_empty_load_configuration() {
         let directory = TestDirectory::create("settings-create");
@@ -590,6 +593,9 @@ mod tests {
         assert_eq!(read_settings_json(&path), get_settings_json(&settings));
     }
 
+    /// Checks that loading a settings file without the load configuration or
+    /// the later groups, email among them, reads them as empty, the providers
+    /// as their defaults, and leaves the file's text as it was.
     #[test]
     fn reads_a_file_without_a_load_configuration_without_rewriting_it() {
         let directory = TestDirectory::create("settings-without-group");
@@ -757,6 +763,10 @@ mod tests {
         }
     }
 
+    /// Checks that loading fails with a parse failure, leaving the file's
+    /// text as it was, for an unusable MCP switch, an unusable email group or
+    /// account, an unknown field in either, or an email password with a
+    /// control character.
     #[test]
     fn fails_on_unusable_switches_or_email_settings_without_rewriting_the_file() {
         let mut null_built_in = get_complete_settings();
@@ -803,6 +813,10 @@ mod tests {
         }
     }
 
+    /// Checks that loading fails with a parse failure, leaving the file's
+    /// text as it was, when an array stands in place of a group or of an
+    /// object inside one, the built-in MCP switches and the email objects
+    /// among them, or when the whole document is an array or null.
     #[test]
     fn fails_when_the_document_or_an_object_in_it_is_not_a_json_object_without_rewriting_it() {
         // Each pointer names an object of the complete settings (`~1` escapes
@@ -1007,6 +1021,9 @@ mod tests {
         );
     }
 
+    /// Checks that loading reads the saved email group and its password as
+    /// stored, and that the settings' `Debug` output holds none of the
+    /// account's address, name, IMAP host, or password.
     #[test]
     fn reads_the_saved_email_account_and_hides_it_and_its_password_from_debug_output() {
         let directory = TestDirectory::create("settings-email");

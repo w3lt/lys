@@ -1879,6 +1879,8 @@ mod tests {
         }
     }
 
+    /// Checks that the IMAP fake answers a `UID` without a command name
+    /// with `BAD`, as an unknown command.
     #[test]
     fn answers_bad_to_uid_without_a_command_name() {
         let mut mailbox = FakeMailbox::create_standard();
@@ -1889,6 +1891,9 @@ mod tests {
         assert_eq!(answer, "a1 BAD Error in IMAP command: Unknown command\r\n");
     }
 
+    /// Checks that the IMAP fake leaves no folder selected after a `SELECT`
+    /// of a missing folder or a refused `EXAMINE`, as RFC 3501 has it, so
+    /// that a later search answers `BAD`.
     #[test]
     fn leaves_no_folder_selected_after_a_failed_select_or_a_refused_examine() {
         let mut mailbox = FakeMailbox::create_standard();
@@ -1910,6 +1915,9 @@ mod tests {
         assert_eq!(after_refused, "a7 BAD No mailbox selected\r\n");
     }
 
+    /// Checks that the IMAP fake's search of a folder without messages
+    /// answers with no UIDs for keys it can read and with `BAD` for a key
+    /// it cannot.
     #[test]
     fn answers_a_folder_without_messages_with_no_uids_or_bad_for_keys_it_cannot_read() {
         let mailbox = FakeMailbox::create_standard();

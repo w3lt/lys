@@ -667,6 +667,10 @@ mod tests {
         ),
     ];
 
+    /// Checks that each sign-in failure serializes to its name and, in a
+    /// `SignIn` failure, reads as the sentence that names the IMAP or SMTP
+    /// server, gives the failure's clause, and points to the account in
+    /// Settings.
     #[test]
     fn names_and_describes_every_sign_in_failure() {
         for (failure, name, clause) in SIGN_IN_FAILURES {
@@ -773,6 +777,8 @@ mod tests {
         ]
     }
 
+    /// Checks that each folder failure has its log class and a sentence
+    /// that names the folder or the role it concerns.
     #[test]
     fn names_the_folder_each_folder_failure_concerns() {
         for (failure, class, sentence) in build_folder_failures() {
@@ -781,6 +787,9 @@ mod tests {
         }
     }
 
+    /// Checks that an SMTP refusal, an id outside the Drafts folder, an
+    /// attachment that is not text, and a missing attachment each have
+    /// their log class and the sentence the model reads.
     #[test]
     fn describes_smtp_refusals_drafts_outside_drafts_and_missing_attachments() {
         for (failure, class, sentence) in build_message_failures() {
@@ -789,6 +798,10 @@ mod tests {
         }
     }
 
+    /// Checks that an IMAP refusal's sentence quotes the server's text
+    /// while its log class names only the operation, and that a sign-in
+    /// failure, a stale id, a missing attachment, and a missing Drafts
+    /// folder read with their classes or sentences.
     #[test]
     fn formats_failures_as_sentences_and_classes_without_server_text() {
         let refused = ToolFailure::ImapRefused {
@@ -933,6 +946,9 @@ mod tests {
         ),
     ];
 
+    /// Checks that each way a new draft's save can end unconfirmed has its
+    /// log class and a sentence that says the draft may be stored, without
+    /// advice to try again.
     #[test]
     fn describes_a_draft_that_may_be_stored_without_advice_to_try_again() {
         for (failure, class, sentence) in UNCONFIRMED_DRAFTS {
@@ -978,6 +994,9 @@ mod tests {
         ]
     }
 
+    /// Checks that each way a replacing draft's save can end unconfirmed
+    /// keeps the class it has without a replaced draft, and has a sentence
+    /// that names the draft it replaces.
     #[test]
     fn names_the_draft_a_save_replaces_when_the_new_one_may_be_stored() {
         for (failure, class, sentence) in build_replacing_unconfirmed_drafts() {
@@ -986,6 +1005,8 @@ mod tests {
         }
     }
 
+    /// Checks that each of the ten ways a send can end unfinished has its
+    /// log class and a sentence that says how far the send came.
     #[test]
     fn describes_each_way_a_send_ends_unfinished_by_how_far_it_came() {
         for (failure, class, sentence) in UNFINISHED_SENDS {
@@ -994,6 +1015,9 @@ mod tests {
         }
     }
 
+    /// Checks that the reason given for a lost, timed-out, or unreadable
+    /// IMAP connection, and for an IMAP refusal with the server's text, is
+    /// one sentence without advice to try again.
     #[test]
     fn states_why_a_step_after_a_change_failed_without_advice_to_try_again() {
         let connection = |failure| ToolFailure::Connection {

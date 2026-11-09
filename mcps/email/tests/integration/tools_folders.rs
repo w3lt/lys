@@ -54,6 +54,9 @@ fn list_folder_changes(imap: &FakeImapServer) -> Vec<String> {
         .collect()
 }
 
+/// Checks that `list_folders` lists each folder of the IMAP fake with its
+/// role and its message count from `STATUS`, and marks a `\Noselect` folder
+/// as unable to hold messages without counting it.
 #[tokio::test(flavor = "multi_thread")]
 async fn lists_folders_with_roles_and_counts() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -99,6 +102,8 @@ async fn lists_folders_with_roles_and_counts() {
     );
 }
 
+/// Checks that `list_folders` names the Junk and Archive roles of folders
+/// the server marks with those special-use attributes.
 #[tokio::test(flavor = "multi_thread")]
 async fn lists_the_junk_and_archive_roles_the_server_declares() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -118,6 +123,8 @@ async fn lists_the_junk_and_archive_roles_the_server_declares() {
     );
 }
 
+/// Checks that `list_folders` answers that the account has no folder when
+/// the server lists none.
 #[tokio::test(flavor = "multi_thread")]
 async fn answers_that_an_account_whose_server_lists_no_folder_has_none() {
     let stack = start_stack(FakeMailbox::create_empty(), false).await;
@@ -128,6 +135,9 @@ async fn answers_that_an_account_whose_server_lists_no_folder_has_none() {
     assert_eq!(report.log, "folders: 0 listed");
 }
 
+/// Checks that `manage_folder` creates, renames, and deletes a folder with
+/// a non-ASCII name, sending the name in modified UTF-7 and answering each
+/// change.
 #[tokio::test(flavor = "multi_thread")]
 async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -182,6 +192,9 @@ async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
     assert!(stack.imap.find_folder("Archive 2026").is_none());
 }
 
+/// Checks that `manage_folder` refuses to rename or delete a role folder,
+/// to create a folder that exists, and to rename one onto the inbox in
+/// another letter case, sending no change.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_to_change_role_folders_or_to_take_a_name_in_use() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
@@ -222,6 +235,9 @@ async fn refuses_to_change_role_folders_or_to_take_a_name_in_use() {
     assert_eq!(list_folder_changes(&stack.imap), Vec::<String>::new());
 }
 
+/// Checks that `manage_folder` refuses to delete a folder that holds
+/// messages or one that is missing, a rename without a new name, and a name
+/// with white space at an edge, sending no change.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_missing_folders_folders_that_hold_messages_and_unusable_names() {
     let mut mailbox = FakeMailbox::create_standard();
@@ -269,6 +285,8 @@ async fn refuses_missing_folders_folders_that_hold_messages_and_unusable_names()
     assert_eq!(list_folder_changes(&stack.imap), Vec::<String>::new());
 }
 
+/// Checks that `manage_folder` refuses to delete a folder that holds other
+/// folders, and deletes it once its subfolder is deleted first.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_to_delete_a_folder_that_holds_other_folders() {
     let mut mailbox = FakeMailbox::create_standard();

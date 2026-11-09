@@ -1402,6 +1402,11 @@ fn build_header_subset(bytes: &[u8], names: &[String]) -> Vec<u8> {
 
 /// Searches the folder with the keys, answering UIDs in ascending order.
 ///
+/// The keys are first read against a blank message, before any message
+/// of the folder is matched, so that keys the fake cannot read get `BAD`
+/// in a folder without messages too; where reading them fails does not
+/// depend on the message.
+///
 /// # Arguments
 ///
 /// * `folder` - The folder to search.
@@ -1423,14 +1428,17 @@ fn list_search_matches(folder: &FakeFolder, keys: &[String]) -> Result<Vec<u32>,
     } else {
         0
     };
+    let cursor = SearchKeys { keys, index: start };
+    let blank = FakeMessage {
+        uid: 0,
+        flags: Vec::new(),
+        timestamp: 0,
+        bytes: Vec::new(),
+    };
+    cursor.calculate_match(&blank, folder)?;
     let mut uids = Vec::new();
     for message in &folder.messages {
-        let mut cursor = SearchKeys { keys, index: start };
-        let mut matched = true;
-        while cursor.index < keys.len() {
-            matched &= cursor.calculate_next_match(message, folder)?;
-        }
-        if matched {
+        if cursor.calculate_match(message, folder)? {
             uids.push(message.uid);
         }
     }
@@ -1439,8 +1447,10 @@ fn list_search_matches(folder: &FakeFolder, keys: &[String]) -> Result<Vec<u32>,
 
 /// A position in the keys of a SEARCH command.
 ///
-/// Concurrency model: single-owner; one [`list_search_matches`] call owns
-/// it for each message and moves it forward one key at a time.
+/// Concurrency model: single-owner; [`list_search_matches`] holds the
+/// start, and each [`Self::calculate_match`] call moves a copy of it
+/// forward one key at a time.
+#[derive(Clone, Copy)]
 struct SearchKeys<'a> {
     /// The keys.
     keys: &'a [String],
@@ -1449,6 +1459,30 @@ struct SearchKeys<'a> {
 }
 
 impl SearchKeys<'_> {
+    /// Calculates whether the message matches every key from this
+    /// position on.
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - The message to match.
+    /// * `folder` - Its folder, whose highest UID a `*` in a UID set means.
+    ///
+    /// # Returns
+    ///
+    /// Whether it matches them all, or why the keys cannot be read, as
+    /// [`Self::calculate_next_match`] gives it.
+    fn calculate_match(
+        mut self,
+        message: &FakeMessage,
+        folder: &FakeFolder,
+    ) -> Result<bool, String> {
+        let mut matched = true;
+        while self.index < self.keys.len() {
+            matched &= self.calculate_next_match(message, folder)?;
+        }
+        Ok(matched)
+    }
+
     /// Reads the argument after a key, advancing past it.
     ///
     /// # Arguments
@@ -1765,4 +1799,30 @@ where
 {
     let _ = reader.get_mut().write_all(bytes).await;
     let _ = reader.get_mut().flush().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn answers_a_folder_without_messages_with_no_uids_or_bad_for_keys_it_cannot_read() {
+        let mailbox = FakeMailbox::create_standard();
+        let readable = parse_command("a1 UID SEARCH UNSEEN SINCE 1-Nov-2026", Vec::new())
+            .expect("a tagged command");
+        let unreadable =
+            parse_command("a2 UID SEARCH CHEAP", Vec::new()).expect("a tagged command");
+
+        let found = handle_search(&readable, &mailbox, Some("INBOX"));
+        let refused = handle_search(&unreadable, &mailbox, Some("INBOX"));
+
+        assert_eq!(
+            String::from_utf8_lossy(&found),
+            "* SEARCH\r\na1 OK Search completed\r\n"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&refused),
+            "a2 BAD unknown search key CHEAP\r\n"
+        );
+    }
 }

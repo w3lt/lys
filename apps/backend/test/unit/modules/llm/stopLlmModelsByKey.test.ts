@@ -3,11 +3,46 @@ import type { LoadedLlmModelInstance } from "../../../../src/modules/llm/llmRunt
 import {
   stopLlmModelsByKey,
   type ListLoadedLlmModelInstances,
+  type LlmModelStopDiagnostic,
   type StopLoadedLlmModelInstance
 } from "../../../../src/modules/llm/stopLlmModelsByKey"
 
 /** Requested model key in every case. */
 const MODEL_KEY = "qwen/qwen3-8b"
+
+/**
+ * Reads the failure a diagnostic retains as its evidence.
+ *
+ * @param diagnostic - Diagnostic of a stop outcome.
+ * @returns The value the evidence reports.
+ */
+function readRetainedFailure(diagnostic: LlmModelStopDiagnostic): unknown {
+  let retained: unknown
+  diagnostic.evidence.handleLlmRuntimeFailureReport((failure) => {
+    retained = failure
+  })
+  return retained
+}
+
+/**
+ * Describes a diagnostic as its operation, the identifier of a failed stop
+ * command, and the failure it retains.
+ *
+ * @param diagnostic - Diagnostic of a stop outcome.
+ * @returns A plain description a case compares with an expected one.
+ */
+function describeDiagnostic(diagnostic: LlmModelStopDiagnostic) {
+  return diagnostic.operation === "stop-model-instance"
+    ? {
+        operation: diagnostic.operation,
+        modelIdentifier: diagnostic.modelIdentifier,
+        failure: readRetainedFailure(diagnostic)
+      }
+    : {
+        operation: diagnostic.operation,
+        failure: readRetainedFailure(diagnostic)
+      }
+}
 
 /**
  * Creates one loaded-instance observation.
@@ -98,33 +133,36 @@ describe("stopLlmModelsByKey", () => {
       []
     )
     const firstStop = Promise.withResolvers<void>()
+    const refusals = new Map<string, Error>()
     const stop = vi.fn<StopLoadedLlmModelInstance>(async (identifier) => {
       if (identifier === "a") {
         await firstStop.promise
       }
-      throw new Error(`${identifier} refused`)
+      const refusal = new Error(`${identifier} refused`)
+      refusals.set(identifier, refusal)
+      throw refusal
     })
 
     const outcome = stopLlmModelsByKey(MODEL_KEY, listLoaded, stop)
     await vi.waitFor(() => expect(stop).toHaveBeenCalledTimes(2))
     await expect(stop.mock.results[1]?.value).rejects.toThrow("b refused")
     firstStop.resolve()
+    const settled = await outcome
 
-    await expect(outcome).resolves.toEqual({
-      status: "stopped",
-      diagnostics: [
-        {
-          operation: "stop-model-instance",
-          modelIdentifier: "a",
-          message: "a refused"
-        },
-        {
-          operation: "stop-model-instance",
-          modelIdentifier: "b",
-          message: "b refused"
-        }
-      ]
-    })
+    expect(settled.status).toBe("stopped")
+    expect(settled.diagnostics.map(describeDiagnostic)).toEqual([
+      {
+        operation: "stop-model-instance",
+        modelIdentifier: "a",
+        failure: refusals.get("a")
+      },
+      {
+        operation: "stop-model-instance",
+        modelIdentifier: "b",
+        failure: refusals.get("b")
+      }
+    ])
+    expect(readRetainedFailure(settled.diagnostics[0]!)).toBe(refusals.get("a"))
   })
 
   it("keeps stopping after a failed stop and reports it when reconciliation is empty", async () => {
@@ -132,25 +170,24 @@ describe("stopLlmModelsByKey", () => {
       [createInstance(MODEL_KEY, "a"), createInstance(MODEL_KEY, "b")],
       []
     )
+    const timeout = new Error("unload timed out")
     const stop = vi.fn<StopLoadedLlmModelInstance>(async (identifier) => {
       if (identifier === "a") {
-        throw new Error("unload timed out")
+        throw timeout
       }
     })
 
     const outcome = await stopLlmModelsByKey(MODEL_KEY, listLoaded, stop)
 
     expect(stop.mock.calls).toEqual([["a"], ["b"]])
-    expect(outcome).toEqual({
-      status: "stopped",
-      diagnostics: [
-        {
-          operation: "stop-model-instance",
-          modelIdentifier: "a",
-          message: "unload timed out"
-        }
-      ]
-    })
+    expect(outcome.status).toBe("stopped")
+    expect(outcome.diagnostics.map(describeDiagnostic)).toEqual([
+      {
+        operation: "stop-model-instance",
+        modelIdentifier: "a",
+        failure: timeout
+      }
+    ])
   })
 
   it("returns stop-failed with the identifiers still loaded after reconciliation", async () => {
@@ -158,29 +195,30 @@ describe("stopLlmModelsByKey", () => {
       [createInstance(MODEL_KEY, "a"), createInstance(MODEL_KEY, "b")],
       [createInstance(MODEL_KEY, "b"), createInstance(MODEL_KEY, "a")]
     )
+    const refusal = new Error("refused")
     const stop = vi.fn<StopLoadedLlmModelInstance>(async () => {
-      throw new Error("refused")
+      throw refusal
     })
 
     const outcome = await stopLlmModelsByKey(MODEL_KEY, listLoaded, stop)
 
     expect(outcome).toHaveProperty("remainingModelIdentifiers.length", 2)
-    expect(outcome).toEqual({
+    expect(outcome).toMatchObject({
       status: "stop-failed",
-      remainingModelIdentifiers: expect.arrayContaining(["a", "b"]),
-      diagnostics: [
-        {
-          operation: "stop-model-instance",
-          modelIdentifier: "a",
-          message: "refused"
-        },
-        {
-          operation: "stop-model-instance",
-          modelIdentifier: "b",
-          message: "refused"
-        }
-      ]
+      remainingModelIdentifiers: expect.arrayContaining(["a", "b"])
     })
+    expect(outcome.diagnostics.map(describeDiagnostic)).toEqual([
+      {
+        operation: "stop-model-instance",
+        modelIdentifier: "a",
+        failure: refusal
+      },
+      {
+        operation: "stop-model-instance",
+        modelIdentifier: "b",
+        failure: refusal
+      }
+    ])
   })
 
   it("returns stop-failed without diagnostics when stops succeed but instances remain", async () => {
@@ -200,59 +238,58 @@ describe("stopLlmModelsByKey", () => {
   })
 
   it("returns runtime-unavailable without stopping when the initial inventory fails", async () => {
+    const socketClosed = new Error("socket closed", {
+      cause: new Error("read ECONNRESET")
+    })
     const listLoaded = vi.fn<ListLoadedLlmModelInstances>(async () => {
-      throw new Error("socket closed")
+      throw socketClosed
     })
     const stop = vi.fn<StopLoadedLlmModelInstance>()
 
     const outcome = await stopLlmModelsByKey(MODEL_KEY, listLoaded, stop)
 
-    expect(outcome).toEqual({
-      status: "runtime-unavailable",
-      diagnostics: [
-        { operation: "list-initial-model-instances", message: "socket closed" }
-      ]
-    })
+    expect(outcome.status).toBe("runtime-unavailable")
+    expect(outcome.diagnostics.map(describeDiagnostic)).toEqual([
+      { operation: "list-initial-model-instances", failure: socketClosed }
+    ])
+    expect(readRetainedFailure(outcome.diagnostics[0]!)).toBe(socketClosed)
     expect(stop).not.toHaveBeenCalled()
   })
 
   it("returns runtime-unavailable with stop failures when reconciliation fails", async () => {
+    const socketClosed = new Error("socket closed")
+    const refusal = new Error("refused")
     const listLoaded = vi
       .fn<ListLoadedLlmModelInstances>()
       .mockResolvedValueOnce([
         createInstance(MODEL_KEY, "a"),
         createInstance(MODEL_KEY, "b")
       ])
-      .mockRejectedValueOnce(new Error("socket closed"))
+      .mockRejectedValueOnce(socketClosed)
     const stop = vi.fn<StopLoadedLlmModelInstance>(async (identifier) => {
       if (identifier === "b") {
-        throw new Error("refused")
+        throw refusal
       }
     })
 
     const outcome = await stopLlmModelsByKey(MODEL_KEY, listLoaded, stop)
 
-    expect(outcome).toEqual({
-      status: "runtime-unavailable",
-      diagnostics: [
-        {
-          operation: "stop-model-instance",
-          modelIdentifier: "b",
-          message: "refused"
-        },
-        {
-          operation: "list-reconciled-model-instances",
-          message: "socket closed"
-        }
-      ]
-    })
+    expect(outcome.status).toBe("runtime-unavailable")
+    expect(outcome.diagnostics.map(describeDiagnostic)).toEqual([
+      {
+        operation: "stop-model-instance",
+        modelIdentifier: "b",
+        failure: refusal
+      },
+      { operation: "list-reconciled-model-instances", failure: socketClosed }
+    ])
   })
 
   it.each([
     ["a non-error value", "offline"],
     ["an error without a message", new Error("")]
   ])(
-    "summarizes %s with a non-empty failure message",
+    "retains %s unchanged as the diagnostic's evidence",
     async (_label, rejection) => {
       const listLoaded = vi.fn<ListLoadedLlmModelInstances>(async () => {
         throw rejection
@@ -260,12 +297,8 @@ describe("stopLlmModelsByKey", () => {
 
       const outcome = await stopLlmModelsByKey(MODEL_KEY, listLoaded, vi.fn())
 
-      expect(outcome.diagnostics).toEqual([
-        {
-          operation: "list-initial-model-instances",
-          message: expect.stringMatching(/\S/)
-        }
-      ])
+      expect(outcome.diagnostics).toHaveLength(1)
+      expect(readRetainedFailure(outcome.diagnostics[0]!)).toBe(rejection)
     }
   )
 
@@ -284,6 +317,7 @@ describe("stopLlmModelsByKey", () => {
     expect(Object.isFrozen(outcome)).toBe(true)
     expect(Object.isFrozen(outcome.diagnostics)).toBe(true)
     expect(Object.isFrozen(outcome.diagnostics[0])).toBe(true)
+    expect(Object.isFrozen(outcome.diagnostics[0]?.evidence)).toBe(true)
     if (outcome.status === "stop-failed") {
       expect(Object.isFrozen(outcome.remainingModelIdentifiers)).toBe(true)
     }

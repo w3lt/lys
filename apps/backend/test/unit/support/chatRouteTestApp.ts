@@ -70,6 +70,16 @@ export const TEST_BUILT_IN_AGENT_PROMPTS = Object.freeze({
   lysiptera: "You are the test Lysiptera."
 })
 
+/**
+ * Request limits of every live agent in the chat route test app: two
+ * replies of one agent run at once and one more may wait, so a case reaches
+ * the waiting line and the refusal with few conversations.
+ */
+export const TEST_AGENT_REQUEST_LIMITS = Object.freeze({
+  slotCount: 2,
+  waitingLimit: 1
+})
+
 /** Test application decorated with the services the chat route borrows. */
 export type ChatRouteTestApp = TestFastify &
   Readonly<{
@@ -242,7 +252,8 @@ export type AgentConversationTestServices = Readonly<{
  * decorated agent service
  * keeps its records on the same in-memory database and builds the built-in
  * agents with {@link TEST_BUILT_IN_AGENT_PROMPTS}; the decorated agent
- * runtime service keeps the live agents over it and titles their requests'
+ * runtime service keeps the live agents over it, each with
+ * {@link TEST_AGENT_REQUEST_LIMITS}, and titles their requests'
  * conversations from the same database; every agent's model calls
  * go through the `completeChatStream` spy, and every measurement, by their
  * meters and by the title task, through the `findLlmContextMeasurement` spy
@@ -445,7 +456,8 @@ async function openTestLlmRuntimeService(): Promise<LlmRuntimeService> {
 /**
  * Creates the agent service, which keeps its records on the test's
  * database and builds the built-in agents with
- * {@link TEST_BUILT_IN_AGENT_PROMPTS}, and the agent runtime service over it.
+ * {@link TEST_BUILT_IN_AGENT_PROMPTS}, and the agent runtime service over it,
+ * each live agent with {@link TEST_AGENT_REQUEST_LIMITS}.
  *
  * @param conversation - The test's database and the history the live
  * agents title their requests' conversations from.
@@ -474,7 +486,8 @@ function createTestAgentServices(
     findConversationTitle: (conversationId) =>
       buildConversationTitleLookup(
         conversation.history.getConversation(conversationId)
-      )
+      ),
+    requestLimits: TEST_AGENT_REQUEST_LIMITS
   })
   return Object.freeze({ agentService, agentRuntimeService })
 }

@@ -34,7 +34,7 @@ use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize};
 use tauri::Url;
 
-use super::json_object::{parse_json_object, parse_json_objects};
+use super::json::{parse_json_object, parse_json_objects};
 use internationalized_host::is_accepted_host;
 
 /// Most servers the group may hold, inclusive. Matches

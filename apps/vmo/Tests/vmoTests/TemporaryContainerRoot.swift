@@ -2,6 +2,15 @@ import Containerization
 import Foundation
 import Testing
 
+extension Trait where Self == ConditionTrait {
+    /// Runs a test only when the current user isn't root. Root can read and
+    /// write a file or directory whatever its permissions, so a test that
+    /// makes one unreadable or read-only would prove nothing as root.
+    static var enabledUnlessRoot: Self {
+        .enabled(if: getuid() != 0, "File permissions don't apply to root")
+    }
+}
+
 /// Owns one test's temporary directory to hold the files of the container
 /// managers, image stores, image layouts, and archives created in it, while
 /// guaranteeing that the directory is removed when the test releases it.

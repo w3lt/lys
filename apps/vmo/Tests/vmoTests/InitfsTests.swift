@@ -17,15 +17,6 @@ private let laterVminitReference = "example.com/vminit:2"
 /// names the image, so a test can tell which vminit a filesystem came from.
 private let vminitdPath = FilePath("/vminitd")
 
-extension Trait where Self == ConditionTrait {
-    /// Runs a test only when the current user isn't root. Root can read and
-    /// write a file or directory whatever its permissions, so a test that
-    /// makes one unreadable or read-only would prove nothing as root.
-    fileprivate static var enabledUnlessRoot: Self {
-        .enabled(if: getuid() != 0, "File permissions don't apply to root")
-    }
-}
-
 /// One version of a file on disk: deleting and recreating the file changes
 /// its number, and rewriting it changes its modification date.
 private struct FileVersion: Equatable {

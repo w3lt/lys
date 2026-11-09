@@ -26,7 +26,7 @@ use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::host_name::is_host_name;
-use super::json_object::parse_json_object;
+use super::json::parse_json_object;
 
 /// Most characters an email address may have, inclusive. Matches
 /// `MAXIMUM_EMAIL_ADDRESS_LENGTH` in `@lys/share`.

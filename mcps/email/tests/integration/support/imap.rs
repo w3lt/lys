@@ -462,7 +462,8 @@ impl FakeImapServer {
 
     /// Runs a future until a fault strikes, or a connection was accepted
     /// in the silent mode, lets it take up the input it already has, pauses
-    /// the clock, and runs it to its end, as [`run_past_fault`] does.
+    /// the clock for the rest of the case, and runs it to its end, as
+    /// [`run_past_fault`] does.
     ///
     /// # Arguments
     ///
@@ -475,8 +476,10 @@ impl FakeImapServer {
     ///
     /// # Panics
     ///
-    /// As [`run_past_fault`] does: when the future ends before the clock
-    /// paused, or outwaits the guard limit on the paused clock.
+    /// As [`run_past_fault`] does: when the case runs on a runtime other
+    /// than a current-thread one, or the clock is already paused, as by an
+    /// earlier run in the same case; when the future ends before the clock
+    /// paused; or when it outwaits the guard limit on the paused clock.
     pub async fn run_past_fault<F>(&self, future: F) -> (F::Output, FaultTiming)
     where
         F: Future,

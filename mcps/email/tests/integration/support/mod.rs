@@ -124,6 +124,10 @@ pub struct FaultTiming {
 /// it already has, pauses the clock, and runs it to its end, so that the
 /// limit of the wait the fault caused passes at once.
 ///
+/// The clock stays paused for the rest of the case: each later timer of
+/// the case fires as soon as the runtime has no other work, and a second
+/// run in the same case panics.
+///
 /// # Arguments
 ///
 /// * `fault` - Ends when the fault strikes.
@@ -136,8 +140,11 @@ pub struct FaultTiming {
 ///
 /// # Panics
 ///
-/// When the future ends before the clock paused, or waits on the paused
-/// clock longer than [`GUARD_LIMIT`].
+/// When the case runs on a runtime other than a current-thread one, the
+/// default of `#[tokio::test]`, or the clock is already paused, as by an
+/// earlier run in the same case: tokio's `pause` panics then. Also when
+/// the future ends before the clock paused, or waits on the paused clock
+/// longer than [`GUARD_LIMIT`].
 pub async fn run_past_fault<F>(
     fault: impl Future<Output = ()>,
     future: F,

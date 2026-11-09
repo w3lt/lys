@@ -73,12 +73,6 @@ export type GroqApiKey = z.infer<typeof groqApiKeySchema>
  */
 export const MAXIMUM_EMAIL_PASSWORD_LENGTH = 1024
 
-/** Finds a control character (Unicode general category Cc), such as a line break. */
-const CONTROL_CHARACTER_PATTERN = /\p{Cc}/u
-
-/** Finds a lone surrogate: half of a UTF-16 pair without the other half. */
-const LONE_SURROGATE_PATTERN = /\p{Cs}/u
-
 /**
  * Answers whether a text follows the email password rule: 1 to
  * {@link MAXIMUM_EMAIL_PASSWORD_LENGTH} code points, no control character,
@@ -88,13 +82,22 @@ const LONE_SURROGATE_PATTERN = /\p{Cs}/u
  * @returns True when the text is a valid password.
  */
 function isEmailPassword(value: string): boolean {
+  /**
+   * Finds a control character (Unicode general category Cc), such as a line
+   * break.
+   */
+  const controlCharacterPattern = /\p{Cc}/u
+
+  /** Finds a lone surrogate: half of a UTF-16 pair without the other half. */
+  const loneSurrogatePattern = /\p{Cs}/u
+
   const length = [...value].length
 
   return (
     length >= 1 &&
     length <= MAXIMUM_EMAIL_PASSWORD_LENGTH &&
-    !CONTROL_CHARACTER_PATTERN.test(value) &&
-    !LONE_SURROGATE_PATTERN.test(value)
+    !controlCharacterPattern.test(value) &&
+    !loneSurrogatePattern.test(value)
   )
 }
 

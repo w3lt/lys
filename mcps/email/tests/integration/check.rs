@@ -236,8 +236,8 @@ async fn reports_servers_that_cannot_be_reached() {
 }
 
 /// Checks that the account check reports a refused certificate for both
-/// servers, over TLS and STARTTLS, when an authority other than the trusted
-/// one signed their certificates.
+/// servers, IMAP over TLS and SMTP over STARTTLS, when an authority other
+/// than the trusted one signed their certificates.
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_certificates_the_trust_refuses() {
     let authority = TestAuthority::new();
@@ -560,6 +560,10 @@ async fn refuses_to_start_without_a_usable_account_and_names_the_rule_only() {
     );
     assert!(plain_remote.stdout.is_empty());
     assert_eq!(not_json.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8_lossy(&not_json.stderr),
+        "LYS_EMAIL_ACCOUNT: is not JSON\n"
+    );
     assert_eq!(bad_arguments.status.code(), Some(64));
     assert_eq!(
         String::from_utf8_lossy(&bad_arguments.stderr),

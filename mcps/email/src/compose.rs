@@ -514,8 +514,9 @@ mod tests {
     }
 
     /// Checks that a sent message's envelope goes from the account's
-    /// address to every To, Cc, and Bcc recipient, and that a draft of the
-    /// same composition keeps its `Bcc` header.
+    /// address to every To, Cc, and Bcc recipient, that the message itself
+    /// has no `Bcc` header, and that a draft of the same composition keeps
+    /// it.
     #[test]
     fn sends_to_every_recipient_and_keeps_bcc_only_in_a_draft() {
         let composition = build_plain_composition();
@@ -534,6 +535,9 @@ mod tests {
             sent.envelope.from().map(ToString::to_string),
             Some("person@example.com".to_owned())
         );
+        let sent_text = String::from_utf8(sent.bytes).expect("utf-8");
+        assert!(!sent_text.contains("Bcc"), "{sent_text}");
+        assert!(!sent_text.contains("hidden@example.com"), "{sent_text}");
         let draft_text = String::from_utf8(draft.bytes).expect("utf-8");
         assert!(
             draft_text.contains("Bcc: hidden@example.com\r\n"),

@@ -135,19 +135,19 @@ async fn answers_that_an_account_whose_server_lists_no_folder_has_none() {
     assert_eq!(report.log, "folders: 0 listed");
 }
 
-/// Checks that `manage_folder` creates, renames, and deletes a folder with
-/// a non-ASCII name, sending the name in modified UTF-7 and answering each
-/// change.
+/// Checks that `manage_folder` creates a folder with a non-ASCII name,
+/// renames it to another, and deletes it, sending each name in modified
+/// UTF-7 and answering each change.
 #[tokio::test(flavor = "multi_thread")]
 async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
     let stack = start_stack(FakeMailbox::create_standard(), false).await;
     let create = build_folder_arguments(FolderAction::Create, "Grüße", None);
-    let rename = build_folder_arguments(FolderAction::Rename, "Grüße", Some("Archive 2026"));
+    let rename = build_folder_arguments(FolderAction::Rename, "Grüße", Some("Größe"));
 
     let created = run_manage_folder(&stack.context, create).await;
     let listed = run_list_folders(&stack.context).await.expect("the folders");
     let renamed = run_manage_folder(&stack.context, rename).await;
-    let deleted = delete_folder(&stack.context, "Archive 2026").await;
+    let deleted = delete_folder(&stack.context, "Größe").await;
 
     assert_eq!(
         created.map(|report| (report.text, report.log)),
@@ -164,14 +164,14 @@ async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
     assert_eq!(
         renamed.map(|report| (report.text, report.log)),
         Ok((
-            "Folder Grüße renamed to Archive 2026.".to_owned(),
+            "Folder Grüße renamed to Größe.".to_owned(),
             "folder: renamed".to_owned()
         ))
     );
     assert_eq!(
         deleted.map(|report| (report.text, report.log)),
         Ok((
-            "Folder Archive 2026 deleted.".to_owned(),
+            "Folder Größe deleted.".to_owned(),
             "folder: deleted".to_owned()
         ))
     );
@@ -182,14 +182,14 @@ async fn creates_renames_and_deletes_a_folder_with_a_name_that_is_not_ascii() {
         "{changes:?}"
     );
     assert!(
-        changes[1].ends_with(" RENAME \"Gr&APwA3w-e\" \"Archive 2026\""),
+        changes[1].ends_with(" RENAME \"Gr&APwA3w-e\" \"Gr&APYA3w-e\""),
         "{changes:?}"
     );
     assert!(
-        changes[2].ends_with(" DELETE \"Archive 2026\""),
+        changes[2].ends_with(" DELETE \"Gr&APYA3w-e\""),
         "{changes:?}"
     );
-    assert!(stack.imap.find_folder("Archive 2026").is_none());
+    assert!(stack.imap.find_folder("Gr&APYA3w-e").is_none());
 }
 
 /// Checks that `manage_folder` refuses to rename or delete a role folder,

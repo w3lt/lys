@@ -698,7 +698,7 @@ mod tests {
 
     /// Each failure about a folder, with the class the log gives it and the
     /// sentence the model reads.
-    fn build_folder_failures() -> [(ToolFailure, &'static str, &'static str); 5] {
+    fn build_folder_failures() -> [(ToolFailure, &'static str, &'static str); 6] {
         [
             (
                 ToolFailure::FolderMissing("Projects".to_owned()),
@@ -722,6 +722,11 @@ mod tests {
                 ToolFailure::FolderNotEmpty("Projects".to_owned()),
                 "folder-not-empty",
                 "Projects holds messages, so it cannot be deleted. Empty it first.",
+            ),
+            (
+                ToolFailure::FolderHasSubfolders("Projects".to_owned()),
+                "folder-has-subfolders",
+                "Projects holds other folders, so it cannot be deleted. Delete them first.",
             ),
             (
                 ToolFailure::FolderExists("Projects".to_owned()),
@@ -915,7 +920,7 @@ mod tests {
     fn describes_a_draft_that_may_be_stored_without_advice_to_try_again() {
         /// Each way a draft that replaces none can end unconfirmed, with the
         /// class the log gives it and the sentence the model reads.
-        const UNCONFIRMED_DRAFTS: [(ToolFailure, &str, &str); 4] = [
+        const UNCONFIRMED_DRAFTS: [(ToolFailure, &str, &str); 5] = [
             (
                 ToolFailure::DraftUnconfirmed {
                     failure: ConnectionFailure::Lost,
@@ -931,6 +936,14 @@ mod tests {
                 },
                 "save-unconfirmed-unreadable",
                 "The IMAP server answered something Lys could not read. The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again.",
+            ),
+            (
+                ToolFailure::DraftUnconfirmed {
+                    failure: ConnectionFailure::TimedOut,
+                    replaced: None,
+                },
+                "save-unconfirmed-timed-out",
+                "The IMAP server did not answer in time. The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again.",
             ),
             (
                 ToolFailure::StoppedWhileSaving {
@@ -959,7 +972,7 @@ mod tests {
     /// Each way a draft that replaces `1.1003.Drafts` can end unconfirmed,
     /// with the class the log gives it, the same as without a replaced
     /// draft, and the sentence the model reads, which names that draft.
-    fn build_replacing_unconfirmed_drafts() -> [(ToolFailure, &'static str, &'static str); 3] {
+    fn build_replacing_unconfirmed_drafts() -> [(ToolFailure, &'static str, &'static str); 5] {
         let replaced = Some(EmailId {
             uid: 1,
             uid_validity: 1003,
@@ -973,6 +986,22 @@ mod tests {
                 },
                 "save-unconfirmed-lost",
                 "The connection to the IMAP server ended before it answered. The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again. The draft it replaces, 1.1003.Drafts, is still in the Drafts folder.",
+            ),
+            (
+                ToolFailure::DraftUnconfirmed {
+                    failure: ConnectionFailure::Unreadable,
+                    replaced: replaced.clone(),
+                },
+                "save-unconfirmed-unreadable",
+                "The IMAP server answered something Lys could not read. The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again. The draft it replaces, 1.1003.Drafts, is still in the Drafts folder.",
+            ),
+            (
+                ToolFailure::DraftUnconfirmed {
+                    failure: ConnectionFailure::TimedOut,
+                    replaced: replaced.clone(),
+                },
+                "save-unconfirmed-timed-out",
+                "The IMAP server did not answer in time. The whole draft had been handed over, so it may or may not be in the Drafts folder; search that folder before saving it again. The draft it replaces, 1.1003.Drafts, is still in the Drafts folder.",
             ),
             (
                 ToolFailure::StoppedWhileSaving {

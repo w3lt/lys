@@ -600,6 +600,14 @@ mod tests {
             SentCopy::Saved("Sent".to_owned()).format_sentence(),
             "A copy was saved in Sent."
         );
+        assert_eq!(
+            format_copy_for_log(&SentCopy::Saved("Sent".to_owned())),
+            "saved"
+        );
+        assert_eq!(
+            SentCopy::NoFolder.format_sentence(),
+            "No Sent folder was found, so no copy was saved."
+        );
         assert_eq!(format_copy_for_log(&SentCopy::NoFolder), "no folder");
         let unconfirmed = SentCopy::Unconfirmed(ToolFailure::Connection {
             protocol: Protocol::Imap,

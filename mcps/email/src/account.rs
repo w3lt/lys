@@ -696,6 +696,7 @@ mod tests {
         let debug = format!("{account:?}");
 
         assert!(!debug.contains("person"));
+        assert!(!debug.contains("A Person"));
         assert!(!debug.contains("correct horse"));
         assert!(debug.contains("imap.example.com"));
         assert!(debug.contains("<redacted>"));

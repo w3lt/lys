@@ -167,7 +167,7 @@ mod tests {
 
     /// Checks that decoding keeps a run after `&` as it is when it is not
     /// modified UTF-7: unterminated, with a character outside its base64,
-    /// or with bits left over.
+    /// or with base64 that ends in half a UTF-16 code unit.
     #[test]
     fn keeps_a_run_that_is_not_modified_utf7() {
         assert_eq!(parse_encoded_folder_name("Open&Run"), "Open&Run");

@@ -63,8 +63,8 @@ async fn get_inbox_result(mailbox: FakeMailbox) -> ToolResult {
 
 /// Checks that a `SEARCH` the fake IMAP server refuses fails
 /// `search_emails` with the server's code and text instead of matching
-/// nothing, and that the non-ASCII subject went as a literal under
-/// `CHARSET UTF-8`, not in the command line.
+/// nothing, and that the non-ASCII subject was announced as a literal under
+/// `CHARSET UTF-8` and, the search being refused first, never sent.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_search_fails_instead_of_matching_nothing() {
     let mut mailbox = build_mailbox();

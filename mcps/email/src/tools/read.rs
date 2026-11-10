@@ -748,8 +748,8 @@ mod tests {
 
     /// Checks that a message reads with its id, headers, flags, folder, and
     /// attachment list before its text, and that a text past the given
-    /// length is cut with a note pointing to `read_email`, while a shorter
-    /// one stays whole.
+    /// length is cut with a note pointing to `read_email`, while one at that
+    /// length stays whole.
     #[test]
     fn formats_a_message_with_its_attachments_and_cuts_the_text_when_asked() {
         let view = parse_message(b"From: Jane <jane@example.com>\r\nTo: person@example.com\r\nCc: cc@example.com\r\nReply-To: reply@example.com\r\nDate: Sun, 2 Nov 2026 10:30:00 +0000\r\nSubject: Hello\r\nMessage-ID: <one@example.com>\r\nIn-Reply-To: <zero@example.com>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b\"\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nHello there, this is the text.\r\n--b\r\nContent-Type: text/csv\r\nContent-Disposition: attachment; filename=\"data.csv\"\r\n\r\na,b\r\n--b--\r\n").expect("message");

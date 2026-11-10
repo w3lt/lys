@@ -148,8 +148,8 @@ pub enum AccountProblem {
     NotUnicode,
     /// The value is not JSON.
     NotJson,
-    /// The JSON is not the account the backend writes: a field is missing,
-    /// unknown, or of the wrong type.
+    /// The JSON is not the account the backend writes: it is not an object,
+    /// or a field is missing, unknown, repeated, or of the wrong type.
     NotAnAccount,
     /// A field breaks the named rule.
     Rule(&'static str),
@@ -165,7 +165,7 @@ impl fmt::Display for AccountProblem {
             Self::NotUnicode => formatter.write_str("is not Unicode text"),
             Self::NotJson => formatter.write_str("is not JSON"),
             Self::NotAnAccount => formatter.write_str(
-                "is not the account the backend writes: a field is missing, unknown, or of the wrong type",
+                "is not the account the backend writes: it is not a JSON object, or a field is missing, unknown, repeated, or of the wrong type",
             ),
             Self::Rule(rule) => write!(formatter, "breaks a rule: {rule}"),
         }
@@ -704,8 +704,9 @@ mod tests {
 
     /// Checks that a variable that is not JSON gives `NotJson`, and that
     /// JSON that is not an account gives `NotAnAccount`: an empty array, an
-    /// array of the account's fields in order, a server written as an array
-    /// of its fields, a field of the wrong type, or an unknown server field.
+    /// array of the account's fields in order, either server written as an
+    /// array of its fields, a field of the wrong type, or an unknown server
+    /// field.
     #[test]
     fn reports_text_that_is_not_json_or_not_an_account_by_kind() {
         /// A server object that passes every rule.
@@ -739,6 +740,14 @@ mod tests {
             Err(AccountProblem::NotAnAccount)
         );
         assert_eq!(
+            parse_account_variable(&build_variable(
+                "smtp",
+                "[\"smtp.example.com\",587,\"starttls\"]"
+            ))
+            .map(|_| ()),
+            Err(AccountProblem::NotAnAccount)
+        );
+        assert_eq!(
             parse_account_variable(&build_variable("serverKeepsSentCopy", "\"yes\"")).map(|_| ()),
             Err(AccountProblem::NotAnAccount)
         );
@@ -748,6 +757,19 @@ mod tests {
                 "{\"host\":\"h\",\"port\":1,\"security\":\"tls\",\"x\":1}"
             ))
             .map(|_| ()),
+            Err(AccountProblem::NotAnAccount)
+        );
+    }
+
+    /// Checks that an account whose JSON holds a field twice gives
+    /// `NotAnAccount`.
+    #[test]
+    fn reports_a_repeated_field_as_not_an_account() {
+        let variable =
+            build_variable("", "").replacen('{', "{\"address\":\"person@example.com\",", 1);
+
+        assert_eq!(
+            parse_account_variable(&variable).map(|_| ()),
             Err(AccountProblem::NotAnAccount)
         );
     }
@@ -1115,10 +1137,9 @@ mod tests {
             "is not Unicode text"
         );
         assert_eq!(AccountProblem::NotJson.to_string(), "is not JSON");
-        assert!(
-            AccountProblem::NotAnAccount
-                .to_string()
-                .starts_with("is not the account")
+        assert_eq!(
+            AccountProblem::NotAnAccount.to_string(),
+            "is not the account the backend writes: it is not a JSON object, or a field is missing, unknown, repeated, or of the wrong type"
         );
         assert_eq!(
             AccountProblem::Rule("imap.port is a whole number from 1 to 65535").to_string(),

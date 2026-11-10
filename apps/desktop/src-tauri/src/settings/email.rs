@@ -1,13 +1,13 @@
 //! The email account stored under the `email` settings group.
 //!
-//! The person saves one email account in Settings → Email: the address mail
-//! is sent from and received at, the name sent with it, the user name the
-//! account signs in with, and the IMAP and SMTP servers Lys reaches. A
-//! missing group, a missing `account` field, and a settings file written
-//! before the group existed all mean no account. The backend reads the group
-//! from the saved file and starts the built-in email MCP server with it; this
-//! module only stores it. The password is not here: it lives in the
-//! `secrets` group as `emailPassword`.
+//! The person saves one email account on the email server's card in
+//! Settings → MCP: the address mail is sent from and received at, the name
+//! sent with it, the user name the account signs in with, and the IMAP and
+//! SMTP servers Lys reaches. A missing group, a missing `account` field, and
+//! a settings file written before the group existed all mean no account. The
+//! backend reads the group from the saved file and starts the built-in email
+//! MCP server with it; this module only stores it. The password is not here:
+//! it lives in the `secrets` group as `emailPassword`.
 //!
 //! Every rule matches `emailSettingsSchema` in `@lys/share`, which the
 //! renderer and the backend check. A text with a lone surrogate, which that
@@ -17,7 +17,7 @@
 //! The account is personal data. It is stored as plain text in the
 //! owner-only settings file, `Debug` never shows its texts, and a validation
 //! error about the account never quotes a value. An error about the group
-//! itself, such as an `account` value that is a list, can quote that value,
+//! itself, such as an `email` value that is text, can quote that value,
 //! because it is the JSON reader's own message.
 
 use std::fmt;

@@ -14,9 +14,11 @@
 
 use std::env;
 use std::fmt;
+use std::marker::PhantomData;
 
 use lettre::Address;
-use serde::Deserialize;
+use serde::de::{MapAccess, Visitor, value::MapAccessDeserializer};
+use serde::{Deserialize, Deserializer};
 use serde_json::error::Category;
 
 use crate::failure::Protocol;
@@ -180,7 +182,9 @@ struct StoredAccount {
     display_name: String,
     user_name: String,
     password: String,
+    #[serde(deserialize_with = "parse_json_object")]
     imap: StoredServer,
+    #[serde(deserialize_with = "parse_json_object")]
     smtp: StoredServer,
     server_keeps_sent_copy: bool,
 }
@@ -195,6 +199,76 @@ struct StoredServer {
     /// feature rounds a number with many digits as `JSON.parse` does.
     port: f64,
     security: String,
+}
+
+/// Reads a stored shape from a JSON object, refusing every other JSON value.
+///
+/// serde's derived structs also read a JSON array as their fields in order,
+/// so a derived account would accept `["person@example.com", …]` in place of
+/// its object. `emailAccountSchema` in `@lys/share` refuses that form, so
+/// the account and each of its servers are read from an object first.
+///
+/// # Errors
+///
+/// Returns the deserializer's error when the input is not a JSON object, and
+/// the shape's error when the object does not match it.
+fn parse_json_object<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    deserializer.deserialize_map(JsonObjectVisitor(PhantomData))
+}
+
+/// A stored shape read from a JSON object only, as [`parse_json_object`]
+/// reads it, so that a whole text can be parsed into one.
+struct JsonObject<T>(
+    /// The shape read from the object.
+    T,
+);
+
+/// Deserializes the shape from a JSON object only.
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for JsonObject<T> {
+    /// Reads the shape as [`parse_json_object`] does.
+    ///
+    /// # Errors
+    ///
+    /// Returns the deserializer's error when the input is not a JSON object,
+    /// and the shape's error when the object does not match it.
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        parse_json_object(deserializer).map(Self)
+    }
+}
+
+/// Visitor that accepts a JSON object only and reads a stored shape from it.
+struct JsonObjectVisitor<T>(
+    /// The shape the object is read into; the visitor holds no value.
+    PhantomData<T>,
+);
+
+/// Hands the object's entries, as the JSON reader reads them, to the shape.
+impl<'de, T: Deserialize<'de>> Visitor<'de> for JsonObjectVisitor<T> {
+    type Value = T;
+
+    /// Names what was expected in a refusal of any other JSON value.
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON object")
+    }
+
+    /// Reads the shape from the object's entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns the shape's error when the object does not match it.
+    fn visit_map<A>(self, map: A) -> Result<T, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        T::deserialize(MapAccessDeserializer::new(map))
+    }
 }
 
 /// Reads the raw text of the account variable.
@@ -223,7 +297,7 @@ pub fn read_account_variable() -> Result<String, AccountProblem> {
 /// The account, or the first problem found, named without its value.
 pub fn parse_account_variable(text: &str) -> Result<Account, AccountProblem> {
     let stored: StoredAccount = match serde_json::from_str(text) {
-        Ok(stored) => stored,
+        Ok(JsonObject(stored)) => stored,
         Err(error) => {
             return Err(match error.classify() {
                 Category::Syntax | Category::Eof => AccountProblem::NotJson,
@@ -628,10 +702,14 @@ mod tests {
     }
 
     /// Checks that a variable that is not JSON gives `NotJson`, and that
-    /// JSON that is not an account, such as an array, a field of the wrong
-    /// type, or an unknown server field, gives `NotAnAccount`.
+    /// JSON that is not an account gives `NotAnAccount`: an empty array, an
+    /// array of the account's fields in order, a server written as an array
+    /// of its fields, a field of the wrong type, or an unknown server field.
     #[test]
     fn reports_text_that_is_not_json_or_not_an_account_by_kind() {
+        /// A server object that passes every rule.
+        const SERVER: &str = "{\"host\":\"imap.example.com\",\"port\":993,\"security\":\"tls\"}";
+
         assert_eq!(
             parse_account_variable("{").map(|_| ()),
             Err(AccountProblem::NotJson)
@@ -642,6 +720,21 @@ mod tests {
         );
         assert_eq!(
             parse_account_variable("[]").map(|_| ()),
+            Err(AccountProblem::NotAnAccount)
+        );
+        assert_eq!(
+            parse_account_variable(&format!(
+                "[\"person@example.com\",\"A Person\",\"person@example.com\",\"{SYNTHETIC_PASSWORD}\",{SERVER},{SERVER},true]"
+            ))
+            .map(|_| ()),
+            Err(AccountProblem::NotAnAccount)
+        );
+        assert_eq!(
+            parse_account_variable(&build_variable(
+                "imap",
+                "[\"imap.example.com\",993,\"tls\"]"
+            ))
+            .map(|_| ()),
             Err(AccountProblem::NotAnAccount)
         );
         assert_eq!(

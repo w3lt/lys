@@ -545,6 +545,18 @@ mod tests {
         assert!(!failure.to_string().contains(personal), "{failure}");
     }
 
+    /// Asserts that a group holding only `account` is refused by a failure
+    /// that quotes neither `marker`, a word of the account's personal texts,
+    /// nor `value`, the refused text itself, unless it is empty.
+    fn assert_text_refused(account: Value, value: &str, marker: &str) {
+        let failure = parse_account(account)
+            .expect_err("an invalid account")
+            .to_string();
+
+        assert!(!failure.contains(marker), "{failure}");
+        assert!(value.is_empty() || !failure.contains(value), "{failure}");
+    }
+
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
     /// One case of the shared groups.
@@ -719,7 +731,11 @@ mod tests {
             "person@example.com\n".to_string(),
             "person@example.com ".to_string(),
         ] {
-            assert_account_refused(build_account_with("address", json!(address)), "person");
+            assert_text_refused(
+                build_account_with("address", json!(address)),
+                &address,
+                "person",
+            );
         }
         assert_account_refused(build_account_with("address", json!(42)), "person");
     }
@@ -744,11 +760,15 @@ mod tests {
             " Secret".to_string(),
             "Secret ".to_string(),
             "Secret\u{00a0}".to_string(),
-            "Sec\nret".to_string(),
-            "Sec\tret".to_string(),
-            "Sec\u{0000}ret".to_string(),
+            "Secret\nName".to_string(),
+            "Secret\tName".to_string(),
+            "Secret\u{0000}Name".to_string(),
         ] {
-            assert_account_refused(build_account_with("displayName", json!(name)), "Secret");
+            assert_text_refused(
+                build_account_with("displayName", json!(name)),
+                &name,
+                "Secret",
+            );
         }
         assert_account_refused(build_account_with("displayName", json!(1)), "Secret");
     }
@@ -778,10 +798,10 @@ mod tests {
             "é".repeat(255),
             " secret".to_string(),
             "secret ".to_string(),
-            "sec\nret".to_string(),
-            "sec\u{0000}ret".to_string(),
+            "secret\nname".to_string(),
+            "secret\u{0000}name".to_string(),
         ] {
-            assert_account_refused(build_account_with("userName", json!(name)), "secret");
+            assert_text_refused(build_account_with("userName", json!(name)), &name, "secret");
         }
     }
 
@@ -846,7 +866,11 @@ mod tests {
             "[::1 ]".to_string(),
             "[secret]".to_string(),
         ] {
-            assert_account_refused(build_account_with_imap("host", json!(host)), "secret");
+            assert_text_refused(
+                build_account_with_imap("host", json!(host)),
+                &host,
+                "secret",
+            );
         }
         assert_account_refused(build_account_with_imap("host", Value::Null), "secret");
     }

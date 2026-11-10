@@ -562,7 +562,7 @@ async fn refuses_to_start_without_a_usable_account_and_names_the_rule_only() {
     assert_eq!(not_json.status.code(), Some(2));
     assert_eq!(
         String::from_utf8_lossy(&not_json.stderr),
-        "LYS_EMAIL_ACCOUNT: is not JSON\n"
+        "LYS_EMAIL_ACCOUNT: is not JSON the email server can read\n"
     );
     assert_eq!(bad_arguments.status.code(), Some(64));
     assert_eq!(

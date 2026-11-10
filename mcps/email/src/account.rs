@@ -146,7 +146,10 @@ pub enum AccountProblem {
     Missing,
     /// The variable's value is not Unicode text.
     NotUnicode,
-    /// The value is not JSON.
+    /// The value is not JSON the server can read: text that is not JSON, or
+    /// JSON with a number too large for a 64-bit float, such as `1e999`, or
+    /// with an escape of half a surrogate pair, such as `\ud800`. The JSON
+    /// reader refuses both as it refuses a syntax error.
     NotJson,
     /// The JSON is not the account the backend writes: it is not an object,
     /// or a field is missing, unknown, repeated, or of the wrong type.
@@ -163,7 +166,7 @@ impl fmt::Display for AccountProblem {
         match self {
             Self::Missing => formatter.write_str("is not set"),
             Self::NotUnicode => formatter.write_str("is not Unicode text"),
-            Self::NotJson => formatter.write_str("is not JSON"),
+            Self::NotJson => formatter.write_str("is not JSON the email server can read"),
             Self::NotAnAccount => formatter.write_str(
                 "is not the account the backend writes: it is not a JSON object, or a field is missing, unknown, repeated, or of the wrong type",
             ),
@@ -761,6 +764,27 @@ mod tests {
         );
     }
 
+    /// Checks that JSON the reader cannot hold gives `NotJson`, as text that
+    /// is not JSON does: a port too large for a 64-bit float, and a name
+    /// with an escape of half a surrogate pair.
+    #[test]
+    fn reports_json_the_reader_cannot_hold_as_not_json() {
+        let cases = [
+            (
+                "imap",
+                "{\"host\":\"imap.example.com\",\"port\":1e999,\"security\":\"tls\"}",
+            ),
+            ("displayName", "\"\\ud800\""),
+        ];
+        for (field, value) in cases {
+            assert_eq!(
+                parse_account_variable(&build_variable(field, value)).map(|_| ()),
+                Err(AccountProblem::NotJson),
+                "{field}"
+            );
+        }
+    }
+
     /// Checks that an account whose JSON holds a field twice gives
     /// `NotAnAccount`.
     #[test]
@@ -1136,7 +1160,10 @@ mod tests {
             AccountProblem::NotUnicode.to_string(),
             "is not Unicode text"
         );
-        assert_eq!(AccountProblem::NotJson.to_string(), "is not JSON");
+        assert_eq!(
+            AccountProblem::NotJson.to_string(),
+            "is not JSON the email server can read"
+        );
         assert_eq!(
             AccountProblem::NotAnAccount.to_string(),
             "is not the account the backend writes: it is not a JSON object, or a field is missing, unknown, repeated, or of the wrong type"

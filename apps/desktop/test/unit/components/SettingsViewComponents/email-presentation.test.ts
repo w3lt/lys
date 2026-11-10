@@ -102,13 +102,6 @@ const ACCEPTED_CHECK = checkEmailAccountApiResponseSchema.parse({
   smtp: { status: "accepted" }
 })
 
-/** Answer of a check whose IMAP server refused the user name or password. */
-const IMAP_REFUSED_CHECK = checkEmailAccountApiResponseSchema.parse({
-  status: "checked",
-  imap: { status: "failed", reason: "wrong-password" },
-  smtp: { status: "accepted" }
-})
-
 /** Answer of a check whose SMTP server refused the user name or password. */
 const SMTP_REFUSED_CHECK = checkEmailAccountApiResponseSchema.parse({
   status: "checked",
@@ -268,6 +261,13 @@ describe("listEmailDraftProblems", () => {
 })
 
 describe("formatEmailAccountMessage", () => {
+  /** Answer of a check whose IMAP server refused the user name or password. */
+  const imapRefusedCheck = checkEmailAccountApiResponseSchema.parse({
+    status: "checked",
+    imap: { status: "failed", reason: "wrong-password" },
+    smtp: { status: "accepted" }
+  })
+
   it("shows the saved address while nothing happens", () => {
     expect(formatEmailAccountMessage(RESTING_INPUT)).toEqual(SAVED_LINE)
   })
@@ -367,7 +367,7 @@ describe("formatEmailAccountMessage", () => {
     ],
     [
       "a server refused the sign-in they were tried with",
-      { ...SUBMITTED_INPUT, checkState: buildChecked(IMAP_REFUSED_CHECK) }
+      { ...SUBMITTED_INPUT, checkState: buildChecked(imapRefusedCheck) }
     ],
     [
       "the save they were tried with failed",

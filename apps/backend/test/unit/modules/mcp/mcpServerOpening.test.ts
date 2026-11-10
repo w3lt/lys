@@ -113,20 +113,6 @@ function buildScriptServerSettings(
 }
 
 /**
- * Script of a stdio server that reports its process identifier, answers
- * the handshake, never answers anything else, and exits once its standard
- * input ends.
- */
-const HANDSHAKE_ONLY_SERVER_SCRIPT = [
-  'process.stderr.write("pid " + process.pid + "\\n")',
-  'require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {',
-  "  const message = JSON.parse(line)",
-  '  if (message.method !== "initialize") return',
-  '  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "handshake-only", version: "1.0.0" } } }) + "\\n")',
-  "})"
-].join("\n")
-
-/**
  * Nesting depth of the input schema of {@link DEEP_SCHEMA_TOOL_TEXT}, deep
  * enough that the SDK's check of a tool runs out of stack.
  */
@@ -750,12 +736,26 @@ describe("openMcpServer", () => {
   })
 
   it("closes a connected server whose tool list does not arrive within the limit", async () => {
+    /**
+     * Script of a stdio server that reports its process identifier, answers
+     * the handshake, never answers anything else, and exits once its standard
+     * input ends.
+     */
+    const handshakeOnlyServerScript = [
+      'process.stderr.write("pid " + process.pid + "\\n")',
+      'require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {',
+      "  const message = JSON.parse(line)",
+      '  if (message.method !== "initialize") return',
+      '  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "handshake-only", version: "1.0.0" } } }) + "\\n")',
+      "})"
+    ].join("\n")
+
     /** Settings of a stdio server that connects but never lists its tools. */
     const handshakeOnlyServerSettings: McpServerSettings = Object.freeze({
       name: "handshake-only",
       transport: "stdio",
       command: process.execPath,
-      arguments: Object.freeze(["-e", HANDSHAKE_ONLY_SERVER_SCRIPT]),
+      arguments: Object.freeze(["-e", handshakeOnlyServerScript]),
       environment: Object.freeze([]),
       enabled: true
     })

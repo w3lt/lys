@@ -33,14 +33,6 @@ const SAVED_DRAFT = buildEmailAccountDraft(STORED_EMAIL_ACCOUNT)
 /** The fields of an empty card. */
 const EMPTY_DRAFT = buildEmailAccountDraft(null)
 
-/** Problem of an address that breaks the address rule. */
-const ADDRESS_PROBLEM =
-  "An email address is a name of 1 to 64 ASCII letters, digits, dots, and ! # $ % & ' * + - / = ? ^ _ ` { | } ~, with no dot at either end or two in a row, then @ and an ASCII host name, up to 254 characters in all."
-
-/** Problem of a mail server host that breaks the host rule. */
-const HOST_PROBLEM =
-  "A mail server host is an ASCII host name, an IPv4 address, or an IPv6 address in brackets."
-
 /** Preset of the stored account's provider. */
 const FASTMAIL = findEmailPreset(STORED_EMAIL_ACCOUNT.address)
 
@@ -54,41 +46,6 @@ const SAVED_IMAP_ON_OWN_HOST: EmailServerDraft = Object.freeze({
 const SAVED_SMTP_WITH_STARTTLS: EmailServerDraft = Object.freeze({
   ...SAVED_DRAFT.smtp,
   security: "starttls"
-})
-
-/** Gmail's IMAP server with a space in its host. */
-const SPACED_HOST_IMAP: EmailServerDraft = Object.freeze({
-  host: "mail server",
-  port: "993",
-  security: "tls"
-})
-
-/** An IMAP server whose host holds a letter beyond ASCII. */
-const NON_ASCII_HOST_IMAP: EmailServerDraft = Object.freeze({
-  host: "imap.bücher.example",
-  port: "993",
-  security: "tls"
-})
-
-/** Gmail's SMTP server on a port above 65535. */
-const OUT_OF_RANGE_PORT_SMTP: EmailServerDraft = Object.freeze({
-  host: "smtp.gmail.com",
-  port: "70000",
-  security: "tls"
-})
-
-/** Gmail's SMTP server on a port with a letter in it. */
-const LETTERED_PORT_SMTP: EmailServerDraft = Object.freeze({
-  host: "smtp.gmail.com",
-  port: "25a",
-  security: "tls"
-})
-
-/** Gmail's IMAP server on port zero. */
-const ZERO_PORT_IMAP: EmailServerDraft = Object.freeze({
-  host: "imap.gmail.com",
-  port: "0",
-  security: "tls"
 })
 
 /**
@@ -423,6 +380,49 @@ describe("updateEmailAccountAddress", () => {
 })
 
 describe("parseEmailAccountDraft", () => {
+  /** Problem of an address that breaks the address rule. */
+  const addressProblem =
+    "An email address is a name of 1 to 64 ASCII letters, digits, dots, and ! # $ % & ' * + - / = ? ^ _ ` { | } ~, with no dot at either end or two in a row, then @ and an ASCII host name, up to 254 characters in all."
+
+  /** Problem of a mail server host that breaks the host rule. */
+  const hostProblem =
+    "A mail server host is an ASCII host name, an IPv4 address, or an IPv6 address in brackets."
+
+  /** Gmail's IMAP server with a space in its host. */
+  const spacedHostImap: EmailServerDraft = Object.freeze({
+    host: "mail server",
+    port: "993",
+    security: "tls"
+  })
+
+  /** An IMAP server whose host holds a letter beyond ASCII. */
+  const nonAsciiHostImap: EmailServerDraft = Object.freeze({
+    host: "imap.bücher.example",
+    port: "993",
+    security: "tls"
+  })
+
+  /** Gmail's SMTP server on a port above 65535. */
+  const outOfRangePortSmtp: EmailServerDraft = Object.freeze({
+    host: "smtp.gmail.com",
+    port: "70000",
+    security: "tls"
+  })
+
+  /** Gmail's SMTP server on a port with a letter in it. */
+  const letteredPortSmtp: EmailServerDraft = Object.freeze({
+    host: "smtp.gmail.com",
+    port: "25a",
+    security: "tls"
+  })
+
+  /** Gmail's IMAP server on port zero. */
+  const zeroPortImap: EmailServerDraft = Object.freeze({
+    host: "imap.gmail.com",
+    port: "0",
+    security: "tls"
+  })
+
   it("reads the saved account with an empty password field as unchanged", () => {
     expect(
       parseEmailAccountDraft(
@@ -502,7 +502,7 @@ describe("parseEmailAccountDraft", () => {
       {
         change: { address: "josé@example.test" },
         field: "address",
-        expectedProblem: ADDRESS_PROBLEM
+        expectedProblem: addressProblem
       }
     ],
     [
@@ -510,7 +510,7 @@ describe("parseEmailAccountDraft", () => {
       {
         change: { address: "ada..lovelace@example.test" },
         field: "address",
-        expectedProblem: ADDRESS_PROBLEM
+        expectedProblem: addressProblem
       }
     ],
     [
@@ -518,7 +518,7 @@ describe("parseEmailAccountDraft", () => {
       {
         change: { address: `${"a".repeat(65)}@example.test` },
         field: "address",
-        expectedProblem: ADDRESS_PROBLEM
+        expectedProblem: addressProblem
       }
     ],
     [
@@ -526,7 +526,7 @@ describe("parseEmailAccountDraft", () => {
       {
         change: { address: "ada@bücher.example" },
         field: "address",
-        expectedProblem: ADDRESS_PROBLEM
+        expectedProblem: addressProblem
       }
     ],
     [
@@ -548,7 +548,7 @@ describe("parseEmailAccountDraft", () => {
     [
       "a host",
       {
-        change: { imap: SPACED_HOST_IMAP },
+        change: { imap: spacedHostImap },
         field: "imapHost",
         expectedProblem: "host"
       }
@@ -556,15 +556,15 @@ describe("parseEmailAccountDraft", () => {
     [
       "a host that holds a letter beyond ASCII",
       {
-        change: { imap: NON_ASCII_HOST_IMAP },
+        change: { imap: nonAsciiHostImap },
         field: "imapHost",
-        expectedProblem: HOST_PROBLEM
+        expectedProblem: hostProblem
       }
     ],
     [
       "a port that is not a whole number in range",
       {
-        change: { smtp: OUT_OF_RANGE_PORT_SMTP },
+        change: { smtp: outOfRangePortSmtp },
         field: "smtpPort",
         expectedProblem: "A port is a whole number from 1 to 65535."
       }
@@ -572,7 +572,7 @@ describe("parseEmailAccountDraft", () => {
     [
       "a port with letters",
       {
-        change: { smtp: LETTERED_PORT_SMTP },
+        change: { smtp: letteredPortSmtp },
         field: "smtpPort",
         expectedProblem: "A port is a whole number from 1 to 65535."
       }
@@ -580,7 +580,7 @@ describe("parseEmailAccountDraft", () => {
     [
       "a port of zero",
       {
-        change: { imap: ZERO_PORT_IMAP },
+        change: { imap: zeroPortImap },
         field: "imapPort",
         expectedProblem: "A port is a whole number from 1 to 65535."
       }

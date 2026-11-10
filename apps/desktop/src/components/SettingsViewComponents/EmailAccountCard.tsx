@@ -1,4 +1,5 @@
 import {
+  LOOPBACK_EMAIL_HOSTS,
   MAXIMUM_EMAIL_ADDRESS_LENGTH,
   MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH,
   MAXIMUM_EMAIL_LOCAL_PART_LENGTH,
@@ -51,7 +52,6 @@ import {
 
 import {
   EMAIL_SECURITIES,
-  EMAIL_SECURITY_HINT,
   findEmailSecurity,
   formatEmailAccountMessage,
   formatEmailPresetNote,
@@ -531,9 +531,6 @@ const INITIAL_EMAIL_ACCOUNT_EDIT: EmailAccountEdit = Object.freeze({
   rejectedSaveCount: 0
 })
 
-/** The change that discards the edit. */
-const RESET_EDIT: EmailAccountEditChange = Object.freeze({ kind: "reset" })
-
 /**
  * Builds the identifiers of the elements that describe an input.
  *
@@ -872,6 +869,12 @@ function EmailSecurityChoice({
   security,
   onSecurityChange
 }: EmailSecurityChoiceProps): ReactElement {
+  /**
+   * Rule of the way without TLS, shown beside the Security label before a
+   * choice: the hosts it is allowed for.
+   */
+  const emailSecurityHint = `${formatEmailSecurityLabel("plain")} only for ${LOOPBACK_EMAIL_HOSTS.join(", ")}`
+
   const labelId = useId()
   const hintId = `${labelId}-hint`
 
@@ -888,7 +891,7 @@ function EmailSecurityChoice({
   return (
     <div className="settings-view__email-security">
       <EmailFieldTop
-        hint={EMAIL_SECURITY_HINT}
+        hint={emailSecurityHint}
         hintId={hintId}
         isRequired={false}
         label="Security"
@@ -1832,7 +1835,7 @@ function useEmailAccountEdit(
 
   /** Discards the edit, the tried save, and the shown password. */
   function resetEdit(): void {
-    updateEdit(RESET_EDIT)
+    updateEdit({ kind: "reset" })
   }
 
   /**

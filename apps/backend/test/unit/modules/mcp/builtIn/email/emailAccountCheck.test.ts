@@ -34,16 +34,6 @@ vi.mock("node:child_process", async (importOriginal) => {
 /** Longest one case may run; a case starts a check process. */
 const CASE_TIMEOUT_MILLISECONDS = 30_000
 
-/** Every reason a sign-in can fail for. */
-const FAILURE_REASONS: readonly EmailServerCheckFailure[] = [
-  "wrong-password",
-  "unreachable",
-  "certificate-refused",
-  "encryption-not-offered",
-  "timed-out",
-  "protocol-error"
-]
-
 /**
  * Creates an empty folder for one case, removed after it.
  *
@@ -138,6 +128,16 @@ function buildCheckLogRecords(
 }
 
 describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
+  /** Every reason a sign-in can fail for. */
+  const failureReasons: readonly EmailServerCheckFailure[] = [
+    "wrong-password",
+    "unreachable",
+    "certificate-refused",
+    "encryption-not-offered",
+    "timed-out",
+    "protocol-error"
+  ]
+
   /**
    * Whether the tests run on macOS, where Node throws as it starts an
    * executable file that is not a program (`ENOEXEC`). On Linux, libuv
@@ -281,7 +281,7 @@ describe("EmailAccountChecker", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
     ])
   })
 
-  it.each(FAILURE_REASONS)(
+  it.each(failureReasons)(
     "passes on a sign-in that failed because %s",
     async (reason) => {
       const { checker } = createChecker()

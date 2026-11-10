@@ -48,20 +48,12 @@ const PORT_HINT = "1–65535"
 /** Save state before any save or removal. */
 const IDLE_SAVE_STATE: EmailAccountSaveState = Object.freeze({ status: "idle" })
 
-/** Save state while the account is written. */
-const SAVING_STATE: EmailAccountSaveState = Object.freeze({ status: "saving" })
-
 /** Save state once the file holds the account and its password, or none. */
 const SAVED_STATE: EmailAccountSaveState = Object.freeze({ status: "saved" })
 
 /** Check state before any check. */
 const IDLE_CHECK_STATE: EmailAccountCheckState = Object.freeze({
   status: "idle"
-})
-
-/** Check state while Lys signs in to both servers. */
-const CHECKING_STATE: EmailAccountCheckState = Object.freeze({
-  status: "checking"
 })
 
 /** What the fields show once the Gmail preset filled them. */
@@ -278,6 +270,14 @@ async function updateGmailAccountFields(
 }
 
 describe("EmailAccountCard", () => {
+  /** Save state while the account is written. */
+  const savingState: EmailAccountSaveState = Object.freeze({ status: "saving" })
+
+  /** Check state while Lys signs in to both servers. */
+  const checkingState: EmailAccountCheckState = Object.freeze({
+    status: "checking"
+  })
+
   it("names the card, shows the saved account, and keeps the saved password out of the field", () => {
     startEmailAccountCard()
 
@@ -726,8 +726,8 @@ describe("EmailAccountCard", () => {
   })
 
   it.each<[string, Partial<EmailAccountCardProps>, string]>([
-    ["Lys signs in", { checkState: CHECKING_STATE }, "Signing in…"],
-    ["the account is written", { saveState: SAVING_STATE }, "Saving…"]
+    ["Lys signs in", { checkState: checkingState }, "Signing in…"],
+    ["the account is written", { saveState: savingState }, "Saving…"]
   ])(
     "disables the fields and the actions while %s, and says so",
     async (_label, props, text) => {

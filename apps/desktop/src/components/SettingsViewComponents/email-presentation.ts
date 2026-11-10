@@ -7,7 +7,6 @@ import type {
 import {
   emailAddressSchema,
   emailSecuritySchema,
-  LOOPBACK_EMAIL_HOSTS,
   type EmailAccount,
   type EmailSecurity
 } from "@lys/share"
@@ -77,12 +76,6 @@ const EMAIL_SECURITY_LABELS = Object.freeze({
   starttls: "STARTTLS",
   plain: "None"
 } satisfies Readonly<Record<EmailSecurity, string>>)
-
-/**
- * Rule of the way without TLS, shown beside the Security label of each
- * server before a choice: the hosts it is allowed for.
- */
-export const EMAIL_SECURITY_HINT = `${EMAIL_SECURITY_LABELS.plain} only for ${LOOPBACK_EMAIL_HOSTS.join(", ")}`
 
 /**
  * Formats the label of a way to secure a connection.

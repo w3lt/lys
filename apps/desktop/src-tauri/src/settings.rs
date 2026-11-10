@@ -523,6 +523,22 @@ mod tests {
         json!({ "account": null })
     }
 
+    /// Email account of the complete settings as an array of its six fields
+    /// in the order the account declares them, which serde's derived reader
+    /// alone would read as the account.
+    fn get_email_account_as_array() -> Value {
+        let account = &get_complete_settings()["email"]["account"];
+
+        json!([
+            account["address"],
+            account["displayName"],
+            account["userName"],
+            account["imap"],
+            account["smtp"],
+            account["serverKeepsSentCopy"]
+        ])
+    }
+
     /// Reads the settings file at `path` as JSON.
     fn read_settings_json(path: &PathBuf) -> Value {
         let contents = fs::read_to_string(path).expect("read the settings file");
@@ -563,8 +579,8 @@ mod tests {
     }
 
     /// Checks that loading a missing settings file writes the loaded settings
-    /// to it: each group empty, the email group among them, and the providers
-    /// at their defaults.
+    /// to it: the load configuration, secrets, tools, location, MCP, and email
+    /// groups empty, and the providers at their defaults.
     #[test]
     fn creates_a_missing_file_with_an_empty_load_configuration() {
         let directory = TestDirectory::create("settings-create");
@@ -845,10 +861,7 @@ mod tests {
             ("/mcp/builtIn", json!([{ "enabled": true }])),
             ("/mcp/builtIn/email", json!([true])),
             ("/email", json!([null])),
-            (
-                "/email/account",
-                json!(["person@example.com", "A Person", "person@example.com"]),
-            ),
+            ("/email/account", get_email_account_as_array()),
             (
                 "/email/account/imap",
                 json!(["imap.example.com", 993, "tls"]),

@@ -140,19 +140,25 @@ impl fmt::Debug for Account {
 }
 
 /// Why the account variable gave no account; named without any value.
+///
+/// The JSON reader stops at the first thing it cannot take, and that decides
+/// between [`AccountProblem::NotJson`] and [`AccountProblem::NotAnAccount`]:
+/// an account that is cut off is not JSON, and an array that is cut off is
+/// not an account. A rule is checked only once the whole value is read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccountProblem {
     /// The variable is not set.
     Missing,
     /// The variable's value is not Unicode text.
     NotUnicode,
-    /// The value is not JSON the server can read: text that is not JSON, or
-    /// JSON with a number too large for a 64-bit float, such as `1e999`, or
-    /// with an escape of half a surrogate pair, such as `\ud800`. The JSON
-    /// reader refuses both as it refuses a syntax error.
+    /// The reader met text it cannot read as JSON: text that is not JSON, or
+    /// JSON with a number beyond the range of a 64-bit float, such as
+    /// `1e999`, or with an escape of half a surrogate pair, such as `\ud800`.
+    /// It refuses both as it refuses a syntax error.
     NotJson,
-    /// The JSON is not the account the backend writes: it is not an object,
-    /// or a field is missing, unknown, repeated, or of the wrong type.
+    /// The reader met a value that is not the account the backend writes:
+    /// it is not an object, or a field is missing, unknown, repeated, or of
+    /// the wrong type.
     NotAnAccount,
     /// A field breaks the named rule.
     Rule(&'static str),
@@ -197,9 +203,11 @@ struct StoredAccount {
 #[serde(deny_unknown_fields)]
 struct StoredServer {
     host: String,
-    /// The port as any JSON number, as the shared rules read it: `993.0`
-    /// and `9.93e2` are the port 993, and serde_json's `float_roundtrip`
-    /// feature rounds a number with many digits as `JSON.parse` does.
+    /// The port as any JSON number within the range of a 64-bit float, as
+    /// the shared rules read it: `993.0` and `9.93e2` are the port 993, and
+    /// serde_json's `float_roundtrip` feature rounds a number with many
+    /// digits as `JSON.parse` does. The JSON reader refuses a number beyond
+    /// that range, such as `1e999` ([`AccountProblem::NotJson`]).
     port: f64,
     security: String,
 }
@@ -705,11 +713,11 @@ mod tests {
         assert!(debug.contains("<redacted>"));
     }
 
-    /// Checks that a variable that is not JSON gives `NotJson`, and that
-    /// JSON that is not an account gives `NotAnAccount`: an empty array, an
-    /// array of the account's fields in order, either server written as an
-    /// array of its fields, a field of the wrong type, or an unknown server
-    /// field.
+    /// Checks that `{` and `not json`, which the reader cannot read as JSON,
+    /// give `NotJson`, and that a value that is not the account gives
+    /// `NotAnAccount`: an empty array, an array of the account's fields in
+    /// order, either server written as an array of its fields, a field of
+    /// the wrong type, or an unknown server field.
     #[test]
     fn reports_text_that_is_not_json_or_not_an_account_by_kind() {
         /// A server object that passes every rule.
@@ -765,35 +773,85 @@ mod tests {
     }
 
     /// Checks that JSON the reader cannot hold gives `NotJson`, as text that
-    /// is not JSON does: a port too large for a 64-bit float, and a name
-    /// with an escape of half a surrogate pair.
+    /// is not JSON does, each beside its neighbour that the reader takes: a
+    /// port of `1e309`, beyond the range of a 64-bit float, where `1e308`
+    /// breaks only the port rule, and a name written as the first half of
+    /// an escaped surrogate pair, where the whole pair is accepted.
     #[test]
     fn reports_json_the_reader_cannot_hold_as_not_json() {
-        let cases = [
+        /// The two escapes of the surrogate pair of U+1F600.
+        const ESCAPED_PAIR: &str = "\\ud83d\\ude00";
+        /// Bytes of one `\uXXXX` escape.
+        const ESCAPE_LENGTH: usize = 6;
+        let port_problems = [
             (
-                "imap",
-                "{\"host\":\"imap.example.com\",\"port\":1e999,\"security\":\"tls\"}",
+                308,
+                AccountProblem::Rule("imap.port is a whole number from 1 to 65535"),
             ),
-            ("displayName", "\"\\ud800\""),
+            (309, AccountProblem::NotJson),
         ];
-        for (field, value) in cases {
+        let half = &ESCAPED_PAIR[..ESCAPE_LENGTH];
+
+        for (exponent, problem) in port_problems {
             assert_eq!(
-                parse_account_variable(&build_variable(field, value)).map(|_| ()),
-                Err(AccountProblem::NotJson),
-                "{field}"
+                parse_with_imap_port(&format!("1e{exponent}")).map(|_| ()),
+                Err(problem),
+                "1e{exponent}"
             );
         }
+        assert_eq!(
+            parse_account_variable(&build_variable(
+                "displayName",
+                &format!("\"{ESCAPED_PAIR}\"")
+            ))
+            .map(|account| account.display_name),
+            Ok("\u{1f600}".to_owned())
+        );
+        assert_eq!(
+            parse_account_variable(&build_variable("displayName", &format!("\"{half}\"")))
+                .map(|_| ()),
+            Err(AccountProblem::NotJson)
+        );
     }
 
-    /// Checks that an account whose JSON holds a field twice gives
-    /// `NotAnAccount`.
+    /// Checks that the first thing the reader cannot take decides the
+    /// problem: an account whose address breaks its rule gives that rule
+    /// when whole and `NotJson` when cut off before its closing brace, and
+    /// an array cut off after its opening bracket gives `NotAnAccount`.
     #[test]
-    fn reports_a_repeated_field_as_not_an_account() {
-        let variable =
-            build_variable("", "").replacen('{', "{\"address\":\"person@example.com\",", 1);
+    fn reports_the_first_thing_the_reader_cannot_take() {
+        let account = build_variable("address", "\"person\"");
+        let cut_off = &account[..account.len() - 1];
+
+        assert!(matches!(
+            parse_account_variable(&account),
+            Err(AccountProblem::Rule(rule)) if rule.starts_with("address")
+        ));
+        assert_eq!(
+            parse_account_variable(cut_off).map(|_| ()),
+            Err(AccountProblem::NotJson)
+        );
+        assert_eq!(
+            parse_account_variable("[").map(|_| ()),
+            Err(AccountProblem::NotAnAccount)
+        );
+    }
+
+    /// Checks that an account whose JSON lacks a field, or holds one twice,
+    /// gives `NotAnAccount`.
+    #[test]
+    fn reports_a_missing_or_repeated_field_as_not_an_account() {
+        /// The first field of the account the backend writes, with its comma.
+        const ADDRESS_FIELD: &str = "\"address\":\"person@example.com\",";
+        let account = build_variable("", "");
 
         assert_eq!(
-            parse_account_variable(&variable).map(|_| ()),
+            parse_account_variable(&account.replacen(ADDRESS_FIELD, "", 1)).map(|_| ()),
+            Err(AccountProblem::NotAnAccount)
+        );
+        assert_eq!(
+            parse_account_variable(&account.replacen(ADDRESS_FIELD, &ADDRESS_FIELD.repeat(2), 1))
+                .map(|_| ()),
             Err(AccountProblem::NotAnAccount)
         );
     }
@@ -851,9 +909,9 @@ mod tests {
     }
 
     /// Checks that a port is read from any JSON number with a whole value
-    /// from 1 to 65535, such as `993.0` or `9.93e2`. Any other number
-    /// breaks the port rule, and a port written as a string is not an
-    /// account.
+    /// from 1 to 65535, such as `993.0` or `9.93e2`. Any other number within
+    /// the range of a 64-bit float breaks the port rule, and a port written
+    /// as a string is not an account.
     #[test]
     fn reads_a_port_written_as_any_whole_number_from_1_to_65535_and_refuses_the_rest() {
         for (written, port) in [

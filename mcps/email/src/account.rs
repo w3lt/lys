@@ -409,8 +409,8 @@ fn parse_address(value: &str) -> Option<Address> {
 /// Whether the text is an email address by the shared rule: at most
 /// [`MAXIMUM_ADDRESS_LENGTH`] bytes, a local part of 1 to 64 bytes of
 /// atoms joined by single dots, `@`, and a host name. The local part is
-/// RFC 5322's dot-atom. The only other local part lettre sends from is a
-/// quoted one, which the rule refuses.
+/// RFC 5322's dot-atom. lettre also sends from a quoted local part and from
+/// one with letters beyond ASCII; the rule refuses both.
 fn is_address(value: &str) -> bool {
     /// Most bytes the part of an address before `@` may have, inclusive.
     const MAXIMUM_LOCAL_PART_LENGTH: usize = 64;
@@ -1002,6 +1002,16 @@ mod tests {
             && format!("{local_part}@example.com")
                 .parse::<Address>()
                 .is_ok()
+    }
+
+    /// Checks that the rule refuses a local part with letters beyond ASCII,
+    /// which lettre sends from.
+    #[test]
+    fn refuses_a_local_part_beyond_ascii_that_lettre_sends_from() {
+        for address in ["jürgen@example.com", "日本@example.com"] {
+            assert!(address.parse::<Address>().is_ok(), "{address}");
+            assert!(!is_address(address), "{address}");
+        }
     }
 
     /// Checks that every local part of 1 to 3 visible ASCII characters

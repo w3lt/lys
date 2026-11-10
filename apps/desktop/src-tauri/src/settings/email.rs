@@ -276,11 +276,11 @@ impl Security {
 /// Holds a name of 1 to 64 ASCII letters, digits, dots, and
 /// ``! # $ % & ' * + - / = ? ^ _ ` { | } ~``, with no dot at either end or
 /// two in a row, then `@`, then a host name, at most 254 characters in all.
-/// The name is RFC 5322's dot-atom. The only other name lettre, the email
-/// server's mail library, sends from is a quoted one, which is not accepted.
-/// A host with letters beyond ASCII is not accepted: SMTP sends the address
-/// as typed, without the extension that carries them. It serializes as a
-/// JSON string.
+/// The name is RFC 5322's dot-atom. lettre, the email server's mail library,
+/// also sends from a quoted name and from a name with letters beyond ASCII;
+/// neither is accepted. A host with letters beyond ASCII is not accepted
+/// either: SMTP sends the address as typed, without the extension that
+/// carries them. It serializes as a JSON string.
 /// `Debug` never shows the address.
 struct EmailAddress(
     /// The validated address.

@@ -115,11 +115,12 @@ function isAccountText(value: string, maximumLength: number): boolean {
  *
  * @param value - Text to inspect, as typed.
  * @returns True for such an address.
- * @remarks The name is RFC 5322's dot-atom. The only other name lettre, the
- * library the email server builds its messages with, sends from is a quoted
- * one, such as `"john doe"@example.com`, which is not accepted. A domain
- * with letters beyond ASCII is not accepted: SMTP sends the address as
- * typed, without the extension that carries them.
+ * @remarks The name is RFC 5322's dot-atom. lettre, the library the email
+ * server builds its messages with, also sends from a quoted name, such as
+ * `"john doe"@example.com`, and from a name with letters beyond ASCII, such
+ * as `jürgen@example.com`; neither is accepted. A domain with letters beyond
+ * ASCII is not accepted either: SMTP sends the address as typed, without the
+ * extension that carries them.
  */
 function isEmailAddress(value: string): boolean {
   /**

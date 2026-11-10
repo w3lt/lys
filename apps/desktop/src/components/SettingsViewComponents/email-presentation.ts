@@ -70,13 +70,6 @@ type EmailAccountStatusInput = {
 export const EMAIL_SECURITIES: readonly EmailSecurity[] =
   emailSecuritySchema.options
 
-/** Label of each way to secure a connection; a new way must add one. */
-const EMAIL_SECURITY_LABELS = Object.freeze({
-  tls: "TLS",
-  starttls: "STARTTLS",
-  plain: "None"
-} satisfies Readonly<Record<EmailSecurity, string>>)
-
 /**
  * Formats the label of a way to secure a connection.
  *
@@ -84,7 +77,14 @@ const EMAIL_SECURITY_LABELS = Object.freeze({
  * @returns `TLS`, `STARTTLS`, or `None`.
  */
 export function formatEmailSecurityLabel(security: EmailSecurity): string {
-  return EMAIL_SECURITY_LABELS[security]
+  /** Label of each way to secure a connection; a new way must add one. */
+  const emailSecurityLabels = Object.freeze({
+    tls: "TLS",
+    starttls: "STARTTLS",
+    plain: "None"
+  } satisfies Readonly<Record<EmailSecurity, string>>)
+
+  return emailSecurityLabels[security]
 }
 
 /**

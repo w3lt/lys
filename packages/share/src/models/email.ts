@@ -119,8 +119,9 @@ function isAccountText(value: string, maximumLength: number): boolean {
  * server builds its messages with, also sends from a quoted name, such as
  * `"john doe"@example.com`, and from a name with letters beyond ASCII, such
  * as `jürgen@example.com`; neither is accepted. A domain with letters beyond
- * ASCII is not accepted either: SMTP sends the address as typed, without the
- * extension that carries them.
+ * ASCII is not accepted either: {@link isHostName} takes ASCII labels only.
+ * The email server could send from an address beyond ASCII only through an
+ * SMTP server that offers SMTPUTF8.
  */
 function isEmailAddress(value: string): boolean {
   /**

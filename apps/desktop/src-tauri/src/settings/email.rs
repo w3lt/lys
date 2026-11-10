@@ -279,8 +279,9 @@ impl Security {
 /// The name is RFC 5322's dot-atom. lettre, the email server's mail library,
 /// also sends from a quoted name and from a name with letters beyond ASCII;
 /// neither is accepted. A host with letters beyond ASCII is not accepted
-/// either: SMTP sends the address as typed, without the extension that
-/// carries them. It serializes as a JSON string.
+/// either: [`is_host_name`] takes ASCII labels only. The email server could
+/// send from an address beyond ASCII only through an SMTP server that offers
+/// SMTPUTF8. It serializes as a JSON string.
 /// `Debug` never shows the address.
 struct EmailAddress(
     /// The validated address.

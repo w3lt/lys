@@ -15,7 +15,7 @@ use tokio::sync::Notify;
 use tokio_rustls::TlsAcceptor;
 
 use super::{
-    FaultTiming, PASSWORD, USER_NAME, build_internal_date, get_current_timestamp,
+    FaultTiming, PASSWORD, SECONDS_PER_DAY, USER_NAME, build_internal_date, get_current_timestamp,
     parse_search_date, read_until_end, run_past_fault,
 };
 
@@ -1579,7 +1579,7 @@ impl SearchKeys<'_> {
         if let Some(matched) = calculate_flag_match(&key, message) {
             return Ok(matched);
         }
-        let days = message.timestamp.div_euclid(86_400);
+        let days = message.timestamp.div_euclid(SECONDS_PER_DAY);
         Ok(match key.as_str() {
             "TEXT" | "BODY" | "FROM" | "TO" | "CC" | "SUBJECT" | "HEADER" => {
                 self.calculate_text_match(&key, message)?

@@ -35,6 +35,9 @@ pub const MONTH_NAMES: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
+/// Seconds in one day of the Unix clock, which has no leap seconds.
+pub const SECONDS_PER_DAY: i64 = 86_400;
+
 /// How a server of an account is reached, as the settings name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SecurityName {
@@ -430,8 +433,8 @@ pub fn build_rfc2822_date(timestamp: i64) -> String {
     /// Weekday names as mail writes them, from Sunday.
     const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-    let days = timestamp.div_euclid(86_400);
-    let seconds = timestamp.rem_euclid(86_400);
+    let days = timestamp.div_euclid(SECONDS_PER_DAY);
+    let seconds = timestamp.rem_euclid(SECONDS_PER_DAY);
     let (year, month, day) = calculate_civil_day(days);
     let weekday = WEEKDAY_NAMES[usize::try_from((days + 4).rem_euclid(7)).expect("a weekday")];
     format!(
@@ -445,8 +448,8 @@ pub fn build_rfc2822_date(timestamp: i64) -> String {
 
 /// Builds the text IMAP's INTERNALDATE writes for a timestamp, in UTC.
 pub fn build_internal_date(timestamp: i64) -> String {
-    let days = timestamp.div_euclid(86_400);
-    let seconds = timestamp.rem_euclid(86_400);
+    let days = timestamp.div_euclid(SECONDS_PER_DAY);
+    let seconds = timestamp.rem_euclid(SECONDS_PER_DAY);
     let (year, month, day) = calculate_civil_day(days);
     format!(
         "{day:02}-{}-{year} {:02}:{:02}:{:02} +0000",

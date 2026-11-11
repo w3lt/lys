@@ -1,4 +1,5 @@
 import { BACKEND_HOST, BACKEND_PORT, VMO_HOST, VMO_PORT } from "@lys/protocol"
+import { MAXIMUM_MCP_COMMAND_LENGTH } from "@lys/share"
 import { isAbsolute, join } from "node:path"
 import { readPrompt } from "./utils/prompts"
 import * as z from "zod"
@@ -103,6 +104,32 @@ export const backendConfigSchema = z
       .string()
       .refine(isAbsolute, "MCP process groups file path must be absolute."),
     /**
+     * Absolute filesystem path of the email MCP server Lys ships, which the
+     * backend starts once the person switched it on, and runs for each
+     * check of an email account.
+     *
+     * @remarks `build.sh` installs it under the Lys home; the desktop host
+     * names the workspace build in development. The file need not exist
+     * when the configuration loads: a missing file fails the server's start
+     * and the account check, which Settings reports. The path is started
+     * as an MCP server command, so it meets the shared command rules: at
+     * most {@link MAXIMUM_MCP_COMMAND_LENGTH} characters, no control
+     * character, no space or tab at either end.
+     */
+    emailServerPath: z
+      .string()
+      .max(MAXIMUM_MCP_COMMAND_LENGTH)
+      .refine(isAbsolute, "Email server path must be absolute.")
+      .refine((path) => {
+        /**
+         * Finds a control character (Unicode general category Cc), such as a
+         * line break.
+         */
+        const controlCharacterPattern = /\p{Cc}/u
+
+        return path === path.trim() && !controlCharacterPattern.test(path)
+      }, "Email server path must have no control character or surrounding whitespace."),
+    /**
      * IPv4 loopback address of vmo, which reads every `read_page` page in a
      * micro VM.
      *
@@ -190,16 +217,20 @@ export type BackendConfig = z.infer<typeof backendConfigSchema>
  * configuration schema, whose database path is `lys_db.sqlite`, whose
  * settings file path is `settings.json`, whose attachments directory is
  * `attachments`, and whose MCP process groups file is `mcp-process-groups`
- * in the `LYS_HOME` directory, whose vmo endpoint is
- * `127.0.0.1:8080`, and whose prompts were read once during this call.
+ * in the `LYS_HOME` directory, whose email server is the
+ * `LYS_EMAIL_SERVER_PATH` environment variable when it is set and not
+ * empty and `runtime/email/email` in the `LYS_HOME` directory otherwise,
+ * whose vmo endpoint is `127.0.0.1:8080`, and whose prompts were read once
+ * during this call.
  * @throws If `LYS_HOME` is unset, empty, or not an absolute path, as
  * described by {@link parseLysHome}.
  * @throws If a prompt file cannot be read or its trimmed contents are empty.
- * @throws {z.ZodError} If a setting is outside its domain; each issue names the
- * failing key.
+ * @throws {z.ZodError} If a setting is outside its domain, such as a relative
+ * `LYS_EMAIL_SERVER_PATH`; each issue names the failing key.
  * @remarks `LYS_HOME` has no backend default, and the backend does not create
  * that directory. The desktop host sets it to its resolved absolute Lys home
- * for the backend it starts.
+ * for the backend it starts, and sets `LYS_EMAIL_SERVER_PATH` to the
+ * workspace build of the email server in development.
  */
 export function loadBackendConfig(): BackendConfig {
   const lysHome = parseLysHome(process.env.LYS_HOME)
@@ -210,6 +241,9 @@ export function loadBackendConfig(): BackendConfig {
     settingsFilePath: join(lysHome, "settings.json"),
     attachmentsDirectoryPath: join(lysHome, "attachments"),
     mcpProcessGroupsFilePath: join(lysHome, "mcp-process-groups"),
+    emailServerPath:
+      process.env.LYS_EMAIL_SERVER_PATH ||
+      join(lysHome, "runtime", "email", "email"),
     vmoHost: VMO_HOST,
     vmoPort: VMO_PORT,
     caliginiaSystemPrompt: readPrompt("caliginia-system"),

@@ -23,6 +23,41 @@ export type McpServerEvent =
       kind: "settings-unreadable"
     }>
   | Readonly<{
+      /**
+       * A server's session was stopped because the settings just applied
+       * switched the server off, changed it, or no longer name it; a
+       * changed server opens in a new session when it can start, and a
+       * built-in server that cannot, such as one without a usable account,
+       * is listed as failed instead.
+       */
+      kind: "server-stopped"
+      /** Name of the server. */
+      serverName: string
+      /** Why. */
+      reason: "switched-off" | "changed" | "removed"
+    }>
+  | Readonly<{
+      /**
+       * A built-in server is switched on but was not started, because no
+       * account is saved for it, or the saved account or its password
+       * fails its rules or could not be read.
+       */
+      kind: "built-in-unusable"
+      /** Name of the server. */
+      serverName: string
+      /** Why, as the server list reports it. */
+      reason: "account-missing" | "account-invalid"
+    }>
+  | Readonly<{
+      /**
+       * An added server has a built-in server's name, so the built-in
+       * server is not applied until the added one is renamed or removed.
+       */
+      kind: "built-in-name-taken"
+      /** Name of the server. */
+      serverName: string
+    }>
+  | Readonly<{
       /** A server connected and its tools were read. */
       kind: "connected"
       /** Name of the server. */
@@ -114,3 +149,14 @@ export type McpServerEvent =
       /** What was thrown, when Lys could not tell what it was. */
       unknownError: unknown
     }>
+
+/**
+ * Why a server's session was stopped: the settings just applied switched the
+ * server off, changed it, or no longer name it, the reasons a
+ * `server-stopped` event carries; the person restarted or reconnected the
+ * server; or Lys is shutting down.
+ */
+export type McpServerStopReason =
+  | Extract<McpServerEvent, { kind: "server-stopped" }>["reason"]
+  | "reconnected"
+  | "shut-down"

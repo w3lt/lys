@@ -21,8 +21,9 @@ Toolchain versions, platform prerequisites, and first build.
   deployment workflow also builds with Node 24. The backend needs at least
   24.10, because its database owner uses `DatabaseSync.setAuthorizer`.
 - **pnpm 11**: the root workspace pins `pnpm@11.17.0`.
-- **Rust and Cargo**: required because the desktop app uses Tauri and the
-  repository validation list includes Cargo-based checks for the host code.
+- **Rust and Cargo**: required because the desktop app uses Tauri, the email
+  MCP server Lys ships is a Rust crate in `mcps/email`, and the repository
+  validation list includes Cargo-based checks for both.
 - **Swift 6.3 or later** (Xcode or the Command Line Tools): required to build
   vmo, the page reader `read_page` uses, which the desktop starts with
   `apps/vmo/run.sh` and `build.sh` installs. vmo builds and runs only on
@@ -70,6 +71,19 @@ The script sets `LYS_HOME` to `$HOME/.lys`:
 ```sh
 mkdir -p "$HOME/.lys"
 ```
+
+The email MCP server is not built by these commands. Build it once before
+saving an email account in Settings → MCP, since Save signs in through it,
+and again after changing it:
+
+```sh
+cargo build --manifest-path mcps/email/Cargo.toml --target-dir mcps/email/target
+```
+
+In development, the backend starts `mcps/email/target/debug/email`, where
+`--target-dir` puts the build even when `CARGO_TARGET_DIR` or Cargo's
+`build.target-dir` setting names another folder, unless a Cargo
+configuration sets `build.target`, which adds the target's name to the path.
 
 Desktop settings initialization creates the Lys home directory for the
 desktop-managed path. Choose one backend launch path: desktop auto-start is

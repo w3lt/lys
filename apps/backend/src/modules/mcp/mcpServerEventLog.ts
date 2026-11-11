@@ -15,6 +15,9 @@ type McpConnectionEvent = Extract<
   McpServerEvent,
   {
     kind:
+      | "server-stopped"
+      | "built-in-unusable"
+      | "built-in-name-taken"
       | "connected"
       | "connection-closed"
       | "connection-error"
@@ -68,13 +71,15 @@ const MCP_LOG_OPTIONS = Object.freeze({
 /**
  * Writes one MCP server event to the backend log.
  *
- * @param logger - Backend logger, borrowed for the call.
+ * @param parentLogger - Backend logger, borrowed for the call.
  * @param event - Event the registry reported.
  * @remarks Each entry names the server as `mcpServer`. Failures Lys can tell
- * apart, ended connections, and sessions a server did not end are
- * warnings; a failure Lys cannot tell
+ * apart, ended connections, sessions a server did not end, a built-in
+ * server that cannot start, and a built-in server's name an added server
+ * took are warnings; a failure Lys cannot tell
  * apart, and a failed close, are errors with what was thrown; a server's
- * own log lines and a connection are information. No entry holds a
+ * own log lines, a connection, and a session stopped by the settings are
+ * information. No entry holds a
  * setting. An entry's `err` describes what was thrown: its type, message,
  * stack, string code, and at most 4 causes, each text cut to 2,000
  * characters; an HTTP error is described only by its code and status,
@@ -92,6 +97,9 @@ export function handleMcpServerEvent(
     case "settings-unreadable":
       handleSettingsEvent(logger, event)
       return
+    case "server-stopped":
+    case "built-in-unusable":
+    case "built-in-name-taken":
     case "connected":
     case "connection-closed":
     case "connection-error":
@@ -105,6 +113,12 @@ export function handleMcpServerEvent(
     case "tool-call-failed":
       handleRequestFailureEvent(logger, event)
       return
+    default: {
+      const unhandledEvent: never = event
+      throw new TypeError(
+        `Unhandled MCP server event: ${JSON.stringify(unhandledEvent)}`
+      )
+    }
   }
 }
 
@@ -142,6 +156,24 @@ function handleConnectionEvent(
 ): void {
   const fields = { mcpServer: event.serverName }
   switch (event.kind) {
+    case "server-stopped":
+      logger.info(
+        { ...fields, reason: event.reason },
+        "MCP server stopped: the settings switched it off, changed it, or no longer name it"
+      )
+      return
+    case "built-in-unusable":
+      logger.warn(
+        { ...fields, reason: event.reason },
+        "Built-in MCP server is switched on but has no usable account; it is not started"
+      )
+      return
+    case "built-in-name-taken":
+      logger.warn(
+        fields,
+        "An added MCP server has a built-in server's name; the built-in server is not applied"
+      )
+      return
     case "connected":
       logger.info(
         {
@@ -180,6 +212,12 @@ function handleConnectionEvent(
         "Closing an MCP server connection failed"
       )
       return
+    default: {
+      const unhandledEvent: never = event
+      throw new TypeError(
+        `Unhandled MCP connection event: ${JSON.stringify(unhandledEvent)}`
+      )
+    }
   }
 }
 

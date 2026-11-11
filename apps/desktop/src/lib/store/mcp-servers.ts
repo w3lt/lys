@@ -1,5 +1,9 @@
-import type { McpServerList } from "@lys/protocol"
-import type { McpServerName, McpServerSettings } from "@lys/share"
+import type { McpServerList, McpServerStatus } from "@lys/protocol"
+import type {
+  BuiltInMcpServerName,
+  McpServerName,
+  McpServerSettings
+} from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
 import {
@@ -91,9 +95,11 @@ type McpServerStoreActions = {
    * @returns A promise that resolves after the answered list or the failure
    * is committed; it never rejects.
    * @remarks A failure shown before is cleared when the reconnect starts.
-   * When the backend has not applied a server with that name, it applies the
-   * saved group instead, which opens the server if it is saved, unless the
-   * store was reset since the reconnect started.
+   * When the backend has not applied a server with that name, or says the
+   * server is switched off or cannot start, which it answers without
+   * changing anything, it applies the saved group instead, which opens the
+   * server if it is saved and switched on, and lists its state either way,
+   * unless the store was reset since the reconnect started.
    */
   sendMcpServerReconnect: (serverName: McpServerName) => Promise<void>
   /**
@@ -110,6 +116,20 @@ type McpServerStoreActions = {
    */
   saveMcpServers: (
     servers: readonly McpServerSettings[]
+  ) => Promise<McpSettingsSaveOutcome>
+  /**
+   * Saves the switch of one MCP server Lys ships and, once it is saved
+   * while the backend runs, asks the backend to apply it.
+   *
+   * @param serverName - Name of the built-in server.
+   * @param isOn - Whether the backend starts the server.
+   * @returns The save outcome, once the save settled; it never rejects. The
+   * request to apply the group is handled like
+   * {@link McpServerStoreActions.saveMcpServers}'s.
+   */
+  saveBuiltInMcpServerSwitch: (
+    serverName: BuiltInMcpServerName,
+    isOn: boolean
   ) => Promise<McpSettingsSaveOutcome>
   /**
    * Forgets the list and any failure, as when the backend stops; an answer
@@ -132,9 +152,14 @@ type McpServerStoreDependencies = {
   readonly sendMcpServerReconnectRequest: (
     serverName: McpServerName
   ) => Promise<ReconnectMcpServerResult>
-  /** Saves the MCP group through the application store; never rejects. */
+  /** Saves the added servers through the application store; never rejects. */
   readonly saveMcpSettings: (
     servers: readonly McpServerSettings[]
+  ) => Promise<McpSettingsSaveOutcome>
+  /** Saves a built-in server's switch through the application store; never rejects. */
+  readonly saveBuiltInMcpServerSwitch: (
+    serverName: BuiltInMcpServerName,
+    isOn: boolean
   ) => Promise<McpSettingsSaveOutcome>
   /** Answers whether the backend is running now. */
   readonly isBackendRunning: () => boolean
@@ -394,12 +419,13 @@ function createMcpServerStore(
 
     /**
      * Asks the backend to reconnect one server and commits its answer, or
-     * applies the saved group when the backend has not applied the server.
+     * applies the saved group when the backend has not applied the server,
+     * or says it is switched off or cannot start.
      *
      * @param serverName - Name of the server to reconnect.
      * @returns A promise that resolves after the outcome is committed. A
-     * not-found answer to a reconnect that started before a reset applies
-     * nothing.
+     * not-found or off answer to a reconnect that started before a reset
+     * applies nothing.
      */
     async function sendReconnectAndUpdateList(
       serverName: McpServerName
@@ -417,11 +443,19 @@ function createMcpServerStore(
         updateActionFailure(request, failure)
         return
       }
-      if (result.status === "not-found") {
-        if (!isRequestDiscarded(request)) await sendMcpServerSync()
-        return
+      switch (result.status) {
+        case "reconnected":
+          updateServerList(request, buildLoadedMcpServerList(result.list))
+          return
+        case "not-found":
+        case "off":
+          if (!isRequestDiscarded(request)) await sendMcpServerSync()
+          return
+        default: {
+          const unhandledResult: never = result
+          return unhandledResult
+        }
       }
-      updateServerList(request, buildLoadedMcpServerList(result.list))
     }
 
     /**
@@ -435,6 +469,30 @@ function createMcpServerStore(
     }
 
     /**
+     * Handles the save of a group: asks the running backend to apply it once
+     * it is saved.
+     *
+     * @param outcome - Outcome of the save.
+     * @returns The same outcome.
+     */
+    function handleGroupSave(
+      outcome: McpSettingsSaveOutcome
+    ): McpSettingsSaveOutcome {
+      switch (outcome) {
+        case "saved":
+          if (dependencies.isBackendRunning()) void sendMcpServerSync()
+          return outcome
+        case "failed":
+        case "busy":
+          return outcome
+        default: {
+          const unhandledOutcome: never = outcome
+          return unhandledOutcome
+        }
+      }
+    }
+
+    /**
      * Implements {@link McpServerStoreActions.saveMcpServers}.
      *
      * @param servers - Servers to save.
@@ -443,11 +501,23 @@ function createMcpServerStore(
     async function saveMcpServers(
       servers: readonly McpServerSettings[]
     ): Promise<McpSettingsSaveOutcome> {
-      const outcome = await dependencies.saveMcpSettings(servers)
-      if (outcome === "saved" && dependencies.isBackendRunning()) {
-        void sendMcpServerSync()
-      }
-      return outcome
+      return handleGroupSave(await dependencies.saveMcpSettings(servers))
+    }
+
+    /**
+     * Implements {@link McpServerStoreActions.saveBuiltInMcpServerSwitch}.
+     *
+     * @param serverName - Name of the built-in server.
+     * @param isOn - Whether the backend starts it.
+     * @returns The save outcome.
+     */
+    async function saveBuiltInMcpServerSwitch(
+      serverName: BuiltInMcpServerName,
+      isOn: boolean
+    ): Promise<McpSettingsSaveOutcome> {
+      return handleGroupSave(
+        await dependencies.saveBuiltInMcpServerSwitch(serverName, isOn)
+      )
     }
 
     /** Implements {@link McpServerStoreActions.resetMcpServers}. */
@@ -466,6 +536,7 @@ function createMcpServerStore(
       sendMcpServerSync,
       sendMcpServerReconnect,
       saveMcpServers,
+      saveBuiltInMcpServerSwitch,
       resetMcpServers
     }
   }
@@ -498,6 +569,8 @@ export const useMcpServerStore: UseBoundStore<StoreApi<McpServerStore>> =
       ),
     saveMcpSettings: (servers) =>
       useLysStore.getState().saveMcpServers(servers),
+    saveBuiltInMcpServerSwitch: (serverName, isOn) =>
+      useLysStore.getState().saveBuiltInMcpServerSwitch(serverName, isOn),
     isBackendRunning: () =>
       useLysStore.getState().backendServerInfo.status === "running"
   })
@@ -540,13 +613,32 @@ function handleBackendStatusChange(
 function buildConnectedToolsKey(
   list: Extract<McpServerListState, { readonly status: "loaded" }>
 ): string {
-  return list.servers
-    .flatMap((server) =>
-      server.state.status === "connected"
-        ? [`${server.name}:${server.state.toolCount}`]
-        : []
-    )
-    .join(" ")
+  return list.servers.flatMap(listConnectedToolsKeyParts).join(" ")
+}
+
+/**
+ * Lists what one applied server adds to the key of the connected servers'
+ * tools.
+ *
+ * @param server - Applied server and its state.
+ * @returns The server's name and tool count while it is connected; none
+ * while it connects, failed, or is off, since it adds no tools then.
+ */
+function listConnectedToolsKeyParts(
+  server: McpServerStatus
+): readonly string[] {
+  switch (server.state.status) {
+    case "connected":
+      return [`${server.name}:${server.state.toolCount}`]
+    case "connecting":
+    case "failed":
+    case "off":
+      return []
+    default: {
+      const unhandledState: never = server.state
+      return unhandledState
+    }
+  }
 }
 
 /**
@@ -556,10 +648,40 @@ function buildConnectedToolsKey(
  * @returns True when the list is loaded and a server is `connecting`.
  */
 function isAnyMcpServerConnecting(list: McpServerListState): boolean {
-  return (
-    list.status === "loaded" &&
-    list.servers.some((server) => server.state.status === "connecting")
-  )
+  switch (list.status) {
+    case "loaded":
+      return list.servers.some(isMcpServerConnecting)
+    case "idle":
+    case "loading":
+    case "failed":
+      return false
+    default: {
+      const unhandledList: never = list
+      return unhandledList
+    }
+  }
+}
+
+/**
+ * Answers whether an applied server is still connecting.
+ *
+ * @param server - Applied server and its state.
+ * @returns True while it is `connecting`; false once it is connected, has
+ * failed, or is off.
+ */
+function isMcpServerConnecting(server: McpServerStatus): boolean {
+  switch (server.state.status) {
+    case "connecting":
+      return true
+    case "connected":
+    case "failed":
+    case "off":
+      return false
+    default: {
+      const unhandledState: never = server.state
+      return unhandledState
+    }
+  }
 }
 
 /**

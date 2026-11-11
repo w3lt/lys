@@ -1,12 +1,16 @@
 import { chatContextApi } from "@lys/protocol"
-import type { BuiltInAgent, McpServerSettings } from "@lys/share"
+import {
+  mcpSettingsSchema,
+  type BuiltInAgent,
+  type McpServerSettings
+} from "@lys/share"
+import type { FastifyInstance } from "fastify"
 import { serializerCompiler } from "fastify-type-provider-zod"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
-import type { McpSettingsRead } from "../../../../../src/infrastructure/settings/mcpSettingsFile"
 import SqliteAgentRecordStore from "../../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
 import AgentRuntimeService, {
   buildConversationTitleLookup
@@ -14,6 +18,7 @@ import AgentRuntimeService, {
 import AgentService from "../../../../../src/modules/agent/agentService"
 import { formatSystemPrompt } from "../../../../../src/modules/agent/agentContext"
 import { TOOL_CALLS_OFF } from "../../../../../src/modules/agent/unofferedTools"
+import type { ReplyContextMeter } from "../../../../../src/modules/agent/replyContextMeter"
 import type { ReplyModel } from "../../../../../src/modules/agent/replyModel"
 import AttachmentFileStore from "../../../../../src/modules/attachment/attachmentFileStore"
 import { buildReadAttachmentDefinition } from "../../../../../src/modules/attachment/readAttachmentTool"
@@ -23,14 +28,18 @@ import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import LlmService from "../../../../../src/modules/llm/llmService"
 import type { DownloadedLlmModel } from "../../../../../src/modules/llm/llmRuntimeTypes"
-import { openMcpServer } from "../../../../../src/modules/mcp/mcpServerOpening"
-import McpServerRegistry from "../../../../../src/modules/mcp/mcpServerRegistry"
 import AgentTool from "../../../../../src/modules/tool/tool"
 import {
   createImageAttachment,
   createPngBytes,
   createTextAttachment
 } from "../../../support/attachmentFixtures"
+import {
+  buildScriptedBuiltInTools,
+  createTestMcpServerRegistry,
+  type AgentConversationTestServices,
+  type McpServerUpdateTestApp
+} from "../../../support/chatRouteTestApp"
 import {
   openConversationTestServices,
   saveAssistantMessageRow,
@@ -53,12 +62,10 @@ import {
   LOOK_UP_WORD_TOOL,
   ScriptedBuiltInTool
 } from "../../../support/scriptedBuiltInTool"
-import { ScriptedBuiltInToolProvider } from "../../../support/scriptedBuiltInToolProvider"
 import {
   LEADER_STATE_TOOL_FORMATS,
   READ_TEXT_FILE_TOOL
 } from "../../../support/toolFixtures"
-import { createOwnedMcpServerProcessGroups } from "../../../support/mcpServerProcessGroups"
 
 /** Built-in agent that answers the cases' conversations. */
 const CALIGINIA: BuiltInAgent = Object.freeze({
@@ -149,73 +156,21 @@ async function createChatContextRouteApp() {
   const listDownloadedLlmModels = vi
     .spyOn(llmService, "listDownloadedLlmModels")
     .mockResolvedValue([])
-  const readMcpSettings = vi.fn<() => Promise<McpSettingsRead>>(() =>
-    Promise.resolve(
-      Object.freeze({
-        status: "read",
-        settings: Object.freeze({ servers: Object.freeze([]) })
-      })
-    )
-  )
-  const { processGroups } = createOwnedMcpServerProcessGroups()
-  const mcpServerRegistry = new McpServerRegistry({
-    readSettings: readMcpSettings,
-    openServer: (settings, context) => openMcpServer(settings, context, 10_000),
-    workingDirectory: process.cwd(),
-    processGroups,
-    reportEvent: () => undefined
-  })
-  onTestFinished(async () => {
-    await mcpServerRegistry.close()
-  })
+  const { mcpServerRegistry, readMcpSettings } = createTestMcpServerRegistry()
   await updateFastifyWithHttpTransport(app)
   app.decorate("llmService", llmService)
   app.decorate("mcpServerRegistry", mcpServerRegistry)
   app.decorate("attachmentFileStore", attachmentFileStore)
   app.decorate(
     "agentRuntimeService",
-    new AgentRuntimeService({
-      agents: new AgentService({
-        recordStore: SqliteAgentRecordStore.create(database),
-        builtInAgents: [CALIGINIA]
-      }),
-      replyModel: UNUSED_REPLY_MODEL,
-      replyContextMeter,
-      findConversationTitle: (conversationId) =>
-        buildConversationTitleLookup(history.getConversation(conversationId)),
-      requestLimits: REQUEST_LIMITS
-    })
+    createTestAgentRuntimeService({ database, history }, replyContextMeter)
   )
   app.decorate("conversationHistoryReader", history)
   app.decorate(
     "builtInTools",
-    Object.freeze([
-      Object.freeze({
-        definition: LOOK_UP_WORD_TOOL,
-        provider: new ScriptedBuiltInToolProvider({
-          status: "ready",
-          tool: new ScriptedBuiltInTool()
-        })
-      }),
-      Object.freeze({
-        definition: CHECK_SPELLING_TOOL,
-        provider: new ScriptedBuiltInToolProvider({
-          status: "unavailable",
-          reason: "api-key-missing"
-        })
-      })
-    ])
+    buildScriptedBuiltInTools(new ScriptedBuiltInTool())
   )
-  await app.register(async (scope) => {
-    scope.setSerializerCompiler(serializerCompiler)
-    registerChatContextRoute(
-      scope,
-      createModelCapabilitiesLookup(
-        () => llmService.listDownloadedLlmModels(),
-        () => DEFAULT_LM_STUDIO_ACCESS
-      )
-    )
-  })
+  await app.register(registerSerializedChatContextRoute, { llmService })
   return {
     app,
     database,
@@ -226,22 +181,85 @@ async function createChatContextRouteApp() {
   }
 }
 
+/** What {@link registerSerializedChatContextRoute} reads. */
+type ChatContextRouteTestOptions = Readonly<{
+  /** Lists the downloaded models the capability lookup reads. */
+  llmService: Pick<LlmService, "listDownloadedLlmModels">
+}>
+
 /**
- * Applies one MCP server to a case's registry and waits until its opening
+ * Creates the agent runtime service of the chat-context route's cases: its
+ * one built-in agent, Caliginia, keeps its records on the test's database,
+ * and its reply model is one that the route never calls.
+ *
+ * @param conversation - The test's database and the history the agents
+ * title conversations from.
+ * @param replyContextMeter - Meter every agent measures its context with.
+ * @returns The service.
+ */
+function createTestAgentRuntimeService(
+  conversation: AgentConversationTestServices,
+  replyContextMeter: ReplyContextMeter
+): AgentRuntimeService {
+  return new AgentRuntimeService({
+    agents: new AgentService({
+      recordStore: SqliteAgentRecordStore.create(conversation.database),
+      builtInAgents: [CALIGINIA]
+    }),
+    replyModel: UNUSED_REPLY_MODEL,
+    replyContextMeter,
+    findConversationTitle: (conversationId) =>
+      buildConversationTitleLookup(
+        conversation.history.getConversation(conversationId)
+      ),
+    requestLimits: REQUEST_LIMITS
+  })
+}
+
+/**
+ * Registers the chat-context route in the scope Fastify gives it, which
+ * serializes the route's answers with their schemas, over a capability
+ * lookup of the LLM service's downloaded models from
+ * {@link DEFAULT_LM_STUDIO_ACCESS}.
+ *
+ * @param scope - The route's scope.
+ * @param options - The LLM service the lookup reads.
+ * @returns A promise that resolves once the route is registered.
+ * @throws If Fastify cannot register the route. The failure rejects the
+ * promise, so `app.register` reports it rather than an uncaught exception.
+ */
+function registerSerializedChatContextRoute(
+  scope: FastifyInstance,
+  { llmService }: ChatContextRouteTestOptions
+): Promise<void> {
+  const findModelCapabilities = createModelCapabilitiesLookup(
+    () => llmService.listDownloadedLlmModels(),
+    () => DEFAULT_LM_STUDIO_ACCESS
+  )
+  return new Promise((resolve) => {
+    scope.setSerializerCompiler(serializerCompiler)
+    registerChatContextRoute(scope, findModelCapabilities)
+    resolve()
+  })
+}
+
+/**
+ * Updates a case's registry to one MCP server and waits until its opening
  * ended.
  *
- * @param testApp - The case's application.
+ * @param testApp - The case's settings spy and registry.
  * @param settings - Settings of the only applied server.
  * @param status - State the opening is expected to end in.
  */
-async function applyMcpServer(
-  testApp: Awaited<ReturnType<typeof createChatContextRouteApp>>,
+async function updateMcpServer(
+  testApp: McpServerUpdateTestApp,
   settings: McpServerSettings,
   status: "connected" | "failed"
 ): Promise<void> {
+  const mcpSettings = mcpSettingsSchema.parse({ servers: [settings] })
   testApp.readMcpSettings.mockResolvedValue({
     status: "read",
-    settings: { servers: [settings] }
+    settings: mcpSettings
   })
   await testApp.app.mcpServerRegistry.updateServers()
   await vi.waitFor(
@@ -789,7 +807,7 @@ describe("registerChatContextRoute", () => {
 
   it("measures a connected MCP server's offered tool after the client and built-in tools, as a turn offers it", async () => {
     const testApp = await createChatContextRouteApp()
-    await applyMcpServer(
+    await updateMcpServer(
       testApp,
       buildFakeStdioServerSettings("files"),
       "connected"
@@ -826,7 +844,7 @@ describe("registerChatContextRoute", () => {
     testApp.listDownloadedLlmModels.mockResolvedValue([
       { ...VISION_MODEL_INFO, vision: false }
     ])
-    await applyMcpServer(
+    await updateMcpServer(
       testApp,
       buildFakeStdioServerSettings("files"),
       "connected"
@@ -858,7 +876,7 @@ describe("registerChatContextRoute", () => {
 
   it("leaves out an offered MCP tool whose server is not connected", async () => {
     const testApp = await createChatContextRouteApp()
-    await applyMcpServer(
+    await updateMcpServer(
       testApp,
       buildFakeStdioServerSettings("files", { exitOnStart: 1 }),
       "failed"
@@ -882,7 +900,7 @@ describe("registerChatContextRoute", () => {
 
   it("rejects an MCP tool no applied server lists without measuring", async () => {
     const testApp = await createChatContextRouteApp()
-    await applyMcpServer(
+    await updateMcpServer(
       testApp,
       buildFakeStdioServerSettings("files"),
       "connected"

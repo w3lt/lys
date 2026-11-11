@@ -35,6 +35,7 @@ import {
   formatMcpToolNamePreview,
   getMcpEntryListPresentation,
   getMcpTransportPresentation,
+  hasMcpSignInTokenInput,
   MCP_SERVER_NAME_RULE,
   MCP_SERVER_TRANSPORTS
 } from "./mcp-presentation"
@@ -121,13 +122,13 @@ const ENTRY_NAME_LABEL = "Name"
 const ENTRY_VALUE_LABEL = "Value"
 
 /**
- * Formats the identifiers of the elements that describe a control.
+ * Builds the identifiers of the elements that describe a control.
  *
  * @param ids - Identifiers, with undefined for a description not shown.
  * @returns The shown identifiers separated by spaces, or undefined when none
  * is shown.
  */
-function formatDescriptionIds(
+function buildDescriptionIds(
   ids: readonly (string | undefined)[]
 ): string | undefined {
   const shownIds = ids.filter((id) => id !== undefined)
@@ -290,7 +291,7 @@ function McpTextField({
         target={{ kind: "control", controlId }}
       />
       <Input
-        aria-describedby={formatDescriptionIds([
+        aria-describedby={buildDescriptionIds([
           hintId,
           note === "" ? undefined : noteId,
           problem === undefined ? undefined : problemId
@@ -670,6 +671,32 @@ function McpEntryRows({
   )
 }
 
+/**
+ * Builds what the rows of a list learn of the list's problem when it
+ * concerns one row's input.
+ *
+ * @param problemEntry - Row input the problem concerns, or undefined while
+ * the list has no problem or its problem is of the whole list.
+ * @param problemId - Identifier of the list's problem, which describes the
+ * input.
+ * @param inputRef - Host the input attaches to, which the editor moves focus
+ * to.
+ * @returns The row problem, or undefined when no row input has one.
+ */
+function buildRowProblem(
+  problemEntry: McpDraftProblemEntry | undefined,
+  problemId: string,
+  inputRef: RefObject<HTMLInputElement | null>
+): McpEntryRowProblem | undefined {
+  if (problemEntry === undefined) return undefined
+  return {
+    entryId: problemEntry.entryId,
+    part: problemEntry.part,
+    problemId,
+    inputRef
+  }
+}
+
 /** Properties accepted by {@link McpEntryListField}. */
 type McpEntryListFieldProps = {
   /** List the field edits. */
@@ -723,19 +750,11 @@ function McpEntryListField({
   const presentation = getMcpEntryListPresentation(list)
   const addButtonRef = useRef<HTMLButtonElement>(null)
   const editing = useMcpEntryRows(draft, list, addButtonRef, onDraftChange)
-  const rowProblem: McpEntryRowProblem | undefined =
-    problemEntry === undefined
-      ? undefined
-      : {
-          entryId: problemEntry.entryId,
-          part: problemEntry.part,
-          problemId,
-          inputRef: problemEntryRef
-        }
+  const rowProblem = buildRowProblem(problemEntry, problemId, problemEntryRef)
 
   return (
     <fieldset
-      aria-describedby={formatDescriptionIds([
+      aria-describedby={buildDescriptionIds([
         hintId,
         problem === undefined ? undefined : problemId
       ])}
@@ -901,9 +920,9 @@ function McpSignInChoice({
       <p className="settings-view__mcp-field-note" id={noteId}>
         {formatMcpSignInNote(signIn)}
       </p>
-      {signIn === "token" ? (
+      {hasMcpSignInTokenInput(signIn) ? (
         <McpSecretInput
-          descriptionIds={formatDescriptionIds([
+          descriptionIds={buildDescriptionIds([
             noteId,
             problem === undefined ? undefined : problemId
           ])}

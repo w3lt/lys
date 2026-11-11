@@ -10,6 +10,7 @@ import type StoredReplyParts from "./modules/conversation/replyParts"
 import type StoredConversationTurns from "./modules/conversation/turns"
 import type LlmRuntimeService from "./modules/llm/llmRuntimeService"
 import type LlmService from "./modules/llm/llmService"
+import type EmailAccountChecker from "./modules/mcp/builtIn/email/emailAccountCheck"
 import type McpServerProcessGroups from "./modules/mcp/mcpServerProcessGroups"
 import type McpServerRegistry from "./modules/mcp/mcpServerRegistry"
 import type { BuiltInToolEntry } from "./modules/tool/builtIn/builtInTool"
@@ -17,7 +18,7 @@ import type WebSearchToolProvider from "./modules/tool/builtIn/web/webSearchTool
 import type ToolApprovalService from "./modules/toolApproval/toolApprovalService"
 
 declare module "fastify" {
-  /** Fastify application services installed by the singleton-services plugin. */
+  /** Fastify application services registered by the singleton-services plugin. */
   interface FastifyInstance {
     /** Application-scoped service for OpenAI-compatible chat completion streams. */
     chatService: ChatService
@@ -62,6 +63,11 @@ declare module "fastify" {
      * servers run in, which the backend ends at once when it exits.
      */
     mcpServerProcessGroups: McpServerProcessGroups
+    /**
+     * Application-scoped checks of email accounts through the email server
+     * Lys ships, one at a time.
+     */
+    emailAccountChecker: EmailAccountChecker
     /**
      * Application-scoped attachment files of every conversation, under the
      * attachments directory.

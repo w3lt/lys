@@ -90,7 +90,8 @@ impl LysHome {
     }
 
     /// Returns the `runtime` directory that holds the Node.js runtime, the
-    /// backend bundle, and the vmo binary started by release builds.
+    /// backend bundle, the vmo binary, and the email MCP server started by
+    /// release builds.
     ///
     /// `build.sh` installs the release runtime into this directory; the paths
     /// derived from it must stay in step with that installer's layout.
@@ -114,6 +115,16 @@ impl LysHome {
     /// `runtime/vmo/vmo` under the Lys home.
     pub fn vmo_executable_path(&self) -> PathBuf {
         self.prod_runtime_dir().join("vmo/vmo")
+    }
+
+    /// Returns the email MCP server that the backend of a release build
+    /// starts and runs account checks with, `runtime/email/email` under the
+    /// Lys home.
+    ///
+    /// The backend receives it as `LYS_EMAIL_SERVER_PATH`; the host never
+    /// starts it itself.
+    pub fn email_executable_path(&self) -> PathBuf {
+        self.prod_runtime_dir().join("email/email")
     }
 
     /// Returns the desktop settings file, `settings.json` under the Lys home.

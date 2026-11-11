@@ -1,4 +1,6 @@
 import type {
+  EmailPassword,
+  EmailSettings,
   GroqApiKey,
   LlmProviderSettings,
   McpSettings,
@@ -108,10 +110,12 @@ export type LoadConfigurationSettings = {
  * load, and the Tauri settings adapter parses it again with the shared key
  * schema of its service, which brands it. Each key is saved only by an
  * explicit Save: the Tavily key in the Secrets pane, the Ollama and Groq keys
- * in the Providers pane. The backend reads them from the settings file: the
- * Tavily key for each turn that offers `web_search`, a provider's key at
- * each connection attempt while that provider is active. The renderer never
- * logs or sends them.
+ * in the Providers pane, the email password with its account in the MCP
+ * pane. The backend reads them from the settings file: the Tavily key for
+ * each turn that offers `web_search`, a provider's key at each connection
+ * attempt while that provider is active, the email password each time it
+ * starts the email server. The renderer never logs them, and sends the
+ * email password only to the backend's account check.
  */
 export type SecretsSettings = {
   /** Saved Tavily API key, or null when none is saved; a secret. */
@@ -120,6 +124,11 @@ export type SecretsSettings = {
   readonly ollamaApiKey: OllamaApiKey | null
   /** Saved Groq API key, or null when none is saved; a secret. */
   readonly groqApiKey: GroqApiKey | null
+  /**
+   * Password of the saved email account, or null when none is saved; a
+   * secret. Saved and removed together with the account.
+   */
+  readonly emailPassword: EmailPassword | null
 }
 
 /**
@@ -182,7 +191,7 @@ export type LocationSettings = {
 /**
  * Renderer projection of the complete Tauri-persisted settings document.
  *
- * @remarks Holds the seven groups of Rust's `LysSettings` under the same
+ * @remarks Holds the eight groups of Rust's `LysSettings` under the same
  * names, so a saved value cannot silently drop a persisted group. The
  * runtime and generation groups match Rust field for field. The load
  * configuration group differs only in its per-model settings, a map here and
@@ -208,17 +217,31 @@ export type LysSettings = {
   location: LocationSettings
   /**
    * MCP servers the backend connects to, as the shared `mcp` group schema
-   * validates them.
+   * validates them: the added servers, each with its switch, and the
+   * switches of the servers Lys ships.
    *
    * @remarks Rust validates the group on load with the same rules, and the
    * Tauri settings adapter parses it again with the shared schema. The group
-   * is saved only by an explicit Save or Remove in the MCP pane; the backend
-   * reads it from the settings file when it starts and when the desktop asks
-   * it to apply the group again. Environment values and header values can be
-   * secrets: the renderer never logs them or sends them anywhere but to the
-   * Tauri settings commands.
+   * is saved only by an explicit Save, Remove, or switch in the MCP pane;
+   * the backend reads it from the settings file when it starts and when the
+   * desktop asks it to apply the group again. Environment values and header
+   * values can be secrets: the renderer never logs them or sends them
+   * anywhere but to the Tauri settings commands.
    */
   mcp: McpSettings
+  /**
+   * The email account the built-in email server works with, as the shared
+   * `email` group schema validates it, or none.
+   *
+   * @remarks Rust validates the group on load with the same rules, and the
+   * Tauri settings adapter parses it again with the shared schema. The group
+   * is saved, together with the password in the secrets group, only by Save
+   * or Remove account on the MCP pane's email server; the backend reads it
+   * from the settings file each time it starts the email server. The account
+   * is personal data: the renderer never logs it, and sends it only to the
+   * backend's account check and the Tauri settings commands.
+   */
+  email: EmailSettings
 }
 
 /**
@@ -249,7 +272,8 @@ const INITIAL_LOAD_CONFIGURATION_SETTINGS: LoadConfigurationSettings =
 const INITIAL_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
   tavilyApiKey: null,
   ollamaApiKey: null,
-  groqApiKey: null
+  groqApiKey: null,
+  emailPassword: null
 })
 
 /**
@@ -282,13 +306,32 @@ const INITIAL_LOCATION_SETTINGS: LocationSettings = Object.freeze({
   country: null
 })
 
+/** Added MCP servers of a first-run settings file: none. */
+const NO_ADDED_MCP_SERVERS: McpSettings["servers"] = Object.freeze([])
+
+/** The email server's switch in a first-run settings file: off. */
+const INITIAL_EMAIL_SERVER_SWITCH: McpSettings["builtIn"]["email"] =
+  Object.freeze({ enabled: false })
+
+/** Switches of the MCP servers Lys ships in a first-run settings file. */
+const INITIAL_BUILT_IN_MCP_SWITCHES: McpSettings["builtIn"] = Object.freeze({
+  email: INITIAL_EMAIL_SERVER_SWITCH
+})
+
 /**
- * MCP servers shown before Tauri initialization completes: none, as in a
- * first-run settings file.
+ * MCP servers shown before Tauri initialization completes: no added server
+ * and every built-in server off, as in a first-run settings file.
  */
 const INITIAL_MCP_SETTINGS: McpSettings = Object.freeze({
-  servers: Object.freeze([])
+  servers: NO_ADDED_MCP_SERVERS,
+  builtIn: INITIAL_BUILT_IN_MCP_SWITCHES
 })
+
+/**
+ * Email account shown before Tauri initialization completes: none, as in a
+ * first-run settings file.
+ */
+const INITIAL_EMAIL_SETTINGS: EmailSettings = Object.freeze({ account: null })
 
 /**
  * Renderer-side fallback settings used before Tauri initialization completes.
@@ -312,5 +355,6 @@ export const initialSettingsState: LysSettings = {
   providers: INITIAL_PROVIDERS_SETTINGS,
   tools: INITIAL_TOOL_SETTINGS,
   location: INITIAL_LOCATION_SETTINGS,
-  mcp: INITIAL_MCP_SETTINGS
+  mcp: INITIAL_MCP_SETTINGS,
+  email: INITIAL_EMAIL_SETTINGS
 }

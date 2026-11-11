@@ -85,6 +85,33 @@ export function calculateMcpRequestFailure(error: unknown): McpRequestFailure {
 }
 
 /**
+ * Finds what was thrown, for the log, when Lys could not tell what it was.
+ *
+ * @param failure - The failure {@link calculateMcpRequestFailure} found.
+ * @param error - What was thrown.
+ * @returns The thrown value for an `unknown` failure, a possible defect;
+ * undefined for every other failure, whose kind says what happened.
+ */
+export function findUnknownError(
+  failure: McpRequestFailure,
+  error: unknown
+): unknown {
+  switch (failure.kind) {
+    case "unknown":
+      return error
+    case "timed-out":
+    case "closed":
+    case "http-status":
+    case "unreachable":
+    case "start-failed":
+    case "refused":
+    case "invalid-answer":
+    case "too-large":
+      return undefined
+  }
+}
+
+/**
  * Classifies one error without its cause.
  *
  * @param error - One error of a chain.

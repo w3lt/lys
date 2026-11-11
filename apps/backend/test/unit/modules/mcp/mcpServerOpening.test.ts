@@ -1,6 +1,8 @@
 import type { McpServerSettings } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
-import type { McpServerConnectionContext } from "../../../../src/modules/mcp/mcpServerConnection"
+import McpServerConnection, {
+  type McpServerConnectionContext
+} from "../../../../src/modules/mcp/mcpServerConnection"
 import { MAXIMUM_MCP_RESPONSE_BYTES } from "../../../../src/modules/mcp/mcpResponseLimit"
 import {
   openMcpServer,
@@ -52,7 +54,8 @@ const SILENT_SERVER_SETTINGS: McpServerSettings = Object.freeze({
   transport: "stdio",
   command: process.execPath,
   arguments: Object.freeze(["-e", SILENT_SERVER_SCRIPT]),
-  environment: Object.freeze([])
+  environment: Object.freeze([]),
+  enabled: true
 })
 
 /**
@@ -104,41 +107,10 @@ function buildScriptServerSettings(
     transport: "stdio",
     command: process.execPath,
     arguments: Object.freeze(["-e", script]),
-    environment: Object.freeze([])
+    environment: Object.freeze([]),
+    enabled: true
   })
 }
-
-/**
- * Script of a stdio server that reports its process identifier, answers
- * the handshake, never answers anything else, and exits once its standard
- * input ends.
- */
-const HANDSHAKE_ONLY_SERVER_SCRIPT = [
-  'process.stderr.write("pid " + process.pid + "\\n")',
-  'require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {',
-  "  const message = JSON.parse(line)",
-  '  if (message.method !== "initialize") return',
-  '  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "handshake-only", version: "1.0.0" } } }) + "\\n")',
-  "})"
-].join("\n")
-
-/** Settings of a stdio server that connects but never lists its tools. */
-const HANDSHAKE_ONLY_SERVER_SETTINGS: McpServerSettings = Object.freeze({
-  name: "handshake-only",
-  transport: "stdio",
-  command: process.execPath,
-  arguments: Object.freeze(["-e", HANDSHAKE_ONLY_SERVER_SCRIPT]),
-  environment: Object.freeze([])
-})
-
-/** Settings of a stdio server whose command no folder of `PATH` holds. */
-const MISSING_COMMAND_SETTINGS: McpServerSettings = Object.freeze({
-  name: "missing",
-  transport: "stdio",
-  command: "lys-test-missing-command-7f3a",
-  arguments: Object.freeze([]),
-  environment: Object.freeze([])
-})
 
 /**
  * Nesting depth of the input schema of {@link DEEP_SCHEMA_TOOL_TEXT}, deep
@@ -596,9 +568,19 @@ describe("openMcpServer", () => {
   })
 
   it("reports a command that is not found as start-failed", async () => {
+    /** Settings of a stdio server whose command no folder of `PATH` holds. */
+    const missingCommandSettings: McpServerSettings = Object.freeze({
+      name: "missing",
+      transport: "stdio",
+      command: "lys-test-missing-command-7f3a",
+      arguments: Object.freeze([]),
+      environment: Object.freeze([]),
+      enabled: true
+    })
+
     const { context } = createRecordingContext()
 
-    const opening = await openForTest(MISSING_COMMAND_SETTINGS, context)
+    const opening = await openForTest(missingCommandSettings, context)
 
     expect(opening).toEqual({
       status: "failed",
@@ -639,6 +621,24 @@ describe("openMcpServer", () => {
       unknownError: undefined
     })
     expect(events.closedCount).toBe(0)
+  })
+
+  it("reports a failure Lys cannot tell apart as a protocol error, with what was thrown", async () => {
+    const thrown = new RangeError("The connection has a defect.")
+    vi.spyOn(McpServerConnection, "open").mockRejectedValue(thrown)
+    const { context } = createRecordingContext()
+
+    const opening = await openForTest(
+      buildFakeStdioServerSettings("fake"),
+      context
+    )
+
+    expect(opening).toEqual({
+      status: "failed",
+      reason: "protocol-error",
+      failure: { kind: "unknown" },
+      unknownError: thrown
+    })
   })
 
   it("reports an answer that is not JSON as a protocol error", async () => {
@@ -736,13 +736,33 @@ describe("openMcpServer", () => {
   })
 
   it("closes a connected server whose tool list does not arrive within the limit", async () => {
+    /**
+     * Script of a stdio server that reports its process identifier, answers
+     * the handshake, never answers anything else, and exits once its standard
+     * input ends.
+     */
+    const handshakeOnlyServerScript = [
+      'process.stderr.write("pid " + process.pid + "\\n")',
+      'require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {',
+      "  const message = JSON.parse(line)",
+      '  if (message.method !== "initialize") return',
+      '  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "handshake-only", version: "1.0.0" } } }) + "\\n")',
+      "})"
+    ].join("\n")
+
+    /** Settings of a stdio server that connects but never lists its tools. */
+    const handshakeOnlyServerSettings: McpServerSettings = Object.freeze({
+      name: "handshake-only",
+      transport: "stdio",
+      command: process.execPath,
+      arguments: Object.freeze(["-e", handshakeOnlyServerScript]),
+      environment: Object.freeze([]),
+      enabled: true
+    })
+
     const { context, events } = createRecordingContext()
 
-    const opening = await openForTest(
-      HANDSHAKE_ONLY_SERVER_SETTINGS,
-      context,
-      300
-    )
+    const opening = await openForTest(handshakeOnlyServerSettings, context, 300)
     const pid = await waitForReportedPid(events)
 
     expect(opening).toEqual({

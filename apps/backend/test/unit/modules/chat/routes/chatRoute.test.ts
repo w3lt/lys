@@ -13,6 +13,7 @@ import {
   CALIGINIA_AGENT_CODE,
   MAXIMUM_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
+  mcpSettingsSchema,
   type McpServerSettings
 } from "@lys/share"
 import type { LightMyRequestResponse } from "fastify"
@@ -36,7 +37,8 @@ import {
   sendChatRequest,
   TEST_AGENT_REQUEST_LIMITS,
   TEST_BUILT_IN_AGENT_PROMPTS,
-  type ChatRouteTestApp
+  type ChatRouteTestApp,
+  type McpServerUpdateTestApp
 } from "../../../support/chatRouteTestApp"
 import { parseSseEvents } from "../../../support/chatSseRoute"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
@@ -1485,21 +1487,22 @@ describe("updateFastifyWithChatRoute", () => {
     })
 
     /**
-     * Applies one MCP server to the test application's registry and waits
+     * Updates the test application's registry to one MCP server and waits
      * until its opening ended.
      *
-     * @param testApp - Test application without the chat route.
+     * @param testApp - The test application's settings spy and registry.
      * @param settings - Settings of the only applied server.
      * @param status - State the opening is expected to end in.
      */
-    async function applyMcpServer(
-      testApp: ChatRouteTestApp,
+    async function updateMcpServer(
+      testApp: McpServerUpdateTestApp,
       settings: McpServerSettings,
       status: "connected" | "failed"
     ): Promise<void> {
+      const mcpSettings = mcpSettingsSchema.parse({ servers: [settings] })
       testApp.readMcpSettings.mockResolvedValue({
         status: "read",
-        settings: { servers: [settings] }
+        settings: mcpSettings
       })
       await testApp.app.mcpServerRegistry.updateServers()
       await vi.waitFor(
@@ -1522,28 +1525,26 @@ describe("updateFastifyWithChatRoute", () => {
      */
     async function createEchoApp() {
       const testApp = await createChatRouteTestApp()
-      await applyMcpServer(
+      await updateMcpServer(
         testApp,
         buildFakeStdioServerSettings("files"),
         "connected"
       )
       testApp.createConversationTurn.mockRestore()
+      const callChunk = createChatCompletionChunk({
+        toolCalls: [
+          {
+            index: 0,
+            id: "call_0",
+            type: "function",
+            function: { name: ECHO_TOOL_NAME, arguments: '{"text":"moth"}' }
+          }
+        ]
+      })
       testApp.completeChatStream
         .mockImplementationOnce(async () =>
           createChunkStream(
-            createChatCompletionChunk({
-              toolCalls: [
-                {
-                  index: 0,
-                  id: "call_0",
-                  type: "function",
-                  function: {
-                    name: ECHO_TOOL_NAME,
-                    arguments: '{"text":"moth"}'
-                  }
-                }
-              ]
-            }),
+            callChunk,
             createChatCompletionChunk({ finishReason: "tool_calls" })
           )
         )
@@ -1580,7 +1581,7 @@ describe("updateFastifyWithChatRoute", () => {
 
     it("refuses an MCP tool whose server is not connected before storing a turn, naming it and why", async () => {
       const testApp = await createChatRouteTestApp()
-      await applyMcpServer(
+      await updateMcpServer(
         testApp,
         buildFakeStdioServerSettings("files", { exitOnStart: 1 }),
         "failed"
@@ -1620,7 +1621,7 @@ describe("updateFastifyWithChatRoute", () => {
 
     it("names a built-in tool that cannot run now before an MCP tool whose server is not connected, even when the MCP tool is offered first", async () => {
       const testApp = await createChatRouteTestApp()
-      await applyMcpServer(
+      await updateMcpServer(
         testApp,
         buildFakeStdioServerSettings("files", { exitOnStart: 1 }),
         "failed"
@@ -1651,7 +1652,7 @@ describe("updateFastifyWithChatRoute", () => {
 
     it("rejects an MCP tool no applied server lists before storing a turn, naming each", async () => {
       const testApp = await createChatRouteTestApp()
-      await applyMcpServer(
+      await updateMcpServer(
         testApp,
         buildFakeStdioServerSettings("files"),
         "connected"

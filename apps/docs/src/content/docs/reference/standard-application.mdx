@@ -351,12 +351,17 @@ format before interpreting it. The exception was approved by the maintainer on
 2026-10-10 for [PR #143](https://github.com/w3lt/lys/pull/143), which adds the
 `loadConfiguration` group to the file. On 2026-10-24 the maintainer extended
 it, for [PR #263](https://github.com/w3lt/lys/pull/263), to the `mcp` group, in
-the scope and the risk below.
+the scope and the risk below. On 2026-11-02 the maintainer extended it again,
+for [PR #308](https://github.com/w3lt/lys/pull/308), to the `enabled` and
+`builtIn` switches of the `mcp` group, the `email` group, and `emailPassword`
+in `secrets`.
 
 - **Scope:** only `$LYS_HOME/settings.json`, which the
   [native settings module](https://github.com/w3lt/lys/blob/main/apps/desktop/src-tauri/src/settings.rs)
   reads and writes, and whose `secrets` group the backend reads for the
-  Tavily API key, and its `mcp` group for the MCP servers. A missing group,
+  Tavily API key and the email account's password, its `mcp` group for the
+  MCP servers and their switches, and its `email` group for the email
+  account. A missing group,
   such as `loadConfiguration` in a file written before PR #143, is read as
   that group's defaults like any other missing optional field; no format is
   inferred from it, and the file is not rewritten on load. Every other
@@ -377,11 +382,16 @@ the scope and the risk below.
   every per-model load setting with it; a build from before `web_search` drops
   the `secrets` group, and the saved Tavily API key with it; a build from
   before MCP support drops the `mcp` group, and every configured server, its
-  variables and headers included, with it. Nothing stops an older build from
-  rewriting a newer file. The current build rejects an unknown field inside
-  `loadConfiguration`, `tools`, `location`, and `mcp`, a server object
-  included, so a newer file that adds a field to one of these groups fails to
-  load in this build, every setting with it. It ignores an unknown group and
+  variables and headers included, with it; a build from before the MCP
+  switches knows the `mcp` group but refuses `enabled` and `builtIn`, so a
+  file that holds either fails to load in it, every setting with it, until
+  they are removed by hand; a build from before the email server drops the
+  `email` group and `emailPassword`, and the saved account with them. Nothing
+  stops an older build from rewriting a newer file. The current build rejects
+  an unknown field inside `loadConfiguration`, `tools`, `location`, `mcp`, a
+  server object and `builtIn` included, and `email`, so a newer file that
+  adds a field to one of these groups fails to load in this build, every
+  setting with it. It ignores an unknown group and
   an unknown field of `runtime`, `generation`, and `secrets`, and drops them
   on its next save. A file that fails to load is never rewritten.
 - **Removal condition:** [#146](https://github.com/w3lt/lys/issues/146) adds
@@ -511,7 +521,6 @@ before and after the pull request.
       lines: 42 → 50, for the turn fields the reply parts added.
     - `registerBuiltInToolContractSuite` in `builtInToolContract.ts`, lines:
       41 → 47, for the run context its cases now pass.
-    - `createChatRouteTestApp` in `chatRouteTestApp.ts`, lines: 70 → 72.
     - `registerConversationRecordEditorContractSuite` and
       `registerConversationTurnTransactionContractSuite` in
       `conversationRecordsContract.ts`, lines: 87 → 101 and 191 → 201, for

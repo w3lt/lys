@@ -132,7 +132,10 @@ export function buildFakeStdioServerSettings(
       FAKE_STDIO_SERVER_PATH,
       JSON.stringify(options)
     ]),
-    environment: Object.freeze(environment.map((entry) => Object.freeze(entry)))
+    environment: Object.freeze(
+      environment.map((entry) => Object.freeze(entry))
+    ),
+    enabled: true
   })
 }
 
@@ -150,17 +153,17 @@ export function buildFakeLauncherServerSettings(
   name: string,
   options: FakeStdioServerOptions
 ): McpServerSettings {
+  const optionsVariable: McpEnvironmentVariable = Object.freeze({
+    name: "LYS_FAKE_MCP_OPTIONS",
+    value: JSON.stringify(options)
+  })
   return Object.freeze({
     name,
     transport: "stdio",
     command: process.execPath,
     arguments: Object.freeze(["--no-warnings", FAKE_LAUNCHER_PATH]),
-    environment: Object.freeze([
-      Object.freeze({
-        name: "LYS_FAKE_MCP_OPTIONS",
-        value: JSON.stringify(options)
-      })
-    ])
+    environment: Object.freeze([optionsVariable]),
+    enabled: true
   })
 }
 
@@ -220,7 +223,8 @@ export function buildHttpServerSettings(
     name,
     transport: "http",
     url,
-    headers: Object.freeze(headers.map((header) => Object.freeze(header)))
+    headers: Object.freeze(headers.map((header) => Object.freeze(header))),
+    enabled: true
   })
 }
 

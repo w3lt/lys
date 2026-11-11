@@ -89,6 +89,24 @@ export {
   type JsonValue
 } from "./json"
 export {
+  emailAccountSchema,
+  emailAddressSchema,
+  emailSecuritySchema,
+  emailSettingsSchema,
+  LOOPBACK_EMAIL_HOSTS,
+  MAXIMUM_EMAIL_ADDRESS_LENGTH,
+  MAXIMUM_EMAIL_DISPLAY_NAME_LENGTH,
+  MAXIMUM_EMAIL_LOCAL_PART_LENGTH,
+  MAXIMUM_EMAIL_USER_NAME_LENGTH,
+  type EmailAccount,
+  type EmailAccountCandidate,
+  type EmailSecurity,
+  type EmailServerSettings,
+  type EmailSettings
+} from "./email"
+export { MAXIMUM_TCP_PORT } from "./hostName"
+export {
+  BUILT_IN_MCP_SERVER_NAMES,
   buildMcpToolNamePrefix,
   MAXIMUM_MCP_COMMAND_ARGUMENT_COUNT,
   MAXIMUM_MCP_COMMAND_ARGUMENT_LENGTH,
@@ -112,7 +130,10 @@ export {
   type McpServerSettings,
   type McpServerSettingsCandidate,
   type McpServerTransport,
-  type McpSettings
+  type McpSettings,
+  type McpSettingsCandidate,
+  type BuiltInMcpServerName,
+  type BuiltInMcpSettings
 } from "./mcp"
 export {
   llmProviderSchema,
@@ -123,9 +144,12 @@ export {
   type ProviderAddress
 } from "./providers"
 export {
+  emailPasswordSchema,
   groqApiKeySchema,
+  MAXIMUM_EMAIL_PASSWORD_LENGTH,
   ollamaApiKeySchema,
   tavilyApiKeySchema,
+  type EmailPassword,
   type GroqApiKey,
   type OllamaApiKey,
   type TavilyApiKey

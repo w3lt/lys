@@ -1,0 +1,2863 @@
+[
+  {
+    "case": "a group without an account holds no account",
+    "group": {},
+    "accepted": true,
+    "written": {
+      "account": null
+    }
+  },
+  {
+    "case": "a null account",
+    "group": {
+      "account": null
+    },
+    "accepted": true,
+    "written": {
+      "account": null
+    }
+  },
+  {
+    "case": "an account with TLS servers",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account with STARTTLS servers",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 143,
+          "security": "starttls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 587,
+          "security": "starttls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 143,
+          "security": "starttls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 587,
+          "security": "starttls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account with plain servers on localhost",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "localhost",
+          "port": 143,
+          "security": "plain"
+        },
+        "smtp": {
+          "host": "localhost",
+          "port": 25,
+          "security": "plain"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "localhost",
+          "port": 143,
+          "security": "plain"
+        },
+        "smtp": {
+          "host": "localhost",
+          "port": 25,
+          "security": "plain"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account with plain servers on 127.0.0.1",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "127.0.0.1",
+          "port": 143,
+          "security": "plain"
+        },
+        "smtp": {
+          "host": "127.0.0.1",
+          "port": 25,
+          "security": "plain"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "127.0.0.1",
+          "port": 143,
+          "security": "plain"
+        },
+        "smtp": {
+          "host": "127.0.0.1",
+          "port": 25,
+          "security": "plain"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account with plain servers on [::1]",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "[::1]",
+          "port": 143,
+          "security": "plain"
+        },
+        "smtp": {
+          "host": "[::1]",
+          "port": 25,
+          "security": "plain"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "[::1]",
+          "port": 143,
+          "security": "plain"
+        },
+        "smtp": {
+          "host": "[::1]",
+          "port": 25,
+          "security": "plain"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account with a plain server on LOCALHOST in capitals",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "LOCALHOST",
+          "port": 143,
+          "security": "plain"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "LOCALHOST",
+          "port": 143,
+          "security": "plain"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account with an empty display name",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account whose display name has inner spaces, accents, and an apostrophe",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "Jeanne d'Arc Épée",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "Jeanne d'Arc Épée",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account with a display name of 100 characters",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account with a user name of 254 characters",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account whose user name is not its address",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account with an address of 254 characters",
+    "group": {
+      "account": {
+        "address": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "displayName": "A Person",
+        "userName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "displayName": "A Person",
+        "userName": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account whose address name has symbols",
+    "group": {
+      "account": {
+        "address": "o'neil+tag.1_2-3@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "o'neil+tag.1_2-3@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account whose address name holds every symbol a name may hold",
+    "group": {
+      "account": {
+        "address": "!#$%&'*+-/=?^_`{|}~@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "!#$%&'*+-/=?^_`{|}~@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account whose address name has single dots between its parts",
+    "group": {
+      "account": {
+        "address": "a.b.c@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "a.b.c@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account whose address host has capitals and digits",
+    "group": {
+      "account": {
+        "address": "person@Mail-2.Example.COM",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@Mail-2.Example.COM",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account whose servers are IPv4 addresses",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "192.0.2.10",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "192.0.2.11",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "192.0.2.10",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "192.0.2.11",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account whose servers are bracketed IPv6 addresses",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "[2001:db8::10]",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "[::ffff:192.0.2.11]",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "[2001:db8::10]",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "[::ffff:192.0.2.11]",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account whose server host is 253 characters",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account with ports 1 and 65535",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 1,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 65535,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 1,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 65535,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account whose port 993 is written as 993.0",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993.0,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account whose port 993 is written as 9.93e2",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 9.93e2,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account whose port 587 is written with 17 significant digits, which rounds to 587",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 587.00000000000005,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 587,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    }
+  },
+  {
+    "case": "an account that keeps no sent copy on the server",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      }
+    },
+    "accepted": true,
+    "written": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": false
+      }
+    }
+  },
+  {
+    "case": "a null group",
+    "group": null,
+    "accepted": false
+  },
+  {
+    "case": "a group that is an array",
+    "group": [],
+    "accepted": false
+  },
+  {
+    "case": "a group that is text",
+    "group": "person@example.com",
+    "accepted": false
+  },
+  {
+    "case": "a group with an unknown field",
+    "group": {
+      "account": null,
+      "signature": "Regards"
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account that is an array",
+    "group": {
+      "account": []
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account that is an array of its fields in order",
+    "group": {
+      "account": [
+        "person@example.com",
+        "A Person",
+        "person@example.com",
+        {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        true
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account that is text",
+    "group": {
+      "account": "person@example.com"
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account that is an empty object",
+    "group": {
+      "account": {}
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account without an address",
+    "group": {
+      "account": {
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account without a display name",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account without a user name",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account without an IMAP server",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account without an SMTP server",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account without the sent copy switch",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        }
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account with an unknown field",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true,
+        "signature": "Regards"
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account with a null address",
+    "group": {
+      "account": {
+        "address": null,
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account with a null display name",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": null,
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account with a null user name",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": null,
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account with a null IMAP server",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": null,
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account whose sent copy switch is text",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": "true"
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an account whose sent copy switch is null",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": null
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an empty address",
+    "group": {
+      "account": {
+        "address": "",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address without @",
+    "group": {
+      "account": {
+        "address": "person.example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address without a name",
+    "group": {
+      "account": {
+        "address": "@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address without a host",
+    "group": {
+      "account": {
+        "address": "person@",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address with two @",
+    "group": {
+      "account": {
+        "address": "per@son@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address with a space",
+    "group": {
+      "account": {
+        "address": "per son@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address whose name has two dots in a row",
+    "group": {
+      "account": {
+        "address": "john..doe@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address whose name starts with a dot",
+    "group": {
+      "account": {
+        "address": ".john@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address whose name ends with a dot",
+    "group": {
+      "account": {
+        "address": "john.@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address whose name has a parenthesis",
+    "group": {
+      "account": {
+        "address": "a(b@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address whose name is quoted",
+    "group": {
+      "account": {
+        "address": "\"john\"@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address with a name of 65 characters",
+    "group": {
+      "account": {
+        "address": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address of 255 characters",
+    "group": {
+      "account": {
+        "address": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address with a letter beyond ASCII in its name",
+    "group": {
+      "account": {
+        "address": "pérson@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address with a letter beyond ASCII in its host",
+    "group": {
+      "account": {
+        "address": "person@exämple.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address whose host has a label of 64 characters",
+    "group": {
+      "account": {
+        "address": "person@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address whose host has an empty label",
+    "group": {
+      "account": {
+        "address": "person@example..com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address whose host label starts with a hyphen",
+    "group": {
+      "account": {
+        "address": "person@-example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address whose host has an underscore",
+    "group": {
+      "account": {
+        "address": "person@my_mail.example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address with a port",
+    "group": {
+      "account": {
+        "address": "person@example.com:25",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address with a line break",
+    "group": {
+      "account": {
+        "address": "person@example.com\n",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address with white space at the end",
+    "group": {
+      "account": {
+        "address": "person@example.com ",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an address that is a number",
+    "group": {
+      "account": {
+        "address": 42,
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a display name of 101 characters",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a display name with white space at the start",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": " A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a display name with white space at the end",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person ",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a display name with a no-break space at the end",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person ",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a display name with a line break",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A\nPerson",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a display name with a tab",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A\tPerson",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a display name that is a number",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": 1,
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "an empty user name",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a user name of 255 characters",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a user name with white space at the end",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person ",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a user name with a control character",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person\u0000",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server that is an array",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": [],
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server that is an array of its fields in order",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": ["imap.example.com", 993, "tls"],
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server that is text",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": "imap.example.com",
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server without a host",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server without a port",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server without a security",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server with an unknown field",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls",
+          "timeoutSeconds": 30
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server with an empty host",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server host with a port",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com:993",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server host with a scheme",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imaps://imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server host with a space",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server host with a letter beyond ASCII",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.exämple.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server host of 254 characters",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeef",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server host whose label is 64 characters",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server host that is an unbracketed IPv6 address",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "::1",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server host that is an unclosed bracket",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "[::1",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server host in brackets without a colon",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "[1234]",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server host in brackets with a letter beyond hexadecimal",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "[2001:db8::g]",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server host in brackets of 48 characters",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "[000000000000000000000000000000000000000000000:]",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server host in brackets with a space",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "[::1 ]",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server host that is null",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": null,
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server port of 0",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 0,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server port of 65536",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 65536,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a negative server port",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": -1,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server port that is text",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": "993",
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server port with a fraction",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993.5,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server port written with 17 significant digits, which rounds to a fraction",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465.00000000000004,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server port that is null",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": null,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server security in capitals",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "TLS"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server security of ssl",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "ssl"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server security that is null",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": null
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a server security that is a switch",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": true
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a plain IMAP connection to a remote host",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "plain"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a plain SMTP connection to a remote host",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "security": "tls"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "plain"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a plain connection to 127.0.0.2",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "127.0.0.2",
+          "port": 993,
+          "security": "plain"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a plain connection to localhost.example",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "localhost.example",
+          "port": 993,
+          "security": "plain"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  },
+  {
+    "case": "a plain connection to the loopback IPv6 address in long form",
+    "group": {
+      "account": {
+        "address": "person@example.com",
+        "displayName": "A Person",
+        "userName": "person@example.com",
+        "imap": {
+          "host": "[0:0:0:0:0:0:0:1]",
+          "port": 993,
+          "security": "plain"
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "security": "tls"
+        },
+        "serverKeepsSentCopy": true
+      }
+    },
+    "accepted": false
+  }
+]

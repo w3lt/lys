@@ -1,3 +1,4 @@
+import { mcpSettingsSchema } from "@lys/share"
 import type { FastifyInstance, LightMyRequestResponse } from "fastify"
 import { validatorCompiler } from "fastify-type-provider-zod"
 import { mkdtempSync, rmSync } from "node:fs"
@@ -5,6 +6,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { onTestFinished, vi, type Mock, type MockInstance } from "vitest"
 import SqliteAgentRecordStore from "../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
+import type {
+  DatabaseFunctionRegistry,
+  DatabaseReader,
+  DatabaseWriter
+} from "../../../src/infrastructure/database/databaseTransactions"
 import AgentRuntimeService, {
   buildConversationTitleLookup
 } from "../../../src/modules/agent/agentRuntimeService"
@@ -14,6 +20,7 @@ import { buildBuiltInAgents } from "../../../src/modules/agent/builtInAgents"
 import ChatService from "../../../src/modules/chat/chatService"
 import LlmReplyContextMeter from "../../../src/modules/chat/llmReplyContextMeter"
 import OpenAiReplyModel from "../../../src/modules/chat/openAiReplyModel"
+import type { ConversationReader } from "../../../src/modules/conversation/capabilities"
 import type StoredConversationTurns from "../../../src/modules/conversation/turns"
 import ReplyGenerationRegistry from "../../../src/modules/chat/replyGenerationRegistry"
 import {
@@ -25,6 +32,7 @@ import LlmService from "../../../src/modules/llm/llmService"
 import McpServerRegistry from "../../../src/modules/mcp/mcpServerRegistry"
 import { openMcpServer } from "../../../src/modules/mcp/mcpServerOpening"
 import type { McpSettingsRead } from "../../../src/infrastructure/settings/mcpSettingsFile"
+import type { BuiltInToolEntry } from "../../../src/modules/tool/builtIn/builtInTool"
 import ToolApprovalService, {
   type ReadJustRunToolNames
 } from "../../../src/modules/toolApproval/toolApprovalService"
@@ -128,6 +136,107 @@ export type ChatRouteTestApp = TestFastify &
   }>
 
 /**
+ * Services that {@link createChatRouteTestApp} registers with its
+ * application, under the names the routes reach them by.
+ */
+type ChatRouteTestServices = Readonly<
+  Pick<
+    FastifyInstance,
+    | "conversationTurns"
+    | "replyParts"
+    | "conversationHistoryReader"
+    | "conversationHistoryEditor"
+    | "chatService"
+    | "llmService"
+    | "llmRuntimeService"
+    | "agentService"
+    | "agentRuntimeService"
+    | "toolApprovalService"
+    | "attachmentFileStore"
+    | "mcpServerRegistry"
+    | "builtInTools"
+  >
+>
+
+/** Spies of {@link ChatRouteTestApp} that its services call. */
+type ChatRouteTestSpies = Pick<
+  ChatRouteTestApp,
+  | "createConversationTurn"
+  | "completeChatStream"
+  | "generateTitle"
+  | "findLlmContextMeasurement"
+  | "listDownloadedLlmModels"
+  | "readJustRunToolNames"
+  | "readMcpSettings"
+>
+
+/** The chat route test app's services and the spies inside them. */
+type SpiedChatRouteTestServices = Readonly<{
+  /** Services the application registers. */
+  services: ChatRouteTestServices
+  /** Spies inside the services, which a case configures or inspects. */
+  spies: ChatRouteTestSpies
+}>
+
+/** A chat service and the spies that replace its model calls. */
+type SpiedChatService = Readonly<{
+  /** The service; its endpoint is an LM Studio URL that no case reaches. */
+  chatService: ChatService
+}> &
+  Pick<ChatRouteTestApp, "completeChatStream" | "generateTitle">
+
+/** An LLM service and the spies that replace its measurement and inventory. */
+type SpiedLlmService = Readonly<{
+  /** The service; its engine operation queue rejects every operation. */
+  llmService: LlmService
+}> &
+  Pick<
+    ChatRouteTestApp,
+    "findLlmContextMeasurement" | "listDownloadedLlmModels"
+  >
+
+/** A real MCP server registry and the spy it reads its settings through. */
+export type TestMcpServerRegistry = Readonly<{
+  /** The registry; it holds no server until a case applies settings. */
+  mcpServerRegistry: McpServerRegistry
+  /**
+   * Its settings reader; it reads the settings group with no server until
+   * a case configures it.
+   */
+  readMcpSettings: Mock<() => Promise<McpSettingsRead>>
+}>
+
+/** A case's application, as the case updates and lists its MCP servers. */
+type McpServerRegistryTestApp = Readonly<{
+  /** The registry, through its update and its list of servers. */
+  mcpServerRegistry: Pick<McpServerRegistry, "updateServers" | "listServers">
+}>
+
+/**
+ * The parts of a case's application that a case updates its MCP servers
+ * through: the spy the registry reads its settings through, and the
+ * registry's update and list.
+ */
+export type McpServerUpdateTestApp = Readonly<{
+  /** Spy the registry reads its settings through. */
+  readMcpSettings: TestMcpServerRegistry["readMcpSettings"]
+  /** Application whose registry the case updates and lists. */
+  app: McpServerRegistryTestApp
+}>
+
+/**
+ * What a case's agent services use of its conversation services: the
+ * database their records are kept on, and the history the agents title
+ * conversations from.
+ */
+export type AgentConversationTestServices = Readonly<{
+  /** Database the agent record store keeps its records on. */
+  database: DatabaseReader & DatabaseWriter & DatabaseFunctionRegistry
+  /** History the agents read the titles of conversations from. */
+  history: ConversationReader
+}>
+
+/**
  * Creates an application with SSE and schema validation whose conversation
  * turns and chat service are real instances with every call the chat route
  * can reach replaced by a spy.
@@ -178,11 +287,94 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     rmSync(attachmentsDirectoryPath, { recursive: true, force: true })
   })
   const testFastify = await createChatSseTestApp()
-  const { database, turns, replyParts, history, editor } =
-    openConversationTestServices()
+  const { services, spies } = await createChatRouteTestServices(
+    attachmentsDirectoryPath
+  )
+  const generations = new ReplyGenerationRegistry()
+  onTestFinished(async () => {
+    await generations[Symbol.asyncDispose]()
+  })
+  testFastify.app.setValidatorCompiler(validatorCompiler)
+  registerChatRouteTestServices(testFastify.app, services)
+  return Object.freeze({
+    ...testFastify,
+    ...spies,
+    findModelCapabilities: createModelCapabilitiesLookup(
+      () => services.llmService.listDownloadedLlmModels(),
+      () => services.llmRuntimeService.connectedLlmProviderAccess
+    ),
+    attachmentsDirectoryPath,
+    generations
+  })
+}
+
+/**
+ * Creates the services of {@link createChatRouteTestApp} over one in-memory
+ * conversation database, with every call the chat route can reach replaced
+ * by a spy.
+ *
+ * @param attachmentsDirectoryPath - Directory the attachment file store
+ * keeps its files under; the caller owns it.
+ * @returns The services and their spies.
+ * @throws If the LLM runtime service cannot connect.
+ * @remarks When the test finishes, the MCP server registry closes first,
+ * then the LLM runtime service is disposed, and the database closes last.
+ */
+async function createChatRouteTestServices(
+  attachmentsDirectoryPath: string
+): Promise<SpiedChatRouteTestServices> {
+  const conversation = openConversationTestServices()
   const createConversationTurn = vi
-    .spyOn(turns, "createConversationTurn")
+    .spyOn(conversation.turns, "createConversationTurn")
     .mockImplementation(() => handleUnexpectedCall("createConversationTurn"))
+  const chat = createSpiedChatService()
+  const llm = createSpiedLlmService()
+  const llmRuntimeService = await openTestLlmRuntimeService()
+  const agents = createTestAgentServices(
+    conversation,
+    chat.chatService,
+    llm.llmService
+  )
+  const readJustRunToolNames = vi.fn<ReadJustRunToolNames>(() =>
+    Promise.reject(createUnexpectedCallError("readJustRunToolNames"))
+  )
+  const mcp = createTestMcpServerRegistry()
+  return Object.freeze({
+    services: Object.freeze({
+      conversationTurns: conversation.turns,
+      replyParts: conversation.replyParts,
+      conversationHistoryReader: conversation.history,
+      conversationHistoryEditor: conversation.editor,
+      chatService: chat.chatService,
+      llmService: llm.llmService,
+      llmRuntimeService,
+      ...agents,
+      toolApprovalService: new ToolApprovalService(readJustRunToolNames),
+      attachmentFileStore: new AttachmentFileStore(attachmentsDirectoryPath),
+      mcpServerRegistry: mcp.mcpServerRegistry,
+      builtInTools: buildScriptedBuiltInTools(
+        new ScriptedBuiltInTool(runLookUpWordWithSource)
+      )
+    }),
+    spies: Object.freeze({
+      createConversationTurn,
+      completeChatStream: chat.completeChatStream,
+      generateTitle: chat.generateTitle,
+      findLlmContextMeasurement: llm.findLlmContextMeasurement,
+      listDownloadedLlmModels: llm.listDownloadedLlmModels,
+      readJustRunToolNames,
+      readMcpSettings: mcp.readMcpSettings
+    })
+  })
+}
+
+/**
+ * Creates a chat service whose completion and title calls are spies.
+ *
+ * @returns The service and its spies, which reject with
+ * `Unexpected chat route call: <name>` until a case configures them.
+ */
+function createSpiedChatService(): SpiedChatService {
   const chatService = new ChatService({
     findChatEndpoint: () => ({
       baseUrl: "http://lmstudio.test/v1",
@@ -202,6 +394,18 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     .mockImplementation(() =>
       Promise.reject(createUnexpectedCallError("generateTitle"))
     )
+  return Object.freeze({ chatService, completeChatStream, generateTitle })
+}
+
+/**
+ * Creates an LLM service whose context measurement and model inventory are
+ * spies.
+ *
+ * @returns The service and its spies. By default the measurement answers
+ * that the model is loaded with a window larger than any test context and
+ * that each text is one token, and the inventory lists no model.
+ */
+function createSpiedLlmService(): SpiedLlmService {
   const llmService = new LlmService({
     llmEngineOperationQueue: Object.freeze({
       handleLlmEngineOperationRequest: () =>
@@ -221,6 +425,22 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   const listDownloadedLlmModels = vi
     .spyOn(llmService, "listDownloadedLlmModels")
     .mockResolvedValue([])
+  return Object.freeze({
+    llmService,
+    findLlmContextMeasurement,
+    listDownloadedLlmModels
+  })
+}
+
+/**
+ * Opens an LLM runtime service connected to {@link DEFAULT_LM_STUDIO_ACCESS}
+ * over a runtime double that no case reaches.
+ *
+ * @returns The connected service, disposed when the test finishes.
+ * @throws If the service cannot connect, as
+ * {@link LlmRuntimeService.connectLlmRuntime} documents.
+ */
+async function openTestLlmRuntimeService(): Promise<LlmRuntimeService> {
   const llmRuntimeService = new LlmRuntimeService({
     reportLlmRuntimeAcquisitionFailure: vi.fn(),
     reportLlmRuntimeAvailabilityCheckFailure: vi.fn(),
@@ -230,8 +450,29 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   })
   await llmRuntimeService.connectLlmRuntime()
   onTestFinished(async () => await llmRuntimeService[Symbol.asyncDispose]())
+  return llmRuntimeService
+}
+
+/**
+ * Creates the agent service, which keeps its records on the test's
+ * database and builds the built-in agents with
+ * {@link TEST_BUILT_IN_AGENT_PROMPTS}, and the agent runtime service over it,
+ * each live agent with {@link TEST_AGENT_REQUEST_LIMITS}.
+ *
+ * @param conversation - The test's database and the history the live
+ * agents title their requests' conversations from.
+ * @param chatService - Chat stream every agent's model calls go through.
+ * @param llmService - Context measurement every agent's meter measures
+ * through.
+ * @returns The two services.
+ */
+function createTestAgentServices(
+  conversation: AgentConversationTestServices,
+  chatService: Pick<ChatService, "completeChatStream">,
+  llmService: Pick<LlmService, "findLlmContextMeasurement">
+): Pick<ChatRouteTestServices, "agentService" | "agentRuntimeService"> {
   const agentService = new AgentService({
-    recordStore: SqliteAgentRecordStore.create(database),
+    recordStore: SqliteAgentRecordStore.create(conversation.database),
     builtInAgents: buildBuiltInAgents(TEST_BUILT_IN_AGENT_PROMPTS)
   })
   const agentRuntimeService = new AgentRuntimeService({
@@ -243,23 +484,61 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
       llmService.findLlmContextMeasurement(model, texts)
     ),
     findConversationTitle: (conversationId) =>
-      buildConversationTitleLookup(history.getConversation(conversationId)),
+      buildConversationTitleLookup(
+        conversation.history.getConversation(conversationId)
+      ),
     requestLimits: TEST_AGENT_REQUEST_LIMITS
   })
-  const readJustRunToolNames = vi.fn<ReadJustRunToolNames>(() =>
-    Promise.reject(createUnexpectedCallError("readJustRunToolNames"))
-  )
+  return Object.freeze({ agentService, agentRuntimeService })
+}
+
+/**
+ * Registers the services of {@link createChatRouteTestApp} with its
+ * application, so the routes reach them as `app.<service>`.
+ *
+ * @param app - The test application.
+ * @param services - Services the application borrows until the test
+ * finishes.
+ */
+function registerChatRouteTestServices(
+  app: FastifyInstance,
+  services: ChatRouteTestServices
+): void {
+  app.decorate("conversationTurns", services.conversationTurns)
+  app.decorate("replyParts", services.replyParts)
+  app.decorate("conversationHistoryReader", services.conversationHistoryReader)
+  app.decorate("conversationHistoryEditor", services.conversationHistoryEditor)
+  app.decorate("chatService", services.chatService)
+  app.decorate("llmService", services.llmService)
+  app.decorate("llmRuntimeService", services.llmRuntimeService)
+  app.decorate("agentService", services.agentService)
+  app.decorate("agentRuntimeService", services.agentRuntimeService)
+  app.decorate("toolApprovalService", services.toolApprovalService)
+  app.decorate("attachmentFileStore", services.attachmentFileStore)
+  app.decorate("mcpServerRegistry", services.mcpServerRegistry)
+  app.decorate("builtInTools", services.builtInTools)
+}
+
+/**
+ * Creates a real MCP server registry for a chat route test app, which reads
+ * its settings through a spy, opens servers with a 10-second limit, and
+ * logs nothing.
+ *
+ * @returns The registry and its settings reader.
+ * @remarks The registry saves its process groups to a folder the test
+ * owns, and it is closed when the test finishes.
+ */
+export function createTestMcpServerRegistry(): TestMcpServerRegistry {
+  const emptyMcpSettings = mcpSettingsSchema.parse({})
   const readMcpSettings = vi.fn<() => Promise<McpSettingsRead>>(() =>
     Promise.resolve(
-      Object.freeze({
-        status: "read",
-        settings: Object.freeze({ servers: Object.freeze([]) })
-      })
+      Object.freeze({ status: "read", settings: emptyMcpSettings })
     )
   )
   const { processGroups } = createOwnedMcpServerProcessGroups()
   const mcpServerRegistry = new McpServerRegistry({
     readSettings: readMcpSettings,
+    builtInServers: [],
     openServer: (settings, context) =>
       openMcpServer(settings, context, MCP_TEST_OPENING_TIMEOUT_MILLISECONDS),
     workingDirectory: process.cwd(),
@@ -269,64 +548,36 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   onTestFinished(async () => {
     await mcpServerRegistry.close()
   })
-  const generations = new ReplyGenerationRegistry()
-  onTestFinished(async () => {
-    await generations[Symbol.asyncDispose]()
-  })
-  testFastify.app.setValidatorCompiler(validatorCompiler)
-  testFastify.app.decorate("conversationTurns", turns)
-  testFastify.app.decorate("replyParts", replyParts)
-  testFastify.app.decorate("conversationHistoryReader", history)
-  testFastify.app.decorate("conversationHistoryEditor", editor)
-  testFastify.app.decorate("chatService", chatService)
-  testFastify.app.decorate("llmService", llmService)
-  testFastify.app.decorate("llmRuntimeService", llmRuntimeService)
-  testFastify.app.decorate("agentService", agentService)
-  testFastify.app.decorate("agentRuntimeService", agentRuntimeService)
-  testFastify.app.decorate(
-    "toolApprovalService",
-    new ToolApprovalService(readJustRunToolNames)
-  )
-  testFastify.app.decorate(
-    "attachmentFileStore",
-    new AttachmentFileStore(attachmentsDirectoryPath)
-  )
-  testFastify.app.decorate("mcpServerRegistry", mcpServerRegistry)
-  testFastify.app.decorate(
-    "builtInTools",
-    Object.freeze([
-      Object.freeze({
-        definition: LOOK_UP_WORD_TOOL,
-        provider: new ScriptedBuiltInToolProvider({
-          status: "ready",
-          tool: new ScriptedBuiltInTool(runLookUpWordWithSource)
-        })
-      }),
-      Object.freeze({
-        definition: CHECK_SPELLING_TOOL,
-        provider: new ScriptedBuiltInToolProvider({
-          status: "unavailable",
-          reason: "api-key-missing"
-        })
+  return Object.freeze({ mcpServerRegistry, readMcpSettings })
+}
+
+/**
+ * Builds the backend tools of a chat route test app: `look_up_word`, always
+ * ready, and `check_spelling`, whose provider is never ready
+ * (`api-key-missing`).
+ *
+ * @param lookUpWordTool - Tool that runs each `look_up_word` call.
+ * @returns The two tools, `look_up_word` first.
+ */
+export function buildScriptedBuiltInTools(
+  lookUpWordTool: ScriptedBuiltInTool
+): readonly BuiltInToolEntry[] {
+  return Object.freeze([
+    Object.freeze({
+      definition: LOOK_UP_WORD_TOOL,
+      provider: new ScriptedBuiltInToolProvider({
+        status: "ready",
+        tool: lookUpWordTool
       })
-    ])
-  )
-  return Object.freeze({
-    ...testFastify,
-    createConversationTurn,
-    completeChatStream,
-    generateTitle,
-    findLlmContextMeasurement,
-    listDownloadedLlmModels,
-    findModelCapabilities: createModelCapabilitiesLookup(
-      () => llmService.listDownloadedLlmModels(),
-      () => llmRuntimeService.connectedLlmProviderAccess
-    ),
-    readJustRunToolNames,
-    attachmentsDirectoryPath,
-    generations,
-    readMcpSettings
-  })
+    }),
+    Object.freeze({
+      definition: CHECK_SPELLING_TOOL,
+      provider: new ScriptedBuiltInToolProvider({
+        status: "unavailable",
+        reason: "api-key-missing"
+      })
+    })
+  ])
 }
 
 /**

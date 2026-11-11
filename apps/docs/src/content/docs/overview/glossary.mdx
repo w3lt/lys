@@ -63,7 +63,12 @@ Terms that mean something specific inside Lys.
   client, built-in, and MCP tools: first only `find_tools`, which asks
   Armitage which of them fit a task, then each tool Armitage finds, from the
   reply's next round. Finding a tool never allows its calls; each still
-  passes the approval gate.
+  passes the tool call policy and the approval gate.
+- **Tool call policy**: the fixed rules the backend asks about every tool
+  call before the approval gate, whatever the tool: a call that names a
+  private key or credential file, or a URL or host of this machine or a
+  private network, is denied, stored as failed with a sentence the model
+  reads, and never runs or asks the person, even on Just run.
 - **User message**: a persisted message with role `user`, non-empty content,
   and the attachments sent with it.
 - **Attachment**: a file sent with a user message and stored with the

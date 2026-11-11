@@ -544,7 +544,8 @@ fraction Tavily reports is rounded up. The answer never contains the key.
 
 ## Tool approvals
 
-The backend decides which tool calls need the person: every call of a tool
+The backend decides which tool calls need the person: every call the
+[tool call policy](/architecture/backend/#tool-call-policy) allows of a tool
 that is not saved as Just run, client, backend, and MCP tools alike, except
 `read_attachment` and the agent state tools, which run without approval. It
 shows such a

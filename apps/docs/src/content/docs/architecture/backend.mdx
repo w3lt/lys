@@ -103,7 +103,8 @@ the services together.
    place, and each tool Armitage finds is offered from the next round), and
    runs rounds while
    the model calls them: each call is
-   checked by `AgentTool`, then passes the round's
+   checked by `AgentTool`, then decided by the
+   [tool call policy](#tool-call-policy), then passes the round's
    [approval gate](#tool-approval). A call of a backend tool is first parsed by
    the tool, so arguments it can never run are answered without asking. An
    allowed client tool's call is sent to the desktop as a `tool-call` event
@@ -372,11 +373,75 @@ state and context lengths the model list adds. A model the inventory does
 not list has neither capability: an image attached for it is refused, and no
 reader is offered.
 
+## Tool call policy
+
+Every checked call of every turn passes one gateway step, `startToolCall` in
+`src/modules/agent/toolCallRound.ts`, before it runs or the person is asked.
+For each call, in order:
+
+1. A call of a tool its round did not offer, such as a routed turn's tool
+   Armitage has not found, is stored as failed with a result the model reads.
+2. `AgentTool` checks the arguments against the tool's definition, only
+   their shape for an MCP tool, and a backend tool's `parseToolCall` checks
+   them for what it can run; a call either refuses is stored as failed.
+3. `decideToolCall` (`src/modules/toolApproval/toolCallPolicy.ts`) decides
+   the call by fixed rules, whatever the tool.
+4. An allowed call of a backend tool that runs without approval starts at
+   once; every other allowed call passes the round's
+   [approval gate](#tool-approval).
+
+A denied call is stored as failed with a sentence the model reads
+(`formatToolCallDenial`), naming the rule it broke and telling the model not
+to reach the target another way: it never runs, and the person is never
+asked, even for a tool saved as Just run. The rules are code and have no
+settings. Their one input from the machine, the settings file path, comes
+from the configuration: `app.ts` hands it to the chat route, every turn
+carries it, and `find_tools` hands it to Armitage's search turn, so
+Armitage's own `search_tools` and `recommend_tool` calls are decided too.
+
+The policy reads every text of the call's arguments: the argument names,
+every string value at any depth, and the keys of nested objects; numbers,
+booleans, and `null` are not read. Each text is trimmed, and the first rule
+is asked over every text before the second:
+
+- **Credential file.** The text is split into parts at `/` and `\`, without
+  empty and `.` parts, and compared in lowercase. The call is denied when a
+  part is a credential folder (`.ssh`, `.gnupg`, `.aws`, `.azure`, `.kube`,
+  `.docker`, or `Keychains`), a credential file name (`id_rsa`, `id_dsa`,
+  `id_ecdsa`, `id_ed25519`, `id_ecdsa_sk`, `id_ed25519_sk`, `.netrc`,
+  `_netrc`, `.pgpass`, `.git-credentials`, `.npmrc`, `.pypirc`, `.htpasswd`,
+  or `.env`), a name that starts with `.env.`, or a name that ends with
+  `.pem`, `.key`, `.p8`, `.p12`, `.pfx`, `.ppk`, `.jks`, `.keystore`, or
+  `.kdbx`. It is also denied when the parts hold the settings file's folder
+  and name side by side, `.lys/settings.json` with the default Lys home: the
+  file holds the provider and Tavily API keys and the email password. A
+  `file:` URL is read by its decoded path; a URL of any other scheme with a
+  host names a file on another machine and is left to the next rule.
+- **Blocked address.** A text without whitespace that is a URL with a host,
+  or a bare host with an optional port and path, is denied when the host is
+  `localhost`, a name under `.localhost`, or an IP address in a range Lys
+  never connects to: the ranges of `webAddresses.ts`, which `read_page` and
+  `web_search` also refuse. A URL's host is normalized as an `http` host
+  first, so `postgres://0x7f.1/db` names `127.0.0.1`; a bare address counts
+  only in standard notation, so a text `2130706433` is a number, not an
+  address.
+
+The rules read text only. They resolve no host name: an MCP server resolves
+the names it reaches, and `read_page` checks every resolved address when it
+runs. They follow no symbolic link and read no command, and a text with
+whitespace, such as a sentence or a shell command, is never read as an
+address, so a tool that runs commands or searches file contents can still
+reach a credential file or a local address;
+[#339](https://github.com/w3lt/lys/issues/339) proposes checking the
+resolved paths of the desktop's file tools on the host. A sentence that holds a credential
+path, such as a web search query, is denied like a path.
+
 ## Tool approval
 
 `ToolApprovalService` (`src/modules/toolApproval/toolApprovalService.ts`) is the
-approval gateway for every tool call of every turn, client, backend, and MCP
-tools alike, except a call of a backend tool that runs without approval:
+approval gate for every tool call of every turn that the
+[tool call policy](#tool-call-policy) allows, client, backend, and MCP tools
+alike, except a call of a backend tool that runs without approval:
 `read_attachment` reads only what the person attached to the conversation,
 the [agent state tools](#agent-state-tools) only read what agents are
 doing, and [`find_tools`](#tool-routing) and Armitage's search tools only
@@ -394,7 +459,7 @@ parse failures dropped unread. A missing file, `tools` group, or `justRun`
 list means no tool is on Just run. A round whose calls all run without
 approval or name no offered tool creates no gate and does not read the file.
 
-For each checked call that passes the gate, in the model's order, the gate's
+For each allowed call that passes the gate, in the model's order, the gate's
 `startToolCall` stores the call and decides how it goes on. A call of a tool on Just run is
 stored as `running` and goes on at once. Any other call is stored as
 `awaiting-approval` first; the gate then sends a `tool-approval` event, and
@@ -792,7 +857,8 @@ pane row and no saved choice, and its calls run without approval. A call
 asks the `ToolKeeper` for the turn's tools that fit the task and answers
 with their names, and each one is offered from the reply's next round to its
 end. Discovery is not authorization: each call of a found tool passes the
-argument check and the [approval gate](#tool-approval) as any other, and a
+argument check, the [tool call policy](#tool-call-policy), and the
+[approval gate](#tool-approval) as any other, and a
 call of a tool its round did not offer is stored as failed and never runs,
 with a result that lists the tools the model can call and points to
 `find_tools`, without saying whether the turn has that tool. When Armitage
@@ -1113,7 +1179,8 @@ schema requires, at most 32 levels of nesting, and no `__proto__` key. The
 server checks the values.
 
 `handleMcpToolCall` (`src/modules/agent/toolCallRound.ts`) sends every call
-through the round's [approval gate](#tool-approval), which asks the person
+the [tool call policy](#tool-call-policy) allows through the round's
+[approval gate](#tool-approval), which asks the person
 unless they saved the tool as Just run. An allowed call runs on its server as
 the server is connected when the call runs, with five minutes to answer, and
 the reply's Stop signal tells the server that the call was cancelled. A call
@@ -1466,11 +1533,13 @@ for the separate inference and model-management lifetimes.
   MCP resources, prompts, sampling, elicitation, or roots
   ([#255](https://github.com/w3lt/lys/issues/255))
 - No provider fallback or budget-accounting logic
-- No tool execution gateway or attribute-based policy engine, no approval
-  bound to one exact call, and no stored audit record of tool decisions:
-  [tool routing](#tool-routing) names tools, and each call still passes the
-  per-call approval gate; these parts of #330's tool authorization spec are
-  its follow-ups
+- No attribute-based policy engine: the
+  [tool call policy](#tool-call-policy) applies fixed rules to argument
+  text, and answers allow or deny, never a request for approval of its own
+- No approval bound to one exact call
+  ([#336](https://github.com/w3lt/lys/issues/336)) and no stored audit
+  record of tool decisions ([#337](https://github.com/w3lt/lys/issues/337)),
+  parts of #330's tool authorization spec
 
 ## Coming soon
 

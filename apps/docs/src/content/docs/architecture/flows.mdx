@@ -254,11 +254,16 @@ calls it stored are part of the new turn's context.
    switched off or unable to run, a call of a tool its round did not offer,
    such as one Armitage has not found, any call while tool calls are off, or
    a call with invalid arguments is answered by the backend itself and
-   stored as a `failed` call. Every other call is
+   stored as a `failed` call. So is a valid call the
+   [tool call policy](/architecture/backend/#tool-call-policy) denies
+   because it names a private key or credential file, or a local or private
+   network address: it never runs and is never shown to the person, even on
+   Just run. Every other call is
    stored as a part too, `running` or `awaiting-approval`, and each later
    change of it is stored and sent as a `reply-part` event.
 4. The backend's tool approval service reads the Just run choices from the
-   settings file once for the round. For each valid call, in the model's order:
+   settings file once for the round. For each call the policy allows, in the
+   model's order:
    a tool saved as Just run goes on at once; any other tool's call is stored
    as `awaiting-approval` and then shown to the person with a `tool-approval`
    event, in the same step. A call the store refuses, because the reply has

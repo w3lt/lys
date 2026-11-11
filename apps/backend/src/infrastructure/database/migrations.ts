@@ -301,6 +301,54 @@ function migrateRepliesToParts(database: DatabaseSync): void {
  * `user_version`, so every store's tables share this one list; a new table is
  * a new final entry.
  */
+/**
+ * Tells whether a stored agent or conversation holds an agent code.
+ *
+ * @param database - Open SQLite database inside the migration transaction.
+ * @param code - Agent code compared exactly.
+ * @returns True when an agent row, deleted or not, has the code, or a
+ * conversation is recorded under it.
+ */
+function isAgentCodeStored(database: DatabaseSync, code: string): boolean {
+  const row = database
+    .prepare(
+      `SELECT EXISTS (SELECT 1 FROM agents WHERE code = ?1)
+        OR EXISTS (SELECT 1 FROM conversations WHERE agent_code = ?1)
+        AS is_stored`
+    )
+    .get(code)
+  return row?.is_stored === 1
+}
+
+/**
+ * Moves the stored agent and the conversations recorded under `armitage` to
+ * the first free code `armitage-<n>`, n from 2 up.
+ *
+ * @param database - Open SQLite database inside the migration transaction.
+ * @remarks Version 12 ships Armitage, the built-in tool keeper, under
+ * `armitage`, and a built-in agent's code hides a stored agent of the same
+ * code. A stored agent under it, deleted or not, was the person's own, so it
+ * keeps its name, prompt, times, and deletion under the free code, and so
+ * do its conversations, a conversation whose agent is gone included. A code
+ * is free when no agent row and no conversation holds it, so the moved
+ * records never join another agent's. Codes are written as they were when
+ * this version shipped. Nothing changes when no record is under `armitage`.
+ */
+function moveArmitageRecords(database: DatabaseSync): void {
+  if (!isAgentCodeStored(database, "armitage")) return
+  let attempt = 2
+  while (isAgentCodeStored(database, `armitage-${attempt}`)) attempt += 1
+  const code = `armitage-${attempt}`
+  database
+    .prepare("UPDATE agents SET code = ? WHERE code = 'armitage'")
+    .run(code)
+  database
+    .prepare(
+      "UPDATE conversations SET agent_code = ? WHERE agent_code = 'armitage'"
+    )
+    .run(code)
+}
+
 const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
   `
     CREATE TABLE conversations (
@@ -523,7 +571,8 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
   `
     ALTER TABLE agents ADD COLUMN deleted_at TEXT
       CHECK (deleted_at IS NULL OR deleted_at <> '')
-  `
+  `,
+  moveArmitageRecords
 ]
 
 /** Latest schema version that the backend database can open and migrate. */

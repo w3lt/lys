@@ -3,7 +3,7 @@ import { describe, expect, it, onTestFinished } from "vitest"
 import { migrateDatabase } from "../../../../src/infrastructure/database/migrations"
 
 /** Schema version produced by the current migration list. */
-const CURRENT_SCHEMA_VERSION = 11
+const CURRENT_SCHEMA_VERSION = 12
 
 /**
  * Opens an empty in-memory database owned by the current test.
@@ -192,6 +192,101 @@ function createVersion10Database(): DatabaseSync {
     PRAGMA user_version = 10
   `)
   return database
+}
+
+/**
+ * Creates a database at version 11, whose schema is the current one.
+ *
+ * @returns A connection at `user_version` 11, closed when the test finishes.
+ * @remarks Migration 12 changes only stored codes, never the schema.
+ */
+function createVersion11Database(): DatabaseSync {
+  const database = openEmptyDatabase()
+  migrateDatabase(database)
+  database.exec("PRAGMA user_version = 11")
+  return database
+}
+
+/**
+ * Stores agents and conversations in a version-11 database.
+ *
+ * @param database - Connection at `user_version` 11.
+ * @param records - Codes of the stored agents, each deleted when its flag is
+ * true, and agent codes of the stored conversations, one conversation each.
+ */
+function saveVersion11Records(
+  database: DatabaseSync,
+  records: Readonly<{
+    agents: readonly (readonly [code: string, isDeleted: boolean])[]
+    conversationAgentCodes: readonly string[]
+  }>
+): void {
+  const saveAgent = database.prepare(
+    `INSERT INTO agents (code, name, bio, system_prompt, created_at, updated_at, deleted_at)
+    VALUES (?, 'Stored', 'Stored agent.', 'You are stored.', '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z', ?)`
+  )
+  for (const [code, isDeleted] of records.agents)
+    saveAgent.run(code, isDeleted ? "2026-01-03T00:00:00.000Z" : null)
+  const saveConversation = database.prepare(
+    `INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
+    VALUES (?, 'Kept title', ?, '2026-01-01T00:00:00.000Z', '2026-01-04T00:00:00.000Z')`
+  )
+  for (const [index, agentCode] of records.conversationAgentCodes.entries())
+    saveConversation.run(`c${index + 1}`, agentCode)
+}
+
+/**
+ * Lists the stored agents.
+ *
+ * @param database - Open connection.
+ * @returns Each agent's code, times, and deletion, by code.
+ */
+function listStoredAgents(database: DatabaseSync): unknown[] {
+  return database
+    .prepare(
+      "SELECT code, created_at, updated_at, deleted_at FROM agents ORDER BY code"
+    )
+    .all()
+}
+
+/**
+ * Lists the codes of the stored agents.
+ *
+ * @param database - Open connection.
+ * @returns The codes, in code order.
+ */
+function listStoredAgentCodes(database: DatabaseSync): unknown[] {
+  return database
+    .prepare("SELECT code FROM agents ORDER BY code")
+    .all()
+    .map((row) => row.code)
+}
+
+/**
+ * Lists the agent codes of the stored conversations.
+ *
+ * @param database - Open connection.
+ * @returns Each conversation's agent code, in id order.
+ */
+function listConversationAgentCodes(database: DatabaseSync): unknown[] {
+  return database
+    .prepare("SELECT agent_code FROM conversations ORDER BY id")
+    .all()
+    .map((row) => row.agent_code)
+}
+
+/**
+ * Lists the stored conversations.
+ *
+ * @param database - Open connection.
+ * @returns Each conversation's id, agent code, title, and times, by id.
+ */
+function listStoredConversations(database: DatabaseSync): unknown[] {
+  return database
+    .prepare(
+      "SELECT id, agent_code, title, created_at, updated_at FROM conversations ORDER BY id"
+    )
+    .all()
 }
 
 /**
@@ -1084,6 +1179,117 @@ describe("migrateDatabase", () => {
         deleted_at: null
       }
     ])
+  })
+
+  it("upgrades a version-11 database by moving a stored agent coded armitage and its conversations to armitage-2, changing nothing else", () => {
+    const database = createVersion11Database()
+    saveVersion11Records(database, {
+      agents: [
+        ["armitage", false],
+        ["researcher", false]
+      ],
+      conversationAgentCodes: ["armitage", "researcher", "armitage"]
+    })
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
+    expect(listStoredAgents(database)).toEqual([
+      {
+        code: "armitage-2",
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-02T00:00:00.000Z",
+        deleted_at: null
+      },
+      {
+        code: "researcher",
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-02T00:00:00.000Z",
+        deleted_at: null
+      }
+    ])
+    expect(listStoredConversations(database)).toEqual(
+      [
+        ["c1", "armitage-2"],
+        ["c2", "researcher"],
+        ["c3", "armitage-2"]
+      ].map(([id, agentCode]) => ({
+        id,
+        agent_code: agentCode,
+        title: "Kept title",
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-04T00:00:00.000Z"
+      }))
+    )
+  })
+
+  it("upgrades a version-11 database by moving a deleted stored agent coded armitage, keeping its deletion", () => {
+    const database = createVersion11Database()
+    saveVersion11Records(database, {
+      agents: [["armitage", true]],
+      conversationAgentCodes: []
+    })
+
+    migrateDatabase(database)
+
+    expect(listStoredAgents(database)).toEqual([
+      {
+        code: "armitage-2",
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-02T00:00:00.000Z",
+        deleted_at: "2026-01-03T00:00:00.000Z"
+      }
+    ])
+  })
+
+  it("upgrades a version-11 database by moving armitage's records to the first code no agent and no conversation holds", () => {
+    const database = createVersion11Database()
+    saveVersion11Records(database, {
+      agents: [
+        ["armitage", false],
+        ["armitage-2", true]
+      ],
+      conversationAgentCodes: ["armitage", "armitage-3"]
+    })
+
+    migrateDatabase(database)
+
+    expect(listStoredAgentCodes(database)).toEqual(["armitage-2", "armitage-4"])
+    expect(listConversationAgentCodes(database)).toEqual([
+      "armitage-4",
+      "armitage-3"
+    ])
+  })
+
+  it("upgrades a version-11 database by moving conversations recorded under armitage without a stored agent", () => {
+    const database = createVersion11Database()
+    saveVersion11Records(database, {
+      agents: [],
+      conversationAgentCodes: ["armitage"]
+    })
+
+    migrateDatabase(database)
+
+    expect(listConversationAgentCodes(database)).toEqual(["armitage-2"])
+  })
+
+  it("upgrades a version-11 database without a record under armitage without changing anything", () => {
+    const database = createVersion11Database()
+    saveVersion11Records(database, {
+      agents: [
+        ["armitage-2", false],
+        ["researcher", false]
+      ],
+      conversationAgentCodes: ["researcher", "caliginia"]
+    })
+    const agents = listStoredAgents(database)
+    const conversations = listStoredConversations(database)
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
+    expect(listStoredAgents(database)).toEqual(agents)
+    expect(listStoredConversations(database)).toEqual(conversations)
   })
 
   it("refuses an empty agent deletion time", () => {

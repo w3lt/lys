@@ -1,5 +1,10 @@
 import type { DatabaseStatementCompiler } from "../databaseTransactions"
 import {
+  listDeliveredJobReports,
+  type DeliveredJobReports
+} from "../delegation/jobReports"
+import { listConversationJobs } from "../delegation/jobs"
+import {
   conversationMetadataSchema,
   conversationMessageSchema,
   conversationSourceSchema,
@@ -31,6 +36,8 @@ type StoredMessageContext = Readonly<{
   partsByReply: StoredReplyParts
   /** Untrusted attachments of the conversation's user messages. */
   attachmentsByMessage: StoredMessageAttachments
+  /** Validated reports the conversation's user messages delivered. */
+  reportsByMessage: DeliveredJobReports
 }>
 
 /**
@@ -87,9 +94,9 @@ function listStoredMessageAttachments(
  * Reads metadata without changing activity time.
  * @param statements - Statement compilation lent to the caller's transaction.
  * @param conversationId - Stored UUIDv7 to look up.
- * @returns Independent metadata, or undefined for an absent conversation.
- * Every stored conversation is a main one, so it has no parent, job number,
- * or delegator.
+ * @returns Independent metadata, or undefined for an absent conversation. A
+ * job carries its parent, its number, and its parent's agent as the
+ * delegator; a main conversation carries none of the three.
  * @throws If SQLite access or persisted validation fails.
  */
 function findConversationMetadata(
@@ -98,17 +105,17 @@ function findConversationMetadata(
 ): ConversationMetadata | undefined {
   const row = statements
     .getStatement(
-      `SELECT id, title, agent_code AS agentCode,
-    created_at AS createdAt, updated_at AS updatedAt FROM conversations WHERE id = ?`
+      `SELECT c.id, c.title, c.agent_code AS agentCode,
+    c.parent_conversation_id AS parentConversationId, c.job_number AS jobNumber,
+    p.agent_code AS delegatorAgentCode,
+    c.created_at AS createdAt, c.updated_at AS updatedAt
+    FROM conversations c
+    LEFT JOIN conversations p ON p.id = c.parent_conversation_id
+    WHERE c.id = ?`
     )
     .get(conversationId)
   if (row === undefined) return undefined
-  return conversationMetadataSchema.parse({
-    ...row,
-    parentConversationId: null,
-    jobNumber: null,
-    delegatorAgentCode: null
-  })
+  return conversationMetadataSchema.parse(row)
 }
 
 /**
@@ -206,17 +213,18 @@ function listStoredReplyParts(
 /**
  * Projects role-specific SQLite columns into the strict message contract.
  * @param row - Untrusted stored user or reply row selected by findConversation.
- * @param context - Validated parts of the conversation's replies and the
- * untrusted attachments of its user messages.
+ * @param context - Validated parts of the conversation's replies, and the
+ * untrusted attachments and validated delivered reports of its user
+ * messages.
  * @returns The validated independent message; a user message carries its
- * attachments and a reply its parts. Every stored user message is the
- * person's and carries no reports.
+ * attachments, who wrote it, and the reports it delivered, and a reply its
+ * parts. A user message stored without an origin is the person's.
  * @throws If the row, or an attachment of it, violates the shared message
  * schema.
  */
 function parseConversationMessage(
   row: StoredRow,
-  { partsByReply, attachmentsByMessage }: StoredMessageContext
+  { partsByReply, attachmentsByMessage, reportsByMessage }: StoredMessageContext
 ): ConversationMessage {
   const common = {
     id: row.id,
@@ -228,8 +236,8 @@ function parseConversationMessage(
       ...common,
       content: row.content,
       attachments: attachmentsByMessage.get(row.id) ?? [],
-      origin: "person",
-      reports: []
+      origin: row.origin ?? "person",
+      reports: reportsByMessage.get(row.id) ?? []
     })
   return conversationMessageSchema.parse({
     ...common,
@@ -263,12 +271,13 @@ function listConversationSources(
 
 /**
  * Reads a full transcript in creation-time and UUID order, with each user
- * message's attachments, each reply's parts, and the conversation's sources.
+ * message's attachments and delivered reports, each reply's parts, and the
+ * conversation's sources and jobs.
  * @param statements - Statement compilation lent to the caller's read or write transaction.
  * @param conversationId - Stored UUIDv7 to look up.
- * @returns Independent conversation data, or undefined when absent. Reading
- * it never touches the attachment files. It has no jobs, because none is
- * stored.
+ * @returns Independent conversation data of a main conversation or a job,
+ * with the jobs started from it in number order, or undefined when absent.
+ * Reading it never touches the attachment files.
  * @throws If SQLite access or persisted validation fails.
  */
 export function findConversation(
@@ -282,11 +291,12 @@ export function findConversation(
     attachmentsByMessage: listStoredMessageAttachments(
       statements,
       conversationId
-    )
+    ),
+    reportsByMessage: listDeliveredJobReports(statements, conversationId)
   }
   const rows = statements
     .getStatement(
-      `SELECT id, role, model, content, status,
+      `SELECT id, role, model, content, status, origin,
     finish_reason AS finishReason, created_at AS createdAt, updated_at AS updatedAt
     FROM conversation_messages
     WHERE conversation_id = ? AND role IN ('user', 'assistant') ORDER BY created_at, id`
@@ -296,6 +306,6 @@ export function findConversation(
     ...metadata,
     messages: rows.map((row) => parseConversationMessage(row, context)),
     sources: listConversationSources(statements, conversationId),
-    jobs: []
+    jobs: listConversationJobs(statements, conversationId)
   }
 }

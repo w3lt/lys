@@ -1,6 +1,8 @@
 import { onTestFinished } from "vitest"
+import * as z from "zod"
 import {
   isAnsweredToolCall,
+  jobReportKindSchema,
   type ConversationSource,
   type ReplyPart
 } from "@lys/share"
@@ -13,6 +15,7 @@ import SqliteConversationRecordReader from "../../../src/infrastructure/database
 import SqliteConversationTurnRecordWriter from "../../../src/infrastructure/database/conversations/sqliteConversationTurnRecordWriter"
 import SqliteReplyPartRecordWriter from "../../../src/infrastructure/database/conversations/sqliteReplyPartRecordWriter"
 import type {
+  DatabaseReader,
   DatabaseStatementCompiler,
   DatabaseWriter
 } from "../../../src/infrastructure/database/databaseTransactions"
@@ -21,6 +24,7 @@ import type {
   AssistantMessageRowFixture,
   ConversationRecordsHarness,
   ConversationRowFixture,
+  JobReportRowFixture,
   UserMessageRowFixture
 } from "./conversationRecordsContract"
 
@@ -74,6 +78,9 @@ export function openSqliteConversationRecords(
     saveSource: (conversationId, source) => {
       saveSourceRow(database, conversationId, source)
     },
+    saveJobReport: (row) => {
+      saveJobReportRow(database, row)
+    },
     closeRecords: () => {
       database[Symbol.dispose]()
     }
@@ -126,27 +133,38 @@ export function openConversationTestServices(
  * Inserts one conversation row.
  *
  * @param database - Write access to a migrated test database.
- * @param row - Stored column values.
+ * @param row - Stored column values; a row without a parent and a job number
+ * is a main conversation.
  */
 export function saveConversationRow(
   database: DatabaseWriter,
   row: ConversationRowFixture
 ): void {
+  const values = [
+    row.id,
+    row.title,
+    row.agentCode,
+    row.createdAt,
+    row.createdAt,
+    row.parentConversationId ?? null,
+    row.jobNumber ?? null
+  ]
   database.handleDatabaseWriteRequest((statements) => {
     statements
       .getStatement(
-        `INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO conversations (id, title, agent_code, created_at, updated_at,
+      parent_conversation_id, job_number) VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(row.id, row.title, row.agentCode, row.createdAt, row.createdAt)
+      .run(...values)
   })
 }
 
 /**
- * Inserts one user-message row.
+ * Inserts one user-message row and a row for each of its attachments.
  *
  * @param database - Write access to a migrated test database.
- * @param row - Stored column values.
+ * @param row - Stored column values; a row without an origin is the person's
+ * message.
  * @remarks The schema's insert trigger sets the conversation's activity time
  * to `createdAt`. Insert messages in ascending time order after the
  * conversation's creation; an earlier time makes the schema substitute the
@@ -157,30 +175,64 @@ export function saveUserMessageRow(
   row: UserMessageRowFixture
 ): void {
   database.handleDatabaseWriteRequest((statements) => {
-    statements
-      .getStatement(
-        `INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
-      VALUES (?, ?, 'user', ?, ?)`
-      )
-      .run(row.id, row.conversationId, row.content, row.createdAt)
-    const insertAttachment = statements.getStatement(
-      `INSERT INTO conversation_attachments
+    saveMessageRow(statements, row)
+    saveAttachmentRows(statements, row)
+  })
+}
+
+/**
+ * Inserts the row of a user message, without its attachments.
+ *
+ * @param statements - Compilation lent to the running write operation.
+ * @param row - Stored column values of the message.
+ */
+function saveMessageRow(
+  statements: DatabaseStatementCompiler,
+  row: UserMessageRowFixture
+): void {
+  statements
+    .getStatement(
+      `INSERT INTO conversation_messages
+      (id, conversation_id, role, content, created_at, origin, job_call_id)
+      VALUES (?, ?, 'user', ?, ?, ?, ?)`
+    )
+    .run(
+      row.id,
+      row.conversationId,
+      row.content,
+      row.createdAt,
+      row.origin ?? null,
+      row.jobCallId ?? null
+    )
+}
+
+/**
+ * Inserts the rows of a user message's attachments.
+ *
+ * @param statements - Compilation lent to the running write operation.
+ * @param row - The message whose attachments are inserted.
+ */
+function saveAttachmentRows(
+  statements: DatabaseStatementCompiler,
+  row: UserMessageRowFixture
+): void {
+  const insertAttachment = statements.getStatement(
+    `INSERT INTO conversation_attachments
       (conversation_id, message_id, number, name, kind, media_type, size_bytes, width, height)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+  for (const attachment of row.attachments ?? [])
+    insertAttachment.run(
+      row.conversationId,
+      row.id,
+      attachment.number,
+      attachment.name,
+      attachment.kind,
+      attachment.kind === "image" ? attachment.mediaType : null,
+      attachment.sizeBytes,
+      attachment.kind === "image" ? attachment.width : null,
+      attachment.kind === "image" ? attachment.height : null
     )
-    for (const attachment of row.attachments ?? [])
-      insertAttachment.run(
-        row.conversationId,
-        row.id,
-        attachment.number,
-        attachment.name,
-        attachment.kind,
-        attachment.kind === "image" ? attachment.mediaType : null,
-        attachment.sizeBytes,
-        attachment.kind === "image" ? attachment.width : null,
-        attachment.kind === "image" ? attachment.height : null
-      )
-  })
 }
 
 /**
@@ -317,4 +369,111 @@ export function saveSourceRow(
       )
       .run(conversationId, source.number, source.url, source.title)
   })
+}
+
+/**
+ * Inserts one job-report row.
+ *
+ * @param database - Write access to a migrated test database.
+ * @param row - Stored column values; the source numbers are stored as JSON.
+ */
+export function saveJobReportRow(
+  database: DatabaseWriter,
+  row: JobReportRowFixture
+): void {
+  const values = [
+    row.id,
+    row.jobId,
+    row.replyId,
+    row.kind,
+    row.title,
+    row.content,
+    JSON.stringify(row.sourceNumbers),
+    row.createdAt,
+    row.deliveredMessageId
+  ]
+  database.handleDatabaseWriteRequest((statements) => {
+    statements
+      .getStatement(
+        `INSERT INTO job_reports (id, job_conversation_id, reply_id, kind, title, content,
+      source_numbers, created_at, delivered_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(...values)
+  })
+}
+
+/** Validates one stored job-report row once its source numbers are decoded. */
+const jobReportRowSchema = z.strictObject({
+  id: z.string(),
+  jobId: z.string(),
+  replyId: z.string(),
+  kind: jobReportKindSchema,
+  title: z.string(),
+  content: z.string(),
+  sourceNumbers: z.array(z.number()),
+  createdAt: z.string(),
+  deliveredMessageId: z.string().nullable()
+})
+
+/**
+ * Projects one stored job-report row into the values it was saved from.
+ *
+ * @param row - Untrusted stored row selected by
+ * {@link listStoredJobReportRows}.
+ * @returns The row with its source numbers decoded.
+ * @throws If the row is not a job-report row, or its source numbers are not
+ * a JSON list of numbers.
+ */
+function parseJobReportRow(row: Record<string, unknown>): JobReportRowFixture {
+  const sourceNumbers: unknown =
+    typeof row.sourceNumbers === "string"
+      ? JSON.parse(row.sourceNumbers)
+      : row.sourceNumbers
+  return jobReportRowSchema.parse({
+    id: row.id,
+    jobId: row.jobId,
+    replyId: row.replyId,
+    kind: row.kind,
+    title: row.title,
+    content: row.content,
+    sourceNumbers,
+    createdAt: row.createdAt,
+    deliveredMessageId: row.deliveredMessageId
+  })
+}
+
+/**
+ * Reads every stored job-report row inside the caller's read operation.
+ *
+ * @param statements - Compilation lent to the running read operation.
+ * @returns The rows in creation-time and then identity order.
+ * @throws If a stored row is not a job-report row.
+ */
+function listStoredJobReportRows(
+  statements: DatabaseStatementCompiler
+): JobReportRowFixture[] {
+  return statements
+    .getStatement(
+      `SELECT id, job_conversation_id AS jobId, reply_id AS replyId, kind, title,
+      content, source_numbers AS sourceNumbers, created_at AS createdAt,
+      delivered_message_id AS deliveredMessageId
+      FROM job_reports ORDER BY created_at, id`
+    )
+    .all()
+    .map((row) => parseJobReportRow(row))
+}
+
+/**
+ * Lists every stored job-report row.
+ *
+ * @param database - Read access to a migrated test database.
+ * @returns The rows in creation-time and then identity order, as
+ * {@link saveJobReportRow} takes them.
+ */
+export function listJobReportRows(
+  database: DatabaseReader
+): JobReportRowFixture[] {
+  return database.handleDatabaseReadRequest((statements) =>
+    listStoredJobReportRows(statements)
+  )
 }

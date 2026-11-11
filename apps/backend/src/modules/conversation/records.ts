@@ -190,7 +190,8 @@ export interface ConversationRecordEditor {
     title: string
   ): ConversationMetadata | undefined
   /**
-   * Permanently deletes a conversation and every message in it.
+   * Permanently deletes a conversation and every message in it, and with it
+   * every job started from it and the jobs' reports.
    *
    * @param conversationId - UUIDv7 to delete.
    * @returns True when it was stored; false when it was already absent.

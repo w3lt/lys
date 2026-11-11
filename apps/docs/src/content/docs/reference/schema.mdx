@@ -202,6 +202,14 @@ Version 11 adds `agents.deleted_at`, `NULL` for every stored agent, because
 deleting an agent now only marks it: the row stays, so its code is never
 free again. Agents deleted before version 11 are gone, and their codes stay
 free. Builds that support only version 10 refuse a version-11 database.
+Version 12 changes rows only: a stored agent coded `armitage`, deleted or
+not, and every conversation stored under `armitage` move to the first code
+`armitage-<n>` (from `armitage-2`) that no agent or conversation holds,
+because Armitage, the tool keeper, now ships under that code and a built-in
+agent's code hides a stored agent's. Names, bios, prompts, times, a
+deletion, titles, and messages stay, and a database without such rows is
+left as it was. Builds that support only version 11 refuse a version-12
+database.
 Versions 1–3 are unchanged. Missing migrations
 and the version marker commit together. At startup, streaming replies
 become interrupted with a refreshed `updated_at`; their waiting and running

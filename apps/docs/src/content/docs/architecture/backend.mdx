@@ -24,7 +24,7 @@ the services together.
 | Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services, the agent service over SQLite records and the agent runtime service over it, LLM services without contacting the model provider, the built-in tools, the tool approval service, the MCP server registry, whose only built-in server is the email server Lys ships, and the email account checker, which runs the same email server, without reading the settings or starting anything. |
 | Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                                                                                                                                                                                                                                                                     |
 | Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, marks a deleted agent deleted, and searches every agent; contains no SQL.                                                                                                                                             |
-| Agent runtime service | `src/modules/agent`               | Keeps one live agent per agent a chat or a context measurement has loaded, each with its own request slots, finds the one that answers a chat, and tells agents about themselves and each other as their roles allow; see [live agents](#live-agents).                                                                                                                                                                                                                |
+| Agent runtime service | `src/modules/agent`               | Keeps one live agent per agent a chat or a context measurement has loaded, each with its own request slots, finds the one that answers a chat, tells agents about themselves and each other as their roles allow, and has Armitage, the tool keeper, find the tools a routed turn needs; see [live agents](#live-agents) and [tool routing](#tool-routing).                                                                                                           |
 | Database              | `src/infrastructure/database`     | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and runs every conversation query in `conversations/` and every agent query in `agents/`.                                                                                                                                                                                                                                                     |
 | Chat routes           | `src/modules/chat/routes`         | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                                                                                                                                                                                                                                                                                                                                                                    |
 | Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -93,12 +93,15 @@ the services together.
    has then: a built-in agent's shipped prompt, or a stored agent's current
    one. The agent's `createReply` opens an
    OpenAI-compatible streaming completion against the connected provider through
-   `OpenAiReplyModel`, offers the request's tools (client tools first, then
-   built-in tools, then the attachment reader when the conversation holds a
-   text file and the model is trained for tool use, then MCP tools, then,
-   when the model is trained for tool use, the
-   [agent state tools](#agent-state-tools) the agent's role gives), and runs
-   rounds while
+   `OpenAiReplyModel`, offers the turn's tools (the attachment reader first
+   when the conversation holds a text file and the model is trained for tool
+   use, then client tools, then built-in tools, then MCP tools, then, when
+   the model is trained for tool use, the
+   [agent state tools](#agent-state-tools) the agent's role gives; when the
+   model is trained for tool use, the request's tools are
+   [routed](#tool-routing): the first round offers `find_tools` in their
+   place, and each tool Armitage finds is offered from the next round), and
+   runs rounds while
    the model calls them: each call is
    checked by `AgentTool`, then passes the round's
    [approval gate](#tool-approval). A call of a backend tool is first parsed by
@@ -157,9 +160,11 @@ switches tool calls off, the tools, and
 stored messages a turn's first round would send, with an empty new message
 that measures the markup around the text. It reads the model's capabilities
 through the chat route's lookup, so the images a model with vision sees are
-counted, and `read_attachment` and the agent state tools are among the
-measured tools when a turn would offer them. An offered MCP tool is
-measured, after the reader and before the agent state tools, only while its
+counted, and the tools are measured as a turn's first round would offer
+them: `read_attachment` first when a turn would offer it, then the request's
+tools, or, for a routed turn, `find_tools` in their place with the routing
+note at the end of the system prompt, then the agent state tools. An offered
+MCP tool is measured, or counted among a routed turn's tools, only while its
 server is connected, because its definition is known only then; one whose
 server is not connected is left out, and a name no applied server lists
 answers `400`. It never reads an image's
@@ -348,8 +353,9 @@ from the image's stored sides, so it needs no bytes.
 
 A text file is never sent whole. When the conversation holds one and the
 model is trained for tool use, the turn offers
-[`read_attachment`](#read_attachment) after the request's tools, and the
-model reads the file in parts when it needs it. The reader's results stay in
+[`read_attachment`](#read_attachment) before the request's tools, in every
+round, and the model reads the file in parts when it needs it. The
+reader's results stay in
 the reply's stored parts, so later turns resend them like every other tool
 result.
 
@@ -372,9 +378,13 @@ reader is offered.
 approval gateway for every tool call of every turn, client, backend, and MCP
 tools alike, except a call of a backend tool that runs without approval:
 `read_attachment` reads only what the person attached to the conversation,
-and the [agent state tools](#agent-state-tools) only read what agents are
-doing, so their calls are stored as `running` at once and never pass the
-gate. When a
+the [agent state tools](#agent-state-tools) only read what agents are
+doing, and [`find_tools`](#tool-routing) and Armitage's search tools only
+read the turn's tool definitions and name tools, running none, so their
+calls are stored as `running` at once and never pass the gate. A call of a
+tool its round did not offer, such as a routed turn's tool Armitage has not
+found, is stored as failed with a result the model reads and never reaches
+the gate. When a
 round with a call to gate arrives, `createToolCallGate` reads
 `tools.justRun` from the desktop's settings file with `readJustRunToolNames`
 (`src/infrastructure/settings/justRunToolsFile.ts`) and returns a
@@ -419,11 +429,13 @@ now (`page-reader-not-ready`, `api-key-missing`, `api-key-invalid`, or
 `settings-unreadable`). `createBuiltInTools()` builds the list once at
 startup: `read_page`, found by `ReadPageToolProvider`, then `web_search`,
 found by `WebSearchToolProvider`. The attachment reader, `read_attachment`,
-and the agent state tools are in neither the registry nor the tool list: the
-chat route builds the reader for each turn whose conversation holds a text
-attachment, the agent adds its state tools to each turn, and their calls run
-without asking; see [`read_attachment`](#read_attachment) and
-[agent state tools](#agent-state-tools). `ReadPageToolProvider` sends vmo one
+the agent state tools, and `find_tools` are in neither the registry nor the
+tool list: the chat route builds the reader for each turn whose conversation
+holds a text attachment, the agent adds its state tools to each turn and
+`find_tools` to each routed turn, and their calls run without asking; see
+[`read_attachment`](#read_attachment),
+[agent state tools](#agent-state-tools), and [tool routing](#tool-routing).
+`ReadPageToolProvider` sends vmo one
 `GET /health` per lookup (`web/vmoHealth.ts`), on a connection of its own, and
 gives the tool only for a `200` within one second. Any other status, a refused
 or broken connection, an answer that is not HTTP, or no answer in time is
@@ -623,9 +635,10 @@ file the person attached to a message of the conversation. Its definition
 (`buildReadAttachmentDefinition`, `src/modules/attachment/readAttachmentTool.ts`)
 has group `files`, access `reads`, and runner `backend`, and tells the model
 to read a file by the number its message lists it under. A turn offers it
-after the request's backend tools when the conversation, the new message
-included, holds a text attachment and the model is trained for tool use. Its
-calls run without approval, as they read only what the person attached to
+first, as a direct tool in every round, routed or not, when the
+conversation, the new message included, holds a text attachment and the
+model is trained for tool use. Its calls run without approval, as they
+read only what the person attached to
 this conversation; it has no Tools pane row and no saved choice.
 
 `ReadAttachmentTool` holds the conversation's attachments by number and a
@@ -658,11 +671,11 @@ other tool of the turn. Their definitions have group `agents`, access
 choice, and their calls run without approval. Which ones an agent gets
 follows its role (see [roles](#roles)):
 
-| Tool               | Offered to          | Arguments                    | Result                                                                                                                                                                    |
-| ------------------ | ------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `read_my_state`    | every agent         | none                         | Who the agent is, its role, how many of its request slots are in use, and each request it is working on or that waits for a slot, the reply that calls the tool included. |
-| `find_agents`      | the built-in agents | `query`, 1 to 100 characters | Up to 20 agents whose code, name, or bio contains the query, deleted ones included, and how many match.                                                                   |
-| `read_agent_state` | the built-in agents | `code`, an agent code        | Another agent's name, role, when it was deleted if it was, how many of its request slots are in use, and the requests it is working on or that wait for a slot.           |
+| Tool               | Offered to               | Arguments                    | Result                                                                                                                                                                    |
+| ------------------ | ------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `read_my_state`    | every agent but Armitage | none                         | Who the agent is, its role, how many of its request slots are in use, and each request it is working on or that waits for a slot, the reply that calls the tool included. |
+| `find_agents`      | the built-in agents      | `query`, 1 to 100 characters | Up to 20 agents whose code, name, or bio contains the query, deleted ones included, and how many match.                                                                   |
+| `read_agent_state` | the built-in agents      | `code`, an agent code        | Another agent's name, role, when it was deleted if it was, how many of its request slots are in use, and the requests it is working on or that wait for a slot.           |
 
 A state names each request's conversation by its title, read when the tool
 runs (`This reply, in this conversation` for the calling reply, otherwise
@@ -743,12 +756,13 @@ frees them all.
 ### Roles
 
 Roles are fixed in code (`src/modules/agent/agentRoles.ts`), from the
-agent's kind:
+agent's code and kind:
 
-| Role     | Agents              | Permissions                                     |
-| -------- | ------------------- | ----------------------------------------------- |
-| `leader` | the built-in agents | read its own state, find agents, read any state |
-| `member` | the stored agents   | read its own state                              |
+| Role          | Agents                                  | Permissions                                     |
+| ------------- | --------------------------------------- | ----------------------------------------------- |
+| `leader`      | the built-in agents other than Armitage | read its own state, find agents, read any state |
+| `member`      | the stored agents                       | read its own state                              |
+| `tool-keeper` | Armitage                                | none                                            |
 
 The tools an agent is offered and every check follow these permissions.
 The runtime service answers each state read and search
@@ -756,6 +770,59 @@ The runtime service answers each state read and search
 reads anything, reads agents through the agent service, deleted ones
 included, and reads the requests of the agent's live instance; an agent with
 no live instance is working on no request, and a read never creates one.
+
+## Tool routing
+
+When the model is trained for tool use and a turn offers client, built-in,
+or MCP tools, the turn routes them through Armitage, the tool keeper, so the
+model's context does not hold every tool definition while it decides which
+one it needs ([#330](https://github.com/w3lt/lys/issues/330)).
+`buildReplyTools` (`src/modules/agent/toolRouting.ts`) keeps every tool of
+the turn in its toolset, but the reply's `ReplyToolOffer` offers its first
+round only the direct tools (the attachment reader), `find_tools`, and the
+agent state tools, and every round's system prompt ends with a note that
+says how many tools Armitage keeps and to call `find_tools` before using
+one. A model not trained for tool use, and a turn without such a tool, get
+every tool from the first round, as before.
+
+`find_tools(task)` (`src/modules/agent/findToolsTool.ts`) takes what the
+model needs a tool for, 1 to 500 characters after trimming. Its definition
+has group `agents`, access `reads`, and runner `backend`; it has no Tools
+pane row and no saved choice, and its calls run without approval. A call
+asks the `ToolKeeper` for the turn's tools that fit the task and answers
+with their names, and each one is offered from the reply's next round to its
+end. Discovery is not authorization: each call of a found tool passes the
+argument check and the [approval gate](#tool-approval) as any other, and a
+call of a tool its round did not offer is stored as failed and never runs,
+with a result that lists the tools the model can call and points to
+`find_tools`, without saying whether the turn has that tool. When Armitage
+cannot search, the call fails with a result saying so, no tool is offered
+for it, the reply goes on, and the chat route logs a warning with the
+request's logger.
+
+`AgentRuntimeService` is the `ToolKeeper`. `runToolKeeperSearch`
+(`src/modules/agent/toolKeeperSearch.ts`) runs each search on Armitage's
+[live agent](#live-agents), as one of its requests on the asking
+conversation, so it takes one of Armitage's request slots and a leader's
+`read_agent_state` lists it while it runs. Armitage answers with its own
+system prompt, the asking turn's model and generation controls, a user
+message holding the task, no history or images, and two tools of its own,
+which run at once without approval:
+
+| Tool             | Arguments                                 | Result                                                                                                                                                                                                                                |
+| ---------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `search_tools`   | `query`, 1 to 200 characters, with a word | Up to 8 of the asking turn's tools whose name, group, and description best match the query, ranked with BM25 (`ToolCatalog`, `toolCatalog.ts`), each with its description on one line cut to 200 characters, and how many more match. |
+| `recommend_tool` | `name`, a name `search_tools` listed      | Records the tool as fitting the task, at most 5 per search.                                                                                                                                                                           |
+
+Armitage reads only the asking turn's definitions and runs none of its
+tools. `MemoryReply` (`memoryReply.ts`) keeps Armitage's reply in memory;
+it is never stored or sent, and the asking reply shows the search only as
+its `find_tools` call. A search ends with the tools Armitage recommended
+when its reply completes or reaches its limit of 6 rounds of tool calls. It
+fails when Armitage's reply is refused, because its request slots and line
+are full, a round does not fit the model's context window, or the model is
+not loaded, when the reply fails, or when the model reports it cancelled.
+Stop ends a search with the asking reply. Nothing of a search is stored.
 
 ## MCP servers
 
@@ -1036,8 +1103,9 @@ names only the tools of connected servers, so a desktop offers such a tool
 only when the server stopped being connected after the list was read.
 
 The turn keeps each tool's definition and a call function, and `Agent` adds
-MCP tools to the toolset after the client tools, the built-in tools, and the
-reader, and before the [agent state tools](#agent-state-tools).
+MCP tools to the toolset after the reader, the client tools, and the
+built-in tools, and before the [agent state tools](#agent-state-tools); a
+[routed](#tool-routing) turn offers each one once `find_tools` finds it.
 `AgentTool.parseCallArguments` checks only the shape of an MCP call's
 arguments before the person is asked: argument text of at most 256 KiB, a
 JSON object whose keys follow the argument name rule, every name the input
@@ -1205,9 +1273,12 @@ under `$LYS_HOME/attachments`, owned by `AttachmentFileStore`; see
 The agent service `AgentService` (`src/modules/agent/agentService.ts`) owns
 agent management. It uses the SQLite agent records in `agents/` for stored
 agents, but it is not one of the database services: it also owns the built-in
-agents, Caliginia (`caliginia`) and Lysiptera (`lysiptera`), which
-`buildBuiltInAgents` (`src/modules/agent/builtInAgents.ts`) builds from the
-two configured system prompts. A built-in agent is never stored: the service
+agents, Caliginia (`caliginia`), Lysiptera (`lysiptera`), and Armitage
+(`armitage`), the tool keeper, which `buildBuiltInAgents`
+(`src/modules/agent/builtInAgents.ts`) builds from the three configured
+system prompts. Armitage answers other agents through
+[`find_tools`](#tool-routing), never a chat. A built-in agent is never
+stored: the service
 lists it with every page, reads it with `kind: "built-in"`, refuses to change
 or delete it, and refuses to store another agent under its code. Deleting a
 stored agent marks its row deleted at the time of the deletion and keeps the
@@ -1226,11 +1297,13 @@ edited prompt is sent from the conversation's next turn. The chat module's `Open
 over `ChatService`'s streaming completion, using only choice 0 and refusing
 finish reasons other than `stop` and `length`. The chat route passes the agent
 the turn's history, its reply writes, its event sender, its Stop signal, and
-three reporters that log with the request's logger: a cancelled reply and a
+four reporters that log with the request's logger: a cancelled reply and a
 round that was not sent, because it did not fit or its model was not loaded,
-at debug level, and any other failed reply at error level. A new
-conversation must name a built-in or stored agent, or the chat route answers
-`404` before storing anything. When a stored conversation's agent is deleted
+at debug level, a tool search Armitage could not finish at warning level,
+and any other failed reply at error level. A new
+conversation must name a built-in or stored agent other than Armitage, or
+the chat route answers `404` before storing anything. When a stored
+conversation's agent is deleted
 or no longer exists, the chat route answers `409` and stores nothing, so the
 conversation stays readable. A deleted agent's code is never free again;
 only an agent removed before version 11 left its code free, and its
@@ -1242,7 +1315,10 @@ with the conversation's agent code, version 8 moves every conversation stored
 under the former built-in code `lys` to `caliginia`, version 9 stores each
 reply's parts as rows of their own and adds the conversation sources,
 version 10 adds the attachment rows, version 11 adds `agents.deleted_at`, so
-deleting an agent only marks it, and
+deleting an agent only marks it, version 12 moves a stored agent coded
+`armitage`, deleted or not, and every conversation stored under `armitage`
+to the first `armitage-<n>` code no agent or conversation holds, so the code
+is Armitage's, and
 turn persistence's startup recovers streaming assistants and their open tool
 calls without reordering history.
 Two triggers keep `conversations.updated_at` in sync with message and part
@@ -1331,46 +1407,48 @@ See the [health response contract](/reference/api/#model-health-responses).
 
 ## Failure behavior
 
-| Condition                                                                                                                            | Current behavior                                                                                                                                                                                                                                                   |
-| ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Chat SSE connection closes                                                                                                           | Only that follower ends; the reply and its title keep generating and are stored.                                                                                                                                                                                   |
-| Reply-stop request                                                                                                                   | The reply's upstream request is aborted, the reply is stored interrupted, and followers receive `interrupted`; the title task continues.                                                                                                                           |
-| Model operation or health-check client disconnects                                                                                   | Accepted work continues until success or failure; user cancellation is unavailable.                                                                                                                                                                                |
-| LLM runtime queue already has nine accepted operations (including connection attempts)                                               | New inventory/health/load/unload requests receive `503` with `urn:lys:problem:llm:service-busy` before acceptance.                                                                                                                                                 |
-| The provider is not connected                                                                                                        | List, load, unload, and health requests receive `503` with `urn:lys:problem:llm:runtime-unavailable` before acceptance.                                                                                                                                            |
-| A runtime call fails and the provider stopped answering                                                                              | The runtime is released, the status becomes `unreachable`, and a rejected request receives the runtime-unavailable `503`.                                                                                                                                          |
-| The saved provider needs a key and none is saved, or `settings.json` cannot be read                                                  | The connection attempt fails without contacting a provider, the status becomes `unreachable`, and the backend logs why without a key.                                                                                                                              |
-| Load or unload is asked of a provider that loads its own models (Ollama, Groq)                                                       | `409` with `urn:lys:problem:llm:provider-loads-models` before any runtime call. The desktop offers neither when the list says so.                                                                                                                                  |
-| A request resolves after a failed runtime call; the probe or release then fails                                                      | The response keeps its result; the backend logs the probe or release failure at `error`.                                                                                                                                                                           |
-| A reply round does not fit the loaded model, or its model is not loaded                                                              | The round is not sent; the reply is stored failed and followers receive an `error` that says why.                                                                                                                                                                  |
-| A reply round cannot be measured (provider not connected, queue full)                                                                | The round is not sent; the reply is stored failed and followers receive the general `error`.                                                                                                                                                                       |
-| Model stream ends without a finish reason                                                                                            | The route treats it as an error and may emit `error`.                                                                                                                                                                                                              |
-| Assistant row was deleted or already finalized                                                                                       | Late writes return false without recreating data.                                                                                                                                                                                                                  |
-| Assistant terminal state cannot be persisted                                                                                         | The task aggregates the original and storage failures, plus a failed fallback's, and rejects; the generation logs it. No final event.                                                                                                                              |
-| Unknown finish reason                                                                                                                | The backend throws instead of silently coercing it.                                                                                                                                                                                                                |
-| Title generation produces no usable title                                                                                            | The task logs a warning and sends no `error` or `title` event; a later turn retries if the conversation is still untitled.                                                                                                                                         |
-| A generated title cannot be saved                                                                                                    | The task logs an error and sends no `title` event; a later turn retries if the conversation is still untitled.                                                                                                                                                     |
-| A stored title cannot be sent after turn start                                                                                       | That follower ends silently while generation continues; a later turn attempts reconciliation again.                                                                                                                                                                |
-| A follower falls 4,096 events behind                                                                                                 | That follower closes without a final event while generation continues; following the reply again returns its stored state.                                                                                                                                         |
-| A chat request's attachment is neither UTF-8 text nor a PNG, JPEG, or WebP image                                                     | The route answers `400` with `urn:lys:problem:chat:attachment-unsupported`; nothing is stored or written.                                                                                                                                                          |
-| An image is attached for a model without vision, or for one the inventory does not list                                              | The route answers `409` with `urn:lys:problem:chat:image-needs-vision`; nothing is stored or written.                                                                                                                                                              |
-| The provider is not connected, or the queue is full, while a chat or context request reads a model's capabilities for the first time | The route answers the runtime-unavailable or service-busy `503` problem; nothing is stored or written.                                                                                                                                                             |
-| An attachment file cannot be written                                                                                                 | The message's folder and the files written into it are deleted, and the route rethrows; nothing is stored.                                                                                                                                                         |
-| A turn cannot be stored after its attachment files were written                                                                      | The message's folder is deleted again and the route answers `500`; a folder that cannot be deleted fails the request with both failures.                                                                                                                           |
-| A stored attachment's file is missing from disk                                                                                      | An image becomes a placeholder sentence in its message; a read of a text file fails with a result the model reads. The turn goes on.                                                                                                                               |
-| A deleted conversation's attachment folder cannot be removed                                                                         | The delete still answers `204`; the backend logs the failure with its cause at `error`, and the folder stays.                                                                                                                                                      |
-| A request offers a backend tool that is neither a built-in tool nor a tool an applied MCP server lists                               | The route answers `400`, naming every such name; nothing is stored.                                                                                                                                                                                                |
-| A request offers a tool whose MCP server is applied but not connected                                                                | The route answers `409` with `urn:lys:problem:chat:backend-tool-unavailable` and `mcp-server-not-connected`; nothing is stored.                                                                                                                                    |
-| An MCP server cannot be started or reached, refuses Lys, or does not finish opening within two minutes                               | The server is `failed` with its reason and its tools are not listed; the backend logs a warning, or an error with what was thrown for a failure it cannot tell apart. Reconnect or a changed setting tries again.                                                  |
-| A connected MCP server's process exits, its connection ends, or it answers a call with HTTP 404                                      | The server becomes `failed` with `closed`, its tools are no longer listed, and the backend logs a warning; a call that then runs fails with a result the model reads.                                                                                              |
-| An MCP tool call fails before the server returns a result (five minutes passed, the connection ended, an HTTP error, a refusal)      | The call is stored `failed` with the reason the model reads, and the backend logs it; the reply goes on.                                                                                                                                                           |
-| The `mcp` settings group fails its rules, or the settings file cannot be read, when it is applied                                    | The servers applied before are kept, the server list reports `invalid` or `unreadable`, and the backend logs a warning without any value.                                                                                                                          |
-| An MCP server is switched off in Settings → MCP                                                                                      | Its session is stopped and its tools are no longer listed; a call running on it fails with a sentence saying the server was stopped, and the list reports `off`. Reconnect answers `409` with `urn:lys:problem:mcp:server-off`.                                    |
-| The built-in email server is switched on while no usable account is saved                                                            | The server is `failed` with `account-missing` or `account-invalid`, nothing is started, and the backend logs a warning once per reason; Reconnect answers `409` with `urn:lys:problem:mcp:server-off`, and saving an account applies the group again.              |
-| An added MCP server has the built-in email server's name                                                                             | The added server is applied and listed; the built-in server is not, and the backend logs a warning until the added server is renamed or removed.                                                                                                                   |
-| The email server's executable is missing, or an account check does not report                                                        | The server fails as `start-failed`; a check answers `unavailable` with `server-missing` or `server-failed`, and the backend logs a warning for a missing server, or an error with the server's error lines; a check that has not ended after one minute is killed. |
-| An account check arrives while another runs                                                                                          | It is answered `unavailable` with `busy` at once, without running and without keeping the account or the password, and the backend logs a warning.                                                                                                                 |
-| Starting a turn fails for another reason                                                                                             | The route rethrows; Fastify logs it and responds `500` if no event was sent. Written rows stay.                                                                                                                                                                    |
+| Condition                                                                                                                                                              | Current behavior                                                                                                                                                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Chat SSE connection closes                                                                                                                                             | Only that follower ends; the reply and its title keep generating and are stored.                                                                                                                                                                                   |
+| Reply-stop request                                                                                                                                                     | The reply's upstream request is aborted, the reply is stored interrupted, and followers receive `interrupted`; the title task continues.                                                                                                                           |
+| Model operation or health-check client disconnects                                                                                                                     | Accepted work continues until success or failure; user cancellation is unavailable.                                                                                                                                                                                |
+| LLM runtime queue already has nine accepted operations (including connection attempts)                                                                                 | New inventory/health/load/unload requests receive `503` with `urn:lys:problem:llm:service-busy` before acceptance.                                                                                                                                                 |
+| The provider is not connected                                                                                                                                          | List, load, unload, and health requests receive `503` with `urn:lys:problem:llm:runtime-unavailable` before acceptance.                                                                                                                                            |
+| A runtime call fails and the provider stopped answering                                                                                                                | The runtime is released, the status becomes `unreachable`, and a rejected request receives the runtime-unavailable `503`.                                                                                                                                          |
+| The saved provider needs a key and none is saved, or `settings.json` cannot be read                                                                                    | The connection attempt fails without contacting a provider, the status becomes `unreachable`, and the backend logs why without a key.                                                                                                                              |
+| Load or unload is asked of a provider that loads its own models (Ollama, Groq)                                                                                         | `409` with `urn:lys:problem:llm:provider-loads-models` before any runtime call. The desktop offers neither when the list says so.                                                                                                                                  |
+| A request resolves after a failed runtime call; the probe or release then fails                                                                                        | The response keeps its result; the backend logs the probe or release failure at `error`.                                                                                                                                                                           |
+| A reply round does not fit the loaded model, or its model is not loaded                                                                                                | The round is not sent; the reply is stored failed and followers receive an `error` that says why.                                                                                                                                                                  |
+| A reply round cannot be measured (provider not connected, queue full)                                                                                                  | The round is not sent; the reply is stored failed and followers receive the general `error`.                                                                                                                                                                       |
+| Model stream ends without a finish reason                                                                                                                              | The route treats it as an error and may emit `error`.                                                                                                                                                                                                              |
+| Assistant row was deleted or already finalized                                                                                                                         | Late writes return false without recreating data.                                                                                                                                                                                                                  |
+| Assistant terminal state cannot be persisted                                                                                                                           | The task aggregates the original and storage failures, plus a failed fallback's, and rejects; the generation logs it. No final event.                                                                                                                              |
+| Unknown finish reason                                                                                                                                                  | The backend throws instead of silently coercing it.                                                                                                                                                                                                                |
+| Title generation produces no usable title                                                                                                                              | The task logs a warning and sends no `error` or `title` event; a later turn retries if the conversation is still untitled.                                                                                                                                         |
+| A generated title cannot be saved                                                                                                                                      | The task logs an error and sends no `title` event; a later turn retries if the conversation is still untitled.                                                                                                                                                     |
+| A stored title cannot be sent after turn start                                                                                                                         | That follower ends silently while generation continues; a later turn attempts reconciliation again.                                                                                                                                                                |
+| A follower falls 4,096 events behind                                                                                                                                   | That follower closes without a final event while generation continues; following the reply again returns its stored state.                                                                                                                                         |
+| A chat request's attachment is neither UTF-8 text nor a PNG, JPEG, or WebP image                                                                                       | The route answers `400` with `urn:lys:problem:chat:attachment-unsupported`; nothing is stored or written.                                                                                                                                                          |
+| An image is attached for a model without vision, or for one the inventory does not list                                                                                | The route answers `409` with `urn:lys:problem:chat:image-needs-vision`; nothing is stored or written.                                                                                                                                                              |
+| The provider is not connected, or the queue is full, while a chat or context request reads a model's capabilities for the first time                                   | The route answers the runtime-unavailable or service-busy `503` problem; nothing is stored or written.                                                                                                                                                             |
+| An attachment file cannot be written                                                                                                                                   | The message's folder and the files written into it are deleted, and the route rethrows; nothing is stored.                                                                                                                                                         |
+| A turn cannot be stored after its attachment files were written                                                                                                        | The message's folder is deleted again and the route answers `500`; a folder that cannot be deleted fails the request with both failures.                                                                                                                           |
+| A stored attachment's file is missing from disk                                                                                                                        | An image becomes a placeholder sentence in its message; a read of a text file fails with a result the model reads. The turn goes on.                                                                                                                               |
+| A deleted conversation's attachment folder cannot be removed                                                                                                           | The delete still answers `204`; the backend logs the failure with its cause at `error`, and the folder stays.                                                                                                                                                      |
+| A request offers a backend tool that is neither a built-in tool nor a tool an applied MCP server lists                                                                 | The route answers `400`, naming every such name; nothing is stored.                                                                                                                                                                                                |
+| A request offers a tool whose MCP server is applied but not connected                                                                                                  | The route answers `409` with `urn:lys:problem:chat:backend-tool-unavailable` and `mcp-server-not-connected`; nothing is stored.                                                                                                                                    |
+| An MCP server cannot be started or reached, refuses Lys, or does not finish opening within two minutes                                                                 | The server is `failed` with its reason and its tools are not listed; the backend logs a warning, or an error with what was thrown for a failure it cannot tell apart. Reconnect or a changed setting tries again.                                                  |
+| A connected MCP server's process exits, its connection ends, or it answers a call with HTTP 404                                                                        | The server becomes `failed` with `closed`, its tools are no longer listed, and the backend logs a warning; a call that then runs fails with a result the model reads.                                                                                              |
+| An MCP tool call fails before the server returns a result (five minutes passed, the connection ended, an HTTP error, a refusal)                                        | The call is stored `failed` with the reason the model reads, and the backend logs it; the reply goes on.                                                                                                                                                           |
+| The `mcp` settings group fails its rules, or the settings file cannot be read, when it is applied                                                                      | The servers applied before are kept, the server list reports `invalid` or `unreadable`, and the backend logs a warning without any value.                                                                                                                          |
+| An MCP server is switched off in Settings → MCP                                                                                                                        | Its session is stopped and its tools are no longer listed; a call running on it fails with a sentence saying the server was stopped, and the list reports `off`. Reconnect answers `409` with `urn:lys:problem:mcp:server-off`.                                    |
+| The built-in email server is switched on while no usable account is saved                                                                                              | The server is `failed` with `account-missing` or `account-invalid`, nothing is started, and the backend logs a warning once per reason; Reconnect answers `409` with `urn:lys:problem:mcp:server-off`, and saving an account applies the group again.              |
+| An added MCP server has the built-in email server's name                                                                                                               | The added server is applied and listed; the built-in server is not, and the backend logs a warning until the added server is renamed or removed.                                                                                                                   |
+| The email server's executable is missing, or an account check does not report                                                                                          | The server fails as `start-failed`; a check answers `unavailable` with `server-missing` or `server-failed`, and the backend logs a warning for a missing server, or an error with the server's error lines; a check that has not ended after one minute is killed. |
+| An account check arrives while another runs                                                                                                                            | It is answered `unavailable` with `busy` at once, without running and without keeping the account or the password, and the backend logs a warning.                                                                                                                 |
+| A chat names Armitage, the tool keeper                                                                                                                                 | The route answers `404` with the agent-not-found problem; nothing is stored.                                                                                                                                                                                       |
+| Armitage cannot finish a tool search (its request slots and line are full, a round does not fit or its model is not loaded, its model fails or reports a cancellation) | The `find_tools` call is stored failed with a result saying Armitage could not search, no tool is offered for it, the reply goes on, and the chat route logs a warning.                                                                                            |
+| Starting a turn fails for another reason                                                                                                                               | The route rethrows; Fastify logs it and responds `500` if no event was sent. Written rows stay.                                                                                                                                                                    |
 
 See the [provider cancellation policy](/architecture/providers/#cancellation-policy)
 for the separate inference and model-management lifetimes.
@@ -1388,6 +1466,11 @@ for the separate inference and model-management lifetimes.
   MCP resources, prompts, sampling, elicitation, or roots
   ([#255](https://github.com/w3lt/lys/issues/255))
 - No provider fallback or budget-accounting logic
+- No tool execution gateway or attribute-based policy engine, no approval
+  bound to one exact call, and no stored audit record of tool decisions:
+  [tool routing](#tool-routing) names tools, and each call still passes the
+  per-call approval gate; these parts of #330's tool authorization spec are
+  its follow-ups
 
 ## Coming soon
 

@@ -95,6 +95,7 @@ not find a runtime that `build.sh` installed under another directory.
 | vmo endpoint                   | `127.0.0.1:8080`, as `vmoHost` and `vmoPort`, from `VMO_HOST` and `VMO_PORT` in `@lys/protocol`; where vmo listens. It reads every `read_page` page, and its `GET /health` decides whether `read_page` is offered                                                                                                                                                                                                                                                 |
 | Caliginia system prompt        | `src/utils/prompts/caliginia.txt`, as `caliginiaSystemPrompt`                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Lysiptera system prompt        | `src/utils/prompts/lysiptera.txt`, as `lysipteraSystemPrompt`                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Armitage system prompt         | `src/utils/prompts/armitage.txt`, as `armitageSystemPrompt`; Armitage, the tool keeper, searches a turn's tools with it                                                                                                                                                                                                                                                                                                                                           |
 | Title-generation prompt        | `src/utils/prompts/title-generation.txt`, as `titleGenerationPrompt`                                                                                                                                                                                                                                                                                                                                                                                              |
 | Title-generation attempt limit | `3`, from `titleGenerationMaxAttempts` in `src/config.ts`; must be a positive integer                                                                                                                                                                                                                                                                                                                                                                             |
 | Generated title length limit   | `100`, from `generatedTitleMaxLength` in `src/config.ts`; must be a positive integer                                                                                                                                                                                                                                                                                                                                                                              |
@@ -355,9 +356,10 @@ before each call. `switches` holds each tool the person switched on or off,
 `true` for on and `false` for off. A tool without an entry starts on when it
 only reads this machine and off when it sends requests off it (`network`), so
 a tool a later build adds starts at its own default; a tool switched back to
-its default keeps its entry. `read_attachment` and the agent state tools
-(`read_my_state`, `find_agents`, `read_agent_state`), which the backend adds
-to a turn itself, have neither entry: they never ask and cannot be switched
+its default keeps its entry. `read_attachment`, the agent state tools
+(`read_my_state`, `find_agents`, `read_agent_state`), and `find_tools`,
+which the backend adds to a turn itself, have neither entry: they never ask
+and cannot be switched
 off.
 
 - A name is 1 to 64 ASCII letters, digits, underscores, or hyphens, the rule

@@ -182,8 +182,9 @@ seconds. Quitting Lys stops vmo and the backend together.
    builds the system prompt, offered tools, and stored messages a turn's first
    round would send, their attachment lists and, for a model with vision,
    their images included, and, when the model is trained for tool use,
-   `read_attachment` among the tools when the conversation holds a text file
-   and the agent state tools the agent's role gives, with
+   `read_attachment` first among the tools when the conversation holds a
+   text file, `find_tools` and the routing note in place of the offered
+   tools, and the agent state tools the agent's role gives, with
    an empty new message for the markup around the text, and measures them
    with the loaded model's tokenizer through the model operation queue.
 4. The backend answers with the context length and the tokens of each part,
@@ -236,16 +237,24 @@ calls it stored are part of the new turn's context.
    `backend-tool-unavailable` problem and stores nothing; the desktop shows
    the error and reads the tool list again. A name the backend does not know
    answers `400`.
-3. The backend offers the tools to the model in every round. Each round's
+3. The backend offers the tools to the model. A model trained for tool use
+   is first offered `find_tools` in their place, with the attachment reader
+   and the agent state tools, and a note at the end of the system prompt;
+   when it calls `find_tools`, Armitage, the tool keeper, searches the
+   turn's tools on a reply that is never stored or shown, and each tool it
+   finds is offered from the next round to the end of the reply, still
+   asking as below ([tool routing](/architecture/backend/#tool-routing)).
+   Each round's
    reasoning and text are stored as parts of that round and streamed. When a
    round ends with tool calls,
    the backend checks each call's arguments against its definition, and a
    backend tool also checks them by its own rules, such as `read_page`'s URL
    rules; for an MCP tool it checks only the arguments' shape, and the server
    checks the values. A call to an unknown tool, such as one the request names as
-   switched off or unable to run, or any call while tool calls are off, or
-   with invalid arguments is answered by the backend itself and stored as a
-   `failed` call. Every other call is
+   switched off or unable to run, a call of a tool its round did not offer,
+   such as one Armitage has not found, any call while tool calls are off, or
+   a call with invalid arguments is answered by the backend itself and
+   stored as a `failed` call. Every other call is
    stored as a part too, `running` or `awaiting-approval`, and each later
    change of it is stored and sent as a `reply-part` event.
 4. The backend's tool approval service reads the Just run choices from the

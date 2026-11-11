@@ -71,8 +71,10 @@ their only consumer and uses every operation of both, while the routes
 receive narrow capabilities of the service instead. Deleting an agent only sets its `deleted_at`, so its code is
 never free again and the built-in agents can still look it up; listings,
 counts, and changes skip it. The service is not a database service: it also owns the
-built-in agents Caliginia and Lysiptera, which are never stored, and refuses
-to store another agent under their codes `caliginia` and `lysiptera`. It is
+built-in agents Caliginia, Lysiptera, and Armitage, which are never stored,
+and refuses to store another agent under their codes `caliginia`,
+`lysiptera`, and `armitage`; schema version 12 moved a stored agent coded
+`armitage`, with its conversations, to a free code. It is
 decorated as `app.agentService`; the agent routes in
 `src/modules/agent/routes/` call it. The agent runtime service, decorated as
 `app.agentRuntimeService`, reads agents through it for the chat routes and

@@ -88,7 +88,8 @@ selects one of two forms:
 - `{ "kind": "new", "agentCode": "caliginia" }` starts a new conversation,
   created before the first stream event, that the named agent answers: a
   built-in agent (`caliginia`, `lysiptera`) or a stored one. A valid code that
-  no agent has returns the agent-not-found Problem Details response below with
+  no agent has, or `armitage`, the tool keeper, which answers only other
+  agents, returns the agent-not-found Problem Details response below with
   `404`, and nothing is stored.
 - `{ "kind": "existing", "id": "<UUIDv7>" }` continues a stored conversation
   with the agent it was started with, so it names no agent. An unknown
@@ -216,9 +217,10 @@ optional and holds at most 2,112 names (16 MCP servers of 128 tools each, plus
 64 for the backend's own tools). These include the tools of connected [MCP servers](#mcp-servers),
 named `mcp__<server>__<tool>`. Together they offer at least one tool, and no name appears in both.
 A request that breaks these rules, names a backend tool the backend does not
-run, or offers `read_attachment`, `read_my_state`, `find_agents`, or
-`read_agent_state` as a client or backend tool, returns `400` before anything
-is stored; the backend adds those tools to a turn itself. A
+run, or offers `read_attachment`, `read_my_state`, `find_agents`,
+`read_agent_state`, or `find_tools` as a client or backend tool, returns
+`400` before anything is stored; the backend adds those tools to a turn
+itself. A
 request that offers a
 backend tool that cannot run now, such as `web_search` without a usable
 Tavily API key, `read_page` while vmo is not ready, or an MCP tool whose
@@ -277,8 +279,9 @@ All three fields are optional:
 
 A tool appears at most once across `tools`, `switchedOffToolNames`, and
 `unavailableTools`, and neither list names `read_attachment`,
-`read_my_state`, `find_agents`, or `read_agent_state`, which have no switch
-and which the backend adds to a turn itself. A request that breaks these
+`read_my_state`, `find_agents`, `read_agent_state`, or `find_tools`, which
+have no switch and which the backend adds to a turn itself. A request that
+breaks these
 rules returns `400` before anything is stored.
 
 Every round of the turn sends the agent's system prompt followed by the notes
@@ -378,11 +381,16 @@ current system prompt, followed by the notes about the
 [tools the turn does not offer](#tools-the-turn-does-not-offer) when the
 request names any or switches tool calls off, the
 stored messages a turn includes, the empty message,
-and the tools a turn would offer, client tools first, then Lys's own backend
-tools, then `read_attachment` when the conversation holds a text file for a
-model trained for tool use, then the MCP tools of connected servers, then,
-for a model trained for tool use, the agent state tools the answering
-agent's role gives. It counts them with the loaded model's tokenizer and
+and the tools a turn's first round would offer: `read_attachment` first when
+the conversation holds a text file for a model trained for tool use, then
+client tools, then Lys's own backend tools, then the MCP tools of connected
+servers, then, for a model trained for tool use, the agent state tools the
+answering agent's role gives. For a model trained for tool use, the
+offered client, backend, and MCP tools are
+[routed](/architecture/backend/#tool-routing): `find_tools` is measured in
+their place, and the note that tells the model to call it ends the system
+prompt. A `new` conversation that names `armitage` returns `404`, as a chat
+does. It counts them with the loaded model's tokenizer and
 answers `200`:
 
 ```json
@@ -396,14 +404,14 @@ answers `200`:
 }
 ```
 
-| Field                 | Meaning                                                                       |
-| --------------------- | ----------------------------------------------------------------------------- |
-| `contextLength`       | Context length the model is loaded with; the smallest of its loaded instances |
-| `systemPromptTokens`  | Tokens of the agent's system prompt, with the notes about unoffered tools     |
-| `toolTokens`          | Tokens of the offered tool definitions; `0` when none are offered             |
-| `historyTokens`       | Tokens of the stored messages the next turn would include                     |
-| `historyMessageCount` | Number of those messages                                                      |
-| `messageMarkupTokens` | Tokens the new message takes without its text; a client adds the text's count |
+| Field                 | Meaning                                                                                        |
+| --------------------- | ---------------------------------------------------------------------------------------------- |
+| `contextLength`       | Context length the model is loaded with; the smallest of its loaded instances                  |
+| `systemPromptTokens`  | Tokens of the agent's system prompt, with the notes about unoffered tools and the routing note |
+| `toolTokens`          | Tokens of the tool definitions a first round offers; `0` when none are offered                 |
+| `historyTokens`       | Tokens of the stored messages the next turn would include                                      |
+| `historyMessageCount` | Number of those messages                                                                       |
+| `messageMarkupTokens` | Tokens the new message takes without its text; a client adds the text's count                  |
 
 - Each count is the text's tokens plus a fixed allowance for the chat
   template's markup: 8 tokens per message, 16 per tool call of an earlier
@@ -470,11 +478,12 @@ document). For `read_page`, it is `page-reader-not-ready`: vmo did not answer
 `GET /health` at `127.0.0.1:8080` with `200` within one second. Each name in
 `unavailableTools` is a listed tool, once. The list reads the settings file
 and asks vmo's health route, contacts nothing else, and never contains the
-key. `read_attachment`, the attachment reader, and the agent state tools,
-`read_my_state`, `find_agents`, and `read_agent_state`, are not listed and
-cannot be offered by name: the chat route adds them to a turn by itself; see
-[attachments](#attachments) and
-[agent state tools](/architecture/backend/#agent-state-tools).
+key. `read_attachment`, the attachment reader, the agent state tools,
+`read_my_state`, `find_agents`, and `read_agent_state`, and `find_tools` are
+not listed and cannot be offered by name: the chat route adds them to a turn
+by itself; see [attachments](#attachments),
+[agent state tools](/architecture/backend/#agent-state-tools), and
+[tool routing](/architecture/backend/#tool-routing).
 
 An MCP tool's definition has `runner` and `group` `mcp`, and `access`
 `unknown`, because Lys cannot tell what a server's tool reaches:
@@ -957,7 +966,9 @@ timestamps kept; conversation activity time and history order do not change.
 ## Agents
 
 There are two kinds of agent. A built-in agent ships with the backend:
-Caliginia (`caliginia`) and Lysiptera (`lysiptera`). It has a `code`, a `name`,
+Caliginia (`caliginia`), Lysiptera (`lysiptera`), and Armitage (`armitage`),
+the tool keeper, which answers other agents when they look for a tool and
+no chat. It has a `code`, a `name`,
 a `bio`, and a `systemPrompt`, belongs to the release, and can be neither
 changed nor deleted. A stored agent is a definition the user created: a `code`, a `name`, a `bio`, a
 `systemPrompt`, and the `createdAt` and `updatedAt` timestamps. The code is the

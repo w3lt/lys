@@ -483,7 +483,10 @@ The pane lists the built-in agents first, in their own section, then the
 user's agents oldest first, each with its name, code, and bio. A built-in
 agent ships with Lys and cannot be changed or deleted: opening one shows its
 name, bio, and system prompt read-only, with Duplicate, which opens a copy as
-a new agent of the user's own.
+a new agent of the user's own. Armitage, the tool keeper, is listed among
+them; it answers other agents when they look for a tool, never a chat, and
+a copy of it is an ordinary agent of the user's own, without its search
+tools.
 Opening one of the user's agents reads it with its system prompt into an editor; New agent opens
 an empty one. The editor edits the name, bio, and system prompt, and for a new
 agent an optional code. The name, bio, and prompt are marked required, and the
@@ -520,8 +523,9 @@ every turn sends the agent's current system prompt.
 ### Choosing a conversation's agent
 
 The composer's agent menu, left of the weights menu, names the agent that
-answers. Before the first message it lists the built-in agents, then the
-user's own, each with its bio and tagged `selected` or `built-in`; choosing
+answers. Before the first message it lists the built-in agents that answer
+chats, which leaves out Armitage, then the user's own, each with its bio
+and tagged `selected` or `built-in`; choosing
 one selects the agent of the new conversation, and Edit agents opens the
 Agents pane. The chat store keeps the selection, which starts on Caliginia,
 survives starting another conversation, and is not saved across restarts. A
@@ -1050,8 +1054,8 @@ list is read again so the next request leaves the tool out.
 
 The backend's tool approval service decides which calls need the person: every
 call of a tool that is not saved as Just run, client, backend, and MCP tools
-alike, except `read_attachment` and the agent state tools, which run without
-approval (see the
+alike, except `read_attachment`, the agent state tools, and `find_tools`,
+which run without approval (see the
 [backend's tool approval](/architecture/backend/#tool-approval)). The
 desktop does not decide; it reads neither the switches nor the saved Just run
 list when a call arrives.

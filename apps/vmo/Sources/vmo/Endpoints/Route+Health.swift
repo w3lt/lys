@@ -8,3 +8,6 @@ extension Route {
         HTTPResponse(status: .ok, text: "ok\n")
     }
 }
+
+/// Temporary SonarCloud probe, removed by the next commit.
+private let sonarProbeSourcePath = "/sonar-probe/in-source"

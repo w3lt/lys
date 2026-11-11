@@ -31,3 +31,6 @@ struct EndpointTests {
         #expect(response.body == Data("ok\n".utf8))
     }
 }
+
+/// Temporary SonarCloud probe, removed by the next commit.
+private let sonarProbeTestPath = "/sonar-probe/in-test"

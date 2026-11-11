@@ -61,9 +61,9 @@ const NO_MCP_TOOLS: readonly TurnMcpTool[] = Object.freeze([])
  * @remarks Armitage reads only the asking turn's definitions, through its
  * own two tools, whose calls pass the search's tool call policy and then
  * run at once without the person being asked; it runs none of the asking
- * turn's tools. Its reply starts from Armitage's own
- * system prompt and a user message holding the task, without history,
- * images, or the asking reply's other tools.
+ * turn's tools. Its reply starts from Armitage's own system prompt and a
+ * user message holding the task, without history, images, or the asking
+ * reply's other tools.
  */
 export async function runToolKeeperSearch(
   armitage: Agent,

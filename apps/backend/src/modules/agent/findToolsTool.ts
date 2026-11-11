@@ -78,10 +78,10 @@ export type ToolSearchOutcome =
  * call of a named tool still passes the asking reply's argument check, tool
  * call policy, and approval gate. The provider reads only the definitions
  * the search holds, runs no tool of the asking turn, and keeps nothing of a
- * search after it settles. Ready when created; owns no resource of the caller. Concurrency
- * model: asynchronous on the backend's event loop; searches may overlap and
- * run independently, as many at once as the provider allows, the others
- * failing or waiting their turn.
+ * search after it settles. Ready when created; owns no resource of the
+ * caller. Concurrency model: asynchronous on the backend's event loop;
+ * searches may overlap and run independently, as many at once as the
+ * provider allows, the others failing or waiting their turn.
  */
 export interface ToolKeeper {
   /**

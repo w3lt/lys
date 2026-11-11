@@ -971,16 +971,15 @@ async function createTurnReplyTask(
  * keeps.
  * @param context - Generation-owned cancellation, event sender, tool call
  * sender, and approval prompt sender.
- * @returns The agent turn, whose parts and final state go to the stored
- * reply and whose reply state is read back from the stored conversation,
- * which numbers new sources after the conversation's stored ones,
- * whose tool calls pass the tool call policy and then the approval gate,
- * and whose images are read
- * from the conversation's attachment files. With the request's logger, an
+ * @returns The agent turn, whose parts and final state go to the stored reply
+ * and whose reply state is read back from the stored conversation, which
+ * numbers new sources after the conversation's stored ones, whose tool calls
+ * pass the tool call policy and then the approval gate, and whose images are
+ * read from the conversation's attachment files. With the request's logger, an
  * unreadable settings file, and a reply refused because its agent's request
  * slots and line were full, are logged as warnings; a cancelled reply, and a
- * round that was not sent because it did not fit or its model was not
- * loaded, at debug level; and any other reply failure as an error.
+ * round that was not sent because it did not fit or its model was not loaded,
+ * at debug level; and any other reply failure as an error.
  */
 function buildAgentTurn(
   input: TurnGenerationInput,

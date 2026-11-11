@@ -32,6 +32,21 @@ export type AgentIdentity = Readonly<{
   role: AgentRole
 }>
 
+/** Permissions of a leader: its own state, which agents exist, and theirs. */
+const LEADER_PERMISSIONS: readonly AgentPermission[] = Object.freeze([
+  "read-own-state",
+  "find-agents",
+  "read-any-state"
+])
+
+/** Permissions of a member: its own state only. */
+const MEMBER_PERMISSIONS: readonly AgentPermission[] = Object.freeze([
+  "read-own-state"
+])
+
+/** Permissions of the tool keeper: none. */
+const TOOL_KEEPER_PERMISSIONS: readonly AgentPermission[] = Object.freeze([])
+
 /**
  * Permissions of each role; the tools an agent is offered and every check of
  * a state read or an agent search follow them.
@@ -39,13 +54,9 @@ export type AgentIdentity = Readonly<{
 const AGENT_ROLE_PERMISSIONS: Readonly<
   Record<AgentRole, readonly AgentPermission[]>
 > = Object.freeze({
-  leader: Object.freeze<AgentPermission[]>([
-    "read-own-state",
-    "find-agents",
-    "read-any-state"
-  ]),
-  member: Object.freeze<AgentPermission[]>(["read-own-state"]),
-  "tool-keeper": Object.freeze<AgentPermission[]>([])
+  leader: LEADER_PERMISSIONS,
+  member: MEMBER_PERMISSIONS,
+  "tool-keeper": TOOL_KEEPER_PERMISSIONS
 })
 
 /**

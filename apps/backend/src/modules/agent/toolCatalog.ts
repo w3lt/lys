@@ -48,9 +48,12 @@ export type ToolRecommendation =
       status: "full"
     }>
 
+/** Tools of a search that found nothing. */
+const NO_MATCHED_TOOLS: readonly ToolDefinition[] = Object.freeze([])
+
 /** Shared list of a search that found nothing. */
 const NO_TOOL_MATCHES: ToolMatchList = Object.freeze({
-  matches: Object.freeze([]),
+  matches: NO_MATCHED_TOOLS,
   matchCount: 0
 })
 
@@ -130,12 +133,10 @@ export default class ToolCatalog {
         (first, second) =>
           second.score - first.score || first.index - second.index
       )
-    return Object.freeze({
-      matches: Object.freeze(
-        ranked.slice(0, MAXIMUM_LISTED_TOOL_COUNT).map((match) => match.tool)
-      ),
-      matchCount: ranked.length
-    })
+    const matches = Object.freeze(
+      ranked.slice(0, MAXIMUM_LISTED_TOOL_COUNT).map((match) => match.tool)
+    )
+    return Object.freeze({ matches, matchCount: ranked.length })
   }
 
   /**

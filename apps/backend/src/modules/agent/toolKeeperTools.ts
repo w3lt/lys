@@ -41,6 +41,26 @@ const NO_SOURCES = Object.freeze([])
 /** Copy shown for a query that is blank, too long, or without words. */
 const INVALID_QUERY_MESSAGE = `The query must be 1 to ${MAXIMUM_TOOL_QUERY_LENGTH} characters long after trimming and hold at least one word.`
 
+/** The query argument of `search_tools`. */
+const QUERY_ARGUMENT = Object.freeze({
+  type: "string",
+  name: "query",
+  description: `A few words that describe what the tool must do, such as "read web page"; 1 to ${MAXIMUM_TOOL_QUERY_LENGTH} characters.`
+})
+
+/** Arguments of `search_tools`. */
+const SEARCH_TOOLS_ARGUMENTS = Object.freeze([QUERY_ARGUMENT])
+
+/** The name argument of `recommend_tool`. */
+const NAME_ARGUMENT = Object.freeze({
+  type: "string",
+  name: "name",
+  description: `Exact name of the tool, as ${SEARCH_TOOLS_TOOL_NAME} listed it.`
+})
+
+/** Arguments of `recommend_tool`. */
+const RECOMMEND_TOOL_ARGUMENTS = Object.freeze([NAME_ARGUMENT])
+
 /** Definition of the tool that searches the asking turn's tools. */
 const SEARCH_TOOLS_DEFINITION = toolDefinitionSchema.parse({
   name: SEARCH_TOOLS_TOOL_NAME,
@@ -48,13 +68,7 @@ const SEARCH_TOOLS_DEFINITION = toolDefinitionSchema.parse({
   group: "agents",
   access: "reads",
   runner: "backend",
-  arguments: [
-    {
-      type: "string",
-      name: "query",
-      description: `A few words that describe what the tool must do, such as "read web page"; 1 to ${MAXIMUM_TOOL_QUERY_LENGTH} characters.`
-    }
-  ]
+  arguments: SEARCH_TOOLS_ARGUMENTS
 })
 
 /** Definition of the tool that recommends one tool. */
@@ -64,13 +78,7 @@ const RECOMMEND_TOOL_DEFINITION = toolDefinitionSchema.parse({
   group: "agents",
   access: "reads",
   runner: "backend",
-  arguments: [
-    {
-      type: "string",
-      name: "name",
-      description: `Exact name of the tool, as ${SEARCH_TOOLS_TOOL_NAME} listed it.`
-    }
-  ]
+  arguments: RECOMMEND_TOOL_ARGUMENTS
 })
 
 /**
@@ -289,16 +297,17 @@ class RecommendToolTool implements BuiltInTool {
 export function buildToolKeeperTools(
   catalog: ToolCatalog
 ): readonly TurnBuiltInTool[] {
-  return Object.freeze([
-    Object.freeze({
-      definition: SEARCH_TOOLS_DEFINITION,
-      tool: new SearchToolsTool(catalog),
-      runsWithoutApproval: true
-    }),
-    Object.freeze({
-      definition: RECOMMEND_TOOL_DEFINITION,
-      tool: new RecommendToolTool(catalog),
-      runsWithoutApproval: true
-    })
-  ])
+  const searcher = new SearchToolsTool(catalog)
+  const recommender = new RecommendToolTool(catalog)
+  const searchEntry: TurnBuiltInTool = Object.freeze({
+    definition: SEARCH_TOOLS_DEFINITION,
+    tool: searcher,
+    runsWithoutApproval: true
+  })
+  const recommendEntry: TurnBuiltInTool = Object.freeze({
+    definition: RECOMMEND_TOOL_DEFINITION,
+    tool: recommender,
+    runsWithoutApproval: true
+  })
+  return Object.freeze([searchEntry, recommendEntry])
 }

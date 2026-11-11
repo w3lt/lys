@@ -418,13 +418,16 @@ is asked over every text before the second:
   `file:` URL is read by its decoded path; a URL of any other scheme with a
   host names a file on another machine and is left to the next rule.
 - **Blocked address.** A text without whitespace that is a URL with a host,
-  or a bare host with an optional port and path, is denied when the host is
+  or a host without a scheme, is denied when the host is
   `localhost`, a name under `.localhost`, or an IP address in a range Lys
   never connects to: the ranges of `webAddresses.ts`, which `read_page` and
   `web_search` also refuse. A URL's host is normalized as an `http` host
   first, so `postgres://0x7f.1/db` names `127.0.0.1`; a bare address counts
   only in standard notation, so a text `2130706433` is a number, not an
-  address.
+  address. A host without a scheme may follow `//` or `\\` and a user name
+  with `@`, and anything after a `:`, `/`, or `\` that follows it is left
+  aside, so `10.0.0.1:22`, `admin@192.168.1.10`, `git@10.0.0.2:repo.git`,
+  and `\\10.0.0.5\share` are all denied.
 
 The rules read text only. They resolve no host name: an MCP server resolves
 the names it reaches, and `read_page` checks every resolved address when it

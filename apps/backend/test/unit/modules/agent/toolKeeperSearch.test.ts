@@ -1,7 +1,10 @@
 import { ARMITAGE_AGENT_CODE, toolDefinitionSchema } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import Agent, { type AgentProfile } from "../../../../src/modules/agent/agent"
-import type { AgentRequestState } from "../../../../src/modules/agent/agentActivity"
+import {
+  AgentRequestLimitError,
+  type AgentRequestState
+} from "../../../../src/modules/agent/agentActivity"
 import type { AgentStateReader } from "../../../../src/modules/agent/agentStateTools"
 import type {
   ToolKeeper,
@@ -297,6 +300,47 @@ describe("runToolKeeperSearch", () => {
     expect(outcome).toEqual({ status: "failed" })
     expect(reportFailure).toHaveBeenCalledOnce()
     expect(openReplyStream).not.toHaveBeenCalled()
+  })
+
+  it("fails and reports a search refused because Armitage's request slots and line are full, without reaching the model", async () => {
+    const release = Promise.withResolvers<void>()
+    const openReplyStream = vi.fn<OpenReplyStream>(async () =>
+      (async function* () {
+        await release.promise
+        yield* FINISH_ROUND
+      })()
+    )
+    const armitage = createArmitage(openReplyStream)
+    const heldCount = REQUEST_LIMITS.slotCount + REQUEST_LIMITS.waitingLimit
+    const held = Array.from({ length: heldCount }, () =>
+      runToolKeeperSearch(armitage, buildSearch(vi.fn()))
+    )
+    const reportFailure = vi.fn()
+
+    try {
+      await vi.waitFor(() => {
+        expect(armitage.listRequests()).toHaveLength(heldCount)
+        expect(openReplyStream).toHaveBeenCalledTimes(REQUEST_LIMITS.slotCount)
+      })
+
+      const outcome = await runToolKeeperSearch(
+        armitage,
+        buildSearch(reportFailure)
+      )
+
+      expect(outcome).toEqual({ status: "failed" })
+      expect(reportFailure).toHaveBeenCalledExactlyOnceWith(
+        expect.any(AgentRequestLimitError)
+      )
+      expect(reportFailure.mock.calls[0]?.[0]).toHaveProperty(
+        "limits",
+        REQUEST_LIMITS
+      )
+      expect(openReplyStream).toHaveBeenCalledTimes(REQUEST_LIMITS.slotCount)
+    } finally {
+      release.resolve()
+      await Promise.all(held)
+    }
   })
 
   it("rejects with the abort reason when the asking reply stops during the search, reporting nothing", async () => {

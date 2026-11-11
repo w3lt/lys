@@ -13,7 +13,7 @@ import type {
 } from "../tool/builtIn/builtInTool"
 
 /** Inclusive maximum length of a trimmed task, in UTF-16 code units. */
-export const MAXIMUM_TOOL_TASK_LENGTH = 500
+const MAXIMUM_TOOL_TASK_LENGTH = 500
 
 /**
  * Receives why a tool search ended without finding: a refusal, such as a

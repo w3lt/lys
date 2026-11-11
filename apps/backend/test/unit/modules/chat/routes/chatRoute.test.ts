@@ -479,8 +479,8 @@ describe("updateFastifyWithChatRoute", () => {
     expect(testApp.generateTitle).not.toHaveBeenCalled()
   })
 
-  it.each(["web-researcher", "lys"])(
-    "responds with the missing-agent problem before storing a turn when a new conversation names the code %s, which no agent has",
+  it.each(["web-researcher", "lys", "armitage"])(
+    "responds with the missing-agent problem before storing a turn when a new conversation names the code %s, which no agent that answers chats has",
     async (agentCode) => {
       const testApp = await createChatRouteTestApp()
       updateFastifyWithChatRoute(testApp.app, {

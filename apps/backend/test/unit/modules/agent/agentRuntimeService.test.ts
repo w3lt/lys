@@ -1,4 +1,5 @@
 import {
+  ARMITAGE_AGENT_CODE,
   CALIGINIA_AGENT_CODE,
   LYSIPTERA_AGENT_CODE,
   type AgentDefinition
@@ -38,7 +39,8 @@ const NOW = "2026-10-24T10:00:00.000Z"
 /** Built-in agents of every service a case creates. */
 const BUILT_IN_AGENTS = buildBuiltInAgents({
   caliginia: "You are Caliginia.",
-  lysiptera: "You are Lysiptera."
+  lysiptera: "You are Lysiptera.",
+  armitage: "You are Armitage."
 })
 
 /**
@@ -315,6 +317,12 @@ describe("AgentRuntimeService", () => {
         expect(createRuntime().runtime.loadChatAgent(code)).toBeUndefined()
       }
     )
+
+    it("finds no chat agent for Armitage, who answers agents, not chats", () => {
+      expect(
+        createRuntime().runtime.loadChatAgent(ARMITAGE_AGENT_CODE)
+      ).toBeUndefined()
+    })
 
     it("finds no agent for a deleted agent's code, even one that was live", () => {
       const { runtime, agentService } = createRuntime()

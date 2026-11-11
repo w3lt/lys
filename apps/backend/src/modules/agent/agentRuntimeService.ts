@@ -1,4 +1,5 @@
 import type { GetAgentApiResponse } from "@lys/protocol"
+import { ARMITAGE_AGENT_CODE } from "@lys/share"
 import Agent, { type AgentProfile } from "./agent"
 import type { AgentRequestLimits, AgentRequestState } from "./agentActivity"
 import {
@@ -89,14 +90,14 @@ const NO_REQUESTS: readonly AgentRequestState[] = Object.freeze([])
  * Builds the listing of an agent a search found.
  *
  * @param match - The search match.
- * @returns The frozen listing, with the role its kind gives.
+ * @returns The frozen listing, with the role its code and kind give.
  */
 function buildAgentListing(match: AgentSearchMatch): AgentListing {
   return Object.freeze({
     code: match.code,
     name: match.name,
     bio: match.bio,
-    role: calculateAgentRole(match.kind),
+    role: calculateAgentRole(match),
     deletedAt: match.deletedAt
   })
 }
@@ -106,8 +107,8 @@ function buildAgentListing(match: AgentSearchMatch): AgentListing {
  *
  * @param agent - The built-in or stored agent as found now.
  * @param requestLimits - Request slots and waiting limit of every agent.
- * @returns Its code, the role its kind gives, its system prompt, and the
- * request limits.
+ * @returns Its code, the role its code and kind give, its system prompt,
+ * and the request limits.
  */
 function buildAgentProfile(
   agent: GetAgentApiResponse,
@@ -115,7 +116,7 @@ function buildAgentProfile(
 ): AgentProfile {
   return Object.freeze({
     code: agent.code,
-    role: calculateAgentRole(agent.kind),
+    role: calculateAgentRole(agent),
     systemPrompt: agent.systemPrompt,
     requestLimits
   })
@@ -181,12 +182,13 @@ export default class AgentRuntimeService implements AgentStateReader {
    * @returns The agent's live instance, created on its first load with every
    * request slot free and the service's request limits, and holding the
    * system prompt the built-in or stored agent has now; undefined
-   * when no agent has the code or its agent is deleted, which creates
-   * nothing.
+   * when no agent has the code, its agent is deleted, or it is Armitage, the
+   * tool keeper, which answers agents, not chats; that creates nothing.
    * @throws For a code that is not a built-in agent's, if the store is closed
    * or the stored agent is invalid.
    */
   public loadChatAgent(code: string): Agent | undefined {
+    if (code === ARMITAGE_AGENT_CODE) return undefined
     const found = this.#agents.findAgent(code)
     if (found?.deletedAt !== null) return undefined
     const liveAgent = this.#liveAgents.get(code)
@@ -270,7 +272,7 @@ export default class AgentRuntimeService implements AgentStateReader {
     return Object.freeze({
       code: found.agent.code,
       name: found.agent.name,
-      role: calculateAgentRole(found.agent.kind),
+      role: calculateAgentRole(found.agent),
       deletedAt: found.deletedAt,
       requestSlotCount: this.#requestLimits.slotCount,
       requests: Object.freeze(

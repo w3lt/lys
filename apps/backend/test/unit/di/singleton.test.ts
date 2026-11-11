@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { groqApiKeySchema } from "@lys/share"
+import { ARMITAGE_AGENT_CODE, groqApiKeySchema } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
 import type { AgentTurn } from "../../../src/modules/agent/agent"
@@ -499,6 +499,27 @@ describe("createSingletonServices", () => {
       )
     }
   )
+
+  it("builds Armitage, the tool keeper, from its configured prompt", async () => {
+    const { factories } = createRecordedFactories()
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createLogReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+
+    expect(services.agentService.findAgent(ARMITAGE_AGENT_CODE)).toEqual({
+      agent: {
+        kind: "built-in",
+        code: ARMITAGE_AGENT_CODE,
+        name: "Armitage",
+        bio: "Lys's tool keeper. It finds the tools the other agents need and answers agents, not chats.",
+        systemPrompt: TEST_BACKEND_CONFIG.armitageSystemPrompt
+      },
+      deletedAt: null
+    })
+  })
 
   it("gives every live agent the configured request slots and waiting line", async () => {
     const { factories, acquisitions } = createRecordedFactories()

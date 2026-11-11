@@ -102,7 +102,7 @@ export function isBlockedAddress(address: string): boolean {
  * @returns True for `localhost` and any name under `.localhost`, which
  * resolvers send to this machine without asking DNS.
  */
-export function isLocalHostName(hostname: string): boolean {
+function isLocalHostName(hostname: string): boolean {
   const name = hostname.endsWith(".") ? hostname.slice(0, -1) : hostname
   return name === "localhost" || name.endsWith(".localhost")
 }

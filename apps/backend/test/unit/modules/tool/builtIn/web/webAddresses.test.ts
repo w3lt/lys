@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
   isBlockedAddress,
-  isLocalHostName,
   isLocalUrlHost
 } from "../../../../../../src/modules/tool/builtIn/web/webAddresses"
 
@@ -62,23 +61,21 @@ describe("isBlockedAddress", () => {
   })
 })
 
-describe("isLocalHostName", () => {
+describe("isLocalUrlHost", () => {
   it.each(["localhost", "localhost.", "app.localhost", "a.b.localhost."])(
-    "treats %s as this machine",
+    "treats the name %s as this machine",
     (hostname) => {
-      expect(isLocalHostName(hostname)).toBe(true)
+      expect(isLocalUrlHost(hostname)).toBe(true)
     }
   )
 
   it.each(["example.com", "localhost.example.com", "mylocalhost", "local"])(
-    "does not treat %s as this machine",
+    "does not treat the name %s as this machine",
     (hostname) => {
-      expect(isLocalHostName(hostname)).toBe(false)
+      expect(isLocalUrlHost(hostname)).toBe(false)
     }
   )
-})
 
-describe("isLocalUrlHost", () => {
   it.each([
     ["a local name", "localhost"],
     ["a name under localhost", "api.localhost."],

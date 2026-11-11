@@ -261,7 +261,7 @@ function namesCredentialPath(
  */
 function decodePercentEscapes(path: string): string {
   return path.replaceAll(PERCENT_ESCAPE_PATTERN, (escape) =>
-    String.fromCharCode(Number.parseInt(escape.slice(1), 16))
+    String.fromCodePoint(Number.parseInt(escape.slice(1), 16))
   )
 }
 

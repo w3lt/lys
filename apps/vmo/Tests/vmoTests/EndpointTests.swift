@@ -24,13 +24,10 @@ struct EndpointTests {
     func answersHealth() async throws {
         let router = try Router(routes: [.health])
 
-        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/health", query: [])) // sonar probe
+        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/health", query: []))
 
         #expect(response.status == .ok)
         #expect(response.headerFields == [HTTPHeaderField(name: "Content-Type", value: "text/plain; charset=utf-8")])
         #expect(response.body == Data("ok\n".utf8))
     }
 }
-
-/// Temporary SonarCloud probe, removed by the next commit.
-private let sonarProbeTestPath = "/sonar-probe/in-test"

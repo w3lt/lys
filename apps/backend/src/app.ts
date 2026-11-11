@@ -56,10 +56,11 @@ export async function buildApp(
     config
   })
 
-  // =============== REGISTER THE ROUTES =============== //
   const toolCallPolicy: ToolCallPolicy = Object.freeze({
     settingsFilePath: config.settingsFilePath
   })
+
+  // =============== REGISTER THE ROUTES =============== //
   await app.register(registerHealthRoutes)
   await app.register(updateFastifyWithLlmRoutes)
   await app.register(registerChatRoutes, {

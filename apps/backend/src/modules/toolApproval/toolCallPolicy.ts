@@ -9,8 +9,8 @@ type ToolCallArguments = ChatToolCall["arguments"]
 /**
  * What the fixed tool call rules need to know about this machine.
  *
- * @remarks Built once by the composition root and fixed for the backend's
- * lifetime; no setting changes it.
+ * @remarks Built once by `buildApp` from the backend configuration and
+ * fixed for the backend's lifetime; no setting changes it.
  */
 export type ToolCallPolicy = Readonly<{
   /**
@@ -104,8 +104,8 @@ const SETTINGS_FILE_PART_COUNT = 2
 /** A run of path separators, `/` or `\`. */
 const PATH_SEPARATOR_PATTERN = /[/\\]+/u
 
-/** A percent escape of one byte, with the byte as two hex digits. */
-const PERCENT_ESCAPE_PATTERN = /%(?<byte>[0-9a-f]{2})/giu
+/** A percent escape of one byte: `%`, then the byte as two hex digits. */
+const PERCENT_ESCAPE_PATTERN = /%[0-9a-f]{2}/giu
 
 /** Any whitespace character. */
 const WHITESPACE_PATTERN = /\s/u

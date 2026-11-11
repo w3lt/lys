@@ -47,9 +47,8 @@ export type ToolSearch = Readonly<{
    */
   reportFailure: ReportToolSearchFailure
   /**
-   * What the fixed tool call rules know about this machine; every call the
-   * search's own reply makes is decided by them, as the asking reply's
-   * calls are.
+   * The asking turn's tool call policy; a search answered by a reply of its
+   * own, such as Armitage's, decides that reply's tool calls by it.
    */
   toolCallPolicy: ToolCallPolicy
 }>
@@ -76,10 +75,10 @@ export type ToolSearchOutcome =
  *
  * @remarks Consumed by `find_tools`, which a routed reply offers its model.
  * Discovery is not authorization: the keeper only names tools, and every
- * call of a named tool still passes the asking reply's argument check and
- * approval gate. The provider reads only the definitions the search holds,
- * runs no tool of the asking turn, and keeps nothing of a search after it
- * settles. Ready when created; owns no resource of the caller. Concurrency
+ * call of a named tool still passes the asking reply's argument check, tool
+ * call policy, and approval gate. The provider reads only the definitions
+ * the search holds, runs no tool of the asking turn, and keeps nothing of a
+ * search after it settles. Ready when created; owns no resource of the caller. Concurrency
  * model: asynchronous on the backend's event loop; searches may overlap and
  * run independently, as many at once as the provider allows, the others
  * failing or waiting their turn.
@@ -89,8 +88,8 @@ export interface ToolKeeper {
    * Finds the tools that fit a task.
    *
    * @param search - The task, the asking turn's tools, the model and its
-   * controls, and the asking reply's cancellation; borrowed until the
-   * returned promise settles.
+   * controls, the asking reply's cancellation, and its tool call policy;
+   * borrowed until the returned promise settles.
    * @returns `found` with the fitting tools' names, each one of
    * `search.tools`, frozen; `failed` when the search could not run, was
    * refused, failed, or was cancelled by the model, after reporting why to

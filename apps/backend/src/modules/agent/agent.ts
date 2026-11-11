@@ -247,8 +247,9 @@ export type AgentTurn = Readonly<{
   sendClientToolCall: SendClientToolCall
   /**
    * What the fixed tool call rules know about this machine; every checked
-   * call of the turn's tools, and of the tools of each `find_tools` search
-   * it starts, is decided by them before it starts.
+   * call of the turn's tools, and every call Armitage makes in each
+   * `find_tools` search the turn starts, is decided by them before it
+   * starts.
    */
   toolCallPolicy: ToolCallPolicy
   /**

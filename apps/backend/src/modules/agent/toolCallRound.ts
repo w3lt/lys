@@ -3,10 +3,11 @@ import type {
   ChatToolCall,
   ChatToolResult
 } from "@lys/protocol"
-import type {
-  ConversationSource,
-  OpenAIFunctionTool,
-  ToolDefinition
+import {
+  FIND_TOOLS_TOOL_NAME,
+  type ConversationSource,
+  type OpenAIFunctionTool,
+  type ToolDefinition
 } from "@lys/share"
 import { v7 as uuidv7 } from "uuid"
 import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
@@ -69,6 +70,12 @@ export type AgentToolset = ReadonlyMap<string, OfferedTool>
 
 /** Tools one turn offers, by kind, each name once across all of them. */
 export type AgentToolsetInput = Readonly<{
+  /**
+   * Backend tools the reply offers its model in every round, whether or not
+   * it routes the others through `find_tools`, in offer order; empty when
+   * none.
+   */
+  directTools: readonly TurnBuiltInTool[]
   /** Validated definitions of the client tools, in offer order. */
   clientTools: readonly ToolDefinition[]
   /** Built-in tools found for the turn, in offer order. */
@@ -111,7 +118,10 @@ export type CreateToolCallGate = () => Promise<ToolCallGate>
 
 /** What answering one round's calls needs from the turn. */
 export type ToolCallRoundContext = Readonly<{
-  /** Tools offered for the turn. */
+  /**
+   * Tools the round offered; a call of any other tool, a tool of the turn
+   * the round did not offer included, is answered as not run.
+   */
   tools: AgentToolset
   /**
    * What the request names about the tools the turn does not offer; a call
@@ -137,7 +147,7 @@ export type ToolCallRoundContext = Readonly<{
 
 /** What handling one call of a round needs. */
 type ToolCallHandling = Readonly<{
-  /** Tools offered for the turn. */
+  /** Tools the round offered. */
   tools: AgentToolset
   /** What the request names about the tools the turn does not offer. */
   unofferedTools: UnofferedTools
@@ -270,16 +280,23 @@ const ALLOWED_TOOL_CALL_APPROVAL: ToolCallApproval = Object.freeze({
 /**
  * Builds the tools of one turn from the offered tools.
  *
- * @param input - The turn's client, built-in, MCP, and agent state tools.
- * @returns The tools by name: client tools, then built-in tools, then MCP
- * tools, then the agent's state tools, each in offer order.
- * @throws If two tools share a name; the chat request contract and the
- * `mcp__` names of MCP tools prevent that.
+ * @param input - The turn's direct, client, built-in, MCP, and agent state
+ * tools.
+ * @returns The tools by name: direct tools, then client tools, then
+ * built-in tools, then MCP tools, then the agent's state tools, each in
+ * offer order.
+ * @throws If two tools share a name; the chat request contract, which
+ * reserves the backend's own tool names, and the `mcp__` names of MCP tools
+ * prevent that.
  */
 export function buildAgentToolset(input: AgentToolsetInput): AgentToolset {
-  const tools = new Map<string, OfferedTool>(
-    input.clientTools.map(buildClientToolEntry)
-  )
+  const tools = new Map<string, OfferedTool>()
+  addBuiltInTools(tools, input.directTools)
+  for (const definition of input.clientTools)
+    addOfferedTool(tools, new AgentTool(definition), (agentTool) => ({
+      runner: "client",
+      agentTool
+    }))
   addBuiltInTools(tools, input.builtInTools)
   for (const mcpTool of input.mcpTools)
     addOfferedTool(tools, new AgentTool(mcpTool.definition), (agentTool) => ({
@@ -418,7 +435,7 @@ export async function handleToolCallRound(
  * Answers whether a round has a call that passes the approval gate.
  *
  * @param toolCalls - The round's calls.
- * @param tools - Tools offered for the turn.
+ * @param tools - Tools the round offered.
  * @returns True when a call names an offered tool other than a backend tool
  * that runs without approval; a call of an unknown tool is answered without
  * a gate, and so is a call of a tool that runs without approval.
@@ -434,19 +451,6 @@ function hasGatedToolCall(
       !(tool.runner === "backend" && tool.runsWithoutApproval)
     )
   })
-}
-
-/**
- * Builds the entry of one client tool in a turn's toolset.
- *
- * @param definition - Validated client tool definition.
- * @returns The tool's name and the tool.
- */
-function buildClientToolEntry(
-  definition: ToolDefinition
-): [string, OfferedTool] {
-  const agentTool = new AgentTool(definition)
-  return [agentTool.name, Object.freeze({ runner: "client", agentTool })]
 }
 
 /**
@@ -879,10 +883,13 @@ function formatToolCallResult(
  * Formats what the model reads when it called a tool that was not offered.
  *
  * @param toolCall - Call naming a tool that was not offered.
- * @param handling - Tools offered for the turn and what the request names
- * about the others.
+ * @param handling - Tools the round offered and what the request names
+ * about the tools the turn does not offer.
  * @returns The sentence {@link findUnofferedToolCallMessage} finds for a
- * tool the request names, or for any name while tool calls are off;
+ * tool the request names, or for any name while tool calls are off; when
+ * the round offered `find_tools`, a sentence saying the tool cannot be
+ * called now, naming every offered tool, and telling the model to ask
+ * `find_tools` for another, without saying whether the turn has the tool;
  * otherwise a sentence naming the unknown tool and every offered tool, or
  * saying no tool can be called when none is offered.
  */
@@ -898,6 +905,8 @@ function formatMissingToolMessage(
   if (handling.tools.size === 0)
     return `No tool is named "${toolCall.toolName}", and you can call no tool now.`
   const offeredNames = [...handling.tools.keys()].join(", ")
+  if (handling.tools.has(FIND_TOOLS_TOOL_NAME))
+    return `You cannot call "${toolCall.toolName}" now. The tools you can call are: ${offeredNames}. To get another tool, call ${FIND_TOOLS_TOOL_NAME} with what you need it for; the tools Armitage finds are offered to you from your next step.`
   return `No tool is named "${toolCall.toolName}". The tools you can call are: ${offeredNames}.`
 }
 

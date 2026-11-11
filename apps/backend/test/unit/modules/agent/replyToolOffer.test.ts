@@ -36,6 +36,7 @@ const CLIENT_DEFINITIONS = Object.freeze(
  */
 function buildTurnToolset(): AgentToolset {
   return buildAgentToolset({
+    directTools: [],
     clientTools: CLIENT_DEFINITIONS,
     builtInTools: [],
     mcpTools: [],
@@ -53,6 +54,16 @@ function listFunctionToolNames(offer: ReplyToolOffer): readonly string[] {
   return offer.listOfferedTools().map((tool) => tool.function.name)
 }
 
+/**
+ * Lists the names of the tools a round answers calls of.
+ *
+ * @param offer - The reply's offer.
+ * @returns The names of its offered toolset, in its order.
+ */
+function listOfferedToolNames(offer: ReplyToolOffer): readonly string[] {
+  return [...offer.listOfferedToolset().keys()]
+}
+
 describe("ReplyToolOffer", () => {
   it("offers the tools it starts with, in the turn's order, as function tools", () => {
     const offer = new ReplyToolOffer(buildTurnToolset(), [
@@ -60,7 +71,7 @@ describe("ReplyToolOffer", () => {
       "first_tool"
     ])
 
-    expect(offer.listOfferedToolNames()).toEqual(["first_tool", "third_tool"])
+    expect(listOfferedToolNames(offer)).toEqual(["first_tool", "third_tool"])
     expect(offer.listOfferedTools()).toEqual(
       ["first_tool", "third_tool"].map((name) =>
         new AgentTool(buildClientDefinition(name)).buildAgentFormat()
@@ -73,7 +84,7 @@ describe("ReplyToolOffer", () => {
 
     const offer = new ReplyToolOffer(tools, tools.keys())
 
-    expect(offer.listOfferedToolNames()).toEqual([
+    expect(listOfferedToolNames(offer)).toEqual([
       "first_tool",
       "second_tool",
       "third_tool"
@@ -85,7 +96,7 @@ describe("ReplyToolOffer", () => {
 
     offer.addTools(["second_tool", "third_tool", "second_tool"])
 
-    expect(offer.listOfferedToolNames()).toEqual(["second_tool", "third_tool"])
+    expect(listOfferedToolNames(offer)).toEqual(["second_tool", "third_tool"])
     expect(listFunctionToolNames(offer)).toEqual(["second_tool", "third_tool"])
   })
 
@@ -97,26 +108,34 @@ describe("ReplyToolOffer", () => {
 
     offer.addTools(["other_tool"])
 
-    expect(offer.listOfferedToolNames()).toEqual(["first_tool"])
+    expect(listOfferedToolNames(offer)).toEqual(["first_tool"])
   })
 
   it("offers nothing when it starts with no name", () => {
     const offer = new ReplyToolOffer(buildTurnToolset(), [])
 
-    expect(offer.listOfferedToolNames()).toEqual([])
+    expect(listOfferedToolNames(offer)).toEqual([])
     expect(offer.listOfferedTools()).toEqual([])
   })
 
-  it("returns frozen lists that later additions leave as they were", () => {
+  it("hands out the offered tools as the turn's toolset holds them", () => {
+    const tools = buildTurnToolset()
+    const offer = new ReplyToolOffer(tools, ["second_tool"])
+
+    expect(offer.listOfferedToolset().get("second_tool")).toBe(
+      tools.get("second_tool")
+    )
+  })
+
+  it("returns lists and toolsets that later additions leave as they were", () => {
     const offer = new ReplyToolOffer(buildTurnToolset(), ["first_tool"])
-    const names = offer.listOfferedToolNames()
+    const toolset = offer.listOfferedToolset()
     const tools = offer.listOfferedTools()
 
     offer.addTools(["second_tool"])
 
-    expect(Object.isFrozen(names)).toBe(true)
     expect(Object.isFrozen(tools)).toBe(true)
-    expect(names).toEqual(["first_tool"])
+    expect([...toolset.keys()]).toEqual(["first_tool"])
     expect(tools).toHaveLength(1)
   })
 })

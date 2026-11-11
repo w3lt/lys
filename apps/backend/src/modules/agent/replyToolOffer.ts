@@ -8,11 +8,11 @@ import type { AgentToolset } from "./toolCallRound"
  * @remarks Invariant: every offered name is a tool of the turn, and the
  * offer lists the offered tools in the turn's toolset order whatever order
  * they were added in. An offer only grows: a tool offered once stays offered
- * until the reply ends. Each list it returns is a frozen snapshot that later
- * additions leave as it was. Created per reply and dropped with it; holds no
- * resource. Concurrency model: single-owner, used by one reply on the
- * backend's event loop; calls that run in parallel add their tools one after
- * another, each in one synchronous step.
+ * until the reply ends. Each list or toolset it returns is a snapshot that
+ * later additions leave as it was. Created per reply and dropped with it;
+ * holds no resource. Concurrency model: single-owner, used by one reply on
+ * the backend's event loop; calls that run in parallel add their tools one
+ * after another, each in one synchronous step.
  */
 export default class ReplyToolOffer {
   /** Tools of the turn, by name, in toolset order; borrowed for the reply. */
@@ -47,13 +47,16 @@ export default class ReplyToolOffer {
   }
 
   /**
-   * Lists the names of the offered tools.
+   * Lists the offered tools as the round that starts now answers their
+   * calls.
    *
-   * @returns A frozen list in the turn's toolset order.
+   * @returns A new toolset of the offered tools in the turn's toolset
+   * order, each as the turn's toolset holds it; later additions leave it as
+   * it was.
    */
-  public listOfferedToolNames(): readonly string[] {
-    return Object.freeze(
-      [...this.#tools.keys()].filter((name) => this.#offeredNames.has(name))
+  public listOfferedToolset(): AgentToolset {
+    return new Map(
+      [...this.#tools].filter(([name]) => this.#offeredNames.has(name))
     )
   }
 

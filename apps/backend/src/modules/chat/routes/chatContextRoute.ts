@@ -36,6 +36,17 @@ import {
   type TurnAgentLookups
 } from "./turnRequest"
 
+/** Direct tools a measurement counts when the turn would offer none. */
+const NO_DIRECT_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([])
+
+/**
+ * Direct tools a measurement counts when the turn would offer the
+ * attachment reader: the reader alone.
+ */
+const READER_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([
+  buildReadAttachmentDefinition()
+])
+
 /** Lookups the chat-context route borrows for its lifetime. */
 type ChatContextRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
   Readonly<{
@@ -200,18 +211,20 @@ async function handleChatContextRequest(
     body.model,
     dependencies.findModelCapabilities
   )
+  const directTools =
+    capabilities.trainedForToolUse &&
+    hasReadableTextAttachment(measured.attachments)
+      ? READER_DEFINITIONS
+      : NO_DIRECT_DEFINITIONS
+  const tools = buildOfferedDefinitions(body, requestedTools)
   const measurement = await requestedAgent.agent.findContextMeasurement({
     history: measured.history,
     model: body.model,
     canSeeImages: capabilities.vision,
     getAttachmentImageFileStatus: measured.getAttachmentImageFileStatus,
     trainedForToolUse: capabilities.trainedForToolUse,
-    tools: buildOfferedDefinitions(
-      body,
-      requestedTools,
-      capabilities.trainedForToolUse &&
-        hasReadableTextAttachment(measured.attachments)
-    ),
+    directTools,
+    tools,
     unofferedTools
   })
   if (measurement === undefined) {
@@ -269,25 +282,21 @@ function buildMeasuredHistory(
 }
 
 /**
- * Builds the definitions of the tools a turn would offer, as it orders them.
+ * Builds the definitions of the tools the request offers, as a turn orders
+ * them.
  *
  * @param body - Validated chat-context input.
  * @param requestedTools - The offered backend tools, in offer order.
- * @param offersReader - Whether the turn would offer the attachment reader:
- * the conversation holds a text attachment and the model is trained for
- * tool use.
  * @returns The client definitions first, then the built-in tools', then the
- * reader's when the turn offers it, then the connected MCP tools'.
+ * connected MCP tools'.
  */
 function buildOfferedDefinitions(
   body: ChatContextApiRequestBody,
-  requestedTools: RequestedBackendTools,
-  offersReader: boolean
+  requestedTools: RequestedBackendTools
 ): readonly ToolDefinition[] {
   return [
     ...(body.tools?.definitions ?? []),
     ...requestedTools.builtInTools.map((entry) => entry.definition),
-    ...(offersReader ? [buildReadAttachmentDefinition()] : []),
     ...requestedTools.mcpTools.map((tool) => tool.definition)
   ]
 }

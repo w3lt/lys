@@ -41,6 +41,10 @@ import {
 } from "../../../../src/modules/agent/agentContext"
 import type { AgentStateReader } from "../../../../src/modules/agent/agentStateTools"
 import {
+  formatToolRoutingNote,
+  type ToolKeeper
+} from "../../../../src/modules/agent/findToolsTool"
+import {
   NO_UNOFFERED_TOOLS,
   TOOL_CALLS_OFF,
   type UnofferedTools
@@ -88,6 +92,7 @@ import {
 } from "../../support/replyContextMeterFakes"
 import {
   runLookUpWordWithSource,
+  CHECK_SPELLING_TOOL,
   LOOK_UP_WORD_FORMAT,
   LOOK_UP_WORD_TOOL,
   ScriptedBuiltInTool,
@@ -214,6 +219,8 @@ type AgentScenario =
       openReplyStream: OpenReplyStream
       /** Context meter of the model; every context fits by default. */
       replyContextMeter?: ReplyContextMeter
+      /** Keeper `find_tools` asks; any search fails the case by default. */
+      toolKeeper?: ToolKeeper
     }>
   | Readonly<{
       /** Agent the case created, to read its activity while it answers. */
@@ -252,6 +259,8 @@ type AgentTurnScenario = Readonly<{
   canSeeImages?: boolean
   /** Image reader; any read fails the case by default. */
   findAttachmentImage?: AgentTurn["findAttachmentImage"]
+  /** Direct tools, offered in every round; none by default. */
+  directTools?: readonly TurnBuiltInTool[]
   /** Offered client tools; none by default. */
   clientTools?: readonly ToolDefinition[]
   /** Offered backend tools; none by default. */
@@ -727,6 +736,11 @@ const UNEXPECTED_STATE_READER: AgentStateReader = Object.freeze({
   findAgentState: handleUnexpectedToolCall
 })
 
+/** Keeper of an agent whose case searches no tool; any search fails it. */
+const UNEXPECTED_TOOL_KEEPER: ToolKeeper = Object.freeze({
+  findTools: handleUnexpectedToolCall
+})
+
 /**
  * Creates an agent with {@link AGENT_PROFILE}.
  *
@@ -734,17 +748,21 @@ const UNEXPECTED_STATE_READER: AgentStateReader = Object.freeze({
  * @param replyContextMeter - Context meter of the same model.
  * @param stateReader - Reader of the state tools; any read fails the case by
  * default.
+ * @param toolKeeper - Keeper `find_tools` asks; any search fails the case
+ * by default.
  * @returns The ready agent.
  */
 function createTestAgent(
   replyModel: ReplyModel,
   replyContextMeter: ReplyContextMeter,
-  stateReader: AgentStateReader = UNEXPECTED_STATE_READER
+  stateReader: AgentStateReader = UNEXPECTED_STATE_READER,
+  toolKeeper: ToolKeeper = UNEXPECTED_TOOL_KEEPER
 ): Agent {
   return new Agent(AGENT_PROFILE, {
     replyModel,
     replyContextMeter,
-    stateReader
+    stateReader,
+    toolKeeper
   })
 }
 
@@ -758,7 +776,9 @@ function findScenarioAgent(scenario: AgentScenario): Agent {
   if ("agent" in scenario) return scenario.agent
   return createTestAgent(
     { openReplyStream: scenario.openReplyStream },
-    scenario.replyContextMeter ?? createRoomyReplyContextMeter()
+    scenario.replyContextMeter ?? createRoomyReplyContextMeter(),
+    UNEXPECTED_STATE_READER,
+    scenario.toolKeeper
   )
 }
 
@@ -769,8 +789,8 @@ function findScenarioAgent(scenario: AgentScenario): Agent {
  * @param scenario - Model, history, storage, and cancellation behavior.
  * @returns The sent events with the parts stored when each was sent, the
  * final states asked for, the storage spies, reported cancellations,
- * refusals, and failures, the reply's settlement, and the reply and sources
- * stored after it.
+ * refusals, failures, and tool search failures, the reply's settlement, and
+ * the reply and sources stored after it.
  */
 async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
   const store = scenario.store ?? openAgentTurnStore()
@@ -779,6 +799,7 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
   const reportedCancellations: unknown[] = []
   const reportedRefusals: unknown[] = []
   const reportedFailures: unknown[] = []
+  const reportedToolSearchFailures: unknown[] = []
   const persistedStates: AssistantMessageCompletion[] = []
   const storage = buildScenarioReplyStorage(scenario, store)
   const settlement = await findScenarioAgent(scenario)
@@ -793,6 +814,7 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
         scenario.findAttachmentImage ?? handleUnexpectedImageRead,
       history: scenario.history ?? [],
       sources: getStoredReply(store).sources,
+      directTools: scenario.directTools ?? [],
       clientTools: scenario.clientTools ?? [],
       builtInTools: scenario.builtInTools ?? [],
       mcpTools: scenario.mcpTools ?? [],
@@ -814,6 +836,9 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
       },
       reportReplyFailure: (failure) => {
         reportedFailures.push(failure)
+      },
+      reportToolSearchFailure: (failure) => {
+        reportedToolSearchFailures.push(failure)
       },
       createReplyPart: storage.createReplyPart,
       updateReplyPartContent: storage.updateReplyPartContent,
@@ -837,6 +862,7 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
     reportedCancellations,
     reportedRefusals,
     reportedFailures,
+    reportedToolSearchFailures,
     settlement,
     reply,
     parts: reply.parts,
@@ -1461,12 +1487,14 @@ describe("Agent", () => {
       trainedForToolUse: false,
       history: [],
       sources: [],
+      directTools: [],
       clientTools: [],
       builtInTools: [],
       mcpTools: [],
       unofferedTools: NO_UNOFFERED_TOOLS,
       sendClientToolCall: handleUnexpectedToolCall,
       createToolCallGate: handleUnexpectedToolCall,
+      reportToolSearchFailure: handleUnexpectedToolCall,
       userMessage: createUserMessage(101, userMessageContent),
       canSeeImages: false,
       findAttachmentImage: handleUnexpectedImageRead,
@@ -1743,6 +1771,7 @@ describe("Agent", () => {
       )
 
       const measurement = await agent.findContextMeasurement({
+        directTools: [],
         trainedForToolUse: false,
         history: ANSWERED_THEN_FAILED_HISTORY,
         model: TURN_REQUEST.model,
@@ -1787,6 +1816,7 @@ describe("Agent", () => {
       )
 
       const measurement = await agent.findContextMeasurement({
+        directTools: [],
         trainedForToolUse: false,
         history: [],
         model: TURN_REQUEST.model,
@@ -1842,6 +1872,7 @@ describe("Agent", () => {
       )
 
       const measurement = await agent.findContextMeasurement({
+        directTools: [],
         trainedForToolUse: false,
         history: [
           createUserMessage(1, "What does /a say?"),
@@ -1885,6 +1916,7 @@ describe("Agent", () => {
 
       await expect(
         agent.findContextMeasurement({
+          directTools: [],
           trainedForToolUse: false,
           history: [],
           model: TURN_REQUEST.model,
@@ -1930,6 +1962,7 @@ describe("Agent", () => {
         )
 
         await agent.findContextMeasurement({
+          directTools: [],
           trainedForToolUse: false,
           history: photoHistory,
           model: TURN_REQUEST.model,
@@ -1964,6 +1997,7 @@ describe("Agent", () => {
         )
 
         const measurement = await agent.findContextMeasurement({
+          directTools: [],
           trainedForToolUse: false,
           history: photoHistory,
           model: TURN_REQUEST.model,
@@ -3816,7 +3850,8 @@ describe("Agent", () => {
         {
           replyModel: { openReplyStream },
           replyContextMeter,
-          stateReader: UNEXPECTED_STATE_READER
+          stateReader: UNEXPECTED_STATE_READER,
+          toolKeeper: UNEXPECTED_TOOL_KEEPER
         }
       )
       return {
@@ -4077,6 +4112,7 @@ describe("Agent", () => {
       await waitForMicrotasks()
 
       const measurement = await agent.findContextMeasurement({
+        directTools: [],
         trainedForToolUse: false,
         history: [],
         model: TURN_REQUEST.model,
@@ -4116,7 +4152,7 @@ describe("Agent", () => {
       )
     }
 
-    it("offers a leader's state tools after the turn's tools, MCP tools included, when the model is trained for tool use", async () => {
+    it("offers a leader find_tools and its state tools in place of the turn's tools, MCP tools included, when the model is trained for tool use", async () => {
       const openReplyStream = createRoundStreams(FINISH_ROUND)
 
       await getAgentReplyOutcome({
@@ -4128,11 +4164,13 @@ describe("Agent", () => {
       })
 
       expect(listOfferedToolNames(openReplyStream)).toEqual([
-        "read_text_file",
-        "look_up_word",
-        "mcp__files__echo",
+        "find_tools",
         ...LEADER_STATE_TOOL_NAMES
       ])
+      expect(openReplyStream.mock.calls[0]?.[0].messages[0]).toEqual({
+        role: "system",
+        content: `${AGENT_PROFILE.systemPrompt}\n\n${formatToolRoutingNote(3)}`
+      })
     })
 
     it("offers a member read_my_state only", async () => {
@@ -4142,7 +4180,8 @@ describe("Agent", () => {
         {
           replyModel: { openReplyStream },
           replyContextMeter: createRoomyReplyContextMeter(),
-          stateReader: UNEXPECTED_STATE_READER
+          stateReader: UNEXPECTED_STATE_READER,
+          toolKeeper: UNEXPECTED_TOOL_KEEPER
         }
       )
 
@@ -4253,10 +4292,11 @@ describe("Agent", () => {
       }
     )
 
-    it("measures the state tool definitions after the given tools when the model is trained for tool use", async () => {
+    it("measures find_tools and the state tool definitions in place of the given tools, with the routing note, when the model is trained for tool use", async () => {
       const trainedMeter = createCharacterReplyContextMeter(8192)
       const untrainedMeter = createCharacterReplyContextMeter(8192)
       const input = {
+        directTools: [],
         history: [],
         model: TURN_REQUEST.model,
         canSeeImages: false,
@@ -4274,28 +4314,37 @@ describe("Agent", () => {
         untrainedMeter
       ).findContextMeasurement({ ...input, trainedForToolUse: false })
 
-      expect(
-        trainedMeter.findReplyContextMeasurement.mock.calls[0]?.[0].tools.map(
-          (tool) => tool.function.name
-        )
-      ).toEqual(["look_up_word", ...LEADER_STATE_TOOL_NAMES])
-      expect(
-        untrainedMeter.findReplyContextMeasurement.mock.calls[0]?.[0].tools
-      ).toEqual([LOOK_UP_WORD_FORMAT])
+      const [trainedRequest] =
+        trainedMeter.findReplyContextMeasurement.mock.calls[0] ?? []
+      const [untrainedRequest] =
+        untrainedMeter.findReplyContextMeasurement.mock.calls[0] ?? []
+      expect(trainedRequest?.tools.map((tool) => tool.function.name)).toEqual([
+        "find_tools",
+        ...LEADER_STATE_TOOL_NAMES
+      ])
+      expect(trainedRequest?.messages[0]?.content).toBe(
+        `${AGENT_PROFILE.systemPrompt}\n\n${formatToolRoutingNote(1)}`
+      )
+      expect(untrainedRequest?.tools).toEqual([LOOK_UP_WORD_FORMAT])
+      expect(untrainedRequest?.messages[0]?.content).toBe(
+        AGENT_PROFILE.systemPrompt
+      )
     })
 
-    it("measures only read_my_state after the given tools for a member", async () => {
+    it("measures only find_tools and read_my_state in place of the given tools for a member", async () => {
       const replyContextMeter = createCharacterReplyContextMeter(8192)
       const agent = new Agent(
         { ...AGENT_PROFILE, role: "member" },
         {
           replyModel: { openReplyStream: createEventStream() },
           replyContextMeter,
-          stateReader: UNEXPECTED_STATE_READER
+          stateReader: UNEXPECTED_STATE_READER,
+          toolKeeper: UNEXPECTED_TOOL_KEEPER
         }
       )
 
       await agent.findContextMeasurement({
+        directTools: [],
         trainedForToolUse: true,
         history: [],
         model: TURN_REQUEST.model,
@@ -4309,7 +4358,212 @@ describe("Agent", () => {
         replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0].tools.map(
           (tool) => tool.function.name
         )
-      ).toEqual(["look_up_word", "read_my_state"])
+      ).toEqual(["find_tools", "read_my_state"])
+    })
+  })
+
+  describe("tool routing", () => {
+    /**
+     * Lists the names of the tools one model request offered.
+     *
+     * @param openReplyStream - The model's stream opener.
+     * @param call - Zero-based request.
+     * @returns The offered function names, in offer order.
+     */
+    function listOfferedToolNames(
+      openReplyStream: Mock<OpenReplyStream>,
+      call = 0
+    ): readonly string[] {
+      return (
+        openReplyStream.mock.calls[call]?.[0].tools.map(
+          (tool) => tool.function.name
+        ) ?? []
+      )
+    }
+
+    /**
+     * Builds a round in which the model calls one tool.
+     *
+     * @param toolName - Name of the tool.
+     * @param argumentText - Arguments as the model wrote them.
+     * @returns The round's events.
+     */
+    function buildCallRound(
+      toolName: string,
+      argumentText: string
+    ): readonly ReplyStreamEvent[] {
+      const toolCall = { toolName, argumentText }
+      return [{ type: "tool-calls", toolCalls: [toolCall] }]
+    }
+
+    /** Round in which the model asks for a tool that defines words. */
+    const FIND_TOOLS_ROUND = buildCallRound(
+      "find_tools",
+      '{"task":"define a word"}'
+    )
+
+    /** Round in which the model looks up `moth`. */
+    const LOOK_UP_MOTH_ROUND = buildCallRound("look_up_word", '{"word":"moth"}')
+
+    /**
+     * Creates a keeper whose every search ends one way.
+     *
+     * @param findTools - How each search ends.
+     * @returns The keeper, whose search records each call.
+     */
+    function createKeeper(findTools: ToolKeeper["findTools"]) {
+      return { findTools: vi.fn<ToolKeeper["findTools"]>(findTools) }
+    }
+
+    it("offers the direct tools first in every round, routed or not", async () => {
+      const routedStream = createRoundStreams(FINISH_ROUND)
+      const directStream = createRoundStreams(FINISH_ROUND)
+      const directTool: TurnBuiltInTool = {
+        definition: CHECK_SPELLING_TOOL,
+        tool: new ScriptedBuiltInTool(),
+        runsWithoutApproval: true
+      }
+      const lookUpTool = createLookUpWordTool().entry
+
+      await getAgentReplyOutcome({
+        openReplyStream: routedStream,
+        trainedForToolUse: true,
+        directTools: [directTool],
+        builtInTools: [lookUpTool]
+      })
+      await getAgentReplyOutcome({
+        openReplyStream: directStream,
+        directTools: [directTool],
+        builtInTools: [lookUpTool]
+      })
+
+      expect(listOfferedToolNames(routedStream)).toEqual([
+        "check_spelling",
+        "find_tools",
+        ...LEADER_STATE_TOOL_NAMES
+      ])
+      expect(listOfferedToolNames(directStream)).toEqual([
+        "check_spelling",
+        "look_up_word"
+      ])
+    })
+
+    it("asks the keeper for the turn's tools that fit a task without approval, and offers the found ones from the next round", async () => {
+      const store = openAgentTurnStore()
+      const lookUp = createLookUpWordTool()
+      const keeper = createKeeper(async () => ({
+        status: "found",
+        toolNames: ["look_up_word"]
+      }))
+      const createToolCallGate = vi.fn(
+        async () =>
+          new ToolCallGate(new Set(["look_up_word"]), handleUnexpectedToolCall)
+      )
+      const openReplyStream = createRoundStreams(
+        FIND_TOOLS_ROUND,
+        LOOK_UP_MOTH_ROUND,
+        FINISH_ROUND
+      )
+      const mcpTool = createMcpEchoTool().tool
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        toolKeeper: keeper,
+        store,
+        trainedForToolUse: true,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        builtInTools: [lookUp.entry],
+        mcpTools: [mcpTool],
+        createToolCallGate
+      })
+
+      expect(keeper.findTools).toHaveBeenCalledExactlyOnceWith({
+        task: "define a word",
+        tools: [READ_TEXT_FILE_TOOL, LOOK_UP_WORD_TOOL, mcpTool.definition],
+        conversationId: store.conversationId,
+        model: TURN_REQUEST.model,
+        generationOptions: TURN_REQUEST.generationOptions,
+        abortSignal: expect.any(AbortSignal),
+        reportFailure: expect.any(Function)
+      })
+      expect(listOfferedToolNames(openReplyStream, 1)).toEqual([
+        "find_tools",
+        "look_up_word",
+        ...LEADER_STATE_TOOL_NAMES
+      ])
+      expect(listOfferedToolNames(openReplyStream, 2)).toEqual(
+        listOfferedToolNames(openReplyStream, 1)
+      )
+      expect(
+        run.parts.map((part) => part.kind === "tool-call" && part.status)
+      ).toEqual(["succeeded", "succeeded"])
+      expect(run.parts[0]).toMatchObject({
+        toolName: "find_tools",
+        result:
+          "Armitage found these tools for the task, and you can call them from your next step: look_up_word."
+      })
+      expect(lookUp.tool.startedWords).toEqual(["moth"])
+      expect(createToolCallGate).toHaveBeenCalledOnce()
+      expect(run.events.at(-1)).toEqual({ type: "done", finishReason: "stop" })
+    })
+
+    it("does not run a tool of the turn the keeper has not found, and tells the model to call find_tools", async () => {
+      const lookUp = createLookUpWordTool()
+      const createToolCallGate = vi.fn(handleUnexpectedToolCall)
+      const openReplyStream = createRoundStreams(
+        LOOK_UP_MOTH_ROUND,
+        FINISH_ROUND
+      )
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        trainedForToolUse: true,
+        builtInTools: [lookUp.entry],
+        createToolCallGate
+      })
+
+      expect(run.parts[0]).toMatchObject({
+        kind: "tool-call",
+        toolName: "look_up_word",
+        status: "failed",
+        result: `You cannot call "look_up_word" now. The tools you can call are: find_tools, ${LEADER_STATE_TOOL_NAMES.join(", ")}. To get another tool, call find_tools with what you need it for; the tools Armitage finds are offered to you from your next step.`
+      })
+      expect(lookUp.tool.startedWords).toEqual([])
+      expect(createToolCallGate).not.toHaveBeenCalled()
+      expect(listOfferedToolNames(openReplyStream, 1)).toEqual([
+        "find_tools",
+        ...LEADER_STATE_TOOL_NAMES
+      ])
+    })
+
+    it("tells the model when the keeper could not search, reports why, offers no new tool, and goes on", async () => {
+      const failure = new Error("Armitage's model failed")
+      const keeper = createKeeper(async (search) => {
+        search.reportFailure(failure)
+        return { status: "failed" }
+      })
+      const openReplyStream = createRoundStreams(FIND_TOOLS_ROUND, FINISH_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        toolKeeper: keeper,
+        trainedForToolUse: true,
+        builtInTools: [createLookUpWordTool().entry]
+      })
+
+      expect(run.parts[0]).toMatchObject({
+        toolName: "find_tools",
+        status: "failed",
+        result:
+          "Armitage could not search the tools now. Try again, or go on without a tool."
+      })
+      expect(run.reportedToolSearchFailures).toEqual([failure])
+      expect(run.reportedFailures).toEqual([])
+      expect(listOfferedToolNames(openReplyStream, 1)).toEqual([
+        "find_tools",
+        ...LEADER_STATE_TOOL_NAMES
+      ])
+      expect(run.events.at(-1)).toEqual({ type: "done", finishReason: "stop" })
     })
   })
 
@@ -4331,6 +4585,7 @@ describe("Agent", () => {
       })
       await getAgentReplyOutcome({ agent })
       await agent.findContextMeasurement({
+        directTools: [],
         trainedForToolUse: false,
         history: [PHOTO_MESSAGE],
         model: TURN_REQUEST.model,

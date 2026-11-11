@@ -22,8 +22,10 @@ import type {
   AgentSearchMatch,
   FoundAgent
 } from "./capabilities"
+import type { ToolKeeper, ToolSearch, ToolSearchOutcome } from "./findToolsTool"
 import type { ReplyContextMeter } from "./replyContextMeter"
 import type { ReplyModel } from "./replyModel"
+import { runToolKeeperSearch } from "./toolKeeperSearch"
 
 /**
  * Finds the title of a stored conversation.
@@ -86,6 +88,11 @@ const MISSING_OUTCOME = Object.freeze({ status: "missing" } as const)
 /** Requests of an agent that has no live instance. */
 const NO_REQUESTS: readonly AgentRequestState[] = Object.freeze([])
 
+/** Outcome of a tool search that could not run. */
+const FAILED_TOOL_SEARCH: ToolSearchOutcome = Object.freeze({
+  status: "failed"
+})
+
 /**
  * Builds the listing of an agent a search found.
  *
@@ -123,12 +130,14 @@ function buildAgentProfile(
 }
 
 /**
- * Keeps one live {@link Agent} per agent a request has loaded, and tells
- * agents about themselves and each other as their roles allow.
+ * Keeps one live {@link Agent} per agent a request has loaded, tells agents
+ * about themselves and each other as their roles allow, and has Armitage,
+ * the tool keeper, find the tools a routed turn needs.
  *
  * @remarks An agent becomes live the first time a chat or a context
- * measurement loads it, even for a request refused after the load, and stays
- * live for the service's lifetime, so every turn of an agent, overlapping or
+ * measurement loads it, even for a request refused after the load, and
+ * Armitage on its first tool search; each stays live for the service's
+ * lifetime, so every turn of an agent, overlapping or
  * not, runs on one instance that knows all of them and shares its request
  * slots among them; each live agent has its own slots. Each load gives the live
  * agent the system prompt the agent has now; a reply already running keeps
@@ -140,10 +149,15 @@ function buildAgentProfile(
  * model's owner releases the model access and its meter, and the records'
  * owner closes the store. After that, a load of a stored agent's code and a
  * permitted read or search fail with `Database is closed`; a built-in
- * agent's load and a refused read or search touch no store. Concurrency
- * model: single-owner, synchronous on the backend's event loop.
+ * agent's load, a tool search, and a refused read or search touch no
+ * store. Concurrency model: single-owner on the backend's event loop; loads,
+ * reads, and searches of agents are synchronous, and tool searches run
+ * asynchronously as requests of Armitage's live agent, overlapping searches
+ * sharing its request slots.
  */
-export default class AgentRuntimeService implements AgentStateReader {
+export default class AgentRuntimeService
+  implements AgentStateReader, ToolKeeper
+{
   /** Borrowed lookup and search of every agent. */
   readonly #agents: AgentReader & AgentSearcher
 
@@ -191,21 +205,28 @@ export default class AgentRuntimeService implements AgentStateReader {
     if (code === ARMITAGE_AGENT_CODE) return undefined
     const found = this.#agents.findAgent(code)
     if (found?.deletedAt !== null) return undefined
-    const liveAgent = this.#liveAgents.get(code)
-    if (liveAgent !== undefined) {
-      liveAgent.updateSystemPrompt(found.agent.systemPrompt)
-      return liveAgent
+    return this.#loadLiveAgent(found.agent)
+  }
+
+  /**
+   * Has Armitage, the tool keeper, find the tools that fit a task.
+   *
+   * @param search - As {@link ToolKeeper.findTools} takes it.
+   * @returns As {@link ToolKeeper.findTools} returns; `failed`, after
+   * reporting why, also when Armitage is not one of the built-in agents.
+   * The search runs on Armitage's live agent, made live on the first
+   * search, as {@link runToolKeeperSearch} runs it.
+   * @throws The signal's abort reason once `search.abortSignal` aborts.
+   */
+  public async findTools(search: ToolSearch): Promise<ToolSearchOutcome> {
+    const found = this.#agents.findAgent(ARMITAGE_AGENT_CODE)
+    if (found === undefined) {
+      search.reportFailure(
+        new Error("Armitage, the built-in tool keeper, is not defined")
+      )
+      return FAILED_TOOL_SEARCH
     }
-    const createdAgent = new Agent(
-      buildAgentProfile(found.agent, this.#requestLimits),
-      {
-        replyModel: this.#replyModel,
-        replyContextMeter: this.#replyContextMeter,
-        stateReader: this
-      }
-    )
-    this.#liveAgents.set(code, createdAgent)
-    return createdAgent
+    return await runToolKeeperSearch(this.#loadLiveAgent(found.agent), search)
   }
 
   /**
@@ -257,6 +278,32 @@ export default class AgentRuntimeService implements AgentStateReader {
     const found = this.#agents.findAgent(code)
     if (found === undefined) return MISSING_OUTCOME
     return Object.freeze({ status: "found", state: this.#buildState(found) })
+  }
+
+  /**
+   * Loads the live agent of an agent as found now.
+   * @param agent - The built-in or stored agent.
+   * @returns Its live instance, holding the agent's system prompt now;
+   * created on the agent's first load with every request slot free and the
+   * service's request limits.
+   */
+  #loadLiveAgent(agent: GetAgentApiResponse): Agent {
+    const liveAgent = this.#liveAgents.get(agent.code)
+    if (liveAgent !== undefined) {
+      liveAgent.updateSystemPrompt(agent.systemPrompt)
+      return liveAgent
+    }
+    const createdAgent = new Agent(
+      buildAgentProfile(agent, this.#requestLimits),
+      {
+        replyModel: this.#replyModel,
+        replyContextMeter: this.#replyContextMeter,
+        stateReader: this,
+        toolKeeper: this
+      }
+    )
+    this.#liveAgents.set(agent.code, createdAgent)
+    return createdAgent
   }
 
   /**

@@ -17,6 +17,10 @@ import AgentRuntimeService, {
 } from "../../../../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../../../../src/modules/agent/agentService"
 import { formatSystemPrompt } from "../../../../../src/modules/agent/agentContext"
+import {
+  FIND_TOOLS_DEFINITION,
+  formatToolRoutingNote
+} from "../../../../../src/modules/agent/findToolsTool"
 import { TOOL_CALLS_OFF } from "../../../../../src/modules/agent/unofferedTools"
 import type { ReplyContextMeter } from "../../../../../src/modules/agent/replyContextMeter"
 import type { ReplyModel } from "../../../../../src/modules/agent/replyModel"
@@ -686,7 +690,7 @@ describe("registerChatContextRoute", () => {
     }
   )
 
-  it("measures a stored text file's listing and, for a model trained for tool use, the attachment reader after the offered tools, as a turn offers it", async () => {
+  it("measures a stored text file's listing and, for a model trained for tool use, the attachment reader first and find_tools in place of the offered tools, as a routed turn offers them", async () => {
     const { app, database, replyContextMeter, listDownloadedLlmModels } =
       await createChatContextRouteApp()
     saveConversationWithAttachment(
@@ -714,10 +718,13 @@ describe("registerChatContextRoute", () => {
       images: []
     })
     expect(measured?.tools).toEqual([
-      new AgentTool(LOOK_UP_WORD_TOOL).buildAgentFormat(),
       new AgentTool(buildReadAttachmentDefinition()).buildAgentFormat(),
+      new AgentTool(FIND_TOOLS_DEFINITION).buildAgentFormat(),
       ...LEADER_STATE_TOOL_FORMATS
     ])
+    expect(measured?.messages[0]?.content).toBe(
+      `${CALIGINIA.systemPrompt}\n\n${formatToolRoutingNote(1)}`
+    )
   })
 
   it.each([
@@ -835,7 +842,7 @@ describe("registerChatContextRoute", () => {
     ])
   })
 
-  it("measures the attachment reader after the built-in tools and before a connected MCP server's tool, then the agent state tools, as a turn offers them", async () => {
+  it("measures the attachment reader first, then find_tools in place of the client, built-in, and connected MCP tools, then the agent state tools, as a routed turn offers them", async () => {
     const testApp = await createChatContextRouteApp()
     saveConversationWithAttachment(
       testApp.database,
@@ -866,12 +873,14 @@ describe("registerChatContextRoute", () => {
       testApp.replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
         .tools
     ).toEqual([
-      new AgentTool(READ_TEXT_FILE_TOOL).buildAgentFormat(),
-      new AgentTool(LOOK_UP_WORD_TOOL).buildAgentFormat(),
       new AgentTool(buildReadAttachmentDefinition()).buildAgentFormat(),
-      new AgentTool(echoDefinition).buildAgentFormat(),
+      new AgentTool(FIND_TOOLS_DEFINITION).buildAgentFormat(),
       ...LEADER_STATE_TOOL_FORMATS
     ])
+    expect(
+      testApp.replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
+        .messages[0]?.content
+    ).toBe(`${CALIGINIA.systemPrompt}\n\n${formatToolRoutingNote(3)}`)
   })
 
   it("leaves out an offered MCP tool whose server is not connected", async () => {

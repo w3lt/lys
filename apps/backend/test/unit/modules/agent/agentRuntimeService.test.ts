@@ -32,6 +32,11 @@ import {
 } from "../../support/conversationFixtures"
 import { createRoomyReplyContextMeter } from "../../support/replyContextMeterFakes"
 import { LEADER_STATE_TOOL_NAMES } from "../../support/toolFixtures"
+import {
+  registerToolKeeperContractSuite,
+  TOOL_KEEPER_SEARCH_TOOLS,
+  type ToolKeeperScript
+} from "../../support/toolKeeperContract"
 
 /** Time the clock reads when a case starts. */
 const NOW = "2026-10-24T10:00:00.000Z"
@@ -96,6 +101,34 @@ function createWaitingReplyModel() {
       })()
   }
   return { replyModel, releaseReplies: () => release.resolve() }
+}
+
+/**
+ * Creates model access whose every reply recommends the first tool of a
+ * search, then ends, or whose every reply fails.
+ *
+ * @param script - How each search ends.
+ * @returns The model, whose stream opener records each call.
+ */
+function createToolKeeperReplyModel(script: ToolKeeperScript) {
+  const openReplyStream = vi.fn<ReplyModel["openReplyStream"]>()
+  if (script === "fails") {
+    openReplyStream.mockRejectedValue(new Error("Armitage's model failed"))
+    return { openReplyStream } satisfies ReplyModel
+  }
+  const firstToolName = TOOL_KEEPER_SEARCH_TOOLS[0]?.name ?? ""
+  const toolCall = {
+    toolName: "recommend_tool",
+    argumentText: JSON.stringify({ name: firstToolName })
+  }
+  openReplyStream.mockImplementation(async (request) =>
+    (async function* (): AsyncGenerator<ReplyStreamEvent> {
+      if (request.messages.at(-1)?.role === "tool")
+        yield { type: "finish", finishReason: "stop" }
+      else yield { type: "tool-calls", toolCalls: [toolCall] }
+    })()
+  )
+  return { openReplyStream } satisfies ReplyModel
 }
 
 /**
@@ -184,6 +217,7 @@ async function createHelloReply(
     findAttachmentImage: vi.fn(),
     model: "qwen/qwen3-8b",
     generationOptions: { temperature: 0.4 },
+    directTools: [],
     clientTools: [],
     builtInTools: [],
     mcpTools: [],
@@ -199,7 +233,8 @@ async function createHelloReply(
     createToolCallGate: vi.fn(),
     reportReplyCancellation: vi.fn(),
     reportReplyRefusal: vi.fn(),
-    reportReplyFailure: vi.fn()
+    reportReplyFailure: vi.fn(),
+    reportToolSearchFailure: vi.fn()
   })
 }
 
@@ -504,6 +539,57 @@ describe("AgentRuntimeService", () => {
       expect(replyModel.openReplyStream).toHaveBeenCalledWith(
         buildHelloReplyRequest("You cite sources.")
       )
+    })
+  })
+  describe("tool searches", () => {
+    registerToolKeeperContractSuite(
+      (script) =>
+        createRuntime({ replyModel: createToolKeeperReplyModel(script) })
+          .runtime
+    )
+
+    it("runs each search on Armitage's live agent, with Armitage's prompt, as one of its requests on the asking conversation", async () => {
+      const conversationId = createFixtureUuidV7(31)
+      const { replyModel, releaseReplies } = createWaitingReplyModel()
+      const openReplyStream = vi.spyOn(replyModel, "openReplyStream")
+      const { runtime } = createRuntime({
+        replyModel,
+        conversations: new Map([[conversationId, { title: "Reading list" }]])
+      })
+
+      const search = runtime.findTools({
+        task: "read a web page",
+        tools: TOOL_KEEPER_SEARCH_TOOLS,
+        conversationId,
+        model: "qwen/qwen3-8b",
+        generationOptions: { temperature: 0.2 },
+        abortSignal: new AbortController().signal,
+        reportFailure: vi.fn()
+      })
+      await vi.waitFor(() => {
+        expect(openReplyStream).toHaveBeenCalledOnce()
+      })
+      const state = runtime.findAgentState(LEADER, ARMITAGE_AGENT_CODE)
+      releaseReplies()
+
+      await expect(search).resolves.toEqual({ status: "found", toolNames: [] })
+      expect(openReplyStream.mock.calls[0]?.[0].messages[0]).toEqual({
+        role: "system",
+        content: "You are Armitage."
+      })
+      expect(state).toMatchObject({
+        status: "found",
+        state: {
+          role: "tool-keeper",
+          requests: [
+            {
+              conversationId,
+              conversationTitle: { status: "found", title: "Reading list" }
+            }
+          ]
+        }
+      })
+      expect(runtime.loadChatAgent(ARMITAGE_AGENT_CODE)).toBeUndefined()
     })
   })
 })

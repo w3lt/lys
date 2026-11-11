@@ -2695,7 +2695,7 @@ describe("updateFastifyWithChatRoute", () => {
       return testApp
     }
 
-    it("offers a built-in agent's model, trained for tool use, the leader's state tools after the turn's tools", async () => {
+    it("offers a built-in agent's model, trained for tool use, find_tools in place of the turn's tools, then the leader's state tools", async () => {
       const testApp = await createStateToolApp()
 
       const response = await sendChatRequest(testApp.app, {
@@ -2705,8 +2705,98 @@ describe("updateFastifyWithChatRoute", () => {
 
       expect(response.statusCode).toBe(200)
       expect(listOfferedToolNames(testApp, 0)).toEqual([
+        "find_tools",
+        ...LEADER_STATE_TOOL_NAMES
+      ])
+    })
+
+    it("has Armitage find a tool on the same model, unseen by the person, and offers the found tool from the reply's next round", async () => {
+      const testApp = await createStateToolApp()
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set(["look_up_word"])
+      })
+      /**
+       * Builds a model round that calls one tool.
+       *
+       * @param name - Name of the tool.
+       * @param argumentText - Arguments as the model writes them.
+       * @returns The round's chunks.
+       */
+      const callTool = (name: string, argumentText: string) => {
+        const toolCall = {
+          index: 0,
+          id: "call_0",
+          type: "function" as const,
+          function: { name, arguments: argumentText }
+        }
+        return createChunkStream(
+          createChatCompletionChunk({ toolCalls: [toolCall] }),
+          createChatCompletionChunk({ finishReason: "tool_calls" })
+        )
+      }
+      testApp.completeChatStream
+        .mockImplementationOnce(async () =>
+          callTool("find_tools", '{"task":"define a word"}')
+        )
+        .mockImplementationOnce(async () =>
+          callTool("recommend_tool", '{"name":"look_up_word"}')
+        )
+        .mockImplementationOnce(async () =>
+          createChunkStream(
+            createChatCompletionChunk({
+              content: "look_up_word defines words."
+            }),
+            createChatCompletionChunk({ finishReason: "stop" })
+          )
+        )
+        .mockImplementationOnce(async () =>
+          callTool("look_up_word", '{"word":"moth"}')
+        )
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: { definitions: [], backendToolNames: ["look_up_word"] }
+      })
+
+      expect(response.statusCode).toBe(200)
+      const armitageRequest = testApp.completeChatStream.mock.calls[1]?.[0]
+      expect(armitageRequest?.messages.slice(0, 2)).toEqual([
+        { role: "system", content: TEST_BUILT_IN_AGENT_PROMPTS.armitage },
+        { role: "user", content: "define a word" }
+      ])
+      expect(listOfferedToolNames(testApp, 1)).toEqual([
+        "search_tools",
+        "recommend_tool"
+      ])
+      expect(listOfferedToolNames(testApp, 3)).toEqual([
+        "find_tools",
         "look_up_word",
         ...LEADER_STATE_TOOL_NAMES
+      ])
+      const events = parseSseEvents(response.body)
+      expect(events.map((event) => event.event)).not.toContain("tool-approval")
+      expect(events.at(-1)?.event).toBe("done")
+      const start = chatApiStreamEventSchema.parse(events[0]?.data)
+      if (start.type !== "start-new-conversation-turn")
+        throw new Error("The chat route did not start a new conversation")
+      const reply = testApp.app.conversationHistoryReader.getConversation(
+        start.conversation.id
+      )?.messages[1]
+      expect(reply?.role === "assistant" ? reply.parts : []).toEqual([
+        expect.objectContaining({
+          kind: "tool-call",
+          toolName: "find_tools",
+          status: "succeeded",
+          result:
+            "Armitage found these tools for the task, and you can call them from your next step: look_up_word."
+        }),
+        expect.objectContaining({
+          kind: "tool-call",
+          toolName: "look_up_word",
+          status: "succeeded"
+        }),
+        expect.objectContaining({ kind: "text", content: "Hi" })
       ])
     })
 
@@ -2732,6 +2822,9 @@ describe("updateFastifyWithChatRoute", () => {
 
     it("shows a reply in its agent's state, with its conversation and title, while the person decides on a call, and drops it once the reply ends", async () => {
       const testApp = await createStateToolApp()
+      testApp.listDownloadedLlmModels.mockResolvedValue([
+        { ...TOOL_MODEL_INFO, trainedForToolUse: false }
+      ])
       testApp.readJustRunToolNames.mockResolvedValue({
         status: "read",
         toolNames: new Set()

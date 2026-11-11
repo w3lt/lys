@@ -40,6 +40,7 @@ import {
   createFakeLlmRuntime
 } from "../support/fakeLlmRuntime"
 import { writeSettingsFile } from "../support/settingsFile"
+import { READ_TEXT_FILE_TOOL } from "../support/toolFixtures"
 import { answerWithBody, startVmoServer } from "../support/vmoServer"
 
 // The bundle imports the LM Studio SDK through its runtime adapter. No case
@@ -149,6 +150,7 @@ function buildHelloAgentTurn(
     findAttachmentImage: vi.fn(),
     model: "qwen/qwen3-8b",
     generationOptions: { temperature: 0.4 },
+    directTools: [],
     clientTools: [],
     builtInTools: [],
     mcpTools: [],
@@ -164,7 +166,8 @@ function buildHelloAgentTurn(
     createToolCallGate: vi.fn(),
     reportReplyCancellation: vi.fn(),
     reportReplyRefusal: vi.fn(),
-    reportReplyFailure: vi.fn()
+    reportReplyFailure: vi.fn(),
+    reportToolSearchFailure: vi.fn()
   }
 }
 
@@ -519,6 +522,58 @@ describe("createSingletonServices", () => {
       },
       deletedAt: null
     })
+  })
+
+  it("has Armitage answer a tool search with its configured prompt and the task over the acquired chat and LLM services", async () => {
+    const { factories, acquisitions } = createRecordedFactories()
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      createLogReporters(),
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    const engine = createFakeLlmRuntime()
+    engine.findLlmContextMeasurement.mockImplementation(
+      async (_model, texts) => ({
+        contextLength: 1_000_000,
+        textTokenCounts: texts.map(() => 1)
+      })
+    )
+    vi.spyOn(
+      acquisitions.llmRuntime.service,
+      "handleLlmEngineOperationRequest"
+    ).mockImplementation(
+      async (operation) => await operation(createConnectedFakeLlmEngine(engine))
+    )
+    const failure = new Error("model not loaded")
+    const completeChatStream = vi
+      .spyOn(acquisitions.chat.service, "completeChatStream")
+      .mockRejectedValue(failure)
+    const reportFailure = vi.fn()
+
+    const outcome = await services.agentRuntimeService.findTools({
+      task: "read a web page",
+      tools: [READ_TEXT_FILE_TOOL],
+      conversationId: createFixtureUuidV7(1),
+      model: "qwen/qwen3-8b",
+      generationOptions: { temperature: 0.4 },
+      abortSignal: new AbortController().signal,
+      reportFailure
+    })
+
+    expect(completeChatStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [
+          {
+            role: "system",
+            content: TEST_BACKEND_CONFIG.armitageSystemPrompt
+          },
+          { role: "user", content: "read a web page" }
+        ]
+      })
+    )
+    expect(outcome).toEqual({ status: "failed" })
+    expect(reportFailure).toHaveBeenCalledExactlyOnceWith(failure)
   })
 
   it("gives every live agent the configured request slots and waiting line", async () => {

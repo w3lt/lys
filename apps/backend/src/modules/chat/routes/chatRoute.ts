@@ -240,6 +240,9 @@ const UNREADABLE_JUST_RUN_CHOICES_MESSAGE =
 /** Client tools of a request that offered none. */
 const NO_REQUESTED_TOOLS: readonly ToolDefinition[] = Object.freeze([])
 
+/** Direct tools of a turn that offers none. */
+const NO_DIRECT_TOOLS: readonly TurnBuiltInTool[] = Object.freeze([])
+
 /** Values one turn's tasks keep after the request that started them ended. */
 type TurnGenerationInput = Readonly<{
   /** Stored turn and prior transcript snapshot. */
@@ -253,8 +256,14 @@ type TurnGenerationInput = Readonly<{
   /** Client tools the request offered, each name once; empty when it offered none. */
   clientTools: readonly ToolDefinition[]
   /**
-   * Backend tools of the turn, each name once: the ones the request offered,
-   * then the attachment reader when the turn offers it; empty when none.
+   * Backend tools offered in every round, never routed through
+   * `find_tools`: the attachment reader when the turn offers it; empty
+   * otherwise.
+   */
+  directTools: readonly TurnBuiltInTool[]
+  /**
+   * Backend tools the request offered, each name once; empty when it
+   * offered none.
    */
   builtInTools: readonly TurnBuiltInTool[]
   /**
@@ -268,7 +277,7 @@ type TurnGenerationInput = Readonly<{
   canSeeImages: boolean
   /**
    * Whether the model is trained for tool use, so the agent adds its state
-   * tools to the turn.
+   * tools to the turn and routes its other tools through `find_tools`.
    */
   trainedForToolUse: boolean
   /** Reads the bytes of one stored image attachment of the conversation. */
@@ -785,11 +794,10 @@ async function deleteAttachmentsAfterFailure(
  * @param source - The request, what it parsed and looked up, and the stored
  * turn with its agent.
  * @param dependencies - Route capabilities borrowed for the route lifetime.
- * @returns The turn with its agent, request values, the backend tools of the
- * turn, which are the offered ones followed by the attachment reader as
- * {@link buildTurnBuiltInTools} adds it for a model trained for tool use,
- * whether the model sees images, and the reader of the conversation's
- * stored images.
+ * @returns The turn with its agent, request values, the offered tools, the
+ * direct tools {@link buildTurnDirectTools} builds for a model trained for
+ * tool use, whether the model sees images, and the reader of the
+ * conversation's stored images.
  */
 function buildTurnGenerationInput(
   source: TurnGenerationSource,
@@ -806,16 +814,16 @@ function buildTurnGenerationInput(
     model: body.model,
     generationOptions: body.generationOptions,
     clientTools: body.tools?.definitions ?? NO_REQUESTED_TOOLS,
-    builtInTools: accepted.capabilities.trainedForToolUse
-      ? buildTurnBuiltInTools(
-          accepted.builtInTools,
+    directTools: accepted.capabilities.trainedForToolUse
+      ? buildTurnDirectTools(
           listReadableAttachments(conversationId, [
             ...turn.conversation.messages,
             turn.userMessage
           ]),
           (location) => attachmentFiles.readAttachment(location)
         )
-      : accepted.builtInTools,
+      : NO_DIRECT_TOOLS,
+    builtInTools: accepted.builtInTools,
     mcpTools: accepted.mcpTools,
     unofferedTools: accepted.unofferedTools,
     canSeeImages: accepted.capabilities.vision,
@@ -830,33 +838,28 @@ function buildTurnGenerationInput(
 }
 
 /**
- * Builds the backend tools of a turn whose model is trained for tool use.
+ * Builds the direct tools of a turn whose model is trained for tool use.
  *
- * @param offeredTools - Backend tools the request offered, found for the
- * turn.
  * @param attachments - Every attachment of the conversation, the new
  * message's included.
  * @param readAttachmentFile - Reads an attachment's file; lent for the turn.
- * @returns The offered tools, followed by the attachment reader when an
- * attachment is a text file; the reader's calls run without approval, as
- * they read only what the person attached to this conversation. A model
- * that is not trained for tool use gets the offered tools alone, without a
- * call here.
+ * @returns The attachment reader when an attachment is a text file, offered
+ * in every round, as it reads only what the person attached to this
+ * conversation, and its calls run without approval; none otherwise. A model
+ * that is not trained for tool use gets no direct tool, without a call
+ * here.
  */
-function buildTurnBuiltInTools(
-  offeredTools: readonly TurnBuiltInTool[],
+function buildTurnDirectTools(
   attachments: readonly ReadableAttachment[],
   readAttachmentFile: ReadAttachmentFile
 ): readonly TurnBuiltInTool[] {
-  if (!hasReadableTextAttachment(attachments)) return offeredTools
-  return [
-    ...offeredTools,
-    {
-      definition: buildReadAttachmentDefinition(),
-      tool: new ReadAttachmentTool(attachments, readAttachmentFile),
-      runsWithoutApproval: true
-    }
-  ]
+  if (!hasReadableTextAttachment(attachments)) return NO_DIRECT_TOOLS
+  const reader: TurnBuiltInTool = Object.freeze({
+    definition: buildReadAttachmentDefinition(),
+    tool: new ReadAttachmentTool(attachments, readAttachmentFile),
+    runsWithoutApproval: true
+  })
+  return Object.freeze([reader])
 }
 
 /**
@@ -982,6 +985,7 @@ function buildAgentTurn(
     model: input.model,
     trainedForToolUse: input.trainedForToolUse,
     generationOptions: input.generationOptions,
+    directTools: input.directTools,
     clientTools: input.clientTools,
     builtInTools: input.builtInTools,
     mcpTools: input.mcpTools,
@@ -1036,19 +1040,24 @@ function findStoredReplyStatus(
 }
 
 /**
- * Builds the reporters that log how a reply ended without finishing.
+ * Builds the reporters that log how a reply, or one of its tool searches,
+ * ended without finishing.
  *
  * @param logger - Request logger, borrowed for the reply.
  * @returns Reporters that log a reply refused because its agent's request
  * slots and line were full as a warning, a cancellation and a round that was
  * not sent because it did not fit or its model was not loaded as debug
- * entries, and a failed stream as an error.
+ * entries, a failed stream as an error, and a tool search Armitage could not
+ * finish as a warning.
  */
 function buildReplyFailureReporters(
   logger: FastifyBaseLogger
 ): Pick<
   AgentTurn,
-  "reportReplyCancellation" | "reportReplyRefusal" | "reportReplyFailure"
+  | "reportReplyCancellation"
+  | "reportReplyRefusal"
+  | "reportReplyFailure"
+  | "reportToolSearchFailure"
 > {
   return {
     reportReplyCancellation: (failure) => {
@@ -1065,6 +1074,12 @@ function buildReplyFailureReporters(
     },
     reportReplyFailure: (failure) => {
       logger.error({ err: failure }, "Chat completion stream failed")
+    },
+    reportToolSearchFailure: (failure) => {
+      logger.warn(
+        { err: failure },
+        "Armitage could not finish a tool search, so the reply went on without its tools"
+      )
     }
   }
 }

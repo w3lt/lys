@@ -57,7 +57,7 @@ struct Dialogue {
 /// When a request is not answered in time, the binary does not exit in
 /// time once its input ended, or its standard error does not end in time.
 fn send_dialogue_messages(variable: String, messages: Vec<Value>) -> Dialogue {
-    let (mut binary, streams) = BinaryProcess::start(&[], Some(&variable));
+    let (mut binary, streams) = BinaryProcess::start(&[], Some(variable.as_ref()));
     let mut input = streams.input;
     let lines = follow_lines(streams.output);
     let log = read_to_end_in_thread(streams.log);
@@ -131,7 +131,7 @@ fn wait_for_tool_line(lines: &mpsc::Receiver<String>, tool: &str) -> String {
 /// call, or the binary does not log the call in time.
 fn cancel_held_call(variable: String, call: Value, released: mpsc::Receiver<()>) -> String {
     let tool = call["name"].as_str().expect("the tool's name").to_owned();
-    let (binary, streams) = BinaryProcess::start(&[], Some(&variable));
+    let (binary, streams) = BinaryProcess::start(&[], Some(variable.as_ref()));
     let mut input = streams.input;
     let answers = follow_lines(streams.output);
     let lines = follow_lines(streams.log);

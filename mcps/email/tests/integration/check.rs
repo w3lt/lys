@@ -1,6 +1,7 @@
 //! The account check against the fakes: both sign-ins, each way they
 //! fail, and the process contract of the `check` subcommand.
 
+use std::ffi::OsStr;
 use std::process::Output;
 use std::time::Duration;
 
@@ -27,7 +28,7 @@ use crate::support::{
 /// When the binary does not exit within
 /// [`STEP_WAIT_LIMIT`](crate::support::binary::STEP_WAIT_LIMIT), or its output does not
 /// end in time once it exited.
-async fn read_binary_output(arguments: &[&str], variable: Option<&str>) -> Output {
+async fn read_binary_output(arguments: &[&str], variable: Option<&OsStr>) -> Output {
     let (mut binary, streams) = BinaryProcess::start(arguments, variable);
     drop(streams.input);
     let stdout = read_to_end_in_thread(streams.output);
@@ -480,7 +481,7 @@ async fn the_check_subcommand_prints_one_json_line_and_exits_0() {
         false,
     );
 
-    let output = read_binary_output(&["check"], Some(&json)).await;
+    let output = read_binary_output(&["check"], Some(json.as_ref())).await;
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(
@@ -507,7 +508,7 @@ async fn the_check_subcommand_logs_a_report_it_cannot_write_and_exits_1() {
     );
 
     let (mut binary, stderr) =
-        BinaryProcess::start_with_output_reader_closed(&["check"], Some(&json));
+        BinaryProcess::start_with_output_reader_closed(&["check"], Some(json.as_ref()));
     let stderr_bytes = read_to_end_in_thread(stderr);
     let (status, log) = tokio::task::spawn_blocking(move || {
         let status = binary.wait_for_exit();
@@ -531,19 +532,22 @@ async fn refuses_to_start_without_a_usable_account_and_names_the_rule_only() {
     let missing = read_binary_output(&["check"], None).await;
     let plain_remote = read_binary_output(
         &["check"],
-        Some(&build_account_json_for(
-            "mail.example.com",
-            TestServers {
-                imap_port: 143,
-                imap_security: SecurityName::Plain,
-                smtp_port: 587,
-                smtp_security: SecurityName::StartTls,
-            },
-            false,
-        )),
+        Some(
+            build_account_json_for(
+                "mail.example.com",
+                TestServers {
+                    imap_port: 143,
+                    imap_security: SecurityName::Plain,
+                    smtp_port: 587,
+                    smtp_security: SecurityName::StartTls,
+                },
+                false,
+            )
+            .as_ref(),
+        ),
     )
     .await;
-    let not_json = read_binary_output(&[], Some("{not json")).await;
+    let not_json = read_binary_output(&[], Some("{not json".as_ref())).await;
     let bad_arguments = read_binary_output(&["serve"], None).await;
 
     assert_eq!(missing.status.code(), Some(2));
@@ -552,11 +556,9 @@ async fn refuses_to_start_without_a_usable_account_and_names_the_rule_only() {
         "LYS_EMAIL_ACCOUNT: is not set\n"
     );
     assert_eq!(plain_remote.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&plain_remote.stderr);
-    assert!(stderr.starts_with("LYS_EMAIL_ACCOUNT: "), "{stderr}");
-    assert!(
-        !stderr.contains("mail.example.com") && !stderr.contains(crate::support::PASSWORD),
-        "{stderr}"
+    assert_eq!(
+        String::from_utf8_lossy(&plain_remote.stderr),
+        "LYS_EMAIL_ACCOUNT: breaks a rule: imap.security may be plain only for localhost, 127.0.0.1, or [::1]\n"
     );
     assert!(plain_remote.stdout.is_empty());
     assert_eq!(not_json.status.code(), Some(2));
@@ -569,4 +571,24 @@ async fn refuses_to_start_without_a_usable_account_and_names_the_rule_only() {
         String::from_utf8_lossy(&bad_arguments.stderr),
         "usage: email [check]\n"
     );
+}
+
+/// Checks that the binary exits 2 and says that the variable is not Unicode
+/// text when its value holds a byte that no UTF-8 text holds.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_to_start_with_a_variable_that_is_not_unicode_text() {
+    use std::os::unix::ffi::OsStrExt;
+
+    /// A byte that no UTF-8 text holds.
+    const BYTE_OUTSIDE_UTF_8: &[u8] = b"\xff";
+
+    let output = read_binary_output(&["check"], Some(OsStr::from_bytes(BYTE_OUTSIDE_UTF_8))).await;
+
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "LYS_EMAIL_ACCOUNT: is not Unicode text\n"
+    );
+    assert!(output.stdout.is_empty());
 }

@@ -4,6 +4,7 @@
 //! every path the test takes, and waited for only within a bound.
 
 use std::env;
+use std::ffi::OsStr;
 use std::io::{self, BufRead, BufReader, Read};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
@@ -54,8 +55,8 @@ impl BinaryProcess {
     /// # Arguments
     ///
     /// * `arguments` - The binary's command-line arguments.
-    /// * `variable` - The JSON of `LYS_EMAIL_ACCOUNT`, or `None` to start
-    ///   the binary without the variable.
+    /// * `variable` - The value of `LYS_EMAIL_ACCOUNT`, which need not be
+    ///   Unicode text, or `None` to start the binary without the variable.
     ///
     /// # Returns
     ///
@@ -64,7 +65,7 @@ impl BinaryProcess {
     /// # Panics
     ///
     /// When the binary cannot be started.
-    pub fn start(arguments: &[&str], variable: Option<&str>) -> (Self, BinaryStreams) {
+    pub fn start(arguments: &[&str], variable: Option<&OsStr>) -> (Self, BinaryStreams) {
         Self::start_piped(build_email_binary_command(arguments, variable))
     }
 
@@ -77,8 +78,8 @@ impl BinaryProcess {
     /// # Arguments
     ///
     /// * `arguments` - The binary's command-line arguments.
-    /// * `variable` - The JSON of `LYS_EMAIL_ACCOUNT`, or `None` to start
-    ///   the binary without the variable.
+    /// * `variable` - The value of `LYS_EMAIL_ACCOUNT`, which need not be
+    ///   Unicode text, or `None` to start the binary without the variable.
     ///
     /// # Returns
     ///
@@ -89,7 +90,7 @@ impl BinaryProcess {
     /// When the pipe cannot be made or the binary cannot be started.
     pub fn start_with_output_reader_closed(
         arguments: &[&str],
-        variable: Option<&str>,
+        variable: Option<&OsStr>,
     ) -> (Self, ChildStderr) {
         let (reader, writer) = io::pipe().expect("a pipe");
         drop(reader);
@@ -206,9 +207,9 @@ impl BinaryProcess {
 /// # Arguments
 ///
 /// * `arguments` - The binary's command-line arguments.
-/// * `variable` - The JSON of `LYS_EMAIL_ACCOUNT`, or `None` to run the
-///   binary without the variable.
-fn build_email_binary_command(arguments: &[&str], variable: Option<&str>) -> Command {
+/// * `variable` - The value of `LYS_EMAIL_ACCOUNT`, which need not be
+///   Unicode text, or `None` to run the binary without the variable.
+fn build_email_binary_command(arguments: &[&str], variable: Option<&OsStr>) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_email"));
     command.args(arguments);
     match variable {

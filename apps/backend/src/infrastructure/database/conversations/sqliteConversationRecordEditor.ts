@@ -15,7 +15,8 @@ import type {
  * @param conversationId - UUIDv7 to rename.
  * @param title - Validated title, stored as given.
  * @returns The renamed conversation's metadata, or undefined when it is not
- * stored.
+ * stored. Every stored conversation is a main one, so it has no parent, job
+ * number, or delegator.
  * @throws If SQLite fails or the renamed row violates the metadata contract;
  * the row is validated before the caller's transaction commits, so either
  * failure rolls the rename back.
@@ -31,7 +32,13 @@ function updateConversationTitle(
       RETURNING id, title, agent_code AS agentCode, created_at AS createdAt, updated_at AS updatedAt`
     )
     .get(title, conversationId)
-  return row === undefined ? undefined : conversationMetadataSchema.parse(row)
+  if (row === undefined) return undefined
+  return conversationMetadataSchema.parse({
+    ...row,
+    parentConversationId: null,
+    jobNumber: null,
+    delegatorAgentCode: null
+  })
 }
 
 /**

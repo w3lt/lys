@@ -264,16 +264,20 @@ function saveConversationWithReply(
 }
 
 /**
- * Creates the metadata of a new, untitled conversation.
+ * Creates the metadata of a new, untitled main conversation.
  *
  * @param id - Conversation identity.
- * @returns Valid metadata created at {@link CHANGED_AT}.
+ * @returns Valid metadata created at {@link CHANGED_AT}, with no parent, job
+ * number, or delegator.
  */
 function createNewConversationMetadata(id: string) {
   return {
     id,
     title: null,
     agentCode: "lys",
+    parentConversationId: null,
+    jobNumber: null,
+    delegatorAgentCode: null,
     createdAt: CHANGED_AT,
     updatedAt: CHANGED_AT
   }
@@ -541,10 +545,14 @@ export function registerConversationRecordReaderContractSuite(
           id: CONVERSATION_ID,
           title: "Trip plan",
           agentCode: "lys",
+          parentConversationId: null,
+          jobNumber: null,
+          delegatorAgentCode: null,
           createdAt: CREATED_AT,
           updatedAt: CREATED_AT,
           messages: [],
-          sources: []
+          sources: [],
+          jobs: []
         })
       })
 
@@ -581,6 +589,8 @@ export function registerConversationRecordReaderContractSuite(
             role: "user",
             content: "Hello",
             attachments: [],
+            origin: "person",
+            reports: [],
             createdAt: "2025-01-01T00:00:01.000Z"
           },
           {
@@ -715,6 +725,8 @@ export function registerConversationRecordReaderContractSuite(
           role: "user",
           content: "local only",
           attachments: [],
+          origin: "person",
+          reports: [],
           createdAt: "2025-01-01T00:00:09.000Z"
         })
 
@@ -1059,6 +1071,9 @@ export function registerConversationRecordEditorContractSuite(
           id: CONVERSATION_ID,
           title: "Greeting",
           agentCode: "stored-agent",
+          parentConversationId: null,
+          jobNumber: null,
+          delegatorAgentCode: null,
           createdAt: createFixtureTimestamp(1),
           updatedAt: createFixtureTimestamp(1, 1)
         })
@@ -1232,6 +1247,8 @@ async function saveConversationAroundAwait(
     role: "user",
     content: "after await",
     attachments: [],
+    origin: "person",
+    reports: [],
     createdAt: CHANGED_AT
   })
 }
@@ -1263,7 +1280,8 @@ export function registerConversationTurnRecordWriterContractSuite(
         expect(recordReader.findConversation(CONVERSATION_ID)).toEqual({
           ...createNewConversationMetadata(CONVERSATION_ID),
           messages: [],
-          sources: []
+          sources: [],
+          jobs: []
         })
       })
 
@@ -1353,7 +1371,8 @@ export function registerConversationTurnRecordWriterContractSuite(
         expect(harness.recordReader.findConversation(CONVERSATION_ID)).toEqual({
           ...metadata,
           messages: [],
-          sources: []
+          sources: [],
+          jobs: []
         })
       })
 
@@ -1381,6 +1400,8 @@ export function registerConversationTurnRecordWriterContractSuite(
             role: "user",
             content: "late",
             attachments: [],
+            origin: "person",
+            reports: [],
             createdAt: CHANGED_AT
           })
         ).toThrow("Database operation has ended")
@@ -1807,11 +1828,17 @@ export function registerConversationTurnTransactionContractSuite(
         }
       )
 
-      expect(observed).toEqual({ ...metadata, messages: [], sources: [] })
+      expect(observed).toEqual({
+        ...metadata,
+        messages: [],
+        sources: [],
+        jobs: []
+      })
       expect(recordReader.findConversation(CONVERSATION_ID)).toEqual({
         ...metadata,
         messages: [],
-        sources: []
+        sources: [],
+        jobs: []
       })
     })
 
@@ -1917,10 +1944,14 @@ export function registerConversationTurnTransactionContractSuite(
         id: CONVERSATION_ID,
         title: "Trip plan",
         agentCode: "stored-agent",
+        parentConversationId: null,
+        jobNumber: null,
+        delegatorAgentCode: null,
         createdAt: CREATED_AT,
         updatedAt: CREATED_AT,
         messages: [],
-        sources: []
+        sources: [],
+        jobs: []
       })
     })
 
@@ -1933,6 +1964,8 @@ export function registerConversationTurnTransactionContractSuite(
             role: "user",
             content: "Hello",
             attachments: [],
+            origin: "person",
+            reports: [],
             createdAt: CHANGED_AT
           })
         }
@@ -1990,6 +2023,8 @@ export function registerConversationTurnTransactionContractSuite(
             role: "user",
             content: "Hello",
             attachments: [],
+            origin: "person",
+            reports: [],
             createdAt: CHANGED_AT
           })
         }
@@ -2031,6 +2066,8 @@ export function registerConversationTurnTransactionContractSuite(
         role: "user",
         content: "Hello",
         attachments: [],
+        origin: "person",
+        reports: [],
         createdAt: CHANGED_AT
       } as const
       const assistantMessage = {

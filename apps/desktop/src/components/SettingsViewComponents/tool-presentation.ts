@@ -113,6 +113,7 @@ const TOOL_GROUP_LABELS = Object.freeze({
 const TOOL_ACCESS_LABELS = Object.freeze({
   reads: "reads",
   network: "network",
+  agents: "gives work",
   unknown: "depends on server"
 } satisfies Readonly<Record<ToolAccess, string>>)
 
@@ -127,6 +128,8 @@ const JUST_RUN_NOTES = Object.freeze({
   reads: "Runs the moment the model asks, without showing you the call.",
   network:
     "Sends its request off this machine the moment the model asks, without showing you what it sends.",
+  agents:
+    "Starts the job the moment the model asks, without showing you its instructions. The tools the other agent uses still follow their own settings.",
   unknown:
     "Runs on its MCP server the moment the model asks, without showing you what it sends. What it does depends on the MCP server."
 } satisfies Readonly<Record<ToolAccess, string>>)

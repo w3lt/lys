@@ -200,10 +200,14 @@ describe("StoredConversationTurns", () => {
         id: turn.conversation.id,
         title: null,
         agentCode: "lys",
+        parentConversationId: null,
+        jobNumber: null,
+        delegatorAgentCode: null,
         createdAt: NOW,
         updatedAt: expect.any(String),
         messages: [turn.userMessage, turn.assistantMessage],
-        sources: []
+        sources: [],
+        jobs: []
       })
     })
 

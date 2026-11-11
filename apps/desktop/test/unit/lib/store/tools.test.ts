@@ -145,6 +145,15 @@ describe("isToolOn", () => {
       false
     )
   })
+
+  it("returns on for an unchanged tool that gives work to another agent, and the switch once changed", () => {
+    const delegateWork = { name: "delegate_work", access: "agents" } as const
+
+    expect(isToolOn(new Map(), delegateWork)).toBe(true)
+    expect(isToolOn(new Map([["delegate_work", false]]), delegateWork)).toBe(
+      false
+    )
+  })
 })
 
 describe("getToolChoice", () => {

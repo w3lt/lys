@@ -90,10 +90,14 @@ describe("createConversationTurn", () => {
       id: expect.any(String),
       title: null,
       agentCode: "options-agent",
+      parentConversationId: null,
+      jobNumber: null,
+      delegatorAgentCode: null,
       createdAt: NOW,
       updatedAt: NOW,
       messages: [],
-      sources: []
+      sources: [],
+      jobs: []
     })
     expect(z.uuidv7().safeParse(turn.conversation.id).success).toBe(true)
     expect(
@@ -115,6 +119,8 @@ describe("createConversationTurn", () => {
       role: "user",
       content: "Hello",
       attachments: [],
+      origin: "person",
+      reports: [],
       createdAt: NOW
     })
     expect(turn.assistantMessage).toEqual({

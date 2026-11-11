@@ -65,14 +65,14 @@ const NEW_CONVERSATION_REQUEST = Object.freeze({
 
 /** Refusal of a request that offers a tool the backend adds itself. */
 const RESERVED_OFFERED_TOOL_MESSAGE =
-  "A request does not offer read_attachment, read_my_state, find_agents, or read_agent_state; the backend adds them to a turn itself."
+  "A request does not offer read_attachment, read_my_state, find_agents, read_agent_state, report_progress, or stop_job; the backend adds them to a turn itself."
 
 /**
  * Refusal of a request that names a tool the backend adds itself as switched
  * off or unable to run.
  */
 const RESERVED_UNOFFERED_TOOL_MESSAGE =
-  "A request does not name read_attachment, read_my_state, find_agents, or read_agent_state as switched off or unable to run; they have no switch and the backend adds them to a turn itself."
+  "A request does not name read_attachment, read_my_state, find_agents, read_agent_state, report_progress, or stop_job as switched off or unable to run; they have no switch and the backend adds them to a turn itself."
 
 /**
  * Builds the request form of a text attachment.
@@ -507,7 +507,7 @@ describe("updateFastifyWithChatRoute", () => {
   )
 
   it.each(["caliginia", "lysiptera"] as const)(
-    "has the built-in agent %s answer with her own system prompt and streams the stored reply",
+    "has the built-in agent %s answer a new main conversation with her own system prompt and streams the stored reply",
     async (agentCode) => {
       const testApp = await createChatRouteTestApp()
       registerStoringChatRoute(testApp)
@@ -518,9 +518,18 @@ describe("updateFastifyWithChatRoute", () => {
       })
 
       expect(response.statusCode).toBe(200)
-      expect(parseSseEvents(response.body)[0]).toMatchObject({
-        event: "start-new-conversation-turn",
-        data: { conversation: { agentCode } }
+      const [startEvent] = parseSseEvents(response.body)
+      expect(startEvent?.event).toBe("start-new-conversation-turn")
+      expect(
+        chatApi.response.eventSchema.parse(startEvent?.data)
+      ).toMatchObject({
+        type: "start-new-conversation-turn",
+        conversation: {
+          agentCode,
+          parentConversationId: null,
+          jobNumber: null,
+          delegatorAgentCode: null
+        }
       })
       expect(testApp.completeChatStream).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -967,7 +976,9 @@ describe("updateFastifyWithChatRoute", () => {
       "read_attachment",
       "read_my_state",
       "find_agents",
-      "read_agent_state"
+      "read_agent_state",
+      "report_progress",
+      "stop_job"
     ].flatMap((name) => [
       [
         name,

@@ -32,6 +32,7 @@ import {
 } from "../../http/errors/chat"
 import {
   conversationAgentMissingProblemSchema,
+  conversationIsJobProblemSchema,
   conversationNotFoundProblemSchema
 } from "../../http/errors/conversation"
 import { llmRuntimeUnavailableProblemSchema } from "../../http/errors/llm"
@@ -192,7 +193,8 @@ function hasOnlyClientTools(definitions: readonly ToolDefinition[]): boolean {
 /**
  * Lists the tools the backend adds to a turn itself for a refusal message.
  *
- * @returns `a, b, c, or d`, in {@link BACKEND_INTERNAL_TOOL_NAMES} order.
+ * @returns The names separated by commas, with `or` before the last, in
+ * {@link BACKEND_INTERNAL_TOOL_NAMES} order.
  */
 function formatBackendInternalToolNames(): string {
   const names = [...BACKEND_INTERNAL_TOOL_NAMES]
@@ -298,7 +300,8 @@ function hasDistinctOfferedToolNames(offer: ChatToolOfferCandidate): boolean {
  * one tool is offered, no name is offered twice across the two lists, and
  * neither list names a tool the backend adds to a turn itself
  * (`BACKEND_INTERNAL_TOOL_NAMES`): the attachment reader, when the
- * conversation holds a text attachment, and the agent state tools. The
+ * conversation holds a text attachment, the agent state tools, and the
+ * tools a job sends a progress note and a delegator stops a job with. The
  * backend rejects a backend tool name it does not run (400) and an offered
  * backend tool that cannot run now (409), such as an MCP tool whose server
  * is configured but not connected. Offered only to a model trained for tool
@@ -575,17 +578,19 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
  * or a deleted agent's, and the conversation-not-found problem when a
  * continued conversation is not stored. A 409 is the conversation agent
  * missing problem when the continued conversation is stored but its agent no
- * longer exists, the backend tool unavailable problem when an offered
- * backend tool cannot run now, and the image-needs-vision problem when the
- * request attaches an image for a model without vision. A 503 is the
- * service-busy or runtime-unavailable problem when the model's capabilities,
- * which every request reads, cannot be read from LM Studio.
+ * longer exists, the conversation-is-job problem when the continued
+ * conversation is a job, the backend tool unavailable problem when an
+ * offered backend tool cannot run now, and the image-needs-vision problem
+ * when the request attaches an image for a model without vision. A 503 is
+ * the service-busy or runtime-unavailable problem when the model's
+ * capabilities, which every request reads, cannot be read from LM Studio.
  */
 const chatApiResponseSchemas = Object.freeze({
   400: chatAttachmentUnsupportedProblemSchema,
   404: z.union([agentNotFoundProblemSchema, conversationNotFoundProblemSchema]),
   409: z.union([
     conversationAgentMissingProblemSchema,
+    conversationIsJobProblemSchema,
     chatBackendToolUnavailableProblemSchema,
     chatImageNeedsVisionProblemSchema
   ]),

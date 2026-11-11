@@ -22,6 +22,16 @@ export const apiChatReplyEventsRoute = `${API_PREFIX_V1}/chat/:conversationId/re
 export const apiChatReplyStopRoute = `${API_PREFIX_V1}/chat/:conversationId/replies/:assistantMessageId/stop`
 
 /**
+ * Versioned POST path for stopping every working job of one conversation.
+ *
+ * @remarks This path is transmitted in HTTP requests and is not persisted.
+ * Consumers substitute a percent-encoded UUIDv7 identifier for
+ * `:conversationId`. Changing it requires coordinated route registration
+ * because jobs-stop URL compatibility breaks.
+ */
+export const apiChatJobsStopRoute = `${API_PREFIX_V1}/chat/:conversationId/jobs/stop`
+
+/**
  * Versioned POST path for answering one tool call of a running reply.
  *
  * @remarks This path is transmitted in HTTP requests and is not persisted.

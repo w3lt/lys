@@ -55,13 +55,14 @@ export const FIXTURE_TIMESTAMP = "2026-01-02T03:04:05.678Z"
 export const FIXTURE_MODEL = "fixture-model"
 
 /**
- * Builds a stored user message.
+ * Builds a stored user message the person wrote.
  *
  * @param sequence - Identity sequence of the message.
  * @param content - Non-empty authored text.
  * @param attachments - Files sent with the message, in sending order; none
  * when omitted.
- * @returns A frozen user message validated by the shared schema.
+ * @returns A frozen user message of the person that delivers no reports,
+ * validated by the shared schema.
  */
 export function buildUserMessage(
   sequence: number,
@@ -74,6 +75,8 @@ export function buildUserMessage(
       role: "user",
       content,
       attachments,
+      origin: "person",
+      reports: [],
       createdAt: FIXTURE_TIMESTAMP
     })
   )
@@ -434,12 +437,13 @@ export function buildEndedChatViewReply(
 }
 
 /**
- * Builds stored conversation metadata answered by Caliginia, the built-in
- * agent a new conversation starts with.
+ * Builds the stored metadata of a main conversation answered by Caliginia,
+ * the built-in agent a new conversation starts with.
  *
  * @param id - Conversation identity.
  * @param title - Stored title, or null before title generation saves one.
- * @returns Frozen metadata validated by the shared schema.
+ * @returns Frozen metadata without a parent, job number, or delegator,
+ * validated by the shared schema.
  */
 export function buildConversationMetadata(
   id: string,
@@ -450,6 +454,9 @@ export function buildConversationMetadata(
       id,
       title,
       agentCode: CALIGINIA_AGENT_CODE,
+      parentConversationId: null,
+      jobNumber: null,
+      delegatorAgentCode: null,
       createdAt: FIXTURE_TIMESTAMP,
       updatedAt: FIXTURE_TIMESTAMP
     })
@@ -457,13 +464,13 @@ export function buildConversationMetadata(
 }
 
 /**
- * Builds a stored conversation with its transcript.
+ * Builds a stored main conversation with its transcript.
  *
  * @param id - Conversation identity.
  * @param title - Stored title, or null before title generation saves one.
  * @param messages - Transcript in stored order.
- * @returns A frozen conversation without sources, validated by the shared
- * schema.
+ * @returns A frozen conversation without sources or jobs, validated by the
+ * shared schema.
  */
 export function buildConversation(
   id: string,
@@ -474,7 +481,8 @@ export function buildConversation(
     conversationSchema.parse({
       ...buildConversationMetadata(id, title),
       messages,
-      sources: []
+      sources: [],
+      jobs: []
     })
   )
 }

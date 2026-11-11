@@ -4,6 +4,13 @@ export * from "./chat"
 export * from "./agent"
 export * from "./mcp"
 export {
+  activityEventSchema,
+  activityEventsApi,
+  activityReplySchema,
+  type ActivityEvent,
+  type ActivityReply
+} from "./activity"
+export {
   backendToolUnavailableReasonSchema,
   checkWebSearchKeyApi,
   checkWebSearchKeyApiResponseSchema,

@@ -29,11 +29,14 @@ export type ToolChoice = {
  * @remarks A tool that only reads data on this machine starts on; a tool
  * that sends requests off the machine starts off. An MCP tool, whose access
  * depends on its server, starts on: the person added the server for its
- * tools, and every call asks first unless they choose Just run.
+ * tools, and every call asks first unless they choose Just run. A tool that
+ * gives work to another agent inside Lys starts on, because every call asks
+ * first unless the person chooses Just run.
  */
 const IS_TOOL_ON_BY_DEFAULT = Object.freeze({
   reads: true,
   network: false,
+  agents: true,
   unknown: true
 } satisfies Readonly<Record<ToolAccess, boolean>>)
 

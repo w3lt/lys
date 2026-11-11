@@ -34,6 +34,9 @@ const CONVERSATION_METADATA = Object.freeze({
   id: CONVERSATION_ID,
   title: "Trip plan",
   agentCode: "lys",
+  parentConversationId: null,
+  jobNumber: null,
+  delegatorAgentCode: null,
   createdAt: FIXTURE_TIMESTAMP,
   updatedAt: FIXTURE_TIMESTAMP
 } satisfies ConversationMetadata)
@@ -61,7 +64,8 @@ const CONVERSATION = Object.freeze({
       { status: "completed", finishReason: "stop" }
     )
   ],
-  sources: [{ number: 1, url: "https://trips.example/", title: "Trips" }]
+  sources: [{ number: 1, url: "https://trips.example/", title: "Trips" }],
+  jobs: []
 } satisfies Conversation)
 
 /** One-conversation page returned by the stubbed history. */

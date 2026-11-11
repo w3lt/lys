@@ -32,12 +32,12 @@ export const FIXTURE_CONVERSATION_ID = createFixtureUuidV7(1)
 export const FIXTURE_TIMESTAMP = "2026-01-02T03:04:05.678Z"
 
 /**
- * Creates a stored user message.
+ * Creates a stored user message the person wrote.
  *
  * @param sequence - Identity sequence of the message.
  * @param content - Non-empty authored text.
  * @param attachments - Stored attachments in number order; none when omitted.
- * @returns A valid user message.
+ * @returns A valid user message of the person that delivers no reports.
  */
 export function createUserMessage(
   sequence: number,
@@ -49,6 +49,8 @@ export function createUserMessage(
     role: "user",
     content,
     attachments,
+    origin: "person",
+    reports: [],
     createdAt: FIXTURE_TIMESTAMP
   }
 }
@@ -288,7 +290,8 @@ export type ConversationTurnFixture = Readonly<{
 }>
 
 /**
- * Creates a persisted turn for an untitled existing conversation.
+ * Creates a persisted turn for an untitled existing main conversation
+ * without jobs.
  *
  * @param fixture - Agent code, earlier transcript, and new user content.
  * @returns A turn whose new pair uses identity sequences 1001 and 1002.
@@ -301,10 +304,14 @@ export function createConversationTurn(
       id: FIXTURE_CONVERSATION_ID,
       title: null,
       agentCode: fixture.agentCode,
+      parentConversationId: null,
+      jobNumber: null,
+      delegatorAgentCode: null,
       createdAt: FIXTURE_TIMESTAMP,
       updatedAt: FIXTURE_TIMESTAMP,
       messages: [...fixture.earlierMessages],
-      sources: fixture.sources ?? []
+      sources: fixture.sources ?? [],
+      jobs: []
     },
     userMessage: createUserMessage(1001, fixture.userMessageContent),
     assistantMessage: createAssistantMessage(1002, [], {

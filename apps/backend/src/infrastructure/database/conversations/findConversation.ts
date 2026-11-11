@@ -88,6 +88,8 @@ function listStoredMessageAttachments(
  * @param statements - Statement compilation lent to the caller's transaction.
  * @param conversationId - Stored UUIDv7 to look up.
  * @returns Independent metadata, or undefined for an absent conversation.
+ * Every stored conversation is a main one, so it has no parent, job number,
+ * or delegator.
  * @throws If SQLite access or persisted validation fails.
  */
 function findConversationMetadata(
@@ -100,7 +102,13 @@ function findConversationMetadata(
     created_at AS createdAt, updated_at AS updatedAt FROM conversations WHERE id = ?`
     )
     .get(conversationId)
-  return row === undefined ? undefined : conversationMetadataSchema.parse(row)
+  if (row === undefined) return undefined
+  return conversationMetadataSchema.parse({
+    ...row,
+    parentConversationId: null,
+    jobNumber: null,
+    delegatorAgentCode: null
+  })
 }
 
 /**
@@ -201,7 +209,8 @@ function listStoredReplyParts(
  * @param context - Validated parts of the conversation's replies and the
  * untrusted attachments of its user messages.
  * @returns The validated independent message; a user message carries its
- * attachments and a reply its parts.
+ * attachments and a reply its parts. Every stored user message is the
+ * person's and carries no reports.
  * @throws If the row, or an attachment of it, violates the shared message
  * schema.
  */
@@ -218,7 +227,9 @@ function parseConversationMessage(
     return conversationMessageSchema.parse({
       ...common,
       content: row.content,
-      attachments: attachmentsByMessage.get(row.id) ?? []
+      attachments: attachmentsByMessage.get(row.id) ?? [],
+      origin: "person",
+      reports: []
     })
   return conversationMessageSchema.parse({
     ...common,
@@ -256,7 +267,8 @@ function listConversationSources(
  * @param statements - Statement compilation lent to the caller's read or write transaction.
  * @param conversationId - Stored UUIDv7 to look up.
  * @returns Independent conversation data, or undefined when absent. Reading
- * it never touches the attachment files.
+ * it never touches the attachment files. It has no jobs, because none is
+ * stored.
  * @throws If SQLite access or persisted validation fails.
  */
 export function findConversation(
@@ -283,6 +295,7 @@ export function findConversation(
   return {
     ...metadata,
     messages: rows.map((row) => parseConversationMessage(row, context)),
-    sources: listConversationSources(statements, conversationId)
+    sources: listConversationSources(statements, conversationId),
+    jobs: []
   }
 }

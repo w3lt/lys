@@ -16,13 +16,14 @@ import { ConversationNotFoundError } from "../../utils/errors"
 import type { ConversationTurnTransaction } from "./records"
 
 /**
- * Creates a new empty, untitled conversation answered by one agent.
+ * Creates a new empty, untitled main conversation answered by one agent.
  * @param transaction - Conversation creation lent by the turn's write
  * transaction.
  * @param target - Identity of the new conversation and the code of the agent
  * that answers it.
  * @param now - Creation time, also its initial activity time.
- * @returns The newly stored independent conversation snapshot.
+ * @returns The newly stored independent conversation snapshot, with no
+ * parent, job number, delegator, or jobs.
  * @throws If validation fails, the transaction has ended, or the write fails.
  */
 function createConversation(
@@ -34,11 +35,14 @@ function createConversation(
     id: target.id,
     title: null,
     agentCode: target.agentCode,
+    parentConversationId: null,
+    jobNumber: null,
+    delegatorAgentCode: null,
     createdAt: now,
     updatedAt: now
   })
   transaction.createConversation(metadata)
-  return { ...metadata, messages: [], sources: [] }
+  return { ...metadata, messages: [], sources: [], jobs: [] }
 }
 
 /**
@@ -62,9 +66,9 @@ function calculateNextAttachmentNumber(conversation: Conversation): number {
  * numbers.
  * @param userMessage - Identity, content, and attachment drafts.
  * @param now - Time of the turn.
- * @returns The message with its attachments numbered from 1 in message
- * order, for {@link buildNumberedUserMessage} once the conversation's highest
- * number is known.
+ * @returns The person's message, without reports, with its attachments
+ * numbered from 1 in message order, for {@link buildNumberedUserMessage}
+ * once the conversation's highest number is known.
  * @throws If the message or an attachment violates the conversation contract.
  */
 function buildUserMessage(
@@ -79,6 +83,8 @@ function buildUserMessage(
       ...draft,
       number: index + 1
     })),
+    origin: "person",
+    reports: [],
     createdAt: now
   })
 }

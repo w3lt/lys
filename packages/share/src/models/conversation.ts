@@ -46,7 +46,80 @@ function hasDistinctAttachments(
   )
 }
 
-/** Validates a non-empty user-authored message in a persisted conversation. */
+/**
+ * Validates the number Lys gives one source of a conversation.
+ *
+ * @remarks Numbers start at 1 and count up across the whole conversation;
+ * the model cites a source by writing its number in square brackets.
+ */
+const conversationSourceNumberSchema = z.int().min(1)
+
+/**
+ * Validates who wrote a user-role message.
+ *
+ * @remarks `person`: the person. `delegator`: the delegator of a job, which
+ * wrote a job message. `wake-up`: the backend, which wrote a wake-up
+ * message.
+ */
+export const conversationMessageOriginSchema = z.enum([
+  "person",
+  "delegator",
+  "wake-up"
+])
+
+/**
+ * Validates what a report says.
+ *
+ * @remarks `note`: a progress note. The others end one reply of the job:
+ * `result` with its result, `failed` with a failure, `stopped` with a stop,
+ * and `interrupted` with an interruption.
+ */
+export const jobReportKindSchema = z.enum([
+  "note",
+  "result",
+  "failed",
+  "stopped",
+  "interrupted"
+])
+
+/**
+ * Validates one report a job sent to its delegator, as delivered with a
+ * user-role message of the parent conversation.
+ */
+export const jobReportSchema = z.strictObject({
+  /** UUIDv7 identity of the report. */
+  id: z.uuidv7(),
+  /** The job: its conversation id. */
+  jobId: z.uuidv7(),
+  /** The job's number in its parent, from 1. */
+  jobNumber: z.int().min(1),
+  /** Code of the agent that works on the job. */
+  agentCode: agentCodeSchema,
+  /**
+   * Title of the job message this report answers; a later continuation
+   * never changes it.
+   */
+  title: z.string().min(1),
+  /** What the report says. */
+  kind: jobReportKindSchema,
+  /**
+   * `note`: the note. `result`: the text of the reply's last round, possibly
+   * empty. `failed`: the failure sentence. `stopped`, `interrupted`: empty.
+   */
+  content: z.string(),
+  /**
+   * Numbers of the parent conversation's sources the content cites,
+   * ascending; empty when none.
+   */
+  sourceNumbers: z.array(conversationSourceNumberSchema).readonly(),
+  /** Time the report was written. */
+  createdAt: timestampSchema
+})
+
+/**
+ * Validates a non-empty user-role message in a persisted conversation: one
+ * the person wrote, a job message, or a wake-up message.
+ */
 export const conversationUserMessageSchema = z.strictObject({
   ...conversationMessageBase,
   role: z.literal("user"),
@@ -62,16 +135,15 @@ export const conversationUserMessageSchema = z.strictObject({
       hasDistinctAttachments,
       "A message names each attachment once, ignoring case."
     )
-    .readonly()
+    .readonly(),
+  /** Who wrote the message. */
+  origin: conversationMessageOriginSchema,
+  /**
+   * Reports delivered with this message, oldest first; empty for most
+   * messages. Only a message of a conversation that has jobs carries any.
+   */
+  reports: z.array(jobReportSchema).readonly()
 })
-
-/**
- * Validates the number Lys gives one source of a conversation.
- *
- * @remarks Numbers start at 1 and count up across the whole conversation;
- * the model cites a source by writing its number in square brackets.
- */
-const conversationSourceNumberSchema = z.int().min(1)
 
 /**
  * Validates one web source a conversation's tool calls read.
@@ -245,7 +317,58 @@ export const conversationMessageSchema = z.discriminatedUnion("role", [
   conversationAssistantMessageSchema
 ])
 
-/** Validates the persisted conversation record and its ordered message history. */
+/**
+ * Validates the state of a job, read from its latest reply.
+ *
+ * @remarks `working`: that reply is streaming. `replied`: it completed.
+ * `failed`: it failed. `interrupted`: it was interrupted and its end report
+ * says `interrupted`. `stopped`: it was interrupted otherwise.
+ */
+export const jobStateSchema = z.enum([
+  "working",
+  "replied",
+  "failed",
+  "stopped",
+  "interrupted"
+])
+
+/** Validates one job of a conversation, as its card shows it. */
+export const jobSchema = z.strictObject({
+  /** The job conversation's id. */
+  id: z.uuidv7(),
+  /** The job's number in its parent, from 1. */
+  number: z.int().min(1),
+  /** Code of the agent that works on the job. */
+  agentCode: agentCodeSchema,
+  /** Title of the latest job message. */
+  title: z.string().min(1),
+  /** State of the job, read from its latest reply. */
+  state: jobStateSchema,
+  /**
+   * Newest progress note of the job's latest reply; null when that reply
+   * sent none.
+   */
+  latestNote: z.string().min(1).nullable(),
+  /** The job's latest reply: an assistant message id in the job conversation. */
+  replyId: z.uuidv7(),
+  /**
+   * Tool-call ids, in the parent conversation, of the `delegate_work` calls
+   * that sent the job's messages, oldest first; never empty.
+   */
+  jobCallIds: z.array(z.uuidv7()).min(1).readonly(),
+  /** Time the job conversation was created. */
+  createdAt: timestampSchema,
+  /** The job conversation's `updatedAt` when the job was read. */
+  updatedAt: timestampSchema
+})
+
+/**
+ * Validates the persisted conversation record and its ordered message history.
+ *
+ * @remarks A main conversation has no parent, job number, or delegator, and
+ * a job has all three. This schema checks each of the three fields alone,
+ * not that pairing; whoever builds a conversation keeps it.
+ */
 export const conversationSchema = z.strictObject({
   id: z.uuidv7(),
   /** Non-empty title; null until title generation saves one. */
@@ -255,21 +378,62 @@ export const conversationSchema = z.strictObject({
    * every turn sends that agent's current system prompt.
    */
   agentCode: agentCodeSchema,
+  /** Conversation this job was started from; null for a main conversation. */
+  parentConversationId: z.uuidv7().nullable(),
+  /**
+   * The job's number in its parent; null exactly when
+   * `parentConversationId` is null.
+   */
+  jobNumber: z.int().min(1).nullable(),
+  /**
+   * Code of the parent conversation's agent, which wrote the job's messages;
+   * null exactly when `parentConversationId` is null.
+   */
+  delegatorAgentCode: agentCodeSchema.nullable(),
   /** Messages remain in persisted conversation order. */
   messages: z.array(conversationMessageSchema),
   /** Sources the conversation's tool calls read, in number order. */
   sources: z.array(conversationSourceSchema).readonly(),
+  /**
+   * Jobs started from this conversation, in number order; empty for a job,
+   * because jobs go one level deep.
+   */
+  jobs: z.array(jobSchema).readonly(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema
 })
 
-/** Validates conversation metadata without the messages and sources. */
+/**
+ * Validates conversation metadata: a conversation without its messages,
+ * sources, and jobs.
+ */
 export const conversationMetadataSchema = conversationSchema.omit({
   messages: true,
-  sources: true
+  sources: true,
+  jobs: true
 })
 
-/** User-authored message accepted by the persisted conversation contract. */
+/** Who wrote a user-role message. */
+export type ConversationMessageOrigin = z.infer<
+  typeof conversationMessageOriginSchema
+>
+
+/** What a report says. */
+export type JobReportKind = z.infer<typeof jobReportKindSchema>
+
+/** One report a job sent to its delegator. */
+export type JobReport = z.infer<typeof jobReportSchema>
+
+/** State of a job, read from its latest reply. */
+export type JobState = z.infer<typeof jobStateSchema>
+
+/** One job of a conversation, as its card shows it. */
+export type Job = z.infer<typeof jobSchema>
+
+/**
+ * User-role message accepted by the persisted conversation contract,
+ * whoever wrote it.
+ */
 export type ConversationUserMessage = z.infer<
   typeof conversationUserMessageSchema
 >

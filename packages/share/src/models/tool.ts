@@ -2,7 +2,9 @@ import * as z from "zod"
 import {
   FIND_AGENTS_TOOL_NAME,
   READ_AGENT_STATE_TOOL_NAME,
-  READ_MY_STATE_TOOL_NAME
+  READ_MY_STATE_TOOL_NAME,
+  REPORT_PROGRESS_TOOL_NAME,
+  STOP_JOB_TOOL_NAME
 } from "./agent"
 import { READ_ATTACHMENT_TOOL_NAME } from "./attachment"
 import {
@@ -155,12 +157,13 @@ const lysToolGroupSchema = z.enum([
  *
  * @remarks `reads` reads data on that machine and sends nothing off it.
  * `network` sends requests off that machine and reads what comes back; a
- * tool with this access starts switched off. Only access levels that a
- * current tool uses exist; a new level is added here, and to the desktop's
- * copy when a client tool uses it. MCP tools have their own access,
- * `unknown`.
+ * tool with this access starts switched off. `agents` gives work to another
+ * agent inside Lys and sends nothing off that machine itself; a tool with
+ * this access starts switched on. Only access levels that a current tool
+ * uses exist; a new level is added here, and to the desktop's copy when a
+ * client tool uses it. MCP tools have their own access, `unknown`.
  */
-const lysToolAccessSchema = z.enum(["reads", "network"])
+const lysToolAccessSchema = z.enum(["reads", "network", "agents"])
 
 /**
  * Validates which side of Lys runs one of its own tools.
@@ -337,15 +340,21 @@ export type McpToolDefinition = z.infer<typeof mcpToolDefinitionSchema>
 /**
  * Group a tool is listed under in Settings: `files` holds the file tools,
  * `network` the tools that reach past this machine, `timeAndPlace` the tools
- * that tell when and where the person is, `agents` the tools that tell
- * agents about themselves and each other, which the backend adds to a turn
- * itself and Settings does not list, and `mcp` the tools of MCP servers.
+ * that tell when and where the person is, `agents` the tools agents use
+ * about and with each other, and `mcp` the tools of MCP servers.
+ *
+ * @remarks Of the `agents` group Settings lists only `delegate_work`, which
+ * has a switch. The backend adds the others to a turn itself: the tools that
+ * tell agents about themselves and each other, and the tools a job sends a
+ * progress note and a delegator stops a job with.
  */
 export type ToolGroup = ToolDefinition["group"]
 
 /**
  * What a tool does with the machine it runs on: `reads` only reads it,
- * `network` sends requests off it, and `unknown` depends on an MCP server.
+ * `network` sends requests off it, `agents` gives work to another agent
+ * inside Lys and sends nothing off it itself, and `unknown` depends on an
+ * MCP server.
  */
 export type ToolAccess = ToolDefinition["access"]
 
@@ -543,16 +552,20 @@ export function buildToolFunctionFormat(
 }
 
 /**
- * Names of the tools the backend adds to a turn itself: the attachment reader
- * and the agent tools.
+ * Names of the tools the backend adds to a turn itself: the attachment
+ * reader, the agent state tools, the tool a job sends a progress note with,
+ * and the tool a delegator stops a job with.
  *
  * @remarks They have no switch, so a chat request may not offer them or name
  * them as switched off or unable to run; the request contract refuses each
- * one before the backend stores anything.
+ * one before the backend stores anything. `delegate_work` is not among them:
+ * it has a switch, and a chat request offers it among its backend tools.
  */
 export const BACKEND_INTERNAL_TOOL_NAMES: readonly string[] = Object.freeze([
   READ_ATTACHMENT_TOOL_NAME,
   READ_MY_STATE_TOOL_NAME,
   FIND_AGENTS_TOOL_NAME,
-  READ_AGENT_STATE_TOOL_NAME
+  READ_AGENT_STATE_TOOL_NAME,
+  REPORT_PROGRESS_TOOL_NAME,
+  STOP_JOB_TOOL_NAME
 ])

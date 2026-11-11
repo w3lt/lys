@@ -73,10 +73,14 @@ const CONVERSATION = Object.freeze({
   id: CONVERSATION_ID,
   title: "Trip plan",
   agentCode: "lys",
+  parentConversationId: null,
+  jobNumber: null,
+  delegatorAgentCode: null,
   createdAt: FIXTURE_TIMESTAMP,
   updatedAt: FIXTURE_TIMESTAMP,
   messages: [USER_MESSAGE, ASSISTANT_MESSAGE],
-  sources: [{ number: 1, url: "https://trips.example/", title: "Trips" }]
+  sources: [{ number: 1, url: "https://trips.example/", title: "Trips" }],
+  jobs: []
 } satisfies Conversation)
 
 /** Snapshot event opening every stream that follows {@link REPLY_TARGET}. */

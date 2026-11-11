@@ -62,6 +62,9 @@ describe("SqliteConversationTurnRecordWriter", () => {
             id: createFixtureUuidV7(2),
             title: null,
             agentCode: "lys",
+            parentConversationId: null,
+            jobNumber: null,
+            delegatorAgentCode: null,
             createdAt: "2025-01-01T00:00:00.000Z",
             updatedAt: "2025-01-01T00:00:00.000Z"
           })
@@ -70,6 +73,8 @@ describe("SqliteConversationTurnRecordWriter", () => {
             role: "user",
             content: "Hello",
             attachments: [],
+            origin: "person",
+            reports: [],
             createdAt: "2025-01-01T00:00:01.000Z"
           })
         }

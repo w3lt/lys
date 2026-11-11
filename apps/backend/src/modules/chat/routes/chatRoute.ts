@@ -1132,8 +1132,17 @@ function createTurnTitleTask(
 function buildTurnStartEvents(turn: ConversationTurn): ChatApiStreamEvent[] {
   const { userMessage, assistantMessage } = turn
   if (turn.isNewConversation) {
-    const { id, title, agentCode, createdAt, updatedAt } = turn.conversation
-    const conversation = { id, title, agentCode, createdAt, updatedAt }
+    const stored = turn.conversation
+    const conversation = {
+      id: stored.id,
+      title: stored.title,
+      agentCode: stored.agentCode,
+      parentConversationId: stored.parentConversationId,
+      jobNumber: stored.jobNumber,
+      delegatorAgentCode: stored.delegatorAgentCode,
+      createdAt: stored.createdAt,
+      updatedAt: stored.updatedAt
+    }
     return [
       {
         type: "start-new-conversation-turn",

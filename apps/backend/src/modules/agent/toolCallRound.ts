@@ -330,27 +330,12 @@ function addOfferedTool(
 }
 
 /**
- * Builds the function tools a model is offered for one turn.
- *
- * @param tools - Tools of the turn.
- * @returns A frozen list in offer order; empty when the turn offers none.
- */
-export function buildOfferedTools(
-  tools: AgentToolset
-): readonly OpenAIFunctionTool[] {
-  return Object.freeze(
-    [...tools.values()].map((tool) => tool.agentTool.buildAgentFormat())
-  )
-}
-
-/**
  * Builds the function tools a model would be offered for tool definitions.
  *
  * @param definitions - Offered tool definitions in offer order: client tools
  * first, then backend tools, as {@link buildAgentToolset} orders them.
- * @returns A frozen list in the same order and format as
- * {@link buildOfferedTools} builds for a turn with these tools; empty for no
- * definition.
+ * @returns A frozen list in the same order and format as a reply offers a
+ * turn with these tools in every round; empty for no definition.
  * @throws A Zod error when a definition does not match `toolDefinitionSchema`.
  */
 export function buildDefinedToolOffer(

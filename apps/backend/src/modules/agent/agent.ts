@@ -8,7 +8,6 @@ import type {
   ConversationMessage,
   ConversationSource,
   ConversationUserMessage,
-  OpenAIFunctionTool,
   ReplyPart,
   ToolCallReplyPart,
   ToolDefinition
@@ -61,11 +60,11 @@ import ReplyPartSequence, {
   type ReplyPartSequenceDependencies,
   type ReplyToolCallChange
 } from "./replyPartSequence"
+import ReplyToolOffer from "./replyToolOffer"
 import SourceCatalog from "./sourceCatalog"
 import {
   buildAgentToolset,
   buildDefinedToolOffer,
-  buildOfferedTools,
   handleToolCallRound,
   type AgentToolset,
   type CreateToolCallGate,
@@ -368,8 +367,8 @@ type ReplyRoundState = Readonly<{
   tools: AgentToolset
   /** What the request names about the tools the turn does not offer. */
   unofferedTools: UnofferedTools
-  /** Function tools the model is offered in every round. */
-  offeredTools: readonly OpenAIFunctionTool[]
+  /** The turn's tools the model is offered, as each round starts. */
+  toolOffer: ReplyToolOffer
   /** Stores and sends the reply's parts. */
   replyParts: ReplyPartSequence
   /** Numbers the web sources the reply's tool results show. */
@@ -659,7 +658,7 @@ export default class Agent {
       turn,
       tools,
       unofferedTools: turn.unofferedTools,
-      offeredTools: buildOfferedTools(tools),
+      toolOffer: new ReplyToolOffer(tools, tools.keys()),
       replyParts: new ReplyPartSequence(
         buildActivityReplyStorage(turn, this.#activity)
       ),
@@ -764,7 +763,7 @@ export default class Agent {
    * Opens one round's reply stream once its context is measured to fit.
    *
    * @param state - The reply's turn, with its model, generation controls, and
-   * cancellation, and the tools offered in every round.
+   * cancellation, and the tools it offers.
    * @param input - The round's context.
    * @returns The model's events for the round.
    * @throws A `ReplyModelNotLoadedError` when the model is not loaded, a
@@ -781,7 +780,8 @@ export default class Agent {
     state: ReplyRoundState,
     input: ReplyRoundInput
   ): Promise<AsyncIterable<ReplyStreamEvent>> {
-    const { turn, offeredTools } = state
+    const { turn } = state
+    const offeredTools = state.toolOffer.listOfferedTools()
     const measurement = await waitForSettlementOrAbort(
       this.#replyContextMeter.findReplyContextMeasurement({
         messages: input.messages,

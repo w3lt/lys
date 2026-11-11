@@ -113,12 +113,12 @@ const WHITESPACE_PATTERN = /\s/u
 /**
  * A host without a scheme, as a network path, an SSH or `scp` target, or an
  * address with a port writes it: an optional `//` or `\\`, an optional user
- * name ending in `@`, then a name or IPv4 address, or anything in brackets;
- * then, optionally, `:`, `/`, or `\` and anything after it, such as a port
- * or a path. The user name holds no `@`, so the text splits one way.
+ * name up to the last `@`, which may hold an `@` of its own, then a name or
+ * IPv4 address, or anything in brackets; then, optionally, `:`, `/`, or `\`
+ * and anything after it, such as a port or a path.
  */
 const BARE_HOST_PATTERN =
-  /^(?:\/\/|\\\\)?(?:[^@/\\]*@)?(?<host>\[[^\]]*\]|[^:/\\[\]@]+)(?:[:/\\].*)?$/u
+  /^(?:\/\/|\\\\)?(?:[^/\\]*@)?(?<host>\[[^\]]*\]|[^:/\\[\]@]+)(?:[:/\\].*)?$/u
 
 /** Answer for a call no rule denies. */
 const ALLOWED: ToolCallDecision = Object.freeze({ effect: "allow" })

@@ -131,6 +131,7 @@ const BLOCKED_ADDRESS_CASES = Object.freeze({
  */
 const BLOCKED_HOST_FORM_CASES = Object.freeze({
   "a private host after a user name": "admin@192.168.1.10",
+  "a private host after a user name holding @": "ada@contoso.com@10.0.0.5",
   "an scp target on a private host": "git@10.0.0.2:repo.git",
   "a bracketed address after a user name": "ada@[fd00::1]:22",
   "a UNC path on a private host": "\\\\10.0.0.5\\share\\notes.txt",

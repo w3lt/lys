@@ -31,6 +31,52 @@ export type ConversationTurnTarget =
       /** UUIDv7 of the stored conversation. */
       id: string
     }>
+  | Readonly<{
+      /** The turn creates a job: its first job message starts it. */
+      kind: "new-job"
+      /** UUIDv7 the new job is stored under, made by the caller. */
+      id: string
+      /** Valid code of the agent that works on the job. */
+      agentCode: string
+      /**
+       * UUIDv7 of the stored conversation the job is started from. Its agent
+       * is the job's delegator.
+       */
+      parentConversationId: string
+      /** Non-empty title of the job message, which becomes the job's title. */
+      title: string
+    }>
+  | Readonly<{
+      /**
+       * The turn continues a stored job with a later job message. The job
+       * keeps its agent, its parent, and its number.
+       */
+      kind: "existing-job"
+      /** UUIDv7 of the stored job: its conversation. */
+      id: string
+      /** Non-empty title of the job message, which replaces the job's title. */
+      title: string
+    }>
+
+/** Who writes the user message of a turn, selected by `origin`. */
+export type ConversationTurnAuthor =
+  | Readonly<{
+      /** The person writes the message, in a chat request. */
+      origin: "person"
+    }>
+  | Readonly<{
+      /** The backend writes a wake-up message, so the agent reads reports. */
+      origin: "wake-up"
+    }>
+  | Readonly<{
+      /** The delegator of a job writes a job message. */
+      origin: "delegator"
+      /**
+       * UUIDv7 of the stored `delegate_work` call, in the job's parent, that
+       * sends the message.
+       */
+      jobCallId: string
+    }>
 
 /** The user message of a turn before it is stored. */
 export type ConversationTurnUserMessage = Readonly<{
@@ -46,6 +92,11 @@ export type ConversationTurnUserMessage = Readonly<{
    * ignoring case; the turn numbers them after the conversation's.
    */
   attachments: readonly ConversationAttachmentDraft[]
+  /**
+   * Who writes the message. A delegator writes exactly the messages of a
+   * turn that starts or continues a job.
+   */
+  author: ConversationTurnAuthor
 }>
 
 /** Inputs for atomically creating one persisted user/assistant pair. */
@@ -60,27 +111,38 @@ export type CreateConversationTurnOptions = Readonly<{
 
 /** Immutable turn identities plus an independent snapshot of the earlier transcript. */
 export type ConversationTurn = Readonly<{
-  /** Snapshot before this turn, including the code of its agent. */
+  /**
+   * Snapshot before this turn, including the code of its agent. A job this
+   * turn starts or continues carries the title of the turn's job message.
+   */
   conversation: Conversation
-  /** User message committed with this turn, with its numbered attachments. */
+  /**
+   * User message committed with this turn, with its numbered attachments,
+   * who wrote it, and the reports this turn delivered with it, oldest first.
+   */
   userMessage: ConversationUserMessage
   /** Streaming reply without parts committed with this turn. */
   assistantMessage: ConversationAssistantMessage
-  /** Whether this operation created the conversation. */
+  /** Whether this operation created the conversation, a job included. */
   isNewConversation: boolean
 }>
 
 /** Synchronous turn writes borrowed until the backend store closes; no cleanup authority. */
 export interface ConversationTurnWriter {
   /**
-   * Atomically creates a complete user/assistant pair and any new parent conversation.
+   * Atomically creates a complete user/assistant pair, with the conversation
+   * or the job the turn starts.
    * @param options - Conversation selection and validated message inputs.
    * @returns Independent prior transcript and newly committed pair.
-   * @throws If the target is absent, validation fails, or persistence is closed/unavailable; no partial turn remains.
+   * @throws If the target or a new job's parent is absent, the message's
+   * author does not fit the target, validation fails, or persistence is
+   * closed/unavailable; no partial turn remains.
    * @remarks The new turn supersedes a reply still streaming in the same
    * conversation: that reply becomes interrupted with its stored parts kept
    * and its waiting and running calls interrupted, and later writes for it
-   * return false.
+   * return false. Every report of the conversation's jobs that is not
+   * delivered yet is delivered with the turn's user message, in the same
+   * write.
    */
   createConversationTurn(
     options: CreateConversationTurnOptions

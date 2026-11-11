@@ -1597,12 +1597,17 @@ describe("migrateDatabase", () => {
     [
       "a job call on the person's message",
       "'user', NULL, 'Text', NULL, NULL, NULL, NULL, 'call1'",
-      /CHECK constraint failed: job_call_id IS NULL/
+      /CHECK constraint failed: \(job_call_id IS NOT NULL\)/
     ],
     [
       "a job call on a wake-up message",
       "'user', NULL, 'Text', NULL, NULL, NULL, 'wake-up', 'call1'",
-      /CHECK constraint failed: job_call_id IS NULL/
+      /CHECK constraint failed: \(job_call_id IS NOT NULL\)/
+    ],
+    [
+      "a delegator's origin and no job call",
+      "'user', NULL, 'Text', NULL, NULL, NULL, 'delegator', NULL",
+      /CHECK constraint failed: \(job_call_id IS NOT NULL\)/
     ],
     [
       "a job call that is not stored",

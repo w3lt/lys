@@ -2,9 +2,13 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
+import type { ConversationMetadata } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { openSqliteConversationRecords } from "../../../support/conversationDatabase"
-import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
+import {
+  createFixtureUuidV7,
+  createUserMessage
+} from "../../../support/conversationFixtures"
 import {
   registerConversationTurnRecordWriterContractSuite,
   registerConversationTurnTransactionContractSuite
@@ -54,29 +58,23 @@ describe("SqliteConversationTurnRecordWriter", () => {
 
   it("refuses a message for a conversation that is not stored and keeps the turn's other writes out", () => {
     const records = openSqliteConversationRecords()
+    const metadata: ConversationMetadata = {
+      id: createFixtureUuidV7(2),
+      title: null,
+      agentCode: "lys",
+      parentConversationId: null,
+      jobNumber: null,
+      delegatorAgentCode: null,
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z"
+    }
+    const message = createUserMessage(10, "Hello")
 
     expect(() =>
       records.turnRecordWriter.handleConversationTurnWriteRequest(
         (transaction) => {
-          transaction.createConversation({
-            id: createFixtureUuidV7(2),
-            title: null,
-            agentCode: "lys",
-            parentConversationId: null,
-            jobNumber: null,
-            delegatorAgentCode: null,
-            createdAt: "2025-01-01T00:00:00.000Z",
-            updatedAt: "2025-01-01T00:00:00.000Z"
-          })
-          transaction.createUserMessage(CONVERSATION_ID, {
-            id: createFixtureUuidV7(10),
-            role: "user",
-            content: "Hello",
-            attachments: [],
-            origin: "person",
-            reports: [],
-            createdAt: "2025-01-01T00:00:01.000Z"
-          })
+          transaction.createConversation(metadata)
+          transaction.createUserMessage(CONVERSATION_ID, message, undefined)
         }
       )
     ).toThrow("FOREIGN KEY constraint failed")

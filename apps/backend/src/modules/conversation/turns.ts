@@ -59,20 +59,24 @@ export default class StoredConversationTurns
   }
 
   /**
-   * Atomically selects or creates a conversation and appends a user/assistant pair.
+   * Atomically selects or creates a conversation or a job and appends a
+   * user/assistant pair.
    * @param options - Target conversation and initial message values.
    * @returns An independent snapshot and pair after the whole transaction commits.
-   * @throws If lookup, validation, or persistence fails; no partial turn remains.
+   * @throws If lookup, validation, or persistence fails, or the message's
+   * author does not fit the target; no partial turn remains.
    * @remarks Implements {@link ConversationTurnWriter.createConversationTurn},
-   * including interruption of a superseded streaming reply. Every value the
-   * turn builds carries the current time.
+   * including interruption of a superseded streaming reply and delivery of
+   * the reports that wait for the conversation. Every value the turn builds
+   * carries the current time.
    */
   public createConversationTurn(
     options: CreateConversationTurnOptions
   ): ConversationTurn {
     const now = new Date().toISOString()
     return this.#turnRecordWriter.handleConversationTurnWriteRequest(
-      (transaction) => createConversationTurn(transaction, options, now)
+      (transaction, jobs) =>
+        createConversationTurn({ turn: transaction, jobs }, options, now)
     )
   }
 

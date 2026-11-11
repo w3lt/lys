@@ -15,7 +15,12 @@ import type {
   DatabaseStatementCompiler,
   DatabaseWriter
 } from "../databaseTransactions"
+import SqliteJobTurnTransaction from "../delegation/sqliteJobTurnTransaction"
 import { findConversation } from "./findConversation"
+
+/** What a user message fails with when its call does not fit its author. */
+const JOB_CALL_AUTHOR_MESSAGE =
+  "A job call is given exactly with a delegator's message"
 
 /**
  * Marks the waiting and running tool calls of one conversation's streaming
@@ -181,23 +186,29 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
   }
 
   /**
-   * Implements {@link ConversationTurnTransaction.createConversation}.
+   * Implements {@link ConversationTurnTransaction.createConversation}; a
+   * job's row holds its parent and its number, and no delegator.
    * @param metadata - Interface-defined metadata.
    * @throws The interface-defined ended-transaction and write failures; a
-   * stored identity fails the primary-key constraint.
+   * stored identity fails the primary-key constraint, a job's parent that is
+   * not stored the foreign-key constraint, a number the parent already uses
+   * the unique index, and a job without a title the check constraint.
    */
   public createConversation(metadata: ConversationMetadata): void {
     this.#statements
       .getStatement(
-        `INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO conversations
+    (id, title, agent_code, created_at, updated_at, parent_conversation_id, job_number)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         metadata.id,
         metadata.title,
         metadata.agentCode,
         metadata.createdAt,
-        metadata.updatedAt
+        metadata.updatedAt,
+        metadata.parentConversationId,
+        metadata.jobNumber
       )
   }
 
@@ -213,23 +224,39 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
 
   /**
    * Implements {@link ConversationTurnTransaction.createUserMessage}, storing
-   * each attachment of the message under it.
+   * each attachment of the message under it. The person's message is stored
+   * without an origin, as every message was before a row had one.
    * @param conversationId - Interface-defined conversation.
    * @param message - Interface-defined message with its attachments.
-   * @throws The interface-defined failures; an absent conversation fails the
-   * foreign-key constraint, a stored identity the primary-key constraint,
-   * and a stored attachment number the unique constraint.
+   * @param jobCallId - Interface-defined call of a job message.
+   * @throws The interface-defined failures; an absent conversation or call
+   * fails the foreign-key constraint, a stored identity the primary-key
+   * constraint, and a stored attachment number the unique constraint.
+   * @remarks The call is compared with the author before the row is written,
+   * so a misfit fails with a sentence that names it. The schema's check
+   * refuses the same rows.
    */
   public createUserMessage(
     conversationId: string,
-    message: ConversationUserMessage
+    message: ConversationUserMessage,
+    jobCallId: string | undefined
   ): void {
-    this.#statements
-      .getStatement(
-        `INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
-    VALUES (?, ?, 'user', ?, ?)`
-      )
-      .run(message.id, conversationId, message.content, message.createdAt)
+    const insertMessage = this.#statements.getStatement(
+      `INSERT INTO conversation_messages
+    (id, conversation_id, role, content, created_at, origin, job_call_id)
+    VALUES (?, ?, 'user', ?, ?, ?, ?)`
+    )
+    const isJobMessage = message.origin === "delegator"
+    if ((jobCallId !== undefined) !== isJobMessage)
+      throw new Error(JOB_CALL_AUTHOR_MESSAGE)
+    insertMessage.run(
+      message.id,
+      conversationId,
+      message.content,
+      message.createdAt,
+      message.origin === "person" ? null : message.origin,
+      jobCallId ?? null
+    )
     createMessageAttachments(this.#statements, conversationId, message)
   }
 
@@ -287,8 +314,8 @@ export default class SqliteConversationTurnRecordWriter implements ConversationT
 
   /**
    * Implements {@link ConversationTurnRecordWriter.handleConversationTurnWriteRequest}
-   * by lending the operation a transaction over the write's statement
-   * compiler.
+   * by lending the operation a transaction and job records over the write's
+   * one statement compiler, so both write in the same transaction.
    * @typeParam Result - Interface-defined operation result.
    * @param operation - Interface-defined synchronous work.
    * @returns The interface-defined result after the commit.
@@ -300,7 +327,10 @@ export default class SqliteConversationTurnRecordWriter implements ConversationT
   ): Result {
     return this.#databaseWriter.handleDatabaseWriteRequest<Result>(
       (statements) =>
-        operation(new SqliteConversationTurnTransaction(statements))
+        operation(
+          new SqliteConversationTurnTransaction(statements),
+          new SqliteJobTurnTransaction(statements)
+        )
     )
   }
 

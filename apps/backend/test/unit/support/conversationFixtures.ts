@@ -10,6 +10,7 @@ import type {
 import { v7 as uuidv7 } from "uuid"
 import type {
   ConversationTurn,
+  ConversationTurnAuthor,
   ConversationTurnTarget,
   ConversationTurnUserMessage
 } from "../../../src/modules/chat/persistence"
@@ -68,8 +69,30 @@ export function createNewConversationTarget(
 }
 
 /**
- * Creates the user message of a turn before it is stored, without
- * attachments.
+ * Creates the target of a turn that starts a job.
+ *
+ * @param parentConversationId - Conversation the job is started from.
+ * @param agentCode - Code of the agent that works on the job.
+ * @param title - Title of the job message that starts it.
+ * @returns The target with a fresh UUIDv7.
+ */
+export function createNewJobTarget(
+  parentConversationId: string,
+  agentCode: string,
+  title: string
+): Extract<ConversationTurnTarget, { kind: "new-job" }> {
+  return {
+    kind: "new-job",
+    id: uuidv7(),
+    agentCode,
+    parentConversationId,
+    title
+  }
+}
+
+/**
+ * Creates the user message of a turn before it is stored, written by the
+ * person, without attachments.
  *
  * @param content - Authored text.
  * @returns The message with a fresh UUIDv7, as the chat route makes one.
@@ -77,7 +100,38 @@ export function createNewConversationTarget(
 export function createTurnUserMessage(
   content: string
 ): ConversationTurnUserMessage {
-  return { id: uuidv7(), content, attachments: [] }
+  const author: ConversationTurnAuthor = { origin: "person" }
+  return { id: uuidv7(), content, attachments: [], author }
+}
+
+/**
+ * Creates the job message of a turn before it is stored, without
+ * attachments.
+ *
+ * @param content - Instructions the delegator sends.
+ * @param jobCallId - The `delegate_work` call that sends them.
+ * @returns The delegator's message with a fresh UUIDv7.
+ */
+export function createTurnJobMessage(
+  content: string,
+  jobCallId: string
+): ConversationTurnUserMessage {
+  const author: ConversationTurnAuthor = { origin: "delegator", jobCallId }
+  return { id: uuidv7(), content, attachments: [], author }
+}
+
+/**
+ * Creates the wake-up message of a turn before it is stored, without
+ * attachments.
+ *
+ * @param content - Text the backend writes for the conversation's agent.
+ * @returns The backend's message with a fresh UUIDv7.
+ */
+export function createTurnWakeUpMessage(
+  content: string
+): ConversationTurnUserMessage {
+  const author: ConversationTurnAuthor = { origin: "wake-up" }
+  return { id: uuidv7(), content, attachments: [], author }
 }
 
 /** Lifecycle fields that distinguish assistant-message fixtures. */

@@ -524,33 +524,34 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
     ALTER TABLE agents ADD COLUMN deleted_at TEXT
       CHECK (deleted_at IS NULL OR deleted_at <> '')
   `,
-  // Stores jobs: the work one agent gives another. A job is a conversation
-  // with a parent, the conversation it was started from. Its agent_code is
-  // the agent that works on it, its title is the title of its latest job
-  // message, and its job_number counts from 1 inside its parent, where it is
-  // unique. A job always has a title, which the job_number check keeps; a
-  // main conversation may still have none. The agent that gave the work is
-  // the parent's agent and is not stored again. Before this version only the
-  // person could start a conversation or write a user-role message, so NULL
-  // is the value of every existing row and keeps that meaning: no parent is a
-  // main conversation, and no origin is a message the person wrote. The other
-  // origins are `delegator`, a job message, and `wake-up`, a message the
-  // backend wrote so that the parent's agent reads new reports. job_call_id
-  // is the `delegate_work` call that sent a job message. A comparison with
-  // NULL makes a CHECK pass (see version 9), so without `origin IS NOT NULL`
-  // the job_call_id check would accept a call on a message the person wrote,
-  // and without `title IS NOT NULL` the job_number check would accept a job
-  // that has no title. job_reports holds what a job sends back: progress
-  // notes, and at most one report of how each of its replies ended, which the
-  // partial unique index keeps. A note and a failed report always have text.
-  // title is the title of the job message the report answers, kept here
-  // because a later job message replaces the job's title. source_numbers is a
-  // JSON list, of which SQLite checks only that it is JSON; the report schema
-  // checks the rest of every row the backend reads. delivered_message_id is
-  // the user-role message of the turn that delivered the report, NULL until
-  // then. Each column that references a conversation or a message has an
-  // index, so deleting the referenced row scans neither table. The change
-  // only adds: no stored row or column changes, and no table is rebuilt.
+  // Stores jobs: the work one agent gives another. A job is a conversation with
+  // a parent, the conversation it was started from. Its agent_code is the agent
+  // that works on it, its title is the title of its latest job message, and its
+  // job_number counts from 1 inside its parent, where it is unique. A job
+  // always has a title, which the job_number check keeps; a main conversation
+  // may still have none. The agent that gave the work is the parent's agent and
+  // is not stored again. Before this version only the person could start a
+  // conversation or write a user-role message, so NULL is the value of every
+  // existing row and keeps that meaning: no parent is a main conversation, and
+  // no origin is a message the person wrote. The other origins are `delegator`,
+  // a job message, and `wake-up`, a message the backend wrote so that the
+  // parent's agent reads new reports. job_call_id is the `delegate_work` call
+  // that sent a job message: every job message has one, and no other message
+  // does. A comparison with NULL makes a CHECK pass (see version 9), so without
+  // `origin IS NOT NULL` the job_call_id check would accept a call on a message
+  // the person wrote, and without `title IS NOT NULL` the job_number check
+  // would accept a job that has no title. job_reports holds what a job sends
+  // back: progress notes, and at most one report of how each of its replies
+  // ended, which the partial unique index keeps. A note and a failed report
+  // always have text. title is the title of the job message the report answers,
+  // kept here because a later job message replaces the job's title.
+  // source_numbers is a JSON list, of which SQLite checks only that it is JSON;
+  // the report schema checks the rest of every row the backend reads.
+  // delivered_message_id is the user-role message of the turn that delivered
+  // the report, NULL until then. Each column that references a conversation or
+  // a message has an index, so deleting the referenced row scans neither table.
+  // The change only adds: no stored row or column changes, and no table is
+  // rebuilt.
   `
     ALTER TABLE conversations ADD COLUMN parent_conversation_id TEXT
       REFERENCES conversations(id) ON DELETE CASCADE;
@@ -570,7 +571,10 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
     );
     ALTER TABLE conversation_messages ADD COLUMN job_call_id TEXT
       REFERENCES conversation_messages(id) ON DELETE CASCADE
-      CHECK (job_call_id IS NULL OR (origin IS NOT NULL AND origin = 'delegator'));
+      CHECK (
+        (job_call_id IS NOT NULL)
+        = (origin IS NOT NULL AND origin = 'delegator')
+      );
     CREATE INDEX conversation_messages_job_call_idx
       ON conversation_messages (job_call_id)
       WHERE job_call_id IS NOT NULL;

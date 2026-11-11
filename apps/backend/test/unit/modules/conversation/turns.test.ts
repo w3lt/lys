@@ -5,10 +5,12 @@ import StoredConversationTurns from "../../../../src/modules/conversation/turns"
 import SqliteConversationRecordReader from "../../../../src/infrastructure/database/conversations/sqliteConversationRecordReader"
 import SqliteConversationTurnRecordWriter from "../../../../src/infrastructure/database/conversations/sqliteConversationTurnRecordWriter"
 import SqliteDatabase from "../../../../src/infrastructure/database/sqliteDatabase"
+import type { ConversationTurnTarget } from "../../../../src/modules/chat/persistence"
 import { parseConversationListOptions } from "../../../../src/modules/conversation/listOptions"
 import { ConversationNotFoundError } from "../../../../src/utils/errors"
 import {
   openConversationTestServices,
+  openSqliteConversationRecords,
   openTestDatabase,
   saveAssistantMessageRow,
   saveConversationRow,
@@ -21,6 +23,15 @@ import {
   createToolCallPart,
   createTurnUserMessage
 } from "../../support/conversationFixtures"
+import {
+  buildExpectedReport,
+  createFixtureTimestamp,
+  createJobFixture,
+  listUserMessageReports,
+  saveJob,
+  saveMainConversation,
+  saveReport
+} from "../../support/conversationRecordsContract"
 
 /** Wall-clock time observed by every case until it advances the clock. */
 const NOW = "2026-03-04T05:06:07.890Z"
@@ -246,6 +257,44 @@ describe("StoredConversationTurns", () => {
       expect(
         history.listConversations(parseConversationListOptions()).conversations
       ).toEqual([expect.objectContaining({ id: turn.conversation.id })])
+    })
+
+    it("delivers a waiting report with the person's next message, and only once", () => {
+      const records = openSqliteConversationRecords()
+      const turns = createTurns(records.database)
+      const mainId = saveMainConversation(records, 1)
+      const job = saveJob(records, createJobFixture(mainId, 1, "completed"))
+      const row = saveReport(records, job, {
+        sequence: 200,
+        kind: "result",
+        title: "Find what moths eat",
+        content: "They eat wool.",
+        createdAt: createFixtureTimestamp(30)
+      })
+      const conversation: ConversationTurnTarget = {
+        kind: "existing",
+        id: mainId
+      }
+
+      const first = turns.createConversationTurn({
+        conversation,
+        userMessage: createTurnUserMessage("Any news?"),
+        model: "qwen/qwen3-8b"
+      })
+      vi.setSystemTime(new Date(LATER))
+      const second = turns.createConversationTurn({
+        conversation,
+        userMessage: createTurnUserMessage("And now?"),
+        model: "qwen/qwen3-8b"
+      })
+
+      expect(first.userMessage.reports).toEqual([buildExpectedReport(row, 1)])
+      expect(second.userMessage.reports).toEqual([])
+      expect(listUserMessageReports(records, mainId)).toEqual([
+        [],
+        [buildExpectedReport(row, 1)],
+        []
+      ])
     })
   })
 

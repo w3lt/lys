@@ -4,6 +4,7 @@ import type {
   ConversationAssistantMessage,
   ConversationMetadata,
   ConversationUserMessage,
+  JobReport,
   ReplyPart,
   ToolCallReplyPart
 } from "@lys/share"
@@ -110,15 +111,47 @@ export type UpdateAssistantMessageStateInput = Readonly<{
 export type SynchronousConversationTurnResult<Result> =
   Result extends PromiseLike<unknown> ? never : Result
 
+/** One report to deliver with the user message of a turn. */
+export type JobReportDelivery = Readonly<{
+  /** UUIDv7 of a stored report that is not delivered yet. */
+  reportId: string
+  /**
+   * UUIDv7 of the stored user message of the turn that delivers the report,
+   * in the conversation the report's job was started from.
+   */
+  messageId: string
+  /**
+   * Text the delegator reads, stored in place of the report's text;
+   * non-empty for a note and for a `failed` report.
+   */
+  content: string
+  /**
+   * Numbers of the sources of the delegator's conversation the text cites,
+   * ascending; empty when it cites none.
+   */
+  sourceNumbers: readonly number[]
+}>
+
+/**
+ * The records one turn operation is lent, over the same write transaction.
+ */
+export type ConversationTurnRecords = Readonly<{
+  /** Reads and writes of the turn's conversation and its messages. */
+  turn: ConversationTurnTransaction
+  /** What storing the turn changes about jobs. */
+  jobs: JobTurnTransaction
+}>
+
 /**
  * Turn-creation work run inside one write transaction.
  *
  * @typeParam Result - Value returned once the transaction commits.
- * @remarks The transaction is lent for this call only and refuses every call
- * once the operation returns.
+ * @remarks The transaction and the job records are lent for this call only,
+ * over the same write, and refuse every call once the operation returns.
  */
 export type ConversationTurnOperation<Result> = (
-  transaction: ConversationTurnTransaction
+  transaction: ConversationTurnTransaction,
+  jobs: JobTurnTransaction
 ) => SynchronousConversationTurnResult<Result>
 
 /**
@@ -221,8 +254,8 @@ export interface ConversationTurnRecordWriter {
    * Runs turn-creation work in one write transaction.
    *
    * @typeParam Result - Value produced by the operation.
-   * @param operation - Synchronous work; its transaction is valid for this
-   * call only.
+   * @param operation - Synchronous work; the transaction and the job records
+   * it is lent are valid for this call only.
    * @returns The operation's result after everything it wrote is committed.
    * @throws The operation's or the commit's failure, after everything the
    * operation wrote is rolled back.
@@ -363,12 +396,16 @@ export interface ConversationTurnTransaction {
     updatedAt: string
   ): void
   /**
-   * Stores a new conversation exactly as given.
+   * Stores a new conversation exactly as given: a main conversation, or a
+   * job with its parent and its number.
    *
-   * @param metadata - Valid metadata whose identity is not stored yet.
+   * @param metadata - Valid metadata whose identity is not stored yet. A job
+   * names a stored parent, a number no job of that parent has, and a title.
+   * Its delegator's code is not stored: reads take it from the parent.
    * @throws If the transaction has ended or the write fails.
-   * @throws The store's own error when the identity is already stored, which
-   * breaks the precondition.
+   * @throws The store's own error when the identity is already stored, or
+   * when a job's parent is not stored, its number is one a job of that parent
+   * has, or it has no title, each of which breaks the precondition.
    */
   createConversation(metadata: ConversationMetadata): void
   /**
@@ -383,15 +420,24 @@ export interface ConversationTurnTransaction {
    */
   findConversation(conversationId: string): Conversation | undefined
   /**
-   * Appends a user message exactly as given, with its attachments.
+   * Appends a user message exactly as given, with its attachments and who
+   * wrote it.
    *
    * @param conversationId - UUIDv7 of a stored conversation.
    * @param message - Valid message whose identity is not stored yet; its
-   * attachments carry numbers the conversation does not store yet.
+   * attachments carry numbers the conversation does not store yet. Its
+   * reports are not stored by this call:
+   * {@link JobTurnTransaction.updateJobReportToDelivered} delivers a report
+   * with a stored message.
+   * @param jobCallId - UUIDv7 of the stored `delegate_work` call that sends
+   * a job message; given exactly when the message's origin is `delegator`.
    * @throws If the transaction has ended or the write fails.
+   * @throws `A job call is given exactly with a delegator's message` when a
+   * call is given with a message a delegator did not write, or none with one
+   * a delegator wrote; nothing is then written.
    * @throws The store's own error when the conversation is not stored, the
-   * message's identity is, or an attachment's number is stored for the
-   * conversation already, which breaks the precondition.
+   * message's identity is, the call is not stored, or an attachment's number
+   * is stored for the conversation already, which breaks the precondition.
    * @remarks Moves the conversation's activity time forward: to the message's
    * time when that is later than the stored activity time, and otherwise to a
    * later time the store chooses. Each attachment is stored under the
@@ -399,7 +445,8 @@ export interface ConversationTurnTransaction {
    */
   createUserMessage(
     conversationId: string,
-    message: ConversationUserMessage
+    message: ConversationUserMessage,
+    jobCallId: string | undefined
   ): void
   /**
    * Appends an assistant message exactly as given, including its state.
@@ -417,4 +464,61 @@ export interface ConversationTurnTransaction {
     conversationId: string,
     message: ConversationAssistantMessage
   ): void
+}
+
+/**
+ * Reads and writes what storing one turn changes about jobs, inside the
+ * write transaction lent to a {@link ConversationTurnOperation}: the title
+ * of a continued job, and the delivery of the reports that wait for the
+ * turn's conversation.
+ *
+ * @remarks Every change is part of the enclosing transaction: it commits only
+ * when the operation returns and is rolled back when it throws. No call
+ * changes the activity time of a conversation. Valid only while that
+ * operation runs; afterwards every call fails with
+ * `Database operation has ended`, or with `Database is closed` once the store
+ * is closed, and changes nothing. Concurrency model: single-owner, confined
+ * to the running operation.
+ */
+export interface JobTurnTransaction {
+  /**
+   * Replaces a job's title with the title of the job message that continues
+   * it, and keeps everything else of the job.
+   *
+   * @param jobId - UUIDv7 of the job: its conversation. A main conversation
+   * and an identity that is not stored are left as they are.
+   * @param title - Non-empty title, stored as given.
+   * @throws If the transaction has ended or the write fails.
+   * @throws The store's own error when the title is empty, which breaks the
+   * precondition; the stored title is then kept.
+   */
+  updateJobTitle(jobId: string, title: string): void
+  /**
+   * Lists the reports of a conversation's jobs that are not delivered yet,
+   * of every kind, including this transaction's writes.
+   *
+   * @param parentConversationId - UUIDv7 of the conversation the jobs were
+   * started from.
+   * @returns The reports, oldest first and then by identity, each with the
+   * number and the agent of its job; none when the conversation has no jobs
+   * or is not stored.
+   * @throws If the transaction has ended or a stored report violates the
+   * report contract.
+   */
+  listUndeliveredJobReports(parentConversationId: string): readonly JobReport[]
+  /**
+   * Marks one report as delivered with a message, and stores the text and
+   * the source numbers its delegator reads.
+   *
+   * @param delivery - The report, the delivering message, and what the
+   * delegator reads.
+   * @throws If the transaction has ended or the write fails.
+   * @throws `Job report is not waiting for delivery` when the report is not
+   * stored or is already delivered; nothing is then changed, so a report is
+   * delivered once.
+   * @throws The store's own error when the message is not stored, or the
+   * text of a note or of a `failed` report is empty, each of which breaks the
+   * precondition; the report then stays undelivered.
+   */
+  updateJobReportToDelivered(delivery: JobReportDelivery): void
 }

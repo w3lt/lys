@@ -17,6 +17,7 @@ import {
 import {
   buildExpectedJob,
   createFixtureTimestamp,
+  createJobFixture,
   saveFollowUpMessage,
   saveJob,
   saveJobMessage,
@@ -60,31 +61,6 @@ const UNKNOWN_ID = createFixtureUuidV7(999)
 
 /** Time a case passes as the moment a report is written. */
 const REPORTED_AT = "2026-03-04T05:06:07.890Z"
-
-/**
- * Creates the fixture of one job of a stored conversation from its number
- * alone.
- *
- * @param parentId - Stored conversation the job belongs to.
- * @param number - The job's number in that conversation.
- * @param replyStatus - State of the job's reply.
- * @returns The fixture: identity sequences from ten times the number, and
- * creation at the minute of the number, so one case stores at most one job
- * of each number this way.
- */
-function createJobFixture(
-  parentId: string,
-  number: number,
-  replyStatus: JobFixture["replyStatus"]
-): JobFixture {
-  return {
-    sequence: number * 10,
-    parentId,
-    number,
-    createdAtMinute: number,
-    replyStatus
-  }
-}
 
 /**
  * Stores a streaming reply without parts in a stored conversation.

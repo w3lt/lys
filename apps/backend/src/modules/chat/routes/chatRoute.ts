@@ -48,6 +48,9 @@ import type ToolApprovalService from "../../toolApproval/toolApprovalService"
 import type { TitleGenerationOptions } from "../chatService"
 import type {
   ConversationTurn,
+  ConversationTurnAuthor,
+  ConversationTurnTarget,
+  ConversationTurnUserMessage,
   ConversationTurnWriter,
   CreateConversationTurnOptions,
   GeneratedConversationTitleWriter,
@@ -654,24 +657,25 @@ async function saveTurn(
  * @param attachments - The request's decoded attachments in request order.
  * @returns The turn with the identities of a new conversation and of the
  * user message, made here so the attachment files can be saved under them
- * before the turn commits, and the attachments' drafts in request order.
+ * before the turn commits, and the attachments' drafts in request order. The
+ * person is the author of the message.
  */
 function buildTurnOptions(
   body: ChatApiRequestBody,
   attachments: readonly ParsedChatAttachment[]
 ): CreateConversationTurnOptions {
-  return {
-    conversation:
-      body.conversation.kind === "new"
-        ? { kind: "new", id: uuidv7(), agentCode: body.conversation.agentCode }
-        : body.conversation,
-    userMessage: {
-      id: uuidv7(),
-      content: body.message,
-      attachments: attachments.map((attachment) => attachment.draft)
-    },
-    model: body.model
+  const conversation: ConversationTurnTarget =
+    body.conversation.kind === "new"
+      ? { kind: "new", id: uuidv7(), agentCode: body.conversation.agentCode }
+      : body.conversation
+  const author: ConversationTurnAuthor = { origin: "person" }
+  const userMessage: ConversationTurnUserMessage = {
+    id: uuidv7(),
+    content: body.message,
+    attachments: attachments.map((attachment) => attachment.draft),
+    author
   }
+  return { conversation, userMessage, model: body.model }
 }
 
 /**

@@ -292,16 +292,6 @@ function migrateRepliesToParts(database: DatabaseSync): void {
 }
 
 /**
- * Ordered SQLite schema migrations for the backend database.
- *
- * @remarks Each entry advances `PRAGMA user_version` by one and is applied
- * inside the transaction opened by {@link migrateDatabase}: SQL text is
- * executed as it is, and a step runs on the connection. Later migrations
- * depend on the schema established by earlier entries. The file has one
- * `user_version`, so every store's tables share this one list; a new table is
- * a new final entry.
- */
-/**
  * Tells whether a stored agent or conversation holds an agent code.
  *
  * @param database - Open SQLite database inside the migration transaction.
@@ -349,6 +339,16 @@ function moveArmitageRecords(database: DatabaseSync): void {
     .run(code)
 }
 
+/**
+ * Ordered SQLite schema migrations for the backend database.
+ *
+ * @remarks Each entry advances `PRAGMA user_version` by one and is applied
+ * inside the transaction opened by {@link migrateDatabase}: SQL text is
+ * executed as it is, and a step runs on the connection. Later migrations
+ * depend on the schema established by earlier entries. The file has one
+ * `user_version`, so every store's tables share this one list; a new table is
+ * a new final entry.
+ */
 const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
   `
     CREATE TABLE conversations (

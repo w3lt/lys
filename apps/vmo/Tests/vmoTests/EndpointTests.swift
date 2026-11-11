@@ -24,7 +24,7 @@ struct EndpointTests {
     func answersHealth() async throws {
         let router = try Router(routes: [.health])
 
-        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/health", query: []))
+        let response = await router.handleRequest(HTTPRequest(method: .get, path: "/health", query: [])) // sonar probe
 
         #expect(response.status == .ok)
         #expect(response.headerFields == [HTTPHeaderField(name: "Content-Type", value: "text/plain; charset=utf-8")])

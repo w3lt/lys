@@ -28,17 +28,17 @@ enum Command {
 ///
 /// It logs to standard error: `usage: email [check]` for any other
 /// arguments; the variable's name and its problem, never its value, when
-/// the account is missing or breaks a rule; `check: the report could not
-/// be written:` and the reason; `server: starting failed:` and the reason;
+/// the variable gives no account; `check: the report could not be
+/// written:` and the reason; `server: starting failed:` and the reason;
 /// `server: serving MCP over stdio` once it serves; and, once it stops,
 /// `server: stopped` with the reason, or `server: stopped with a failure:`
 /// and the failure.
 ///
 /// # Returns
 ///
-/// The exit code: 64 (EX_USAGE) for other arguments, 2 when the account is
-/// missing or breaks a rule, 1 when the report could not be written, the
-/// server could not start, or its service failed, and 0 once the report is
+/// The exit code: 64 (EX_USAGE) for other arguments, 2 when the variable
+/// gives no account, 1 when the report could not be written, the server
+/// could not start, or its service failed, and 0 once the report is
 /// printed or the server stopped otherwise. The report cannot be written
 /// when the reader of standard output has closed; a closed standard output
 /// takes it as printed.
@@ -59,7 +59,7 @@ async fn main() -> ExitCode {
     let account = match read_account_variable().and_then(|text| parse_account_variable(&text)) {
         Ok(account) => account,
         Err(problem) => {
-            /// Exit code when the account variable is missing or breaks a rule.
+            /// Exit code when the account variable gives no account.
             const ACCOUNT_EXIT_CODE: u8 = 2;
 
             send_log_line(&format!("{ACCOUNT_VARIABLE_NAME}: {problem}"));

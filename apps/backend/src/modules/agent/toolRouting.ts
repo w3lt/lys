@@ -2,6 +2,7 @@ import type { MessageGenerationOptions } from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
 import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
+import type { ToolCallPolicy } from "../toolApproval/toolCallPolicy"
 import { formatSystemPrompt } from "./agentContext"
 import FindToolsTool, {
   FIND_TOOLS_DEFINITION,
@@ -67,6 +68,8 @@ export type ReplyToolsTurn = Readonly<{
   mcpTools: readonly TurnMcpTool[]
   /** Receives why a `find_tools` search ended without finding. */
   reportToolSearchFailure: ReportToolSearchFailure
+  /** What the fixed tool call rules know about this machine. */
+  toolCallPolicy: ToolCallPolicy
 }>
 
 /** What one reply offers its rounds. */
@@ -183,7 +186,8 @@ export function buildReplyTools(
           conversationId: turn.conversationId,
           model: turn.model,
           generationOptions: turn.generationOptions,
-          reportFailure: turn.reportToolSearchFailure
+          reportFailure: turn.reportToolSearchFailure,
+          toolCallPolicy: turn.toolCallPolicy
         })
       : undefined
   const routingTools =

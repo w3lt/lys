@@ -68,6 +68,7 @@ import type { TurnBuiltInTool } from "../../../../src/modules/tool/builtIn/built
 import ToolCallGate, {
   type SendToolApprovalPrompt
 } from "../../../../src/modules/toolApproval/toolCallGate"
+import { formatToolCallDenial } from "../../../../src/modules/toolApproval/toolCallPolicy"
 import { ChatCompletionCancelledError } from "../../../../src/utils/errors"
 import { createImageAttachment } from "../../support/attachmentFixtures"
 import { parseMcpToolDefinition } from "../../support/mcpToolFixtures"
@@ -101,7 +102,8 @@ import {
 import {
   LEADER_STATE_TOOL_NAMES,
   READ_TEXT_FILE_FORMAT,
-  READ_TEXT_FILE_TOOL
+  READ_TEXT_FILE_TOOL,
+  TOOL_CALL_POLICY
 } from "../../support/toolFixtures"
 
 /** Opens one reply stream for the agent under test. */
@@ -143,11 +145,12 @@ const SWITCHED_OFF_SEARCH_TOOLS: UnofferedTools = Object.freeze({
   unavailableTools: Object.freeze([])
 })
 
-/** Request values every case's turn carries. */
+/** Request values and the tool call policy every case's turn carries. */
 const TURN_REQUEST = Object.freeze({
   userMessage: createUserMessage(100, "Hello"),
   model: "qwen/qwen3-8b",
-  generationOptions: { temperature: 0.4, replyCeiling: 128 }
+  generationOptions: { temperature: 0.4, replyCeiling: 128 },
+  toolCallPolicy: TOOL_CALL_POLICY
 })
 
 /** The message of a case whose person attached a photo. */
@@ -566,6 +569,21 @@ const READ_A_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
     toolCalls: [{ toolName: "read_text_file", argumentText: '{"path":"/a"}' }]
   }
 ])
+
+/**
+ * Builds a round in which the model calls one tool.
+ *
+ * @param toolName - Name of the tool.
+ * @param argumentText - Arguments as the model wrote them.
+ * @returns The round's events.
+ */
+function buildCallRound(
+  toolName: string,
+  argumentText: string
+): readonly ReplyStreamEvent[] {
+  const toolCall = { toolName, argumentText }
+  return [{ type: "tool-calls", toolCalls: [toolCall] }]
+}
 
 /** Answer of a person who rejected a call with a note. */
 const DECLINED_APPROVAL = Object.freeze({
@@ -3510,6 +3528,196 @@ describe("Agent", () => {
     })
   })
 
+  describe("tool call policy", () => {
+    /** Denial the model reads for a call naming a credential file. */
+    const CREDENTIAL_FILE_DENIAL = formatToolCallDenial("credential-file")
+
+    /** Denial the model reads for a call naming a blocked address. */
+    const BLOCKED_ADDRESS_DENIAL = formatToolCallDenial("blocked-address")
+
+    /** Round in which the model reads the SSH key of the person. */
+    const READ_KEY_ROUND = buildCallRound(
+      "read_text_file",
+      '{"path":"~/.ssh/id_rsa"}'
+    )
+
+    it("stores a client tool's call that names a credential file as failed and hands the model the denial, without prompting or sending it, even on Just run", async () => {
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+      const openReplyStream = createRoundStreams(READ_KEY_ROUND, FINISH_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        justRunToolNames: ["read_text_file"],
+        sendToolApprovalPrompt,
+        sendClientToolCall: handleUnexpectedToolCall
+      })
+
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+      const callId = run.parts[0]?.id
+      expect(run.events.slice(0, 1)).toEqual([
+        buildReplyPartEventMatcher({
+          id: callId,
+          toolName: "read_text_file",
+          status: "failed",
+          result: CREDENTIAL_FILE_DENIAL
+        })
+      ])
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toEqual({
+        role: "tool",
+        toolCallId: callId,
+        content: CREDENTIAL_FILE_DENIAL
+      })
+      expect(run.events.at(-1)).toEqual({ type: "done", finishReason: "stop" })
+    })
+
+    it("stores a backend tool's call that names a blocked address as failed without asking the person on Ask me or running the tool", async () => {
+      const { tool, entry } = createLookUpWordTool()
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          buildCallRound("look_up_word", '{"word":"http://127.0.0.1/"}'),
+          FINISH_ROUND
+        ),
+        builtInTools: [entry],
+        justRunToolNames: [],
+        sendToolApprovalPrompt
+      })
+
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+      expect(tool.startedWords).toEqual([])
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          toolName: "look_up_word",
+          status: "failed",
+          result: BLOCKED_ADDRESS_DENIAL
+        })
+      ])
+    })
+
+    it("decides a call of a backend tool that runs without approval too, creating no gate", async () => {
+      const { tool, entry } = createLookUpWordTool()
+      const createToolCallGate = vi.fn<AgentTurn["createToolCallGate"]>()
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          buildCallRound("look_up_word", '{"word":"~/.aws/credentials"}'),
+          FINISH_ROUND
+        ),
+        builtInTools: [{ ...entry, runsWithoutApproval: true }],
+        createToolCallGate
+      })
+
+      expect(createToolCallGate).not.toHaveBeenCalled()
+      expect(tool.startedWords).toEqual([])
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          status: "failed",
+          result: CREDENTIAL_FILE_DENIAL
+        })
+      ])
+    })
+
+    it("stores an MCP tool's call saved as Just run that names a blocked address as failed without calling the server", async () => {
+      const { tool, call } = createMcpEchoTool()
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          buildCallRound(
+            "mcp__files__echo",
+            '{"text":"http://169.254.169.254/latest/meta-data"}'
+          ),
+          FINISH_ROUND
+        ),
+        mcpTools: [tool],
+        justRunToolNames: ["mcp__files__echo"],
+        sendToolApprovalPrompt
+      })
+
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+      expect(call).not.toHaveBeenCalled()
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          status: "failed",
+          result: BLOCKED_ADDRESS_DENIAL
+        })
+      ])
+    })
+
+    it("runs a round's allowed call and denies the other, in the model's order", async () => {
+      const sendClientToolCall = vi.fn<AgentTurn["sendClientToolCall"]>(
+        async () => ({ status: "succeeded", content: "notes" })
+      )
+      const openReplyStream = createRoundStreams(
+        [
+          {
+            type: "tool-calls",
+            toolCalls: [
+              { toolName: "read_text_file", argumentText: '{"path":"/a"}' },
+              {
+                toolName: "read_text_file",
+                argumentText: '{"path":"/home/ada/.lys/settings.json"}'
+              }
+            ]
+          }
+        ],
+        FINISH_ROUND
+      )
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall
+      })
+
+      expect(sendClientToolCall.mock.calls).toEqual([
+        [expect.objectContaining({ arguments: { path: "/a" } })]
+      ])
+      expect(run.parts).toEqual([
+        expect.objectContaining({ status: "succeeded", result: "notes" }),
+        expect.objectContaining({
+          status: "failed",
+          result: CREDENTIAL_FILE_DENIAL
+        })
+      ])
+      expect(
+        openReplyStream.mock.calls[1]?.[0].messages
+          .slice(-2)
+          .map((message) => message.content)
+      ).toEqual(["notes", CREDENTIAL_FILE_DENIAL])
+    })
+
+    it("asks the model nothing more when the reply ended before a denied call was stored", async () => {
+      const store = openAgentTurnStore()
+      const openReplyStream = createRoundStreams(READ_KEY_ROUND)
+      const drafts: unknown[] = []
+
+      const run = await getAgentReplyOutcome({
+        store,
+        openReplyStream,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        sendClientToolCall: handleUnexpectedToolCall,
+        createReplyPart: (stored) => (draft) => {
+          drafts.push(draft)
+          updateStoredReplyToInterrupted(store)
+          return stored(draft)
+        }
+      })
+
+      expect(drafts).toEqual([
+        expect.objectContaining({
+          status: "failed",
+          result: CREDENTIAL_FILE_DENIAL
+        })
+      ])
+      expect(openReplyStream).toHaveBeenCalledOnce()
+      expect(run.parts).toEqual([])
+      expect(run.events).toEqual([INTERRUPTED_EVENT])
+    })
+  })
+
   describe("a reply that another writer ended while its calls were handled", () => {
     it("never runs a call the person allows after the reply ended while the prompt waited", async () => {
       const store = openAgentTurnStore()
@@ -4381,21 +4589,6 @@ describe("Agent", () => {
       )
     }
 
-    /**
-     * Builds a round in which the model calls one tool.
-     *
-     * @param toolName - Name of the tool.
-     * @param argumentText - Arguments as the model wrote them.
-     * @returns The round's events.
-     */
-    function buildCallRound(
-      toolName: string,
-      argumentText: string
-    ): readonly ReplyStreamEvent[] {
-      const toolCall = { toolName, argumentText }
-      return [{ type: "tool-calls", toolCalls: [toolCall] }]
-    }
-
     /** Round in which the model asks for a tool that defines words. */
     const FIND_TOOLS_ROUND = buildCallRound(
       "find_tools",
@@ -4484,7 +4677,8 @@ describe("Agent", () => {
         model: TURN_REQUEST.model,
         generationOptions: TURN_REQUEST.generationOptions,
         abortSignal: expect.any(AbortSignal),
-        reportFailure: expect.any(Function)
+        reportFailure: expect.any(Function),
+        toolCallPolicy: TOOL_CALL_POLICY
       })
       expect(listOfferedToolNames(openReplyStream, 1)).toEqual([
         "find_tools",
@@ -4534,6 +4728,27 @@ describe("Agent", () => {
         "find_tools",
         ...LEADER_STATE_TOOL_NAMES
       ])
+    })
+
+    it("denies a find_tools call whose task names a credential file without asking the keeper", async () => {
+      const keeper = createKeeper(handleUnexpectedToolCall)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          buildCallRound("find_tools", '{"task":"read ~/.ssh/id_ed25519"}'),
+          FINISH_ROUND
+        ),
+        toolKeeper: keeper,
+        trainedForToolUse: true,
+        builtInTools: [createLookUpWordTool().entry]
+      })
+
+      expect(keeper.findTools).not.toHaveBeenCalled()
+      expect(run.parts[0]).toMatchObject({
+        toolName: "find_tools",
+        status: "failed",
+        result: formatToolCallDenial("credential-file")
+      })
     })
 
     it("tells the model when the keeper could not search, reports why, offers no new tool, and goes on", async () => {

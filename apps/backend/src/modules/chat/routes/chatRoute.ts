@@ -45,6 +45,7 @@ import type {
 } from "../../tool/builtIn/builtInTool"
 import { findTurnBuiltInTools } from "../../tool/builtIn/builtInTools"
 import type ToolApprovalService from "../../toolApproval/toolApprovalService"
+import type { ToolCallPolicy } from "../../toolApproval/toolCallPolicy"
 import type { TitleGenerationOptions } from "../chatService"
 import type {
   ConversationTurn,
@@ -87,7 +88,17 @@ import {
 } from "./turnRequest"
 
 /** Backend settings the chat route applies to every request. */
-export type ChatRouteOptions = Pick<BackendConfig, "titleGenerationMaxAttempts">
+export type ChatRouteOptions = Pick<
+  BackendConfig,
+  "titleGenerationMaxAttempts"
+> &
+  Readonly<{
+    /**
+     * What the fixed tool call rules know about this machine; every tool
+     * call of every turn the route starts is decided by them.
+     */
+    toolCallPolicy: ToolCallPolicy
+  }>
 
 /**
  * Settings, the generation registry, and the capability lookup the chat
@@ -161,8 +172,13 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      */
     findMcpTool: (toolName: string) => McpTurnToolLookup
     /**
-     * Approval gateway every tool call passes, except a call of a backend
-     * tool that runs without approval.
+     * What the fixed tool call rules know about this machine; every checked
+     * call is decided by them before its approval.
+     */
+    toolCallPolicy: ToolCallPolicy
+    /**
+     * Approval gate every tool call the policy allows passes, except a call
+     * of a backend tool that runs without approval.
      */
     toolApprovals: ToolApprovalService
   }>
@@ -293,8 +309,9 @@ type TurnGenerationInput = Readonly<{
  * follows that generation on the response stream.
  *
  * @param app - Backend with SSE, validation, and singleton services installed.
- * @param registration - Title attempt limit, the registry that owns the
- * started generations, and the model capability lookup.
+ * @param registration - Title attempt limit, the tool call policy, the
+ * registry that owns the started generations, and the model capability
+ * lookup.
  * @throws If route registration fails.
  * @remarks The route accepts bodies up to the chat contract's limit, so a
  * message can carry its attachments. A full model-operation queue and a
@@ -305,6 +322,7 @@ export default function updateFastifyWithChatRoute(
   app: FastifyInstance,
   {
     titleGenerationMaxAttempts,
+    toolCallPolicy,
     generations,
     findModelCapabilities
   }: ChatRouteRegistration
@@ -330,6 +348,7 @@ export default function updateFastifyWithChatRoute(
     builtInTools: app.builtInTools,
     findMcpTool: (toolName: string) =>
       app.mcpServerRegistry.findTurnTool(toolName),
+    toolCallPolicy,
     toolApprovals: app.toolApprovalService
   }
   app.route<ChatApiRoute>({
@@ -955,7 +974,8 @@ async function createTurnReplyTask(
  * @returns The agent turn, whose parts and final state go to the stored
  * reply and whose reply state is read back from the stored conversation,
  * which numbers new sources after the conversation's stored ones,
- * whose tool calls pass the approval gateway, and whose images are read
+ * whose tool calls pass the tool call policy and then the approval gate,
+ * and whose images are read
  * from the conversation's attachment files. With the request's logger, an
  * unreadable settings file, and a reply refused because its agent's request
  * slots and line were full, are logged as warnings; a cancelled reply, and a
@@ -1009,6 +1029,7 @@ function buildAgentTurn(
       ),
     sendEvent,
     sendClientToolCall,
+    toolCallPolicy: dependencies.toolCallPolicy,
     createToolCallGate: () =>
       dependencies.toolApprovals.createToolCallGate(
         sendToolApprovalPrompt,

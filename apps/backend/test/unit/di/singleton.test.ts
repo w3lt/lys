@@ -40,7 +40,7 @@ import {
   createFakeLlmRuntime
 } from "../support/fakeLlmRuntime"
 import { writeSettingsFile } from "../support/settingsFile"
-import { READ_TEXT_FILE_TOOL } from "../support/toolFixtures"
+import { READ_TEXT_FILE_TOOL, TOOL_CALL_POLICY } from "../support/toolFixtures"
 import { answerWithBody, startVmoServer } from "../support/vmoServer"
 
 // The bundle imports the LM Studio SDK through its runtime adapter. No case
@@ -163,6 +163,7 @@ function buildHelloAgentTurn(
     updateReplyToolCall: vi.fn(),
     sendEvent: vi.fn(),
     sendClientToolCall: vi.fn(),
+    toolCallPolicy: TOOL_CALL_POLICY,
     createToolCallGate: vi.fn(),
     reportReplyCancellation: vi.fn(),
     reportReplyRefusal: vi.fn(),
@@ -558,7 +559,8 @@ describe("createSingletonServices", () => {
       model: "qwen/qwen3-8b",
       generationOptions: { temperature: 0.4 },
       abortSignal: new AbortController().signal,
-      reportFailure
+      reportFailure,
+      toolCallPolicy: TOOL_CALL_POLICY
     })
 
     expect(completeChatStream).toHaveBeenCalledWith(

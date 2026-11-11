@@ -130,6 +130,7 @@ function buildSearchTurn(
     findReplyStatus: () => reply.findReplyStatus(),
     sendEvent: dropSearchEvent,
     sendClientToolCall: rejectClientToolCall,
+    toolCallPolicy: search.toolCallPolicy,
     createToolCallGate: rejectToolCallGate,
     reportReplyCancellation: (failure) => {
       if (!search.abortSignal.aborted) reportFailure(failure)

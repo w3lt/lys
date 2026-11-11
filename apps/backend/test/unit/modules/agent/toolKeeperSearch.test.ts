@@ -23,11 +23,16 @@ import {
   MAXIMUM_TOOL_KEEPER_ROUND_COUNT,
   runToolKeeperSearch
 } from "../../../../src/modules/agent/toolKeeperSearch"
+import {
+  formatToolCallDenial,
+  type ToolCallPolicy
+} from "../../../../src/modules/toolApproval/toolCallPolicy"
 import { ChatCompletionCancelledError } from "../../../../src/utils/errors"
 import {
   createRoomyReplyContextMeter,
   createUnloadedReplyContextMeter
 } from "../../support/replyContextMeterFakes"
+import { TOOL_CALL_POLICY } from "../../support/toolFixtures"
 
 /** Opens one round's stream. */
 type OpenReplyStream = ReplyModel["openReplyStream"]
@@ -158,11 +163,13 @@ function createArmitage(
  *
  * @param reportFailure - Receives why the search ended without finding.
  * @param abortSignal - Cancellation of the asking reply.
+ * @param toolCallPolicy - Policy of the asking turn.
  * @returns The search over {@link TOOLS}.
  */
 function buildSearch(
   reportFailure: (failure: unknown) => void,
-  abortSignal: AbortSignal = new AbortController().signal
+  abortSignal: AbortSignal = new AbortController().signal,
+  toolCallPolicy: ToolCallPolicy = TOOL_CALL_POLICY
 ): ToolSearch {
   return {
     task: "read a web page",
@@ -171,7 +178,8 @@ function buildSearch(
     model: "qwen/qwen3-8b",
     generationOptions: { temperature: 0.2 },
     abortSignal,
-    reportFailure
+    reportFailure,
+    toolCallPolicy
   }
 }
 
@@ -209,6 +217,27 @@ describe("runToolKeeperSearch", () => {
     expect(lastRequest?.messages.at(-1)).toMatchObject({
       role: "tool",
       content: "Recommended read_page: 1 of at most 5 tools."
+    })
+  })
+
+  it("decides each of Armitage's calls by the search's tool call policy, without asking anyone", async () => {
+    const settingsFilePath = "/srv/lys/settings.json"
+    const toolCallPolicy: ToolCallPolicy = Object.freeze({ settingsFilePath })
+    const openReplyStream = createRoundStreams(
+      buildToolCallRound(SEARCH_TOOLS_TOOL_NAME, { query: settingsFilePath }),
+      FINISH_ROUND
+    )
+
+    const outcome = await runToolKeeperSearch(
+      createArmitage(openReplyStream),
+      buildSearch(vi.fn(), new AbortController().signal, toolCallPolicy)
+    )
+
+    expect(outcome).toEqual({ status: "found", toolNames: [] })
+    const [lastRequest] = openReplyStream.mock.calls[1] ?? []
+    expect(lastRequest?.messages.at(-1)).toMatchObject({
+      role: "tool",
+      content: formatToolCallDenial("credential-file")
     })
   })
 

@@ -27,6 +27,7 @@ import updateFastifyWithChatRoute, {
 import type { DownloadedLlmModel } from "../../../../../src/modules/llm/llmRuntimeTypes"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
+import { formatToolCallDenial } from "../../../../../src/modules/toolApproval/toolCallPolicy"
 import { ChatCompletionCancelledError } from "../../../../../src/utils/errors"
 import {
   createPngBytes,
@@ -49,12 +50,14 @@ import { LOOK_UP_WORD_FORMAT } from "../../../support/scriptedBuiltInTool"
 import {
   LEADER_STATE_TOOL_NAMES,
   READ_TEXT_FILE_FORMAT,
-  READ_TEXT_FILE_TOOL
+  READ_TEXT_FILE_TOOL,
+  TOOL_CALL_POLICY
 } from "../../../support/toolFixtures"
 
 /** Settings applied by the chat route in every case. */
 const CHAT_ROUTE_OPTIONS = Object.freeze({
-  titleGenerationMaxAttempts: 2
+  titleGenerationMaxAttempts: 2,
+  toolCallPolicy: TOOL_CALL_POLICY
 } satisfies ChatRouteOptions)
 
 /** Valid request body starting a new conversation that Caliginia answers. */
@@ -1341,13 +1344,14 @@ describe("updateFastifyWithChatRoute", () => {
     })
 
     /**
-     * Registers the chat route on a test application whose model looks up
-     * `moth` in its first round and answers `Done` in its second.
+     * Registers the chat route on a test application whose model calls
+     * `look_up_word` in its first round and answers `Done` in its second.
      *
+     * @param argumentText - Arguments of the call; `moth` by default.
      * @returns The application and the generation the route starts, once
      * started.
      */
-    async function createLookUpApp() {
+    async function createLookUpApp(argumentText = '{"word":"moth"}') {
       const testApp = await createChatRouteTestApp()
       testApp.createConversationTurn.mockRestore()
       testApp.completeChatStream
@@ -1359,10 +1363,7 @@ describe("updateFastifyWithChatRoute", () => {
                   index: 0,
                   id: "call_0",
                   type: "function",
-                  function: {
-                    name: "look_up_word",
-                    arguments: '{"word":"moth"}'
-                  }
+                  function: { name: "look_up_word", arguments: argumentText }
                 }
               ]
             })
@@ -1448,6 +1449,38 @@ describe("updateFastifyWithChatRoute", () => {
       expect(eventTypes).not.toContain("tool-approval")
       expect(eventTypes.at(-1)).toBe("done")
       expect(testApp.readJustRunToolNames).toHaveBeenCalledOnce()
+    })
+
+    it("stores a call the tool call policy denies as failed and sends the model the denial, without asking the person even on Just run", async () => {
+      const { testApp } = await createLookUpApp(
+        '{"word":"/home/ada/.lys/settings.json"}'
+      )
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set(["look_up_word"])
+      })
+      const denial = formatToolCallDenial("credential-file")
+
+      const response = await sendChatRequest(testApp.app, LOOK_UP_REQUEST)
+
+      const events = parseSseEvents(response.body)
+      expect(events.map(({ event }) => event)).not.toContain("tool-approval")
+      expect(events).toContainEqual({
+        event: "reply-part",
+        data: {
+          type: "reply-part",
+          part: expect.objectContaining({
+            kind: "tool-call",
+            toolName: "look_up_word",
+            status: "failed",
+            result: denial
+          })
+        }
+      })
+      expect(
+        testApp.completeChatStream.mock.calls[1]?.[0].messages.at(-1)
+      ).toMatchObject({ role: "tool", content: denial })
+      expect(events.at(-1)?.event).toBe("done")
     })
 
     it("asks the person and logs a warning with the request's logger when the saved choices cannot be read", async () => {

@@ -1,6 +1,16 @@
 import { toolDefinitionSchema, type ToolDefinition } from "@lys/share"
 import { buildAgentStateDefinitions } from "../../../src/modules/agent/agentStateTools"
 import AgentTool from "../../../src/modules/tool/tool"
+import type { ToolCallPolicy } from "../../../src/modules/toolApproval/toolCallPolicy"
+
+/**
+ * Tool call policy of a test machine whose Lys home is `/home/ada/.lys`; it
+ * allows every call a case makes unless the case names a credential file
+ * or a blocked address on purpose.
+ */
+export const TOOL_CALL_POLICY = Object.freeze({
+  settingsFilePath: "/home/ada/.lys/settings.json"
+} satisfies ToolCallPolicy)
 
 /**
  * Validated definition of the desktop's read-text-file tool: one required

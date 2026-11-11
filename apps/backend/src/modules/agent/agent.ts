@@ -14,6 +14,7 @@ import type {
 } from "@lys/share"
 import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
+import type { ToolCallPolicy } from "../toolApproval/toolCallPolicy"
 import { waitForSettlementOrAbort } from "../../utils/abort"
 import { ChatCompletionCancelledError } from "../../utils/errors"
 import AgentActivity, {
@@ -244,6 +245,12 @@ export type AgentTurn = Readonly<{
    * rejects.
    */
   sendClientToolCall: SendClientToolCall
+  /**
+   * What the fixed tool call rules know about this machine; every checked
+   * call of the turn's tools, and of the tools of each `find_tools` search
+   * it starts, is decided by them before it starts.
+   */
+  toolCallPolicy: ToolCallPolicy
   /**
    * Creates the approval gate of one round of tool calls, which asks the
    * person through every stream following the reply unless the tool is
@@ -766,6 +773,7 @@ export default class Agent {
       tools: state.replyTools.toolOffer.listOfferedToolset(),
       unofferedTools: state.unofferedTools,
       sendClientToolCall: turn.sendClientToolCall,
+      toolCallPolicy: turn.toolCallPolicy,
       createToolCallGate: turn.createToolCallGate,
       abortSignal: turn.abortSignal,
       replyParts: state.replyParts,

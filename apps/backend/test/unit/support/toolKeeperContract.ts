@@ -4,6 +4,7 @@ import type {
   ToolKeeper,
   ToolSearch
 } from "../../../src/modules/agent/findToolsTool"
+import { TOOL_CALL_POLICY } from "./toolFixtures"
 
 /** How every search of a keeper under test ends. */
 export type ToolKeeperScript = "finds-first-tool" | "fails"
@@ -55,7 +56,8 @@ function buildSearch(abortSignal: AbortSignal = new AbortController().signal) {
     model: "qwen/qwen3-8b",
     generationOptions: { temperature: 0.2 },
     abortSignal,
-    reportFailure
+    reportFailure,
+    toolCallPolicy: TOOL_CALL_POLICY
   }
   return { search, reportFailure }
 }

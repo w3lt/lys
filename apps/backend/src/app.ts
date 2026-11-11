@@ -8,6 +8,7 @@ import registerChatRoutes from "./modules/chat/routes"
 import registerToolRoutes from "./modules/tool/routes"
 import { backendConfigSchema, type BackendConfig } from "./config"
 import singletonServicesPlugin from "./di/fastify"
+import type { ToolCallPolicy } from "./modules/toolApproval/toolCallPolicy"
 import { updateFastifyWithHttpTransport } from "./http"
 
 /** Options used to construct the backend Fastify application. */
@@ -56,10 +57,14 @@ export async function buildApp(
   })
 
   // =============== REGISTER THE ROUTES =============== //
+  const toolCallPolicy: ToolCallPolicy = Object.freeze({
+    settingsFilePath: config.settingsFilePath
+  })
   await app.register(registerHealthRoutes)
   await app.register(updateFastifyWithLlmRoutes)
   await app.register(registerChatRoutes, {
-    titleGenerationMaxAttempts: config.titleGenerationMaxAttempts
+    titleGenerationMaxAttempts: config.titleGenerationMaxAttempts,
+    toolCallPolicy
   })
   await app.register(updateFastifyWithConversationRoutes)
   await app.register(updateFastifyWithAgentRoutes)

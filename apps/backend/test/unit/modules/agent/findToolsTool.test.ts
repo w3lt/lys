@@ -17,6 +17,7 @@ import {
   registerBuiltInToolContractSuite,
   type BuiltInToolHarness
 } from "../../support/builtInToolContract"
+import { TOOL_CALL_POLICY } from "../../support/toolFixtures"
 
 /**
  * Builds the definition of a backend tool that takes no argument.
@@ -79,7 +80,8 @@ function buildContext(keeper: ToolKeeper): FindToolsContext {
     conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
     model: "qwen/qwen3-8b",
     generationOptions: { temperature: 0.4 },
-    reportFailure: reportUnexpectedFailure
+    reportFailure: reportUnexpectedFailure,
+    toolCallPolicy: TOOL_CALL_POLICY
   }
 }
 
@@ -157,7 +159,8 @@ describe("FindToolsTool", () => {
       model: "qwen/qwen3-8b",
       generationOptions: { temperature: 0.4 },
       abortSignal,
-      reportFailure: reportUnexpectedFailure
+      reportFailure: reportUnexpectedFailure,
+      toolCallPolicy: TOOL_CALL_POLICY
     })
   })
 

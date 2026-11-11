@@ -11,6 +11,7 @@ import type {
   BuiltInToolRunContext,
   ParsedBuiltInToolCall
 } from "../tool/builtIn/builtInTool"
+import type { ToolCallPolicy } from "../toolApproval/toolCallPolicy"
 
 /** Inclusive maximum length of a trimmed task, in UTF-16 code units. */
 const MAXIMUM_TOOL_TASK_LENGTH = 500
@@ -45,6 +46,12 @@ export type ToolSearch = Readonly<{
    * the returned promise settles.
    */
   reportFailure: ReportToolSearchFailure
+  /**
+   * What the fixed tool call rules know about this machine; every call the
+   * search's own reply makes is decided by them, as the asking reply's
+   * calls are.
+   */
+  toolCallPolicy: ToolCallPolicy
 }>
 
 /** Outcome of one search for tools. */
@@ -111,6 +118,8 @@ export type FindToolsContext = Readonly<{
   generationOptions: MessageGenerationOptions
   /** Receives why a search ended without finding; lent for the reply. */
   reportFailure: ReportToolSearchFailure
+  /** What the fixed tool call rules know about this machine. */
+  toolCallPolicy: ToolCallPolicy
 }>
 
 /** Copy shown for a task that is blank or too long. */

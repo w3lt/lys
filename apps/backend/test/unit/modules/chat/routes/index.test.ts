@@ -12,6 +12,7 @@ import {
 } from "../../../support/chatRouteTestApp"
 import { createDownloadedLlmModel } from "../../../support/llmFixtures"
 import { createChatCompletionChunk } from "../../../support/openAiEndpointFake"
+import { TOOL_CALL_POLICY } from "../../../support/toolFixtures"
 
 /** Model both requests of the shared-memory case name. */
 const MODEL = "qwen/qwen3-8b"
@@ -26,7 +27,8 @@ describe("registerChatRoutes", () => {
     const testApp = await createChatRouteTestApp()
 
     await registerChatRoutes(testApp.app, {
-      titleGenerationMaxAttempts: 1
+      titleGenerationMaxAttempts: 1,
+      toolCallPolicy: TOOL_CALL_POLICY
     })
 
     expect(
@@ -46,7 +48,10 @@ describe("registerChatRoutes", () => {
     testApp.listDownloadedLlmModels.mockResolvedValue([
       createDownloadedLlmModel({ modelKey: MODEL })
     ])
-    await registerChatRoutes(testApp.app, { titleGenerationMaxAttempts: 1 })
+    await registerChatRoutes(testApp.app, {
+      titleGenerationMaxAttempts: 1,
+      toolCallPolicy: TOOL_CALL_POLICY
+    })
 
     const chat = await sendChatRequest(testApp.app, {
       conversation: { kind: "new", agentCode: "caliginia" },

@@ -31,7 +31,10 @@ import {
   createUserMessage
 } from "../../support/conversationFixtures"
 import { createRoomyReplyContextMeter } from "../../support/replyContextMeterFakes"
-import { LEADER_STATE_TOOL_NAMES } from "../../support/toolFixtures"
+import {
+  LEADER_STATE_TOOL_NAMES,
+  TOOL_CALL_POLICY
+} from "../../support/toolFixtures"
 import {
   registerToolKeeperContractSuite,
   TOOL_KEEPER_SEARCH_TOOLS,
@@ -230,6 +233,7 @@ async function createHelloReply(
     updateReplyToolCall: vi.fn(),
     sendEvent: vi.fn(),
     sendClientToolCall: vi.fn(),
+    toolCallPolicy: TOOL_CALL_POLICY,
     createToolCallGate: vi.fn(),
     reportReplyCancellation: vi.fn(),
     reportReplyRefusal: vi.fn(),
@@ -564,7 +568,8 @@ describe("AgentRuntimeService", () => {
         model: "qwen/qwen3-8b",
         generationOptions: { temperature: 0.2 },
         abortSignal: new AbortController().signal,
-        reportFailure: vi.fn()
+        reportFailure: vi.fn(),
+        toolCallPolicy: TOOL_CALL_POLICY
       })
       await vi.waitFor(() => {
         expect(openReplyStream).toHaveBeenCalledOnce()

@@ -28,7 +28,10 @@ import {
   LOOK_UP_WORD_TOOL,
   ScriptedBuiltInTool
 } from "../../support/scriptedBuiltInTool"
-import { READ_TEXT_FILE_TOOL } from "../../support/toolFixtures"
+import {
+  READ_TEXT_FILE_TOOL,
+  TOOL_CALL_POLICY
+} from "../../support/toolFixtures"
 
 /**
  * Builds a backend tool of a turn.
@@ -131,7 +134,8 @@ function buildTurn(trainedForToolUse: boolean): ReplyToolsTurn {
     clientTools: [READ_TEXT_FILE_TOOL],
     builtInTools: [BUILT_IN_TOOL],
     mcpTools: [MCP_TOOL],
-    reportToolSearchFailure: vi.fn()
+    reportToolSearchFailure: vi.fn(),
+    toolCallPolicy: TOOL_CALL_POLICY
   }
 }
 

@@ -125,6 +125,18 @@ const BLOCKED_ADDRESS_CASES = Object.freeze({
   "an address with spaces around it": " 127.0.0.1 "
 })
 
+/**
+ * Values naming a blocked address in another common form of a host without
+ * a scheme, by what each shows.
+ */
+const BLOCKED_HOST_FORM_CASES = Object.freeze({
+  "a private host after a user name": "admin@192.168.1.10",
+  "an scp target on a private host": "git@10.0.0.2:repo.git",
+  "a bracketed address after a user name": "ada@[fd00::1]:22",
+  "a UNC path on a private host": "\\\\10.0.0.5\\share\\notes.txt",
+  "a network path to loopback": "//127.0.0.1/admin"
+})
+
 /** Values that look like an address but name no blocked one, by what each shows. */
 const ALLOWED_ADDRESS_CASES = Object.freeze({
   "a public URL": "https://example.com/page",
@@ -138,7 +150,11 @@ const ALLOWED_ADDRESS_CASES = Object.freeze({
   "an email address": "mailto:ada@example.com",
   "a bracketed word": "[x]",
   "a sentence naming a local address": "my app runs on http://localhost:3000",
-  "a URL whose host cannot be an http host": "foo://a%zz/"
+  "a URL whose host cannot be an http host": "foo://a%zz/",
+  "an email address without a scheme": "ada@example.com",
+  "a network path to a named server": "//server/share",
+  "a Windows path": "C:\\Users\\ada\\notes.txt",
+  "a time of day": "10:30"
 })
 
 describe("decideToolCall", () => {
@@ -156,6 +172,15 @@ describe("decideToolCall", () => {
   })
 
   it.each(Object.entries(BLOCKED_ADDRESS_CASES))(
+    "denies %s as a blocked address",
+    (_label, value) => {
+      expect(decideToolCall(buildArguments(value), POLICY)).toStrictEqual(
+        DENIED_BLOCKED_ADDRESS
+      )
+    }
+  )
+
+  it.each(Object.entries(BLOCKED_HOST_FORM_CASES))(
     "denies %s as a blocked address",
     (_label, value) => {
       expect(decideToolCall(buildArguments(value), POLICY)).toStrictEqual(

@@ -111,11 +111,14 @@ const PERCENT_ESCAPE_PATTERN = /%[0-9a-f]{2}/giu
 const WHITESPACE_PATTERN = /\s/u
 
 /**
- * A host without a scheme: a name or IPv4 address, or anything in brackets,
- * then an optional port and an optional path.
+ * A host without a scheme, as a network path, an SSH or `scp` target, or an
+ * address with a port writes it: an optional `//` or `\\`, an optional user
+ * name ending in `@`, then a name or IPv4 address, or anything in brackets;
+ * then, optionally, `:`, `/`, or `\` and anything after it, such as a port
+ * or a path. The user name holds no `@`, so the text splits one way.
  */
 const BARE_HOST_PATTERN =
-  /^(?<host>\[[^\]]*\]|[^:/[\]]+)(?::\d{1,5})?(?:\/.*)?$/u
+  /^(?:\/\/|\\\\)?(?:[^@/\\]*@)?(?<host>\[[^\]]*\]|[^:/\\[\]@]+)(?:[:/\\].*)?$/u
 
 /** Answer for a call no rule denies. */
 const ALLOWED: ToolCallDecision = Object.freeze({ effect: "allow" })
@@ -296,10 +299,12 @@ function namesCredentialFile(
  *
  * @param text - Trimmed argument text.
  * @returns True for a URL whose host, normalized as an `http` host, is a
- * local name or a blocked IP address, and for a bare local name or blocked
- * IP address in standard notation, with an optional port and path. False
- * for a text with whitespace, such as a sentence or a command, and for any
- * other name, which is not looked up.
+ * local name or a blocked IP address, and for a local name or blocked IP
+ * address in standard notation without a scheme, in any form
+ * {@link BARE_HOST_PATTERN} reads, such as `admin@10.0.0.2`,
+ * `\\10.0.0.5\share`, or `127.0.0.1:8080/api`. False for a text with
+ * whitespace, such as a sentence or a command, and for any other name,
+ * which is not looked up.
  */
 function namesBlockedAddress(text: string): boolean {
   if (WHITESPACE_PATTERN.test(text)) return false

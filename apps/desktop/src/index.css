@@ -268,9 +268,10 @@
 
 /*
  * Motion timed by a duration token ends at once for a person who asked to
- * reduce motion. The override follows the tokens in this file, because a
- * stylesheet loaded before this one would lose to them. `App.scss` holds the
- * reset for motion that takes its duration elsewhere.
+ * reduce motion. The override follows the tokens in this file, because the
+ * same override in a stylesheet loaded before this one, such as `App.scss`,
+ * would lose to the definitions above. `App.scss` holds the reset that covers
+ * motion declared inside a cascade layer.
  */
 @media (prefers-reduced-motion: reduce) {
   :root {

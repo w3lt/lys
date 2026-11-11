@@ -266,6 +266,21 @@
   --shadow-floating: 0 10px 30px oklch(0.22 0.07 294 / 14%);
 }
 
+/*
+ * Motion timed by a duration token ends at once for a person who asked to
+ * reduce motion. The override follows the tokens in this file, because the
+ * same override in a stylesheet loaded before this one, such as `App.scss`,
+ * would lose to the definitions above. `App.scss` holds the reset that covers
+ * motion declared inside a cascade layer.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-immediate: 0.01ms;
+    --duration-standard: 0.01ms;
+    --duration-enter: 0.01ms;
+  }
+}
+
 .dark {
   color-scheme: dark;
 

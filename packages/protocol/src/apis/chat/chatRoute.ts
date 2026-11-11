@@ -298,7 +298,8 @@ function hasDistinctOfferedToolNames(offer: ChatToolOfferCandidate): boolean {
  * one tool is offered, no name is offered twice across the two lists, and
  * neither list names a tool the backend adds to a turn itself
  * (`BACKEND_INTERNAL_TOOL_NAMES`): the attachment reader, when the
- * conversation holds a text attachment, and the agent state tools. The
+ * conversation holds a text attachment, the agent state tools, and the tool
+ * that asks Armitage, the tool keeper, for tools. The
  * backend rejects a backend tool name it does not run (400) and an offered
  * backend tool that cannot run now (409), such as an MCP tool whose server
  * is configured but not connected. Offered only to a model trained for tool

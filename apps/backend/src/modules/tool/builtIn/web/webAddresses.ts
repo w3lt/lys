@@ -106,3 +106,18 @@ export function isLocalHostName(hostname: string): boolean {
   const name = hostname.endsWith(".") ? hostname.slice(0, -1) : hostname
   return name === "localhost" || name.endsWith(".localhost")
 }
+
+/**
+ * Answers whether a URL host is this machine or a blocked IP address.
+ *
+ * @param hostname - Host of a URL with a special scheme, such as `http`, as
+ * the URL parser normalized it: lowercase, an IPv4 address in four decimal
+ * parts, and an IPv6 address in brackets.
+ * @returns True for a local name or a blocked IP literal; false for any
+ * other name, which is not looked up.
+ */
+export function isLocalUrlHost(hostname: string): boolean {
+  if (isLocalHostName(hostname)) return true
+  if (hostname.startsWith("[")) return isBlockedAddress(hostname.slice(1, -1))
+  return isIP(hostname) === 4 && isBlockedAddress(hostname)
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import {
   findRequestedBackendTools,
+  sendUnansweredTurnProblem,
   UnknownBackendToolError
 } from "../../../../../src/modules/chat/routes/turnRequest"
 import type {
@@ -13,6 +14,8 @@ import {
   LOOK_UP_WORD_TOOL,
   ScriptedBuiltInTool
 } from "../../../support/scriptedBuiltInTool"
+import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
+import { createTestFastify } from "../../../support/fastifyTestApp"
 import { parseMcpToolDefinition } from "../../../support/mcpToolFixtures"
 import { ScriptedBuiltInToolProvider } from "../../../support/scriptedBuiltInToolProvider"
 
@@ -133,5 +136,33 @@ describe("findRequestedBackendTools", () => {
       ["mcp__notes__read"],
       ["mcp__files__delete"]
     ])
+  })
+})
+
+describe("sendUnansweredTurnProblem", () => {
+  it("sends the is-job problem with a 409 for a turn that continues a job", async () => {
+    const { app } = createTestFastify()
+    const conversationId = createFixtureUuidV7(7)
+    app.post("/api/v1/chat", (request, reply) => {
+      sendUnansweredTurnProblem(
+        reply,
+        { status: "conversation-is-job", conversationId },
+        request.url
+      )
+    })
+
+    const response = await app.inject({ method: "POST", url: "/api/v1/chat" })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.headers["content-type"]).toMatch(
+      /^application\/problem\+json/
+    )
+    expect(response.json()).toEqual({
+      type: "urn:lys:problem:conversation:is-job",
+      title: "Conversation is a job",
+      status: 409,
+      detail: `Conversation ${conversationId} is a job. A job can be read and stopped, and nothing else.`,
+      instance: "/api/v1/chat"
+    })
   })
 })

@@ -13,10 +13,34 @@ export interface ConversationReader {
   getConversation(conversationId: string): Conversation | undefined
 }
 
+/**
+ * Synchronous read access to one conversation's metadata, for a consumer
+ * that must not depend on its transcript, such as the routes that change a
+ * conversation. Borrowed from the backend persistence owner for one backend
+ * lifetime; calls after closure fail. Concurrency model: single-owner,
+ * synchronous on the backend's event loop.
+ */
+export interface ConversationMetadataReader {
+  /**
+   * Reads an independent snapshot of one conversation's metadata, without
+   * its transcript, and changes nothing.
+   * @param conversationId - Validated UUIDv7 target.
+   * @returns The metadata of a main conversation or of a job, which carries
+   * its parent, its number, and its delegator; or undefined when absent. The
+   * transcript is not read, so invalid stored messages do not fail the read.
+   * @throws If persistence is unavailable, closed, or contains invalid
+   * metadata.
+   */
+  getConversationMetadata(
+    conversationId: string
+  ): ConversationMetadata | undefined
+}
+
 /** Synchronous list access borrowed from the backend persistence owner. */
 export interface ConversationLister {
   /**
-   * Reads counts and a page from one store snapshot.
+   * Reads counts and a page of main conversations from one store snapshot.
+   * A job is neither listed nor counted.
    * @param options - Validated cursor-bound query and bounded page size.
    * @returns The strict page ordered by descending activity and UUID.
    * @throws If persistence is unavailable, closed, or contains invalid data.

@@ -35,9 +35,10 @@ const MAXIMUM_CONVERSATION_LIST_CURSOR_LENGTH = 2048
 const listConversationsApiQuerySchema = z
   .strictObject({
     /**
-     * Case-insensitive substring searched in conversation titles, the
-     * person's messages, and each text part of a reply; reasoning and tool
-     * calls are not searched. Omission lists every stored conversation.
+     * Case-insensitive substring searched in the titles of main
+     * conversations, the person's messages, and each text part of a reply;
+     * reasoning, tool calls, and wake-up messages are not searched. Omission
+     * lists every stored main conversation.
      */
     query: z
       .string()
@@ -68,12 +69,13 @@ const listConversationsApiQuerySchema = z
  * Validates the message summarized beneath one listed conversation's title.
  *
  * @remarks The backend previews one of the person's messages or one text part
- * of a reply, never reasoning or a tool call. Without a search query, it
- * selects the most recent of them. With a query, it selects the most recent
- * one whose text contains the query under the same case-insensitive
- * comparison used for matching, falling back to the most recent one when
- * only the title matched. `content` is that message's or part's complete
- * stored text; clients derive any shortened excerpt themselves.
+ * of a reply, never reasoning, a tool call, or a wake-up message, which the
+ * backend writes. Without a search query, it selects the most recent of
+ * them. With a query, it selects the most recent one whose text contains the
+ * query under the same case-insensitive comparison used for matching,
+ * falling back to the most recent one when only the title matched. `content`
+ * is that message's or part's complete stored text; clients derive any
+ * shortened excerpt themselves.
  */
 const conversationPreviewSchema = z
   .strictObject({
@@ -105,11 +107,14 @@ const conversationSummarySchema = conversationMetadataSchema
 /**
  * Validates one page of listed conversations and its continuation state.
  *
- * @remarks Conversations are ordered by `updatedAt` descending, then by `id`
- * descending, and appear at most once per page. Each page observes the store
- * when it is read: a conversation updated after an earlier page was read can
- * move ahead of the cursor and be absent from later pages. `nextCursor` is
- * bound to the query that produced it and is null on the final page.
+ * @remarks Only main conversations are listed and counted. A job is in
+ * neither the page nor a count; it is found through the conversation it was
+ * started from. Conversations are ordered by `updatedAt` descending, then by
+ * `id` descending, and appear at most once per page. Each page observes the
+ * store when it is read: a conversation updated after an earlier page was
+ * read can move ahead of the cursor and be absent from later pages.
+ * `nextCursor` is bound to the query that produced it and is null on the
+ * final page.
  */
 const listConversationsApiResponseSchema = z
   .strictObject({
@@ -118,9 +123,12 @@ const listConversationsApiResponseSchema = z
       .array(conversationSummarySchema)
       .max(MAXIMUM_CONVERSATION_LIST_PAGE_SIZE)
       .readonly(),
-    /** Number of stored conversations, independent of the search query. */
+    /** Number of stored main conversations, independent of the search query. */
     storedCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-    /** Number of stored conversations matching the query, or all when omitted. */
+    /**
+     * Number of stored main conversations matching the query, or all of them
+     * when it is omitted.
+     */
     matchCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     /** Continuation for the next page of the same query, or null when final. */
     nextCursor: z
@@ -138,12 +146,14 @@ const listConversationsApiResponseSchema = z
   .readonly()
 
 /**
- * Describes the GET endpoint that lists stored conversations newest first.
+ * Describes the GET endpoint that lists stored main conversations newest
+ * first.
  *
- * @remarks The endpoint observes stored data and changes nothing. The shared
- * descriptor is imported by the desktop client and the backend registrar;
- * changing its method, path, query, or response schema changes the transmitted
- * contract and requires coordinated consumers.
+ * @remarks The endpoint observes stored data and changes nothing. It lists
+ * main conversations only, never a job. The shared descriptor is imported by
+ * the desktop client and the backend registrar; changing its method, path,
+ * query, or response schema changes the transmitted contract and requires
+ * coordinated consumers.
  */
 export const listConversationsApi = Object.freeze({
   method: "GET",
@@ -160,7 +170,7 @@ export type ListConversationsApiQuery = z.infer<
 /** Message summarized beneath one listed conversation's title. */
 export type ConversationPreview = z.infer<typeof conversationPreviewSchema>
 
-/** One listed conversation without its system prompt or transcript. */
+/** One listed conversation without its agent code or transcript. */
 export type ConversationSummary = z.infer<typeof conversationSummarySchema>
 
 /** One page of listed conversations and its continuation state. */

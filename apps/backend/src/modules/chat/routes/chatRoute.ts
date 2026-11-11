@@ -85,8 +85,8 @@ import {
   findRequestedBackendTools,
   findUnofferedTools,
   sendUnansweredTurnProblem,
-  type TurnAgentLookups,
-  type UnansweredTurnOutcome
+  type MissingRequestedAgentOutcome,
+  type TurnAgentLookups
 } from "./turnRequest"
 
 /** Backend settings the chat route applies to every request. */
@@ -224,7 +224,7 @@ type SavedTurn = Readonly<{
 }>
 
 /** Outcome of storing a turn: the stored turn, or why no agent answers it. */
-type SavedTurnOutcome = SavedTurn | UnansweredTurnOutcome
+type SavedTurnOutcome = SavedTurn | MissingRequestedAgentOutcome
 
 /** What the generation input of a stored turn is built from. */
 type TurnGenerationSource = Readonly<{
@@ -483,11 +483,14 @@ async function parseTurnRequest(
  * @param dependencies - Borrowed agent and conversation lookups.
  * @returns The continued conversation as stored now, undefined inside for a
  * new one; or undefined once the problem that says why no agent answers was
- * sent.
+ * sent: for a job, the conversation-is-job problem.
  * @throws Any persistence failure of a lookup.
  * @remarks The conversation is read once, here; the agent lookup uses that
  * read, and the caller takes the stored attachments from it. The agent is
- * not returned, because it is looked up again when the turn is stored.
+ * not returned, because it is looked up again when the turn is stored. A
+ * job is refused here, before its agent is looked up. It is not asked again
+ * when the turn is stored: a conversation is a job from its creation on, so
+ * one that passed here is still a main conversation then.
  */
 function findTurnConversation(
   request: ChatRouteRequest,
@@ -502,6 +505,17 @@ function findTurnConversation(
     conversation.kind === "existing"
       ? dependencies.findConversation(conversation.id)
       : undefined
+  if (
+    storedConversation !== undefined &&
+    storedConversation.parentConversationId !== null
+  ) {
+    sendUnansweredTurnProblem(
+      reply,
+      { status: "conversation-is-job", conversationId: storedConversation.id },
+      request.url
+    )
+    return undefined
+  }
   const requestedAgent = loadRequestedAgent(conversation, {
     loadChatAgent: dependencies.loadChatAgent,
     findConversationAgentCode: () => storedConversation?.agentCode

@@ -3,6 +3,7 @@ import type {
   ChatApiRequestBody,
   ChatToolOffer,
   ConversationAgentMissingProblem,
+  ConversationIsJobProblem,
   ConversationNotFoundProblem
 } from "@lys/protocol"
 import { MCP_TOOL_NAME_PREFIX } from "@lys/share"
@@ -17,6 +18,7 @@ import {
   TOOL_CALLS_OFF,
   type UnofferedTools
 } from "../../agent/unofferedTools"
+import { createConversationIsJobProblem } from "../../conversation/routes/jobProblem"
 import { createConversationNotFoundProblem } from "../../conversation/routes/notFound"
 import type {
   McpTurnToolLookup,
@@ -97,11 +99,35 @@ export type RequestedAgentOutcome =
       agentCode: string
     }>
 
-/** Outcome in which no agent answers the requested turn. */
-export type UnansweredTurnOutcome = Exclude<
+/**
+ * Outcome of looking up the agent that answers a requested turn when the
+ * lookup found none.
+ */
+export type MissingRequestedAgentOutcome = Exclude<
   RequestedAgentOutcome,
   Readonly<{ status: "found" }>
 >
+
+/**
+ * Outcome of the person's message to a job: the chat route refuses it before
+ * it looks up an agent.
+ */
+type ConversationIsJobOutcome = Readonly<{
+  /**
+   * The continued conversation is a job, which the person reads and stops
+   * and does not write into.
+   */
+  status: "conversation-is-job"
+  /** Identifier the request names. */
+  conversationId: string
+}>
+
+/**
+ * Outcome in which no agent answers the requested turn: the agent lookup
+ * found none, or the person's message continues a job.
+ */
+type UnansweredTurnOutcome =
+  MissingRequestedAgentOutcome | ConversationIsJobOutcome
 
 /** The backend tools a request offers, by kind, in offer order. */
 export type RequestedBackendTools = Readonly<{
@@ -266,6 +292,9 @@ export function findUnofferedTools(
  * code no agent has, a continued conversation is not stored, or its agent no
  * longer exists. Nothing is stored or sent.
  * @throws Any persistence failure of a lookup.
+ * @remarks A job's agent is found like any other conversation's, so the
+ * context of a job can be measured. The chat route refuses the person's
+ * message to a job itself, before it asks here.
  */
 export function loadRequestedAgent(
   conversation: ChatApiRequestBody["conversation"],
@@ -290,11 +319,13 @@ export function loadRequestedAgent(
 /**
  * Builds the problem that says why no agent answers a requested turn.
  *
- * @param outcome - Lookup outcome without an agent.
+ * @param outcome - Outcome without an agent: of the agent lookup, or of the
+ * person's message to a job.
  * @param instance - Request path identifying this occurrence.
  * @returns The missing-agent problem for a new conversation's unknown code,
- * the missing-conversation problem for a conversation that is not stored, and
- * the conversation agent missing problem for one whose agent no longer exists.
+ * the missing-conversation problem for a conversation that is not stored,
+ * the conversation agent missing problem for one whose agent no longer
+ * exists, and the conversation-is-job problem for a job.
  */
 function buildUnansweredTurnProblem(
   outcome: UnansweredTurnOutcome,
@@ -302,7 +333,8 @@ function buildUnansweredTurnProblem(
 ):
   | AgentNotFoundProblem
   | ConversationNotFoundProblem
-  | ConversationAgentMissingProblem {
+  | ConversationAgentMissingProblem
+  | ConversationIsJobProblem {
   switch (outcome.status) {
     case "agent-not-found":
       return createAgentNotFoundProblem(outcome.agentCode, instance)
@@ -310,6 +342,8 @@ function buildUnansweredTurnProblem(
       return createConversationNotFoundProblem(outcome.conversationId, instance)
     case "conversation-agent-missing":
       return createConversationAgentMissingProblem(outcome.agentCode, instance)
+    case "conversation-is-job":
+      return createConversationIsJobProblem(outcome.conversationId, instance)
   }
 }
 
@@ -317,7 +351,8 @@ function buildUnansweredTurnProblem(
  * Sends the problem response for a requested turn no agent answers.
  *
  * @param reply - Response owner; the response has not started.
- * @param outcome - Lookup outcome without an agent.
+ * @param outcome - Outcome without an agent: of the agent lookup, or of the
+ * person's message to a job.
  * @param instance - Request path identifying this occurrence.
  */
 export function sendUnansweredTurnProblem(

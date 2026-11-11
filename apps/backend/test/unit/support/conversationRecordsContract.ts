@@ -977,6 +977,84 @@ function registerReplyPartSearchCases(
 }
 
 /**
+ * Registers the {@link ConversationRecordReader.listConversations} cases that
+ * keep jobs out of the list and its counts, and the backend's wake-up
+ * messages out of previews and search.
+ *
+ * @param createHarness - Creates the records over an empty store per case.
+ */
+function registerMainConversationListCases(
+  createHarness: ConversationRecordsHarnessFactory
+): void {
+  it("lists and counts main conversations only: a job is in neither storedCount, matchCount, nor the page", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    saveJob(harness, createJobFixture(mainId, 1, "completed"))
+
+    const page = harness.recordReader.listConversations(FIRST_PAGE)
+
+    expect(page.storedCount).toBe(1)
+    expect(page.matchCount).toBe(1)
+    expect(page.conversations.map(({ id }) => id)).toEqual([mainId])
+  })
+
+  it("does not find a main conversation by text that only its job contains", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    saveJob(harness, {
+      ...createJobFixture(mainId, 1, "completed"),
+      replyParts: [
+        createTextPart({ sequence: 15, round: 0, content: "Moths eat nectar" })
+      ]
+    })
+
+    expect(
+      harness.recordReader.listConversations({
+        ...FIRST_PAGE,
+        query: "moths eat"
+      })
+    ).toEqual({
+      conversations: [],
+      storedCount: 1,
+      matchCount: 0,
+      hasMore: false
+    })
+  })
+
+  it("skips a wake-up message as preview and in search, and uses the newest person or reply text instead", () => {
+    const harness = createHarness()
+    const answeredAt = createFixtureTimestamp(1, 31)
+    saveQuestionWithReply(
+      harness,
+      [
+        createTextPart({
+          sequence: 151,
+          round: 0,
+          content: "Answer",
+          times: { createdAt: answeredAt, updatedAt: answeredAt }
+        })
+      ],
+      "completed"
+    )
+    harness.saveUserMessage({
+      id: createFixtureUuidV7(160),
+      conversationId: createFixtureUuidV7(1),
+      content: "Reports from your jobs arrived.",
+      createdAt: createFixtureTimestamp(2),
+      origin: "wake-up"
+    })
+
+    const { recordReader } = harness
+    expect(
+      recordReader.listConversations(FIRST_PAGE).conversations[0]?.preview
+    ).toEqual({ role: "assistant", content: "Answer" })
+    expect(
+      recordReader.listConversations({ ...FIRST_PAGE, query: "arrived" })
+    ).toMatchObject({ conversations: [], matchCount: 0 })
+  })
+}
+
+/**
  * Lists who wrote each user message of a stored conversation.
  *
  * @param harness - Store under test.
@@ -1260,6 +1338,116 @@ function registerDeliveredReportReadCases(
 }
 
 /**
+ * Registers the {@link ConversationRecordReader.findConversationMetadata}
+ * cases: the metadata of a main conversation and of a job, absence, a
+ * transcript that is not read, and invalid stored metadata.
+ *
+ * @param createHarness - Creates the records over an empty store per case.
+ */
+function registerConversationMetadataReadCases(
+  createHarness: ConversationRecordsHarnessFactory
+): void {
+  it("returns undefined for an absent conversation", () => {
+    const { recordReader } = createHarness()
+
+    expect(
+      recordReader.findConversationMetadata(CONVERSATION_ID)
+    ).toBeUndefined()
+  })
+
+  it("reads a main conversation's metadata, with no parent, job number, or delegator, and without its transcript", () => {
+    const harness = createHarness()
+    harness.saveConversation({
+      id: CONVERSATION_ID,
+      title: "Trip plan",
+      agentCode: "lys",
+      createdAt: CREATED_AT
+    })
+    harness.saveUserMessage({
+      id: createFixtureUuidV7(10),
+      conversationId: CONVERSATION_ID,
+      content: "Hello",
+      createdAt: "2025-01-01T00:00:01.000Z"
+    })
+
+    expect(
+      harness.recordReader.findConversationMetadata(CONVERSATION_ID)
+    ).toEqual({
+      id: CONVERSATION_ID,
+      title: "Trip plan",
+      agentCode: "lys",
+      parentConversationId: null,
+      jobNumber: null,
+      delegatorAgentCode: null,
+      createdAt: CREATED_AT,
+      updatedAt: "2025-01-01T00:00:01.000Z"
+    })
+  })
+
+  it("reads a job's metadata with its parent, its number, and its parent's agent as the delegator", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    const job = saveJob(harness, {
+      sequence: 10,
+      parentId: mainId,
+      number: 3,
+      createdAtMinute: 1,
+      replyStatus: "completed"
+    })
+
+    expect(harness.recordReader.findConversationMetadata(job.id)).toEqual({
+      id: job.id,
+      title: "Job 3",
+      agentCode: "researcher",
+      parentConversationId: mainId,
+      jobNumber: 3,
+      delegatorAgentCode: "caliginia",
+      createdAt: createFixtureTimestamp(1),
+      updatedAt: createFixtureTimestamp(1, 2)
+    })
+  })
+
+  it("reads the metadata of a conversation whose stored message violates the message contract, which findConversation rejects", () => {
+    const harness = createHarness()
+    harness.saveConversation({
+      id: CONVERSATION_ID,
+      title: null,
+      agentCode: "lys",
+      createdAt: CREATED_AT
+    })
+    harness.saveUserMessage({
+      id: "not-a-uuid",
+      conversationId: CONVERSATION_ID,
+      content: "Hello",
+      createdAt: "2025-01-01T00:00:01.000Z"
+    })
+
+    expect(() =>
+      harness.recordReader.findConversation(CONVERSATION_ID)
+    ).toThrow(z.ZodError)
+    expect(
+      harness.recordReader.findConversationMetadata(CONVERSATION_ID)
+    ).toMatchObject({ id: CONVERSATION_ID, parentConversationId: null })
+  })
+
+  it("rejects stored metadata that violates the metadata contract and stays usable", () => {
+    const harness = createHarness()
+    harness.saveConversation({
+      id: CONVERSATION_ID,
+      title: "",
+      agentCode: "lys",
+      createdAt: CREATED_AT
+    })
+
+    expect(() =>
+      harness.recordReader.findConversationMetadata(CONVERSATION_ID)
+    ).toThrow(z.ZodError)
+
+    expect(harness.recordEditor.deleteConversation(CONVERSATION_ID)).toBe(true)
+  })
+}
+
+/**
  * Registers the provider-independent {@link ConversationRecordReader}
  * contract cases.
  *
@@ -1523,6 +1711,10 @@ export function registerConversationRecordReaderContractSuite(
       registerDeliveredReportReadCases(createHarness)
     })
 
+    describe("findConversationMetadata", () => {
+      registerConversationMetadataReadCases(createHarness)
+    })
+
     describe("listConversations", () => {
       it("returns an empty final page for an empty store", () => {
         const { recordReader } = createHarness()
@@ -1587,6 +1779,7 @@ export function registerConversationRecordReaderContractSuite(
 
       registerReplyPreviewCases(createHarness)
       registerReplyPartSearchCases(createHarness)
+      registerMainConversationListCases(createHarness)
 
       it("previews nothing for a conversation without messages", () => {
         const harness = createHarness()
@@ -1779,6 +1972,9 @@ export function registerConversationRecordReaderContractSuite(
 
       expect(() =>
         harness.recordReader.findConversation(CONVERSATION_ID)
+      ).toThrow("Database is closed")
+      expect(() =>
+        harness.recordReader.findConversationMetadata(CONVERSATION_ID)
       ).toThrow("Database is closed")
       expect(() => harness.recordReader.listConversations(FIRST_PAGE)).toThrow(
         "Database is closed"

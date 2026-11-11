@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { onTestFinished, vi, type Mock, type MockInstance } from "vitest"
 import SqliteAgentRecordStore from "../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
+import type SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
 import AgentRuntimeService, {
   buildConversationTitleLookup
 } from "../../../src/modules/agent/agentRuntimeService"
@@ -125,6 +126,11 @@ export type ChatRouteTestApp = TestFastify &
      * case configures it and applies the settings.
      */
     readMcpSettings: Mock<() => Promise<McpSettingsRead>>
+    /**
+     * Database the decorated conversation services and agent records store
+     * on, where a case stores rows no request stores, such as a job.
+     */
+    database: SqliteDatabase
   }>
 
 /**
@@ -132,7 +138,8 @@ export type ChatRouteTestApp = TestFastify &
  * turns and chat service are real instances with every call the chat route
  * can reach replaced by a spy.
  *
- * @returns The application, the destination of its log, and the spies.
+ * @returns The application, the destination of its log, the spies, and the
+ * database its services store on.
  * @throws If the SSE plugin cannot be registered.
  * @remarks The chat route is not registered; each case calls the registrar
  * under test. Unconfigured turn creation throws and both chat-service calls
@@ -325,7 +332,8 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     readJustRunToolNames,
     attachmentsDirectoryPath,
     generations,
-    readMcpSettings
+    readMcpSettings,
+    database
   })
 }
 

@@ -11,6 +11,10 @@ import {
   createNewConversationTarget,
   createTurnUserMessage
 } from "../../support/conversationFixtures"
+import {
+  registerConversationMetadataReaderContractSuite,
+  type ConversationMetadataReaderHarness
+} from "../../support/conversationMetadataReaderContract"
 
 /**
  * Opens isolated in-memory conversation services with one committed turn.
@@ -73,7 +77,26 @@ function createHistoryOverInvalidRow() {
   }
 }
 
+/**
+ * Creates a history reader over empty records, as the metadata reader the
+ * contract suite exercises, with the records' row-level seeding and close.
+ *
+ * @returns The harness; the test owns the database behind it.
+ */
+function createMetadataReaderHarness(): ConversationMetadataReaderHarness {
+  const records = openSqliteConversationRecords()
+  return {
+    metadataReader: new StoredConversationHistoryReader(records.recordReader),
+    saveConversation: records.saveConversation,
+    saveUserMessage: records.saveUserMessage,
+    saveAssistantMessage: records.saveAssistantMessage,
+    closeStore: records.closeRecords
+  }
+}
+
 describe("StoredConversationHistoryReader", () => {
+  registerConversationMetadataReaderContractSuite(createMetadataReaderHarness)
+
   describe("getConversation", () => {
     it("reads the committed conversation and transcript", () => {
       const { history, turn } = openHistoryWithTurn()
@@ -207,6 +230,9 @@ describe("StoredConversationHistoryReader", () => {
     database[Symbol.dispose]()
 
     expect(() => history.getConversation(turn.conversation.id)).toThrow(
+      "Database is closed"
+    )
+    expect(() => history.getConversationMetadata(turn.conversation.id)).toThrow(
       "Database is closed"
     )
     expect(() =>

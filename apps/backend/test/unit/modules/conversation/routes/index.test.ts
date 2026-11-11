@@ -1,4 +1,5 @@
 import {
+  conversationIsJobProblemSchema,
   conversationNotFoundProblemSchema,
   type ListConversationsApiResponse
 } from "@lys/protocol"
@@ -68,6 +69,42 @@ const CONVERSATION = Object.freeze({
   jobs: []
 } satisfies Conversation)
 
+/** Identity of the job the stubbed history answers for. */
+const JOB_ID = createFixtureUuidV7(7)
+
+/**
+ * Metadata of {@link JOB_ID}, a job of {@link CONVERSATION_ID}, returned by
+ * the stubbed history.
+ */
+const JOB_METADATA = Object.freeze({
+  id: JOB_ID,
+  title: "Find what moths eat",
+  agentCode: "researcher",
+  parentConversationId: CONVERSATION_ID,
+  jobNumber: 1,
+  delegatorAgentCode: "lys",
+  createdAt: FIXTURE_TIMESTAMP,
+  updatedAt: FIXTURE_TIMESTAMP
+} satisfies ConversationMetadata)
+
+/**
+ * Complete transcript of {@link JOB_ID} returned by the stubbed history: its
+ * delegator's message and one completed reply.
+ */
+const JOB = Object.freeze({
+  ...JOB_METADATA,
+  messages: [
+    { ...createUserMessage(8, "Find what moths eat"), origin: "delegator" },
+    createAssistantMessage(
+      9,
+      [createTextPart({ sequence: 10, round: 0, content: "Mostly nectar." })],
+      { status: "completed", finishReason: "stop" }
+    )
+  ],
+  sources: [],
+  jobs: []
+} satisfies Conversation)
+
 /** One-conversation page returned by the stubbed history. */
 const CONVERSATION_PAGE = Object.freeze({
   conversations: [
@@ -128,6 +165,11 @@ async function createConversationRouteApp() {
     getConversation: vi
       .spyOn(historyReader, "getConversation")
       .mockImplementation(() => handleUnexpectedHistoryCall("getConversation")),
+    getConversationMetadata: vi
+      .spyOn(historyReader, "getConversationMetadata")
+      .mockImplementation(() =>
+        handleUnexpectedHistoryCall("getConversationMetadata")
+      ),
     updateConversationTitle: vi
       .spyOn(historyEditor, "updateConversationTitle")
       .mockImplementation(() =>
@@ -266,6 +308,19 @@ describe("updateFastifyWithConversationRoutes", () => {
       expect(historyCalls.getConversation).toHaveBeenCalledWith(CONVERSATION_ID)
     })
 
+    it("still reads a job with GET", async () => {
+      const { app, historyCalls } = await createConversationRouteApp()
+      historyCalls.getConversation.mockReturnValue(JOB)
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/conversations/${JOB_ID}`
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual(JOB)
+    })
+
     it("responds with the missing-conversation problem", async () => {
       const { app, historyCalls } = await createConversationRouteApp()
       historyCalls.getConversation.mockReturnValue(undefined)
@@ -315,6 +370,9 @@ describe("updateFastifyWithConversationRoutes", () => {
   describe("PATCH /api/v1/conversations/:conversationId", () => {
     it("replaces the title with its trimmed text and responds with the metadata", async () => {
       const { app, historyCalls } = await createConversationRouteApp()
+      historyCalls.getConversationMetadata.mockReturnValue(
+        CONVERSATION_METADATA
+      )
       historyCalls.updateConversationTitle.mockReturnValue(
         CONVERSATION_METADATA
       )
@@ -333,8 +391,34 @@ describe("updateFastifyWithConversationRoutes", () => {
       )
     })
 
+    it("replaces the title of a conversation whose transcript cannot be read, because it reads only the metadata", async () => {
+      const { app, historyCalls } = await createConversationRouteApp()
+      historyCalls.getConversation.mockImplementation(() => {
+        throw new Error("The stored transcript is invalid")
+      })
+      historyCalls.getConversationMetadata.mockReturnValue(
+        CONVERSATION_METADATA
+      )
+      historyCalls.updateConversationTitle.mockReturnValue(
+        CONVERSATION_METADATA
+      )
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/conversations/${CONVERSATION_ID}`,
+        payload: { title: "Trip plan" }
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(historyCalls.getConversationMetadata).toHaveBeenCalledWith(
+        CONVERSATION_ID
+      )
+      expect(historyCalls.getConversation).not.toHaveBeenCalled()
+    })
+
     it("responds with the missing-conversation problem", async () => {
       const { app, historyCalls } = await createConversationRouteApp()
+      historyCalls.getConversationMetadata.mockReturnValue(undefined)
       historyCalls.updateConversationTitle.mockReturnValue(undefined)
       const url = `/api/v1/conversations/${MISSING_CONVERSATION_ID}`
 
@@ -353,8 +437,52 @@ describe("updateFastifyWithConversationRoutes", () => {
       ).toMatchObject({ instance: url })
     })
 
+    it("answers 409 with the is-job problem when the title of a job is changed, and changes nothing", async () => {
+      const { app, historyCalls } = await createConversationRouteApp()
+      historyCalls.getConversationMetadata.mockReturnValue(JOB_METADATA)
+      const url = `/api/v1/conversations/${JOB_ID}`
+
+      const response = await app.inject({
+        method: "PATCH",
+        url,
+        payload: { title: "Moth food" }
+      })
+
+      expect(response.statusCode).toBe(409)
+      expect(response.headers["content-type"]).toMatch(
+        /^application\/problem\+json/
+      )
+      expect(
+        conversationIsJobProblemSchema.parse(response.json())
+      ).toMatchObject({
+        type: "urn:lys:problem:conversation:is-job",
+        instance: url
+      })
+      expect(historyCalls.getConversationMetadata).toHaveBeenCalledWith(JOB_ID)
+      expect(historyCalls.updateConversationTitle).not.toHaveBeenCalled()
+    })
+
+    it("responds with a server error and replaces nothing when the conversation's metadata cannot be read", async () => {
+      const { app, historyCalls } = await createConversationRouteApp()
+      historyCalls.getConversationMetadata.mockImplementation(() => {
+        throw new Error("database is locked")
+      })
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/conversations/${CONVERSATION_ID}`,
+        payload: { title: "Trip plan" }
+      })
+
+      expect(response.statusCode).toBe(500)
+      expect(historyCalls.updateConversationTitle).not.toHaveBeenCalled()
+    })
+
     it("responds with a server error when the title cannot be replaced", async () => {
       const { app, historyCalls } = await createConversationRouteApp()
+      historyCalls.getConversationMetadata.mockReturnValue(
+        CONVERSATION_METADATA
+      )
       historyCalls.updateConversationTitle.mockImplementation(() => {
         throw new Error("database is locked")
       })
@@ -390,6 +518,9 @@ describe("updateFastifyWithConversationRoutes", () => {
         attachmentFileStore,
         attachmentsDirectoryPath
       } = await createConversationRouteApp()
+      historyCalls.getConversationMetadata.mockReturnValue(
+        CONVERSATION_METADATA
+      )
       historyCalls.deleteConversation.mockReturnValue(true)
       await attachmentFileStore.saveMessageAttachments(
         CONVERSATION_ID,
@@ -421,9 +552,37 @@ describe("updateFastifyWithConversationRoutes", () => {
       ).toBe(true)
     })
 
+    it("deletes a conversation whose transcript cannot be read, because it reads only the metadata", async () => {
+      const { app, historyCalls } = await createConversationRouteApp()
+      historyCalls.getConversation.mockImplementation(() => {
+        throw new Error("The stored transcript is invalid")
+      })
+      historyCalls.getConversationMetadata.mockReturnValue(
+        CONVERSATION_METADATA
+      )
+      historyCalls.deleteConversation.mockReturnValue(true)
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/api/v1/conversations/${CONVERSATION_ID}`
+      })
+
+      expect(response.statusCode).toBe(204)
+      expect(historyCalls.getConversationMetadata).toHaveBeenCalledWith(
+        CONVERSATION_ID
+      )
+      expect(historyCalls.deleteConversation).toHaveBeenCalledWith(
+        CONVERSATION_ID
+      )
+      expect(historyCalls.getConversation).not.toHaveBeenCalled()
+    })
+
     it("still responds without a body, logging the failure with its cause, when the attachment files cannot be removed", async () => {
       const { app, log, historyCalls, attachmentFileStore } =
         await createConversationRouteApp()
+      historyCalls.getConversationMetadata.mockReturnValue(
+        CONVERSATION_METADATA
+      )
       historyCalls.deleteConversation.mockReturnValue(true)
       const removalFailure = new Error("EACCES: permission denied")
       vi.spyOn(
@@ -449,6 +608,7 @@ describe("updateFastifyWithConversationRoutes", () => {
     it("responds with the missing-conversation problem without touching the attachment files", async () => {
       const { app, historyCalls, attachmentFileStore } =
         await createConversationRouteApp()
+      historyCalls.getConversationMetadata.mockReturnValue(undefined)
       historyCalls.deleteConversation.mockReturnValue(false)
       const deleteConversationAttachments = vi.spyOn(
         attachmentFileStore,
@@ -468,8 +628,53 @@ describe("updateFastifyWithConversationRoutes", () => {
       expect(deleteConversationAttachments).not.toHaveBeenCalled()
     })
 
+    it("answers 409 with the is-job problem when a job is deleted, and deletes nothing", async () => {
+      const { app, historyCalls, attachmentFileStore } =
+        await createConversationRouteApp()
+      historyCalls.getConversationMetadata.mockReturnValue(JOB_METADATA)
+      const deleteConversationAttachments = vi.spyOn(
+        attachmentFileStore,
+        "deleteConversationAttachments"
+      )
+      const url = `/api/v1/conversations/${JOB_ID}`
+
+      const response = await app.inject({ method: "DELETE", url })
+
+      expect(response.statusCode).toBe(409)
+      expect(response.headers["content-type"]).toMatch(
+        /^application\/problem\+json/
+      )
+      expect(
+        conversationIsJobProblemSchema.parse(response.json())
+      ).toMatchObject({
+        type: "urn:lys:problem:conversation:is-job",
+        instance: url
+      })
+      expect(historyCalls.getConversationMetadata).toHaveBeenCalledWith(JOB_ID)
+      expect(historyCalls.deleteConversation).not.toHaveBeenCalled()
+      expect(deleteConversationAttachments).not.toHaveBeenCalled()
+    })
+
+    it("responds with a server error and deletes nothing when the conversation's metadata cannot be read", async () => {
+      const { app, historyCalls } = await createConversationRouteApp()
+      historyCalls.getConversationMetadata.mockImplementation(() => {
+        throw new Error("database is locked")
+      })
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/api/v1/conversations/${CONVERSATION_ID}`
+      })
+
+      expect(response.statusCode).toBe(500)
+      expect(historyCalls.deleteConversation).not.toHaveBeenCalled()
+    })
+
     it("responds with a server error when the conversation cannot be deleted", async () => {
       const { app, historyCalls } = await createConversationRouteApp()
+      historyCalls.getConversationMetadata.mockReturnValue(
+        CONVERSATION_METADATA
+      )
       historyCalls.deleteConversation.mockImplementation(() => {
         throw new Error("database is locked")
       })

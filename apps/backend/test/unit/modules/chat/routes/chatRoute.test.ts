@@ -6,6 +6,7 @@ import {
   chatApiStreamEventSchema,
   chatImageNeedsVisionProblemSchema,
   conversationAgentMissingProblemSchema,
+  conversationIsJobProblemSchema,
   conversationNotFoundProblemSchema,
   MAXIMUM_OFFERED_BACKEND_TOOL_COUNT
 } from "@lys/protocol"
@@ -39,7 +40,18 @@ import {
   type ChatRouteTestApp
 } from "../../../support/chatRouteTestApp"
 import { parseSseEvents } from "../../../support/chatSseRoute"
+import {
+  saveAssistantMessageRow,
+  saveConversationRow,
+  saveUserMessageRow
+} from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
+import {
+  createJobFixture,
+  saveJob,
+  saveMainConversation,
+  type JobSeedingHarness
+} from "../../../support/conversationRecordsContract"
 import { createDownloadedLlmModel } from "../../../support/llmFixtures"
 import { buildFakeStdioServerSettings } from "../../../support/mcpTestServers"
 import { createChatCompletionChunk } from "../../../support/openAiEndpointFake"
@@ -156,6 +168,35 @@ async function startWebResearcherConversation(
   testApp.app.agentService.createAgent(WEB_RESEARCHER_DEFINITION)
   const response = await sendChatRequest(testApp.app, WEB_RESEARCHER_REQUEST)
   return findStartedConversationId(response.body)
+}
+
+/**
+ * Stores a main conversation that Caliginia answers and one job of it, with
+ * the job's first message and a completed reply, and creates the stored
+ * agent `researcher` that works on the job.
+ *
+ * @param testApp - Test application.
+ * @returns UUIDv7 of the stored job.
+ */
+function saveResearcherJob(testApp: ChatRouteTestApp): string {
+  const { database } = testApp
+  const harness: JobSeedingHarness = {
+    saveConversation: (row) => {
+      saveConversationRow(database, row)
+    },
+    saveUserMessage: (row) => {
+      saveUserMessageRow(database, row)
+    },
+    saveAssistantMessage: (row) => {
+      saveAssistantMessageRow(database, row)
+    }
+  }
+  testApp.app.agentService.createAgent({
+    ...WEB_RESEARCHER_DEFINITION,
+    code: "researcher"
+  })
+  const mainId = saveMainConversation(harness, 1)
+  return saveJob(harness, createJobFixture(mainId, 1, "completed")).id
 }
 
 /**
@@ -693,6 +734,36 @@ describe("updateFastifyWithChatRoute", () => {
       instance: chatApi.path
     })
     expect(testApp.completeChatStream).not.toHaveBeenCalled()
+  })
+
+  it("answers 409 with the is-job problem when a message is sent into a job, and stores nothing", async () => {
+    const testApp = await createChatRouteTestApp()
+    registerStoringChatRoute(testApp)
+    const jobId = saveResearcherJob(testApp)
+    const history = testApp.app.conversationHistoryReader
+    const storedJob = history.getConversation(jobId)
+
+    const response = await sendChatRequest(testApp.app, {
+      ...NEW_CONVERSATION_REQUEST,
+      conversation: { kind: "existing", id: jobId },
+      message: "And what do they drink?"
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.headers["content-type"]).toMatch(
+      /^application\/problem\+json/
+    )
+    expect(conversationIsJobProblemSchema.parse(response.json())).toMatchObject(
+      {
+        type: "urn:lys:problem:conversation:is-job",
+        detail: `Conversation ${jobId} is a job. A job can be read and stopped, and nothing else.`,
+        instance: chatApi.path
+      }
+    )
+    expect(storedJob?.messages).toHaveLength(2)
+    expect(history.getConversation(jobId)).toEqual(storedJob)
+    expect(testApp.completeChatStream).not.toHaveBeenCalled()
+    expect(testApp.generateTitle).not.toHaveBeenCalled()
   })
 
   it("rejects a backend tool the backend does not run before storing a turn, naming it", async () => {

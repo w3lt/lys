@@ -1,6 +1,10 @@
 import type { ListConversationsApiResponse } from "@lys/protocol"
-import type { Conversation } from "@lys/share"
-import type { ConversationReader, ConversationLister } from "./capabilities"
+import type { Conversation, ConversationMetadata } from "@lys/share"
+import type {
+  ConversationReader,
+  ConversationMetadataReader,
+  ConversationLister
+} from "./capabilities"
 import {
   createConversationListCursor,
   type ConversationListOptions
@@ -17,7 +21,7 @@ import type { ConversationRecordReader } from "./records"
  * single-owner, synchronous on the backend's event loop.
  */
 export default class StoredConversationHistoryReader
-  implements ConversationReader, ConversationLister
+  implements ConversationReader, ConversationMetadataReader, ConversationLister
 {
   /** Borrowed records for conversation and list reads. */
   readonly #recordReader: ConversationRecordReader
@@ -41,8 +45,21 @@ export default class StoredConversationHistoryReader
   }
 
   /**
-   * Lists search matches and previews from one snapshot and binds the
-   * continuation to the query.
+   * Implements {@link ConversationMetadataReader.getConversationMetadata} in
+   * one snapshot of the borrowed records.
+   * @param conversationId - Interface-defined identity.
+   * @returns The interface-defined metadata or absence.
+   * @throws The interface-defined closed and validation failures.
+   */
+  public getConversationMetadata(
+    conversationId: string
+  ): ConversationMetadata | undefined {
+    return this.#recordReader.findConversationMetadata(conversationId)
+  }
+
+  /**
+   * Lists the main conversations that match, with their previews, from one
+   * snapshot and binds the continuation to the query. A job is never listed.
    * @param options - Validated query and cursor from parseConversationListOptions.
    * @returns A strict page in descending activity-time and UUID order; its
    * cursor continues after the last listed conversation while more match.

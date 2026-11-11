@@ -22,12 +22,12 @@ export type ConversationListBoundary = Readonly<{
   id: string
 }>
 
-/** Selection of one page of conversation summaries. */
+/** Selection of one page of main conversation summaries. */
 export type ListConversationsInput = Readonly<{
   /**
    * Normalized search text matched case-insensitively against titles, the
-   * person's messages, and each text part of a reply, but not reasoning or
-   * tool calls; empty matches every conversation.
+   * person's messages, and each text part of a reply, but not reasoning,
+   * tool calls, or wake-up messages; empty matches every main conversation.
    */
   query: string
   /** Last conversation of the previous page; undefined for the first page. */
@@ -39,16 +39,19 @@ export type ListConversationsInput = Readonly<{
   limit: number
 }>
 
-/** One page of conversation summaries read from one consistent snapshot. */
+/**
+ * One page of main conversation summaries read from one consistent snapshot.
+ * A job is neither listed nor counted.
+ */
 export type ConversationPage = Readonly<{
   /**
-   * Matching conversations after the boundary, newest activity first and
-   * then by descending identity, at most the requested limit.
+   * Matching main conversations after the boundary, newest activity first
+   * and then by descending identity, at most the requested limit.
    */
   conversations: readonly ConversationSummary[]
-  /** Number of stored conversations, independent of the query. */
+  /** Number of stored main conversations, independent of the query. */
   storedCount: number
-  /** Number of stored conversations matching the query. */
+  /** Number of stored main conversations matching the query. */
   matchCount: number
   /** Whether a matching conversation follows the last one on this page. */
   hasMore: boolean
@@ -180,12 +183,29 @@ export interface ConversationRecordReader {
    */
   findConversation(conversationId: string): Conversation | undefined
   /**
-   * Reads one page of conversation summaries and both counts.
+   * Reads one conversation's metadata without its transcript.
+   *
+   * @param conversationId - UUIDv7 to look up.
+   * @returns The metadata of a main conversation or of a job, which carries
+   * its parent, its number, and its delegator; or undefined when the
+   * conversation is not stored. Its messages, sources, and jobs are not
+   * read, so a conversation whose transcript violates the conversation
+   * contract is still read.
+   * @throws If the store is closed or the stored metadata violates the
+   * metadata contract; the records stay usable.
+   */
+  findConversationMetadata(
+    conversationId: string
+  ): ConversationMetadata | undefined
+  /**
+   * Reads one page of main conversation summaries and both counts; a job
+   * is neither listed nor counted.
    *
    * @param input - Search text, page boundary, and page size.
-   * @returns The page; each summary previews its latest matching user
-   * message or reply text part, or its latest one when only the title
-   * matches; reasoning and tool calls are never previewed.
+   * @returns The page; each summary previews its latest matching message of
+   * the person or reply text part, or its latest one when only the title
+   * matches; reasoning, tool calls, and wake-up messages are never
+   * previewed.
    * @throws If the store is closed or a stored value violates the summary
    * contract; the records stay usable.
    */

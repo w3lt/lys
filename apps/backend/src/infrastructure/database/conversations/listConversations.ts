@@ -7,14 +7,23 @@ import type {
 import type { DatabaseStatementCompiler } from "../databaseTransactions"
 
 /**
- * Shared SQL predicate for counts and pages; values are always bound
- * parameters. Only the person's messages and reply text count: reasoning and
- * tool results are not searched.
+ * SQL predicate for the rows of `conversation_messages m` that are searched
+ * and previewed: reply text and the person's own messages. A wake-up
+ * message, which the backend writes, is neither searched nor previewed, like
+ * reasoning and tool results.
  */
-const matchingConversationSql = `($query = '' OR contains_search(c.title, $query)
-  OR EXISTS (SELECT 1 FROM conversation_messages m
-    WHERE m.conversation_id = c.id AND m.role IN ('user', 'text')
-      AND contains_search(m.content, $query)))`
+const LISTED_MESSAGE_SQL = `(m.role = 'text' OR (m.role = 'user' AND m.origin IS NULL))`
+
+/**
+ * Shared SQL predicate for the match count and pages; values are always
+ * bound parameters. Only a main conversation matches, never a job, and only
+ * by its title or by a message {@link LISTED_MESSAGE_SQL} selects.
+ */
+const MATCHING_CONVERSATION_SQL = `(c.parent_conversation_id IS NULL
+  AND ($query = '' OR contains_search(c.title, $query)
+    OR EXISTS (SELECT 1 FROM conversation_messages m
+      WHERE m.conversation_id = c.id AND ${LISTED_MESSAGE_SQL}
+        AND contains_search(m.content, $query))))`
 
 /** Validates the two count aggregates read within the same page snapshot. */
 const conversationCountsSchema = z.strictObject({
@@ -24,14 +33,16 @@ const conversationCountsSchema = z.strictObject({
 
 /**
  * Reads a bounded summary page and both counts from one SQLite snapshot.
+ * Only main conversations are listed and counted, never a job.
  * @param statements - Statement compilation lent to the caller's read transaction.
- * @param input - Normalized search text, where empty matches every
+ * @param input - Normalized search text, where empty matches every main
  * conversation; the previous page's last row, or undefined for the first page;
  * and the inclusive page size, from one to
  * `MAXIMUM_CONVERSATION_LIST_PAGE_SIZE`.
  * @returns The validated page with full preview text, and whether more rows match.
  * A preview is the person's message or one text part of a reply, shown as
- * the reply's; reasoning and tool calls are never previews.
+ * the reply's; reasoning, tool calls, and wake-up messages are never
+ * previews.
  * @throws If SQLite or stored-record validation fails.
  * @remarks Requires the `contains_search` function on the connection.
  */
@@ -44,8 +55,8 @@ export function listConversations(
     statements
       .getStatement(
         `SELECT
-    (SELECT count(*) FROM conversations) AS storedCount,
-    count(*) AS matchCount FROM conversations c WHERE ${matchingConversationSql}`
+    (SELECT count(*) FROM conversations WHERE parent_conversation_id IS NULL) AS storedCount,
+    count(*) AS matchCount FROM conversations c WHERE ${MATCHING_CONVERSATION_SQL}`
       )
       .get({ query })
   )
@@ -56,10 +67,10 @@ export function listConversations(
     p.content AS previewContent
     FROM conversations c LEFT JOIN conversation_messages p ON p.id = (
       SELECT m.id FROM conversation_messages m
-      WHERE m.conversation_id = c.id AND m.role IN ('user', 'text')
+      WHERE m.conversation_id = c.id AND ${LISTED_MESSAGE_SQL}
       ORDER BY contains_search(m.content, $query) DESC, m.created_at DESC,
         m.position DESC, m.id DESC LIMIT 1
-    ) WHERE ${matchingConversationSql}
+    ) WHERE ${MATCHING_CONVERSATION_SQL}
       AND ($updatedAt IS NULL OR c.updated_at < $updatedAt
         OR (c.updated_at = $updatedAt AND c.id < $id))
     ORDER BY c.updated_at DESC, c.id DESC LIMIT $limit`

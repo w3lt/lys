@@ -91,15 +91,17 @@ function listStoredMessageAttachments(
 }
 
 /**
- * Reads metadata without changing activity time.
+ * Reads one conversation's metadata, without its transcript and without
+ * changing activity time.
  * @param statements - Statement compilation lent to the caller's transaction.
  * @param conversationId - Stored UUIDv7 to look up.
  * @returns Independent metadata, or undefined for an absent conversation. A
  * job carries its parent, its number, and its parent's agent as the
- * delegator; a main conversation carries none of the three.
- * @throws If SQLite access or persisted validation fails.
+ * delegator; a main conversation carries none of the three. Its messages,
+ * sources, and jobs are not read, so invalid ones do not fail the read.
+ * @throws If SQLite access or validation of the stored metadata fails.
  */
-function findConversationMetadata(
+export function findConversationMetadata(
   statements: DatabaseStatementCompiler,
   conversationId: string
 ): ConversationMetadata | undefined {

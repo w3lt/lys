@@ -772,17 +772,15 @@ mod tests {
         );
     }
 
-    /// Checks that JSON the reader cannot hold gives `NotJson`, as text that
-    /// is not JSON does, each beside its neighbour that the reader takes: a
-    /// port of `1e309`, beyond the range of a 64-bit float, where `1e308`
-    /// breaks only the port rule, and a name written as the first half of
-    /// an escaped surrogate pair, where the whole pair is accepted.
+    /// Checks that JSON the reader cannot hold gives `NotJson`, each beside
+    /// its neighbour that the reader takes: a port of `1e309`, beyond the
+    /// range of a 64-bit float, where `1e308` breaks only the port rule, and
+    /// a name written as the first half of an escaped surrogate pair, where
+    /// the whole pair is accepted.
     #[test]
     fn reports_json_the_reader_cannot_hold_as_not_json() {
         /// The two escapes of the surrogate pair of U+1F600.
         const ESCAPED_PAIR: &str = "\\ud83d\\ude00";
-        /// Bytes of one `\uXXXX` escape.
-        const ESCAPE_LENGTH: usize = 6;
         let port_problems = [
             (
                 308,
@@ -790,7 +788,7 @@ mod tests {
             ),
             (309, AccountProblem::NotJson),
         ];
-        let half = &ESCAPED_PAIR[..ESCAPE_LENGTH];
+        let half = &ESCAPED_PAIR[..ESCAPED_PAIR.len() / 2];
 
         for (exponent, problem) in port_problems {
             assert_eq!(
@@ -1025,20 +1023,36 @@ mod tests {
 
     /// Checks that the display name, the user name, and the password,
     /// written in characters of four bytes each, are accepted at 100, 254,
-    /// and 1,024 code points and refused with their rule one past.
+    /// and 1,024 code points and refused one past with their rule, whose
+    /// whole sentence states that limit.
     #[test]
     fn counts_names_and_the_password_in_code_points_up_to_the_shared_limits() {
-        for (field, limit) in [("displayName", 100), ("userName", 254), ("password", 1024)] {
+        let cases = [
+            (
+                "displayName",
+                100,
+                "displayName has at most 100 characters, no control character, and no white space at its ends",
+            ),
+            (
+                "userName",
+                254,
+                "userName has 1 to 254 characters, no control character, and no white space at its ends",
+            ),
+            (
+                "password",
+                1024,
+                "password has 1 to 1024 characters and no control character",
+            ),
+        ];
+        for (field, limit, rule) in cases {
             assert!(
                 parse_with_long_text(field, limit).is_ok(),
                 "{field} at {limit}"
             );
-            let problem = parse_with_long_text(field, limit + 1)
-                .map(|_| ())
-                .expect_err(field);
-            assert!(
-                matches!(problem, AccountProblem::Rule(rule) if rule.starts_with(field)),
-                "{field} over {limit}: {problem:?}"
+            assert_eq!(
+                parse_with_long_text(field, limit + 1).map(|_| ()),
+                Err(AccountProblem::Rule(rule)),
+                "{field} over {limit}"
             );
         }
     }

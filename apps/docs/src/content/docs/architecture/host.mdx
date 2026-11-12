@@ -23,8 +23,8 @@ exposes a few native commands to the React UI.
 | `get_vmo_health`     | Asks vmo's `GET /health` at `127.0.0.1:8080` whether it can read pages, within one second.                                                                      |
 | `load_settings`      | Reads `$LYS_HOME/settings.json`, creating a default file if needed.                                                                                             |
 | `save_settings`      | Replaces `$LYS_HOME/settings.json` atomically, owner-only, with a new settings JSON document.                                                                   |
-| `read_text_file`     | Returns the complete text of one UTF-8 file of at most 1 MiB.                                                                                                   |
-| `find_files`         | Searches a directory tree for regular files by name or by text content.                                                                                         |
+| `read_text_file`     | Returns the complete text of one UTF-8 file of at most 1 MiB, unless it is a credential file or the settings file.                                              |
+| `find_files`         | Searches a directory tree for regular files by name or by text content, leaving credential files and the settings file out.                                     |
 | `get_current_time`   | Returns the machine's local date and time, UTC offset, weekday, and time zone.                                                                                  |
 | `get_location`       | Returns the location the person saved in Settings → Tools, read from the settings file.                                                                         |
 | `list_tools`         | Returns the definition of every client tool, for the Tools settings pane.                                                                                       |
@@ -39,16 +39,18 @@ policy and tool approval service decide which; see [Desktop](/architecture/deskt
 `apps/desktop/src/lib/apis/tauri/tools.ts`, which validate arguments, results,
 and declared failures with the schemas exported by `@lys/protocol`.
 
-Both commands accept any absolute path that the desktop process can read. They
-are tools, not a permission gateway: deciding whether Lys may use a tool or a
-path belongs to the caller that runs tool requests. Relative paths are rejected
+Both commands accept any absolute path that the desktop process can read,
+except a private key or credential file and Lys's settings file. They are
+tools, not a permission gateway: whether Lys may use a tool or any other path
+is decided by the caller that runs tool requests. Relative paths are rejected
 rather than resolved against the process's working directory. Each call runs on
 Tauri's blocking-task pool, so the window stays responsive, and cannot be
 cancelled.
 
 - `read_text_file` follows symbolic links and returns the whole file. It
   rejects directories, FIFOs, sockets, and devices without blocking on them,
-  files over 1 MiB, and content that is not UTF-8. It never truncates.
+  credential files, files over 1 MiB, and content that is not UTF-8. It never
+  truncates.
 - `find_files` walks the tree breadth-first, lists each directory in byte order
   of entry names, and never follows symbolic links below the root. It compares
   file names, lines of UTF-8 files up to 1 MiB, or both, case-insensitively
@@ -56,6 +58,32 @@ cancelled.
   matches (50 by default, at most 200), 20,000 examined entries, or 64 MiB of
   read content, and its report says whether the result limit or a scan budget
   ended it.
+
+The credential names are those the backend's
+[tool call policy](/architecture/backend/#tool-call-policy) denies:
+`packages/protocol/src/tools/credentialFiles.json` lists the folders, file
+names, starts, and ends, the backend imports it as `CREDENTIAL_FILE_LIST`, and
+`tools/credential_files.rs` embeds it when the host is built. The host parses
+it once at startup and does not start if it cannot. Both commands decide by a
+file's real path, with every symbolic link resolved, and compare each of its
+parts in lowercase with the list. Lys's settings file, `settings.json` in the
+Lys home, holds the API keys and the email password; it is recognized by its
+device and inode numbers, so a link or a hard link to it is refused too.
+
+- `read_text_file` opens the file, resolves its real path, and checks that the
+  path still names the opened file before it reads a byte. A credential file
+  fails with `{ "code": "credentialFile" }`, also when it is over 1 MiB.
+- `find_files` fails with `{ "code": "rootInCredentialFolder" }` when the
+  root's real path is inside a credential folder. Its walk never enters a
+  credential folder and leaves credential files and the settings file out, as
+  it leaves links out, so a search lists none of them and returns no line of
+  one, whatever folder it starts in. Reported paths keep the root as it was
+  given.
+
+A hard link to a key under another name, in a folder with another name, is not
+recognized: only the settings file is compared by identity. A temporary copy
+that a stopped save left beside `settings.json` is not recognized either
+([#345](https://github.com/w3lt/lys/issues/345)).
 
 Expected failures reject with a JSON object whose `code` names the failure,
 such as `{ "code": "fileNotFound" }`. Any other rejection, such as an

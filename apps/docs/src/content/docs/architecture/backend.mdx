@@ -414,8 +414,10 @@ booleans, and `null` are not read. Each text is trimmed, and each rule is
 asked over every text before the next:
 
 - **Credential file.** The text is split into parts at `/` and `\`, without
-  empty and `.` parts, and compared in lowercase. The call is denied when a
-  part is a credential folder (`.ssh`, `.gnupg`, `.aws`, `.azure`, `.kube`,
+  empty and `.` parts, and compared in lowercase with `CREDENTIAL_FILE_LIST`
+  from `@lys/protocol`, the list the desktop's
+  [file tools](/architecture/host/#file-tools) refuse too. The call is denied
+  when a part is a credential folder (`.ssh`, `.gnupg`, `.aws`, `.azure`, `.kube`,
   `.docker`, or `Keychains`), a credential file name (`id_rsa`, `id_dsa`,
   `id_ecdsa`, `id_ed25519`, `id_ecdsa_sk`, `id_ed25519_sk`, `.netrc`,
   `_netrc`, `.pgpass`, `.git-credentials`, `.npmrc`, `.pypirc`, `.htpasswd`,
@@ -449,11 +451,12 @@ The rules read text only. They resolve no host name: an MCP server resolves
 the names it reaches, and `read_page` checks every resolved address when it
 runs. They follow no symbolic link and read no command, and a text with
 whitespace, such as a sentence or a shell command, is never read as an
-address, so a tool that runs commands or searches file contents can still
-reach a credential file or a local address;
-[#339](https://github.com/w3lt/lys/issues/339) proposes checking the resolved
-paths of the desktop's file tools on the host. A sentence that holds a
-credential path, such as a web search query, is denied like a path.
+address, so a tool that runs commands can still reach a credential file or a
+local address. The desktop's [file tools](/architecture/host/#file-tools)
+check the real path of every file they read or list against the same list, so
+a link to a key or a search of a folder that holds keys reaches none. A
+sentence that holds a credential path, such as a web search query, is denied
+like a path.
 
 Every call the gateway stores gets a decision record, a row of
 [`tool_call_decisions`](/reference/schema/#tool_call_decisions) written in

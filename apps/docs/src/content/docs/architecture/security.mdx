@@ -76,6 +76,7 @@ rules; see [MCP servers](#mcp-servers).
 | Tool routing                | Discovery is not authorization. `find_tools` and Armitage's search tools only read the definitions of the tools the request offers and name some of them; they run none, reach no switched-off tool, and run without approval. A tool Armitage finds is offered only for the rest of its reply, and each call of it passes the tool call policy and the approval gateway like any other; a call of a tool its round did not offer is answered as failed and never runs. A chat that names Armitage is refused with `404`.                                  |
 | Route-local abort handling  | Closing the SSE connection aborts the backend chat task.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Tool call policy            | Before a tool call asks or runs, fixed rules in the backend read its arguments, whatever the tool, and deny a call that names a private key or credential file, such as `~/.ssh/id_rsa`, `.env`, a `.pem` file, or Lys's `settings.json`, or a URL or host of this machine or a blocked address. A denied call is stored as failed with a sentence the model reads and never runs or asks, even on Just run. A call of an MCP tool marked destructive asks even on Just run. See [Tool call policy](/architecture/backend/#tool-call-policy).              |
+| File credential refusal     | `read_text_file` and `search_files` on the host resolve the real path of every file they read or list and refuse a private key or credential file of the list the tool call policy reads, and Lys's `settings.json`, also through a symbolic link, or a hard link to the settings file. A search never enters a credential folder. See [File tools](/architecture/host/#file-tools).                                                                                                                                                                       |
 | Approval gateway            | The backend's tool approval service decides every tool call the tool call policy does not deny, client, backend, and MCP tools alike, except `read_attachment`, which reads only what the person attached, the agent state tools, which only read what agents are doing, and `find_tools` and Armitage's search tools, which only name tools: a tool asks first unless it is set to Just run in `settings.json`, and every call asks when that file cannot be read. The desktop shows the prompts and runs only the client tools' calls the backend sends. |
 | Approval token              | Each approval prompt carries a single-use token, 32 random bytes, that the answer must return: the backend accepts one answer with the prompt's token, compared in constant time, and runs the call it stored with the prompt, never one the answer names. A missing token fails validation; a wrong or reused one gets the not-pending problem and changes nothing. The token is never written to the database or the log; a caller that can read the reply's events can read it ([#171](https://github.com/w3lt/lys/issues/171)).                        |
 | Tool call decision record   | Every tool call the backend stores gets a record of how it was decided, written with the call: the tool call policy's effect and rule, the approval mode, the answer to its prompt, and the outcome. It names the tool but copies no argument value, so no path, URL, or message the call named is stored twice, and it is deleted with its conversation. Nothing shows the records yet; see [Database schemas](/reference/schema/#tool_call_decisions).                                                                                                   |
@@ -124,12 +125,12 @@ rules; see [MCP servers](#mcp-servers).
 - There is no scoped credential-handle layer.
 - The tool call policy reads argument text only. It resolves no host name,
   follows no symbolic link, and never reads a text with whitespace, such as
-  a shell command, as an address. A symbolic link to a key, a `search_files`
-  search of the contents of a folder that holds keys, and a tool that runs
-  commands can still reach a credential file or a local address; on Just run
-  nothing else stands in their way. Checking the resolved paths of the
-  desktop's file tools on the host is
-  [#339](https://github.com/w3lt/lys/issues/339).
+  a shell command, as an address. The desktop's `read_text_file` and
+  `search_files` check the real path of every file they read or list against
+  the same names, but a tool that runs commands, an MCP tool that reads
+  files, and a hard link to a key under another name in a folder with
+  another name can still reach a credential file or a local address; on Just
+  run nothing else stands in their way.
 - A destructive mark is the MCP server's own claim. A server that leaves it
   off a tool that deletes or overwrites data keeps the person's Just run
   choice for that tool, and Settings does not show which tools always ask.

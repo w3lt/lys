@@ -161,7 +161,11 @@ accepted until [#171](https://github.com/w3lt/lys/issues/171).
 - **Constraint:** the commands are tools, not the permission gateway, and Lys
   has no path policy yet for them to check against. The paths they can reach
   are bounded only by the operating-system user that runs Lys, which today is
-  the person who launched it.
+  the person who launched it, except the files that
+  [#339](https://github.com/w3lt/lys/issues/339) has them refuse: a file
+  whose real path names a private key or credential file or folder of the
+  list the backend's tool call policy denies, and Lys's settings file. That
+  list is the gateway's own, so it is not a second path policy.
 - **Alternatives considered:**
   - A fixed restriction inside the commands, such as the home directory only
     or no hidden files, was rejected when the tools were designed: it would be

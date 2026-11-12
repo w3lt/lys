@@ -9,6 +9,7 @@ import type {
 } from "@lys/share"
 import type { AssistantMessageCompletion } from "../agent/agent"
 import type { ReplyToolCallChange } from "../agent/replyPartSequence"
+import type { ToolCallDecisionRecord } from "../toolApproval/toolCallDecisionRecord"
 
 /**
  * Position after which a conversation list page starts: the activity time and
@@ -62,6 +63,11 @@ export type CreateReplyPartInput = Readonly<{
    * every part the reply already has.
    */
   part: ReplyPart
+  /**
+   * How the backend decided a tool-call part before it ran, stored as the
+   * call's decision record; undefined for a reasoning or text part.
+   */
+  toolCallDecision: ToolCallDecisionRecord | undefined
 }>
 
 /** One fragment for a reasoning or text part of a reply still streaming. */
@@ -295,13 +301,16 @@ export interface ConversationTurnRecordWriter {
  */
 export interface ReplyPartRecordWriter {
   /**
-   * Stores a part after every part its reply has.
+   * Stores a part after every part its reply has and, for a tool call, its
+   * decision record in the same write.
    *
-   * @param input - Reply and the complete part.
+   * @param input - Reply, the complete part, and a tool call's decision.
    * @returns True when stored; false when the reply is finalized or not
    * stored, which changes nothing.
    * @throws If the store is closed or the write fails, including when the
-   * part's identity is already stored, which breaks the precondition.
+   * part's identity is already stored, which breaks the precondition, or
+   * when a tool call comes without its decision or another part with one;
+   * nothing is then changed.
    */
   createReplyPart(input: CreateReplyPartInput): boolean
   /**
@@ -322,7 +331,9 @@ export interface ReplyPartRecordWriter {
    * @returns The call as stored, or undefined when the reply is finalized or
    * not stored, or the call is not one of its calls in a state the change
    * follows (`running` and `rejected` follow `awaiting-approval`;
-   * `succeeded` and `failed` follow `running`), which changes nothing.
+   * `succeeded` and `failed` follow `running`), which changes nothing. The
+   * call's decision record takes the new state as its outcome; `running`
+   * also records the answer `allowed`, and `rejected` its reason.
    * @throws If the store is closed, the write fails, or the conversation
    * stores a source's number for another URL or its URL under another
    * number; nothing is then changed. A source whose number and URL the

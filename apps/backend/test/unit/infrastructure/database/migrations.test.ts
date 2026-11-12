@@ -3,7 +3,7 @@ import { describe, expect, it, onTestFinished } from "vitest"
 import { migrateDatabase } from "../../../../src/infrastructure/database/migrations"
 
 /** Schema version produced by the current migration list. */
-const CURRENT_SCHEMA_VERSION = 12
+const CURRENT_SCHEMA_VERSION = 13
 
 /**
  * Opens an empty in-memory database owned by the current test.
@@ -177,16 +177,15 @@ function createVersion9Database(): DatabaseSync {
 }
 
 /**
- * Creates a database at version 10: the current schema without the agents'
- * deletion time.
+ * Creates a database at version 10: the version-11 schema without the
+ * agents' deletion time.
  *
  * @returns A connection at `user_version` 10, closed when the test finishes.
  * @remarks Migration 11 only adds `agents.deleted_at`, so dropping that
- * column from a current database leaves exactly the version-10 schema.
+ * column from a version-11 database leaves exactly the version-10 schema.
  */
 function createVersion10Database(): DatabaseSync {
-  const database = openEmptyDatabase()
-  migrateDatabase(database)
+  const database = createVersion11Database()
   database.exec(`
     ALTER TABLE agents DROP COLUMN deleted_at;
     PRAGMA user_version = 10
@@ -195,16 +194,84 @@ function createVersion10Database(): DatabaseSync {
 }
 
 /**
- * Creates a database at version 11, whose schema is the current one.
+ * Creates a database at version 11, whose schema is the version-12 one.
  *
  * @returns A connection at `user_version` 11, closed when the test finishes.
  * @remarks Migration 12 changes only stored codes, never the schema.
  */
 function createVersion11Database(): DatabaseSync {
-  const database = openEmptyDatabase()
-  migrateDatabase(database)
+  const database = createVersion12Database()
   database.exec("PRAGMA user_version = 11")
   return database
+}
+
+/**
+ * Creates a database at version 12: the current schema without the tool call
+ * decision records.
+ *
+ * @returns A connection at `user_version` 12, closed when the test finishes.
+ * @remarks Migration 13 only adds the decision table, its index, and its
+ * trigger, so dropping them from a current database leaves exactly the
+ * version-12 schema.
+ */
+function createVersion12Database(): DatabaseSync {
+  const database = openEmptyDatabase()
+  migrateDatabase(database)
+  database.exec(`
+    DROP TRIGGER update_tool_call_decision_after_tool_call_update;
+    DROP TABLE tool_call_decisions;
+    PRAGMA user_version = 12
+  `)
+  return database
+}
+
+/**
+ * Stores, in a migrated database, conversation `c1` under `caliginia` with
+ * one streaming reply `a1` and its waiting web search call `p1`.
+ *
+ * @param database - Connection at version 12 or later.
+ */
+function saveWaitingToolCall(database: DatabaseSync): void {
+  database.exec(`
+    INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
+    VALUES ('c1', NULL, 'caliginia', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    INSERT INTO conversation_messages (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
+    VALUES ('a1', 'c1', 'assistant', 'model', '', 'streaming', NULL, '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z');
+    INSERT INTO conversation_messages (id, conversation_id, role, reply_id, position, round, content, status, tool_name, tool_arguments, created_at, updated_at)
+    VALUES ('p1', 'c1', 'tool_call', 'a1', 0, 0, '', 'awaiting-approval', 'web_search', '{}', '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z')
+  `)
+}
+
+/**
+ * Stores the decision record of call `p1` with the given decision columns.
+ *
+ * @param database - Connection holding {@link saveWaitingToolCall}'s rows.
+ * @param values - SQL values of `policy_effect`, `policy_reason`,
+ * `approval_mode`, and `answer`, in that order.
+ */
+function saveToolCallDecision(database: DatabaseSync, values: string): void {
+  database.exec(`
+    INSERT INTO tool_call_decisions (call_id, conversation_id, agent_code, tool_name, policy_effect, policy_reason, approval_mode, answer, outcome, created_at, updated_at)
+    VALUES ('p1', 'c1', 'caliginia', 'web_search', ${values}, 'awaiting-approval', '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z')
+  `)
+}
+
+/**
+ * Lists the stored decision records.
+ *
+ * @param database - Open connection.
+ * @returns Each record's call, conversation, outcome, and update time, by
+ * call.
+ */
+function listToolCallDecisionOutcomes(
+  database: DatabaseSync
+): Record<string, unknown>[] {
+  return database
+    .prepare(
+      `SELECT call_id AS callId, conversation_id AS conversationId, outcome,
+      updated_at AS updatedAt FROM tool_call_decisions ORDER BY call_id`
+    )
+    .all()
 }
 
 /**
@@ -403,16 +470,19 @@ describe("migrateDatabase", () => {
       "conversation_attachments",
       "conversation_messages",
       "conversation_sources",
-      "conversations"
+      "conversations",
+      "tool_call_decisions"
     ])
     expect(listSchemaObjects(database, "trigger")).toEqual([
       "update_conversation_after_message_insert",
       "update_conversation_after_message_update",
-      "update_conversation_updated_at"
+      "update_conversation_updated_at",
+      "update_tool_call_decision_after_tool_call_update"
     ])
     expect(listSchemaObjects(database, "index")).toEqual([
       "conversation_messages_conversation_idx",
-      "conversation_messages_reply_part_idx"
+      "conversation_messages_reply_part_idx",
+      "tool_call_decisions_conversation_idx"
     ])
     expect(database.isTransaction).toBe(false)
   })
@@ -586,7 +656,8 @@ describe("migrateDatabase", () => {
     expect(listSchemaObjects(database, "trigger")).toEqual([
       "update_conversation_after_message_insert",
       "update_conversation_after_message_update",
-      "update_conversation_updated_at"
+      "update_conversation_updated_at",
+      "update_tool_call_decision_after_tool_call_update"
     ])
   })
 
@@ -1425,6 +1496,149 @@ describe("migrateDatabase", () => {
     expect(
       database.prepare("SELECT name FROM conversation_attachments").all()
     ).toEqual([])
+  })
+
+  it("upgrades a version-12 database by adding the tool call decision records, giving none to a call it already stores", () => {
+    const database = createVersion12Database()
+    saveWaitingToolCall(database)
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
+    expect(listColumns(database, "tool_call_decisions")).toEqual([
+      "call_id",
+      "conversation_id",
+      "agent_code",
+      "tool_name",
+      "policy_effect",
+      "policy_reason",
+      "approval_mode",
+      "answer",
+      "outcome",
+      "created_at",
+      "updated_at"
+    ])
+    expect(listToolCallDecisionOutcomes(database)).toEqual([])
+    expect(listReplyPartRows(database)).toMatchObject([
+      { id: "p1", status: "awaiting-approval" }
+    ])
+  })
+
+  it.each(
+    Object.entries({
+      "a call Lys's own checks failed": "NULL, NULL, NULL, NULL",
+      "a denied call": "'deny', 'credential-file', NULL, NULL",
+      "an allowed call that runs without approval": "'allow', NULL, NULL, NULL",
+      "an allowed call the person allowed":
+        "'allow', NULL, 'ask-me', 'allowed'",
+      "an allowed call the client could not show":
+        "'allow', NULL, 'ask-me', 'showFailed'",
+      "a destructive call the person declined":
+        "'require-approval', 'destructive-tool', 'just-run', 'declined'"
+    })
+  )("stores the decision record of %s", (_label, values) => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    saveWaitingToolCall(database)
+
+    saveToolCallDecision(database, values)
+
+    expect(listToolCallDecisionOutcomes(database)).toEqual([
+      {
+        callId: "p1",
+        conversationId: "c1",
+        outcome: "awaiting-approval",
+        updatedAt: "2026-01-03T00:00:00.000Z"
+      }
+    ])
+  })
+
+  it.each(
+    Object.entries({
+      "a reason without an effect": "NULL, 'credential-file', NULL, NULL",
+      "a mode without an effect": "NULL, NULL, 'ask-me', NULL",
+      "an unknown effect": "'maybe', NULL, NULL, NULL",
+      "a denial without a reason": "'deny', NULL, NULL, NULL",
+      "a denial with another rule's reason":
+        "'deny', 'destructive-tool', NULL, NULL",
+      "a denial with a mode": "'deny', 'blocked-address', 'ask-me', NULL",
+      "a required approval without its reason":
+        "'require-approval', NULL, 'ask-me', NULL",
+      "a required approval without a mode":
+        "'require-approval', 'destructive-tool', NULL, NULL",
+      "an allowed call with a reason": "'allow', 'credential-file', NULL, NULL",
+      "an unknown mode": "'allow', NULL, 'sometimes', NULL",
+      "an answer without a mode": "'allow', NULL, NULL, 'allowed'",
+      "an unknown answer": "'allow', NULL, 'ask-me', 'maybe'"
+    })
+  )("refuses a decision record with %s", (_label, values) => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    saveWaitingToolCall(database)
+
+    expect(() => saveToolCallDecision(database, values)).toThrow(
+      /constraint failed/
+    )
+  })
+
+  it.each(
+    Object.entries({
+      "whose call is not stored": `'missing', 'c1', 'caliginia', 'awaiting-approval'`,
+      "with an empty agent code": `'p1', 'c1', '', 'awaiting-approval'`,
+      "with an unknown outcome": `'p1', 'c1', 'caliginia', 'streaming'`
+    })
+  )("refuses a decision record %s", (_label, values) => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    saveWaitingToolCall(database)
+
+    expect(() =>
+      database.exec(`
+        INSERT INTO tool_call_decisions (call_id, conversation_id, agent_code, outcome, tool_name, created_at, updated_at)
+        VALUES (${values}, 'web_search', '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z')
+      `)
+    ).toThrow(/constraint failed/)
+  })
+
+  it("copies each status change of a call into its decision record with the call's update time", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    saveWaitingToolCall(database)
+    saveToolCallDecision(database, "'allow', NULL, 'ask-me', NULL")
+
+    database.exec(
+      "UPDATE conversation_messages SET status = 'running', updated_at = '2026-01-04T00:00:00.000Z' WHERE id = 'p1'"
+    )
+    expect(listToolCallDecisionOutcomes(database)).toMatchObject([
+      { outcome: "running", updatedAt: "2026-01-04T00:00:00.000Z" }
+    ])
+
+    database.exec(
+      "UPDATE conversation_messages SET status = 'interrupted' WHERE id = 'p1'"
+    )
+    expect(listToolCallDecisionOutcomes(database)).toMatchObject([
+      { outcome: "interrupted", updatedAt: "2026-01-04T00:00:00.000Z" }
+    ])
+  })
+
+  it("deletes a decision record with its call, and with its conversation", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    saveWaitingToolCall(database)
+    saveToolCallDecision(database, "NULL, NULL, NULL, NULL")
+
+    database.exec("DELETE FROM conversation_messages WHERE id = 'a1'")
+    expect(listToolCallDecisionOutcomes(database)).toEqual([])
+
+    database.exec(`
+      INSERT INTO conversation_messages (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
+      VALUES ('a1', 'c1', 'assistant', 'model', '', 'streaming', NULL, '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z');
+      INSERT INTO conversation_messages (id, conversation_id, role, reply_id, position, round, content, status, tool_name, tool_arguments, created_at, updated_at)
+      VALUES ('p1', 'c1', 'tool_call', 'a1', 0, 0, '', 'awaiting-approval', 'web_search', '{}', '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z')
+    `)
+    saveToolCallDecision(database, "NULL, NULL, NULL, NULL")
+    database.exec("DELETE FROM conversations WHERE id = 'c1'")
+    expect(listToolCallDecisionOutcomes(database)).toEqual([])
   })
 
   it("rejects a database created by a newer version without changing it", () => {

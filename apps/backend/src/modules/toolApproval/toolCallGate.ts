@@ -1,4 +1,5 @@
 import type { ChatToolApprovalAnswer, ChatToolCall } from "@lys/protocol"
+import type { ToolApprovalMode } from "./toolCallDecisionRecord"
 
 /**
  * Shows one checked call to the person and waits for their answer; resolves
@@ -10,12 +11,14 @@ export type SendToolApprovalPrompt = (
 ) => Promise<ChatToolApprovalAnswer | undefined>
 
 /**
- * Stores one checked call in the state the gate chose for it: `running` when
- * it may run at once, `awaiting-approval` when the person is asked. Answers
- * false when the reply refused to store it, because the reply has ended.
+ * Stores one checked call in the state the gate chose for it, `running` when
+ * it may run at once, `awaiting-approval` when the person is asked, with the
+ * approval mode the gate applied. Answers false when the reply refused to
+ * store it, because the reply has ended.
  */
 export type StoreStartedToolCall = (
-  status: "awaiting-approval" | "running"
+  status: "awaiting-approval" | "running",
+  approvalMode: ToolApprovalMode
 ) => boolean
 
 /** What starting one checked call led to. */
@@ -91,8 +94,9 @@ export default class ToolCallGate {
    * deny.
    * @param isApprovalRequired - Whether the policy requires the person's
    * approval of the call, whatever they saved for its tool.
-   * @param storeToolCall - Stores the call in the state given; borrowed for
-   * this call.
+   * @param storeToolCall - Stores the call in the state given, with the
+   * approval mode applied: `just-run` when the tool was saved as Just run,
+   * `ask-me` otherwise; borrowed for this call.
    * @returns `allowed` once the call is stored as running, when its tool was
    * saved as Just run and approval is not required; `prompted` with the
    * person's answer once it is stored as awaiting approval and the prompt is
@@ -105,9 +109,18 @@ export default class ToolCallGate {
     isApprovalRequired: boolean,
     storeToolCall: StoreStartedToolCall
   ): ToolCallStart {
-    const isAllowedAtOnce =
-      !isApprovalRequired && this.#justRunToolNames.has(toolCall.toolName)
-    if (!storeToolCall(isAllowedAtOnce ? "running" : "awaiting-approval"))
+    const approvalMode: ToolApprovalMode = this.#justRunToolNames.has(
+      toolCall.toolName
+    )
+      ? "just-run"
+      : "ask-me"
+    const isAllowedAtOnce = !isApprovalRequired && approvalMode === "just-run"
+    if (
+      !storeToolCall(
+        isAllowedAtOnce ? "running" : "awaiting-approval",
+        approvalMode
+      )
+    )
       return ENDED_TOOL_CALL_START
     if (isAllowedAtOnce) return ALLOWED_TOOL_CALL_START
     return Object.freeze({

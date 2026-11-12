@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import MemoryReply from "../../../../src/modules/agent/memoryReply"
 import type { ReplyPartDraft } from "../../../../src/modules/agent/replyPartSequence"
+import { ASK_ME_TOOL_CALL_DECISION } from "../../support/conversationFixtures"
 
 /** Matches a UUIDv7 the reply gave a part. */
 const UUID_V7_PATTERN =
@@ -28,6 +29,7 @@ function buildToolCallDraft(
     round,
     toolName: "search_tools",
     argumentText: '{"query":"web"}',
+    decision: ASK_ME_TOOL_CALL_DECISION,
     status
   }
 }
@@ -92,7 +94,7 @@ describe("MemoryReply", () => {
     ["awaiting-approval", { status: "running" }, { status: "running" }],
     [
       "awaiting-approval",
-      { status: "rejected", result: "Not allowed." },
+      { status: "rejected", result: "Not allowed.", reason: "declined" },
       { status: "rejected", result: "Not allowed." }
     ]
   ] as const)(
@@ -112,7 +114,7 @@ describe("MemoryReply", () => {
 
   it.each([
     ["running", { status: "running" }],
-    ["running", { status: "rejected", result: "No." }],
+    ["running", { status: "rejected", result: "No.", reason: "declined" }],
     ["awaiting-approval", { status: "succeeded", result: "", sources: [] }],
     ["awaiting-approval", { status: "failed", result: "Broke." }]
   ] as const)(

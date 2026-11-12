@@ -18,11 +18,12 @@ import type {
 } from "../tool/builtIn/builtInTool"
 import { formatNetworkToolResult } from "../tool/networkToolResult"
 import AgentTool from "../tool/tool"
+import type { ToolCallDecisionRecord } from "../toolApproval/toolCallDecisionRecord"
 import type ToolCallGate from "../toolApproval/toolCallGate"
 import {
   decideToolCall,
   formatToolCallDenial,
-  type ToolCallDenialReason,
+  type ToolCallDecision,
   type ToolCallPolicy,
   type ToolCallRequest
 } from "../toolApproval/toolCallPolicy"
@@ -297,6 +298,30 @@ type StartedToolCall =
 /** Context message that carries one tool call's result. */
 type ToolResultMessage = Extract<ReplyContextMessage, { role: "tool" }>
 
+/** A policy answer that lets a call go on to the approval gate. */
+type GatedToolCallDecision = Exclude<ToolCallDecision, { effect: "deny" }>
+
+/** The person's answer when they did not allow a call. */
+type RejectedToolApprovalAnswer = Extract<
+  ChatToolApprovalAnswer,
+  { status: "rejected" }
+>
+
+/** Decision of a call Lys's own checks failed before the policy was asked. */
+const UNCHECKED_TOOL_CALL_DECISION: ToolCallDecisionRecord = Object.freeze({
+  policyDecision: undefined,
+  approvalMode: undefined
+})
+
+/**
+ * Decision of an allowed call of a tool that runs without approval, which
+ * never reaches the gate.
+ */
+const UNPROMPTED_TOOL_CALL_DECISION: ToolCallDecisionRecord = Object.freeze({
+  policyDecision: Object.freeze({ effect: "allow" }),
+  approvalMode: undefined
+})
+
 /** Sources of a result that shows none. */
 const NO_SOURCES: readonly ConversationSource[] = Object.freeze([])
 
@@ -541,13 +566,19 @@ async function handleToolCall(
     return createFailedToolCall(
       handledCall,
       formatMissingToolMessage(toolCall, handling),
+      UNCHECKED_TOOL_CALL_DECISION,
       handling
     )
   const checkedArguments = tool.agentTool.parseCallArguments(
     toolCall.argumentText
   )
   if (checkedArguments.status === "invalid")
-    return createFailedToolCall(handledCall, checkedArguments.message, handling)
+    return createFailedToolCall(
+      handledCall,
+      checkedArguments.message,
+      UNCHECKED_TOOL_CALL_DECISION,
+      handling
+    )
   const checkedCall: ChatToolCall = Object.freeze({
     id: toolCall.id,
     toolName: toolCall.toolName,
@@ -622,7 +653,12 @@ async function handleBuiltInToolCall(
     toolCall.checkedCall.arguments
   )
   if (parsedCall.status === "invalid")
-    return createFailedToolCall(toolCall, parsedCall.message, handling)
+    return createFailedToolCall(
+      toolCall,
+      parsedCall.message,
+      UNCHECKED_TOOL_CALL_DECISION,
+      handling
+    )
   const startedCall = startToolCall(toolCall, handling)
   const approval =
     startedCall.status === "waiting" ? await startedCall.approval : startedCall
@@ -703,17 +739,20 @@ async function runBuiltInToolCall(
 }
 
 /**
- * Stores one checked call in the state the round's gate chose for it.
+ * Stores one checked call in the state chosen for it, with how it was
+ * decided.
  *
  * @param toolCall - Checked call.
- * @param status - `running` when the gate allows it at once,
- * `awaiting-approval` when the person is asked.
+ * @param status - `running` when it may run at once, `awaiting-approval`
+ * when the person is asked.
+ * @param decision - The policy's answer and the approval mode applied.
  * @param handling - The round's index and the reply's part sequence.
  * @returns True once stored and sent; false when the reply refused it.
  */
 function createStartedToolCall(
   toolCall: CheckedToolCall,
   status: "awaiting-approval" | "running",
+  decision: ToolCallDecisionRecord,
   handling: ToolCallPartHandling
 ): boolean {
   return handling.replyParts.createReplyToolCall({
@@ -722,6 +761,7 @@ function createStartedToolCall(
     round: handling.round,
     toolName: toolCall.call.toolName,
     argumentText: toolCall.call.argumentText,
+    decision,
     status
   })
 }
@@ -739,7 +779,12 @@ function startUnpromptedToolCall(
   toolCall: CheckedToolCall,
   handling: ToolCallPartHandling
 ): ToolCallApproval {
-  return createStartedToolCall(toolCall, "running", handling)
+  return createStartedToolCall(
+    toolCall,
+    "running",
+    UNPROMPTED_TOOL_CALL_DECISION,
+    handling
+  )
     ? ALLOWED_TOOL_CALL_APPROVAL
     : ENDED_TOOL_CALL_APPROVAL
 }
@@ -774,13 +819,13 @@ function startToolCall(
   )
   switch (decision.effect) {
     case "deny":
-      return denyToolCall(toolCall, decision.reason, handling)
+      return denyToolCall(toolCall, decision, handling)
     case "require-approval":
-      return startGatedToolCall(toolCall, true, handling)
+      return startGatedToolCall(toolCall, decision, handling)
     case "allow":
       return runsWithoutApproval(toolCall.tool)
         ? startUnpromptedToolCall(toolCall, handling)
-        : startGatedToolCall(toolCall, false, handling)
+        : startGatedToolCall(toolCall, decision, handling)
   }
 }
 
@@ -807,19 +852,20 @@ function buildToolCallRequest(toolCall: CheckedToolCall): ToolCallRequest {
  * model reads.
  *
  * @param toolCall - Checked call.
- * @param reason - The rule the call broke.
+ * @param decision - The policy's denial, with the rule the call broke.
  * @param handling - The round's index and the reply's part sequence.
  * @returns `denied` with the message once stored; `ended` when the reply
  * refused it.
  */
 function denyToolCall(
   toolCall: CheckedToolCall,
-  reason: ToolCallDenialReason,
+  decision: Extract<ToolCallDecision, { effect: "deny" }>,
   handling: ToolCallPartHandling
 ): ToolCallApproval {
   const message = createFailedToolCall(
     toolCall,
-    formatToolCallDenial(reason),
+    formatToolCallDenial(decision.reason),
+    Object.freeze({ policyDecision: decision, approvalMode: undefined }),
     handling
   )
   if (message === undefined) return ENDED_TOOL_CALL_APPROVAL
@@ -832,8 +878,9 @@ function denyToolCall(
  * step.
  *
  * @param toolCall - Checked call.
- * @param isApprovalRequired - Whether the policy requires the person's
- * approval, so they are asked even when they saved the tool as Just run.
+ * @param decision - The policy's answer: `require-approval` asks the person
+ * even when they saved the tool as Just run; stored with the call, together
+ * with the approval mode the gate applied.
  * @param handling - The round's gate and index, and the reply's part
  * sequence.
  * @returns `allowed` once the call is stored as running; `waiting` with the
@@ -848,15 +895,21 @@ function denyToolCall(
  */
 function startGatedToolCall(
   toolCall: CheckedToolCall,
-  isApprovalRequired: boolean,
+  decision: GatedToolCallDecision,
   handling: GatedToolCallStartHandling
 ): StartedToolCall {
   if (handling.gate === undefined)
     throw new Error("The round has no approval gate for a call that needs one")
   const start = handling.gate.startToolCall(
     toolCall.checkedCall,
-    isApprovalRequired,
-    (status) => createStartedToolCall(toolCall, status, handling)
+    decision.effect === "require-approval",
+    (status, approvalMode) =>
+      createStartedToolCall(
+        toolCall,
+        status,
+        Object.freeze({ policyDecision: decision, approvalMode }),
+        handling
+      )
   )
   switch (start.status) {
     case "allowed":
@@ -896,7 +949,7 @@ async function handleToolCallApprovalAnswer(
   if (settledAnswer === undefined) return ENDED_TOOL_CALL_APPROVAL
   return settledAnswer.status === "allowed"
     ? updateAllowedToolCall(toolCall, replyParts)
-    : updateRejectedToolCall(toolCall, settledAnswer.content, replyParts)
+    : updateRejectedToolCall(toolCall, settledAnswer, replyParts)
 }
 
 /**
@@ -919,23 +972,25 @@ function updateAllowedToolCall(
 }
 
 /**
- * Stores a waiting call the person rejected.
+ * Stores a waiting call that was not allowed, with why.
  *
  * @param toolCall - Checked call.
- * @param content - Rejection the model reads, as the client sent it.
+ * @param answer - The rejection: its content, which the model reads as the
+ * client sent it, and its reason, stored with the call's decision.
  * @param replyParts - The reply's part sequence.
  * @returns `rejected` with the message once stored; `ended` when the reply
  * refused it. A network or MCP tool's rejection is cleaned first.
  */
 function updateRejectedToolCall(
   toolCall: CheckedToolCall,
-  content: string,
+  answer: RejectedToolApprovalAnswer,
   replyParts: ReplyPartSequence
 ): ToolCallApproval {
-  const result = formatToolCallResult(toolCall.tool, content)
+  const result = formatToolCallResult(toolCall.tool, answer.content)
   const isStored = replyParts.updateReplyToolCall(toolCall.call.id, {
     status: "rejected",
-    result
+    result,
+    reason: answer.reason
   })
   if (!isStored) return ENDED_TOOL_CALL_APPROVAL
   return Object.freeze({
@@ -974,6 +1029,8 @@ function updateFinishedToolCall(
  *
  * @param toolCall - The call and the tool it names, if any.
  * @param message - Why the call cannot run.
+ * @param decision - How it was decided: no policy answer when Lys's own
+ * checks failed it, or the policy's denial.
  * @param handling - The round's index and the reply's part sequence.
  * @returns The message carrying the explanation, once stored; or undefined
  * when the reply refused it. A network or MCP tool's explanation is cleaned
@@ -982,6 +1039,7 @@ function updateFinishedToolCall(
 function createFailedToolCall(
   toolCall: HandledToolCall,
   message: string,
+  decision: ToolCallDecisionRecord,
   handling: ToolCallPartHandling
 ): ToolResultMessage | undefined {
   const result = formatToolCallResult(toolCall.tool, message)
@@ -991,6 +1049,7 @@ function createFailedToolCall(
     round: handling.round,
     toolName: toolCall.call.toolName,
     argumentText: toolCall.call.argumentText,
+    decision,
     status: "failed",
     result
   })

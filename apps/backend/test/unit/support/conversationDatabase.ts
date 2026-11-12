@@ -13,6 +13,7 @@ import SqliteConversationRecordReader from "../../../src/infrastructure/database
 import SqliteConversationTurnRecordWriter from "../../../src/infrastructure/database/conversations/sqliteConversationTurnRecordWriter"
 import SqliteReplyPartRecordWriter from "../../../src/infrastructure/database/conversations/sqliteReplyPartRecordWriter"
 import type {
+  DatabaseReader,
   DatabaseStatementCompiler,
   DatabaseWriter
 } from "../../../src/infrastructure/database/databaseTransactions"
@@ -317,4 +318,27 @@ export function saveSourceRow(
       )
       .run(conversationId, source.number, source.url, source.title)
   })
+}
+
+/**
+ * Reads every stored tool call decision record.
+ *
+ * @param database - Read access to a migrated test database.
+ * @returns Each record's columns by name, ordered by call.
+ */
+export function readToolCallDecisionRows(
+  database: DatabaseReader
+): Record<string, unknown>[] {
+  return database.handleDatabaseReadRequest((statements) =>
+    statements
+      .getStatement(
+        `SELECT call_id AS callId, conversation_id AS conversationId,
+        agent_code AS agentCode, tool_name AS toolName,
+        policy_effect AS policyEffect, policy_reason AS policyReason,
+        approval_mode AS approvalMode, answer, outcome,
+        created_at AS createdAt, updated_at AS updatedAt
+        FROM tool_call_decisions ORDER BY call_id`
+      )
+      .all()
+  )
 }

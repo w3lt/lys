@@ -572,7 +572,90 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
     ALTER TABLE agents ADD COLUMN deleted_at TEXT
       CHECK (deleted_at IS NULL OR deleted_at <> '')
   `,
-  moveArmitageRecords
+  moveArmitageRecords,
+  // Records how each tool call was decided, one row per stored call, written
+  // with the call's row: the tool call policy's effect and its reason, the
+  // approval mode the gate applied, and the person's answer, with the call's
+  // status as its outcome. No argument value is copied; the call's row keeps
+  // them. A null effect means Lys's own checks failed the call before the
+  // policy was asked; a null mode, that the call never reached the gate. A
+  // comparison with NULL makes a CHECK pass in SQLite, so every comparison on
+  // a nullable column is guarded by `IS NOT NULL`. The trigger copies each
+  // status change of a call, including the interrupted marking, into its
+  // record. Calls stored before this version have no record. Rows go with
+  // their call and their conversation.
+  `
+    CREATE TABLE tool_call_decisions (
+      call_id TEXT PRIMARY KEY
+        REFERENCES conversation_messages(id) ON DELETE CASCADE,
+      conversation_id TEXT NOT NULL
+        REFERENCES conversations(id) ON DELETE CASCADE,
+      agent_code TEXT NOT NULL CHECK (agent_code <> ''),
+      tool_name TEXT NOT NULL,
+      policy_effect TEXT,
+      policy_reason TEXT,
+      approval_mode TEXT,
+      answer TEXT CHECK (
+        answer IS NULL
+        OR (
+          answer IN ('allowed', 'declined', 'showFailed')
+          AND approval_mode IS NOT NULL
+        )
+      ),
+      outcome TEXT NOT NULL CHECK (
+        outcome IN (
+          'awaiting-approval', 'running', 'succeeded', 'failed', 'rejected',
+          'interrupted'
+        )
+      ),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      CHECK (
+        (
+          policy_effect IS NULL
+          AND policy_reason IS NULL
+          AND approval_mode IS NULL
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'deny'
+          AND policy_reason IS NOT NULL
+          AND policy_reason IN ('credential-file', 'blocked-address')
+          AND approval_mode IS NULL
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'require-approval'
+          AND policy_reason IS NOT NULL
+          AND policy_reason = 'destructive-tool'
+          AND approval_mode IS NOT NULL
+          AND approval_mode IN ('ask-me', 'just-run')
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'allow'
+          AND policy_reason IS NULL
+          AND (approval_mode IS NULL OR approval_mode IN ('ask-me', 'just-run'))
+        )
+      )
+    ) STRICT;
+
+    CREATE INDEX tool_call_decisions_conversation_idx
+      ON tool_call_decisions (conversation_id);
+
+    CREATE TRIGGER update_tool_call_decision_after_tool_call_update
+    AFTER UPDATE OF status ON conversation_messages
+    FOR EACH ROW
+    WHEN NEW.role = 'tool_call'
+    BEGIN
+      UPDATE tool_call_decisions
+      SET outcome = NEW.status, updated_at = NEW.updated_at
+      WHERE call_id = NEW.id;
+    END;
+  `
 ]
 
 /** Latest schema version that the backend database can open and migrate. */

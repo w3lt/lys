@@ -13,6 +13,7 @@ import type {
   ConversationTurnTarget,
   ConversationTurnUserMessage
 } from "../../../src/modules/chat/persistence"
+import type { ToolCallDecisionRecord } from "../../../src/modules/toolApproval/toolCallDecisionRecord"
 
 /**
  * Creates a syntactically valid UUIDv7 whose last group encodes `sequence`.
@@ -166,6 +167,15 @@ export function createReasoningPart(
     content
   }
 }
+
+/**
+ * Decision of a tool call the policy allowed and the gate asked about, its
+ * tool being on Ask me.
+ */
+export const ASK_ME_TOOL_CALL_DECISION: ToolCallDecisionRecord = Object.freeze({
+  policyDecision: Object.freeze({ effect: "allow" }),
+  approvalMode: "ask-me"
+})
 
 /** Values that distinguish one tool-call part fixture from another. */
 export type ToolCallPartFixture = Readonly<{

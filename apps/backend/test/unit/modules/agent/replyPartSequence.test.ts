@@ -7,6 +7,7 @@ import ReplyPartSequence, {
   type ReplyToolCallChange
 } from "../../../../src/modules/agent/replyPartSequence"
 import {
+  ASK_ME_TOOL_CALL_DECISION,
   createFixtureUuidV7,
   createToolCallPart,
   FIXTURE_TIMESTAMP
@@ -178,6 +179,7 @@ describe("ReplyPartSequence", () => {
       round: 0,
       toolName: "web_search",
       argumentText: '{"query":"moths"}',
+      decision: ASK_ME_TOOL_CALL_DECISION,
       status: "running"
     } as const
 
@@ -270,6 +272,7 @@ describe("ReplyPartSequence", () => {
           round: 0,
           toolName: "web_search",
           argumentText: "{}",
+          decision: ASK_ME_TOOL_CALL_DECISION,
           status: "running"
         })
     ],

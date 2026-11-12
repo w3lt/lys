@@ -74,6 +74,7 @@ import { createImageAttachment } from "../../support/attachmentFixtures"
 import { parseMcpToolDefinition } from "../../support/mcpToolFixtures"
 import {
   openConversationTestServices,
+  readToolCallDecisionRows,
   saveSourceRow,
   type ConversationTestServices
 } from "../../support/conversationDatabase"
@@ -3790,6 +3791,175 @@ describe("Agent", () => {
       expect(run.parts).toEqual([])
       expect(run.events).toEqual([INTERRUPTED_EVENT])
     })
+  })
+
+  describe("tool call decision records", () => {
+    /** Client tool runner whose every call succeeds with no output. */
+    const sendSucceededClientToolCall: AgentTurn["sendClientToolCall"] =
+      async () => ({ status: "succeeded", content: "" })
+
+    /** Columns of a call's record that the policy filled alone. */
+    const ALLOWED_WITHOUT_GATE = Object.freeze({
+      policyEffect: "allow",
+      policyReason: null,
+      approvalMode: null,
+      answer: null
+    })
+
+    it.each(
+      Object.entries({
+        "a client tool's call the person allowed on Ask me": {
+          createScenario: () => ({
+            openReplyStream: createRoundStreams(READ_A_ROUND, FINISH_ROUND),
+            clientTools: [READ_TEXT_FILE_TOOL],
+            justRunToolNames: [],
+            sendToolApprovalPrompt: createAllowingPromptSender(),
+            sendClientToolCall: sendSucceededClientToolCall
+          }),
+          record: {
+            toolName: "read_text_file",
+            policyEffect: "allow",
+            policyReason: null,
+            approvalMode: "ask-me",
+            answer: "allowed",
+            outcome: "succeeded"
+          }
+        },
+        "a client tool's call on Just run": {
+          createScenario: () => ({
+            openReplyStream: createRoundStreams(READ_A_ROUND, FINISH_ROUND),
+            clientTools: [READ_TEXT_FILE_TOOL],
+            sendClientToolCall: sendSucceededClientToolCall
+          }),
+          record: {
+            toolName: "read_text_file",
+            ...ALLOWED_WITHOUT_GATE,
+            approvalMode: "just-run",
+            outcome: "succeeded"
+          }
+        },
+        "a client tool's call the person declined": {
+          createScenario: () => ({
+            openReplyStream: createRoundStreams(READ_A_ROUND, FINISH_ROUND),
+            clientTools: [READ_TEXT_FILE_TOOL],
+            justRunToolNames: [],
+            sendToolApprovalPrompt: async () => DECLINED_APPROVAL
+          }),
+          record: {
+            toolName: "read_text_file",
+            policyEffect: "allow",
+            policyReason: null,
+            approvalMode: "ask-me",
+            answer: "declined",
+            outcome: "rejected"
+          }
+        },
+        "a client tool's call the client could not show": {
+          createScenario: () => ({
+            openReplyStream: createRoundStreams(READ_A_ROUND, FINISH_ROUND),
+            clientTools: [READ_TEXT_FILE_TOOL],
+            justRunToolNames: [],
+            sendToolApprovalPrompt: async () => ({
+              status: "rejected" as const,
+              reason: "showFailed" as const,
+              content: "The call could not be shown to the person."
+            })
+          }),
+          record: {
+            toolName: "read_text_file",
+            policyEffect: "allow",
+            policyReason: null,
+            approvalMode: "ask-me",
+            answer: "showFailed",
+            outcome: "rejected"
+          }
+        },
+        "a credential file read the policy denied on Just run": {
+          createScenario: () => ({
+            openReplyStream: createRoundStreams(
+              buildCallRound("read_text_file", '{"path":"~/.ssh/id_rsa"}'),
+              FINISH_ROUND
+            ),
+            clientTools: [READ_TEXT_FILE_TOOL]
+          }),
+          record: {
+            toolName: "read_text_file",
+            policyEffect: "deny",
+            policyReason: "credential-file",
+            approvalMode: null,
+            answer: null,
+            outcome: "failed"
+          }
+        },
+        "a destructive MCP tool's call the person allowed on Just run": {
+          createScenario: () => ({
+            openReplyStream: createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND),
+            mcpTools: [createMcpEchoTool(undefined, true).tool],
+            sendToolApprovalPrompt: createAllowingPromptSender()
+          }),
+          record: {
+            toolName: "mcp__files__echo",
+            policyEffect: "require-approval",
+            policyReason: "destructive-tool",
+            approvalMode: "just-run",
+            answer: "allowed",
+            outcome: "succeeded"
+          }
+        },
+        "a backend tool's call that runs without approval": {
+          createScenario: () => ({
+            openReplyStream: createRoundStreams(
+              LOOK_UP_MOTH_ROUND,
+              FINISH_ROUND
+            ),
+            builtInTools: [
+              { ...createLookUpWordTool().entry, runsWithoutApproval: true }
+            ]
+          }),
+          record: {
+            toolName: "look_up_word",
+            ...ALLOWED_WITHOUT_GATE,
+            outcome: "succeeded"
+          }
+        },
+        "a call of a tool the round did not offer": {
+          createScenario: () => ({
+            openReplyStream: createRoundStreams(
+              buildCallRound("delete_everything", "{}"),
+              FINISH_ROUND
+            ),
+            clientTools: [READ_TEXT_FILE_TOOL]
+          }),
+          record: {
+            toolName: "delete_everything",
+            policyEffect: null,
+            policyReason: null,
+            approvalMode: null,
+            answer: null,
+            outcome: "failed"
+          }
+        }
+      })
+    )(
+      "stores how %s was decided, with no argument value",
+      async (_label, { createScenario, record }) => {
+        const store = openAgentTurnStore()
+
+        const run = await getAgentReplyOutcome({ store, ...createScenario() })
+
+        const [call] = run.parts
+        expect(readToolCallDecisionRows(store.services.database)).toEqual([
+          {
+            callId: call?.id,
+            conversationId: store.conversationId,
+            agentCode: AGENT_PROFILE.code,
+            ...record,
+            createdAt: call?.createdAt,
+            updatedAt: call?.updatedAt
+          }
+        ])
+      }
+    )
   })
 
   describe("a reply that another writer ended while its calls were handled", () => {

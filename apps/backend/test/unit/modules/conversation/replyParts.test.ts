@@ -3,6 +3,7 @@ import * as z from "zod"
 import type { ConversationTestServices } from "../../support/conversationDatabase"
 import { openConversationTestServices } from "../../support/conversationDatabase"
 import {
+  ASK_ME_TOOL_CALL_DECISION,
   createFixtureUuidV7,
   createNewConversationTarget,
   createTurnUserMessage
@@ -92,6 +93,7 @@ describe("StoredReplyParts", () => {
         round: 0,
         toolName: "web_search",
         argumentText: '{"query":"moths"}',
+        decision: ASK_ME_TOOL_CALL_DECISION,
         status: "awaiting-approval"
       })
 
@@ -118,6 +120,7 @@ describe("StoredReplyParts", () => {
           round: 0,
           toolName: "nope",
           argumentText: "{",
+          decision: ASK_ME_TOOL_CALL_DECISION,
           status: "failed",
           result: "No tool is named nope."
         })
@@ -135,6 +138,7 @@ describe("StoredReplyParts", () => {
           round: 0,
           toolName: "nope",
           argumentText: "{}",
+          decision: ASK_ME_TOOL_CALL_DECISION,
           status: "failed",
           result: ""
         } as const
@@ -228,6 +232,7 @@ describe("StoredReplyParts", () => {
         round: 0,
         toolName: "web_search",
         argumentText: '{"query":"moths"}',
+        decision: ASK_ME_TOOL_CALL_DECISION,
         status: "awaiting-approval"
       })
       vi.setSystemTime(new Date(LATER))

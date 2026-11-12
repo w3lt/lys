@@ -107,8 +107,9 @@ Terms that mean something specific inside Lys.
   the saved email account; its switch is `mcp.builtIn.email.enabled` in
   `settings.json`.
 - **MCP tool**: a tool of a connected MCP server. The model calls it as
-  `mcp__<server>__<tool>`; the backend asks the person first, unless the tool
-  is on Just run, and runs the call on the server. Its output is untrusted.
+  `mcp__<server>__<tool>`; the backend applies the tool call policy, asks the
+  person first unless the tool is on Just run and its server does not mark it
+  as destructive, and runs the call on the server. Its output is untrusted.
 
 ## Streaming terms
 

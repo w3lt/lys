@@ -203,17 +203,18 @@ model reads the error. A call of a backend tool, such as `read_page` or
 `web_search`, or of an MCP tool never arrives here: once allowed, the backend
 runs it itself.
 
-The backend sends this event only once the call may run: at once for a tool
-saved as Just run, otherwise after the person allowed its `tool-approval`
-prompt. The client runs it without asking again and answers with the
+The backend sends this event only once the call may run: at once when the tool
+call policy allows a call of a tool saved as Just run, otherwise after the
+person allowed its `tool-approval` prompt; a call the policy denies is never
+sent. The client runs it without asking again and answers with the
 [tool-result route](/reference/api/#tool-results). When a round's calls
 arrive, their prompts and the run requests of calls that need no prompt are
 sent in the model's order; the next round starts once every call has an
-answer. The model's text in a round that calls tools is streamed and stored
-as a text part of that round. The event itself is live only: a client that
-was not following when it was sent finds the call in the next
-`reply-snapshot`'s `pendingToolCalls`. The call is also stored as a
-`tool-call` part, which `reply-part` events report.
+answer. The model's text in a round that calls tools is streamed and stored as
+a text part of that round. The event itself is live only: a client that was
+not following when it was sent finds the call in the next `reply-snapshot`'s
+`pendingToolCalls`. The call is also stored as a `tool-call` part, which
+`reply-part` events report.
 
 ### `reply-snapshot`
 

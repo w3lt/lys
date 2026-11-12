@@ -587,8 +587,9 @@ on a prompt; it waits as for a [tool result](#tool-results).
 ## Tool results
 
 A `tool-call` event asks the client to run one call of a client tool: one the
-person allowed, or one whose tool is saved as Just run. The client runs it
-without asking again and answers with
+person allowed, or one the tool call policy allows of a tool saved as Just
+run; a call the policy denies is never sent. The client runs it without asking
+again and answers with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`,
 where `callId` is the `id` of the call's `tool-call` event or of its entry in
 `reply-snapshot.pendingToolCalls`. One request answers one call. Calls of
@@ -796,10 +797,11 @@ stopped. The model reads one of:
   and which ends the connection, failing the server's other calls in flight
   the same way.
 
-The backend checks only the shape of a call's arguments before it asks the
-person: a JSON object of at most 256 KiB, nesting at most 32 levels, whose
-keys follow the argument name rule and include every name the schema
-requires. The server checks the values.
+Before it asks the person, the backend checks the shape of a call's arguments,
+a JSON object of at most 256 KiB, nesting at most 32 levels, whose keys follow
+the argument name rule and include every name the schema requires, and the
+[tool call policy](/architecture/backend/#tool-call-policy) denies a call that
+names a credential file or a blocked address. The server checks the values.
 
 ### The email server's tools
 

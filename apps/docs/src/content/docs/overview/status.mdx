@@ -29,11 +29,11 @@ repository today; it is not a promise of unreleased work.
 - A new conversation is answered by the agent chosen in the composer: a
   built-in agent, Caliginia unless another is chosen, or one of the user's
   own. Armitage, the built-in tool keeper, answers no chat: a model trained
-  for tool use asks it, through `find_tools`, which of the turn's tools fit
-  a task, and is offered those tools from its next round, each call still
-  asking first unless the tool is on Just run. A conversation keeps its
-  agent for every turn, and one whose agent was
-  deleted stays readable but accepts no new message.
+  for tool use asks it, through `find_tools`, which of the turn's tools fit a
+  task, and is offered those tools from its next round, each call still going
+  through the tool call policy and the approval as without routing. A
+  conversation keeps its agent for every turn, and one whose agent was deleted
+  stays readable but accepts no new message.
 - Conversation history supports search, cursor pagination, transcript retrieval,
   rename, and deletion. A reply's parts, its reasoning, text, and tool calls
   with their results, are each persisted before publication; continuation

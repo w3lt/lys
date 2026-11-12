@@ -32,8 +32,9 @@ starts each stdio server's command as the person's OS account, or connects to
 each remote server's URL with the configured headers, and a call of one of
 their tools runs on that server, which decides what the call reaches. Their
 tools start switched on, because adding a server is the person's choice, and
-each call still asks first unless the person set the tool to Just run; see
-[MCP servers](#mcp-servers).
+each call still asks first unless the person set the tool to Just run and its
+server does not mark it as destructive, after the tool call policy's deny
+rules; see [MCP servers](#mcp-servers).
 
 ## Current trust boundaries
 
@@ -187,14 +188,14 @@ each call still asks first unless the person set the tool to Just run; see
   soon as it sees it ended, which keeps that window short but does not close
   it.
 - An MCP server writes its tools' descriptions, input schemas, and results,
-  and all reach the model. A description is offered as the tool's
-  description, cleaned of invisible characters and cut to 4,096 characters,
-  and an input schema as the server wrote it, both without framing, so a
-  server can put instructions in either; a tool whose name or schema holds a
-  character a person cannot see is not listed, so Settings shows the text
-  the model reads. Results are framed as untrusted, which
-  lowers the risk but cannot remove it. On Just run, an MCP tool's calls run
-  with no card shown.
+  and all reach the model. A description is offered as the tool's description,
+  cleaned of invisible characters and cut to 4,096 characters, and an input
+  schema as the server wrote it, both without framing, so a server can put
+  instructions in either; a tool whose name or schema holds a character a
+  person cannot see is not listed, so Settings shows the text the model reads.
+  Results are framed as untrusted, which lowers the risk but cannot remove it.
+  On Just run, an MCP tool's calls run with no card shown, unless its server
+  marks the tool as destructive.
 - The environment variables and headers of the MCP servers are stored as
   plain text in `settings.json`, like the Tavily API key, readable by the
   person's OS account and by any process running as it. A stdio server
@@ -246,10 +247,10 @@ each call still asks first unless the person set the tool to Just run; see
   them; a search that finds them full fails, and its reply goes on without
   the tools it asked for.
 - A tool search reads what the asking model wrote as the task and the
-  descriptions of the turn's tools, MCP servers' included, without framing,
-  so a page's or a server's instructions can steer which tools Armitage
-  names. A named tool is only offered: each call of it still asks the person
-  unless it is on Just run, as without routing.
+  descriptions of the turn's tools, MCP servers' included, without framing, so
+  a page's or a server's instructions can steer which tools Armitage names. A
+  named tool is only offered: each call of it still goes through the tool call
+  policy and asks the person as without routing.
 - Deleting a stored agent keeps its row, its system prompt included, in
   `lys_db.sqlite`, so that its code is never reused; Lys offers no way to
   erase it.
@@ -456,9 +457,12 @@ rules and the [API reference](/reference/api/#mcp-servers) for the routes.
   character a person cannot see, since Lys sends both unchanged.
 - **Approval.** Every call of an MCP tool asks the person first unless the
   tool is on Just run; MCP tools start switched on, because adding the server
-  is the person's opt-in, and none starts on Just run. Before asking, the backend
-  checks only the arguments' shape: a JSON object of at most 256 KiB whose
-  keys follow the argument name rule. The server checks the values.
+  is the person's opt-in, and none starts on Just run. A call of a tool its
+  server marks as destructive asks even on Just run. Before asking, the
+  backend checks the arguments' shape, a JSON object of at most 256 KiB whose
+  keys follow the argument name rule, and the [tool call
+  policy](/architecture/backend/#tool-call-policy) denies a call that names a
+  credential file or a blocked address; the server checks the values.
 - **Choices kept by name.** A tool's switch and Just run choice are saved
   under the name the model calls it by, `mcp__<server>__<tool>`, and stay
   when the server is removed or renamed. A server saved later under an
@@ -468,10 +472,11 @@ rules and the [API reference](/reference/api/#mcp-servers) for the routes.
   off comes back on; the choices under the old name apply again to a server
   saved under it.
 - **Prompt injection.** A server, or a page or file one of its tools reads,
-  can try to steer the model, and a description is not framed as untrusted.
-  On Ask me each further call still needs the person's approval; on Just run
-  it does not, so an MCP tool and a file tool both on Just run can move a
-  file's text to the server with no card shown.
+  can try to steer the model, and a description is not framed as untrusted. On
+  Ask me each further call still needs the person's approval; on Just run it
+  does not, unless the server marks the tool as destructive, so an MCP tool
+  and a file tool both on Just run can move a file's text to the server with
+  no card shown.
 - **Time and size.** Connecting and reading the tool list take at most two
   minutes, and a call at most five; Stop tells the server a call was
   cancelled. The backend reads at most 16 MiB of one answer: an HTTP body,

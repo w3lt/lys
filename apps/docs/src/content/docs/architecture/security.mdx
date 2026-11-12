@@ -130,8 +130,10 @@ rules; see [MCP servers](#mcp-servers).
   `search_files` check the real path of every file they read or list against
   the same names, but a tool that runs commands, an MCP tool that reads
   files, and a hard link to a key under another name in a folder with
-  another name can still reach a credential file or a local address; on Just
-  run nothing else stands in their way.
+  another name can still reach a credential file or a local address, and a
+  tool that runs commands or an MCP tool that follows a link out of an
+  approved folder can still reach a file outside the approved folders; on
+  Just run nothing else stands in their way.
 - A destructive mark is the MCP server's own claim. A server that leaves it
   off a tool that deletes or overwrites data keeps the person's Just run
   choice for that tool, and Settings does not show which tools always ask.
@@ -467,8 +469,8 @@ rules and the [API reference](/reference/api/#mcp-servers) for the routes.
   backend checks the arguments' shape, a JSON object of at most 256 KiB whose
   keys follow the argument name rule, and the
   [tool call policy](/architecture/backend/#tool-call-policy) denies a call
-  that names a credential file or a blocked address; the server checks the
-  values.
+  that names a credential file, a path outside the approved folders, or a
+  blocked address; the server checks the values.
 - **Choices kept by name.** A tool's switch and Just run choice are saved
   under the name the model calls it by, `mcp__<server>__<tool>`, and stay
   when the server is removed or renamed. A server saved later under an

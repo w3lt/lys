@@ -93,7 +93,8 @@ folder listed, any path is allowed. Otherwise a path is inside when its real
 path, with every link resolved, is a listed folder or below one by whole
 parts, so `/work/app-old` is outside `/work/app` and a link inside a listed
 folder that points outside it is outside too. A settings file that cannot be
-read or parsed approves no folder, so both commands refuse every path.
+read or parsed approves no folder, so both commands refuse every path with
+`{ "code": "settingsUnreadable" }`, as `get_location` does.
 
 - `read_text_file` fails with `{ "code": "outsideApprovedFolders" }` when the
   opened file's real path is outside every listed folder, before it reads a

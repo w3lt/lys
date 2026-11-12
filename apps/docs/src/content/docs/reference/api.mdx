@@ -818,7 +818,8 @@ Before it asks the person, the backend checks the shape of a call's arguments,
 a JSON object of at most 256 KiB, nesting at most 32 levels, whose keys follow
 the argument name rule and include every name the schema requires, and the
 [tool call policy](/architecture/backend/#tool-call-policy) denies a call that
-names a credential file or a blocked address. The server checks the values.
+names a credential file, a path outside the approved folders, or a blocked
+address. The server checks the values.
 
 ### The email server's tools
 

@@ -392,7 +392,9 @@ For each call, in order:
    the person's approval mode decides.
 5. A call the person allows is stored as running, then decided again with
    the approved folders read at that moment (spec §4): one the rules now deny
-   is stored as failed with the denial and never runs.
+   is stored as failed with the denial and never runs. Its decision record
+   keeps the decision made when the call arrived, with the answer `allowed`
+   and the outcome `failed`; the denial is in the call's result.
 
 The policy reads a `ToolCallRequest` that the gateway builds from what the
 backend trusts, never from what the model claims, in the attribute groups of
@@ -415,8 +417,11 @@ search turn, so Armitage's own `search_tools` and `recommend_tool` calls are
 decided too. Each round reads the folders once into the `ToolCallRules` the
 round's calls are decided by (`readToolCallRules`), and the re-check of an
 allowed call reads them again. A missing file or list leaves the folder rule
-off; a file that cannot be read approves no folder, so every call naming a
-path is denied.
+off. A file that cannot be read approves no folder: every call naming a path
+is denied with the reason `settings-unreadable`, whose sentence tells the
+model the settings file cannot be read, and the chat route logs a warning
+with the request's logger at each such read, as it does for the Just run
+choices.
 
 The policy reads every text of the call's arguments: the argument names,
 every string value at any depth, and the keys of nested objects; numbers,
@@ -484,8 +489,8 @@ like a path.
 Every call the gateway stores gets a decision record, a row of
 [`tool_call_decisions`](/reference/schema/#tool_call_decisions) written in
 the transaction that stores the call. It names the conversation, its agent,
-and the tool, and holds the policy's effect and reason, none when step 1 or
-2 failed the call; the approval mode the gate applied, `just-run` or
+and the tool, and holds the policy's effect and reason when the call arrived,
+none when step 1 or 2 failed the call, and the same for a call step 5 denies; the approval mode the gate applied, `just-run` or
 `ask-me`, none when the call never reached the gate; the answer that moved a
 waiting call on, `allowed`, `declined`, or `showFailed`, or `expired` when
 nobody answered its prompt in time, stored in the transaction that changes the

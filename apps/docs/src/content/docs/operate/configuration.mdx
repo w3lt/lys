@@ -64,7 +64,10 @@ tool calls may name any path. Once you list one, a call that names a path
 outside every listed folder is denied without asking you, and the desktop's
 file tools refuse a file outside them, wherever a link leads. The backend and
 the file tools read the list at each round of calls, so a hand edit applies
-at once. If the file exists but cannot be read, no folder is approved. See
+at once. If the file exists but cannot be read, no folder is approved: a call
+that names a file is denied with a sentence saying the settings file cannot be
+read, the backend logs a warning, and the file tools fail with
+`settingsUnreadable`. See
 [Approved folders](/reference/configuration/#approved-folders).
 
 The `location` group holds the city, region, and country you type in Settings

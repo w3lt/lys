@@ -254,9 +254,10 @@ calls it stored are part of the new turn's context.
    any call while tool calls are off, or a call with invalid arguments is
    answered by the backend itself and stored as a `failed` call. So is a valid
    call the [tool call policy](/architecture/backend/#tool-call-policy) denies
-   because it names a private key or credential file, or a local or private
-   network address: it never runs and is never shown to the person, even on
-   Just run. Every other call is stored as a part too, `running` or
+   because it names a private key or credential file, a path outside the
+   folders the person lets tools use, once any is listed, or a local or
+   private network address: it never runs and is never shown to the person,
+   even on Just run. Every other call is stored as a part too, `running` or
    `awaiting-approval`, and each later change of it is stored and sent as a
    `reply-part` event.
 4. The backend's tool approval service reads the Just run choices from the
@@ -273,7 +274,10 @@ calls it stored are part of the new turn's context.
    `showFailed` at once when it cannot describe the call. Allow once and
    Reject send the answer, with the prompt's token, to
    `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`.
-6. An allowed client tool's call goes to the desktop as a `tool-call` event
+6. A call the person allows is stored as `running` and decided again with
+   the approved folders read at that moment; one they no longer approve is
+   stored as `failed` with the denial and never runs. An allowed client
+   tool's call goes to the desktop as a `tool-call` event
    under the same `id`; the store runs the Tauri command at once and sends its
    result to
    `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`.

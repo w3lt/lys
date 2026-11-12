@@ -424,8 +424,10 @@ a result the model reads, never runs, and the person is not asked.
   and compare real paths, with every link followed, so a link inside a listed
   folder that points outside it is refused too.
 - When the file exists but cannot be read or parsed, no folder is approved:
-  the backend denies every call that names a path, and the desktop's file
-  tools refuse every file. A missing file lists no folder.
+  the backend denies every call that names a path with the reason
+  `settings-unreadable` and a sentence saying the settings file cannot be
+  read, and logs a warning, and the desktop's file tools refuse every file
+  with `settingsUnreadable`. A missing file lists no folder.
 - A build older than the list cannot load a settings file that holds it,
   because the `tools` group rejects unknown fields; remove the folders, or the
   `approvedFolders` key, before going back to one.

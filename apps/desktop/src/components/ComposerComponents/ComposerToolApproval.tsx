@@ -1,6 +1,12 @@
 import type { ChatToolCall } from "@lys/protocol"
 import type { ToolAccess, ToolRunner } from "@lys/share"
-import { useId, useState, type ReactElement } from "react"
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactElement
+} from "react"
 import { ChevronRight, Lock } from "lucide-react"
 
 import {
@@ -334,8 +340,11 @@ function ComposerToolResultFailure({
  *
  * @remarks The card is a named group. The parent's polite status line
  * announces the expiry, so the sentence here is not announced again.
- * Dismiss asks the parent to stop showing the card; Esc and Enter in the
- * composer field leave it alone. The component owns no state.
+ * Dismiss asks the parent to stop showing the card, and the parent moves
+ * focus on; Esc and Enter in the composer field leave it alone. When the
+ * card mounts with focus on the page body, as when it replaces the waiting
+ * card that held focus, Dismiss takes focus before the page paints; focus
+ * anywhere else is left alone.
  * @param props - Tool and the dismissal.
  * @returns The expired prompt's card.
  */
@@ -343,6 +352,15 @@ function ComposerToolApprovalExpiry({
   toolName,
   onDismissToolCall
 }: ComposerToolApprovalExpiryProps): ReactElement {
+  const dismissButtonRef = useRef<HTMLButtonElement>(null)
+
+  useLayoutEffect(() => {
+    const focusedElement = document.activeElement
+    if (focusedElement === null || focusedElement === document.body) {
+      dismissButtonRef.current?.focus()
+    }
+  }, [])
+
   return (
     <fieldset
       aria-label="Tool call prompt expired"
@@ -365,6 +383,7 @@ function ComposerToolApprovalExpiry({
       <div className="composer__approval-footer">
         <Button
           onClick={onDismissToolCall}
+          ref={dismissButtonRef}
           size="sm"
           type="button"
           variant="outline"

@@ -1254,6 +1254,28 @@ describe("Composer", () => {
       ).toBeInTheDocument()
     })
 
+    it("drops an expired prompt on Dismiss and moves focus to the message field", async () => {
+      startNativeHostFake({})
+      startBackendFake(MEASURING_BACKEND_ROUTES)
+      const { Composer } = await loadFreshComposerWithWaitingCall()
+      const { useToolCallStore } = await import("@/lib/store/tool-calls")
+      useToolCallStore.setState({
+        heldCalls: [{ ...WAITING_READ, answer: { status: "expired" } }]
+      })
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      await user.click(screen.getByRole("button", { name: "Dismiss" }))
+
+      expect(useToolCallStore.getState().heldCalls).toEqual([])
+      expect(
+        screen.queryByRole("group", { name: "Tool call prompt expired" })
+      ).not.toBeInTheDocument()
+      expect(getMessageField()).toHaveFocus()
+    })
+
     it.each(["Escape", "Enter"])(
       "leaves %s to the field while only an expired prompt is shown, sending nothing",
       async (key) => {

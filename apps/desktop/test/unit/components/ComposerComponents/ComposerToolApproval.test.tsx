@@ -178,6 +178,44 @@ function startToolApproval(
   return answers
 }
 
+/**
+ * Renders {@link WAITING_SEARCH}'s card after a text field, moves focus to
+ * the element the case picks, and lets the prompt expire.
+ *
+ * @param findFocusTarget - Finds the element that holds focus before the
+ * prompt expires.
+ */
+function expireAfterFocusing(findFocusTarget: () => HTMLElement): void {
+  const answers = {
+    onAllowToolCall: vi.fn(),
+    onRejectToolCall: vi.fn(),
+    onRetryToolCallAnswer: vi.fn(),
+    onDismissToolCall: vi.fn()
+  }
+  const { rerender } = render(
+    <>
+      <textarea aria-label="Message" />
+      <ComposerToolApproval
+        {...answers}
+        hasDraft={false}
+        toolCall={WAITING_SEARCH}
+      />
+    </>
+  )
+  findFocusTarget().focus()
+
+  rerender(
+    <>
+      <textarea aria-label="Message" />
+      <ComposerToolApproval
+        {...answers}
+        hasDraft={false}
+        toolCall={EXPIRED_SEARCH}
+      />
+    </>
+  )
+}
+
 describe("ComposerToolApproval", () => {
   describe("a call that waits for the person", () => {
     it("says which desktop tool was called, what it does with the machine, and what this call will do", () => {
@@ -411,6 +449,22 @@ describe("ComposerToolApproval", () => {
       expect(answers.onAllowToolCall).not.toHaveBeenCalled()
       expect(answers.onRejectToolCall).not.toHaveBeenCalled()
       expect(answers.onRetryToolCallAnswer).not.toHaveBeenCalled()
+    })
+
+    it("gives Dismiss the focus the waiting card held when the prompt expires", () => {
+      expireAfterFocusing(() =>
+        screen.getByRole("button", { name: "Allow once" })
+      )
+
+      expect(screen.getByRole("button", { name: "Dismiss" })).toHaveFocus()
+    })
+
+    it("leaves focus in the field when the prompt expires while the person types", () => {
+      expireAfterFocusing(() =>
+        screen.getByRole("textbox", { name: "Message" })
+      )
+
+      expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus()
     })
   })
 })

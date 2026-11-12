@@ -5,7 +5,7 @@ import ApprovedFoldersCard from "@/components/SettingsViewComponents/ApprovedFol
 
 /** What the field says for a path that is not an absolute folder path. */
 const INVALID_PATH_MESSAGE =
-  "Type an absolute path that starts with /, such as /Users/you/Projects, in at most 1024 characters, on one line."
+  "Type an absolute path that starts with /, such as /Users/you/Projects, in at most 1024 characters, without tabs or other control characters."
 
 /**
  * Renders the card for a list of folders, with spies for its requests.
@@ -63,7 +63,8 @@ describe("ApprovedFoldersCard", () => {
     Object.entries({
       "a relative path": "work/app",
       "a path in the home folder's form": "~/work",
-      "a path that is too long": `/${"a".repeat(1024)}`
+      "a path that is too long": `/${"a".repeat(1024)}`,
+      "a path holding a tab": "/Users/ada/a\tb"
     })
   )(
     "refuses %s with Add folder, says why, and keeps it until the person types again",

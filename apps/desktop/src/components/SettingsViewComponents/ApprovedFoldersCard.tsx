@@ -16,7 +16,7 @@ type FolderProblem = "invalid" | "listed"
 /** What the person reads for each problem with a typed folder. */
 const FOLDER_PROBLEM_MESSAGES = Object.freeze({
   invalid:
-    "Type an absolute path that starts with /, such as /Users/you/Projects, in at most 1024 characters, on one line.",
+    "Type an absolute path that starts with /, such as /Users/you/Projects, in at most 1024 characters, without tabs or other control characters.",
   listed: "This folder is already listed."
 } satisfies Readonly<Record<FolderProblem, string>>)
 

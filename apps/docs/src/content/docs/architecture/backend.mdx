@@ -461,8 +461,8 @@ path, such as a web search query, is denied like a path.
 
 `ToolApprovalService` (`src/modules/toolApproval/toolApprovalService.ts`) is the
 approval gate for every tool call of every turn that the
-[tool call policy](#tool-call-policy) allows, client, backend, and MCP tools
-alike, except a call of a backend tool that runs without approval:
+[tool call policy](#tool-call-policy) does not deny, client, backend, and MCP
+tools alike, except a call of a backend tool that runs without approval:
 `read_attachment` reads only what the person attached to the conversation,
 the [agent state tools](#agent-state-tools) only read what agents are
 doing, and [`find_tools`](#tool-routing) and Armitage's search tools only
@@ -483,18 +483,17 @@ approval or name no offered tool creates no gate and does not read the file.
 For each call that passes the gate, in the model's order, the gate's
 `startToolCall` stores the call and decides how it goes on. A call of a tool
 on Just run that the policy allowed is stored as `running` and goes on at
-once. Any other call is stored as
-`awaiting-approval` first; the gate then sends a `tool-approval` event, and
-the round waits for the person's answer through the tool-approval route,
-with no timer. A call the store refuses is never prompted. Storing and
-prompting happen in the same synchronous step, so a follower that sees the
-prompt can read the call, and a round's prompts and the run requests of
-calls allowed at once keep the model's order. When the settings
-file cannot be read, or `tools`, `justRun`, or a name in it is invalid, no
-tool is on Just run, every call of the round asks, and the chat route logs a
-warning with the request's logger. A choice the desktop saves applies from
-the next round. The desktop is the file's only writer; the backend never
-writes it.
+once. Any other call is stored as `awaiting-approval` first; the gate then
+sends a `tool-approval` event, and the round waits for the person's answer
+through the tool-approval route, with no timer. A call the store refuses is
+never prompted. Storing and prompting happen in the same synchronous step, so
+a follower that sees the prompt can read the call, and a round's prompts and
+the run requests of calls allowed at once keep the model's order. When the
+settings file cannot be read, or `tools`, `justRun`, or a name in it is
+invalid, no tool is on Just run, every call of the round asks, and the chat
+route logs a warning with the request's logger. A choice the desktop saves
+applies from the next round. The desktop is the file's only writer; the
+backend never writes it.
 
 The Tools pane's switches are not part of the gateway: they decide only which
 tools a chat request offers, so switching a tool or tool calls off applies

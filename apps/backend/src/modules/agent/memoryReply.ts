@@ -12,13 +12,27 @@ import {
 } from "./replyPartSequence"
 
 /**
- * Finds the status a tool call has before a change.
+ * Fields a tool call has in every state, with the time of its last change.
+ */
+type ToolCallPartFields = Pick<
+  ToolCallReplyPart,
+  | "kind"
+  | "id"
+  | "round"
+  | "createdAt"
+  | "updatedAt"
+  | "toolName"
+  | "argumentText"
+>
+
+/**
+ * Selects the status a tool call has before a change.
  *
  * @param change - The call's next state.
  * @returns `awaiting-approval` for `running` and `rejected`, which answer
  * the person; `running` for `succeeded` and `failed`, which end a run.
  */
-function findPreviousToolCallStatus(
+function getPreviousToolCallStatus(
   change: ReplyToolCallChange
 ): "awaiting-approval" | "running" {
   return change.status === "running" || change.status === "rejected"
@@ -32,15 +46,16 @@ function findPreviousToolCallStatus(
  * @param part - The call as kept.
  * @param change - The call's next state.
  * @param updatedAt - Time of the change.
- * @returns The validated call: its new status, the result the model reads
- * when it has one, and the numbers of a succeeded call's sources.
+ * @returns The validated, frozen call: its new status, the result the model
+ * reads when it has one, and the numbers of a succeeded call's sources.
+ * @throws If the changed call breaks the part contract.
  */
 function buildChangedToolCall(
   part: ToolCallReplyPart,
   change: ReplyToolCallChange,
   updatedAt: string
 ): ToolCallReplyPart {
-  const base = {
+  const base: ToolCallPartFields = {
     kind: part.kind,
     id: part.id,
     round: part.round,
@@ -79,7 +94,7 @@ function buildChangedToolCall(
 function parseToolCallPart(candidate: unknown): ToolCallReplyPart {
   const part = replyPartSchema.parse(candidate)
   if (part.kind !== "tool-call") throw new Error("Expected a tool call part")
-  return part
+  return Object.freeze(part)
 }
 
 /**
@@ -93,9 +108,10 @@ function parseToolCallPart(candidate: unknown): ToolCallReplyPart {
  * final state is kept, every write is refused, and so is a tool call of a
  * round at or past the reply's tool call round limit, which ends the reply
  * the way a deleted reply ends; reasoning and text of any round are kept.
- * Created per reply and dropped with it; holds no resource. Concurrency
- * model: single-owner, used by one reply on the backend's event loop; each
- * operation is one synchronous step.
+ * Every part it keeps or returns is frozen, so a caller cannot change what
+ * the reply keeps. Created per reply and dropped with it; holds no
+ * resource. Concurrency model: single-owner, used by one reply on the
+ * backend's event loop; each operation is one synchronous step.
  */
 export default class MemoryReply {
   /** Number of rounds, from round 0, whose tool calls the reply keeps. */
@@ -121,16 +137,16 @@ export default class MemoryReply {
    * Keeps a new part after the reply's last one.
    *
    * @param draft - The part; a reasoning or text part gets a new UUIDv7.
-   * @returns The kept part with its identity and times; undefined once the
-   * final state is kept, or for a tool call of a round at or past the
-   * limit.
+   * @returns The kept part with its identity and times, frozen; undefined
+   * once the final state is kept, or for a tool call of a round at or past
+   * the limit.
    * @throws If the draft breaks the part contract, such as empty text.
    */
   public createReplyPart(draft: ReplyPartDraft): ReplyPart | undefined {
     if (this.#status !== "streaming") return undefined
     if (draft.kind === "tool-call" && draft.round >= this.#toolCallRoundCount)
       return undefined
-    const part = buildReplyPart(draft, new Date().toISOString())
+    const part = Object.freeze(buildReplyPart(draft, new Date().toISOString()))
     this.#parts.set(part.id, part)
     return part
   }
@@ -155,14 +171,12 @@ export default class MemoryReply {
     if (this.#status !== "streaming" || part === undefined) return undefined
     if (part.kind === "tool-call") return undefined
     const updatedAt = new Date().toISOString()
-    this.#parts.set(
-      partId,
-      replyPartSchema.parse({
-        ...part,
-        content: `${part.content}${content}`,
-        updatedAt
-      })
-    )
+    const changed = replyPartSchema.parse({
+      ...part,
+      content: `${part.content}${content}`,
+      updatedAt
+    })
+    this.#parts.set(partId, Object.freeze(changed))
     return updatedAt
   }
 
@@ -171,9 +185,9 @@ export default class MemoryReply {
    *
    * @param toolCallId - UUIDv7 of the call.
    * @param change - The call's next state.
-   * @returns The call as kept; undefined once the final state is kept, or
-   * when the reply keeps no tool call with the identity in the state the
-   * change follows.
+   * @returns The call as kept, frozen; undefined once the final state is
+   * kept, or when the reply keeps no tool call with the identity in the
+   * state the change follows.
    */
   public updateReplyToolCall(
     toolCallId: string,
@@ -183,7 +197,7 @@ export default class MemoryReply {
     if (
       this.#status !== "streaming" ||
       part?.kind !== "tool-call" ||
-      part.status !== findPreviousToolCallStatus(change)
+      part.status !== getPreviousToolCallStatus(change)
     )
       return undefined
     const changed = buildChangedToolCall(part, change, new Date().toISOString())

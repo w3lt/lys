@@ -101,7 +101,7 @@ export type ReplyTools =
     }>
 
 /**
- * Finds how a turn offers its client, built-in, and MCP tools.
+ * Calculates how a turn offers its client, built-in, and MCP tools.
  *
  * @param trainedForToolUse - Whether the turn's model is trained for tool
  * use.
@@ -110,7 +110,7 @@ export type ReplyTools =
  * and the turn has such a tool; `direct` otherwise, as a model not trained
  * for tool use may not call `find_tools` before the tool it needs.
  */
-export function findToolRouting(
+export function calculateToolRouting(
   trainedForToolUse: boolean,
   toolCount: number
 ): ToolRouting {
@@ -187,7 +187,7 @@ export function buildReplyTools(
     ...turn.builtInTools.map((tool) => tool.definition),
     ...turn.mcpTools.map((tool) => tool.definition)
   ])
-  const routing = findToolRouting(turn.trainedForToolUse, keptTools.length)
+  const routing = calculateToolRouting(turn.trainedForToolUse, keptTools.length)
   if (routing.status === "direct") {
     const tools = buildTurnToolset(turn, turn.directTools, agentStateTools)
     const toolOffer = new ReplyToolOffer(tools, tools.keys())

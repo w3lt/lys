@@ -219,7 +219,7 @@ export default class FindToolsTool implements BuiltInTool {
       return Object.freeze({ status: "invalid", message: invalidTaskMessage })
     return Object.freeze({
       status: "parsed",
-      runToolCall: async (context) => await this.#findTools(task, context)
+      runToolCall: async (context) => await this.#runFindTools(task, context)
     })
   }
 
@@ -243,7 +243,7 @@ export default class FindToolsTool implements BuiltInTool {
    * @throws The abort reason when the run's signal aborted before or during
    * the search; nothing is kept then.
    */
-  async #findTools(
+  async #runFindTools(
     task: string,
     context: BuiltInToolRunContext
   ): Promise<BuiltInToolResult> {

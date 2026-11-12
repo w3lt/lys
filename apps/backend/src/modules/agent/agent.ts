@@ -71,7 +71,7 @@ import {
 import {
   addFoundTools,
   buildReplyTools,
-  findToolRouting,
+  calculateToolRouting,
   formatRoutedSystemPrompt,
   listOfferedDefinitions,
   type ReplyTools
@@ -536,7 +536,10 @@ export default class Agent {
     const noAgentStateDefinitions: readonly ToolDefinition[] = Object.freeze([])
 
     const systemPrompt = this.#systemPrompt
-    const routing = findToolRouting(input.trainedForToolUse, input.tools.length)
+    const routing = calculateToolRouting(
+      input.trainedForToolUse,
+      input.tools.length
+    )
     const images: AgentContextImages<ReplyContextImageSides> =
       input.canSeeImages
         ? await getAgentContextImageSides(

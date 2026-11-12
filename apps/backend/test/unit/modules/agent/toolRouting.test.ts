@@ -1,3 +1,4 @@
+import type { MessageGenerationOptions } from "@lys/protocol"
 import { FIND_TOOLS_TOOL_NAME } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import { formatSystemPrompt } from "../../../../src/modules/agent/agentContext"
@@ -11,7 +12,7 @@ import ReplyToolOffer from "../../../../src/modules/agent/replyToolOffer"
 import {
   addFoundTools,
   buildReplyTools,
-  findToolRouting,
+  calculateToolRouting,
   formatRoutedSystemPrompt,
   listOfferedDefinitions,
   type ReplyToolsTurn,
@@ -29,7 +30,10 @@ import {
   LOOK_UP_WORD_TOOL,
   ScriptedBuiltInTool
 } from "../../support/scriptedBuiltInTool"
-import { READ_TEXT_FILE_TOOL } from "../../support/toolFixtures"
+import {
+  buildFoundToolSearchOutcome,
+  READ_TEXT_FILE_TOOL
+} from "../../support/toolFixtures"
 
 /**
  * Builds a backend tool of a turn.
@@ -88,10 +92,9 @@ const DIRECT_ROUTING: ToolRouting = Object.freeze({ status: "direct" })
  */
 function createKeeper() {
   return {
-    findTools: vi.fn<ToolKeeper["findTools"]>(async () => ({
-      status: "found",
-      toolNames: [READ_TEXT_FILE_TOOL.name]
-    }))
+    findTools: vi.fn<ToolKeeper["findTools"]>(async () =>
+      buildFoundToolSearchOutcome([READ_TEXT_FILE_TOOL.name])
+    )
   } satisfies ToolKeeper
 }
 
@@ -103,11 +106,12 @@ function createKeeper() {
  * client, a built-in, and an MCP tool.
  */
 function buildTurn(trainedForToolUse: boolean): ReplyToolsTurn {
+  const generationOptions: MessageGenerationOptions = { temperature: 0.7 }
   return {
     conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
     model: "qwen/qwen3-8b",
     trainedForToolUse,
-    generationOptions: { temperature: 0.7 },
+    generationOptions,
     directTools: [buildTurnTool(CHECK_SPELLING_TOOL, true)],
     clientTools: [READ_TEXT_FILE_TOOL],
     builtInTools: [buildTurnTool(LOOK_UP_WORD_TOOL, false)],
@@ -129,16 +133,21 @@ function buildRoutedReplyTools(keeper: ToolKeeper) {
   return replyTools
 }
 
-describe("findToolRouting", () => {
+describe("calculateToolRouting", () => {
   it("routes the tools of a model trained for tool use through find_tools", () => {
-    expect(findToolRouting(true, 3)).toEqual({ status: "routed", toolCount: 3 })
+    expect(calculateToolRouting(true, 3)).toEqual({
+      status: "routed",
+      toolCount: 3
+    })
   })
 
   it.each([
     ["a model not trained for tool use", false, 3],
     ["a turn without tools to keep", true, 0]
   ])("offers the tools directly for %s", (_label, trained, toolCount) => {
-    expect(findToolRouting(trained, toolCount)).toEqual({ status: "direct" })
+    expect(calculateToolRouting(trained, toolCount)).toEqual({
+      status: "direct"
+    })
   })
 })
 

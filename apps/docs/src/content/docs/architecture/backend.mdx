@@ -440,7 +440,13 @@ asked over every text before the next:
   `.pem`, `.key`, `.p8`, `.p12`, `.pfx`, `.ppk`, `.jks`, `.keystore`, or
   `.kdbx`. It is also denied when the parts hold the settings file's folder
   and name side by side, `.lys/settings.json` with the default Lys home: the
-  file holds the provider and Tavily API keys and the email password. A
+  file holds the provider and Tavily API keys and the email password. A part
+  that is the settings file's name followed by `.`, a number, `.`, a number,
+  and `.tmp`, such as `settings.json.4242.0.tmp`, is read as the settings
+  file's name: it names the copy a save that stops midway leaves, with the
+  same secrets. `SETTINGS_FILE_COPY_ENDING_PATTERN` repeats the host's
+  pattern, and both sides' tests read the cases of
+  `packages/share/test/fixtures/settings-file-copy-names.json`. A
   `file:` URL is read by its decoded path; a URL of any other scheme with a
   host names a file on another machine and is left to the next rule.
 - **Outside approved folders.** Only while folders are listed. A text, or

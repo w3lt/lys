@@ -69,22 +69,29 @@ commands decide by a file's real path, with every symbolic link resolved, and
 compare each of its parts in lowercase with the list. Lys's settings file,
 `settings.json` in the Lys home, holds the API keys and the email password; it
 is recognized by its device and inode numbers, so a link or a hard link to it
-is refused too.
+is refused too. A save that stops midway leaves a temporary copy with the same
+secrets, `settings.json.<process id>.<number>.tmp`
+([Settings file](#settings-file)), and it is refused too: a file whose name has
+that form, compared in lowercase, in the folder that holds `settings.json`,
+compared by its device and inode numbers, so a link to a copy is refused and a
+file of that name in another folder is not. `is_temporary_file_name`, beside
+the code in `src-tauri/src/settings.rs` that names the copies, decides the
+name; the policy's tests and the host's read the same cases from
+`packages/share/test/fixtures/settings-file-copy-names.json`.
 
 - `read_text_file` opens the file, resolves its real path, and checks that the
   path still names the opened file before it reads a byte. A credential file
   fails with `{ "code": "credentialFile" }`, also when it is over 1 MiB.
 - `find_files` fails with `{ "code": "rootInCredentialFolder" }` when the
   root's real path is inside a credential folder. Its walk never enters a
-  credential folder and leaves credential files and the settings file out, as
-  it leaves links out, so a search lists none of them and returns no line of
+  credential folder and leaves credential files, the settings file, and its
+  leftover copies out, as it leaves links out, so a search lists none of them and returns no line of
   one, whatever folder it starts in. Reported paths keep the root as it was
   given.
 
 A hard link to a key under another name, in a folder with another name, is not
-recognized: only the settings file is compared by identity. A temporary copy
-that a stopped save left beside `settings.json` is not recognized either
-([#345](https://github.com/w3lt/lys/issues/345)).
+recognized, nor a hard link to a leftover copy of the settings file in another
+folder: only the settings file itself is compared by identity.
 
 Both commands read `tools.approvedFolders` from the settings file at each
 call (`src-tauri/src/tools/approved_folders.rs`), and resolve the real path of
@@ -357,7 +364,9 @@ therefore sees the previous document or a complete new one, also while the
 installed app and a development build save at the same moment (the one
 renamed last is kept), and other OS users cannot read the key. A failed save
 removes its temporary file; a host that stops in the middle of a save leaves
-it, owner-only. The rename itself is not synced to the directory, so it is not
+it, owner-only, and the [file tools](#file-tools) and the backend's tool call
+policy refuse it as they refuse the settings file. The rename itself is not
+synced to the directory, so it is not
 promised to survive a power loss. When `settings.json` is a symbolic link, the rename replaces the
 link with a regular file, and the file it pointed to stops receiving saves.
 

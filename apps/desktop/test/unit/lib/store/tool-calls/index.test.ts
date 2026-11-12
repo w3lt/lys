@@ -243,6 +243,24 @@ function buildAcceptingToolCallRoutes(call: ChatToolCall): BackendRoutes {
 }
 
 /**
+ * Builds the backend's answer to an answer whose call no longer waits.
+ *
+ * @returns A new `409` not-pending problem response.
+ */
+function buildNotPendingResponse(): Response {
+  return buildJsonResponse(
+    409,
+    {
+      type: "urn:lys:problem:chat:tool-call-not-pending",
+      title: "Tool call not pending",
+      status: 409,
+      detail: "No tool call is waiting under this identifier."
+    },
+    "application/problem+json"
+  )
+}
+
+/**
  * Starts a backend whose reply-events route for {@link REPLY} opens a new
  * event stream per request.
  *
@@ -1061,6 +1079,30 @@ describe("useToolCallStore", () => {
   })
 
   describe("a prompt that expires", () => {
+    /**
+     * Follows a reply with one prompt and has the person allow it, with the
+     * backend refusing the answer before the call's stored state arrives.
+     *
+     * @returns The store and the reply's event stream.
+     */
+    async function startRefusedAnswer() {
+      const approvals = createControlledRoute()
+      const { replyStreams } = startReplyBackend({
+        [buildToolApprovalRouteKey(READ_CALL)]: approvals.route
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const stream = await startFollowWithEvents(
+        useToolCallStore,
+        replyStreams,
+        [buildStreamingSnapshot(), buildApprovalEvent(READ_CALL)]
+      )
+      const sending = useToolCallStore.getState().resolveToolCall(READ_CALL.id)
+      await waitForMicrotasks()
+      approvals.responses[0]?.resolve(buildNotPendingResponse())
+      await sending
+      return { useToolCallStore, replyStreams, stream }
+    }
+
     it("shows the expired prompt in place of its card once its call is stored as failed, and keeps it after the reply ends", async () => {
       const { backend, replyStreams } = startReplyBackend()
       const { useToolCallStore } = await loadFreshToolCallStore()
@@ -1141,19 +1183,63 @@ describe("useToolCallStore", () => {
 
       stream.sendEvent(EXPIRED_READ_PART_EVENT)
       await waitForMicrotasks()
-      approvals.responses[0]?.resolve(
-        buildJsonResponse(
-          409,
-          {
-            type: "urn:lys:problem:chat:tool-call-not-pending",
-            title: "Tool call not pending",
-            status: 409,
-            detail: "No tool call is waiting under this identifier."
-          },
-          "application/problem+json"
-        )
-      )
+      approvals.responses[0]?.resolve(buildNotPendingResponse())
       await sending
+
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: READ_CALL, answer: { status: "expired" } }
+      ])
+    })
+
+    it("hides a refused answer's call until it arrives as failed, then shows the expired prompt", async () => {
+      const { useToolCallStore, stream } = await startRefusedAnswer()
+      const whileRefused = useToolCallStore.getState()
+
+      stream.sendEvent(EXPIRED_READ_PART_EVENT)
+      await waitForMicrotasks()
+
+      expect(whileRefused.heldCalls).toMatchObject([
+        { call: READ_CALL, answer: { status: "refused" } }
+      ])
+      expect(
+        findShownToolCall(whileRefused, REPLY_TARGET.conversationId)
+      ).toBeUndefined()
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: READ_CALL, answer: { status: "expired" } }
+      ])
+    })
+
+    it("marks a refused answer answered when its call arrives as running, because another caller answered first", async () => {
+      const { useToolCallStore, stream } = await startRefusedAnswer()
+
+      stream.sendEvent({
+        type: "reply-part",
+        part: buildToolCallPart(10, 0, {
+          toolName: "read_text_file",
+          argumentText: "{}",
+          status: "running"
+        })
+      })
+      await waitForMicrotasks()
+
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: READ_CALL, answer: { status: "answered" } }
+      ])
+    })
+
+    it("marks a refused answer expired from a later snapshot that stores its call as failed", async () => {
+      const { useToolCallStore, replyStreams, stream } =
+        await startRefusedAnswer()
+
+      stream.close()
+      await waitForMicrotasks()
+      replyStreams[1]?.sendEvent({
+        ...buildStreamingSnapshot(),
+        assistantMessage: buildStreamingAssistantMessage(3, [
+          EXPIRED_READ_PART_EVENT.part
+        ])
+      })
+      await waitForMicrotasks()
 
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
         { call: READ_CALL, answer: { status: "expired" } }
@@ -1509,19 +1595,9 @@ describe("useToolCallStore", () => {
       }
     )
 
-    it("marks the call answered when the backend no longer waits for it", async () => {
+    it("holds the call as refused, and no longer shows it, when the backend no longer waits for it", async () => {
       const { replyStreams } = startReplyBackend({
-        [buildToolApprovalRouteKey(READ_CALL)]: () =>
-          buildJsonResponse(
-            409,
-            {
-              type: "urn:lys:problem:chat:tool-call-not-pending",
-              title: "Tool call not pending",
-              status: 409,
-              detail: "No tool call is waiting under this identifier."
-            },
-            "application/problem+json"
-          )
+        [buildToolApprovalRouteKey(READ_CALL)]: buildNotPendingResponse
       })
       const { useToolCallStore } = await loadFreshToolCallStore()
       await startFollowWithEvents(useToolCallStore, replyStreams, [
@@ -1532,8 +1608,14 @@ describe("useToolCallStore", () => {
       await useToolCallStore.getState().rejectToolCall(READ_CALL.id, "")
 
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
-        { answer: { status: "answered" } }
+        { answer: { status: "refused" } }
       ])
+      expect(
+        findShownToolCall(
+          useToolCallStore.getState(),
+          REPLY_TARGET.conversationId
+        )
+      ).toBeUndefined()
     })
 
     it("rejects with a store listener's failure after the backend took the rejection, instead of showing it as unsent", async () => {

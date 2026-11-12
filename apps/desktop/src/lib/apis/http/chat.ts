@@ -173,8 +173,8 @@ export type SendChatToolCallAnswerResult =
     }
   | {
       /**
-       * The call was not waiting for an answer: it was already answered, or
-       * its reply ended. Nothing changed.
+       * The call was not waiting for an answer: it was already answered, its
+       * approval prompt expired, or its reply ended. Nothing changed.
        */
       readonly status: "not-pending"
     }

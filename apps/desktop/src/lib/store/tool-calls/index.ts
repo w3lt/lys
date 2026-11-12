@@ -51,9 +51,10 @@ export type { ToolCallInput } from "./approval-prompt"
  *
  * @remarks `awaiting-person` and `send-failed` need the person, so they are
  * shown first; `expired` is shown when no call needs the person, to tell
- * them why the prompt ended. `answered` and `expired` are final for the
- * prompt; after `answered`, a client tool's call waits for the backend to
- * send it to run.
+ * them why the prompt ended. `refused` is not shown and waits for the call's
+ * stored state to say whether the prompt expired. `answered` and `expired`
+ * are final for the prompt; after `answered`, a client tool's call waits for
+ * the backend to send it to run.
  */
 type HeldToolApprovalAnswer =
   | {
@@ -85,6 +86,15 @@ type HeldToolApprovalAnswer =
        * again.
        */
       readonly status: "answered"
+    }
+  | {
+      /**
+       * The backend refused the answer because the prompt no longer waits:
+       * it expired, another caller answered it, or its reply ended. The
+       * call's stored state, which the backend changed before it refused,
+       * moves it on to `expired` or `answered`; its reply's end drops it.
+       */
+      readonly status: "refused"
     }
   | {
       /**
@@ -312,6 +322,9 @@ const RUNNING_ANSWER: HeldToolRunAnswer = Object.freeze({ status: "running" })
 /** Shared answered state; it carries no per-call data. */
 const ANSWERED_ANSWER = Object.freeze({ status: "answered" } as const)
 
+/** Shared refused state; it carries no per-call data. */
+const REFUSED_ANSWER = Object.freeze({ status: "refused" } as const)
+
 /** Shared expired state; it carries no per-call data. */
 const EXPIRED_ANSWER = Object.freeze({ status: "expired" } as const)
 
@@ -322,17 +335,17 @@ const EXPIRED_ANSWER = Object.freeze({ status: "expired" } as const)
  */
 const LIVE_ENDABLE_APPROVAL_STATUSES: ReadonlySet<
   HeldToolApprovalAnswer["status"]
-> = new Set(["awaiting-person", "sending", "send-failed"])
+> = new Set(["awaiting-person", "sending", "send-failed", "refused"])
 
 /**
  * Answer states of a held prompt that a snapshot of its reply can end. A
- * snapshot skips the states between, so only a prompt the person did not
- * answer is ended from it: a call of such a prompt is stored as failed only
- * when the prompt expired.
+ * snapshot skips the states between, so only a prompt whose answer the
+ * backend did not take is ended from it: a call of such a prompt is stored
+ * as failed only when the prompt expired.
  */
 const SNAPSHOT_ENDABLE_APPROVAL_STATUSES: ReadonlySet<
   HeldToolApprovalAnswer["status"]
-> = new Set(["awaiting-person"])
+> = new Set(["awaiting-person", "refused"])
 
 /** Empty held-call list of a store that holds no call. */
 const NO_HELD_CALLS: readonly HeldToolCall[] = Object.freeze([])
@@ -546,13 +559,17 @@ function buildSendFailedHeldToolCall(
 }
 
 /**
- * Builds the held call whose answer the backend took.
+ * Builds the held call whose answer the backend took or refused.
  *
  * @param heldCall - Held call whose answer was being sent.
- * @returns A frozen answered held call, in the same step.
+ * @param result - The backend's outcome for the answer.
+ * @returns A frozen held call in the same step: `refused` for an approval
+ * answer the backend no longer waited for, because its prompt may have
+ * expired; `answered` otherwise.
  */
 function buildAnsweredHeldToolCall(
-  heldCall: SendingHeldToolCall
+  heldCall: SendingHeldToolCall,
+  result: SendChatToolCallAnswerResult
 ): HeldToolCall {
   const { target, call } = heldCall
   switch (heldCall.step) {
@@ -562,7 +579,8 @@ function buildAnsweredHeldToolCall(
         call,
         step: "approval",
         approvalToken: heldCall.approvalToken,
-        answer: ANSWERED_ANSWER
+        answer:
+          result.status === "not-pending" ? REFUSED_ANSWER : ANSWERED_ANSWER
       } as const)
     case "run":
       return Object.freeze({
@@ -764,7 +782,8 @@ function createToolCallStore(
      * one of the given states, changes: to `expired` when the call is stored
      * as failed, or to `answered` once the backend took an answer, this
      * store's or another caller's. A send still in flight then leaves the new
-     * state alone.
+     * state alone. A `refused` answer waits here for the state the backend
+     * stored before it refused.
      */
     function updateEndedToolApproval(
       part: ReplyPart,
@@ -789,8 +808,10 @@ function createToolCallStore(
      *
      * @param heldCall - Held call with the answer to send.
      * @returns A promise that settles after the send; a failed send never
-     * rejects it. An accepted or not-pending answer marks the call
-     * `answered`; a failed send keeps it as `send-failed` with the answer.
+     * rejects it. An accepted answer marks the call `answered`, and so does
+     * a not-pending result; a not-pending approval answer marks it `refused`
+     * until its stored state says why. A failed send keeps it as
+     * `send-failed` with the answer.
      * Either happens only while the call is still sending in the same step,
      * so a run that started while an allowed answer was in flight is never
      * overwritten. Only the send's failure is recorded: a store listener that
@@ -800,8 +821,9 @@ function createToolCallStore(
       heldCall: SendingHeldToolCall
     ): Promise<void> {
       updateHeldToolCall(heldCall)
+      let result: SendChatToolCallAnswerResult
       try {
-        await sendToolCallAnswer(heldCall)
+        result = await sendToolCallAnswer(heldCall)
       } catch (error) {
         if (!isHeldToolCallSending(heldCall.call.id, heldCall.step)) return
         const sendError = formatToolCallAnswerSendError(error)
@@ -809,7 +831,7 @@ function createToolCallStore(
         return
       }
       if (!isHeldToolCallSending(heldCall.call.id, heldCall.step)) return
-      updateHeldToolCall(buildAnsweredHeldToolCall(heldCall))
+      updateHeldToolCall(buildAnsweredHeldToolCall(heldCall, result))
     }
 
     /**

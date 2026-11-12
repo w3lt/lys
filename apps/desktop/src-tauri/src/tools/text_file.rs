@@ -26,7 +26,8 @@ pub enum TextFileReadError {
     /// regular file.
     NotARegularFile,
     /// The file's real path has a credential name as a part, or the file is
-    /// Lys's settings file; nothing of it was read.
+    /// Lys's settings file or a copy of it that a stopped save left; nothing
+    /// of it was read.
     CredentialFile,
     /// The file's real path is outside every folder the person lets tools
     /// use; nothing of it was read.
@@ -66,9 +67,10 @@ pub enum TextFileReadError {
 /// # Errors
 ///
 /// Returns the matching [`TextFileReadError`] when the path cannot be looked
-/// up or opened, is not a regular file, is a credential file or Lys's
-/// settings file, is outside the approved folders, is larger than
-/// `max_size_bytes`, cannot be read, or is not valid UTF-8.
+/// up or opened, is not a regular file, is a credential file, Lys's settings
+/// file, or a copy of it that a stopped save left, is outside the approved
+/// folders, is larger than `max_size_bytes`, cannot be read, or is not valid
+/// UTF-8.
 pub fn read_regular_text_file(
     path: &Path,
     max_size_bytes: u64,

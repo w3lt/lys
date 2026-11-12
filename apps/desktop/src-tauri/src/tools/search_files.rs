@@ -6,8 +6,9 @@
 //! names and lines case-insensitively, and stops at fixed result and scan
 //! budgets so that one request cannot read an unbounded amount of the disk.
 //! It never starts inside a credential folder or outside the folders the
-//! person lets tools use, and it leaves credential files and folders and
-//! Lys's settings file out of its walk.
+//! person lets tools use, and it leaves credential files and folders, Lys's
+//! settings file, and the copies of it that stopped saves left out of its
+//! walk.
 
 use std::{
     collections::VecDeque,
@@ -299,8 +300,8 @@ enum ListedEntry {
     /// An entry whose type could not be read or whose path is not valid UTF-8.
     Unexaminable,
     /// A symbolic link, FIFO, socket, or device, or a credential file or
-    /// folder, or Lys's settings file, which is never followed, read, or
-    /// reported.
+    /// folder, Lys's settings file, or a copy of it that a stopped save left,
+    /// which is never followed, read, or reported.
     Ignored,
 }
 
@@ -438,7 +439,8 @@ fn find_files_under_root(
 /// `approved_folders` limit, applying the documented defaults.
 ///
 /// The query and limits are checked before the root is inspected on disk.
-/// The identity of Lys's settings file is looked up once, after the root.
+/// The identities of Lys's settings file and of the folder that holds it are
+/// looked up once, after the root.
 ///
 /// # Errors
 ///
@@ -939,7 +941,7 @@ pub(super) fn build_search_files_definition() -> ToolDefinition {
     ToolDefinition {
         name: "search_files",
         description: String::from(
-            "Find files under a directory whose name or content contains the query, ignoring case. Returns each matching file's absolute path and, for content matches, its first matching lines with their line numbers. Private key and credential files and folders, and Lys's settings file, are never searched or returned. When the person listed the folders tools may use, a directory outside them is refused.",
+            "Find files under a directory whose name or content contains the query, ignoring case. Returns each matching file's absolute path and, for content matches, its first matching lines with their line numbers. Private key and credential files and folders, and Lys's settings file and its leftover copies, are never searched or returned. When the person listed the folders tools may use, a directory outside them is refused.",
         ),
         group: ToolGroup::Files,
         access: ToolAccess::Reads,

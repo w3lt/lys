@@ -51,8 +51,8 @@ pub enum ReadTextFileError {
     /// regular file.
     NotAFile,
     /// The file's real path has a private key or credential file or folder
-    /// name as a part, or the file is Lys's settings file, so none of it is
-    /// read.
+    /// name as a part, or the file is Lys's settings file or a copy of it
+    /// that a stopped save left, so none of it is read.
     CredentialFile,
     /// The file's real path is outside every folder the person lets tools
     /// use, so none of it is read.
@@ -113,9 +113,10 @@ pub async fn read_text_file(
 ///
 /// Rejects with a [`ReadTextFileError`] when the path is relative, nothing
 /// exists there, access is denied, it is not a regular file, it is a
-/// credential file or Lys's settings file, it is outside the folders saved in
-/// the settings file at `settings_path`, the file exceeds the read limit or
-/// is not UTF-8, or the read fails.
+/// credential file, Lys's settings file, or a copy of it that a stopped save
+/// left, it is outside the folders saved in the settings file at
+/// `settings_path`, the file exceeds the read limit or is not UTF-8, or the
+/// read fails.
 async fn read_text_file_in_background(
     path: String,
     credential_files: CredentialFiles,
@@ -195,7 +196,7 @@ pub(super) fn build_read_text_file_definition() -> ToolDefinition {
     ToolDefinition {
         name: "read_text_file",
         description: format!(
-            "Read one UTF-8 text file and return its complete text. A file over {max_size_mebibytes} MiB or one that is not UTF-8 text is refused, never truncated. Private key and credential files, and Lys's settings file, are refused, wherever a link leads, and so is a file outside the folders the person lets tools use, when they listed any."
+            "Read one UTF-8 text file and return its complete text. A file over {max_size_mebibytes} MiB or one that is not UTF-8 text is refused, never truncated. Private key and credential files, and Lys's settings file and its leftover copies, are refused, wherever a link leads, and so is a file outside the folders the person lets tools use, when they listed any."
         ),
         group: ToolGroup::Files,
         access: ToolAccess::Reads,

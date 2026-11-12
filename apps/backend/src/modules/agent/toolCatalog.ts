@@ -10,16 +10,6 @@ export const MAXIMUM_LISTED_TOOL_COUNT = 8
 /** Most tools the tool keeper recommends in one search, inclusive. */
 export const MAXIMUM_RECOMMENDED_TOOL_COUNT = 5
 
-/**
- * Matches where one word of a tool name ends and the next starts: a run of
- * `_` or `-`, the place between a lowercase letter or digit and an uppercase
- * letter, or the place before the last uppercase letter of a run that a
- * lowercase letter follows, so `send_email`, `createIssue`, and
- * `XMLHttpRequest` each split into their words.
- */
-const TOOL_NAME_WORD_BREAK_PATTERN =
-  /[_-]+|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/g
-
 /** The tools one search of the catalog found. */
 export type ToolMatchList = Readonly<{
   /**
@@ -59,15 +49,26 @@ export type ToolRecommendation =
  * Builds the text a tool is ranked by.
  *
  * @param definition - Definition of the tool.
- * @returns Its name with the words split, its group, and its description,
- * so a query finds `send_email` by `email` and `createIssue` by `issue`.
+ * @returns Its name, the words of its name when the name holds more than
+ * one, its group, and its description, so a query finds `send_email` by
+ * `email` and by `send_email`, and `createIssue` by `issue` and by
+ * `createIssue`.
  */
 function buildRankedToolText(definition: ToolDefinition): string {
-  const nameWords = definition.name.replaceAll(
-    TOOL_NAME_WORD_BREAK_PATTERN,
-    " "
-  )
-  return `${nameWords} ${definition.group} ${definition.description}`
+  /**
+   * Matches where one word of a tool name ends and the next starts: a run
+   * of `_` or `-`, the place between a lowercase letter or digit and an
+   * uppercase letter, or the place before the last uppercase letter of a
+   * run that a lowercase letter follows, so `send_email`, `createIssue`,
+   * and `XMLHttpRequest` each split into their words.
+   */
+  const nameWordBreakPattern =
+    /[_-]+|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/g
+
+  const { name } = definition
+  const nameWords = name.replaceAll(nameWordBreakPattern, " ")
+  const rankedName = nameWords === name ? name : `${name} ${nameWords}`
+  return `${rankedName} ${definition.group} ${definition.description}`
 }
 
 /**
@@ -116,12 +117,12 @@ export default class ToolCatalog {
   /**
    * Lists the tools that best match a query.
    *
-   * @param query - Words that describe what a tool must do; a tool name in
-   * it is split into its words as the tools' names are.
+   * @param query - Words that describe what a tool must do, or a tool's
+   * name; each word is searched as written, ignoring case.
    * @returns The frozen first matches and the number of all matches, ranked
-   * with BM25 over each tool's name words, group, and description, ignoring
-   * case; nothing when the query holds no word or no tool holds one of its
-   * words.
+   * with BM25 over each tool's name, the words of its name, its group, and
+   * its description, ignoring case; nothing when the query holds no word or
+   * no tool holds one of its words.
    */
   public listToolMatches(query: string): ToolMatchList {
     /** Tools of a search that found nothing. */
@@ -132,8 +133,7 @@ export default class ToolCatalog {
       matchCount: 0
     })
 
-    const queryText = query.replaceAll(TOOL_NAME_WORD_BREAK_PATTERN, " ")
-    const queryWords = [...new Set(listRankingWords(queryText))]
+    const queryWords = [...new Set(listRankingWords(query))]
     if (queryWords.length === 0 || this.#tools.length === 0)
       return noToolMatches
     const scores = calculateRankingScores(this.#rankedTexts, queryWords)

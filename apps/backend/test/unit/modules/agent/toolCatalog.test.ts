@@ -1,52 +1,39 @@
-import { toolDefinitionSchema, type ToolDefinition } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import ToolCatalog, {
   MAXIMUM_LISTED_TOOL_COUNT,
   MAXIMUM_RECOMMENDED_TOOL_COUNT
 } from "../../../../src/modules/agent/toolCatalog"
+import {
+  buildNetworkToolDefinition,
+  buildNoteTools
+} from "../../support/toolFixtures"
 
 /**
- * Builds the definition of a backend tool that takes no argument.
- *
- * @param name - Name of the tool.
- * @param description - What the tool does.
- * @returns The validated definition.
+ * Tools of the asking turn in most cases, in offer order; `web_search` comes
+ * before `read_page`, which matches "read web page" better.
  */
-function buildDefinition(name: string, description: string): ToolDefinition {
-  return toolDefinitionSchema.parse({
-    name,
-    description,
-    group: "network",
-    access: "network",
-    runner: "backend",
-    arguments: []
-  })
-}
-
-/** Tools of the asking turn in most cases, in offer order. */
 const TOOLS = Object.freeze([
-  buildDefinition("read_page", "Reads one web page and returns its text."),
-  buildDefinition("web_search", "Searches the web and lists the results."),
-  buildDefinition("send_email", "Sends an email message to a recipient."),
-  buildDefinition("get_time", "Tells the current time and time zone.")
-])
-
-/**
- * Builds as many tools as a search can list, plus extra ones, all matching
- * the same word.
- *
- * @param count - Number of tools.
- * @returns Tools named `note_1` up, each about notes.
- */
-function buildNoteTools(count: number): readonly ToolDefinition[] {
-  return Array.from({ length: count }, (_unused, index) =>
-    buildDefinition(`note_${index + 1}`, "Keeps a note.")
+  buildNetworkToolDefinition(
+    "web_search",
+    "Searches the web and lists the results."
+  ),
+  buildNetworkToolDefinition(
+    "read_page",
+    "Reads one web page and returns its text."
+  ),
+  buildNetworkToolDefinition(
+    "send_email",
+    "Sends an email message to a recipient."
+  ),
+  buildNetworkToolDefinition(
+    "get_time",
+    "Tells the current time and time zone."
   )
-}
+])
 
 describe("ToolCatalog", () => {
   describe("listToolMatches", () => {
-    it("lists the tools whose name or description matches, best first", () => {
+    it("lists the tools whose name or description matches, best first whatever the offer order", () => {
       const catalog = new ToolCatalog(TOOLS)
 
       const result = catalog.listToolMatches("read web page")
@@ -64,8 +51,8 @@ describe("ToolCatalog", () => {
       ["its group", "network", ["list_invoices", "lookup"]]
     ])("finds a tool by a word only %s holds", (_field, query, toolNames) => {
       const catalog = new ToolCatalog([
-        buildDefinition("list_invoices", "Shows what is owed."),
-        buildDefinition("lookup", "Finds a term in the dictionary.")
+        buildNetworkToolDefinition("list_invoices", "Shows what is owed."),
+        buildNetworkToolDefinition("lookup", "Finds a term in the dictionary.")
       ])
 
       expect(
@@ -84,16 +71,64 @@ describe("ToolCatalog", () => {
       ["a name with a digit by the word after it", "upload", "s3Upload"]
     ])("finds %s", (_label, query, toolName) => {
       const catalog = new ToolCatalog([
-        buildDefinition("send_email", "Sends a message."),
-        buildDefinition("open-calendar", "Shows the week."),
-        buildDefinition("createIssue", "Opens a ticket."),
-        buildDefinition("readHTMLPage", "Loads a site."),
-        buildDefinition("s3Upload", "Stores a file.")
+        buildNetworkToolDefinition("send_email", "Sends a message."),
+        buildNetworkToolDefinition("open-calendar", "Shows the week."),
+        buildNetworkToolDefinition("createIssue", "Opens a ticket."),
+        buildNetworkToolDefinition("readHTMLPage", "Loads a site."),
+        buildNetworkToolDefinition("s3Upload", "Stores a file.")
       ])
 
       expect(
         catalog.listToolMatches(query).matches.map((tool) => tool.name)
       ).toEqual([toolName])
+    })
+
+    it.each([
+      ["a mixed-case word its description holds", "GitHub", "open_ticket"],
+      ["the same word in lowercase", "github", "open_ticket"],
+      ["a plural acronym its description holds", "PDFs", "read_document"],
+      [
+        "a mixed-case word a part of its name holds",
+        "GitLab",
+        "gitlab_create_issue"
+      ]
+    ])("finds a tool by %s", (_label, query, toolName) => {
+      const catalog = new ToolCatalog([
+        buildNetworkToolDefinition("open_ticket", "Opens a ticket on GitHub."),
+        buildNetworkToolDefinition("read_document", "Reads PDFs."),
+        buildNetworkToolDefinition("gitlab_create_issue", "Creates a record.")
+      ])
+
+      expect(
+        catalog.listToolMatches(query).matches.map((tool) => tool.name)
+      ).toEqual([toolName])
+    })
+
+    it("counts a name of one word once, so it ties with a description that holds the word", () => {
+      const catalog = new ToolCatalog([
+        buildNetworkToolDefinition("list", "Stores your notes."),
+        buildNetworkToolDefinition("notes", "Stores your list.")
+      ])
+
+      expect(
+        catalog.listToolMatches("notes").matches.map((tool) => tool.name)
+      ).toEqual(["list", "notes"])
+    })
+
+    it("weighs a word the query repeats once", () => {
+      const catalog = new ToolCatalog([
+        buildNetworkToolDefinition("beta", "Prints page."),
+        buildNetworkToolDefinition("gamma", "Folds page."),
+        buildNetworkToolDefinition("alpha", "Fetches web.")
+      ])
+
+      const result = catalog.listToolMatches("web page page page")
+
+      expect(result.matches.map((tool) => tool.name)).toEqual([
+        "alpha",
+        "beta",
+        "gamma"
+      ])
     })
 
     it("ignores case and punctuation", () => {

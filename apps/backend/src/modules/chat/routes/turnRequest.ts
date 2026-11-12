@@ -81,7 +81,7 @@ export type RequestedAgentOutcome =
     }>
   | Readonly<{
       /**
-       * A new conversation names a code no built-in or stored agent has, or
+       * A new conversation names a code no agent has, a deleted agent's, or
        * Armitage's, which answers no chat.
        */
       status: "agent-not-found"

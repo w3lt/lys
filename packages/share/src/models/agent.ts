@@ -102,9 +102,10 @@ export const READ_AGENT_STATE_TOOL_NAME = "read_agent_state"
  * Name the model calls the tool by that asks Armitage, the tool keeper, for
  * the tools that fit a task.
  *
- * @remarks The backend offers it instead of the tools of a turn whose model
- * is trained for tool use and that has tools, so a chat request may not
- * offer or name a tool of this name.
+ * @remarks The backend offers it in place of a turn's client, built-in, and
+ * MCP tools when the turn's model is trained for tool use and the turn has
+ * at least one such tool, beside the turn's other tools, so a chat request
+ * may not offer or name a tool of this name.
  */
 export const FIND_TOOLS_TOOL_NAME = "find_tools"
 

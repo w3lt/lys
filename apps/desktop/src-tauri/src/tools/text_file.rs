@@ -8,7 +8,7 @@ use std::{
 };
 
 use super::{
-    approved_folders::ApprovedFolders,
+    approved_folders::{ApprovedFolderRefusal, ApprovedFolders},
     credential_files::{CredentialFiles, FileIdentity},
 };
 
@@ -31,6 +31,9 @@ pub enum TextFileReadError {
     /// The file's real path is outside every folder the person lets tools
     /// use; nothing of it was read.
     OutsideApprovedFolders,
+    /// The folders the person lets tools use cannot be read from the
+    /// settings file, so no file is approved; nothing of it was read.
+    SettingsUnreadable,
     /// The file is larger than the caller's limit; its content was not read.
     TooLarge {
         /// Smallest size in bytes the file was observed to have, which exceeds
@@ -122,7 +125,9 @@ fn open_file_without_blocking(path: &Path) -> io::Result<File> {
 ///
 /// Returns [`TextFileReadError::CredentialFile`] when `credential_files`
 /// refuses the real file, [`TextFileReadError::OutsideApprovedFolders`] when
-/// `approved_folders` does not hold its real path, [`TextFileReadError::Io`]
+/// `approved_folders` does not hold its real path,
+/// [`TextFileReadError::SettingsUnreadable`] when they cannot be read,
+/// [`TextFileReadError::Io`]
 /// when the real path names
 /// another file than the one opened, or the matching path failure when the
 /// real path cannot be resolved or looked up.
@@ -146,11 +151,12 @@ fn check_opened_file(
         return Err(TextFileReadError::CredentialFile);
     }
 
-    if !approved_folders.holds_real_path(&real_path) {
-        return Err(TextFileReadError::OutsideApprovedFolders);
-    }
-
-    Ok(())
+    approved_folders
+        .check_real_path(&real_path)
+        .map_err(|refusal| match refusal {
+            ApprovedFolderRefusal::Outside => TextFileReadError::OutsideApprovedFolders,
+            ApprovedFolderRefusal::SettingsUnreadable => TextFileReadError::SettingsUnreadable,
+        })
 }
 
 /// Gets the size in bytes of the opened file that `metadata` describes, after

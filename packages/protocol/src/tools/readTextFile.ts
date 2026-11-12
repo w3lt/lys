@@ -68,6 +68,13 @@ export const readTextFileErrorSchema = z.discriminatedUnion("code", [
      */
     code: z.literal("outsideApprovedFolders")
   }),
+  buildCodeOnlyFailureSchema({
+    /**
+     * The folders the person lets tools use cannot be read from Lys's
+     * settings file, so no file is read until the file is fixed.
+     */
+    code: z.literal("settingsUnreadable")
+  }),
   z
     .strictObject({
       /** The file exceeds the desktop's read limit, so none of it was returned. */

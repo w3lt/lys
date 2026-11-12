@@ -21,9 +21,20 @@ pub enum ApprovedFolders {
     /// No folder is listed, so every path is approved.
     Any,
     /// Only a path inside one of these real folder paths is approved. Empty
-    /// when the settings file cannot be read or parsed, so the check fails
-    /// closed, or when no listed folder can be resolved.
+    /// when no listed folder can be resolved.
     Listed(Vec<PathBuf>),
+    /// The settings file exists but cannot be read or parsed, so no path is
+    /// approved until it is fixed.
+    Unreadable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Why [`ApprovedFolders`] refuse a real path.
+pub enum ApprovedFolderRefusal {
+    /// The path is outside every listed folder.
+    Outside,
+    /// The folders cannot be read from the settings file.
+    SettingsUnreadable,
 }
 
 impl ApprovedFolders {
@@ -32,14 +43,14 @@ impl ApprovedFolders {
     ///
     /// A missing file and a file without folders give
     /// [`ApprovedFolders::Any`]. A file that cannot be read or parsed gives
-    /// [`ApprovedFolders::Listed`] with no folder. A listed folder whose real
+    /// [`ApprovedFolders::Unreadable`]. A listed folder whose real
     /// path cannot be resolved, such as one that does not exist, approves
     /// nothing.
     pub fn read(settings_path: &Path) -> Self {
         match find_settings_file(settings_path) {
             Ok(None) => Self::Any,
             Ok(Some(settings)) => Self::resolve(settings.tools().approved_folders()),
-            Err(_) => Self::Listed(Vec::new()),
+            Err(_) => Self::Unreadable,
         }
     }
 
@@ -56,15 +67,25 @@ impl ApprovedFolders {
         )
     }
 
-    /// Answers whether `real_path`, a path with every symbolic link resolved,
-    /// is an approved folder or lies inside one.
+    /// Checks that `real_path`, a path with every symbolic link resolved, is
+    /// an approved folder or lies inside one.
     ///
     /// Components are compared whole, so `/work/app-old` is not inside
     /// `/work/app`.
-    pub fn holds_real_path(&self, real_path: &Path) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ApprovedFolderRefusal::Outside`] when folders are listed and
+    /// none holds the path, and [`ApprovedFolderRefusal::SettingsUnreadable`]
+    /// for every path when the folders cannot be read.
+    pub fn check_real_path(&self, real_path: &Path) -> Result<(), ApprovedFolderRefusal> {
         match self {
-            Self::Any => true,
-            Self::Listed(folders) => folders.iter().any(|folder| real_path.starts_with(folder)),
+            Self::Any => Ok(()),
+            Self::Listed(folders) if folders.iter().any(|folder| real_path.starts_with(folder)) => {
+                Ok(())
+            }
+            Self::Listed(_) => Err(ApprovedFolderRefusal::Outside),
+            Self::Unreadable => Err(ApprovedFolderRefusal::SettingsUnreadable),
         }
     }
 }
@@ -75,7 +96,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::ApprovedFolders;
+    use super::{ApprovedFolderRefusal, ApprovedFolders};
     use crate::tools::test_directory::TestDirectory;
 
     /// Name of the settings file each test writes in its own directory.
@@ -102,18 +123,21 @@ mod tests {
 
         assert_eq!(missing, ApprovedFolders::Any);
         assert_eq!(empty, ApprovedFolders::Any);
-        assert!(empty.holds_real_path(Path::new("/etc/hosts")));
+        assert_eq!(empty.check_real_path(Path::new("/etc/hosts")), Ok(()));
     }
 
     #[test]
-    fn approves_no_path_when_the_settings_file_cannot_be_parsed() {
+    fn refuses_every_path_as_unreadable_when_the_settings_file_cannot_be_parsed() {
         let directory = TestDirectory::create("approved-unreadable");
         let settings_path = directory.create_file(SETTINGS_FILE_NAME, "{ not json");
 
         let approved = ApprovedFolders::read(&settings_path);
 
-        assert_eq!(approved, ApprovedFolders::Listed(Vec::new()));
-        assert!(!approved.holds_real_path(&directory.path().join(SETTINGS_FILE_NAME)));
+        assert_eq!(approved, ApprovedFolders::Unreadable);
+        assert_eq!(
+            approved.check_real_path(Path::new("/")),
+            Err(ApprovedFolderRefusal::SettingsUnreadable)
+        );
     }
 
     #[test]
@@ -126,10 +150,21 @@ mod tests {
 
         let approved = read_listed(&directory, &[&app]);
 
-        assert!(approved.holds_real_path(&real_app));
-        assert!(approved.holds_real_path(&real_app.join("src/main.rs")));
-        assert!(!approved.holds_real_path(&real_app_old.join("notes.txt")));
-        assert!(!approved.holds_real_path(real_app.parent().expect("a parent")));
+        assert_eq!(approved.check_real_path(&real_app), Ok(()));
+        assert_eq!(
+            approved.check_real_path(&real_app.join("src/main.rs")),
+            Ok(())
+        );
+        for outside in [
+            real_app_old.join("notes.txt"),
+            real_app.parent().expect("a parent").to_path_buf(),
+        ] {
+            assert_eq!(
+                approved.check_real_path(&outside),
+                Err(ApprovedFolderRefusal::Outside),
+                "{outside:?}"
+            );
+        }
     }
 
     #[test]

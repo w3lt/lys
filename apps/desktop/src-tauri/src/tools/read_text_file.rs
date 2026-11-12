@@ -57,6 +57,9 @@ pub enum ReadTextFileError {
     /// The file's real path is outside every folder the person lets tools
     /// use, so none of it is read.
     OutsideApprovedFolders,
+    /// The folders the person lets tools use cannot be read from Lys's
+    /// settings file, so no file is read until the file is fixed.
+    SettingsUnreadable,
     /// The file is larger than the read limit, so none of it is returned.
     FileTooLarge {
         /// Smallest size in bytes the file was observed to have.
@@ -163,6 +166,7 @@ fn build_read_text_file_error(error: TextFileReadError) -> ReadTextFileError {
         TextFileReadError::NotARegularFile => ReadTextFileError::NotAFile,
         TextFileReadError::CredentialFile => ReadTextFileError::CredentialFile,
         TextFileReadError::OutsideApprovedFolders => ReadTextFileError::OutsideApprovedFolders,
+        TextFileReadError::SettingsUnreadable => ReadTextFileError::SettingsUnreadable,
         TextFileReadError::TooLarge { size_bytes } => ReadTextFileError::FileTooLarge {
             size_bytes,
             max_size_bytes: MAX_TEXT_FILE_SIZE_BYTES,
@@ -352,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    fn refuses_every_file_when_the_settings_file_cannot_be_parsed() {
+    fn refuses_every_file_as_unreadable_settings_when_the_settings_file_cannot_be_parsed() {
         let directory = TestDirectory::create("read-unparsed-settings");
         let file = directory.create_file("notes.txt", "notes\n");
         let settings_path = directory.create_file("lys/settings.json", "{ not json");
@@ -363,7 +367,7 @@ mod tests {
                 CredentialFiles::load_for_test_without_settings_file(),
                 &settings_path,
             ),
-            Err(ReadTextFileError::OutsideApprovedFolders)
+            Err(ReadTextFileError::SettingsUnreadable)
         );
     }
 

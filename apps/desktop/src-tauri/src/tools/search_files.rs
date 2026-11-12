@@ -23,7 +23,7 @@ use tauri::State;
 use crate::utils::lys_home::LysHome;
 
 use super::{
-    approved_folders::ApprovedFolders,
+    approved_folders::{ApprovedFolderRefusal, ApprovedFolders},
     credential_files::{CredentialFiles, FileIdentity},
     definition::{
         ToolAccess, ToolArgumentDefinition, ToolArgumentType, ToolDefinition, ToolGroup, ToolRunner,
@@ -144,6 +144,9 @@ pub enum SearchFilesError {
     /// The root's real path is outside every folder the person lets tools
     /// use, so nothing under it is searched.
     RootOutsideApprovedFolders,
+    /// The folders the person lets tools use cannot be read from Lys's
+    /// settings file, so nothing is searched until the file is fixed.
+    SettingsUnreadable,
     /// The operating system denied access to the root directory.
     PermissionDenied,
     /// The query is empty or contains only whitespace.
@@ -518,6 +521,7 @@ fn parse_search_query(query: &str) -> Result<String, SearchFilesError> {
 /// [`SearchFilesError::RootNotADirectory`],
 /// [`SearchFilesError::RootInCredentialFolder`],
 /// [`SearchFilesError::RootOutsideApprovedFolders`],
+/// [`SearchFilesError::SettingsUnreadable`],
 /// [`SearchFilesError::PermissionDenied`], or
 /// [`SearchFilesError::SearchFailed`] for any other operating-system failure.
 fn parse_search_root(
@@ -541,9 +545,12 @@ fn parse_search_root(
         return Err(SearchFilesError::RootInCredentialFolder);
     }
 
-    if !approved_folders.holds_real_path(&real_root) {
-        return Err(SearchFilesError::RootOutsideApprovedFolders);
-    }
+    approved_folders
+        .check_real_path(&real_root)
+        .map_err(|refusal| match refusal {
+            ApprovedFolderRefusal::Outside => SearchFilesError::RootOutsideApprovedFolders,
+            ApprovedFolderRefusal::SettingsUnreadable => SearchFilesError::SettingsUnreadable,
+        })?;
 
     fs::read_dir(&root).map_err(build_root_error)?;
 
@@ -796,6 +803,7 @@ fn build_unsearched_content_outcome(error: TextFileReadError) -> ContentScanOutc
         | TextFileReadError::NotARegularFile
         | TextFileReadError::CredentialFile
         | TextFileReadError::OutsideApprovedFolders
+        | TextFileReadError::SettingsUnreadable
         | TextFileReadError::Io(_) => ContentScanOutcome::Unreadable,
     }
 }
@@ -1231,6 +1239,25 @@ mod tests {
                 root.display()
             );
         }
+    }
+
+    #[test]
+    fn searches_nothing_when_the_settings_file_cannot_be_parsed() {
+        let directory = TestDirectory::create("search-unparsed-settings");
+        let work = directory.create_subdirectory("work");
+        directory.create_file("work/notes.txt", "todo\n");
+        let settings_path = directory.create_file("lys/settings.json", "{ not json");
+
+        let search_result = find_files_in_folders(
+            json!({ "root": get_path_text(&work), "query": "todo", "target": "content" }),
+            CredentialFiles::load_for_test_without_settings_file(),
+            &settings_path,
+        );
+
+        assert_eq!(
+            search_result.err(),
+            Some(SearchFilesError::SettingsUnreadable)
+        );
     }
 
     #[test]

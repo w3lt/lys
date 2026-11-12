@@ -65,11 +65,11 @@ function buildRankedToolText(definition: ToolDefinition): string {
   const wordStartPattern = /(?<=[a-z0-9])(?=[A-Z])/g
   /**
    * Matches the place before the last uppercase letter of a run that a
-   * lowercase letter follows, which splits `XMLHttp` before `H`, unless
-   * that letter is a plural `s` that no lowercase letter follows, so
-   * `getURLs` and `listAPIsByOwner` keep `URLs` and `APIs` whole.
+   * lowercase letter follows, whatever that letter is, which splits
+   * `XMLHttp` before `H`, `exportPDFAsImage` before `A`, and `getURLs`
+   * before `L`.
    */
-  const acronymEndPattern = /(?<=[A-Z])(?=[A-Z](?!s(?![a-z]))[a-z])/g
+  const acronymEndPattern = /(?<=[A-Z])(?=[A-Z][a-z])/g
 
   const { name } = definition
   // The word segmenter splits a name at `-` but keeps `_`, so the whole

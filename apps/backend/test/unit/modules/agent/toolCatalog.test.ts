@@ -92,25 +92,31 @@ describe("ToolCatalog", () => {
         "GitLab",
         "gitlab_create_issue"
       ],
-      ["a plural acronym that ends its name", "urls", "getURLs"],
-      ["a plural acronym before a word of its name", "apis", "listAPIsByOwner"],
-      ["a plural acronym before an underscore", "ids", "find_IDs_by_owner"]
+      ["an acronym before As in its name", "pdf", "exportPDFAsImage"],
+      ["an acronym before Is in its name", "url", "checkURLIsValid"]
     ])("finds a tool by %s", (_label, query, toolName) => {
       const catalog = new ToolCatalog([
         buildNetworkToolDefinition("open_ticket", "Opens a ticket on GitHub."),
         buildNetworkToolDefinition("read_document", "Reads PDFs."),
         buildNetworkToolDefinition("gitlab_create_issue", "Creates a record."),
-        buildNetworkToolDefinition("getURLs", "Lists the links of a page."),
-        buildNetworkToolDefinition(
-          "listAPIsByOwner",
-          "Lists services by owner."
-        ),
-        buildNetworkToolDefinition("find_IDs_by_owner", "Lists records.")
+        buildNetworkToolDefinition("exportPDFAsImage", "Saves a page."),
+        buildNetworkToolDefinition("checkURLIsValid", "Checks a link.")
       ])
 
       expect(
         catalog.listToolMatches(query).matches.map((tool) => tool.name)
       ).toEqual([toolName])
+    })
+
+    it("splits a capital run before an s like before any lowercase letter, so a plural acronym in a name is not found by its plural", () => {
+      const catalog = new ToolCatalog([
+        buildNetworkToolDefinition("getURLs", "Lists the links of a page.")
+      ])
+
+      expect(catalog.listToolMatches("urls").matches).toEqual([])
+      expect(
+        catalog.listToolMatches("ls").matches.map((tool) => tool.name)
+      ).toEqual(["getURLs"])
     })
 
     it("counts a name of one word once, so it ties with a description that holds the word", () => {

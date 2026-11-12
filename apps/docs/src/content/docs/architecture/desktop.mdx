@@ -1084,7 +1084,10 @@ does not bring it back:
    `reply-part` event or a later snapshot's parts, the backend ended the prompt
    at its time limit, and the card becomes a "Prompt expired" notice. A call
    that arrives as `running` or `rejected` first was answered, so its later
-   failure is not taken for an expiry.
+   failure is not taken for an expiry. When the backend refuses an answer
+   because the prompt no longer waits, the card is hidden until the call's
+   stored state arrives, so an answer sent just after the limit still ends in
+   the notice.
 3. A call to run is run at once and its result sent; a call the desktop
    cannot run is answered `runFailed`. Nothing is shown. The desktop does not
    check that the person allowed the call, so a call that another local

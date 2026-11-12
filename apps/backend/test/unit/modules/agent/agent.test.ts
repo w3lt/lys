@@ -101,6 +101,7 @@ import {
   type BuiltInToolRunScript
 } from "../../support/scriptedBuiltInTool"
 import {
+  buildFoundToolSearchOutcome,
   LEADER_STATE_TOOL_NAMES,
   READ_TEXT_FILE_FORMAT,
   READ_TEXT_FILE_TOOL
@@ -4575,10 +4576,9 @@ describe("Agent", () => {
     async function getFoundToolReplyOutcome() {
       const store = openAgentTurnStore()
       const lookUp = createLookUpWordTool()
-      const keeper = createKeeper(async () => ({
-        status: "found",
-        toolNames: ["look_up_word"]
-      }))
+      const keeper = createKeeper(async () =>
+        buildFoundToolSearchOutcome(["look_up_word"])
+      )
       const createToolCallGate = vi.fn(
         async () =>
           new ToolCallGate(new Set(["look_up_word"]), handleUnexpectedToolCall)
@@ -4664,10 +4664,9 @@ describe("Agent", () => {
           LOOK_UP_MOTH_ROUND,
           FINISH_ROUND
         ),
-        toolKeeper: createKeeper(async () => ({
-          status: "found",
-          toolNames: ["look_up_word"]
-        })),
+        toolKeeper: createKeeper(async () =>
+          buildFoundToolSearchOutcome(["look_up_word"])
+        ),
         trainedForToolUse: true,
         builtInTools: [lookUp.entry],
         justRunToolNames: [],
@@ -4695,10 +4694,9 @@ describe("Agent", () => {
           LOOK_UP_MOTH_ROUND,
           FINISH_ROUND
         ),
-        toolKeeper: createKeeper(async () => ({
-          status: "found",
-          toolNames: ["look_up_word"]
-        })),
+        toolKeeper: createKeeper(async () =>
+          buildFoundToolSearchOutcome(["look_up_word"])
+        ),
         trainedForToolUse: true,
         builtInTools: [lookUp.entry],
         justRunToolNames: [],

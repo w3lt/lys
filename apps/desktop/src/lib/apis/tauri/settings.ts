@@ -84,13 +84,17 @@ type SettingsDocumentProviders = {
  * Just run names are one array, which Rust stores in ascending order with
  * each name once, and the switches one object keyed by tool name, which Rust
  * stores in ascending name order. Both stay inside this adapter; the rest of
- * the renderer reads the set and the map of {@link ToolSettings}.
+ * the renderer reads the set and the map of {@link ToolSettings}. Rust stores
+ * the approved folders in ascending order, each once, and leaves the list out
+ * when it is empty.
  */
 type SettingsDocumentTools = {
   /** Names of the tools on Just run. */
   readonly justRun: readonly string[]
   /** Whether each tool the person switched is on, keyed by tool name. */
   readonly switches: Readonly<Record<string, boolean>>
+  /** Paths of the folders tools may use; absent when none is listed. */
+  readonly approvedFolders?: readonly string[]
 }
 
 /**
@@ -319,31 +323,37 @@ function buildEmailSettings(email: SettingsDocumentEmail): EmailSettings {
  *
  * @param tools - Tool choices owned by the desktop store.
  * @returns A newly owned group listing the Just run names in the set's
- * order, and the switches as an object with one property of its own per map
- * entry, also for a tool name that names a member of the object prototype;
- * Rust stores both in ascending name order.
+ * order, the switches as an object with one property of its own per map
+ * entry, also for a tool name that names a member of the object prototype,
+ * and the approved folders in the list's order, left out when there are
+ * none, as Rust writes them; Rust stores all three in ascending order.
  */
 function buildSettingsDocumentTools(
   tools: ToolSettings
 ): SettingsDocumentTools {
-  return {
+  const group: SettingsDocumentTools = {
     justRun: [...tools.justRunToolNames],
     switches: Object.fromEntries(tools.switches)
   }
+  return tools.approvedFolderPaths.length === 0
+    ? group
+    : { ...group, approvedFolders: [...tools.approvedFolderPaths] }
 }
 
 /**
  * Builds the renderer's tool choices from the document group.
  *
  * @param tools - Group Rust validated.
- * @returns Newly owned choices: the Just run names as a set, and the
- * switches as a map with one entry per property of the document's object,
- * whatever the text of the name.
+ * @returns Newly owned choices: the Just run names as a set, the switches
+ * as a map with one entry per property of the document's object, whatever
+ * the text of the name, and the approved folders as a frozen list, empty when
+ * the document lists none.
  */
 function buildToolSettings(tools: SettingsDocumentTools): ToolSettings {
   return {
     justRunToolNames: new Set(tools.justRun),
-    switches: new Map(Object.entries(tools.switches))
+    switches: new Map(Object.entries(tools.switches)),
+    approvedFolderPaths: Object.freeze([...(tools.approvedFolders ?? [])])
   }
 }
 
@@ -535,7 +545,8 @@ export async function saveProviderSettings(
 /**
  * Persists the tool choices while preserving everything else already on disk.
  * @param tools - Tool choices to save; every name in the set and every
- * switch in the map is written, also for a tool Lys does not list now.
+ * switch in the map is written, also for a tool Lys does not list now, and
+ * every approved folder.
  * @returns Resolves after the merged settings document is written by Tauri.
  * @throws The native load or save rejection; no replacement is written if
  * loading fails.

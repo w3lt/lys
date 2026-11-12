@@ -828,6 +828,7 @@ describe("useLysStore", () => {
       useLysStore.getState().setSettings({
         ...DISK_SETTINGS,
         tools: {
+          approvedFolderPaths: [],
           justRunToolNames: new Set(["find_files"]),
           switches: new Map([["web_search", true]])
         }
@@ -940,6 +941,7 @@ describe("useLysStore", () => {
           models: new Map([["gemma-3", { evalBatchSize: 1024 }]])
         },
         tools: {
+          approvedFolderPaths: [],
           justRunToolNames: new Set(["find_files"]),
           switches: new Map([["web_search", true]])
         }

@@ -1,5 +1,6 @@
 /// <reference types="fastify" />
 
+import type ActivityHub from "./modules/activity/activityHub"
 import type AgentRuntimeService from "./modules/agent/agentRuntimeService"
 import type AgentService from "./modules/agent/agentService"
 import type AttachmentFileStore from "./modules/attachment/attachmentFileStore"
@@ -85,5 +86,11 @@ declare module "fastify" {
      * application's reply generation registry.
      */
     startTurn: StartTurn
+    /**
+     * Application-scoped hub of the activity streams, which tells every
+     * stream what the backend started; the application closes it before it
+     * disposes the reply generation registry.
+     */
+    activityHub: ActivityHub
   }
 }

@@ -5,6 +5,7 @@ import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgen
 import AttachmentFileStore from "../modules/attachment/attachmentFileStore"
 import SqliteDatabase from "../infrastructure/database/sqliteDatabase"
 import { acquireLlmProviderRuntime } from "../modules/llm/runtimes/llmProviderRuntime"
+import ActivityHub from "../modules/activity/activityHub"
 import AgentRuntimeService, {
   buildConversationTitleLookup
 } from "../modules/agent/agentRuntimeService"
@@ -207,7 +208,8 @@ export type SingletonServices = Readonly<{
   attachmentFileStore: AttachmentFileStore
   /**
    * Every running reply generation, registered by the turn start; the
-   * bundle's cleanup disposes it first, which ends every generation.
+   * bundle's cleanup disposes it right after it closed the activity hub,
+   * which ends every generation.
    */
   replyGenerations: ReplyGenerationRegistry
   /**
@@ -216,6 +218,12 @@ export type SingletonServices = Readonly<{
    * service, and the attachment file store; it owns nothing to release.
    */
   startTurn: StartTurn
+  /**
+   * The open activity streams and the backend-started replies they follow;
+   * the bundle's cleanup closes it first, which ends every activity stream
+   * before the generations end.
+   */
+  activityHub: ActivityHub
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
@@ -231,11 +239,11 @@ type TurnStartServices = Pick<
 
 /**
  * The services a bundle's turn start is created over: every service of the
- * bundle except the turn start and its registry.
+ * bundle except the turn start, its registry, and the activity hub.
  */
 type CoreServices = Omit<
   SingletonServices,
-  keyof TurnStartServices | typeof CLOSE_SINGLETON_SERVICES
+  keyof TurnStartServices | "activityHub" | typeof CLOSE_SINGLETON_SERVICES
 >
 
 /**
@@ -300,12 +308,14 @@ type DatabaseServices = Pick<
  * service, the MCP server registry, the email account checker, and the
  * attachment file store are created next; they read and contact nothing at
  * creation. The reply generation registry and the turn start are created
- * last, over the services before them. Only the MCP server registry, the
- * email account checker, and the reply generation registry own resources:
- * the connections and the check process the first two open later, and the
- * generations the turn start starts later. The bundle's cleanup disposes the
- * reply generation registry first, which ends every generation, then closes
- * the email account checker, then the MCP server registry.
+ * next, over the services before them, and the activity hub last. Only the
+ * MCP server registry, the email account checker, the reply generation
+ * registry, and the activity hub own resources: the connections and the
+ * check process the first two open later, the generations the turn start
+ * starts later, and the activity streams clients open later. The bundle's
+ * cleanup closes the activity hub first, which ends every activity stream,
+ * then disposes the reply generation registry, which ends every generation,
+ * then closes the email account checker, then the MCP server registry.
  * Creation stops at the first failure. The database is not part of the
  * returned bundle: the bundle's cleanup closes it last, after the chat
  * service and the LLM runtime service.
@@ -374,12 +384,13 @@ export async function createSingletonServices(
 
 /**
  * Creates the turn start and its registry over a bundle's other services,
- * and builds the bundle.
+ * creates the activity hub, and builds the bundle.
  *
  * @param config - Title attempt limit given to the turn start.
  * @param serviceLifetime - Owner of every service the bundle acquired; it
- * takes over the disposal of the reply generation registry, which it then
- * disposes before everything it took over earlier.
+ * takes over the disposal of the reply generation registry, then the close
+ * of the activity hub, so it closes the hub first, then disposes the
+ * registry, before everything it took over earlier.
  * @param coreServices - The bundle's other services, which the turn start
  * borrows for the bundle's lifetime.
  * @returns The frozen bundle of owned services, with its cleanup capability.
@@ -391,10 +402,15 @@ function createSingletonServiceBundle(
 ): SingletonServices {
   const turnStartServices = createTurnStartServices(config, coreServices)
   serviceLifetime.use(turnStartServices.replyGenerations)
+  const activityHub = new ActivityHub()
+  serviceLifetime.defer(() => {
+    activityHub.close()
+  })
   return Object.freeze({
     ...coreServices,
     replyGenerations: turnStartServices.replyGenerations,
     startTurn: turnStartServices.startTurn,
+    activityHub,
     [CLOSE_SINGLETON_SERVICES]: buildCloseSingletonServices(serviceLifetime)
   })
 }

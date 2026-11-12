@@ -26,11 +26,12 @@ type SingletonServicePluginOptions = {
  * @returns A promise that resolves after the services are open and the shutdown hook is registered.
  * @throws If service construction or Fastify decoration and hook registration fails.
  * @remarks The services are exposed as Fastify decorations and disposed when
- * Fastify closes. The reply generation registry is disposed first, in
- * `preClose`, while SSE streams are still open: every generation stores its
- * final state and its followers end before the server waits for requests
- * and before the services close SQLite. After the HTTP listener opens, an
- * `onListen` hook performs
+ * Fastify closes. The activity hub is closed first, then the reply
+ * generation registry is disposed, both in `preClose`, while SSE streams
+ * are still open: every activity stream ends, then every generation stores
+ * its final state and its followers end, before the server waits for
+ * requests and before the services close SQLite. After the HTTP listener
+ * opens, an `onListen` hook performs
  * the first LLM runtime connection attempt. Fastify resolves `listen()` before
  * running the hook and logs a hook rejection, so the provider never delays or
  * prevents listening. `inject()` and `ready()` do not run the hook. An
@@ -86,6 +87,7 @@ const openSingletonServices: FastifyPluginAsync<
   })
 
   app.addHook("preClose", async () => {
+    singletonServices.activityHub.close()
     await singletonServices.replyGenerations[Symbol.asyncDispose]()
   })
   app.addHook("onClose", async () => {
@@ -140,6 +142,7 @@ function registerSingletonServices(
   app.decorate("attachmentFileStore", singletonServices.attachmentFileStore)
   app.decorate("replyGenerations", singletonServices.replyGenerations)
   app.decorate("startTurn", singletonServices.startTurn)
+  app.decorate("activityHub", singletonServices.activityHub)
 }
 
 /** Fastify plugin that opens the application-scoped singleton services. */

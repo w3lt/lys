@@ -1,9 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { ActivityEvent } from "@lys/protocol"
 import { groqApiKeySchema, type ConversationAttachmentDraft } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
+import ActivityHub from "../../../src/modules/activity/activityHub"
 import type { AgentTurn } from "../../../src/modules/agent/agent"
 import AgentRuntimeService from "../../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../../src/modules/agent/agentService"
@@ -52,6 +54,7 @@ import { CapturedLogDestination } from "../support/fastifyTestApp"
 import { waitForMicrotasks } from "../support/microtasks"
 import { createChatCompletionChunk } from "../support/openAiEndpointFake"
 import { writeSettingsFile } from "../support/settingsFile"
+import { createSettlementReader } from "../support/settlement"
 import { READ_TEXT_FILE_TOOL } from "../support/toolFixtures"
 import { answerWithBody, startVmoServer } from "../support/vmoServer"
 
@@ -109,10 +112,14 @@ type StartedTurn = Readonly<{
 
 /**
  * Name of each service whose close the cleanup log records: the
- * acquisitions, and the two tool services that own resources.
+ * acquisitions, the two tool services that own resources, and the activity
+ * hub.
  */
 type ClosedServiceName =
-  AcquisitionName | "email-account-checker" | "mcp-server-registry"
+  | AcquisitionName
+  | "activity-hub"
+  | "email-account-checker"
+  | "mcp-server-registry"
 
 /**
  * Creates log reporters that record what they receive.
@@ -163,15 +170,16 @@ function createAcquisition<Service>(
 }
 
 /**
- * Updates a tool service the bundle created so that each of its closes is
- * logged under `name` before the close goes on.
+ * Updates a service the bundle created so that each of its closes is logged
+ * under `name` before the close goes on.
  *
- * @param service - Service whose close is recorded.
+ * @param service - Service whose close is recorded; its close completes at
+ * once or returns its completion.
  * @param name - Name recorded when the close starts.
  * @param closeLog - Shared log of cleanup calls in call order.
  */
 function updateServiceClose(
-  service: Readonly<{ close: () => Promise<void> }>,
+  service: Readonly<{ close: () => void | Promise<void> }>,
   name: ClosedServiceName,
   closeLog: ClosedServiceName[]
 ): void {
@@ -538,6 +546,7 @@ describe("createSingletonServices", () => {
     expect(services.llmService).toBeInstanceOf(LlmService)
     expect(services.attachmentFileStore).toBeInstanceOf(AttachmentFileStore)
     expect(services.replyGenerations).toBeInstanceOf(ReplyGenerationRegistry)
+    expect(services.activityHub).toBeInstanceOf(ActivityHub)
   })
 
   it("starts a person's turn in the bundle's reply generation registry and stores its reply and generated title on the acquired database", async () => {
@@ -1088,8 +1097,9 @@ describe("closeSingletonServices", () => {
     expect(closeLog).toEqual(["chat", "llm-runtime", "database"])
   })
 
-  it("ends every running reply generation before it closes the MCP server registry or releases an acquisition, and leaves the reply generation registry closed", async () => {
+  it("closes the activity hub, then ends every running reply generation, before it closes the MCP server registry or releases an acquisition, and leaves the reply generation registry closed", async () => {
     const { services, closeLog } = await createRecordedServices()
+    updateServiceClose(services.activityHub, "activity-hub", closeLog)
     const closeMcpServerRegistry = vi.spyOn(services.mcpServerRegistry, "close")
     const replyTask = new ControlledReplyTask()
     services.replyGenerations.startReplyGeneration(UNSTORED_REPLY_TARGET, {
@@ -1100,31 +1110,70 @@ describe("closeSingletonServices", () => {
     onTestFinished(() => {
       replyTask.resolve()
     })
+    // The reply task starts here, so the case can observe what was closed
+    // at the moment the cleanup cancels it.
+    await waitForMicrotasks()
+    let closedBeforeCancellation: readonly ClosedServiceName[] | undefined =
+      undefined
+    replyTask.context.abortSignal.addEventListener(
+      "abort",
+      () => {
+        closedBeforeCancellation = [...closeLog]
+      },
+      { once: true }
+    )
 
     const closing = closeSingletonServices(services)
     await waitForMicrotasks()
     const closedWhileGenerating = {
       isReplyCancelled: replyTask.context.abortSignal.aborted,
       mcpServerRegistryCloseCount: closeMcpServerRegistry.mock.calls.length,
-      releasedAcquisitions: [...closeLog]
+      closedServices: [...closeLog]
     }
     replyTask.resolve()
     await closing
 
+    expect(closedBeforeCancellation).toEqual(["activity-hub"])
     expect(closedWhileGenerating).toEqual({
       isReplyCancelled: true,
       mcpServerRegistryCloseCount: 0,
-      releasedAcquisitions: []
+      closedServices: ["activity-hub"]
     })
     expect(closeMcpServerRegistry).toHaveBeenCalledOnce()
-    expect(closeLog).toEqual(["chat", "llm-runtime", "database"])
+    expect(closeLog).toEqual([
+      "activity-hub",
+      "chat",
+      "llm-runtime",
+      "database"
+    ])
     expect(() =>
       services.replyGenerations.findReplyGeneration(UNSTORED_REPLY_TARGET)
     ).toThrow("Reply generation registry is closed")
   })
 
-  it("closes the email account checker, then the MCP server registry, before every acquisition", async () => {
+  it("ends the streams of the activity hub, which gives a later stream no event", async () => {
+    const { services } = await createRecordedServices()
+    const written: ActivityEvent[] = []
+    const stream = services.activityHub.openStream(async (event) => {
+      written.push(event)
+    })
+    const streamClosure = createSettlementReader(stream.closed)
+
+    await closeSingletonServices(services)
+    const lateStream = services.activityHub.openStream(async (event) => {
+      written.push(event)
+    })
+    const lateStreamClosure = createSettlementReader(lateStream.closed)
+    await waitForMicrotasks()
+
+    expect(streamClosure()).toBe("fulfilled")
+    expect(lateStreamClosure()).toBe("fulfilled")
+    expect(written).toEqual([{ type: "activity-snapshot", replies: [] }])
+  })
+
+  it("closes the activity hub, then the email account checker, then the MCP server registry, before every acquisition", async () => {
     const { services, closeLog } = await createRecordedServices()
+    updateServiceClose(services.activityHub, "activity-hub", closeLog)
     updateServiceClose(
       services.emailAccountChecker,
       "email-account-checker",
@@ -1139,6 +1188,7 @@ describe("closeSingletonServices", () => {
     await closeSingletonServices(services)
 
     expect(closeLog).toEqual([
+      "activity-hub",
       "email-account-checker",
       "mcp-server-registry",
       "chat",

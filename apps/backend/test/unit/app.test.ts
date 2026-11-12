@@ -25,6 +25,7 @@ import StoredReplyParts from "../../src/modules/conversation/replyParts"
 import StoredConversationTurns from "../../src/modules/conversation/turns"
 import { TEST_BACKEND_CONFIG } from "./support/backendConfig"
 import { sendChatRequest } from "./support/chatRouteTestApp"
+import { parseSseEvents } from "./support/chatSseRoute"
 import ControlledReplyTask from "./support/controlledReplyTask"
 import {
   createFixtureUuidV7,
@@ -334,6 +335,59 @@ describe("buildApp", () => {
 
     expect(serverCloseCountWhileGenerating).toBe(0)
     expect(closeServer).toHaveBeenCalledOnce()
+  })
+
+  it("ends an open activity stream when it closes, while a reply generation still runs and before it closes its HTTP server", async () => {
+    const log = new CapturedLogDestination()
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(log)
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    const closeServer = vi.spyOn(app.server, "close")
+    const replyTask = new ControlledReplyTask()
+    app.replyGenerations.startReplyGeneration(
+      {
+        conversationId: createFixtureUuidV7(1),
+        assistantMessageId: createFixtureUuidV7(2)
+      },
+      {
+        startReplyTask: (context) => replyTask.start(context),
+        startTitleTask: undefined,
+        reportTaskFailure: vi.fn()
+      }
+    )
+    onTestFinished(() => {
+      replyTask.resolve()
+    })
+    const streamResponse = app.inject({
+      method: "GET",
+      url: "/api/v1/activity/events",
+      headers: { accept: "text/event-stream" }
+    })
+    await vi.waitFor(() => {
+      expect(log.records).toContainEqual(
+        expect.objectContaining({ msg: "Activity stream connected" })
+      )
+    })
+
+    const closing = app.close()
+    // The reply task is still pending here, so the stream ends without
+    // waiting for the generation the close is ending.
+    const response = await streamResponse
+    const serverCloseCountWhenStreamEnded = closeServer.mock.calls.length
+    replyTask.resolve()
+    await closing
+
+    expect(response.statusCode).toBe(200)
+    expect(parseSseEvents(response.body)).toEqual([
+      {
+        event: "activity-snapshot",
+        data: { type: "activity-snapshot", replies: [] }
+      }
+    ])
+    expect(serverCloseCountWhenStreamEnded).toBe(0)
   })
 
   it("logs a request by its full URL, query string included", async () => {

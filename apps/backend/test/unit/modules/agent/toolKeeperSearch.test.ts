@@ -1,15 +1,15 @@
-import {
-  ARMITAGE_AGENT_CODE,
-  toolDefinitionSchema,
-  type ToolDefinition
-} from "@lys/share"
+import { ARMITAGE_AGENT_CODE } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
-import Agent from "../../../../src/modules/agent/agent"
+import Agent, { type AgentProfile } from "../../../../src/modules/agent/agent"
 import {
   AgentRequestLimitError,
   type AgentRequestState
 } from "../../../../src/modules/agent/agentActivity"
-import type { ToolSearch } from "../../../../src/modules/agent/findToolsTool"
+import type { AgentStateReader } from "../../../../src/modules/agent/agentStateTools"
+import type {
+  ToolKeeper,
+  ToolSearch
+} from "../../../../src/modules/agent/findToolsTool"
 import type { ReplyContextMeter } from "../../../../src/modules/agent/replyContextMeter"
 import type {
   ReplyModel,
@@ -28,6 +28,7 @@ import {
   createRoomyReplyContextMeter,
   createUnloadedReplyContextMeter
 } from "../../support/replyContextMeterFakes"
+import { buildNetworkToolDefinition } from "../../support/toolFixtures"
 
 /** Opens one round's stream. */
 type OpenReplyStream = ReplyModel["openReplyStream"]
@@ -45,24 +46,6 @@ const REQUEST_LIMITS = Object.freeze({ slotCount: 2, waitingLimit: 2 })
  */
 function handleUnexpectedRead(): never {
   throw new Error("Unexpected read")
-}
-
-/**
- * Builds the definition of a backend tool that takes no argument.
- *
- * @param name - Name of the tool.
- * @param description - What the tool does.
- * @returns The validated definition.
- */
-function buildDefinition(name: string, description: string): ToolDefinition {
-  return toolDefinitionSchema.parse({
-    name,
-    description,
-    group: "network",
-    access: "network",
-    runner: "backend",
-    arguments: []
-  })
 }
 
 /**
@@ -125,21 +108,23 @@ function createArmitage(
   openReplyStream: OpenReplyStream,
   replyContextMeter: ReplyContextMeter = createRoomyReplyContextMeter()
 ): Agent {
-  const profile = {
+  const profile: AgentProfile = {
     code: ARMITAGE_AGENT_CODE,
     role: "tool-keeper",
     systemPrompt: ARMITAGE_PROMPT,
     requestLimits: REQUEST_LIMITS
-  } as const
-  const stateReader = {
+  }
+  const replyModel: ReplyModel = { openReplyStream }
+  const stateReader: AgentStateReader = {
     listAgentMatches: handleUnexpectedRead,
     findAgentState: handleUnexpectedRead
   }
+  const toolKeeper: ToolKeeper = { findTools: handleUnexpectedRead }
   return new Agent(profile, {
-    replyModel: { openReplyStream },
+    replyModel,
     replyContextMeter,
     stateReader,
-    toolKeeper: { findTools: handleUnexpectedRead }
+    toolKeeper
   })
 }
 
@@ -156,8 +141,11 @@ function buildSearch(
   abortSignal: AbortSignal = new AbortController().signal
 ): ToolSearch {
   const tools = [
-    buildDefinition("read_page", "Reads one web page and returns its text."),
-    buildDefinition("send_email", "Sends an email message.")
+    buildNetworkToolDefinition(
+      "read_page",
+      "Reads one web page and returns its text."
+    ),
+    buildNetworkToolDefinition("send_email", "Sends an email message.")
   ]
   return {
     task: "read a web page",

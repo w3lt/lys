@@ -178,12 +178,9 @@ describe("listOfferedDefinitions", () => {
   })
 
   it("lists find_tools in place of a routed turn's tools", () => {
-    expect(
-      listOfferedDefinitions({
-        ...input,
-        routing: { status: "routed", toolCount: 2 }
-      })
-    ).toEqual([
+    const routing: ToolRouting = { status: "routed", toolCount: 2 }
+
+    expect(listOfferedDefinitions({ ...input, routing })).toEqual([
       CHECK_SPELLING_TOOL,
       FIND_TOOLS_DEFINITION,
       ...STATE_DEFINITIONS

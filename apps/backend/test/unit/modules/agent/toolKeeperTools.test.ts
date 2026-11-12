@@ -1,4 +1,3 @@
-import { toolDefinitionSchema, type ToolDefinition } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import ToolCatalog, {
   MAXIMUM_LISTED_TOOL_COUNT,
@@ -18,29 +17,21 @@ import {
   registerBuiltInToolContractSuite,
   type BuiltInToolHarness
 } from "../../support/builtInToolContract"
-
-/**
- * Builds the definition of a backend tool that takes no argument.
- *
- * @param name - Name of the tool.
- * @param description - What the tool does.
- * @returns The validated definition.
- */
-function buildDefinition(name: string, description: string): ToolDefinition {
-  return toolDefinitionSchema.parse({
-    name,
-    description,
-    group: "network",
-    access: "network",
-    runner: "backend",
-    arguments: []
-  })
-}
+import {
+  buildNetworkToolDefinition,
+  buildNoteTools
+} from "../../support/toolFixtures"
 
 /** Tools of the asking turn in most cases, in offer order. */
 const TOOLS = Object.freeze([
-  buildDefinition("read_page", "Reads one web page and returns its text."),
-  buildDefinition("send_email", "Sends an email message to a recipient.")
+  buildNetworkToolDefinition(
+    "read_page",
+    "Reads one web page and returns its text."
+  ),
+  buildNetworkToolDefinition(
+    "send_email",
+    "Sends an email message to a recipient."
+  )
 ])
 
 /**
@@ -95,18 +86,6 @@ function parseKeeperToolCall(
   callArguments: BuiltInToolCallArguments
 ) {
   return findKeeperTool(catalog, name).tool.parseToolCall(callArguments)
-}
-
-/**
- * Builds as many tools about notes as asked, all matching the same word.
- *
- * @param count - Number of tools.
- * @returns Tools named `note_1` up.
- */
-function buildNoteTools(count: number): readonly ToolDefinition[] {
-  return Array.from({ length: count }, (_unused, index) =>
-    buildDefinition(`note_${index + 1}`, "Keeps a note.")
-  )
 }
 
 /**
@@ -218,7 +197,7 @@ describe("buildToolKeeperTools", () => {
     it("shows a description on one line, each run of whitespace as one space", async () => {
       const result = await runKeeperTool(
         new ToolCatalog([
-          buildDefinition("keep_note", "  Keeps\na \t note.\r\n")
+          buildNetworkToolDefinition("keep_note", "  Keeps\na \t note.\r\n")
         ]),
         SEARCH_TOOLS_TOOL_NAME,
         { query: "note" }
@@ -241,7 +220,7 @@ describe("buildToolKeeperTools", () => {
       ]
     ])("shows a description %s", async (_label, description, shown) => {
       const result = await runKeeperTool(
-        new ToolCatalog([buildDefinition("keep_note", description)]),
+        new ToolCatalog([buildNetworkToolDefinition("keep_note", description)]),
         SEARCH_TOOLS_TOOL_NAME,
         { query: "note" }
       )

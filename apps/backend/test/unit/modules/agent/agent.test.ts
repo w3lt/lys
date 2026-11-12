@@ -765,7 +765,8 @@ function createTestAgent(
 /**
  * Finds the agent that answers a case's turn.
  *
- * @param scenario - The case's own agent, or its model and meter.
+ * @param scenario - The case's own agent, or its model, meter, and tool
+ * keeper.
  * @returns The case's agent, or a new one with {@link AGENT_PROFILE} over
  * the case's model, meter, and tool keeper, whose every state read fails
  * the case.
@@ -782,6 +783,41 @@ function findScenarioAgent(scenario: AgentScenario): Agent {
   })
 }
 
+/** What a case's turn records while its reply runs; every list is live. */
+type TurnRecords = Readonly<{
+  /** Events the turn sent, in order. */
+  events: ChatGenerationEvent[]
+  /** Parts stored when each event was sent, in the events' order. */
+  storedPartsAtEvents: (readonly ReplyPart[])[]
+  /** Final states the reply asked its storage to keep, in order. */
+  persistedStates: AssistantMessageCompletion[]
+  /** Cancellations the reply reported, in order. */
+  reportedCancellations: unknown[]
+  /** Refusals the reply reported, in order. */
+  reportedRefusals: unknown[]
+  /** Failures the reply reported, in order. */
+  reportedFailures: unknown[]
+  /** Tool search failures the reply reported, in order. */
+  reportedToolSearchFailures: unknown[]
+}>
+
+/**
+ * Creates the records of a case's turn.
+ *
+ * @returns The records, each list empty.
+ */
+function createTurnRecords(): TurnRecords {
+  return {
+    events: [],
+    storedPartsAtEvents: [],
+    persistedStates: [],
+    reportedCancellations: [],
+    reportedRefusals: [],
+    reportedFailures: [],
+    reportedToolSearchFailures: []
+  }
+}
+
 /** The reporters of a turn. */
 type TurnReporters = Pick<
   AgentTurn,
@@ -792,37 +828,26 @@ type TurnReporters = Pick<
 >
 
 /**
- * Creates the reporters of a case's turn, recording what each receives.
+ * Builds the reporters of a case's turn.
  *
- * @returns The reporters, and the live records of the cancellations,
- * refusals, failures, and tool search failures they received.
+ * @param records - Records of the case's turn.
+ * @returns Reporters that add what each receives to the records.
  */
-function createRecordedReporters() {
-  const reportedCancellations: unknown[] = []
-  const reportedRefusals: unknown[] = []
-  const reportedFailures: unknown[] = []
-  const reportedToolSearchFailures: unknown[] = []
-  const reporters: TurnReporters = {
+function buildRecordingReporters(records: TurnRecords): TurnReporters {
+  return {
     reportReplyCancellation: (failure) => {
-      reportedCancellations.push(failure)
+      records.reportedCancellations.push(failure)
     },
     reportReplyRefusal: (failure) => {
-      reportedRefusals.push(failure)
+      records.reportedRefusals.push(failure)
     },
     reportReplyFailure: (failure) => {
-      reportedFailures.push(failure)
+      records.reportedFailures.push(failure)
     },
     reportToolSearchFailure: (failure) => {
-      reportedToolSearchFailures.push(failure)
+      records.reportedToolSearchFailures.push(failure)
     }
   }
-  const records = {
-    reportedCancellations,
-    reportedRefusals,
-    reportedFailures,
-    reportedToolSearchFailures
-  }
-  return { reporters, records }
 }
 
 /** The tools of a turn and what answers their calls. */
@@ -857,6 +882,69 @@ function buildScenarioTools(scenario: AgentReplyScenario): TurnTools {
   }
 }
 
+/** What building a case's turn needs. */
+type ScenarioTurnInput = Readonly<{
+  /** Model, history, tools, and cancellation behavior of the case. */
+  scenario: AgentReplyScenario
+  /** Stored turn of the case. */
+  store: AgentTurnStore
+  /** Storage spies of the case. */
+  storage: ReturnType<typeof buildScenarioReplyStorage>
+  /** Records the turn adds to while its reply runs. */
+  records: TurnRecords
+}>
+
+/**
+ * Builds the turn of a case over its stored turn.
+ *
+ * @param input - The case's scenario, stored turn, storage spies, and
+ * records.
+ * @returns The turn, each field with the default its scenario field
+ * documents; it adds each event with the parts stored then, each final
+ * state, and each report to the records.
+ */
+function buildScenarioTurn(input: ScenarioTurnInput): AgentTurn {
+  const { scenario, store, storage, records } = input
+  const tools = buildScenarioTools(scenario)
+  const reporters = buildRecordingReporters(records)
+  return {
+    ...TURN_REQUEST,
+    conversationId: store.conversationId,
+    requestId: store.replyId,
+    trainedForToolUse: scenario.trainedForToolUse ?? false,
+    userMessage: scenario.userMessage ?? TURN_REQUEST.userMessage,
+    canSeeImages: scenario.canSeeImages ?? false,
+    findAttachmentImage:
+      scenario.findAttachmentImage ?? handleUnexpectedImageRead,
+    history: scenario.history ?? [],
+    sources: getStoredReply(store).sources,
+    directTools: tools.directTools,
+    clientTools: tools.clientTools,
+    builtInTools: tools.builtInTools,
+    mcpTools: tools.mcpTools,
+    unofferedTools: tools.unofferedTools,
+    sendClientToolCall: tools.sendClientToolCall,
+    createToolCallGate: tools.createToolCallGate,
+    abortSignal: scenario.abortSignal ?? new AbortController().signal,
+    sendEvent: (event) => {
+      records.events.push(event)
+      records.storedPartsAtEvents.push(getStoredReply(store).reply.parts)
+    },
+    reportReplyCancellation: reporters.reportReplyCancellation,
+    reportReplyRefusal: reporters.reportReplyRefusal,
+    reportReplyFailure: reporters.reportReplyFailure,
+    reportToolSearchFailure: reporters.reportToolSearchFailure,
+    createReplyPart: storage.createReplyPart,
+    updateReplyPartContent: storage.updateReplyPartContent,
+    updateReplyToolCall: storage.updateReplyToolCall,
+    updateAssistantMessageState: (completion) => {
+      records.persistedStates.push(completion)
+      return storage.updateAssistantMessageState(completion)
+    },
+    findReplyStatus: storage.findReplyStatus
+  }
+}
+
 /**
  * Has one agent answer one turn to settlement over a stored turn and records
  * the effects.
@@ -869,50 +957,25 @@ function buildScenarioTools(scenario: AgentReplyScenario): TurnTools {
  */
 async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
   const store = scenario.store ?? openAgentTurnStore()
-  const events: ChatGenerationEvent[] = []
-  const storedPartsAtEvents: (readonly ReplyPart[])[] = []
-  const reported = createRecordedReporters()
-  const persistedStates: AssistantMessageCompletion[] = []
+  const records = createTurnRecords()
   const storage = buildScenarioReplyStorage(scenario, store)
+  const turn = buildScenarioTurn({ scenario, store, storage, records })
   const settlement = await findScenarioAgent(scenario)
-    .createReply({
-      ...TURN_REQUEST,
-      conversationId: store.conversationId,
-      requestId: store.replyId,
-      trainedForToolUse: scenario.trainedForToolUse ?? false,
-      userMessage: scenario.userMessage ?? TURN_REQUEST.userMessage,
-      canSeeImages: scenario.canSeeImages ?? false,
-      findAttachmentImage:
-        scenario.findAttachmentImage ?? handleUnexpectedImageRead,
-      history: scenario.history ?? [],
-      sources: getStoredReply(store).sources,
-      ...buildScenarioTools(scenario),
-      abortSignal: scenario.abortSignal ?? new AbortController().signal,
-      sendEvent: (event) => {
-        events.push(event)
-        storedPartsAtEvents.push(getStoredReply(store).reply.parts)
-      },
-      ...reported.reporters,
-      createReplyPart: storage.createReplyPart,
-      updateReplyPartContent: storage.updateReplyPartContent,
-      updateReplyToolCall: storage.updateReplyToolCall,
-      updateAssistantMessageState: (completion) => {
-        persistedStates.push(completion)
-        return storage.updateAssistantMessageState(completion)
-      },
-      findReplyStatus: storage.findReplyStatus
-    })
+    .createReply(turn)
     .then(
       () => ({ status: "resolved" as const }),
       (error: unknown) => ({ status: "rejected" as const, error })
     )
   const { reply, sources } = getStoredReply(store)
   return {
-    events,
-    storedPartsAtEvents,
-    persistedStates,
+    events: records.events,
+    storedPartsAtEvents: records.storedPartsAtEvents,
+    persistedStates: records.persistedStates,
     storage,
-    ...reported.records,
+    reportedCancellations: records.reportedCancellations,
+    reportedRefusals: records.reportedRefusals,
+    reportedFailures: records.reportedFailures,
+    reportedToolSearchFailures: records.reportedToolSearchFailures,
     settlement,
     reply,
     parts: reply.parts,
@@ -4457,9 +4520,6 @@ describe("Agent", () => {
       "find_tools",
       '{"task":"define a word"}'
     )
-
-    /** Round in which the model looks up `moth`. */
-    const LOOK_UP_MOTH_ROUND = buildCallRound("look_up_word", '{"word":"moth"}')
 
     /**
      * Creates a keeper whose every search ends one way.

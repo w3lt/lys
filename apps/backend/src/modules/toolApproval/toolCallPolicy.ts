@@ -1,16 +1,51 @@
 import { CREDENTIAL_FILE_LIST, type ChatToolCall } from "@lys/protocol"
 import type { JsonValue } from "@lys/share"
 import { isIP } from "node:net"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+import type { ApprovedFoldersRead } from "../../infrastructure/settings/approvedFoldersFile"
 import { isLocalUrlHost } from "../tool/builtIn/web/webAddresses"
 
 /** Arguments of one call, after `AgentTool` checked their types. */
 type ToolCallArguments = ChatToolCall["arguments"]
 
 /**
- * What the fixed tool call rules need to know about this machine.
+ * The folders the person lets tools use, as the policy reads them.
  *
- * @remarks Built once by `buildApp` from the backend configuration and
- * fixed for the backend's lifetime; no setting changes it.
+ * @remarks `any`: no folder is listed, so the folder rule is off and a call
+ * may name any path. `listed`: a call may name a path only inside one of
+ * `folderPaths`; the list is empty when the saved folders cannot be read, so
+ * the rule fails closed and every path is outside.
+ */
+export type ApprovedFolders =
+  | Readonly<{
+      /** No folder is listed. */
+      kind: "any"
+    }>
+  | Readonly<{
+      /** Only the listed folders may be named. */
+      kind: "listed"
+      /**
+       * Absolute paths of the folders, each resolved by text: without `.`
+       * and `..` parts, repeated separators, or a separator at its end.
+       */
+      folderPaths: readonly string[]
+    }>
+
+/**
+ * Reads the folders the person lets tools use, again on every call.
+ *
+ * @remarks Rejects only when the settings file cannot be closed.
+ */
+export type ReadApprovedFolders = () => Promise<ApprovedFolders>
+
+/**
+ * What the tool call rules need to know about this machine, and where they
+ * read the person's choices from.
+ *
+ * @remarks Built once by `buildApp` from the backend configuration; the
+ * paths are fixed for the backend's lifetime. Each decision uses the
+ * {@link ToolCallRules} that {@link readToolCallRules} builds from it.
  */
 export type ToolCallPolicy = Readonly<{
   /**
@@ -18,6 +53,30 @@ export type ToolCallPolicy = Readonly<{
    * passwords; a call naming it is denied.
    */
   settingsFilePath: string
+  /**
+   * Absolute path of the person's home folder: what `~` names, and the
+   * folder a relative path is resolved against, because Lys starts MCP
+   * servers in it.
+   */
+  homeFolderPath: string
+  /** Reads the folders a call may name paths in. */
+  readApprovedFolders: ReadApprovedFolders
+}>
+
+/**
+ * What the rules decide one call by: the policy's paths and the approved
+ * folders read for it.
+ *
+ * @remarks Read once for each round of tool calls, and again for the
+ * re-check of a call the person allowed.
+ */
+export type ToolCallRules = Readonly<{
+  /** As {@link ToolCallPolicy.settingsFilePath}. */
+  settingsFilePath: string
+  /** As {@link ToolCallPolicy.homeFolderPath}. */
+  homeFolderPath: string
+  /** The folders a call may name paths in, as read. */
+  approvedFolders: ApprovedFolders
 }>
 
 /**
@@ -47,7 +106,8 @@ export type ToolCallRequest = Readonly<{
 }>
 
 /** Why the policy denied a call. */
-export type ToolCallDenialReason = "credential-file" | "blocked-address"
+export type ToolCallDenialReason =
+  "credential-file" | "outside-approved-folders" | "blocked-address"
 
 /** Why the policy requires the person's approval of a call. */
 type ToolCallApprovalReason = "destructive-tool"
@@ -93,6 +153,22 @@ const SETTINGS_FILE_PART_COUNT = 2
 /** A run of path separators, `/` or `\`. */
 const PATH_SEPARATOR_PATTERN = /[/\\]+/u
 
+/**
+ * A separator, a carriage return, or a line feed between the lines of a
+ * text, each line of which is read as a path on its own.
+ */
+const LINE_BREAK_PATTERN = /\r\n|\r|\n/u
+
+/**
+ * Start of a path a text names on this machine: `/` but not `//`, which
+ * starts a network path; `~` alone or before `/`; or `.` or `..` alone or
+ * before `/`.
+ */
+const LOCAL_PATH_START_PATTERN = /^(?:\/(?!\/)|~(?:\/|$)|\.\.?(?:\/|$))/u
+
+/** Start of a path in the person's home folder: `~` alone or before `/`. */
+const HOME_PATH_START_PATTERN = /^~(?=\/|$)/u
+
 /** A percent escape of one byte: `%`, then the byte as two hex digits. */
 const PERCENT_ESCAPE_PATTERN = /%[0-9a-f]{2}/giu
 
@@ -109,6 +185,15 @@ const WHITESPACE_PATTERN = /\s/u
 const BARE_HOST_PATTERN =
   /^(?:\/\/|\\\\)?(?:[^/\\]*@)?(?<host>\[[^\]]*\]|[^:/\\[\]@]+)(?:[:/\\].*)?$/u
 
+/** Folders when none is listed: the folder rule is off. */
+const ANY_FOLDER: ApprovedFolders = Object.freeze({ kind: "any" })
+
+/** Folders when the saved list cannot be read: none, so every path is outside. */
+const NO_APPROVED_FOLDERS: ApprovedFolders = Object.freeze({
+  kind: "listed",
+  folderPaths: Object.freeze([])
+})
+
 /** Answer for a call no rule denies. */
 const ALLOWED: ToolCallDecision = Object.freeze({ effect: "allow" })
 
@@ -116,6 +201,12 @@ const ALLOWED: ToolCallDecision = Object.freeze({ effect: "allow" })
 const DENIED_CREDENTIAL_FILE: ToolCallDecision = Object.freeze({
   effect: "deny",
   reason: "credential-file"
+})
+
+/** Answer for a call naming a path outside the approved folders. */
+const DENIED_OUTSIDE_APPROVED_FOLDERS: ToolCallDecision = Object.freeze({
+  effect: "deny",
+  reason: "outside-approved-folders"
 })
 
 /** Answer for a call naming a blocked network address. */
@@ -134,6 +225,8 @@ const DESTRUCTIVE_TOOL_APPROVAL_REQUIRED: ToolCallDecision = Object.freeze({
 const DENIAL_MESSAGES = Object.freeze({
   "credential-file":
     "This call was denied and did not run: an argument names a private key or credential file, such as one under ~/.ssh or Lys's settings file, which no tool may use. Do not try to reach it another way; tell the person what you need it for.",
+  "outside-approved-folders":
+    "This call was denied and did not run: an argument names a file or folder outside the folders the person lets tools use. Do not try to reach it another way; tell the person which file you need, so they can add its folder in Settings if they agree.",
   "blocked-address":
     "This call was denied and did not run: an argument names this machine, a private network, or another address Lys never connects to. Do not try to reach it another way; tell the person what you need it for."
 } satisfies Readonly<Record<ToolCallDenialReason, string>>)
@@ -290,6 +383,85 @@ function namesCredentialFile(
 }
 
 /**
+ * Finds the path on this machine that one line of an argument text names.
+ *
+ * @param line - Trimmed line of an argument text.
+ * @param homeFolderPath - Absolute path of the person's home folder.
+ * @returns The path, absolute and resolved by text, for a `file:` URL, or
+ * for a line that starts as {@link LOCAL_PATH_START_PATTERN} describes: `~`
+ * names the home folder, and a relative path is resolved against it. Null
+ * for a `file:` URL that names no path on this machine, such as one with a
+ * host or an escaped `/`. Undefined for any other line, which names no path.
+ */
+function findLocalPath(
+  line: string,
+  homeFolderPath: string
+): string | null | undefined {
+  const url = URL.parse(line)
+  if (url?.protocol === "file:") {
+    try {
+      return path.resolve(fileURLToPath(url))
+    } catch {
+      return null
+    }
+  }
+  if (!LOCAL_PATH_START_PATTERN.test(line)) return undefined
+  return path.resolve(
+    homeFolderPath,
+    line.replace(HOME_PATH_START_PATTERN, homeFolderPath)
+  )
+}
+
+/**
+ * Answers whether a path is one of the approved folders or inside one.
+ *
+ * @param localPath - Absolute path, resolved by text.
+ * @param folderPaths - Absolute folder paths, resolved by text.
+ * @returns True when the path equals a folder or lies below it by whole
+ * parts, so `/work/app-old` is not inside `/work/app`. Case counts.
+ */
+function isInsideApprovedFolder(
+  localPath: string,
+  folderPaths: readonly string[]
+): boolean {
+  return folderPaths.some((folderPath) => {
+    const relativePath = path.relative(folderPath, localPath)
+    return (
+      relativePath !== ".." &&
+      !relativePath.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relativePath)
+    )
+  })
+}
+
+/**
+ * Answers whether a trimmed argument text names a path outside the approved
+ * folders.
+ *
+ * @param text - Trimmed argument text.
+ * @param rules - The home folder and the approved folders.
+ * @returns False when no folder is listed. Otherwise true when the text, or
+ * one of its lines, names a path, as {@link findLocalPath} finds it, that is
+ * not inside a listed folder; a `file:` URL that names no path on this
+ * machine counts as outside.
+ */
+function namesPathOutsideApprovedFolders(
+  text: string,
+  rules: ToolCallRules
+): boolean {
+  const { approvedFolders } = rules
+  if (approvedFolders.kind === "any") return false
+  return text.split(LINE_BREAK_PATTERN).some((line) => {
+    const localPath = findLocalPath(line.trim(), rules.homeFolderPath)
+    if (localPath === undefined) return false
+    return (
+      localPath === null ||
+      !isInsideApprovedFolder(localPath, approvedFolders.folderPaths)
+    )
+  })
+}
+
+/**
  * Answers whether a trimmed argument text is one URL or host that names this
  * machine or a blocked IP address.
  *
@@ -321,12 +493,15 @@ function namesBlockedAddress(text: string): boolean {
 }
 
 /**
- * Decides one tool call by the fixed rules, whatever the tool.
+ * Decides one tool call by the rules, whatever the tool.
  *
  * @param request - What the gateway knows about the call.
- * @param policy - What the rules need to know about this machine.
+ * @param rules - What the rules need to know about this machine and the
+ * folders the person lets tools use.
  * @returns `deny` with `credential-file` when an argument text names a
  * private key or credential file, a folder of them, or Lys's settings file;
+ * otherwise `deny` with `outside-approved-folders` when folders are listed
+ * and an argument text, or a line of one, names a path outside them;
  * otherwise `deny` with `blocked-address` when an argument text is a URL or
  * host of this machine or a blocked IP address; otherwise `require-approval`
  * with `destructive-tool` when the tool is marked destructive; otherwise
@@ -334,23 +509,68 @@ function namesBlockedAddress(text: string): boolean {
  * even when it would also need approval.
  * @remarks Reads argument texts only: it resolves no host name and follows
  * no symbolic link, and a text with whitespace is never read as an address.
+ * A path is read only from a text, or a line of one, that starts as one; a
+ * path inside a longer text, such as a command, and a relative path without
+ * a leading `.` or `..`, such as `notes/a.txt`, are not read.
  * It does no I/O and throws nothing.
  */
 export function decideToolCall(
   request: ToolCallRequest,
-  policy: ToolCallPolicy
+  rules: ToolCallRules
 ): ToolCallDecision {
   const texts = listArgumentTexts(request.resource.arguments).map((text) =>
     text.trim()
   )
-  const settingsFileParts = listPathParts(policy.settingsFilePath).slice(
+  const settingsFileParts = listPathParts(rules.settingsFilePath).slice(
     -SETTINGS_FILE_PART_COUNT
   )
   if (texts.some((text) => namesCredentialFile(text, settingsFileParts)))
     return DENIED_CREDENTIAL_FILE
+  if (texts.some((text) => namesPathOutsideApprovedFolders(text, rules)))
+    return DENIED_OUTSIDE_APPROVED_FOLDERS
   if (texts.some(namesBlockedAddress)) return DENIED_BLOCKED_ADDRESS
   if (request.action.isDestructive) return DESTRUCTIVE_TOOL_APPROVAL_REQUIRED
   return ALLOWED
+}
+
+/**
+ * Reads what the rules decide calls by, now.
+ *
+ * @param policy - The machine's paths and the reader of the folders.
+ * @returns A frozen snapshot holding the folders read just now.
+ * @throws The reader's failure, when the settings file cannot be closed.
+ */
+export async function readToolCallRules(
+  policy: ToolCallPolicy
+): Promise<ToolCallRules> {
+  const approvedFolders = await policy.readApprovedFolders()
+  return Object.freeze({
+    settingsFilePath: policy.settingsFilePath,
+    homeFolderPath: policy.homeFolderPath,
+    approvedFolders
+  })
+}
+
+/**
+ * Builds the folders the policy reads from what reading the settings file
+ * found.
+ *
+ * @param read - The saved folders, or `unreadable`.
+ * @returns `any` when no folder is saved; `listed` with each saved path
+ * resolved by text; `listed` with no folder when the file cannot be read,
+ * so every path is outside.
+ */
+export function buildApprovedFolders(
+  read: ApprovedFoldersRead
+): ApprovedFolders {
+  if (read.status === "unreadable") return NO_APPROVED_FOLDERS
+  if (read.folderPaths.length === 0) return ANY_FOLDER
+  return Object.freeze({
+    kind: "listed",
+    folderPaths: Object.freeze(
+      read.folderPaths.map((folderPath) => path.resolve(folderPath))
+    )
+  })
 }
 
 /**

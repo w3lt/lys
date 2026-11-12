@@ -25,9 +25,11 @@ import type { ToolApprovalPromptOutcome } from "../toolApproval/toolCallGate"
 import {
   decideToolCall,
   formatToolCallDenial,
+  readToolCallRules,
   type ToolCallDecision,
   type ToolCallPolicy,
-  type ToolCallRequest
+  type ToolCallRequest,
+  type ToolCallRules
 } from "../toolApproval/toolCallPolicy"
 import type ReplyPartSequence from "./replyPartSequence"
 import type {
@@ -142,8 +144,11 @@ export type ToolCallRoundContext = Readonly<{
   /** Sends one allowed call of a client tool to run. */
   sendClientToolCall: SendClientToolCall
   /**
-   * What the fixed rules know about this machine; every checked call of an
-   * offered tool is decided by them before it starts.
+   * What the tool call rules know about this machine, and the reader of the
+   * folders the person lets tools use; every checked call of an offered tool
+   * is decided by the rules, with the folders read once for the round, before
+   * it starts, and a call the person allowed is decided again, with the
+   * folders read again, before it runs.
    */
   toolCallPolicy: ToolCallPolicy
   /**
@@ -167,8 +172,13 @@ type ToolCallHandling = Readonly<{
   tools: AgentToolset
   /** What the request names about the tools the turn does not offer. */
   unofferedTools: UnofferedTools
-  /** What the fixed rules know about this machine. */
+  /**
+   * What the rules know about this machine; read again for the re-check of a
+   * call the person allowed.
+   */
   toolCallPolicy: ToolCallPolicy
+  /** What the rules decide the round's calls by, read for the round. */
+  toolCallRules: ToolCallRules
   /**
    * Approval gate of the round; undefined when no call of the round passes
    * one, because every call names a tool that runs without approval or no
@@ -191,18 +201,24 @@ type ToolCallHandling = Readonly<{
 type ToolCallPartHandling = Pick<ToolCallHandling, "round" | "replyParts">
 
 /**
- * What starting a checked call needs: the policy, the gate, the round, and
- * the parts.
+ * What starting a checked call needs: the policy and the round's rules, the
+ * gate, the round, and the parts.
  */
 type ToolCallStartHandling = Pick<
   ToolCallHandling,
-  "toolCallPolicy" | "gate" | "round" | "replyParts"
+  "toolCallPolicy" | "toolCallRules" | "gate" | "round" | "replyParts"
 >
 
 /** What starting a checked call through the round's gate needs. */
 type GatedToolCallStartHandling = Pick<
   ToolCallHandling,
-  "gate" | "round" | "replyParts"
+  "toolCallPolicy" | "gate" | "round" | "replyParts"
+>
+
+/** What storing the person's answer to a call's prompt needs. */
+type ToolCallAnswerHandling = Pick<
+  ToolCallHandling,
+  "toolCallPolicy" | "replyParts"
 >
 
 /** What handling a checked call of a client tool needs. */
@@ -445,8 +461,9 @@ export function buildDefinedToolOffer(
  * and builds the messages that add the round to the context.
  *
  * @param round - The round's index, text, and calls in the model's order.
- * @param context - Tools, the client call sender, the gate factory, the
- * reply's cancellation, its part sequence, and the turn's source catalog.
+ * @param context - Tools, the client call sender, the tool call policy, the
+ * gate factory, the reply's cancellation, its part sequence, and the turn's
+ * source catalog.
  * @returns The assistant message with the round's text and calls, then one
  * result message per call in the model's order; or undefined when the reply
  * was stopped while the gate was created, a call waited, or a backend tool
@@ -454,13 +471,14 @@ export function buildDefinedToolOffer(
  * @throws If the turn offered no tools and tells the model nothing about the
  * tools it does not offer: the model called a tool it was not offered, which
  * ends the reply as failed, as before tools existed. Also throws when the
- * gate cannot be created, or a backend tool's run fails for a reason other
- * than Stop.
+ * gate cannot be created, the approved folders cannot be read, or a backend
+ * tool's run fails for a reason other than Stop.
  * @remarks Each call gets a new UUIDv7, which is its part's identity. Calls
  * of tools the turn does not offer, named or not, and calls whose arguments
  * do not match are stored as failed with the message the model reads; nobody
  * is asked about them, and none of them runs. Every other call is decided by
- * the fixed tool call policy first: a denied call is stored as failed with
+ * the tool call rules first, with the approved folders read once for the
+ * round: a denied call is stored as failed with
  * the denial the model reads, never runs, and nobody is asked about it,
  * whatever the person saved for the tool. A call the policy requires approval
  * of passes the round's gate, which asks the person even when they saved its
@@ -473,7 +491,8 @@ export function buildDefinedToolOffer(
  * it asks about, and the run requests of calls allowed at once are sent
  * before the first wait, in the model's order, because each call's handling
  * runs synchronously up to its first send. Nothing runs before its call is
- * allowed. Every result the model reads is stored with its call first; the
+ * allowed; a call the person allowed is decided again, with the folders read
+ * again, and one the rules now deny is stored as failed and never runs. Every result the model reads is stored with its call first; the
  * result of a tool that does more than read this machine, a network or MCP
  * tool, is cleaned of invisible characters before that, whichever side
  * answered and however the call ended.
@@ -488,11 +507,13 @@ export async function handleToolCallRound(
   const gate = hasGatedToolCall(toolCalls, context.tools)
     ? await context.createToolCallGate()
     : undefined
+  const toolCallRules = await readToolCallRules(context.toolCallPolicy)
   if (context.abortSignal.aborted) return undefined
   const handling: ToolCallHandling = Object.freeze({
     tools: context.tools,
     unofferedTools: context.unofferedTools,
     toolCallPolicy: context.toolCallPolicy,
+    toolCallRules,
     gate,
     round: round.round,
     sendClientToolCall: context.sendClientToolCall,
@@ -832,7 +853,7 @@ function startToolCall(
 ): StartedToolCall {
   const decision = decideToolCall(
     buildToolCallRequest(toolCall),
-    handling.toolCallPolicy
+    handling.toolCallRules
   )
   switch (decision.effect) {
     case "deny":
@@ -936,11 +957,7 @@ function startGatedToolCall(
     case "prompted":
       return Object.freeze({
         status: "waiting",
-        approval: handleToolCallApprovalAnswer(
-          toolCall,
-          start.answer,
-          handling.replyParts
-        )
+        approval: handleToolCallApprovalAnswer(toolCall, start.answer, handling)
       })
   }
 }
@@ -952,46 +969,73 @@ function startGatedToolCall(
  * @param answer - Settles with the person's answer, with `expired` when the
  * prompt reached its time limit first, or with undefined when the reply was
  * stopped while the prompt waited; never rejects.
- * @param replyParts - The reply's part sequence.
- * @returns `allowed` once the call is stored as running; `rejected` with the
- * rejection the model reads, once stored; `expired` with the expiry the
- * model reads, once the call is stored as failed; `ended` when the reply was
- * stopped while the prompt waited, or refused to store the outcome.
+ * @param handling - The policy, read again for an allowed call, and the
+ * reply's part sequence.
+ * @returns As {@link updateAllowedToolCall} returns for an allowed call;
+ * `rejected` with the rejection the model reads, once stored; `expired` with
+ * the expiry the model reads, once the call is stored as failed; `ended`
+ * when the reply was stopped while the prompt waited, or refused to store
+ * the outcome.
+ * @throws When reading the approved folders for the re-check does.
  */
 async function handleToolCallApprovalAnswer(
   toolCall: CheckedToolCall,
   answer: Promise<ToolApprovalPromptOutcome | undefined>,
-  replyParts: ReplyPartSequence
+  handling: ToolCallAnswerHandling
 ): Promise<ToolCallApproval> {
   const settledAnswer = await answer
   if (settledAnswer === undefined) return ENDED_TOOL_CALL_APPROVAL
   switch (settledAnswer.status) {
     case "allowed":
-      return updateAllowedToolCall(toolCall, replyParts)
+      return updateAllowedToolCall(toolCall, handling)
     case "rejected":
-      return updateRejectedToolCall(toolCall, settledAnswer, replyParts)
+      return updateRejectedToolCall(
+        toolCall,
+        settledAnswer,
+        handling.replyParts
+      )
     case "expired":
-      return updateExpiredToolCall(toolCall, replyParts)
+      return updateExpiredToolCall(toolCall, handling.replyParts)
   }
 }
 
 /**
- * Stores a waiting call the person allowed as running.
+ * Stores a waiting call the person allowed as running, then decides it again
+ * by the rules with the approved folders read now, before it runs.
  *
  * @param toolCall - Checked call.
- * @param replyParts - The reply's part sequence.
- * @returns `allowed` once stored; `ended` when the reply refused it, so the
- * call never runs.
+ * @param handling - The policy and the reply's part sequence.
+ * @returns `allowed` once stored when the rules still let it go on;
+ * `denied` with the denial the model reads, once the call is stored as
+ * failed, when they now deny it, so it never runs; `ended` when the reply
+ * refused either change, so the call never runs.
+ * @throws When reading the approved folders does.
+ * @remarks Spec §4: an approval answers the exact call, and the gateway
+ * checks it again against the policy's current state before it runs, so a
+ * folder removed while the prompt waited is out of reach. Only the folders
+ * can change; the other rules read the same arguments the same way. The
+ * call is stored as running first, because a waiting call may change only
+ * to running, rejected, or expired; nothing runs before this returns.
  */
-function updateAllowedToolCall(
+async function updateAllowedToolCall(
   toolCall: CheckedToolCall,
-  replyParts: ReplyPartSequence
-): ToolCallApproval {
-  return replyParts.updateReplyToolCall(toolCall.call.id, {
-    status: "running"
-  })
-    ? ALLOWED_TOOL_CALL_APPROVAL
-    : ENDED_TOOL_CALL_APPROVAL
+  handling: ToolCallAnswerHandling
+): Promise<ToolCallApproval> {
+  const { replyParts } = handling
+  if (!replyParts.updateReplyToolCall(toolCall.call.id, { status: "running" }))
+    return ENDED_TOOL_CALL_APPROVAL
+  const decision = decideToolCall(
+    buildToolCallRequest(toolCall),
+    await readToolCallRules(handling.toolCallPolicy)
+  )
+  if (decision.effect !== "deny") return ALLOWED_TOOL_CALL_APPROVAL
+  const message = updateFinishedToolCall(
+    toolCall,
+    { status: "failed", content: formatToolCallDenial(decision.reason) },
+    replyParts
+  )
+  if (message === undefined) return ENDED_TOOL_CALL_APPROVAL
+  return Object.freeze({ status: "denied", message })
 }
 
 /**

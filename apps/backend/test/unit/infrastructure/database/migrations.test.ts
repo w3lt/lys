@@ -3,7 +3,7 @@ import { describe, expect, it, onTestFinished } from "vitest"
 import { migrateDatabase } from "../../../../src/infrastructure/database/migrations"
 
 /** Schema version produced by the current migration list. */
-const CURRENT_SCHEMA_VERSION = 14
+const CURRENT_SCHEMA_VERSION = 15
 
 /**
  * Opens an empty in-memory database owned by the current test.
@@ -211,8 +211,8 @@ function createVersion11Database(): DatabaseSync {
  *
  * @returns A connection at `user_version` 12, closed when the test finishes.
  * @remarks Migration 13 only adds the decision table, its index, and its
- * trigger, and migration 14 only creates them again, so dropping them from a
- * current database leaves exactly the version-12 schema.
+ * trigger, and migrations 14 and 15 only create them again, so dropping them
+ * from a current database leaves exactly the version-12 schema.
  */
 function createVersion12Database(): DatabaseSync {
   const database = openEmptyDatabase()
@@ -225,19 +225,48 @@ function createVersion12Database(): DatabaseSync {
   return database
 }
 
+/** Denial reasons of the current decision table, in its SQL's words. */
+const CURRENT_DENIAL_REASONS_SQL =
+  "'credential-file', 'outside-approved-folders', 'blocked-address'"
+
+/** Denial reasons of the version-14 decision table, in its SQL's words. */
+const VERSION_14_DENIAL_REASONS_SQL = "'credential-file', 'blocked-address'"
+
 /**
- * Creates a database at version 13: the current schema whose decision
- * records cannot store the answer `expired`.
+ * Replaces one text of an SQL definition, which must hold it.
  *
- * @returns A connection at `user_version` 13, closed when the test finishes.
- * @remarks Migration 14 only creates the decision table again with
- * `expired` added to its answer rule, and its index and trigger again
- * unchanged, so the current table's own SQL without `expired` is the
- * version-13 table.
- * @throws If the current table's SQL no longer lists `expired` after
- * `showFailed`, which this derivation relies on.
+ * @param sql - Definition.
+ * @param text - Text to replace.
+ * @param replacement - Its replacement.
+ * @returns The definition with the text replaced.
+ * @throws If the definition does not hold the text, which the derivations
+ * below rely on.
  */
-function createVersion13Database(): DatabaseSync {
+function replaceSqlText(
+  sql: string,
+  text: string,
+  replacement: string
+): string {
+  if (!sql.includes(text)) throw new Error(`The SQL no longer holds ${text}`)
+  return sql.replace(text, replacement)
+}
+
+/**
+ * Creates a database at an earlier version whose decision table differs
+ * from the current one only in its rules.
+ *
+ * @param version - The version.
+ * @param editTableSql - Changes the current table's SQL into the version's.
+ * @returns A connection at `user_version` `version`, closed when the test
+ * finishes.
+ * @remarks Migrations 14 and 15 only create the decision table again with
+ * one more allowed value, and its index and trigger again unchanged, so
+ * the current table's own SQL without those values is each earlier table.
+ */
+function createDecisionTableVersionDatabase(
+  version: number,
+  editTableSql: (tableSql: string) => string
+): DatabaseSync {
   const database = openEmptyDatabase()
   migrateDatabase(database)
   const readSql = (name: string): string => {
@@ -250,21 +279,51 @@ function createVersion13Database(): DatabaseSync {
   const tableSql = readSql("tool_call_decisions")
   const indexSql = readSql("tool_call_decisions_conversation_idx")
   const triggerSql = readSql("update_tool_call_decision_after_tool_call_update")
-  const version13TableSql = tableSql.replace(
-    "'showFailed', 'expired'",
-    "'showFailed'"
-  )
-  if (version13TableSql === tableSql)
-    throw new Error("The decision table's answer rule changed")
   database.exec(`
     DROP TRIGGER update_tool_call_decision_after_tool_call_update;
     DROP TABLE tool_call_decisions;
   `)
-  database.exec(version13TableSql)
+  database.exec(editTableSql(tableSql))
   database.exec(indexSql)
   database.exec(triggerSql)
-  database.exec("PRAGMA user_version = 13")
+  database.exec(`PRAGMA user_version = ${version}`)
   return database
+}
+
+/**
+ * Creates a database at version 14: the current schema whose decision
+ * records cannot store the denial reason `outside-approved-folders`.
+ *
+ * @returns A connection at `user_version` 14, closed when the test finishes.
+ */
+function createVersion14Database(): DatabaseSync {
+  return createDecisionTableVersionDatabase(14, (tableSql) =>
+    replaceSqlText(
+      tableSql,
+      CURRENT_DENIAL_REASONS_SQL,
+      VERSION_14_DENIAL_REASONS_SQL
+    )
+  )
+}
+
+/**
+ * Creates a database at version 13: the version-14 schema whose decision
+ * records cannot store the answer `expired` either.
+ *
+ * @returns A connection at `user_version` 13, closed when the test finishes.
+ */
+function createVersion13Database(): DatabaseSync {
+  return createDecisionTableVersionDatabase(13, (tableSql) =>
+    replaceSqlText(
+      replaceSqlText(
+        tableSql,
+        CURRENT_DENIAL_REASONS_SQL,
+        VERSION_14_DENIAL_REASONS_SQL
+      ),
+      "'showFailed', 'expired'",
+      "'showFailed'"
+    )
+  )
 }
 
 /**
@@ -1592,7 +1651,9 @@ describe("migrateDatabase", () => {
         "'allow', NULL, 'ask-me', 'showFailed'",
       "a destructive call the person declined":
         "'require-approval', 'destructive-tool', 'just-run', 'declined'",
-      "a call whose prompt expired": "'allow', NULL, 'ask-me', 'expired'"
+      "a call whose prompt expired": "'allow', NULL, 'ask-me', 'expired'",
+      "a call naming a path outside the approved folders":
+        "'deny', 'outside-approved-folders', NULL, NULL"
     })
   )("stores the decision record of %s", (_label, values) => {
     const database = openEmptyDatabase()
@@ -1685,6 +1746,37 @@ describe("migrateDatabase", () => {
     expect(readRecords()).toMatchObject([
       {
         answer: "expired",
+        outcome: "failed",
+        updated_at: "2026-01-04T00:00:00.000Z"
+      }
+    ])
+  })
+
+  it("upgrades a version-14 database by letting a decision record store the denial outside-approved-folders, keeping every record, its index, and its trigger", () => {
+    const database = createVersion14Database()
+    saveWaitingToolCall(database)
+    saveToolCallDecision(database, "'allow', NULL, 'ask-me', 'expired'")
+    const readRecords = () =>
+      database.prepare("SELECT * FROM tool_call_decisions").all()
+    const version14Records = readRecords()
+    const denyOutside =
+      "UPDATE tool_call_decisions SET policy_effect = 'deny', policy_reason = 'outside-approved-folders', approval_mode = NULL, answer = NULL WHERE call_id = 'p1'"
+    expect(() => database.exec(denyOutside)).toThrow(/constraint failed/)
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
+    expect(readRecords()).toEqual(version14Records)
+    expect(listSchemaObjects(database, "index")).toContain(
+      "tool_call_decisions_conversation_idx"
+    )
+    database.exec(denyOutside)
+    database.exec(
+      "UPDATE conversation_messages SET status = 'failed', content = 'Denied.', updated_at = '2026-01-04T00:00:00.000Z' WHERE id = 'p1'"
+    )
+    expect(readRecords()).toMatchObject([
+      {
+        policy_reason: "outside-approved-folders",
         outcome: "failed",
         updated_at: "2026-01-04T00:00:00.000Z"
       }

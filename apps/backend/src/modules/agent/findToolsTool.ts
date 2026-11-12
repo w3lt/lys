@@ -117,7 +117,10 @@ export type FindToolsContext = Readonly<{
   generationOptions: MessageGenerationOptions
   /** Receives why a search ended without finding; lent for the reply. */
   reportFailure: ReportToolSearchFailure
-  /** What the fixed tool call rules know about this machine. */
+  /**
+   * What the tool call rules know about this machine, and the reader of the
+   * folders the person lets tools use.
+   */
   toolCallPolicy: ToolCallPolicy
 }>
 

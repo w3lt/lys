@@ -3,17 +3,41 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import {
+  buildApprovedFolders,
   decideToolCall,
   formatToolCallDenial,
+  readToolCallRules,
+  type ApprovedFolders,
   type ToolCallDecision,
-  type ToolCallPolicy,
-  type ToolCallRequest
+  type ToolCallRequest,
+  type ToolCallRules
 } from "../../../../src/modules/toolApproval/toolCallPolicy"
 
-/** Policy of a machine whose Lys home is `/home/ada/.lys`. */
-const POLICY = Object.freeze({
-  settingsFilePath: "/home/ada/.lys/settings.json"
-} satisfies ToolCallPolicy)
+/**
+ * Rules of a machine whose home folder is `/home/ada` and whose Lys home is
+ * `/home/ada/.lys`, with no folder listed.
+ */
+const RULES = Object.freeze({
+  settingsFilePath: "/home/ada/.lys/settings.json",
+  homeFolderPath: "/home/ada",
+  approvedFolders: Object.freeze({ kind: "any" })
+} satisfies ToolCallRules)
+
+/**
+ * Builds the rules of the same machine with only some folders approved.
+ *
+ * @param folderPaths - Approved folders, resolved by text.
+ * @returns The rules.
+ */
+function buildListedRules(folderPaths: readonly string[]): ToolCallRules {
+  return Object.freeze({
+    ...RULES,
+    approvedFolders: Object.freeze({ kind: "listed", folderPaths })
+  })
+}
+
+/** Rules approving `/home/ada/work/app` and `/srv/shared` only. */
+const LISTED_RULES = buildListedRules(["/home/ada/work/app", "/srv/shared"])
 
 /**
  * Builds what the gateway knows about one call.
@@ -48,6 +72,12 @@ function buildTargetRequest(value: string): ToolCallRequest {
 const DENIED_CREDENTIAL_FILE = Object.freeze({
   effect: "deny",
   reason: "credential-file"
+} satisfies ToolCallDecision)
+
+/** Decision for a call naming a path outside the approved folders. */
+const DENIED_OUTSIDE_APPROVED_FOLDERS = Object.freeze({
+  effect: "deny",
+  reason: "outside-approved-folders"
 } satisfies ToolCallDecision)
 
 /** Decision for a call naming a blocked network address. */
@@ -215,7 +245,7 @@ describe("decideToolCall", () => {
   it.each(Object.entries(CREDENTIAL_FILE_CASES))(
     "denies %s as a credential file",
     (_label, value) => {
-      expect(decideToolCall(buildTargetRequest(value), POLICY)).toStrictEqual(
+      expect(decideToolCall(buildTargetRequest(value), RULES)).toStrictEqual(
         DENIED_CREDENTIAL_FILE
       )
     }
@@ -227,13 +257,13 @@ describe("decideToolCall", () => {
     "judges %s as the desktop's file tools do",
     (_label, { name, credential }) => {
       expect(
-        decideToolCall(buildTargetRequest(`/home/ada/${name}`), POLICY)
+        decideToolCall(buildTargetRequest(`/home/ada/${name}`), RULES)
       ).toStrictEqual(credential ? DENIED_CREDENTIAL_FILE : ALLOWED)
     }
   )
 
   it.each(Object.entries(ALLOWED_PATH_CASES))("allows %s", (_label, value) => {
-    expect(decideToolCall(buildTargetRequest(value), POLICY)).toStrictEqual(
+    expect(decideToolCall(buildTargetRequest(value), RULES)).toStrictEqual(
       ALLOWED
     )
   })
@@ -241,7 +271,7 @@ describe("decideToolCall", () => {
   it.each(Object.entries(BLOCKED_ADDRESS_CASES))(
     "denies %s as a blocked address",
     (_label, value) => {
-      expect(decideToolCall(buildTargetRequest(value), POLICY)).toStrictEqual(
+      expect(decideToolCall(buildTargetRequest(value), RULES)).toStrictEqual(
         DENIED_BLOCKED_ADDRESS
       )
     }
@@ -250,7 +280,7 @@ describe("decideToolCall", () => {
   it.each(Object.entries(BLOCKED_HOST_FORM_CASES))(
     "denies %s as a blocked address",
     (_label, value) => {
-      expect(decideToolCall(buildTargetRequest(value), POLICY)).toStrictEqual(
+      expect(decideToolCall(buildTargetRequest(value), RULES)).toStrictEqual(
         DENIED_BLOCKED_ADDRESS
       )
     }
@@ -259,7 +289,7 @@ describe("decideToolCall", () => {
   it.each(Object.entries(ALLOWED_ADDRESS_CASES))(
     "allows %s",
     (_label, value) => {
-      expect(decideToolCall(buildTargetRequest(value), POLICY)).toStrictEqual(
+      expect(decideToolCall(buildTargetRequest(value), RULES)).toStrictEqual(
         ALLOWED
       )
     }
@@ -272,7 +302,7 @@ describe("decideToolCall", () => {
       })
     })
 
-    expect(decideToolCall(buildRequest(callArguments), POLICY)).toStrictEqual({
+    expect(decideToolCall(buildRequest(callArguments), RULES)).toStrictEqual({
       effect: "deny",
       reason: "credential-file"
     })
@@ -283,7 +313,7 @@ describe("decideToolCall", () => {
       headers: Object.freeze({ "http://10.0.0.1/": true })
     })
 
-    expect(decideToolCall(buildRequest(callArguments), POLICY)).toStrictEqual({
+    expect(decideToolCall(buildRequest(callArguments), RULES)).toStrictEqual({
       effect: "deny",
       reason: "blocked-address"
     })
@@ -291,7 +321,7 @@ describe("decideToolCall", () => {
 
   it("reads argument names too", () => {
     expect(
-      decideToolCall(buildRequest(Object.freeze({ id_rsa: "on" })), POLICY)
+      decideToolCall(buildRequest(Object.freeze({ id_rsa: "on" })), RULES)
     ).toStrictEqual({ effect: "deny", reason: "credential-file" })
   })
 
@@ -302,14 +332,14 @@ describe("decideToolCall", () => {
       note: null
     })
 
-    expect(decideToolCall(buildRequest(callArguments), POLICY)).toStrictEqual({
+    expect(decideToolCall(buildRequest(callArguments), RULES)).toStrictEqual({
       effect: "allow"
     })
   })
 
   it("allows a call without arguments", () => {
     expect(
-      decideToolCall(buildRequest(Object.freeze({})), POLICY)
+      decideToolCall(buildRequest(Object.freeze({})), RULES)
     ).toStrictEqual({
       effect: "allow"
     })
@@ -321,7 +351,7 @@ describe("decideToolCall", () => {
       path: "~/.ssh/id_rsa"
     })
 
-    expect(decideToolCall(buildRequest(callArguments), POLICY)).toStrictEqual({
+    expect(decideToolCall(buildRequest(callArguments), RULES)).toStrictEqual({
       effect: "deny",
       reason: "credential-file"
     })
@@ -330,7 +360,7 @@ describe("decideToolCall", () => {
   it("requires approval of a call of a tool marked destructive", () => {
     const request = buildRequest(Object.freeze({ path: "notes/old.md" }), true)
 
-    expect(decideToolCall(request, POLICY)).toStrictEqual({
+    expect(decideToolCall(request, RULES)).toStrictEqual({
       effect: "require-approval",
       reason: "destructive-tool"
     })
@@ -344,14 +374,15 @@ describe("decideToolCall", () => {
     (_label, value, decision) => {
       const request = buildRequest(Object.freeze({ target: value }), true)
 
-      expect(decideToolCall(request, POLICY)).toStrictEqual(decision)
+      expect(decideToolCall(request, RULES)).toStrictEqual(decision)
     }
   )
 
   it("compares with the settings file of the policy it is given", () => {
     const policy = Object.freeze({
+      ...RULES,
       settingsFilePath: "/srv/lys/settings.json"
-    } satisfies ToolCallPolicy)
+    } satisfies ToolCallRules)
 
     expect(
       decideToolCall(buildTargetRequest("/srv/lys/settings.json"), policy)
@@ -362,11 +393,191 @@ describe("decideToolCall", () => {
   })
 })
 
+/** Paths inside an approved folder, by label. */
+const INSIDE_APPROVED_FOLDER_CASES = Object.freeze({
+  "the folder itself": "/home/ada/work/app",
+  "the folder with a separator at its end": "/home/ada/work/app/",
+  "a file in it": "/home/ada/work/app/src/main.ts",
+  "a path that leaves and comes back": "/home/ada/work/app/src/../README.md",
+  "a path in the home folder's form": "~/work/app/notes.md",
+  "a path relative to the home folder": "./work/app/notes.md",
+  "a file URL with an escaped space": "file:///home/ada/work/app/a%20b.txt",
+  "a file in the second folder": "/srv/shared/report.txt",
+  "a list of paths, one per line":
+    "/home/ada/work/app/a.txt\r\n/srv/shared/b.txt"
+})
+
+/** Paths outside every approved folder, by label. */
+const OUTSIDE_APPROVED_FOLDER_CASES = Object.freeze({
+  "a system file": "/etc/hosts",
+  "a folder next to an approved one": "/home/ada/work/app-old/a.txt",
+  "the folder above an approved one": "/home/ada/work",
+  "a path that climbs out": "/home/ada/work/app/../secret.txt",
+  "a path that climbs out in its own words": "/home/ada/work/app/./../x",
+  "the home folder": "~",
+  "a file in the home folder": "~/Documents/a.txt",
+  "the folder relative paths start from": ".",
+  "a path relative to the home folder": "./notes.txt",
+  "a relative path that climbs out": "../bob/notes.txt",
+  "a file URL": "file:///etc/hosts",
+  "a file URL that climbs out": "file:///home/ada/work/app/%2e%2e/secret",
+  "a file URL with an escaped separator": "file:///home/ada/work/app/..%2Fx",
+  "a file URL with a host": "file://server/home/ada/work/app/a.txt",
+  "a path in other letter case": "/HOME/ADA/WORK/APP/a.txt",
+  "a list with one path outside": "/home/ada/work/app/a.txt\n/etc/hosts"
+})
+
+/** Texts that name no path the folder rule reads, by label. */
+const UNREAD_PATH_CASES = Object.freeze({
+  "a relative path without a leading dot": "notes/a.txt",
+  "a media type": "text/plain",
+  "a command holding a path": "cat /etc/hosts",
+  "a web address with a path": "https://example.com/etc/hosts",
+  "a network path": "//server/share/a.txt",
+  "another person's home folder": "~bob/notes.txt",
+  "a dotted name": ".gitignore"
+})
+
+describe("decideToolCall with approved folders", () => {
+  it.each(Object.entries(INSIDE_APPROVED_FOLDER_CASES))(
+    "allows %s",
+    (_label, value) => {
+      expect(
+        decideToolCall(buildTargetRequest(value), LISTED_RULES)
+      ).toStrictEqual(ALLOWED)
+    }
+  )
+
+  it.each(Object.entries(OUTSIDE_APPROVED_FOLDER_CASES))(
+    "denies %s",
+    (_label, value) => {
+      expect(
+        decideToolCall(buildTargetRequest(value), LISTED_RULES)
+      ).toStrictEqual(DENIED_OUTSIDE_APPROVED_FOLDERS)
+    }
+  )
+
+  it.each(Object.entries(UNREAD_PATH_CASES))(
+    "leaves %s to the other rules",
+    (_label, value) => {
+      expect(
+        decideToolCall(buildTargetRequest(value), LISTED_RULES)
+      ).toStrictEqual(ALLOWED)
+    }
+  )
+
+  it("reads a path in an argument name and in a nested value", () => {
+    const nestedRequest = buildRequest(
+      Object.freeze({ files: Object.freeze([{ "/etc/hosts": true }]) })
+    )
+
+    expect(decideToolCall(nestedRequest, LISTED_RULES)).toStrictEqual(
+      DENIED_OUTSIDE_APPROVED_FOLDERS
+    )
+  })
+
+  it("allows any path when no folder is listed", () => {
+    expect(
+      decideToolCall(buildTargetRequest("/etc/hosts"), RULES)
+    ).toStrictEqual(ALLOWED)
+  })
+
+  it("denies every path when the listed folders are none", () => {
+    const rules = buildListedRules([])
+
+    expect(
+      decideToolCall(buildTargetRequest("/home/ada/work/app/a.txt"), rules)
+    ).toStrictEqual(DENIED_OUTSIDE_APPROVED_FOLDERS)
+    expect(decideToolCall(buildTargetRequest("hello"), rules)).toStrictEqual(
+      ALLOWED
+    )
+  })
+
+  it("approves everything under the root folder", () => {
+    expect(
+      decideToolCall(buildTargetRequest("/etc/hosts"), buildListedRules(["/"]))
+    ).toStrictEqual(ALLOWED)
+  })
+
+  it.each([
+    [
+      "a credential file",
+      "/home/ada/work/app/.ssh/id_rsa",
+      DENIED_CREDENTIAL_FILE
+    ],
+    ["a credential file outside", "/etc/ssh/id_rsa", DENIED_CREDENTIAL_FILE],
+    ["a blocked address", "http://127.0.0.1/", DENIED_BLOCKED_ADDRESS]
+  ])("still denies %s by its own rule", (_label, value, decision) => {
+    expect(
+      decideToolCall(buildTargetRequest(value), LISTED_RULES)
+    ).toStrictEqual(decision)
+  })
+
+  it("denies a path outside before it asks about a destructive tool", () => {
+    const request = buildRequest(Object.freeze({ target: "/etc/hosts" }), true)
+
+    expect(decideToolCall(request, LISTED_RULES)).toStrictEqual(
+      DENIED_OUTSIDE_APPROVED_FOLDERS
+    )
+  })
+})
+
+describe("buildApprovedFolders", () => {
+  it("turns the rule off when no folder is saved", () => {
+    expect(
+      buildApprovedFolders({ status: "read", folderPaths: [] })
+    ).toStrictEqual({ kind: "any" } satisfies ApprovedFolders)
+  })
+
+  it("resolves each saved folder by text", () => {
+    expect(
+      buildApprovedFolders({
+        status: "read",
+        folderPaths: ["/home/ada/work/", "/srv//shared/./x/.."]
+      })
+    ).toStrictEqual({
+      kind: "listed",
+      folderPaths: ["/home/ada/work", "/srv/shared"]
+    } satisfies ApprovedFolders)
+  })
+
+  it("approves no folder when the settings file cannot be read", () => {
+    expect(buildApprovedFolders({ status: "unreadable" })).toStrictEqual({
+      kind: "listed",
+      folderPaths: []
+    } satisfies ApprovedFolders)
+  })
+})
+
+describe("readToolCallRules", () => {
+  it("reads the approved folders again on every call", async () => {
+    const readings: ApprovedFolders[] = [
+      Object.freeze({ kind: "any" }),
+      Object.freeze({ kind: "listed", folderPaths: ["/srv/shared"] })
+    ]
+    const policy = Object.freeze({
+      settingsFilePath: RULES.settingsFilePath,
+      homeFolderPath: RULES.homeFolderPath,
+      readApprovedFolders: () =>
+        Promise.resolve(readings.shift() ?? RULES.approvedFolders)
+    })
+
+    await expect(readToolCallRules(policy)).resolves.toStrictEqual(RULES)
+    await expect(readToolCallRules(policy)).resolves.toStrictEqual(
+      buildListedRules(["/srv/shared"])
+    )
+  })
+})
+
 describe("formatToolCallDenial", () => {
   it.each([
     [
       "credential-file",
       "This call was denied and did not run: an argument names a private key or credential file, such as one under ~/.ssh or Lys's settings file, which no tool may use. Do not try to reach it another way; tell the person what you need it for."
+    ],
+    [
+      "outside-approved-folders",
+      "This call was denied and did not run: an argument names a file or folder outside the folders the person lets tools use. Do not try to reach it another way; tell the person which file you need, so they can add its folder in Settings if they agree."
     ],
     [
       "blocked-address",

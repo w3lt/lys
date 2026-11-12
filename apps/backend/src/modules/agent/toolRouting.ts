@@ -68,7 +68,10 @@ export type ReplyToolsTurn = Readonly<{
   mcpTools: readonly TurnMcpTool[]
   /** Receives why a `find_tools` search ended without finding. */
   reportToolSearchFailure: ReportToolSearchFailure
-  /** What the fixed tool call rules know about this machine. */
+  /**
+   * What the tool call rules know about this machine, and the reader of the
+   * folders the person lets tools use.
+   */
   toolCallPolicy: ToolCallPolicy
 }>
 

@@ -94,8 +94,9 @@ export type ChatRouteOptions = Pick<
 > &
   Readonly<{
     /**
-     * What the fixed tool call rules know about this machine; every tool
-     * call of every turn the route starts is decided by them.
+     * What the tool call rules know about this machine, and the reader of
+     * the folders the person lets tools use; every tool call of every turn
+     * the route starts is decided by them.
      */
     toolCallPolicy: ToolCallPolicy
   }>
@@ -172,8 +173,9 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      */
     findMcpTool: (toolName: string) => McpTurnToolLookup
     /**
-     * What the fixed tool call rules know about this machine; every checked
-     * call is decided by them before its approval.
+     * What the tool call rules know about this machine, and the reader of
+     * the folders the person lets tools use; every checked call is decided
+     * by them before its approval, and again once the person allows it.
      */
     toolCallPolicy: ToolCallPolicy
     /**

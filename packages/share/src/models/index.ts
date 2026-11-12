@@ -83,6 +83,10 @@ export {
   type LocationSettings,
   type PlaceName
 } from "./location"
+export {
+  approvedFolderPathSchema,
+  MAXIMUM_APPROVED_FOLDER_PATH_LENGTH
+} from "./approvedFolder"
 export { getTypedHostAndPort } from "./internationalizedHost"
 export {
   isWithinJsonValueLimits,

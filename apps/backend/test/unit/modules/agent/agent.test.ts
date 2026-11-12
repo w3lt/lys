@@ -69,7 +69,11 @@ import type { TurnBuiltInTool } from "../../../../src/modules/tool/builtIn/built
 import ToolCallGate, {
   type SendToolApprovalPrompt
 } from "../../../../src/modules/toolApproval/toolCallGate"
-import { formatToolCallDenial } from "../../../../src/modules/toolApproval/toolCallPolicy"
+import {
+  formatToolCallDenial,
+  type ApprovedFolders,
+  type ToolCallPolicy
+} from "../../../../src/modules/toolApproval/toolCallPolicy"
 import { ChatCompletionCancelledError } from "../../../../src/utils/errors"
 import { createImageAttachment } from "../../support/attachmentFixtures"
 import { parseMcpToolDefinition } from "../../support/mcpToolFixtures"
@@ -239,6 +243,11 @@ type AgentReplyScenario = AgentScenario & AgentTurnScenario
 type AgentTurnScenario = Readonly<{
   /** Transcript before the turn; empty by default. */
   history?: readonly ConversationMessage[]
+  /**
+   * Tool call policy of the turn; by default, one that lists no approved
+   * folder.
+   */
+  toolCallPolicy?: ToolCallPolicy
   /**
    * Stored turn the agent writes; a new one without sources by default. A
    * case that changes the reply while it streams opens its own.
@@ -832,6 +841,7 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
   const settlement = await findScenarioAgent(scenario)
     .createReply({
       ...TURN_REQUEST,
+      toolCallPolicy: scenario.toolCallPolicy ?? TURN_REQUEST.toolCallPolicy,
       conversationId: store.conversationId,
       requestId: store.replyId,
       trainedForToolUse: scenario.trainedForToolUse ?? false,
@@ -3573,6 +3583,136 @@ describe("Agent", () => {
 
     /** Denial the model reads for a call naming a blocked address. */
     const BLOCKED_ADDRESS_DENIAL = formatToolCallDenial("blocked-address")
+
+    /** Denial the model reads for a call naming a path outside the folders. */
+    const OUTSIDE_APPROVED_FOLDERS_DENIAL = formatToolCallDenial(
+      "outside-approved-folders"
+    )
+
+    /**
+     * Builds a policy whose approved folders are read from a list of
+     * readings, one per read; the last reading repeats.
+     *
+     * @param readings - Folders each read returns, in order; at least one.
+     * @returns The policy and the reader, to count its reads.
+     */
+    function buildPolicyReading(readings: readonly ApprovedFolders[]) {
+      let readCount = 0
+      const readApprovedFolders = vi.fn<ToolCallPolicy["readApprovedFolders"]>(
+        () => {
+          const reading = readings[Math.min(readCount, readings.length - 1)]
+          readCount += 1
+          if (reading === undefined) throw new Error("No reading is listed")
+          return Promise.resolve(reading)
+        }
+      )
+      const toolCallPolicy: ToolCallPolicy = Object.freeze({
+        ...TOOL_CALL_POLICY,
+        readApprovedFolders
+      })
+      return { toolCallPolicy, readApprovedFolders }
+    }
+
+    /** Folders when only `/home/ada/work` is approved. */
+    const WORK_FOLDER_ONLY: ApprovedFolders = Object.freeze({
+      kind: "listed",
+      folderPaths: Object.freeze(["/home/ada/work"])
+    })
+
+    /** Folders when everything under the root folder is approved. */
+    const ROOT_FOLDER: ApprovedFolders = Object.freeze({
+      kind: "listed",
+      folderPaths: Object.freeze(["/"])
+    })
+
+    it("stores a client tool's call that names a path outside the approved folders as failed, without prompting or sending it, even on Just run", async () => {
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+      const { toolCallPolicy, readApprovedFolders } = buildPolicyReading([
+        WORK_FOLDER_ONLY
+      ])
+      const openReplyStream = createRoundStreams(READ_A_ROUND, FINISH_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        justRunToolNames: ["read_text_file"],
+        toolCallPolicy,
+        sendToolApprovalPrompt,
+        sendClientToolCall: handleUnexpectedToolCall
+      })
+
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+      expect(readApprovedFolders).toHaveBeenCalledOnce()
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          toolName: "read_text_file",
+          status: "failed",
+          result: OUTSIDE_APPROVED_FOLDERS_DENIAL
+        })
+      ])
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
+        role: "tool",
+        content: OUTSIDE_APPROVED_FOLDERS_DENIAL
+      })
+    })
+
+    it("decides an allowed call again with the folders saved when the person answers, and never runs it once they no longer approve its path", async () => {
+      const { toolCallPolicy, readApprovedFolders } = buildPolicyReading([
+        ROOT_FOLDER,
+        WORK_FOLDER_ONLY
+      ])
+      const openReplyStream = createRoundStreams(READ_A_ROUND, FINISH_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        justRunToolNames: [],
+        toolCallPolicy,
+        sendToolApprovalPrompt: createAllowingPromptSender(),
+        sendClientToolCall: handleUnexpectedToolCall
+      })
+
+      expect(readApprovedFolders).toHaveBeenCalledTimes(2)
+      const callId = run.parts[0]?.id
+      expect(run.events.slice(0, 3)).toEqual([
+        buildReplyPartEventMatcher({
+          id: callId,
+          status: "awaiting-approval"
+        }),
+        buildReplyPartEventMatcher({ id: callId, status: "running" }),
+        buildReplyPartEventMatcher({
+          id: callId,
+          status: "failed",
+          result: OUTSIDE_APPROVED_FOLDERS_DENIAL
+        })
+      ])
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toEqual({
+        role: "tool",
+        toolCallId: callId,
+        content: OUTSIDE_APPROVED_FOLDERS_DENIAL
+      })
+    })
+
+    it("runs an allowed call whose path the folders saved when the person answers still approve", async () => {
+      const { toolCallPolicy, readApprovedFolders } = buildPolicyReading([
+        ROOT_FOLDER
+      ])
+      const sendClientToolCall = vi.fn<AgentTurn["sendClientToolCall"]>(
+        async () => ({ status: "succeeded", content: "Buy milk" })
+      )
+
+      await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(READ_A_ROUND, FINISH_ROUND),
+        clientTools: [READ_TEXT_FILE_TOOL],
+        justRunToolNames: [],
+        toolCallPolicy,
+        sendToolApprovalPrompt: createAllowingPromptSender(),
+        sendClientToolCall
+      })
+
+      expect(readApprovedFolders).toHaveBeenCalledTimes(2)
+      expect(sendClientToolCall).toHaveBeenCalledOnce()
+    })
 
     /** Round in which the model reads the SSH key of the person. */
     const READ_KEY_ROUND = buildCallRound(

@@ -222,7 +222,10 @@ describe("runToolKeeperSearch", () => {
 
   it("decides each of Armitage's calls by the search's tool call policy, without asking anyone", async () => {
     const settingsFilePath = "/srv/lys/settings.json"
-    const toolCallPolicy: ToolCallPolicy = Object.freeze({ settingsFilePath })
+    const toolCallPolicy: ToolCallPolicy = Object.freeze({
+      ...TOOL_CALL_POLICY,
+      settingsFilePath
+    })
     const openReplyStream = createRoundStreams(
       buildToolCallRound(SEARCH_TOOLS_TOOL_NAME, { query: settingsFilePath }),
       FINISH_ROUND

@@ -748,6 +748,101 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
       SET outcome = NEW.status, updated_at = NEW.updated_at
       WHERE call_id = NEW.id;
     END;
+  `,
+  // Lets a decision record store the denial reason
+  // `outside-approved-folders`: an argument named a path outside the folders
+  // the person lets tools use. SQLite cannot change a CHECK, so the table is
+  // created again with every other rule unchanged, every row is copied, and
+  // its index and the trigger that copies status changes into it are created
+  // again unchanged, as in the version before. Rows stored before this
+  // version keep their values.
+  `
+    DROP TRIGGER update_tool_call_decision_after_tool_call_update;
+
+    CREATE TABLE new_tool_call_decisions (
+      call_id TEXT PRIMARY KEY
+        REFERENCES conversation_messages(id) ON DELETE CASCADE,
+      conversation_id TEXT NOT NULL
+        REFERENCES conversations(id) ON DELETE CASCADE,
+      agent_code TEXT NOT NULL CHECK (agent_code <> ''),
+      tool_name TEXT NOT NULL,
+      policy_effect TEXT,
+      policy_reason TEXT,
+      approval_mode TEXT,
+      answer TEXT CHECK (
+        answer IS NULL
+        OR (
+          answer IN ('allowed', 'declined', 'showFailed', 'expired')
+          AND approval_mode IS NOT NULL
+        )
+      ),
+      outcome TEXT NOT NULL CHECK (
+        outcome IN (
+          'awaiting-approval', 'running', 'succeeded', 'failed', 'rejected',
+          'interrupted'
+        )
+      ),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      CHECK (
+        (
+          policy_effect IS NULL
+          AND policy_reason IS NULL
+          AND approval_mode IS NULL
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'deny'
+          AND policy_reason IS NOT NULL
+          AND policy_reason IN (
+            'credential-file', 'outside-approved-folders', 'blocked-address'
+          )
+          AND approval_mode IS NULL
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'require-approval'
+          AND policy_reason IS NOT NULL
+          AND policy_reason = 'destructive-tool'
+          AND approval_mode IS NOT NULL
+          AND approval_mode IN ('ask-me', 'just-run')
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'allow'
+          AND policy_reason IS NULL
+          AND (approval_mode IS NULL OR approval_mode IN ('ask-me', 'just-run'))
+        )
+      )
+    ) STRICT;
+
+    INSERT INTO new_tool_call_decisions (
+      call_id, conversation_id, agent_code, tool_name, policy_effect,
+        policy_reason, approval_mode, answer, outcome, created_at, updated_at
+    )
+    SELECT
+      call_id, conversation_id, agent_code, tool_name, policy_effect,
+        policy_reason, approval_mode, answer, outcome, created_at, updated_at
+    FROM tool_call_decisions;
+
+    DROP TABLE tool_call_decisions;
+    ALTER TABLE new_tool_call_decisions RENAME TO tool_call_decisions;
+
+    CREATE INDEX tool_call_decisions_conversation_idx
+      ON tool_call_decisions (conversation_id);
+
+    CREATE TRIGGER update_tool_call_decision_after_tool_call_update
+    AFTER UPDATE OF status ON conversation_messages
+    FOR EACH ROW
+    WHEN NEW.role = 'tool_call'
+    BEGIN
+      UPDATE tool_call_decisions
+      SET outcome = NEW.status, updated_at = NEW.updated_at
+      WHERE call_id = NEW.id;
+    END;
   `
 ]
 

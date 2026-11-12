@@ -91,12 +91,19 @@ describe("ToolCatalog", () => {
         "a mixed-case word a part of its name holds",
         "GitLab",
         "gitlab_create_issue"
-      ]
+      ],
+      ["a plural acronym that ends its name", "urls", "getURLs"],
+      ["a plural acronym before a word of its name", "apis", "listAPIsByOwner"]
     ])("finds a tool by %s", (_label, query, toolName) => {
       const catalog = new ToolCatalog([
         buildNetworkToolDefinition("open_ticket", "Opens a ticket on GitHub."),
         buildNetworkToolDefinition("read_document", "Reads PDFs."),
-        buildNetworkToolDefinition("gitlab_create_issue", "Creates a record.")
+        buildNetworkToolDefinition("gitlab_create_issue", "Creates a record."),
+        buildNetworkToolDefinition("getURLs", "Lists the links of a page."),
+        buildNetworkToolDefinition(
+          "listAPIsByOwner",
+          "Lists services by owner."
+        )
       ])
 
       expect(
@@ -114,6 +121,21 @@ describe("ToolCatalog", () => {
         catalog.listToolMatches("notes").matches.map((tool) => tool.name)
       ).toEqual(["list", "notes"])
     })
+
+    it.each([["email"], ["send email"], ["send_email"]])(
+      "ranks a kebab-case name as the snake_case name of the same words, so the two tie in offer order for the query %s",
+      (query) => {
+        const description = "Sends a message."
+        const catalog = new ToolCatalog([
+          buildNetworkToolDefinition("send_email", description),
+          buildNetworkToolDefinition("send-email", description)
+        ])
+
+        expect(
+          catalog.listToolMatches(query).matches.map((tool) => tool.name)
+        ).toEqual(["send_email", "send-email"])
+      }
+    )
 
     it("weighs a word the query repeats once", () => {
       const catalog = new ToolCatalog([

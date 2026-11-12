@@ -49,25 +49,32 @@ export type ToolRecommendation =
  * Builds the text a tool is ranked by.
  *
  * @param definition - Definition of the tool.
- * @returns Its name, the words of its name when the name holds more than
- * one, its group, and its description, so a query finds `send_email` by
- * `email` and by `send_email`, and `createIssue` by `issue` and by
- * `createIssue`.
+ * @returns Its name as one word, with each `-` written as `_`, the words of
+ * its name when the name holds more than one, its group, and its
+ * description, so a query finds `send_email` by `email` and by
+ * `send_email`, `createIssue` by `issue` and by `createIssue`, and
+ * `send-email` as it finds `send_email`.
  */
 function buildRankedToolText(definition: ToolDefinition): string {
   /**
    * Matches where one word of a tool name ends and the next starts: a run
    * of `_` or `-`, the place between a lowercase letter or digit and an
    * uppercase letter, or the place before the last uppercase letter of a
-   * run that a lowercase letter follows, so `send_email`, `createIssue`,
-   * and `XMLHttpRequest` each split into their words.
+   * run that a lowercase letter follows, unless that letter is a plural `s`
+   * that ends the name or comes before an uppercase letter. So
+   * `send_email`, `createIssue`, `XMLHttpRequest`, and `getURLs` each split
+   * into their words.
    */
   const nameWordBreakPattern =
-    /[_-]+|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/g
+    /[_-]+|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z](?!s(?:[A-Z]|$))[a-z])/g
 
   const { name } = definition
+  // The word segmenter splits a name at `-` but keeps `_`, so the whole
+  // name is ranked with `_` to stay one word.
+  const wholeName = name.replaceAll("-", "_")
   const nameWords = name.replaceAll(nameWordBreakPattern, " ")
-  const rankedName = nameWords === name ? name : `${name} ${nameWords}`
+  const rankedName =
+    nameWords === name ? wholeName : `${wholeName} ${nameWords}`
   return `${rankedName} ${definition.group} ${definition.description}`
 }
 

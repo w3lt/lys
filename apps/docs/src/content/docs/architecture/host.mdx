@@ -63,12 +63,13 @@ The credential names are those the backend's
 [tool call policy](/architecture/backend/#tool-call-policy) denies:
 `packages/protocol/src/tools/credentialFiles.json` lists the folders, file
 names, starts, and ends, the backend imports it as `CREDENTIAL_FILE_LIST`, and
-`tools/credential_files.rs` embeds it when the host is built. The host parses
-it once at startup and does not start if it cannot. Both commands decide by a
-file's real path, with every symbolic link resolved, and compare each of its
-parts in lowercase with the list. Lys's settings file, `settings.json` in the
-Lys home, holds the API keys and the email password; it is recognized by its
-device and inode numbers, so a link or a hard link to it is refused too.
+`src-tauri/src/tools/credential_files.rs` embeds it when the host is built.
+The host parses it once at startup and does not start if it cannot. Both
+commands decide by a file's real path, with every symbolic link resolved, and
+compare each of its parts in lowercase with the list. Lys's settings file,
+`settings.json` in the Lys home, holds the API keys and the email password; it
+is recognized by its device and inode numbers, so a link or a hard link to it
+is refused too.
 
 - `read_text_file` opens the file, resolves its real path, and checks that the
   path still names the opened file before it reads a byte. A credential file

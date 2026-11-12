@@ -223,6 +223,12 @@ export function addFoundTools(replyTools: ReplyTools): void {
     replyTools.toolOffer.addTools(replyTools.findTools.listFoundToolNames())
 }
 
+/** The tools of a turn that a routed reply offers only once found. */
+type TurnKeptTools = Pick<
+  ReplyToolsTurn,
+  "clientTools" | "builtInTools" | "mcpTools"
+>
+
 /**
  * Builds the toolset of a reply's turn.
  *
@@ -235,7 +241,7 @@ export function addFoundTools(replyTools: ReplyTools): void {
  * @throws If two tools share a name, as {@link buildAgentToolset} throws.
  */
 function buildTurnToolset(
-  turn: ReplyToolsTurn,
+  turn: TurnKeptTools,
   directTools: readonly TurnBuiltInTool[],
   agentStateTools: readonly TurnBuiltInTool[]
 ): AgentToolset {

@@ -114,24 +114,27 @@ function buildSearchTurn(input: SearchTurnInput): AgentTurn {
   /** MCP tools of a search: none. */
   const noMcpTools: readonly TurnMcpTool[] = Object.freeze([])
 
+  const { search, reportFailure } = input
   const reply = new MemoryReply(MAXIMUM_TOOL_KEEPER_ROUND_COUNT)
+  const userMessage = buildSearchMessage(search.task, input.now)
+  const directTools = buildToolKeeperTools(input.catalog)
   return {
-    conversationId: input.search.conversationId,
+    conversationId: search.conversationId,
     requestId: uuidv7(),
     history: noHistory,
     sources: noSources,
-    userMessage: buildSearchMessage(input.search.task, input.now),
+    userMessage,
     canSeeImages: false,
     findAttachmentImage: rejectAttachmentImageRead,
-    model: input.search.model,
+    model: search.model,
     trainedForToolUse: true,
-    generationOptions: input.search.generationOptions,
-    directTools: buildToolKeeperTools(input.catalog),
+    generationOptions: search.generationOptions,
+    directTools,
     clientTools: noClientTools,
     builtInTools: noBuiltInTools,
     mcpTools: noMcpTools,
     unofferedTools: NO_UNOFFERED_TOOLS,
-    abortSignal: input.search.abortSignal,
+    abortSignal: search.abortSignal,
     createReplyPart: (draft) => reply.createReplyPart(draft),
     updateReplyPartContent: (partId, content) =>
       reply.updateReplyPartContent(partId, content),
@@ -144,10 +147,10 @@ function buildSearchTurn(input: SearchTurnInput): AgentTurn {
     sendClientToolCall: rejectClientToolCall,
     createToolCallGate: rejectToolCallGate,
     reportReplyCancellation: (failure) =>
-      handleSearchCancellation(input, failure),
-    reportReplyRefusal: input.reportFailure,
-    reportReplyFailure: input.reportFailure,
-    reportToolSearchFailure: input.reportFailure
+      handleSearchCancellation(search.abortSignal, reportFailure, failure),
+    reportReplyRefusal: reportFailure,
+    reportReplyFailure: reportFailure,
+    reportToolSearchFailure: reportFailure
   }
 }
 
@@ -176,17 +179,20 @@ function buildSearchMessage(
 /**
  * Handles a cancellation Armitage's reply reported.
  *
- * @param input - The search and the receiver of its failure.
+ * @param abortSignal - Cancellation of the asking reply.
+ * @param reportFailure - Receives the failure that ended the search without
+ * finding.
  * @param failure - The cancellation.
  * @remarks The cancellation is the search's failure only while the asking
  * reply was not stopped. After Stop the search ends with the abort reason,
  * so the receiver is not called.
  */
 function handleSearchCancellation(
-  input: SearchTurnInput,
+  abortSignal: AbortSignal,
+  reportFailure: ReportToolSearchFailure,
   failure: unknown
 ): void {
-  if (!input.search.abortSignal.aborted) input.reportFailure(failure)
+  if (!abortSignal.aborted) reportFailure(failure)
 }
 
 /**

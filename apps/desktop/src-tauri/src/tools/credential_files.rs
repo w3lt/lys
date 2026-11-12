@@ -88,7 +88,18 @@ impl CredentialFiles {
     /// Returns an error when the embedded list is not JSON of the expected
     /// shape; the host then refuses to start.
     pub fn load(settings_path: PathBuf) -> Result<Self, String> {
-        let list: CredentialFileList = serde_json::from_str(CREDENTIAL_FILE_LIST_JSON)
+        Self::parse(CREDENTIAL_FILE_LIST_JSON, settings_path)
+    }
+
+    /// Parses `list_json` as the credential file list, for the Lys settings
+    /// file at `settings_path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming the list when `list_json` is not JSON of the
+    /// expected shape, including when it has a key the list does not define.
+    fn parse(list_json: &str, settings_path: PathBuf) -> Result<Self, String> {
+        let list: CredentialFileList = serde_json::from_str(list_json)
             .map_err(|error| format!("The credential file list cannot be read: {error}"))?;
 
         Ok(Self {
@@ -170,7 +181,12 @@ impl CredentialFiles {
 
 #[cfg(test)]
 mod tests {
-    use std::{ffi::OsStr, fs, os::unix::ffi::OsStrExt, path::Path};
+    use std::{
+        ffi::OsStr,
+        fs,
+        os::unix::ffi::OsStrExt,
+        path::{Path, PathBuf},
+    };
 
     use super::{CredentialFiles, FileIdentity};
     use crate::tools::test_directory::TestDirectory;
@@ -217,6 +233,28 @@ mod tests {
             .collect();
 
         assert_eq!(mismatches, Vec::<String>::new());
+    }
+
+    #[test]
+    fn refuses_a_list_that_is_not_json_of_the_list_shape() {
+        let parse = |list_json: &str| {
+            CredentialFiles::parse(list_json, PathBuf::from("/nonexistent/lys/settings.json")).err()
+        };
+        let complete_list = r#"{"folderNames":[".ssh"],"fileNames":[".env"],"fileNamePrefixes":[".env."],"fileNameEndings":[".pem"]}"#;
+        let unknown_key = complete_list.replace("{", r#"{"directories":[],"#);
+
+        assert_eq!(parse(complete_list), None);
+        for list_json in [
+            "not json",
+            r#"{"folderNames":[".ssh"]}"#,
+            unknown_key.as_str(),
+        ] {
+            let error = parse(list_json).expect("a refused list");
+            assert!(
+                error.starts_with("The credential file list cannot be read: "),
+                "{list_json}: {error}"
+            );
+        }
     }
 
     #[test]

@@ -194,9 +194,13 @@ fn build_path_error(error: io::Error) -> TextFileReadError {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{self, ErrorKind};
+    use std::{
+        fs,
+        io::{self, ErrorKind},
+    };
 
-    use super::{build_path_error, TextFileReadError};
+    use super::{build_path_error, check_opened_file, TextFileReadError};
+    use crate::tools::{credential_files::CredentialFiles, test_directory::TestDirectory};
 
     #[test]
     fn path_errors_keep_missing_and_denied_paths_distinct() {
@@ -212,6 +216,25 @@ mod tests {
             build_path_error(io::Error::from(ErrorKind::PermissionDenied)),
             TextFileReadError::PermissionDenied
         ));
+    }
+
+    #[test]
+    fn refuses_a_path_that_no_longer_names_the_opened_file() {
+        let directory = TestDirectory::create("text-file-changed");
+        let opened_file = directory.create_file("opened.txt", "opened");
+        let path = directory.create_file("notes.txt", "notes");
+        let opened_metadata = fs::metadata(&opened_file).expect("metadata");
+
+        let failure = check_opened_file(
+            &path,
+            &opened_metadata,
+            &CredentialFiles::load_for_test_without_settings_file(),
+        );
+
+        let Err(TextFileReadError::Io(error)) = failure else {
+            panic!("expected an I/O failure, got {failure:?}");
+        };
+        assert_eq!(error.to_string(), "The file changed while it was opened");
     }
 
     #[test]

@@ -1114,7 +1114,9 @@ Several calls wait in the model's order, one card at a time. A call that
 waits for the person comes before a notice of an expired prompt, which shows
 the tool and says that no answer came within five minutes, so the call did not
 run and the reply went on without it; the composer's status line announces it
-once. Dismiss removes the notice, and Escape and Enter leave it alone.
+once. When the card it replaces held focus, Dismiss takes it. Dismiss
+removes the notice and moves focus to the message field, and Escape and Enter
+leave the notice alone.
 
 A read sends the file's text, a search sends its report as JSON, and a
 declared tool failure sends the failure as JSON. A backend or MCP tool's

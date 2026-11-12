@@ -460,9 +460,10 @@ rules and the [API reference](/reference/api/#mcp-servers) for the routes.
   is the person's opt-in, and none starts on Just run. A call of a tool its
   server marks as destructive asks even on Just run. Before asking, the
   backend checks the arguments' shape, a JSON object of at most 256 KiB whose
-  keys follow the argument name rule, and the [tool call
-  policy](/architecture/backend/#tool-call-policy) denies a call that names a
-  credential file or a blocked address; the server checks the values.
+  keys follow the argument name rule, and the
+  [tool call policy](/architecture/backend/#tool-call-policy) denies a call
+  that names a credential file or a blocked address; the server checks the
+  values.
 - **Choices kept by name.** A tool's switch and Just run choice are saved
   under the name the model calls it by, `mcp__<server>__<tool>`, and stay
   when the server is removed or renamed. A server saved later under an

@@ -155,24 +155,22 @@ too.
 
 ### `tool-approval`
 
-Carries one tool call the backend shows to the person before anything runs,
-in the same shape as a `tool-call` event's `call`. The backend's tool approval
+Carries one tool call the backend shows to the person before anything runs, in
+the same shape as a `tool-call` event's `call`. The backend's tool approval
 service sends it for every call the
 [tool call policy](/architecture/backend/#tool-call-policy) allows of a tool
 that is not saved as Just run, and for every call it requires approval of, of
 an MCP tool its server marks as destructive, even on Just run; client,
-backend, and MCP tools alike except
-`read_attachment`, the agent
-state tools (`read_my_state`, `find_agents`, `read_agent_state`), and
-`find_tools`, which run without approval, right after the call's
-`reply-part` stored it
-as `awaiting-approval`; any other call of a tool on Just run gets no prompt. The
+backend, and MCP tools alike except `read_attachment`, the agent state tools
+(`read_my_state`, `find_agents`, `read_agent_state`), and `find_tools`, which
+run without approval, right after the call's `reply-part` stored it as
+`awaiting-approval`; any other call of a tool on Just run gets no prompt. The
 client shows the call and answers with the
 [tool-approval route](/reference/api/#tool-approvals). After `allowed`, a
 backend tool runs in the backend, an MCP tool runs on its
-[MCP server](/reference/api/#mcp-servers), and a client tool's call comes
-back as a `tool-call` event under the same `id`. The event is live only: a client that
-was not following when it was sent finds the call in the next
+[MCP server](/reference/api/#mcp-servers), and a client tool's call comes back
+as a `tool-call` event under the same `id`. The event is live only: a client
+that was not following when it was sent finds the call in the next
 `reply-snapshot`'s `pendingToolApprovals`.
 
 ### `tool-call`

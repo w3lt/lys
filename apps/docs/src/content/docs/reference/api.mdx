@@ -547,11 +547,10 @@ fraction Tavily reports is rounded up. The answer never contains the key.
 The backend decides which tool calls need the person: every call the
 [tool call policy](/architecture/backend/#tool-call-policy) allows of a tool
 that is not saved as Just run, client, backend, and MCP tools alike, except
-`read_attachment` and the agent state tools, which run without approval, and
-every call the policy requires approval of, of an MCP tool its server marks
-as destructive, even on Just run. It
-shows such a
-call with a `tool-approval` event, and the client answers it with
+`read_attachment`, the agent state tools, and `find_tools`, which run without
+approval, and every call the policy requires approval of, of an MCP tool its
+server marks as destructive, even on Just run. It shows such a call with a
+`tool-approval` event, and the client answers it with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`,
 where `callId` is the `id` of the event's call or of its entry in
 `reply-snapshot.pendingToolApprovals`. One request answers one prompt.

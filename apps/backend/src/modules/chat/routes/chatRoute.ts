@@ -957,10 +957,11 @@ async function createTurnReplyTask(
  * which numbers new sources after the conversation's stored ones,
  * whose tool calls pass the approval gateway, and whose images are read
  * from the conversation's attachment files. With the request's logger, an
- * unreadable settings file, and a reply refused because its agent's request
- * slots and line were full, are logged as warnings; a cancelled reply, and a
- * round that was not sent because it did not fit or its model was not
- * loaded, at debug level; and any other reply failure as an error.
+ * unreadable settings file, a reply refused because its agent's request
+ * slots and line were full, and a tool search Armitage could not finish are
+ * logged as warnings; a cancelled reply, and a round that was not sent
+ * because it did not fit or its model was not loaded, at debug level; and
+ * any other reply failure as an error.
  */
 function buildAgentTurn(
   input: TurnGenerationInput,

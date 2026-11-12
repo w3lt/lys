@@ -349,10 +349,11 @@ function addOfferedTool(
 /**
  * Builds the function tools a model would be offered for tool definitions.
  *
- * @param definitions - Offered tool definitions in offer order: client tools
- * first, then backend tools, as {@link buildAgentToolset} orders them.
- * @returns A frozen list in the same order and format as a reply offers a
- * turn with these tools in every round; empty for no definition.
+ * @param definitions - Offered tool definitions in offer order: direct
+ * tools first, then client, built-in, MCP, and agent state tools, as
+ * {@link buildAgentToolset} orders them.
+ * @returns A frozen list in the same order and format as a reply's round
+ * offers these tools; empty for no definition.
  * @throws A Zod error when a definition does not match `toolDefinitionSchema`.
  */
 export function buildDefinedToolOffer(
@@ -376,15 +377,16 @@ export function buildDefinedToolOffer(
  * result message per call in the model's order; or undefined when the reply
  * was stopped while the gate was created, a call waited, or a backend tool
  * ran, or the reply refused to store a call because it ended.
- * @throws If the turn offered no tools and tells the model nothing about the
- * tools it does not offer: the model called a tool it was not offered, which
- * ends the reply as failed, as before tools existed. Also throws when the
- * gate cannot be created, or a backend tool's run fails for a reason other
- * than Stop.
+ * @throws If the round offered no tools and the turn tells the model nothing
+ * about the tools it does not offer: the model called a tool it was not
+ * offered, which ends the reply as failed, as before tools existed. Also
+ * throws when the gate cannot be created, or a backend tool's run fails for
+ * a reason other than Stop.
  * @remarks Each call gets a new UUIDv7, which is its part's identity. Calls
- * of tools the turn does not offer, named or not, and calls whose arguments
- * do not match are stored as failed with the message the model reads;
- * nobody is asked about them, and none of them runs. A
+ * of tools the round did not offer, whether the request names them or not,
+ * a tool of a routed turn that `find_tools` has not found yet included, and
+ * calls whose arguments do not match are stored as failed with the message
+ * the model reads; nobody is asked about them, and none of them runs. A
  * call of a backend tool that runs without approval is stored as running at
  * once. Every other call passes the round's gate, created once for a round
  * that has such a call, so the saved choices are read at most once per

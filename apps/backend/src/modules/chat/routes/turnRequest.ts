@@ -29,7 +29,8 @@ import { findBuiltInTools } from "../../tool/builtIn/builtInTools"
 export type TurnAgentLookups = Readonly<{
   /**
    * Live agent loading of the agent runtime service; undefined means no
-   * built-in or stored agent has the code, or its agent is deleted.
+   * built-in or stored agent has the code, its agent is deleted, or the code
+   * is Armitage's, which answers tool searches and no chat.
    */
   loadChatAgent: (code: string) => Agent | undefined
   /**
@@ -79,7 +80,10 @@ export type RequestedAgentOutcome =
       agent: Agent
     }>
   | Readonly<{
-      /** A new conversation names a code no built-in or stored agent has. */
+      /**
+       * A new conversation names a code no built-in or stored agent has, or
+       * Armitage's, which answers no chat.
+       */
       status: "agent-not-found"
       /** Code the request names. */
       agentCode: string

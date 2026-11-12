@@ -35,7 +35,7 @@ export const MAXIMUM_AGENT_NAME_LENGTH = 64
 export const MAXIMUM_AGENT_BIO_LENGTH = 128
 
 /**
- * Code of Caliginia, Lys's dark side and one of the two agents the backend
+ * Code of Caliginia, Lys's dark side and one of the three agents the backend
  * ships with.
  *
  * @remarks Clients send it to start a conversation that Caliginia answers,
@@ -48,8 +48,8 @@ export const MAXIMUM_AGENT_BIO_LENGTH = 128
 export const CALIGINIA_AGENT_CODE = "caliginia"
 
 /**
- * Code of Lysiptera, Lys's light side and one of the two agents the backend
- * ships with.
+ * Code of Lysiptera, Lys's light side and one of the three agents the
+ * backend ships with.
  *
  * @remarks Clients send it to start a conversation that Lysiptera answers.
  * The backend reserves it, so no stored agent can be created under it, and
@@ -76,8 +76,9 @@ export const ARMITAGE_AGENT_CODE = "armitage"
  * Name the model calls the tool by that tells an agent its own state: who it
  * is, its role, and the requests it is working on.
  *
- * @remarks The backend offers it to every agent whose model is trained for
- * tool use, so a chat request may not offer or name a tool of this name.
+ * @remarks The backend offers it to every agent but Armitage, when the
+ * agent's model is trained for tool use, so a chat request may not offer or
+ * name a tool of this name.
  */
 export const READ_MY_STATE_TOOL_NAME = "read_my_state"
 

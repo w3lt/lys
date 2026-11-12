@@ -192,7 +192,8 @@ function hasOnlyClientTools(definitions: readonly ToolDefinition[]): boolean {
 /**
  * Lists the tools the backend adds to a turn itself for a refusal message.
  *
- * @returns `a, b, c, or d`, in {@link BACKEND_INTERNAL_TOOL_NAMES} order.
+ * @returns The names separated by commas, with `or` before the last, in
+ * {@link BACKEND_INTERNAL_TOOL_NAMES} order.
  */
 function formatBackendInternalToolNames(): string {
   const names = [...BACKEND_INTERNAL_TOOL_NAMES]

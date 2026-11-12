@@ -80,6 +80,12 @@ const DENIED_OUTSIDE_APPROVED_FOLDERS = Object.freeze({
   reason: "outside-approved-folders"
 } satisfies ToolCallDecision)
 
+/** Decision for a call naming a path while the folders cannot be read. */
+const DENIED_SETTINGS_UNREADABLE = Object.freeze({
+  effect: "deny",
+  reason: "settings-unreadable"
+} satisfies ToolCallDecision)
+
 /** Decision for a call naming a blocked network address. */
 const DENIED_BLOCKED_ADDRESS = Object.freeze({
   effect: "deny",
@@ -493,6 +499,33 @@ describe("decideToolCall with approved folders", () => {
     )
   })
 
+  it("denies a call naming any path, a file URL with a host included, and leaves the rest to the other rules while the folders cannot be read", () => {
+    const rules = Object.freeze({
+      ...RULES,
+      approvedFolders: Object.freeze({ kind: "unreadable" })
+    } satisfies ToolCallRules)
+
+    for (const value of [
+      "/home/ada/work/app/a.txt",
+      "~",
+      "../notes.txt",
+      "file://server/a.txt",
+      "notes\n/etc/hosts"
+    ])
+      expect(
+        decideToolCall(buildTargetRequest(value), rules),
+        value
+      ).toStrictEqual(DENIED_SETTINGS_UNREADABLE)
+    for (const value of ["hello", "notes/a.txt", "cat /etc/hosts"])
+      expect(
+        decideToolCall(buildTargetRequest(value), rules),
+        value
+      ).toStrictEqual(ALLOWED)
+    expect(
+      decideToolCall(buildTargetRequest("/home/ada/.ssh/id_rsa"), rules)
+    ).toStrictEqual(DENIED_CREDENTIAL_FILE)
+  })
+
   it("approves everything under the root folder", () => {
     expect(
       decideToolCall(buildTargetRequest("/etc/hosts"), buildListedRules(["/"]))
@@ -541,10 +574,9 @@ describe("buildApprovedFolders", () => {
     } satisfies ApprovedFolders)
   })
 
-  it("approves no folder when the settings file cannot be read", () => {
+  it("marks the folders unreadable when the settings file cannot be read", () => {
     expect(buildApprovedFolders({ status: "unreadable" })).toStrictEqual({
-      kind: "listed",
-      folderPaths: []
+      kind: "unreadable"
     } satisfies ApprovedFolders)
   })
 })
@@ -578,6 +610,10 @@ describe("formatToolCallDenial", () => {
     [
       "outside-approved-folders",
       "This call was denied and did not run: an argument names a file or folder outside the folders the person lets tools use. Do not try to reach it another way; tell the person which file you need, so they can add its folder in Settings if they agree."
+    ],
+    [
+      "settings-unreadable",
+      "This call was denied and did not run: an argument names a file or folder, and Lys cannot read the folders the person lets tools use, because its settings file cannot be read, so no file or folder may be named until the file is fixed. Do not try to reach it another way; tell the person that Lys's settings file cannot be read."
     ],
     [
       "blocked-address",

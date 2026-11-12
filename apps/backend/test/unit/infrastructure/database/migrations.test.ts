@@ -227,7 +227,7 @@ function createVersion12Database(): DatabaseSync {
 
 /** Denial reasons of the current decision table, in its SQL's words. */
 const CURRENT_DENIAL_REASONS_SQL =
-  "'credential-file', 'outside-approved-folders', 'blocked-address'"
+  "'credential-file', 'outside-approved-folders', 'settings-unreadable', 'blocked-address'"
 
 /** Denial reasons of the version-14 decision table, in its SQL's words. */
 const VERSION_14_DENIAL_REASONS_SQL = "'credential-file', 'blocked-address'"
@@ -292,7 +292,8 @@ function createDecisionTableVersionDatabase(
 
 /**
  * Creates a database at version 14: the current schema whose decision
- * records cannot store the denial reason `outside-approved-folders`.
+ * records cannot store the denial reasons `outside-approved-folders` and
+ * `settings-unreadable`.
  *
  * @returns A connection at `user_version` 14, closed when the test finishes.
  */
@@ -1653,7 +1654,9 @@ describe("migrateDatabase", () => {
         "'require-approval', 'destructive-tool', 'just-run', 'declined'",
       "a call whose prompt expired": "'allow', NULL, 'ask-me', 'expired'",
       "a call naming a path outside the approved folders":
-        "'deny', 'outside-approved-folders', NULL, NULL"
+        "'deny', 'outside-approved-folders', NULL, NULL",
+      "a call naming a path while the approved folders cannot be read":
+        "'deny', 'settings-unreadable', NULL, NULL"
     })
   )("stores the decision record of %s", (_label, values) => {
     const database = openEmptyDatabase()
@@ -1752,7 +1755,7 @@ describe("migrateDatabase", () => {
     ])
   })
 
-  it("upgrades a version-14 database by letting a decision record store the denial outside-approved-folders, keeping every record, its index, and its trigger", () => {
+  it("upgrades a version-14 database by letting a decision record store the denials outside-approved-folders and settings-unreadable, keeping every record, its index, and its trigger", () => {
     const database = createVersion14Database()
     saveWaitingToolCall(database)
     saveToolCallDecision(database, "'allow', NULL, 'ask-me', 'expired'")
@@ -1761,7 +1764,12 @@ describe("migrateDatabase", () => {
     const version14Records = readRecords()
     const denyOutside =
       "UPDATE tool_call_decisions SET policy_effect = 'deny', policy_reason = 'outside-approved-folders', approval_mode = NULL, answer = NULL WHERE call_id = 'p1'"
+    const denyUnreadable = denyOutside.replace(
+      "outside-approved-folders",
+      "settings-unreadable"
+    )
     expect(() => database.exec(denyOutside)).toThrow(/constraint failed/)
+    expect(() => database.exec(denyUnreadable)).toThrow(/constraint failed/)
 
     migrateDatabase(database)
 
@@ -1770,6 +1778,7 @@ describe("migrateDatabase", () => {
     expect(listSchemaObjects(database, "index")).toContain(
       "tool_call_decisions_conversation_idx"
     )
+    database.exec(denyUnreadable)
     database.exec(denyOutside)
     database.exec(
       "UPDATE conversation_messages SET status = 'failed', content = 'Denied.', updated_at = '2026-01-04T00:00:00.000Z' WHERE id = 'p1'"

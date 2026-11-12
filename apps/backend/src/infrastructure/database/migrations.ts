@@ -749,9 +749,10 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
       WHERE call_id = NEW.id;
     END;
   `,
-  // Lets a decision record store the denial reason
-  // `outside-approved-folders`: an argument named a path outside the folders
-  // the person lets tools use. SQLite cannot change a CHECK, so the table is
+  // Lets a decision record store the denial reasons
+  // `outside-approved-folders`, for an argument naming a path outside the
+  // folders the person lets tools use, and `settings-unreadable`, for one
+  // naming a path while those folders cannot be read. SQLite cannot change a CHECK, so the table is
   // created again with every other rule unchanged, every row is copied, and
   // its index and the trigger that copies status changes into it are created
   // again unchanged, as in the version before. Rows stored before this
@@ -795,9 +796,7 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
           policy_effect IS NOT NULL
           AND policy_effect = 'deny'
           AND policy_reason IS NOT NULL
-          AND policy_reason IN (
-            'credential-file', 'outside-approved-folders', 'blocked-address'
-          )
+          AND policy_reason IN ('credential-file', 'outside-approved-folders', 'settings-unreadable', 'blocked-address')
           AND approval_mode IS NULL
         )
         OR

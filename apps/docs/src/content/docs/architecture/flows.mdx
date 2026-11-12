@@ -237,30 +237,28 @@ calls it stored are part of the new turn's context.
    `backend-tool-unavailable` problem and stores nothing; the desktop shows
    the error and reads the tool list again. A name the backend does not know
    answers `400`.
-3. The backend offers the tools to the model. A model trained for tool use
-   is first offered `find_tools` in their place, with the attachment reader
-   and the agent state tools, and a note at the end of the system prompt;
-   when it calls `find_tools`, Armitage, the tool keeper, searches the
-   turn's tools on a reply that is never stored or shown, and each tool it
-   finds is offered from the next round to the end of the reply, still
-   asking as below ([tool routing](/architecture/backend/#tool-routing)).
-   Each round's
+3. The backend offers the tools to the model. A model trained for tool use is
+   first offered `find_tools` in their place, with the attachment reader and
+   the agent state tools, and a note at the end of the system prompt; when it
+   calls `find_tools`, Armitage, the tool keeper, searches the turn's tools on
+   a reply that is never stored or shown, and each tool it finds is offered
+   from the next round to the end of the reply, still asking as below
+   ([tool routing](/architecture/backend/#tool-routing)). Each round's
    reasoning and text are stored as parts of that round and streamed. When a
-   round ends with tool calls,
-   the backend checks each call's arguments against its definition, and a
-   backend tool also checks them by its own rules, such as `read_page`'s URL
-   rules; for an MCP tool it checks only the arguments' shape, and the server
-   checks the values. A call to an unknown tool, such as one the request names as
-   switched off or unable to run, a call of a tool its round did not offer,
-   such as one Armitage has not found, any call while tool calls are off, or
-   a call with invalid arguments is answered by the backend itself and
-   stored as a `failed` call. So is a valid call the
-   [tool call policy](/architecture/backend/#tool-call-policy) denies
+   round ends with tool calls, the backend checks each call's arguments
+   against its definition, and a backend tool also checks them by its own
+   rules, such as `read_page`'s URL rules; for an MCP tool it checks only the
+   arguments' shape, and the server checks the values. A call to an unknown
+   tool, such as one the request names as switched off or unable to run, a
+   call of a tool its round did not offer, such as one Armitage has not found,
+   any call while tool calls are off, or a call with invalid arguments is
+   answered by the backend itself and stored as a `failed` call. So is a valid
+   call the [tool call policy](/architecture/backend/#tool-call-policy) denies
    because it names a private key or credential file, or a local or private
    network address: it never runs and is never shown to the person, even on
-   Just run. Every other call is
-   stored as a part too, `running` or `awaiting-approval`, and each later
-   change of it is stored and sent as a `reply-part` event.
+   Just run. Every other call is stored as a part too, `running` or
+   `awaiting-approval`, and each later change of it is stored and sent as a
+   `reply-part` event.
 4. The backend's tool approval service reads the Just run choices from the
    settings file once for the round. For each call the policy does not deny,
    in the model's order: a tool saved as Just run goes on at once, unless the

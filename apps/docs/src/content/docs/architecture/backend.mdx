@@ -91,29 +91,27 @@ the services together.
    to reconcile desktop metadata from an earlier missed delivery.
 5. The agent found when the turn is stored answers with the system prompt it
    has then: a built-in agent's shipped prompt, or a stored agent's current
-   one. The agent's `createReply` opens an
-   OpenAI-compatible streaming completion against the connected provider through
-   `OpenAiReplyModel`, offers the turn's tools (the attachment reader first
-   when the conversation holds a text file and the model is trained for tool
-   use, then client tools, then built-in tools, then MCP tools, then, when
-   the model is trained for tool use, the
-   [agent state tools](#agent-state-tools) the agent's role gives; when the
-   model is trained for tool use, the request's tools are
+   one. The agent's `createReply` opens an OpenAI-compatible streaming
+   completion against the connected provider through `OpenAiReplyModel`,
+   offers the turn's tools (the attachment reader first when the conversation
+   holds a text file and the model is trained for tool use, then client tools,
+   then built-in tools, then MCP tools, then, when the model is trained for
+   tool use, the [agent state tools](#agent-state-tools) the agent's role
+   gives; when the model is trained for tool use, the request's tools are
    [routed](#tool-routing): the first round offers `find_tools` in their
    place, and each tool Armitage finds is offered from the next round), and
-   runs rounds while
-   the model calls them: each call is
-   checked by `AgentTool`, then decided by the
-   [tool call policy](#tool-call-policy), then passes the round's
-   [approval gate](#tool-approval). A call of a backend tool is first parsed by
-   the tool, so arguments it can never run are answered without asking. An
-   allowed client tool's call is sent to the desktop as a `tool-call` event
-   and answered through the tool-result route; an allowed backend tool runs in
-   the backend under the reply's cancellation, and an allowed MCP tool's call
-   runs on its server, which is told when the reply is stopped. Every call
-   has an answer before the next round. [Reply parts](#reply-parts-and-sources) describes how each
-   part is stored before it is sent to every stream following the reply; the
-   agent stores completion before emitting `done`.
+   runs rounds while the model calls them: each call is checked by
+   `AgentTool`, then decided by the [tool call policy](#tool-call-policy),
+   then passes the round's [approval gate](#tool-approval). A call of a
+   backend tool is first parsed by the tool, so arguments it can never run are
+   answered without asking. An allowed client tool's call is sent to the
+   desktop as a `tool-call` event and answered through the tool-result route;
+   an allowed backend tool runs in the backend under the reply's cancellation,
+   and an allowed MCP tool's call runs on its server, which is told when the
+   reply is stopped. Every call has an answer before the next round.
+   [Reply parts](#reply-parts-and-sources) describes how each part is stored
+   before it is sent to every stream following the reply; the agent stores
+   completion before emitting `done`.
 6. When the conversation has no stored title, `createTitleGenerationTask` runs
    in parallel and emits a `title` event only after a conditional write wins the
    first assignment.
@@ -453,9 +451,9 @@ runs. They follow no symbolic link and read no command, and a text with
 whitespace, such as a sentence or a shell command, is never read as an
 address, so a tool that runs commands or searches file contents can still
 reach a credential file or a local address;
-[#339](https://github.com/w3lt/lys/issues/339) proposes checking the
-resolved paths of the desktop's file tools on the host. A sentence that holds a credential
-path, such as a web search query, is denied like a path.
+[#339](https://github.com/w3lt/lys/issues/339) proposes checking the resolved
+paths of the desktop's file tools on the host. A sentence that holds a
+credential path, such as a web search query, is denied like a path.
 
 ## Tool approval
 
@@ -1203,14 +1201,14 @@ server checks the values.
 the [tool call policy](#tool-call-policy) does not deny through the round's
 [approval gate](#tool-approval), which asks the person unless they saved the
 tool as Just run and the server does not mark it as destructive; the turn
-keeps that mark with the tool, as the server listed it when the turn found
-it. An allowed call runs on its server as
-the server is connected when the call runs, with five minutes to answer, and
-the reply's Stop signal tells the server that the call was cancelled. A call
-whose server is no longer connected, or no longer lists the tool, fails with a
-sentence the model reads and is logged as a call that was not sent. Because an MCP tool's access is `unknown`, its
-result, failure, or rejection is cleaned of invisible characters like a
-network tool's before it is stored and read.
+keeps that mark with the tool, as the server listed it when the turn found it.
+An allowed call runs on its server as the server is connected when the call
+runs, with five minutes to answer, and the reply's Stop signal tells the
+server that the call was cancelled. A call whose server is no longer
+connected, or no longer lists the tool, fails with a sentence the model reads
+and is logged as a call that was not sent. Because an MCP tool's access is
+`unknown`, its result, failure, or rejection is cleaned of invisible
+characters like a network tool's before it is stored and read.
 
 `formatMcpToolResult` (`mcpToolResult.ts`) frames the server's result as
 untrusted: a sentence naming the server and the tool, by the

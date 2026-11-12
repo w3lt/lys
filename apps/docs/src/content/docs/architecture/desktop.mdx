@@ -1055,12 +1055,12 @@ list is read again so the next request leaves the tool out.
 The backend's tool approval service decides which calls need the person: every
 call the [tool call policy](/architecture/backend/#tool-call-policy) allows of
 a tool that is not saved as Just run, client, backend, and MCP tools alike,
-except `read_attachment`, the agent state tools, and `find_tools`,
-which run without approval, and every call of an MCP tool its server marks as
+except `read_attachment`, the agent state tools, and `find_tools`, which run
+without approval, and every call of an MCP tool its server marks as
 destructive, even on Just run (see the
-[backend's tool approval](/architecture/backend/#tool-approval)). The
-desktop does not decide; it reads neither the switches nor the saved Just run
-list when a call arrives.
+[backend's tool approval](/architecture/backend/#tool-approval)). The desktop
+does not decide; it reads neither the switches nor the saved Just run list
+when a call arrives.
 
 The tool-call store follows every reply the chat store starts or follows on
 its own reply-events connection, so tool calls keep moving while another

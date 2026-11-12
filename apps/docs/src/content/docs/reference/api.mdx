@@ -228,12 +228,15 @@ server is applied but not connected, switched off included, returns `409` with
 `urn:lys:problem:chat:backend-tool-unavailable` before anything is stored; see
 [an offered tool that cannot run](#an-offered-tool-that-cannot-run). An MCP
 tool name that no applied server lists, such as one of a removed server or a
-tool its server no longer lists, returns `400`. The model is offered client
-tools first, then Lys's own backend tools, each in request order, then
-`read_attachment` for a model trained for tool use while the conversation
-holds a text file, then MCP tools in request order, then the
+tool its server no longer lists, returns `400`. The model is offered
+`read_attachment` first, for a model trained for tool use while the
+conversation holds a text file, then client tools, then Lys's own backend
+tools, then MCP tools, each in request order, then the
 [agent state tools](/architecture/backend/#agent-state-tools) for a model
-trained for tool use. A turn keeps the MCP tools it was offered; each call
+trained for tool use. For a model trained for tool use, the client, backend,
+and MCP tools are [routed](/architecture/backend/#tool-routing): the first
+round offers `find_tools` in their place, and each tool it finds is offered
+from the reply's next round. A turn keeps the MCP tools it was offered; each call
 runs on the tool's server as it is connected when the call runs, and fails
 for the model when the server is no longer connected or no longer lists the
 tool. Without `tools`, a turn of a model that is not trained for tool use is
@@ -425,7 +428,7 @@ answers `200`:
   image whose file is gone is measured as the placeholder sentence a turn
   sends instead. When a stored message
   holds a text file and the model is trained for tool use, `read_attachment`
-  is measured after the offered tools, as a turn offers it. Whether the model
+  is measured before the offered tools, as a turn offers it. Whether the model
   sees images and is trained for tool use is read as the chat request reads
   it, through the same remembered capabilities. A client adds the same
   estimate for each image it would send.
@@ -546,7 +549,8 @@ fraction Tavily reports is rounded up. The answer never contains the key.
 
 The backend decides which tool calls need the person: every call of a tool
 that is not saved as Just run, client, backend, and MCP tools alike, except
-`read_attachment` and the agent state tools, which run without approval. It
+`read_attachment`, the agent state tools, and `find_tools`, which run without
+approval. A tool `find_tools` found is asked about like any other. It
 shows such a
 call with a `tool-approval` event, and the client answers it with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`,

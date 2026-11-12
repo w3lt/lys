@@ -93,7 +93,7 @@ On startup the database owner:
 1. Opens the SQLite file with foreign keys enabled.
 2. Acquires a write transaction and reads `PRAGMA user_version`.
 3. Rejects unsupported future versions or applies each missing migration in order.
-4. Records the latest version, 11, and commits; a migration failure rolls back
+4. Records the latest version, 12, and commits; a migration failure rolls back
    all pending work.
 5. Switches to write-ahead logging with `synchronous = NORMAL`. A database from
    a newer version was refused in step 3, before anything changed its file.

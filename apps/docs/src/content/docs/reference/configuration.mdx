@@ -120,16 +120,16 @@ The backend validates the complete configuration with `backendConfigSchema` in
 application or any service. Every key is required, unknown keys are rejected,
 and no defaults are applied.
 
-| Key                                                                                            | Accepted values                                                                                        |
-| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `backendHost`                                                                                  | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers          |
-| `backendPort`, `vmoPort`                                                                       | An integer from 1 to 65535                                                                             |
-| `vmoHost`                                                                                      | An IPv4 loopback address (`127.x.x.x`); vmo does not authenticate its callers                          |
-| `databaseFilePath`, `settingsFilePath`, `attachmentsDirectoryPath`, `mcpProcessGroupsFilePath` | An absolute path                                                                                       |
-| `emailServerPath`                                                                              | An absolute path of at most 1,024 characters, without a control character or white space at either end |
-| `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `titleGenerationPrompt`                      | Non-empty text without leading or trailing whitespace                                                  |
-| `titleGenerationMaxAttempts`, `generatedTitleMaxLength`, `agentRequestSlotCount`               | A positive integer                                                                                     |
-| `agentWaitingRequestLimit`                                                                     | A non-negative integer                                                                                 |
+| Key                                                                                               | Accepted values                                                                                        |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `backendHost`                                                                                     | An IPv4 loopback address (`127.x.x.x`); the backend does not authenticate non-browser callers          |
+| `backendPort`, `vmoPort`                                                                          | An integer from 1 to 65535                                                                             |
+| `vmoHost`                                                                                         | An IPv4 loopback address (`127.x.x.x`); vmo does not authenticate its callers                          |
+| `databaseFilePath`, `settingsFilePath`, `attachmentsDirectoryPath`, `mcpProcessGroupsFilePath`    | An absolute path                                                                                       |
+| `emailServerPath`                                                                                 | An absolute path of at most 1,024 characters, without a control character or white space at either end |
+| `caliginiaSystemPrompt`, `lysipteraSystemPrompt`, `armitageSystemPrompt`, `titleGenerationPrompt` | Non-empty text without leading or trailing whitespace                                                  |
+| `titleGenerationMaxAttempts`, `generatedTitleMaxLength`, `agentRequestSlotCount`                  | A positive integer                                                                                     |
+| `agentWaitingRequestLimit`                                                                        | A non-negative integer                                                                                 |
 
 A value outside these rules stops the backend at startup with a `ZodError`
 whose issues name each failing key. The shared constants, the `LYS_HOME`

@@ -820,11 +820,14 @@ which run at once without approval:
 | `search_tools`   | `query`, 1 to 200 characters, with a word                                                                         | Up to 8 of the asking turn's tools whose name, group, and description best match the query, ranked with BM25 (`ToolCatalog`, `toolCatalog.ts`), each with its description on one line cut to 200 characters, and how many more match. |
 | `recommend_tool` | `name`, the exact name of one of the asking turn's tools, as `search_tools` lists them; any other name is refused | Records the tool as fitting the task, at most 5 per search.                                                                                                                                                                           |
 
-A search reads a tool's name whole and by its words: `_`, `-`, and the word
-starts of a camelCase name split it, so `email` and `send_email` both find
-`send_email`, `issue` and `createIssue` both find `createIssue`, and `urls`
-finds `getURLs`. Each word of the query is searched as written, ignoring
-case.
+A search reads a tool's name whole and by its words. A name splits at each
+run of `_` or `-`, before each capital that follows a lowercase letter or a
+digit, and before the last capital of a run of capitals that a lowercase
+letter follows. So `email` and `send_email` both find `send_email`, `issue`
+and `createIssue` both find `createIssue`, and `pdf` finds
+`exportPDFAsImage`. A plural acronym splits the same way: `getURLs` splits
+into `get`, `UR`, and `Ls`. Each word of the query is searched as written,
+ignoring case.
 
 Armitage reads only the asking turn's definitions and runs none of its
 tools. `MemoryReply` (`memoryReply.ts`) keeps Armitage's reply in memory;

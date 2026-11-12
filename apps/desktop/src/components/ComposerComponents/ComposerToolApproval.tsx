@@ -14,12 +14,16 @@ import type { HeldToolCallAnswer, ShownToolCall } from "@/lib/store/tool-calls"
 import {
   DRAFT_APPROVAL_HINT,
   EMPTY_DRAFT_APPROVAL_HINT,
+  EXPIRED_TOOL_APPROVAL_SUMMARY,
   formatToolCallSummary
 } from "./tool-approval-presentation"
 
 /** Properties accepted by {@link ComposerToolApproval}. */
 type ComposerToolApprovalProps = {
-  /** Call shown: one that waits for the person, or whose answer failed to send. */
+  /**
+   * Call shown: one that waits for the person, whose answer failed to send,
+   * or whose prompt expired.
+   */
   readonly toolCall: ShownToolCall
   /** Whether the composer holds text, which Enter then sends as a rejection. */
   readonly hasDraft: boolean
@@ -29,6 +33,8 @@ type ComposerToolApprovalProps = {
   readonly onRejectToolCall: () => void
   /** Requests that the parent send the failed answer again. */
   readonly onRetryToolCallAnswer: () => void
+  /** Requests that the parent stop showing the expired prompt. */
+  readonly onDismissToolCall: () => void
 }
 
 /** Properties accepted by {@link ComposerToolCallRequest}. */
@@ -81,6 +87,14 @@ type ComposerToolResultFailureProps = {
   readonly error: string
   /** Requests that the parent send the failed answer again. */
   readonly onRetryToolCallAnswer: () => void
+}
+
+/** Properties accepted by {@link ComposerToolApprovalExpiry}. */
+type ComposerToolApprovalExpiryProps = {
+  /** Name of the tool whose prompt expired. */
+  readonly toolName: string
+  /** Requests that the parent stop showing the expired prompt. */
+  readonly onDismissToolCall: () => void
 }
 
 /**
@@ -315,16 +329,67 @@ function ComposerToolResultFailure({
 }
 
 /**
+ * Presents one prompt that expired: its tool, why the call did not run, and
+ * Dismiss.
+ *
+ * @remarks The card is a named group. The parent's polite status line
+ * announces the expiry, so the sentence here is not announced again.
+ * Dismiss asks the parent to stop showing the card; Esc and Enter in the
+ * composer field leave it alone. The component owns no state.
+ * @param props - Tool and the dismissal.
+ * @returns The expired prompt's card.
+ */
+function ComposerToolApprovalExpiry({
+  toolName,
+  onDismissToolCall
+}: ComposerToolApprovalExpiryProps): ReactElement {
+  return (
+    <fieldset
+      aria-label="Tool call prompt expired"
+      className="composer__approval"
+      data-expired=""
+    >
+      <div className="composer__approval-header">
+        <span aria-hidden="true" className="composer__approval-dot" />
+        <span className="composer__approval-label">Prompt expired</span>
+      </div>
+
+      <div className="composer__approval-tool">
+        <span className="composer__approval-tool-name">{toolName}</span>
+      </div>
+
+      <p className="composer__approval-summary">
+        {EXPIRED_TOOL_APPROVAL_SUMMARY}
+      </p>
+
+      <div className="composer__approval-footer">
+        <Button
+          onClick={onDismissToolCall}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          Dismiss
+        </Button>
+      </div>
+    </fieldset>
+  )
+}
+
+/**
  * Presents the tool call shown above the composer field: a call that waits
- * for the person, or one whose answer failed to send.
+ * for the person, one whose answer failed to send, or one whose prompt
+ * expired.
  *
  * @remarks The parent selects the call, owns every answer, and routes Esc
  * and Enter from the composer field; it keys this component by call, so a
  * new call starts with its arguments hidden, or shown for an MCP call. A
  * waiting call shows what it will do and offers Reject and Allow once, or
  * Allow anyway while the composer holds text. A failed answer shows the
- * reason and Try again.
- * @param props - Shown call, whether a draft exists, and the answers.
+ * reason and Try again. An expired prompt says why its call did not run and
+ * offers Dismiss.
+ * @param props - Shown call, whether a draft exists, the answers, and the
+ * dismissal.
  * @returns The card for the call's state.
  */
 export default function ComposerToolApproval({
@@ -332,7 +397,8 @@ export default function ComposerToolApproval({
   hasDraft,
   onAllowToolCall,
   onRejectToolCall,
-  onRetryToolCallAnswer
+  onRetryToolCallAnswer,
+  onDismissToolCall
 }: ComposerToolApprovalProps): ReactElement {
   const { answer } = toolCall
 
@@ -352,6 +418,13 @@ export default function ComposerToolApproval({
         <ComposerToolResultFailure
           error={answer.error}
           onRetryToolCallAnswer={onRetryToolCallAnswer}
+          toolName={toolCall.call.toolName}
+        />
+      )
+    case "expired":
+      return (
+        <ComposerToolApprovalExpiry
+          onDismissToolCall={onDismissToolCall}
           toolName={toolCall.call.toolName}
         />
       )

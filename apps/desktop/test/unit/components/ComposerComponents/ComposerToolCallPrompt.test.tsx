@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react"
+import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
@@ -261,6 +261,31 @@ describe("ComposerToolCallPrompt", () => {
       unsentAnswer
     ])
     expect(screen.queryByRole("group")).not.toBeInTheDocument()
+  })
+
+  it("shows and announces a prompt that expired once no call waits, and drops it on Dismiss", async () => {
+    const user = userEvent.setup()
+    const expiredRead: HeldToolCall = {
+      ...buildWaitingRead(FIRST_CALL),
+      step: "approval",
+      approvalToken: createFixtureApprovalToken(1),
+      answer: { status: "expired" }
+    }
+    const { useToolCallStore, ComposerToolCallPrompt } =
+      await loadFreshToolCallPrompt([expiredRead])
+
+    render(
+      <ComposerToolCallPrompt agentName="Poet" onRejectToolCall={vi.fn()} />
+    )
+    const card = screen.getByRole("group", { name: "Tool call prompt expired" })
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Poet’s request to use read_text_file expired."
+    )
+    await user.click(within(card).getByRole("button", { name: "Dismiss" }))
+
+    expect(useToolCallStore.getState().heldCalls).toEqual([])
+    expect(screen.queryByRole("group")).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toBeEmptyDOMElement()
   })
 
   it("starts each call's card with its arguments hidden", async () => {

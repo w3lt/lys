@@ -1,3 +1,4 @@
+import { TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES } from "@lys/protocol"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ComponentProps } from "react"
@@ -145,12 +146,21 @@ const UNSENT_SEARCH: ShownToolCall = Object.freeze({
   }
 } satisfies ShownToolCall)
 
+/** Search whose prompt expired before the person answered. */
+const EXPIRED_SEARCH: ShownToolCall = Object.freeze({
+  target: buildCallTarget(SEARCH_CALL.id),
+  call: SEARCH_CALL,
+  step: "approval",
+  approvalToken: createFixtureApprovalToken(10),
+  answer: { status: "expired" }
+} satisfies ShownToolCall)
+
 /**
  * Renders the card for one shown call.
  *
  * @param props - Shown call and whether the composer holds a draft; the
  * answers default to recorders.
- * @returns The recorders of the three answers.
+ * @returns The recorders of the three answers and the dismissal.
  */
 function startToolApproval(
   props: Pick<
@@ -161,7 +171,8 @@ function startToolApproval(
   const answers = {
     onAllowToolCall: vi.fn(),
     onRejectToolCall: vi.fn(),
-    onRetryToolCallAnswer: vi.fn()
+    onRetryToolCallAnswer: vi.fn(),
+    onDismissToolCall: vi.fn()
   }
   render(<ComposerToolApproval {...props} {...answers} />)
   return answers
@@ -373,6 +384,33 @@ describe("ComposerToolApproval", () => {
       expect(answers.onRetryToolCallAnswer).toHaveBeenCalledOnce()
       expect(answers.onAllowToolCall).not.toHaveBeenCalled()
       expect(answers.onRejectToolCall).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("a call whose prompt expired", () => {
+    it("names the tool, says the call did not run because nobody answered within the limit, and offers only Dismiss", async () => {
+      const user = userEvent.setup()
+      const answers = startToolApproval({
+        toolCall: EXPIRED_SEARCH,
+        hasDraft: true
+      })
+      const card = screen.getByRole("group", {
+        name: "Tool call prompt expired"
+      })
+
+      await user.click(within(card).getByRole("button", { name: "Dismiss" }))
+
+      expect(within(card).getByText("Prompt expired")).toBeInTheDocument()
+      expect(within(card).getByText("search_files")).toBeInTheDocument()
+      expect(card).toHaveTextContent(
+        `No answer came within ${TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES} minutes, so the call did not run`
+      )
+      expect(within(card).queryByRole("alert")).not.toBeInTheDocument()
+      expect(within(card).getAllByRole("button")).toHaveLength(1)
+      expect(answers.onDismissToolCall).toHaveBeenCalledOnce()
+      expect(answers.onAllowToolCall).not.toHaveBeenCalled()
+      expect(answers.onRejectToolCall).not.toHaveBeenCalled()
+      expect(answers.onRetryToolCallAnswer).not.toHaveBeenCalled()
     })
   })
 })

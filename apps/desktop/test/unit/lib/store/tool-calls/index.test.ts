@@ -20,6 +20,7 @@ import {
 import {
   buildCompletedAssistantMessage,
   buildTextPart,
+  buildToolCallPart,
   buildStreamingAssistantMessage,
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
@@ -122,6 +123,17 @@ const READING_DELTA_EVENT = Object.freeze({
   partId: READING_PART_EVENT.part.id,
   content: " notes",
   updatedAt: "2026-01-02T03:04:06.000Z"
+})
+
+/** {@link READ_CALL} as stored once the backend ended its prompt at the limit. */
+const EXPIRED_READ_PART_EVENT = Object.freeze({
+  type: "reply-part",
+  part: buildToolCallPart(10, 0, {
+    toolName: "read_text_file",
+    argumentText: "{}",
+    status: "failed",
+    result: "Nobody answered its approval prompt in time."
+  })
 })
 
 /** Sources a call of the reply showed. */
@@ -506,6 +518,23 @@ describe("findShownToolCall", () => {
     ]
 
     expect(findShownToolCall({ heldCalls }, shownConversationId)).toBe(unsent)
+  })
+
+  it("shows a call that needs the person before an earlier expired prompt, and the expired prompt once none does", () => {
+    const expired = buildHeldToolCall(20, shownConversationId, {
+      status: "expired"
+    })
+    const waiting = buildHeldToolCall(21, shownConversationId, awaitingPerson)
+    const answered = buildHeldToolCall(21, shownConversationId, {
+      status: "answered"
+    })
+
+    expect(
+      findShownToolCall({ heldCalls: [expired, waiting] }, shownConversationId)
+    ).toBe(waiting)
+    expect(
+      findShownToolCall({ heldCalls: [expired, answered] }, shownConversationId)
+    ).toBe(expired)
   })
 
   it("shows nothing while every call of the conversation is being handled without the person", () => {
@@ -1031,6 +1060,193 @@ describe("useToolCallStore", () => {
     })
   })
 
+  describe("a prompt that expires", () => {
+    it("shows the expired prompt in place of its card once its call is stored as failed, and keeps it after the reply ends", async () => {
+      const { backend, replyStreams } = startReplyBackend()
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const stream = await startFollowWithEvents(
+        useToolCallStore,
+        replyStreams,
+        [
+          buildStreamingSnapshot(),
+          buildApprovalEvent(READ_CALL),
+          EXPIRED_READ_PART_EVENT
+        ]
+      )
+      const whileGenerating = useToolCallStore.getState()
+
+      stream.sendEvent({ type: "done", finishReason: "stop" })
+      await waitForMicrotasks()
+
+      expect(
+        findShownToolCall(whileGenerating, REPLY_TARGET.conversationId)
+      ).toMatchObject({ call: READ_CALL, answer: { status: "expired" } })
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: READ_CALL, answer: { status: "expired" } }
+      ])
+      expect(listToolAnswers(backend)).toEqual([])
+    })
+
+    it("drops an expired prompt once the person dismisses it", async () => {
+      const { replyStreams } = startReplyBackend()
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot(),
+        buildApprovalEvent(READ_CALL),
+        EXPIRED_READ_PART_EVENT
+      ])
+
+      useToolCallStore.getState().dismissExpiredToolCall(READ_CALL.id)
+
+      expect(useToolCallStore.getState().heldCalls).toEqual([])
+    })
+
+    it("marks a prompt expired from a later snapshot that stores its call as failed", async () => {
+      const { replyStreams } = startReplyBackend()
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const firstStream = await startFollowWithEvents(
+        useToolCallStore,
+        replyStreams,
+        [buildStreamingSnapshot(), buildApprovalEvent(READ_CALL)]
+      )
+
+      firstStream.close()
+      await waitForMicrotasks()
+      replyStreams[1]?.sendEvent({
+        ...buildStreamingSnapshot(),
+        assistantMessage: buildStreamingAssistantMessage(3, [
+          EXPIRED_READ_PART_EVENT.part
+        ])
+      })
+      await waitForMicrotasks()
+
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: READ_CALL, answer: { status: "expired" } }
+      ])
+    })
+
+    it("shows the expired prompt when it expires while the person's answer is being sent, which the backend then refuses", async () => {
+      const approvals = createControlledRoute()
+      const { replyStreams } = startReplyBackend({
+        [buildToolApprovalRouteKey(READ_CALL)]: approvals.route
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const stream = await startFollowWithEvents(
+        useToolCallStore,
+        replyStreams,
+        [buildStreamingSnapshot(), buildApprovalEvent(READ_CALL)]
+      )
+      const sending = useToolCallStore.getState().resolveToolCall(READ_CALL.id)
+      await waitForMicrotasks()
+
+      stream.sendEvent(EXPIRED_READ_PART_EVENT)
+      await waitForMicrotasks()
+      approvals.responses[0]?.resolve(
+        buildJsonResponse(
+          409,
+          {
+            type: "urn:lys:problem:chat:tool-call-not-pending",
+            title: "Tool call not pending",
+            status: 409,
+            detail: "No tool call is waiting under this identifier."
+          },
+          "application/problem+json"
+        )
+      )
+      await sending
+
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: READ_CALL, answer: { status: "expired" } }
+      ])
+    })
+
+    it("keeps a prompt whose allowed answer is still being sent answered, not expired, when its call runs and then fails", async () => {
+      const approvals = createControlledRoute()
+      const { replyStreams } = startReplyBackend({
+        [buildToolApprovalRouteKey(PAGE_CALL)]: approvals.route
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const stream = await startFollowWithEvents(
+        useToolCallStore,
+        replyStreams,
+        [buildStreamingSnapshot(), buildApprovalEvent(PAGE_CALL)]
+      )
+      const pageCall = { toolName: "read_page", argumentText: "{}" }
+      const sending = useToolCallStore.getState().resolveToolCall(PAGE_CALL.id)
+      await waitForMicrotasks()
+
+      stream.sendEvent({
+        type: "reply-part",
+        part: buildToolCallPart(12, 0, { ...pageCall, status: "running" })
+      })
+      stream.sendEvent({
+        type: "reply-part",
+        part: buildToolCallPart(12, 0, {
+          ...pageCall,
+          status: "failed",
+          result: "The page could not be read."
+        })
+      })
+      await waitForMicrotasks()
+      approvals.responses[0]?.resolve(
+        new Response(null, { status: ACCEPTED_STATUS })
+      )
+      await sending
+
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: PAGE_CALL, answer: { status: "answered" } }
+      ])
+    })
+
+    it("drops a conversation's expired prompts once a later reply of it is followed, keeping other conversations' ones", async () => {
+      const laterReply = buildStreamingAssistantMessage(5, "")
+      const laterTarget = {
+        conversationId: REPLY_TARGET.conversationId,
+        assistantMessageId: laterReply.id
+      }
+      const otherReply = buildStreamingAssistantMessage(6, "")
+      const otherTarget = {
+        conversationId: createFixtureUuidV7(4),
+        assistantMessageId: otherReply.id
+      }
+      const otherStream = startBackendEventStream()
+      const { replyStreams } = startReplyBackend({
+        [`GET /api/v1/chat/${laterTarget.conversationId}/replies/${laterTarget.assistantMessageId}/events`]:
+          () => startBackendEventStream().response,
+        [`GET /api/v1/chat/${otherTarget.conversationId}/replies/${otherTarget.assistantMessageId}/events`]:
+          () => otherStream.response
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot(),
+        buildApprovalEvent(READ_CALL),
+        EXPIRED_READ_PART_EVENT
+      ])
+      useToolCallStore.getState().startReplyToolCallFollow(otherTarget)
+      await waitForMicrotasks()
+      otherStream.sendEvent({
+        ...buildStreamingSnapshot([SECOND_READ_CALL]),
+        assistantMessage: otherReply
+      })
+      otherStream.sendEvent({
+        type: "reply-part",
+        part: buildToolCallPart(11, 0, {
+          toolName: "read_text_file",
+          argumentText: "{}",
+          status: "failed",
+          result: "Nobody answered its approval prompt in time."
+        })
+      })
+      await waitForMicrotasks()
+
+      useToolCallStore.getState().startReplyToolCallFollow(laterTarget)
+
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: SECOND_READ_CALL, answer: { status: "expired" } }
+      ])
+    })
+  })
+
   describe("resolveToolCall", () => {
     it("allows a desktop tool's call and runs it once the backend sends it to run, under the same identifier", async () => {
       const host = startNativeHostFake({ read_text_file: () => "Buy milk." })
@@ -1528,6 +1744,20 @@ describe("useToolCallStore", () => {
       ])
 
       expect(backend.requests).toEqual([])
+    })
+
+    it("keeps a waiting prompt when asked to dismiss it, as only an expired prompt is dismissed", async () => {
+      const { replyStreams } = startReplyBackend()
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot(),
+        buildApprovalEvent(READ_CALL)
+      ])
+      const before = useToolCallStore.getState().heldCalls
+
+      useToolCallStore.getState().dismissExpiredToolCall(READ_CALL.id)
+
+      expect(useToolCallStore.getState().heldCalls).toBe(before)
     })
 
     it("neither answers a prompt again nor resends an answer that did not fail", async () => {

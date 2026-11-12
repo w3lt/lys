@@ -14,9 +14,9 @@ import reactDom from "eslint-plugin-react-dom"
  * @remarks Applies the JavaScript, TypeScript, React, and Prettier-compatible
  * rules used by the workspace lint command. Configured global ignores cover
  * `dist`, `node_modules`, `.astro`, and `src-tauri/target` paths in every
- * workspace, the root `worktree/` directory, and SwiftPM's `apps/vmo/.build`
- * directory; this configuration affects static analysis only and has no
- * application runtime effect.
+ * workspace, the root `worktree/` directory, SwiftPM's `apps/vmo/.build`
+ * directory, and Cargo's `mcps/email/target` directory; this configuration
+ * affects static analysis only and has no application runtime effect.
  */
 export default defineConfig([
   // Patterns are matched against every workspace, not only the repository
@@ -34,7 +34,8 @@ export default defineConfig([
     "**/.astro",
     "**/src-tauri/target",
     "worktree/",
-    "apps/vmo/.build/"
+    "apps/vmo/.build/",
+    "mcps/email/target/"
   ]),
   {
     files: ["**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx}"],

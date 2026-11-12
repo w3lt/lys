@@ -1,6 +1,5 @@
 import {
   listMcpServersApi,
-  mcpServerNotFoundProblemSchema,
   reconnectMcpServerApi,
   syncMcpServersApi,
   type McpServerActionBody,
@@ -29,6 +28,14 @@ export type ReconnectMcpServerResult =
        */
       readonly status: "not-found"
     }
+  | {
+      /**
+       * The backend returned the declared server-off problem: the server is
+       * switched off, or it is a built-in server without a usable account,
+       * so it cannot be opened, and nothing changed.
+       */
+      readonly status: "off"
+    }
 
 /** One MCP server request before it is sent. */
 type McpHttpRequest = {
@@ -47,6 +54,19 @@ const HTTP_OK_STATUS = 200
 
 /** HTTP status of a reconnect naming a server the backend has not applied. */
 const HTTP_NOT_FOUND_STATUS = 404
+
+/** HTTP status of a reconnect of a server that is off or cannot start. */
+const HTTP_CONFLICT_STATUS = 409
+
+/** HTTP status of a reconnect the backend refused with a declared problem. */
+type McpReconnectProblemStatus =
+  typeof HTTP_NOT_FOUND_STATUS | typeof HTTP_CONFLICT_STATUS
+
+/** Outcome of a reconnect the backend refused with a declared problem. */
+type McpReconnectRefusal = Exclude<
+  ReconnectMcpServerResult,
+  { readonly status: "reconnected" }
+>
 
 /**
  * Body of every sync and reconnect: the empty JSON object the protocol
@@ -110,12 +130,12 @@ export async function sendMcpServerSyncRequest(
  * @param serverName - Validated name of the server; a valid name needs no
  * percent-encoding, so it is substituted as it is.
  * @returns `reconnected` with the list right after the server was opened
- * again, or `not-found` when the backend reports the declared
- * server-not-found problem.
+ * again; `not-found` when the backend reports the declared server-not-found
+ * problem; `off` when it reports the declared server-off problem.
  * @throws A caller-safe error when the backend cannot be reached, when it
- * answers with another status or with a 404 without the declared problem,
- * naming only the status, or when its answer has another media type or a
- * list that does not match the shared schema.
+ * answers with another status or with a 404 or 409 without the problem its
+ * status declares, naming only the status, or when its answer has another
+ * media type or a list that does not match the shared schema.
  */
 export async function sendMcpServerReconnectRequest(
   connection: McpApiConnection,
@@ -127,8 +147,11 @@ export async function sendMcpServerReconnectRequest(
     path: reconnectMcpServerApi.path.replace(":serverName", serverName),
     hasActionBody: true
   })
-  if (response.status === HTTP_NOT_FOUND_STATUS) {
-    return await parseMcpServerNotFound(response)
+  if (
+    response.status === HTTP_NOT_FOUND_STATUS ||
+    response.status === HTTP_CONFLICT_STATUS
+  ) {
+    return await parseMcpReconnectProblem(response, response.status)
   }
   const list = await parseMcpServerList(response)
   return Object.freeze({ status: "reconnected", list })
@@ -203,25 +226,42 @@ async function parseMcpServerList(response: Response): Promise<McpServerList> {
 }
 
 /**
- * Decodes a 404 answer to a reconnect.
+ * Decodes a 404 or 409 answer to a reconnect.
  *
- * @param response - Response with HTTP 404, consumed here.
- * @returns The not-found outcome for the declared server-not-found problem.
+ * @param response - Response with that status, consumed here.
+ * @param status - Its HTTP status.
+ * @returns `not-found` for the declared server-not-found problem with HTTP
+ * 404; `off` for the declared server-off problem with HTTP 409.
  * @throws A caller-safe error naming only the status when the body is not
- * that problem, such as the answer of an unregistered route, which is not
- * evidence that the server is absent.
+ * the problem its status declares, such as the answer of an unregistered
+ * route, which is not evidence of what the problem says.
  */
-async function parseMcpServerNotFound(
-  response: Response
-): Promise<ReconnectMcpServerResult> {
+async function parseMcpReconnectProblem(
+  response: Response,
+  status: McpReconnectProblemStatus
+): Promise<McpReconnectRefusal> {
+  /** Outcome of a reconnect naming a server the backend has not applied. */
+  const mcpReconnectNotFound: McpReconnectRefusal = Object.freeze({
+    status: "not-found"
+  })
+
+  /** Outcome of a reconnect of a server that is off or cannot start. */
+  const mcpReconnectOff: McpReconnectRefusal = Object.freeze({ status: "off" })
+
+  /** Outcome each declared problem of a reconnect stands for, by its status. */
+  const mcpReconnectRefusals = Object.freeze({
+    [HTTP_NOT_FOUND_STATUS]: mcpReconnectNotFound,
+    [HTTP_CONFLICT_STATUS]: mcpReconnectOff
+  } satisfies Readonly<Record<McpReconnectProblemStatus, McpReconnectRefusal>>)
+
   let body: unknown
   try {
     body = await response.json()
   } catch {
     body = undefined
   }
-  if (!mcpServerNotFoundProblemSchema.safeParse(body).success) {
-    throw createMcpResponseError(response.status)
+  if (!reconnectMcpServerApi.responses[status].safeParse(body).success) {
+    throw createMcpResponseError(status)
   }
-  return Object.freeze({ status: "not-found" })
+  return mcpReconnectRefusals[status]
 }

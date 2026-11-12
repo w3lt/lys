@@ -488,12 +488,25 @@ body {
   }
 }
 
+/*
+ * Motion a reader asked to reduce ends at once. The reset outranks the motion
+ * Starlight declares inside its cascade layers. This file's rules and the
+ * components' scoped styles are unlayered and outrank `*`, so they take their
+ * durations from the tokens shortened here.
+ */
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-immediate: 0.001ms;
+    --duration-standard: 0.001ms;
+    --duration-enter: 0.001ms;
+    --duration-collapse: 0.001ms;
+  }
+
   *,
   *::before,
   *::after {
-    animation-duration: 0.001ms !important;
-    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms;
+    transition-duration: 0.001ms;
   }
 }
 

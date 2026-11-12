@@ -1,6 +1,13 @@
+import { checkEmailAccountApiResponseSchema } from "@lys/protocol"
+import { llmProviderSettingsSchema } from "@lys/share"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { BackendServerInfo } from "@/lib/store"
-import type { LysSettings, RuntimeSettings } from "@/lib/store/settings"
+import type {
+  GenerationSettings,
+  LocationSettings,
+  LysSettings,
+  RuntimeSettings
+} from "@/lib/store/settings"
 import type { VmoServerInfo } from "@/lib/store/vmo-runtime"
 import {
   buildJsonResponse,
@@ -21,6 +28,9 @@ import {
   waitForMicrotasks
 } from "../../support/settlement"
 import {
+  isSettingsWrite,
+  STORED_EMAIL_ACCOUNT,
+  STORED_EMAIL_PASSWORD,
   STORED_SETTINGS,
   STORED_SETTINGS_DOCUMENT,
   type SettingsDocument
@@ -86,6 +96,53 @@ const BOTH_AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   runtime: BOTH_AUTOSTART_RUNTIME_SETTINGS
 })
 
+/** Generation controls a settings edit changes to. */
+const EDITED_GENERATION_SETTINGS: GenerationSettings = Object.freeze({
+  temperature: 0.9,
+  replyCeiling: 0
+})
+
+/** Providers group a save changes to: Groq is active, with no address saved. */
+const EDITED_PROVIDERS_SETTINGS = llmProviderSettingsSchema.parse({
+  active: "groq",
+  lmStudio: { address: null },
+  ollama: { address: null }
+})
+
+/** Location a save changes to: none, which removes the saved one. */
+const NO_LOCATION_SETTINGS: LocationSettings = Object.freeze({
+  city: null,
+  region: null,
+  country: null
+})
+
+/**
+ * Settings document on disk once one edit of the four groups the store
+ * saves by itself, the startup switches, generation, the per-model load
+ * settings, and the tools, is saved, the Tavily key is removed,
+ * {@link EDITED_PROVIDERS_SETTINGS} is chosen, the location and the added
+ * MCP servers are removed, and the email account is removed with its
+ * password: every group differs from {@link DISK_SETTINGS_DOCUMENT}.
+ */
+const EVERY_GROUP_EDITED_DOCUMENT: SettingsDocument = Object.freeze({
+  runtime: VMO_AUTOSTART_RUNTIME_SETTINGS,
+  generation: EDITED_GENERATION_SETTINGS,
+  loadConfiguration: {
+    default: DISK_SETTINGS_DOCUMENT.loadConfiguration.default,
+    models: { "gemma-3": { evalBatchSize: 1024 } }
+  },
+  secrets: {
+    ...DISK_SETTINGS_DOCUMENT.secrets,
+    tavilyApiKey: null,
+    emailPassword: null
+  },
+  providers: EDITED_PROVIDERS_SETTINGS,
+  tools: { justRun: ["find_files"], switches: { web_search: true } },
+  location: NO_LOCATION_SETTINGS,
+  mcp: { ...DISK_SETTINGS_DOCUMENT.mcp, servers: [] },
+  email: { account: null }
+})
+
 /** Inventory listed once LM Studio is connected. */
 const INVENTORY = [
   buildLlmInfo("resident", { loaded: true }),
@@ -147,6 +204,61 @@ function startDesktopHost(
     get_vmo_health: () => "ready",
     ...commands
   })
+}
+
+/** A native host whose settings file holds its writes until the case releases them. */
+type SettingsFileHoldingWrites = Readonly<{
+  /** Observation handle of the native host. */
+  host: ReturnType<typeof startNativeHostFake>
+  /** Lets every write, the pending ones and those that follow, complete. */
+  releaseWrites: () => void
+  /** Reads the document the settings file holds. */
+  readStoredDocument: () => unknown
+}>
+
+/**
+ * Starts a native host as {@link startDesktopHost} does, whose settings
+ * commands keep one document as the settings file does: `load_settings`
+ * returns the document last written, and each `save_settings` replaces it
+ * once the case released the writes. Until then every write stays pending;
+ * after that, each completes at once.
+ *
+ * @param settingsDocument - Document the file holds before the first write.
+ * @returns The host observation handle, the release of the writes, and a
+ * reader of the document the file holds.
+ */
+function startDesktopHostHoldingWrites(
+  settingsDocument: SettingsDocument
+): SettingsFileHoldingWrites {
+  let storedDocument: unknown = settingsDocument
+  const writeRelease = createControlledPromise<void>()
+
+  /**
+   * Handles one `save_settings` command as the settings file does, once the
+   * case released the writes.
+   *
+   * @param args - Arguments the renderer invoked the command with.
+   * @returns A promise resolving with the command's `null` result after the
+   * document is replaced.
+   * @throws A string, as a Rust `Err`, when the arguments carry no
+   * `newSettings`.
+   */
+  async function handleSaveSettingsCommand(args: unknown): Promise<null> {
+    if (!isSettingsWrite(args)) throw "save_settings needs newSettings"
+    await writeRelease.promise
+    storedDocument = args.newSettings
+    return null
+  }
+
+  const host = startDesktopHost(settingsDocument, {
+    load_settings: () => storedDocument,
+    save_settings: handleSaveSettingsCommand
+  })
+  return {
+    host,
+    releaseWrites: () => writeRelease.resolve(),
+    readStoredDocument: () => storedDocument
+  }
 }
 
 /** Reason a failed spawn of the backend process rejects with. */
@@ -278,7 +390,8 @@ describe("useLysStore", () => {
     expect(useLysStore.getState().settings.secrets).toEqual({
       tavilyApiKey: null,
       ollamaApiKey: null,
-      groqApiKey: null
+      groqApiKey: null,
+      emailPassword: null
     })
     expect(useLysStore.getState().settings.providers).toEqual({
       active: "lmStudio",
@@ -811,6 +924,64 @@ describe("useLysStore", () => {
     })
   })
 
+  describe("settings group saves", () => {
+    it("applies the saves of all nine settings groups one at a time, so the file keeps every group's change", async () => {
+      /**
+       * The store's settings once one edit changed the four groups the store
+       * saves by itself: the startup switches, generation, the per-model load
+       * settings, and the tools.
+       */
+      const autosavedGroupsEditedSettings: LysSettings = Object.freeze({
+        ...DISK_SETTINGS,
+        runtime: VMO_AUTOSTART_RUNTIME_SETTINGS,
+        generation: EDITED_GENERATION_SETTINGS,
+        loadConfiguration: {
+          default: DISK_SETTINGS.loadConfiguration.default,
+          models: new Map([["gemma-3", { evalBatchSize: 1024 }]])
+        },
+        tools: {
+          justRunToolNames: new Set(["find_files"]),
+          switches: new Map([["web_search", true]])
+        }
+      })
+
+      const file = startDesktopHostHoldingWrites(DISK_SETTINGS_DOCUMENT)
+      const useLysStore = await loadFreshLysStore()
+      await useLysStore.getState().initialize()
+      const store = useLysStore.getState()
+      const commandCountBeforeSaves = file.host.commands.length
+
+      store.setSettings(autosavedGroupsEditedSettings)
+      const outcomes = Promise.all([
+        store.saveTavilyApiKey(null),
+        store.saveProviderSettings(EDITED_PROVIDERS_SETTINGS),
+        store.saveLocation(NO_LOCATION_SETTINGS),
+        store.saveMcpServers([]),
+        store.deleteEmailAccount(() =>
+          store.saveBuiltInMcpServerSwitch("email", false)
+        )
+      ])
+      await waitForMicrotasks()
+      const commandsDuringFirstWrite = listCommandNames(file.host).slice(
+        commandCountBeforeSaves
+      )
+      file.releaseWrites()
+
+      await expect(outcomes).resolves.toEqual([
+        "saved",
+        "saved",
+        "saved",
+        "saved",
+        "saved"
+      ])
+      expect(commandsDuringFirstWrite).toEqual([
+        "load_settings",
+        "save_settings"
+      ])
+      expect(file.readStoredDocument()).toEqual(EVERY_GROUP_EDITED_DOCUMENT)
+    })
+  })
+
   describe("secrets", () => {
     it("checks the saved key at the application store's current backend", async () => {
       const backend = startBackendFake({
@@ -854,6 +1025,40 @@ describe("useLysStore", () => {
       expect(useLysStore.getState().settings.secrets).toEqual({
         ...DISK_SETTINGS.secrets,
         tavilyApiKey: null
+      })
+    })
+  })
+
+  describe("email account", () => {
+    it("checks an account at the application store's current backend", async () => {
+      /**
+       * Answer of an email account check whose SMTP server refused the
+       * password.
+       */
+      const refusedEmailCheck = checkEmailAccountApiResponseSchema.parse({
+        status: "checked",
+        imap: { status: "accepted" },
+        smtp: { status: "failed", reason: "wrong-password" }
+      })
+
+      const backend = startBackendFake({
+        "POST /api/v1/mcp/email/account-check": () =>
+          buildJsonResponse(200, refusedEmailCheck)
+      })
+      const useLysStore = await loadFreshLysStore()
+      useLysStore.setState({ backendUrl: FIXTURE_BACKEND_URL })
+
+      const outcome = await useLysStore
+        .getState()
+        .saveEmailAccount(STORED_EMAIL_ACCOUNT, STORED_EMAIL_PASSWORD)
+
+      expect(backend.requests.map((request) => request.url)).toEqual([
+        `${FIXTURE_BACKEND_URL}/api/v1/mcp/email/account-check`
+      ])
+      expect(outcome).toBe("refused")
+      expect(useLysStore.getState().emailAccountCheck).toEqual({
+        status: "checked",
+        outcome: refusedEmailCheck
       })
     })
   })

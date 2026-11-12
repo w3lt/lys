@@ -1,12 +1,18 @@
 import {
+  emailPasswordSchema,
+  emailSettingsSchema,
   groqApiKeySchema,
   llmProviderSettingsSchema,
   locationSettingsSchema,
   mcpSettingsSchema,
   ollamaApiKeySchema,
   tavilyApiKeySchema,
-  type McpServerSettingsCandidate,
+  type EmailAccount,
+  type EmailAccountCandidate,
+  type EmailPassword,
+  type EmailSettings,
   type McpSettings,
+  type McpSettingsCandidate,
   type ModelLoadConfiguration
 } from "@lys/share"
 
@@ -51,6 +57,8 @@ type SettingsDocumentSecrets = {
   readonly ollamaApiKey: string | null
   /** Saved Groq key, or null. */
   readonly groqApiKey: string | null
+  /** Saved password of the email account, or null. */
+  readonly emailPassword: string | null
 }
 
 /**
@@ -103,13 +111,22 @@ type SettingsDocumentLocation = {
 /**
  * The `mcp` group as the settings document holds it.
  *
- * @remarks Matches Rust's `McpSettings`; the servers are plain JSON here and
- * become the shared, frozen form only after {@link buildMcpSettings} parses
- * them.
+ * @remarks Matches Rust's `McpSettings`; the servers and the switches are
+ * plain JSON here and become the shared, frozen form only after
+ * {@link buildMcpSettings} parses them.
  */
-type SettingsDocumentMcp = {
-  /** MCP servers in list order. */
-  readonly servers: readonly McpServerSettingsCandidate[]
+type SettingsDocumentMcp = McpSettingsCandidate
+
+/**
+ * The `email` group as the settings document holds it.
+ *
+ * @remarks Matches Rust's `EmailSettings`; the account is plain JSON here
+ * and becomes the shared, frozen form only after {@link buildEmailSettings}
+ * parses it.
+ */
+type SettingsDocumentEmail = {
+  /** The saved account, or null. */
+  readonly account: EmailAccountCandidate | null
 }
 
 /**
@@ -136,6 +153,8 @@ type SettingsDocument = {
   readonly location: SettingsDocumentLocation
   /** MCP servers, as plain JSON. */
   readonly mcp: SettingsDocumentMcp
+  /** Email account, as plain JSON. */
+  readonly email: SettingsDocumentEmail
 }
 
 /**
@@ -201,8 +220,28 @@ function buildSecretsSettings(
       secrets.ollamaApiKey,
       "Ollama"
     ),
-    groqApiKey: buildApiKey(groqApiKeySchema, secrets.groqApiKey, "Groq")
+    groqApiKey: buildApiKey(groqApiKeySchema, secrets.groqApiKey, "Groq"),
+    emailPassword: buildEmailPassword(secrets.emailPassword)
   }
+}
+
+/**
+ * Brands the saved email password.
+ *
+ * @param emailPassword - Saved password, or null.
+ * @returns The branded password, or null when none is saved.
+ * @throws If the password fails the shared password rule, which Rust's
+ * validation rules out; the error never contains the password.
+ */
+function buildEmailPassword(
+  emailPassword: string | null
+): EmailPassword | null {
+  if (emailPassword === null) return null
+  const parsed = emailPasswordSchema.safeParse(emailPassword)
+  if (!parsed.success) {
+    throw new Error("The settings file holds an invalid email password.")
+  }
+  return parsed.data
 }
 
 /**
@@ -260,6 +299,22 @@ function buildMcpSettings(mcp: SettingsDocumentMcp): McpSettings {
 }
 
 /**
+ * Builds the renderer's email account from the document group.
+ *
+ * @param email - Group Rust validated.
+ * @returns The group as the shared `email` group schema returns it, frozen.
+ * @throws If the group fails the shared schema, which Rust's validation
+ * rules out; the error never contains the account.
+ */
+function buildEmailSettings(email: SettingsDocumentEmail): EmailSettings {
+  const parsed = emailSettingsSchema.safeParse(email)
+  if (!parsed.success) {
+    throw new Error("The settings file holds an invalid email account.")
+  }
+  return parsed.data
+}
+
+/**
  * Builds the document group that stores the renderer's tool choices.
  *
  * @param tools - Tool choices owned by the desktop store.
@@ -300,10 +355,12 @@ function buildToolSettings(tools: SettingsDocumentTools): ToolSettings {
  * @returns Settings holding the document's groups. The per-model load
  * settings are a newly owned map with one entry per key of the document's
  * object, whatever the text of the key, the tool choices are newly owned, as
- * {@link buildToolSettings} builds them, and the MCP servers are parsed by
- * {@link buildMcpSettings}.
- * @throws If a key, the provider choice, the location, or the MCP servers
- * fail their shared schema, which Rust's validation rules out.
+ * {@link buildToolSettings} builds them, the MCP servers are parsed by
+ * {@link buildMcpSettings}, and the email account by
+ * {@link buildEmailSettings}.
+ * @throws If a key, the password, the provider choice, the location, the
+ * MCP servers, or the email account fail their shared schema, which Rust's
+ * validation rules out.
  */
 function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
   const models = new Map(
@@ -321,7 +378,8 @@ function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
     providers: buildProvidersSettings(settingsDocument.providers),
     tools: buildToolSettings(settingsDocument.tools),
     location: buildLocationSettings(settingsDocument.location),
-    mcp: buildMcpSettings(settingsDocument.mcp)
+    mcp: buildMcpSettings(settingsDocument.mcp),
+    email: buildEmailSettings(settingsDocument.email)
   }
 }
 
@@ -349,7 +407,8 @@ function buildSettingsDocument(settings: LysSettings): SettingsDocument {
     providers: settings.providers,
     tools: buildSettingsDocumentTools(settings.tools),
     location: settings.location,
-    mcp: settings.mcp
+    mcp: settings.mcp,
+    email: settings.email
   }
 }
 
@@ -359,7 +418,8 @@ function buildSettingsDocument(settings: LysSettings): SettingsDocument {
  * @returns The settings of the complete document after Rust validation and
  * defaulting, with the per-model load settings as a map keyed by model key,
  * the tools on Just run as a set, the tool switches as a map keyed by tool
- * name, and the MCP servers parsed by the shared `mcp` group schema.
+ * name, and the MCP servers and the email account parsed by their shared
+ * group schemas.
  * @throws The Tauri invoke rejection when the settings path cannot be read or parsed.
  * @throws An `Error` when a group fails its shared schema after Rust
  * accepted it; the message holds no setting value.
@@ -535,9 +595,41 @@ export async function saveRuntimeAutoStartSettings(
 }
 
 /**
+ * Persists the email account and its password together while preserving
+ * everything else already on disk.
+ * @param account - Account to save, or null to remove the saved one.
+ * @param password - Password of the account, or null to remove the saved
+ * one; a secret.
+ * @returns Resolves after the merged settings document is written by Tauri,
+ * which validates both groups and replaces the file atomically and
+ * owner-only.
+ * @throws The native load or save rejection, including Rust's refusal of a
+ * group that breaks its rules; no replacement is written if loading fails.
+ * @remarks One write replaces the `email` group's account and the secrets
+ * group's `emailPassword`, so the file never holds an account without its
+ * password, which the backend would refuse. The application store
+ * serializes this read-modify-write operation with the other settings-group
+ * saves, so that overlapping saves cannot write back each other's stale
+ * group or each other's stale key.
+ */
+export async function saveEmailAccountSettings(
+  account: EmailAccount | null,
+  password: EmailPassword | null
+): Promise<void> {
+  const persistedSettings = await loadSettings()
+  const secrets: SecretsSettings = {
+    ...persistedSettings.secrets,
+    emailPassword: password
+  }
+  const email: EmailSettings = { account }
+  await saveSettings({ ...persistedSettings, secrets, email })
+}
+
+/**
  * Persists the MCP servers while preserving everything else already on disk.
- * @param mcp - MCP servers to save, in list order; an empty list removes
- * every server.
+ * @param mcp - MCP group to save: the added servers in list order, each with
+ * its switch, and the switches of the servers Lys ships; an empty list
+ * removes every added server.
  * @returns Resolves after the merged settings document is written by Tauri,
  * which validates the group and replaces the file atomically and
  * owner-only.

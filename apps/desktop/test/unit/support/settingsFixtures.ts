@@ -1,10 +1,15 @@
 import {
+  emailAccountSchema,
+  emailPasswordSchema,
   groqApiKeySchema,
   llmProviderSettingsSchema,
   locationSettingsSchema,
   mcpSettingsSchema,
   modelLoadConfigurationSchema,
   tavilyApiKeySchema,
+  type EmailAccount,
+  type EmailPassword,
+  type EmailSettings,
   type McpSettings,
   type ModelLoadConfiguration
 } from "@lys/share"
@@ -22,10 +27,10 @@ import type {
  * Settings document as the Tauri settings commands exchange it: the JSON form
  * of Rust's `LysSettings`.
  *
- * @remarks The runtime, generation, secrets, providers, location, and MCP
- * groups are the renderer's groups field for field; the saved keys,
- * addresses, and place names are plain text in JSON and branded only in the
- * renderer. JSON has no map or set, so the per-model load settings are one
+ * @remarks The runtime, generation, secrets, providers, location, MCP, and
+ * email groups are the renderer's groups field for field; the saved keys,
+ * the email password, addresses, and place names are plain text in JSON and
+ * branded only in the renderer. JSON has no map or set, so the per-model load settings are one
  * object whose keys are model keys, where the renderer holds a map, and the
  * tools on Just run are an array, where the renderer holds a set.
  */
@@ -50,6 +55,22 @@ export type SettingsDocument = Readonly<
     }>
   }
 >
+
+/** Arguments of a `save_settings` command that carry the document to write. */
+export type SettingsWriteArguments = Readonly<{
+  /** Settings document the renderer asks the host to write, unchecked. */
+  newSettings: unknown
+}>
+
+/**
+ * Answers whether a `save_settings` argument object carries a document.
+ *
+ * @param args - Arguments the renderer invoked the command with.
+ * @returns Whether `newSettings` is present.
+ */
+export function isSettingsWrite(args: unknown): args is SettingsWriteArguments {
+  return typeof args === "object" && args !== null && "newSettings" in args
+}
 
 /**
  * Load configuration a model whose maximum context is 8,192 tokens is loaded
@@ -109,13 +130,23 @@ export const STORED_GROQ_API_KEY = groqApiKeySchema.parse(
 )
 
 /**
+ * Email password saved on disk: a made-up value, never a password of a real
+ * account.
+ */
+export const STORED_EMAIL_PASSWORD: EmailPassword = emailPasswordSchema.parse(
+  "fixture-app-password-0000"
+)
+
+/**
  * Secrets group on disk, distinct from the first-run group, which has no key:
- * a Tavily key and a Groq key, and no Ollama key.
+ * a Tavily key, a Groq key, and the email account's password, and no Ollama
+ * key.
  */
 const STORED_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
   tavilyApiKey: STORED_TAVILY_API_KEY,
   ollamaApiKey: null,
-  groqApiKey: STORED_GROQ_API_KEY
+  groqApiKey: STORED_GROQ_API_KEY,
+  emailPassword: STORED_EMAIL_PASSWORD
 })
 
 /**
@@ -174,11 +205,33 @@ export const STORED_MCP_SETTINGS: McpSettings = mcpSettingsSchema.parse({
 })
 
 /**
+ * Email account on disk: a Fastmail account whose servers are the provider's
+ * published ones, with a made-up address, never one of a real account.
+ */
+export const STORED_EMAIL_ACCOUNT: EmailAccount = emailAccountSchema.parse({
+  address: "ada@fastmail.com",
+  displayName: "Ada Fixture",
+  userName: "ada@fastmail.com",
+  imap: { host: "imap.fastmail.com", port: 993, security: "tls" },
+  smtp: { host: "smtp.fastmail.com", port: 465, security: "tls" },
+  serverKeepsSentCopy: true
+})
+
+/**
+ * Email group on disk: the stored account, distinct from the first-run group,
+ * which saves no account.
+ */
+export const STORED_EMAIL_SETTINGS: EmailSettings = Object.freeze({
+  account: STORED_EMAIL_ACCOUNT
+})
+
+/**
  * Settings document `load_settings` resolves with: every group is set, one
  * model has load settings of its own, a Tavily and a Groq API key are saved,
  * local Ollama is the active provider at a saved address, one tool is on Just
- * run, one tool is switched off, a location is saved, and two MCP servers are
- * saved.
+ * run, one tool is switched off, a location is saved, two MCP servers are
+ * saved with the email server switched off, and an email account is saved
+ * with its password.
  */
 export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   runtime: STORED_RUNTIME_SETTINGS,
@@ -194,7 +247,8 @@ export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
     switches: Object.freeze({ search_files: false })
   }),
   location: STORED_LOCATION_SETTINGS,
-  mcp: STORED_MCP_SETTINGS
+  mcp: STORED_MCP_SETTINGS,
+  email: STORED_EMAIL_SETTINGS
 })
 
 /**
@@ -218,5 +272,21 @@ export const STORED_SETTINGS: LysSettings = Object.freeze({
   providers: STORED_PROVIDERS_SETTINGS,
   tools: STORED_TOOL_SETTINGS,
   location: STORED_LOCATION_SETTINGS,
-  mcp: STORED_MCP_SETTINGS
+  mcp: STORED_MCP_SETTINGS,
+  email: STORED_EMAIL_SETTINGS
+})
+
+/**
+ * MCP group with the stored added servers and the email server Lys ships
+ * switched on, which the stored group leaves off.
+ */
+export const EMAIL_ON_MCP_SETTINGS: McpSettings = mcpSettingsSchema.parse({
+  servers: STORED_MCP_SETTINGS.servers,
+  builtIn: { email: { enabled: true } }
+})
+
+/** {@link STORED_SETTINGS} with the email server Lys ships switched on. */
+export const EMAIL_ON_SETTINGS: LysSettings = Object.freeze({
+  ...STORED_SETTINGS,
+  mcp: EMAIL_ON_MCP_SETTINGS
 })

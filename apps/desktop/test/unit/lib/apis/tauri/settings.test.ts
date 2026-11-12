@@ -5,6 +5,7 @@ import {
 import { describe, expect, it } from "vitest"
 import {
   loadSettings,
+  saveEmailAccountSettings,
   saveGenerationSettings,
   saveLoadConfigurationSettings,
   saveLocationSettings,
@@ -29,6 +30,8 @@ import {
   waitForMicrotasks
 } from "../../../support/settlement"
 import {
+  STORED_EMAIL_ACCOUNT,
+  STORED_EMAIL_PASSWORD,
   STORED_GROQ_API_KEY,
   STORED_MCP_SETTINGS,
   STORED_PROVIDERS_SETTINGS,
@@ -38,12 +41,14 @@ import {
   type SettingsDocument
 } from "../../../support/settingsFixtures"
 
-/** Secrets group of a settings file that saves no key. */
-const NO_SAVED_KEYS = Object.freeze({
-  tavilyApiKey: null,
-  ollamaApiKey: null,
-  groqApiKey: null
+/** Secrets group of the stored document without the email password. */
+const NO_EMAIL_PASSWORD = Object.freeze({
+  ...STORED_SETTINGS_DOCUMENT.secrets,
+  emailPassword: null
 })
+
+/** Email group of a settings file that saves no account. */
+const NO_EMAIL_ACCOUNT = Object.freeze({ account: null })
 
 /** Load settings of the model whose key names an object-prototype member. */
 const PROTOTYPE_KEY_LOAD_CONFIGURATION = modelLoadConfigurationSchema.parse({
@@ -126,16 +131,24 @@ describe("loadSettings", () => {
   })
 
   it("reads a settings file without a saved key as no key", async () => {
+    /** Secrets group of a settings file that saves no key and no password. */
+    const noSavedKeys = Object.freeze({
+      tavilyApiKey: null,
+      ollamaApiKey: null,
+      groqApiKey: null,
+      emailPassword: null
+    })
+
     startNativeHostFake({
       load_settings: () => ({
         ...STORED_SETTINGS_DOCUMENT,
-        secrets: NO_SAVED_KEYS
+        secrets: noSavedKeys
       })
     })
 
     const settings = await loadSettings()
 
-    expect(settings.secrets).toEqual(NO_SAVED_KEYS)
+    expect(settings.secrets).toEqual(noSavedKeys)
   })
 
   it.each([
@@ -242,14 +255,19 @@ describe("loadSettings", () => {
     })
   })
 
-  it("reads a server's omitted lists as empty and freezes the servers", async () => {
+  it("reads a server's omitted lists as empty, an omitted switch as on, omitted built-in switches as off, and freezes the servers", async () => {
     startNativeHostFake({
       load_settings: () => ({
         ...STORED_SETTINGS_DOCUMENT,
         mcp: {
           servers: [
             { name: "files", transport: "stdio", command: "/usr/bin/files" },
-            { name: "notes", transport: "http", url: "http://127.0.0.1:9000" }
+            {
+              name: "notes",
+              transport: "http",
+              url: "http://127.0.0.1:9000",
+              enabled: false
+            }
           ]
         }
       })
@@ -262,6 +280,7 @@ describe("loadSettings", () => {
         {
           name: "files",
           transport: "stdio",
+          enabled: true,
           command: "/usr/bin/files",
           arguments: [],
           environment: []
@@ -269,13 +288,31 @@ describe("loadSettings", () => {
         {
           name: "notes",
           transport: "http",
+          enabled: false,
           url: "http://127.0.0.1:9000",
           headers: []
         }
-      ]
+      ],
+      builtIn: { email: { enabled: false } }
     })
     expect(Object.isFrozen(settings.mcp.servers)).toBe(true)
     expect(Object.isFrozen(settings.mcp.servers[0])).toBe(true)
+  })
+
+  it("reads the built-in servers' switches", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        mcp: { servers: [], builtIn: { email: { enabled: true } } }
+      })
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.mcp).toEqual({
+      servers: [],
+      builtIn: { email: { enabled: true } }
+    })
   })
 
   it("rejects MCP servers that fail the shared rules without naming a header value", async () => {
@@ -306,6 +343,86 @@ describe("loadSettings", () => {
     expect(failure).toBeInstanceOf(Error)
     expect(failure).toMatchObject({
       message: "The settings file holds invalid MCP server settings."
+    })
+    expect(String(failure)).not.toContain("leaked")
+  })
+
+  it("reads the saved email account and its password, the password branded", async () => {
+    startNativeHostFake({ load_settings: () => STORED_SETTINGS_DOCUMENT })
+
+    const settings = await loadSettings()
+
+    expect(settings.email).toEqual({ account: STORED_EMAIL_ACCOUNT })
+    expect(Object.isFrozen(settings.email.account)).toBe(true)
+    expect(settings.secrets.emailPassword).toBe(STORED_EMAIL_PASSWORD)
+  })
+
+  it("reads a settings file without an email account as no account", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        secrets: NO_EMAIL_PASSWORD,
+        email: NO_EMAIL_ACCOUNT
+      })
+    })
+
+    const settings = await loadSettings()
+
+    expect(settings.email).toEqual({ account: null })
+    expect(settings.secrets.emailPassword).toBeNull()
+  })
+
+  it("rejects an email account that fails the shared rules without naming the address", async () => {
+    const address = "leaked-address@example.test"
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        email: {
+          account: {
+            ...STORED_EMAIL_ACCOUNT,
+            address,
+            imap: { host: "imap.example.test", port: 143, security: "plain" }
+          }
+        }
+      })
+    })
+
+    const failure = await loadSettings().then(
+      () => {
+        throw new Error("The settings loaded")
+      },
+      (rejection: unknown) => rejection
+    )
+
+    expect(failure).toBeInstanceOf(Error)
+    expect(failure).toMatchObject({
+      message: "The settings file holds an invalid email account."
+    })
+    expect(String(failure)).not.toContain("leaked")
+  })
+
+  it("rejects an email password that fails the password rule without printing it", async () => {
+    const brokenPassword = "leaked\npassword"
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        secrets: {
+          ...STORED_SETTINGS_DOCUMENT.secrets,
+          emailPassword: brokenPassword
+        }
+      })
+    })
+
+    const failure = await loadSettings().then(
+      () => {
+        throw new Error("The settings loaded")
+      },
+      (rejection: unknown) => rejection
+    )
+
+    expect(failure).toBeInstanceOf(Error)
+    expect(failure).toMatchObject({
+      message: "The settings file holds an invalid email password."
     })
     expect(String(failure)).not.toContain("leaked")
   })
@@ -490,7 +607,8 @@ describe("saveSecretsSettings", () => {
             secrets: {
               tavilyApiKey: null,
               ollamaApiKey: null,
-              groqApiKey: STORED_GROQ_API_KEY
+              groqApiKey: STORED_GROQ_API_KEY,
+              emailPassword: STORED_EMAIL_PASSWORD
             }
           }
         }
@@ -628,7 +746,10 @@ describe("saveLocationSettings", () => {
 
 describe("saveMcpSettings", () => {
   it("replaces only the mcp group of the document on disk", async () => {
-    const onlyNotes = { servers: [STORED_MCP_SETTINGS.servers[1]] }
+    const onlyNotes = {
+      ...STORED_MCP_SETTINGS,
+      servers: [STORED_MCP_SETTINGS.servers[1]]
+    }
     const host = startNativeHostFake({
       load_settings: () => STORED_SETTINGS_DOCUMENT,
       save_settings: () => null
@@ -647,18 +768,19 @@ describe("saveMcpSettings", () => {
     ])
   })
 
-  it("writes an empty server list when every server was removed", async () => {
+  it("writes an empty server list when every server was removed, keeping the built-in switches", async () => {
+    const noServers = { ...STORED_MCP_SETTINGS, servers: [] }
     const host = startNativeHostFake({
       load_settings: () => STORED_SETTINGS_DOCUMENT,
       save_settings: () => null
     })
 
-    await saveMcpSettings({ servers: [] })
+    await saveMcpSettings(noServers)
 
     expect(host.commands.at(-1)).toEqual({
       command: "save_settings",
       args: {
-        newSettings: { ...STORED_SETTINGS_DOCUMENT, mcp: { servers: [] } }
+        newSettings: { ...STORED_SETTINGS_DOCUMENT, mcp: noServers }
       }
     })
   })
@@ -684,6 +806,84 @@ describe("saveMcpSettings", () => {
     })
 
     await expect(saveMcpSettings(STORED_MCP_SETTINGS)).rejects.toBe("Disk full")
+  })
+})
+
+describe("saveEmailAccountSettings", () => {
+  const editedAccount = {
+    ...STORED_EMAIL_ACCOUNT,
+    displayName: "Ada Edited"
+  }
+
+  it("replaces the email account and its password together, in one write", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        secrets: NO_EMAIL_PASSWORD,
+        email: NO_EMAIL_ACCOUNT
+      }),
+      save_settings: () => null
+    })
+
+    await saveEmailAccountSettings(editedAccount, STORED_EMAIL_PASSWORD)
+
+    expect(host.commands).toEqual([
+      { command: "load_settings", args: {} },
+      {
+        command: "save_settings",
+        args: {
+          newSettings: {
+            ...STORED_SETTINGS_DOCUMENT,
+            email: { account: editedAccount }
+          }
+        }
+      }
+    ])
+  })
+
+  it("removes the account and the password together", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveEmailAccountSettings(null, null)
+
+    expect(host.commands.at(-1)).toEqual({
+      command: "save_settings",
+      args: {
+        newSettings: {
+          ...STORED_SETTINGS_DOCUMENT,
+          secrets: NO_EMAIL_PASSWORD,
+          email: NO_EMAIL_ACCOUNT
+        }
+      }
+    })
+  })
+
+  it("writes nothing when the document cannot be loaded", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => Promise.reject("Failed to read settings.json"),
+      save_settings: () => null
+    })
+
+    await expect(
+      saveEmailAccountSettings(editedAccount, STORED_EMAIL_PASSWORD)
+    ).rejects.toBe("Failed to read settings.json")
+    expect(host.commands.map((invoked) => invoked.command)).toEqual([
+      "load_settings"
+    ])
+  })
+
+  it("rejects when the merged document cannot be written", async () => {
+    startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => Promise.reject("Disk full")
+    })
+
+    await expect(
+      saveEmailAccountSettings(editedAccount, STORED_EMAIL_PASSWORD)
+    ).rejects.toBe("Disk full")
   })
 })
 

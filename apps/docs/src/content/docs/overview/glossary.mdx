@@ -85,6 +85,11 @@ Terms that mean something specific inside Lys.
   group of `settings.json`. Lys either starts it as a command and talks to it
   over its standard input and output (stdio), or reaches it at a URL over
   Streamable HTTP. The backend owns every connection.
+- **Built-in MCP server**: an MCP server Lys ships and the backend starts
+  itself, listed first in Settings → MCP and marked `built-in`, off until the
+  person switches it on. Today the only one is the email server, which needs
+  the saved email account; its switch is `mcp.builtIn.email.enabled` in
+  `settings.json`.
 - **MCP tool**: a tool of a connected MCP server. The model calls it as
   `mcp__<server>__<tool>`; the backend asks the person first, unless the tool
   is on Just run, and runs the call on the server. Its output is untrusted.

@@ -17,6 +17,10 @@ import {
   type ControlledPromise
 } from "../../support/settlement"
 import {
+  isSettingsWrite,
+  STORED_EMAIL_ACCOUNT,
+  STORED_EMAIL_PASSWORD,
+  STORED_MCP_SETTINGS,
   STORED_SETTINGS_DOCUMENT,
   type SettingsDocument
 } from "../../support/settingsFixtures"
@@ -29,16 +33,6 @@ const EDITED_LOAD_CONFIGURATION: LoadConfigurationSettings = Object.freeze({
   default: Object.freeze({}),
   models: new Map([["gemma-3", { evalBatchSize: 1024 }]])
 })
-
-/**
- * Answers whether a `save_settings` argument object carries a document.
- *
- * @param args - Arguments the renderer invoked the command with.
- * @returns Whether `newSettings` is present.
- */
-function isSettingsWrite(args: unknown): args is { newSettings: unknown } {
-  return typeof args === "object" && args !== null && "newSettings" in args
-}
 
 /**
  * Starts a native host that keeps one settings document as the settings file
@@ -250,8 +244,10 @@ describe("createSettingsGroupSaves", () => {
     const saves = createSettingsGroupSaves()
     const noLocation = { city: null, region: null, country: null }
 
+    const noServers = { ...STORED_MCP_SETTINGS, servers: [] }
+
     const locationSave = saves.saveLocationSettings(noLocation)
-    const mcpSave = saves.saveMcpSettings({ servers: [] })
+    const mcpSave = saves.saveMcpSettings(noServers)
     await waitForMicrotasks()
     const writesDuringFirst = writes.length
     writes[0]?.resolve(null)
@@ -264,7 +260,34 @@ describe("createSettingsGroupSaves", () => {
     expect(readStoredDocument()).toEqual({
       ...STORED_SETTINGS_DOCUMENT,
       location: noLocation,
-      mcp: { servers: [] }
+      mcp: noServers
+    })
+  })
+
+  it("applies an email account save after an MCP save sent before it, keeping both groups and the other secrets", async () => {
+    const { writes, readStoredDocument } = startSettingsFileHost()
+    const saves = createSettingsGroupSaves()
+    const noServers = { ...STORED_MCP_SETTINGS, servers: [] }
+    const editedAccount = { ...STORED_EMAIL_ACCOUNT, displayName: "Ada Edited" }
+
+    const mcpSave = saves.saveMcpSettings(noServers)
+    const emailSave = saves.saveEmailAccountSettings(
+      editedAccount,
+      STORED_EMAIL_PASSWORD
+    )
+    await waitForMicrotasks()
+    const writesDuringFirst = writes.length
+    writes[0]?.resolve(null)
+    await mcpSave
+    await waitForMicrotasks()
+    writes[1]?.resolve(null)
+    await emailSave
+
+    expect(writesDuringFirst).toBe(1)
+    expect(readStoredDocument()).toEqual({
+      ...STORED_SETTINGS_DOCUMENT,
+      mcp: noServers,
+      email: { account: editedAccount }
     })
   })
 

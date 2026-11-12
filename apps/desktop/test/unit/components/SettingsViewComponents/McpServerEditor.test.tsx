@@ -277,6 +277,9 @@ describe("McpServerEditor", () => {
       name: "Fix 2 fields to save:"
     })
     expect(summary).toHaveFocus()
+    expect(
+      within(summary).getByRole("heading", { level: 3 })
+    ).toHaveTextContent("Fix 2 fields to save:")
     await user.click(
       within(summary).getByRole("button", {
         name: /^Environment: Variable 2: /

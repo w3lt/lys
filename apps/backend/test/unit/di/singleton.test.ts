@@ -108,6 +108,13 @@ type StartedTurn = Readonly<{
 }>
 
 /**
+ * Name of each service whose close the cleanup log records: the
+ * acquisitions, and the two tool services that own resources.
+ */
+type ClosedServiceName =
+  AcquisitionName | "email-account-checker" | "mcp-server-registry"
+
+/**
  * Creates log reporters that record what they receive.
  *
  * @returns Reporters whose calls each case can inspect.
@@ -129,7 +136,8 @@ function createLogReporters() {
     pageRendering,
     lmStudioSdk,
     reportMcpServerEvent: vi.fn(),
-    reportMcpProcessGroupsSaveFailure: vi.fn()
+    reportMcpProcessGroupsSaveFailure: vi.fn(),
+    sendEmailAccountCheckEvent: vi.fn()
   } satisfies SingletonLogReporters
 }
 
@@ -144,7 +152,7 @@ function createLogReporters() {
 function createAcquisition<Service>(
   service: Service,
   name: AcquisitionName,
-  closeLog: AcquisitionName[]
+  closeLog: ClosedServiceName[]
 ) {
   return {
     service,
@@ -152,6 +160,26 @@ function createAcquisition<Service>(
       closeLog.push(name)
     })
   } satisfies SingletonServiceAcquisition<Service>
+}
+
+/**
+ * Updates a tool service the bundle created so that each of its closes is
+ * logged under `name` before the close goes on.
+ *
+ * @param service - Service whose close is recorded.
+ * @param name - Name recorded when the close starts.
+ * @param closeLog - Shared log of cleanup calls in call order.
+ */
+function updateServiceClose(
+  service: Readonly<{ close: () => Promise<void> }>,
+  name: ClosedServiceName,
+  closeLog: ClosedServiceName[]
+): void {
+  const close = service.close.bind(service)
+  vi.spyOn(service, "close").mockImplementation(async () => {
+    closeLog.push(name)
+    await close()
+  })
 }
 
 /**
@@ -208,7 +236,7 @@ function buildHelloAgentTurn(
  * endpoint. No external resource is acquired.
  */
 function createRecordedFactories() {
-  const closeLog: AcquisitionName[] = []
+  const closeLog: ClosedServiceName[] = []
   const database = SqliteDatabase.open(":memory:")
   onTestFinished(() => {
     database[Symbol.dispose]()
@@ -1093,6 +1121,30 @@ describe("closeSingletonServices", () => {
     expect(() =>
       services.replyGenerations.findReplyGeneration(UNSTORED_REPLY_TARGET)
     ).toThrow("Reply generation registry is closed")
+  })
+
+  it("closes the email account checker, then the MCP server registry, before every acquisition", async () => {
+    const { services, closeLog } = await createRecordedServices()
+    updateServiceClose(
+      services.emailAccountChecker,
+      "email-account-checker",
+      closeLog
+    )
+    updateServiceClose(
+      services.mcpServerRegistry,
+      "mcp-server-registry",
+      closeLog
+    )
+
+    await closeSingletonServices(services)
+
+    expect(closeLog).toEqual([
+      "email-account-checker",
+      "mcp-server-registry",
+      "chat",
+      "llm-runtime",
+      "database"
+    ])
   })
 
   it("joins repeated and concurrent calls to one release of each acquisition", async () => {

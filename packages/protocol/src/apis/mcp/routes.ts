@@ -29,3 +29,13 @@ export const apiMcpServersSyncRoute = `${apiMcpServersRoute}/sync`
  * changing it requires coordinated route registration.
  */
 export const apiMcpServerReconnectRoute = `${apiMcpServersRoute}/:serverName/reconnect`
+
+/**
+ * Versioned POST path for signing in to the mail servers of an email
+ * account, before the account is saved.
+ *
+ * @remarks This path is transmitted in HTTP requests and is not persisted. It
+ * is release-stable across compatible clients; changing it requires
+ * coordinated route registration.
+ */
+export const apiMcpEmailAccountCheckRoute = `${API_PREFIX_V1}/mcp/email/account-check`

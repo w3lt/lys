@@ -1,4 +1,7 @@
-import type { McpServerList } from "@lys/protocol"
+import {
+  checkEmailAccountApiResponseSchema,
+  type McpServerList
+} from "@lys/protocol"
 import { mcpServerSettingsSchema, type ToolDefinition } from "@lys/share"
 import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -9,6 +12,7 @@ import {
 } from "@/components/SettingsViewComponents/tool-presentation"
 import {
   buildJsonResponse,
+  createControlledRoute,
   createTransportFailure,
   startBackendFake,
   type BackendFake,
@@ -16,11 +20,15 @@ import {
   type BackendRoutes
 } from "../../support/backendFake"
 import {
+  buildBuiltInMcpServerStatus,
   buildConnectedMcpState,
   buildFailedMcpState,
   buildMcpServerList,
+  buildMcpServerListRoute,
+  buildMcpServerOffProblem,
   buildMcpServerStatus,
-  CONNECTING_MCP_STATE
+  CONNECTING_MCP_STATE,
+  OFF_MCP_STATE
 } from "../../support/mcpFixtures"
 import { buildLlmInfo } from "../../support/modelFixtures"
 import { startNativeHostFake } from "../../support/nativeHostFake"
@@ -32,6 +40,9 @@ import {
   type RuntimeArrangement
 } from "../../support/runtimeFixtures"
 import {
+  EMAIL_ON_SETTINGS,
+  STORED_EMAIL_ACCOUNT,
+  STORED_EMAIL_PASSWORD,
   STORED_MCP_SETTINGS,
   STORED_SETTINGS,
   STORED_SETTINGS_DOCUMENT
@@ -42,6 +53,20 @@ import {
   loadFreshSettingsView
 } from "../../support/settingsViewFixtures"
 import { buildMcpToolDefinition } from "../../support/toolFixtures"
+
+/** What the person types into the editor of a new local program. */
+type TypedLocalProgram = Readonly<{
+  /** Text typed into Name. */
+  name: string
+  /** Text typed into Command. */
+  command: string
+  /** Text typed into Arguments. */
+  arguments: string
+  /** Name typed into the variable that add variable adds. */
+  variableName: string
+  /** Value typed into that variable. */
+  variableValue: string
+}>
 
 /** Route key of the list read. */
 const LIST_ROUTE = "GET /api/v1/mcp/servers"
@@ -55,19 +80,61 @@ const RECONNECT_NOTES_ROUTE = "POST /api/v1/mcp/servers/notes/reconnect"
 /** Route key of the backend's tool list. */
 const TOOLS_ROUTE = "GET /api/v1/tools"
 
+/** Route key of the email account check. */
+const ACCOUNT_CHECK_ROUTE = "POST /api/v1/mcp/email/account-check"
+
 /** Tools the connected `files` server lists, in the server's order. */
 const FILES_TOOLS = ["read_file", "write_file", "search"].map((name) =>
   buildMcpToolDefinition("files", name)
 )
 
-/** Both stored servers: the command server connected, the URL one refused. */
+/**
+ * Both stored servers, the command server connected and the URL one
+ * refused, then the email server Lys ships, switched off.
+ */
 const STORED_LIST = buildMcpServerList([
   buildMcpServerStatus("files", "stdio", buildConnectedMcpState(3)),
-  buildMcpServerStatus("notes", "http", buildFailedMcpState("unauthorized"))
+  buildMcpServerStatus("notes", "http", buildFailedMcpState("unauthorized")),
+  buildBuiltInMcpServerStatus("email", OFF_MCP_STATE)
 ])
 
+/** {@link STORED_LIST} once the command server is switched off. */
+const FILES_OFF_LIST = buildMcpServerList([
+  buildMcpServerStatus("files", "stdio", OFF_MCP_STATE),
+  ...STORED_LIST.servers.slice(1)
+])
+
+/** What the email server's row says it does. */
+const EMAIL_BLURB = "Reads, searches, and sends your email over IMAP and SMTP."
+
 /** Saved values that can be secrets, which the pane never shows as text. */
-const SECRET_VALUES = ["debug", "fixture-0000"]
+const SECRET_VALUES = ["debug", "fixture-0000", STORED_EMAIL_PASSWORD]
+
+/** An added server that takes the name of the email server Lys ships. */
+const ADDED_EMAIL_SERVER = mcpServerSettingsSchema.parse({
+  name: "email",
+  transport: "stdio",
+  command: "/usr/local/bin/mail-server"
+})
+
+/** MCP settings whose only added server takes the email server's name. */
+const ADDED_EMAIL_MCP_SETTINGS = Object.freeze({
+  ...STORED_MCP_SETTINGS,
+  servers: [ADDED_EMAIL_SERVER]
+})
+
+/** Settings whose only added server takes the email server's name. */
+const ADDED_EMAIL_SETTINGS = Object.freeze({
+  ...STORED_SETTINGS,
+  mcp: ADDED_EMAIL_MCP_SETTINGS
+})
+
+/** Answer of a check both servers accepted. */
+const ACCEPTED_ACCOUNT_CHECK = checkEmailAccountApiResponseSchema.parse({
+  status: "checked",
+  imap: { status: "accepted" },
+  smtp: { status: "accepted" }
+})
 
 /** Problem of the stored `notes` server, which refused the request. */
 const UNAUTHORIZED_TEXT =
@@ -105,6 +172,31 @@ function formatToolCost(tools: readonly ToolDefinition[]): string {
  */
 function answerList(list: McpServerList): BackendRoute {
   return () => buildJsonResponse(200, list)
+}
+
+/**
+ * Gets the switch of one server.
+ *
+ * @param serverName - Server name.
+ * @returns The switch, named by the server followed by `on`.
+ */
+function getServerSwitch(serverName: string): HTMLElement {
+  return within(getServerRow(serverName)).getByRole("switch", {
+    name: `${serverName} on`
+  })
+}
+
+/**
+ * Opens the email server's details and gets its account card.
+ *
+ * @param user - User-event session of the case.
+ * @returns The form named Email account.
+ */
+async function openEmailAccountCard(
+  user: ReturnType<typeof userEvent.setup>
+): Promise<HTMLElement> {
+  const email = await expandServer(user, "email")
+  return within(email).getByRole("form", { name: "Email account" })
 }
 
 /**
@@ -211,6 +303,29 @@ function getServerToggle(serverName: string): HTMLElement {
 }
 
 /**
+ * Lists the toggles of the rows named email: the server Lys ships first,
+ * then an added server with its name.
+ *
+ * @returns The toggles, in list order.
+ */
+function listEmailRowToggles(): HTMLElement[] {
+  return within(screen.getByRole("list", { name: "MCP servers" }))
+    .getAllByRole("listitem", { name: "email" })
+    .map((row) => within(row).getByRole("button", { name: "email" }))
+}
+
+/**
+ * Lists whether each row named email shows its details.
+ *
+ * @returns The `aria-expanded` of each row's toggle, in list order.
+ */
+function listEmailRowExpansions(): (string | null)[] {
+  return listEmailRowToggles().map((toggle) =>
+    toggle.getAttribute("aria-expanded")
+  )
+}
+
+/**
  * Shows one server's details.
  *
  * @param user - User-event session of the case.
@@ -245,6 +360,40 @@ async function openNewServerEditor(
 ): Promise<HTMLElement> {
   await user.click(screen.getByRole("button", { name: "Add server" }))
   return screen.getByRole("form", { name: "New MCP server" })
+}
+
+/**
+ * Updates the fields of a new server's editor to a local program, typing
+ * each: its name, its command, and its arguments, then one environment
+ * variable, which add variable adds and focuses.
+ *
+ * @param user - User-event session of the case.
+ * @param form - The editor form.
+ * @param program - What the person types.
+ */
+async function updateLocalProgramFields(
+  user: ReturnType<typeof userEvent.setup>,
+  form: HTMLElement,
+  program: TypedLocalProgram
+): Promise<void> {
+  await user.type(
+    within(form).getByRole("textbox", { name: "Name" }),
+    program.name
+  )
+  await user.type(
+    within(form).getByRole("textbox", { name: "Command" }),
+    program.command
+  )
+  await user.type(
+    within(form).getByRole("textbox", { name: "Arguments" }),
+    program.arguments
+  )
+  await user.click(within(form).getByRole("button", { name: "add variable" }))
+  await user.keyboard(program.variableName)
+  await user.type(
+    within(form).getByLabelText("Value of variable 1"),
+    program.variableValue
+  )
 }
 
 /**
@@ -289,7 +438,7 @@ describe("McpPaneContent", () => {
     ).toBeInTheDocument()
     const section = screen.getByRole("region", { name: "servers" })
     expect(section).toHaveTextContent(
-      `1 of 2 connected · 3 tools · ${formatToolCost(FILES_TOOLS)} per request`
+      `1 of 3 connected · 3 tools · ${formatToolCost(FILES_TOOLS)} per request`
     )
     const files = getServerToggle("files")
     expect(files).toHaveAttribute("aria-expanded", "false")
@@ -299,10 +448,652 @@ describe("McpPaneContent", () => {
     expect(getServerToggle("notes")).toHaveAccessibleDescription(
       "http failed https://mcp.example.test/notes"
     )
+    expect(getServerToggle("email")).toHaveAccessibleDescription(
+      `built-in stdio off ${EMAIL_BLURB}`
+    )
+    expect(
+      within(screen.getByRole("list", { name: "MCP servers" }))
+        .getAllByRole("listitem")
+        .map((row) => row.getAttribute("aria-labelledby"))
+    ).toEqual([
+      getServerRow("email").getAttribute("aria-labelledby"),
+      getServerRow("files").getAttribute("aria-labelledby"),
+      getServerRow("notes").getAttribute("aria-labelledby")
+    ])
+    expect(getServerSwitch("files")).toBeChecked()
+    expect(getServerSwitch("files")).toHaveAccessibleDescription("Running")
+    expect(getServerSwitch("notes")).toBeChecked()
+    expect(getServerSwitch("email")).not.toBeChecked()
+    expect(getServerSwitch("email")).not.toHaveAttribute("aria-disabled")
+    expect(getServerSwitch("email")).toHaveAccessibleDescription("off")
     for (const secret of SECRET_VALUES) {
       expect(section).not.toHaveTextContent(secret)
     }
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE])
+  })
+
+  it("switches an added server off, which the store saves and the backend applies", async () => {
+    const host = startSettingsHost()
+    const { backend } = await startMcpPane({
+      [SYNC_ROUTE]: answerList(FILES_OFF_LIST)
+    })
+    const user = userEvent.setup()
+
+    await user.click(getServerSwitch("files"))
+    await waitForRenderedWork()
+
+    expect(getServerSwitch("files")).not.toBeChecked()
+    expect(listWrittenDocuments(host.commands)).toEqual([
+      {
+        ...STORED_SETTINGS_DOCUMENT,
+        mcp: {
+          ...STORED_MCP_SETTINGS,
+          servers: [
+            { ...STORED_MCP_SETTINGS.servers[0], enabled: false },
+            STORED_MCP_SETTINGS.servers[1]
+          ]
+        }
+      }
+    ])
+    expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, SYNC_ROUTE])
+    expect(getServerToggle("files")).toHaveAccessibleDescription(
+      "stdio off /opt/homebrew/bin/npx -y @modelcontextprotocol/server-filesystem /tmp"
+    )
+    expect(screen.getByRole("region", { name: "servers" })).toHaveTextContent(
+      "0 of 3 connected · 0 tools"
+    )
+    const files = await expandServer(user, "files")
+    expect(within(files).getAllByRole("status")[0]).toHaveTextContent(
+      "files: OffSwitched off. Its tools are not offered to the agents."
+    )
+    expect(
+      within(files).queryByRole("button", { name: /^(Start|Restart|Retry) / })
+    ).toBeNull()
+    expect(
+      within(files).getByRole("region", { name: "tools" })
+    ).toHaveTextContent("Nothing is listed while it is off.")
+    expect(
+      within(files).getByRole("button", { name: "Edit files" })
+    ).toBeEnabled()
+  })
+
+  it("switches an added server on again, which the store saves and the backend applies", async () => {
+    const host = startSettingsHost()
+    const { backend } = await startMcpPane({
+      [SYNC_ROUTE]: buildMcpServerListRoute([FILES_OFF_LIST, STORED_LIST])
+    })
+    const user = userEvent.setup()
+    await user.click(getServerSwitch("files"))
+    await waitForRenderedWork()
+    const files = await expandServer(user, "files")
+
+    await user.click(getServerSwitch("files"))
+    await waitForRenderedWork()
+
+    expect(getServerSwitch("files")).toBeChecked()
+    expect(listWrittenDocuments(host.commands).at(-1)).toEqual(
+      STORED_SETTINGS_DOCUMENT
+    )
+    expect(listMcpRouteKeys(backend)).toEqual([
+      LIST_ROUTE,
+      SYNC_ROUTE,
+      SYNC_ROUTE
+    ])
+    expect(within(files).getAllByRole("status")[0]).toHaveTextContent(
+      "files: Running3 tools listed"
+    )
+  })
+
+  it("switches the email server on, which the store saves and the backend starts, and off again", async () => {
+    const host = startSettingsHost()
+    const emailStarting = buildMcpServerList([
+      ...STORED_LIST.servers.slice(0, 2),
+      buildBuiltInMcpServerStatus("email", CONNECTING_MCP_STATE)
+    ])
+    const { backend } = await startMcpPane({
+      [SYNC_ROUTE]: buildMcpServerListRoute([emailStarting, STORED_LIST])
+    })
+    const user = userEvent.setup()
+
+    await user.click(getServerSwitch("email"))
+    await waitForRenderedWork()
+
+    expect(getServerSwitch("email")).toBeChecked()
+    expect(listWrittenDocuments(host.commands)).toEqual([
+      {
+        ...STORED_SETTINGS_DOCUMENT,
+        mcp: { ...STORED_MCP_SETTINGS, builtIn: { email: { enabled: true } } }
+      }
+    ])
+    expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, SYNC_ROUTE])
+    expect(getServerToggle("email")).toHaveAccessibleDescription(
+      `built-in stdio starting ${EMAIL_BLURB}`
+    )
+
+    await user.click(getServerSwitch("email"))
+    await waitForRenderedWork()
+
+    expect(getServerSwitch("email")).not.toBeChecked()
+    expect(listWrittenDocuments(host.commands).at(-1)).toEqual(
+      STORED_SETTINGS_DOCUMENT
+    )
+    expect(listMcpRouteKeys(backend)).toEqual([
+      LIST_ROUTE,
+      SYNC_ROUTE,
+      SYNC_ROUTE
+    ])
+    expect(getServerToggle("email")).toHaveAccessibleDescription(
+      `built-in stdio off ${EMAIL_BLURB}`
+    )
+  })
+
+  it("reports a failed save of a switch in the status line and keeps the switch", async () => {
+    startSettingsHost(() => Promise.reject("Disk full"))
+    const { backend } = await startMcpPane()
+    const user = userEvent.setup()
+
+    await user.click(getServerSwitch("email"))
+    await waitForRenderedWork()
+
+    expect(getPaneStatus()).toHaveTextContent(
+      "Lys couldn't write the MCP servers to its settings file."
+    )
+    expect(getServerSwitch("email")).not.toBeChecked()
+    expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE])
+  })
+
+  it("disables every server's switch while a save of the servers runs", async () => {
+    const write = createControlledPromise<unknown>()
+    startSettingsHost(() => write.promise)
+    await startMcpPane({ [SYNC_ROUTE]: answerList(FILES_OFF_LIST) })
+    const user = userEvent.setup()
+
+    await user.click(getServerSwitch("files"))
+    await waitForRenderedWork()
+
+    for (const serverName of ["files", "notes", "email"]) {
+      expect(getServerSwitch(serverName)).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      )
+    }
+    write.resolve(null)
+    await waitForRenderedWork()
+
+    for (const serverName of ["files", "notes", "email"]) {
+      expect(getServerSwitch(serverName)).not.toHaveAttribute("aria-disabled")
+    }
+  })
+
+  it("shows the email server's details with its account card, and no Edit, Remove, or configuration, never the password", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+
+    const email = await expandServer(user, "email")
+
+    expect(within(email).getAllByRole("status")[0]).toHaveTextContent(
+      "email: OffSwitched off. Its tools are not offered to the agents."
+    )
+    expect(
+      within(email).getByRole("region", { name: "tools" })
+    ).toHaveTextContent("Nothing is listed while it is off.")
+    expect(
+      within(email).queryByRole("button", { name: "Edit email" })
+    ).toBeNull()
+    expect(
+      within(email).queryByRole("button", { name: "Remove email" })
+    ).toBeNull()
+    expect(
+      within(email).queryByRole("region", { name: "configuration" })
+    ).toBeNull()
+    const card = within(email).getByRole("form", { name: "Email account" })
+    expect(within(card).getByRole("textbox", { name: "Address" })).toHaveValue(
+      STORED_EMAIL_ACCOUNT.address
+    )
+    expect(within(card).getByLabelText("Password")).toHaveValue("")
+    expect(within(card).getByRole("status")).toHaveTextContent(
+      `Saved · ${STORED_EMAIL_ACCOUNT.address}`
+    )
+    for (const secret of SECRET_VALUES) {
+      expect(
+        screen.getByRole("region", { name: "servers" })
+      ).not.toHaveTextContent(secret)
+    }
+  })
+
+  it("disables the email switch while no account is saved, and says what the server needs", async () => {
+    startSettingsHost()
+    const { useLysStore } = await startMcpPane()
+    const user = userEvent.setup()
+
+    const secrets = { ...STORED_SETTINGS.secrets, emailPassword: null }
+    const noAccount = { account: null }
+    const settings = { ...STORED_SETTINGS, secrets, email: noAccount }
+
+    useLysStore.setState({ settings })
+    await waitForRenderedWork()
+
+    expect(getServerSwitch("email")).toHaveAttribute("aria-disabled", "true")
+    expect(getServerToggle("email")).toHaveAccessibleDescription(
+      `built-in stdio off ${EMAIL_BLURB}`
+    )
+    const email = await expandServer(user, "email")
+    expect(within(email).getAllByRole("status")[0]).toHaveTextContent(
+      "email: OffNeeds an email account. Add one below."
+    )
+    const card = within(email).getByRole("form", { name: "Email account" })
+    expect(within(card).getByRole("status")).toHaveTextContent(
+      "No account yet. The email server stays off until you save one."
+    )
+    expect(within(card).getByRole("textbox", { name: "Address" })).toHaveValue(
+      ""
+    )
+  })
+
+  it("says an added server took the email server's name, and disables the built-in switch", async () => {
+    startSettingsHost()
+    const { useLysStore } = await startMcpPane()
+
+    useLysStore.setState({ settings: ADDED_EMAIL_SETTINGS })
+    await waitForRenderedWork()
+
+    const rows = within(
+      screen.getByRole("list", { name: "MCP servers" })
+    ).getAllByRole("listitem", { name: "email" })
+    expect(rows).toHaveLength(2)
+    const [builtIn, added] = rows
+    expect(
+      within(builtIn).getByRole("button", { name: "email" })
+    ).toHaveAccessibleDescription(`built-in stdio name taken ${EMAIL_BLURB}`)
+    expect(
+      within(builtIn).getByRole("switch", { name: "email on" })
+    ).toHaveAttribute("aria-disabled", "true")
+    expect(
+      within(added).getByRole("button", { name: "email" })
+    ).toHaveAccessibleDescription(
+      expect.stringContaining("/usr/local/bin/mail-server")
+    )
+    expect(
+      within(added).getByRole("switch", { name: "email on" })
+    ).not.toHaveAttribute("aria-disabled")
+  })
+
+  it("shows the details of only the row the person expands while an added server has the email server's name, also after its editor closes", async () => {
+    startSettingsHost()
+    const { useLysStore } = await startMcpPane()
+    const user = userEvent.setup()
+    useLysStore.setState({ settings: ADDED_EMAIL_SETTINGS })
+    await waitForRenderedWork()
+
+    await user.click(listEmailRowToggles()[1])
+
+    expect(listEmailRowExpansions()).toEqual(["false", "true"])
+
+    await user.click(listEmailRowToggles()[0])
+
+    expect(listEmailRowExpansions()).toEqual(["true", "false"])
+
+    await user.click(listEmailRowToggles()[1])
+    await user.click(screen.getByRole("button", { name: "Edit email" }))
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+
+    expect(listEmailRowExpansions()).toEqual(["false", "true"])
+    expect(screen.getByRole("button", { name: "Edit email" })).toHaveFocus()
+  })
+
+  it("keeps the email server's details shown when an added server with its name is removed after the person moved on", async () => {
+    const write = createControlledPromise<unknown>()
+    startSettingsHost(() => write.promise)
+    const emailOnly = buildMcpServerList([
+      buildBuiltInMcpServerStatus("email", OFF_MCP_STATE)
+    ])
+    const { useLysStore } = await startMcpPane({
+      [SYNC_ROUTE]: answerList(emailOnly)
+    })
+    const user = userEvent.setup()
+    useLysStore.setState({ settings: ADDED_EMAIL_SETTINGS })
+    await waitForRenderedWork()
+    await user.click(listEmailRowToggles()[1])
+    await user.click(screen.getByRole("button", { name: "Remove email" }))
+    await user.click(
+      within(screen.getByRole("group", { name: /^remove / })).getByRole(
+        "button",
+        { name: "Remove email" }
+      )
+    )
+
+    await user.click(listEmailRowToggles()[0])
+    write.resolve(null)
+    await waitForRenderedWork()
+
+    expect(listEmailRowExpansions()).toEqual(["true"])
+    expect(listEmailRowToggles()[0]).toHaveFocus()
+  })
+
+  it("refuses a new server named like a server Lys ships", async () => {
+    const host = startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+
+    const form = await openNewServerEditor(user)
+    await user.type(
+      within(form).getByRole("textbox", { name: "Name" }),
+      "email"
+    )
+    await user.type(
+      within(form).getByRole("textbox", { name: "Command" }),
+      "/usr/local/bin/mail-server"
+    )
+    await user.click(within(form).getByRole("button", { name: "Add server" }))
+
+    const name = within(form).getByRole("textbox", { name: "Name" })
+    expect(name).toHaveFocus()
+    expect(name).toHaveAccessibleDescription(
+      expect.stringContaining("Another MCP server already has this name.")
+    )
+    expect(listWrittenDocuments(host.commands)).toEqual([])
+  })
+
+  it("signs in through the backend before saving the account with its password, then applies the group while the email server is on", async () => {
+    const host = startSettingsHost()
+    const { backend, useLysStore } = await startMcpPane({
+      [ACCOUNT_CHECK_ROUTE]: () =>
+        buildJsonResponse(200, ACCEPTED_ACCOUNT_CHECK),
+      [SYNC_ROUTE]: answerList(STORED_LIST)
+    })
+    const user = userEvent.setup()
+    useLysStore.setState({ settings: EMAIL_ON_SETTINGS })
+    await waitForRenderedWork()
+    const card = await openEmailAccountCard(user)
+    const displayName = within(card).getByRole("textbox", {
+      name: "Display name"
+    })
+
+    await user.clear(displayName)
+    await user.type(displayName, "Ada Edited")
+    await user.type(within(card).getByLabelText("Password"), "new-app-password")
+    await user.click(within(card).getByRole("button", { name: "Save" }))
+    await waitForRenderedWork()
+
+    const editedAccount = { ...STORED_EMAIL_ACCOUNT, displayName: "Ada Edited" }
+    expect(
+      backend.requests.find(
+        (request) => request.routeKey === ACCOUNT_CHECK_ROUTE
+      )?.body
+    ).toEqual({ account: editedAccount, password: "new-app-password" })
+    expect(listWrittenDocuments(host.commands)).toEqual([
+      {
+        ...STORED_SETTINGS_DOCUMENT,
+        secrets: {
+          ...STORED_SETTINGS_DOCUMENT.secrets,
+          emailPassword: "new-app-password"
+        },
+        email: { account: editedAccount }
+      }
+    ])
+    expect(listMcpRouteKeys(backend)).toEqual([
+      LIST_ROUTE,
+      ACCOUNT_CHECK_ROUTE,
+      SYNC_ROUTE
+    ])
+    expect(within(card).getByRole("status")).toHaveTextContent("Account saved.")
+    expect(within(card).getByLabelText("Password")).toHaveValue("")
+    expect(useLysStore.getState().settings.email.account).toEqual(editedAccount)
+    expect(useLysStore.getState().settings.secrets.emailPassword).toBe(
+      "new-app-password"
+    )
+    expect(
+      screen.getByRole("region", { name: "servers" })
+    ).not.toHaveTextContent("new-app-password")
+  })
+
+  it("saves the account without applying the group while the email server is off", async () => {
+    const host = startSettingsHost()
+    const { backend } = await startMcpPane({
+      [ACCOUNT_CHECK_ROUTE]: () =>
+        buildJsonResponse(200, ACCEPTED_ACCOUNT_CHECK)
+    })
+    const user = userEvent.setup()
+    const card = await openEmailAccountCard(user)
+
+    await user.type(
+      within(card).getByLabelText("Password"),
+      "new-app-password{Enter}"
+    )
+    await waitForRenderedWork()
+
+    expect(listWrittenDocuments(host.commands)).toHaveLength(1)
+    expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, ACCOUNT_CHECK_ROUTE])
+    expect(within(card).getByRole("status")).toHaveTextContent("Account saved.")
+  })
+
+  it("applies the group after the save when the email server was switched on during the check", async () => {
+    const host = startSettingsHost()
+    const accountCheck = createControlledRoute()
+    const { backend } = await startMcpPane({
+      [ACCOUNT_CHECK_ROUTE]: accountCheck.route,
+      [SYNC_ROUTE]: answerList(STORED_LIST)
+    })
+    const user = userEvent.setup()
+    const card = await openEmailAccountCard(user)
+
+    await user.type(
+      within(card).getByLabelText("Password"),
+      "new-app-password{Enter}"
+    )
+    await waitForRenderedWork()
+    await user.click(getServerSwitch("email"))
+    await waitForRenderedWork()
+    const beforeTheSave = listMcpRouteKeys(backend)
+    accountCheck.responses[0]?.resolve(
+      buildJsonResponse(200, ACCEPTED_ACCOUNT_CHECK)
+    )
+    await waitForRenderedWork()
+
+    // The switch's sync started the server before the new password was saved.
+    expect(beforeTheSave).toEqual([LIST_ROUTE, ACCOUNT_CHECK_ROUTE, SYNC_ROUTE])
+    expect(listWrittenDocuments(host.commands)).toHaveLength(2)
+    expect(listWrittenDocuments(host.commands)[1]).toMatchObject({
+      secrets: { emailPassword: "new-app-password" }
+    })
+    expect(listMcpRouteKeys(backend)).toEqual([
+      LIST_ROUTE,
+      ACCOUNT_CHECK_ROUTE,
+      SYNC_ROUTE,
+      SYNC_ROUTE
+    ])
+  })
+
+  it("says which server refused the sign-in, saves nothing, and keeps the edit", async () => {
+    const host = startSettingsHost()
+    const { backend } = await startMcpPane({
+      [ACCOUNT_CHECK_ROUTE]: () =>
+        buildJsonResponse(200, {
+          status: "checked",
+          imap: { status: "accepted" },
+          smtp: { status: "failed", reason: "wrong-password" }
+        })
+    })
+    const user = userEvent.setup()
+    const card = await openEmailAccountCard(user)
+
+    await user.type(within(card).getByLabelText("Password"), "wrong{Enter}")
+    await waitForRenderedWork()
+
+    expect(within(card).getByRole("status")).toHaveTextContent(
+      "IMAP: accepted · SMTP: the user name or password was refused"
+    )
+    expect(within(card).getByLabelText("Password")).toHaveValue("wrong")
+    expect(listWrittenDocuments(host.commands)).toEqual([])
+    expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, ACCOUNT_CHECK_ROUTE])
+  })
+
+  it("shows the refusal of a new check after a failed write, not the write's failure", async () => {
+    startSettingsHost(() => Promise.reject("Disk full"))
+    let checks = 0
+    await startMcpPane({
+      [ACCOUNT_CHECK_ROUTE]: () => {
+        checks += 1
+        return buildJsonResponse(
+          200,
+          checks === 1
+            ? ACCEPTED_ACCOUNT_CHECK
+            : {
+                status: "checked",
+                imap: { status: "accepted" },
+                smtp: { status: "failed", reason: "wrong-password" }
+              }
+        )
+      }
+    })
+    const user = userEvent.setup()
+    const card = await openEmailAccountCard(user)
+    const password = within(card).getByLabelText("Password")
+
+    await user.type(password, "new-app-password{Enter}")
+    await waitForRenderedWork()
+    const afterFailedWrite = within(card).getByRole("status").textContent
+    await user.type(password, "2{Enter}")
+    await waitForRenderedWork()
+
+    expect(afterFailedWrite).toBe(
+      "Lys couldn't write the email account to its settings file."
+    )
+    expect(within(card).getByRole("status")).toHaveTextContent(
+      "IMAP: accepted · SMTP: the user name or password was refused"
+    )
+  })
+
+  it("shows the outcome of a check that ended while the card was not shown, until the fields are edited", async () => {
+    startSettingsHost()
+    const accountCheck = createControlledRoute()
+    await startMcpPane({ [ACCOUNT_CHECK_ROUTE]: accountCheck.route })
+    const user = userEvent.setup()
+    const card = await openEmailAccountCard(user)
+
+    await user.type(
+      within(card).getByLabelText("Password"),
+      "new-app-password{Enter}"
+    )
+    await waitForRenderedWork()
+    const whileChecking = within(card).getByRole("status").textContent
+    await openNewServerEditor(user)
+    accountCheck.responses[0]?.resolve(
+      buildJsonResponse(200, {
+        status: "checked",
+        imap: { status: "accepted" },
+        smtp: { status: "failed", reason: "wrong-password" }
+      })
+    )
+    await waitForRenderedWork()
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    const shownAgain = within(getServerRow("email")).getByRole("form", {
+      name: "Email account"
+    })
+
+    expect(whileChecking).toBe("Signing in…")
+    expect(within(shownAgain).getByRole("status")).toHaveTextContent(
+      "IMAP: accepted · SMTP: the user name or password was refused"
+    )
+    await user.type(
+      within(shownAgain).getByRole("textbox", { name: "Display name" }),
+      " Lovelace"
+    )
+    expect(within(shownAgain).getByRole("status")).toHaveTextContent(
+      "Unsaved · Save signs in to both servers first."
+    )
+  })
+
+  it("removes the account and its password after confirming, switching the email server off first", async () => {
+    const host = startSettingsHost()
+    const { backend, useLysStore } = await startMcpPane({
+      [SYNC_ROUTE]: answerList(STORED_LIST)
+    })
+    const user = userEvent.setup()
+    useLysStore.setState({ settings: EMAIL_ON_SETTINGS })
+    await waitForRenderedWork()
+    const card = await openEmailAccountCard(user)
+
+    await user.click(
+      within(card).getByRole("button", { name: "Remove account" })
+    )
+    const question = within(card).getByRole("group", {
+      name: "Remove the email account and its password? The email server is switched off."
+    })
+    expect(
+      within(question).getByRole("button", { name: "Keep the email account" })
+    ).toHaveFocus()
+    await user.click(
+      within(question).getByRole("button", { name: "Remove the email account" })
+    )
+    await waitForRenderedWork()
+
+    expect(listWrittenDocuments(host.commands)).toEqual([
+      STORED_SETTINGS_DOCUMENT,
+      {
+        ...STORED_SETTINGS_DOCUMENT,
+        secrets: { ...STORED_SETTINGS_DOCUMENT.secrets, emailPassword: null },
+        email: { account: null }
+      }
+    ])
+    expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, SYNC_ROUTE])
+    expect(getServerSwitch("email")).not.toBeChecked()
+    expect(getServerSwitch("email")).toHaveAttribute("aria-disabled", "true")
+    expect(within(card).getByRole("status")).toHaveTextContent(
+      "No account yet. The email server stays off until you save one."
+    )
+    expect(within(card).getByRole("textbox", { name: "Address" })).toHaveValue(
+      ""
+    )
+    expect(within(card).getByRole("textbox", { name: "Address" })).toHaveFocus()
+    expect(useLysStore.getState().settings.secrets.emailPassword).toBeNull()
+  })
+
+  it("disables the removal while the switch is written, and keeps the account, saying why, when the email server cannot be switched off", async () => {
+    const switchWrite = createControlledPromise<null>()
+    const host = startSettingsHost(() => switchWrite.promise)
+    const { backend, useLysStore } = await startMcpPane()
+    const user = userEvent.setup()
+    useLysStore.setState({ settings: EMAIL_ON_SETTINGS })
+    await waitForRenderedWork()
+    const card = await openEmailAccountCard(user)
+
+    await user.click(
+      within(card).getByRole("button", { name: "Remove account" })
+    )
+    await user.click(
+      within(card).getByRole("button", { name: "Remove the email account" })
+    )
+    await waitForRenderedWork()
+
+    expect(
+      within(card).getByRole("button", { name: "Remove the email account" })
+    ).toBeDisabled()
+    expect(
+      within(card).getByRole("button", { name: "Keep the email account" })
+    ).toBeDisabled()
+    expect(within(card).getByRole("status")).toHaveTextContent("Saving…")
+    switchWrite.reject("Disk full")
+    await waitForRenderedWork()
+
+    expect(listWrittenDocuments(host.commands)).toEqual([
+      STORED_SETTINGS_DOCUMENT
+    ])
+    expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE])
+    expect(within(card).getByRole("status")).toHaveTextContent(
+      "Lys couldn't switch the email server off, so the account wasn't removed."
+    )
+    expect(within(card).getByRole("textbox", { name: "Address" })).toHaveValue(
+      STORED_EMAIL_ACCOUNT.address
+    )
+    expect(
+      within(card).getByRole("button", { name: "Remove account" })
+    ).toHaveFocus()
+    expect(getServerSwitch("email")).toBeChecked()
+    expect(useLysStore.getState().settings.email.account).toEqual(
+      STORED_EMAIL_ACCOUNT
+    )
   })
 
   it("shows one server's state, tools, approval, and configuration at a time, never a secret", async () => {
@@ -450,56 +1241,93 @@ describe("McpPaneContent", () => {
     )
   })
 
-  it("lists the saved servers without state while the backend is not running, and asks nothing of it", async () => {
+  it.each(["stopped", "starting", "stopping", "unresponsive"] as const)(
+    "lists the saved servers without state while the backend is %s, and asks nothing of it",
+    async (backendStatus) => {
+      startSettingsHost()
+      const { backend } = await startMcpPane(
+        {},
+        buildUnreachableRuntime(backendStatus)
+      )
+      const user = userEvent.setup()
+
+      expect(getPaneStatus()).toHaveTextContent(
+        "Start the backend in Settings → Runtime to connect to MCP servers."
+      )
+      expect(screen.getByRole("region", { name: "servers" })).toHaveTextContent(
+        "3 servers"
+      )
+      expect(getServerToggle("files")).toHaveAccessibleDescription(
+        expect.stringContaining("Not connected")
+      )
+      const files = await expandServer(user, "files")
+      expect(within(files).getByRole("status")).toHaveTextContent(
+        "files: Not connectedLys connects once the backend runs."
+      )
+      expect(
+        within(files).getByRole("button", { name: "Start files" })
+      ).toBeDisabled()
+      expect(
+        within(files).getByRole("button", { name: "Edit files" })
+      ).toBeEnabled()
+      expect(backend.requests).toEqual([])
+    }
+  )
+
+  it("shows the servers' tool totals only once the tool list is read", async () => {
     startSettingsHost()
-    const { backend } = await startMcpPane(
-      {},
-      buildUnreachableRuntime("stopped")
-    )
-    const user = userEvent.setup()
+    const toolRead = createControlledPromise<Response>()
+    await startMcpPane({ [TOOLS_ROUTE]: () => toolRead.promise })
 
-    expect(getPaneStatus()).toHaveTextContent(
-      "Start the backend in Settings → Runtime to connect to MCP servers."
-    )
-    expect(screen.getByRole("region", { name: "servers" })).toHaveTextContent(
-      "2 saved"
-    )
-    expect(getServerToggle("files")).toHaveAccessibleDescription(
-      expect.stringContaining("Not connected")
-    )
-    const files = await expandServer(user, "files")
-    expect(within(files).getByRole("status")).toHaveTextContent(
-      "files: Not connectedLys connects once the backend runs."
-    )
-    expect(
-      within(files).getByRole("button", { name: "Start files" })
-    ).toBeDisabled()
-    expect(
-      within(files).getByRole("button", { name: "Edit files" })
-    ).toBeEnabled()
-    expect(backend.requests).toEqual([])
-  })
+    expect(screen.getByText("1 of 3 connected")).toBeInTheDocument()
 
-  it("offers the two kinds of server when none is saved, each opening its editor", async () => {
-    startSettingsHost()
-    const { useLysStore } = await startMcpPane({
-      [LIST_ROUTE]: answerList(buildMcpServerList([]))
-    })
-    const user = userEvent.setup()
-
-    useLysStore.setState({
-      settings: { ...STORED_SETTINGS, mcp: { servers: [] } }
-    })
+    toolRead.resolve(
+      buildJsonResponse(200, { tools: FILES_TOOLS, unavailableTools: [] })
+    )
     await waitForRenderedWork()
 
     expect(
       screen.getByText(
-        "No servers yet. Each one gives the agents more tools: your issue tracker, a database, a repository. Add one by the command that starts it, or by its URL."
+        `1 of 3 connected · 3 tools · ${formatToolCost(FILES_TOOLS)} per request`
       )
     ).toBeInTheDocument()
-    expect(screen.queryByRole("list", { name: "MCP servers" })).toBeNull()
+  })
+
+  it("shows no tool totals after the tool list could not be read", async () => {
+    startSettingsHost()
+    await startMcpPane({
+      [TOOLS_ROUTE]: () => new Response(null, { status: 500 })
+    })
+
+    expect(screen.getByText("1 of 3 connected")).toBeInTheDocument()
+  })
+
+  it("offers the two kinds of server under the servers Lys ships while none is added, each opening its editor", async () => {
+    startSettingsHost()
+    const { useLysStore } = await startMcpPane({
+      [LIST_ROUTE]: answerList(buildMcpServerList([STORED_LIST.servers[2]]))
+    })
+    const user = userEvent.setup()
+
+    const mcp = { ...STORED_MCP_SETTINGS, servers: [] }
+    const settings = { ...STORED_SETTINGS, mcp }
+
+    useLysStore.setState({ settings })
+    await waitForRenderedWork()
+
+    expect(
+      screen.getByText(
+        "No added servers yet. Each one gives the agents more tools: your issue tracker, a database, a repository. Add one by the command that starts it, or by its URL."
+      )
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByRole("list", { name: "MCP servers" })).getAllByRole(
+        "listitem"
+      )
+    ).toHaveLength(1)
+    expect(getServerRow("email")).toBeInTheDocument()
     expect(screen.getByRole("region", { name: "servers" })).toHaveTextContent(
-      "none yet"
+      "0 of 1 connected · 0 tools · ~0 tok per request"
     )
     const remote = screen.getByRole("button", { name: "Remote server" })
     expect(remote).toHaveAccessibleDescription(
@@ -515,6 +1343,22 @@ describe("McpPaneContent", () => {
     expect(within(form).getByRole("textbox", { name: "URL" })).toBeRequired()
   })
 
+  it("opens the editor of a new server on a local program, with Name focused", async () => {
+    startSettingsHost()
+    await startMcpPane()
+    const user = userEvent.setup()
+
+    const form = await openNewServerEditor(user)
+
+    expect(
+      within(form).getByRole("heading", { name: "new server" })
+    ).toBeInTheDocument()
+    expect(
+      within(form).getByRole("radio", { name: "Local program" })
+    ).toBeChecked()
+    expect(within(form).getByRole("textbox", { name: "Name" })).toHaveFocus()
+  })
+
   it("adds a local program, applies the saved list, and shows the new server with Edit focused", async () => {
     const host = startSettingsHost()
     const syncedList = buildMcpServerList([
@@ -527,31 +1371,13 @@ describe("McpPaneContent", () => {
     const user = userEvent.setup()
 
     const form = await openNewServerEditor(user)
-    expect(
-      within(form).getByRole("heading", { name: "new server" })
-    ).toBeInTheDocument()
-    expect(
-      within(form).getByRole("radio", { name: "Local program" })
-    ).toBeChecked()
-    expect(within(form).getByRole("textbox", { name: "Name" })).toHaveFocus()
-    await user.type(
-      within(form).getByRole("textbox", { name: "Name" }),
-      "tools"
-    )
-    await user.type(
-      within(form).getByRole("textbox", { name: "Command" }),
-      "/usr/bin/tools"
-    )
-    await user.type(
-      within(form).getByRole("textbox", { name: "Arguments" }),
-      '--stdio "two words"'
-    )
-    await user.click(within(form).getByRole("button", { name: "add variable" }))
-    await user.keyboard("TOKEN")
-    await user.type(
-      within(form).getByLabelText("Value of variable 1"),
-      "fixture-1111"
-    )
+    await updateLocalProgramFields(user, form, {
+      name: "tools",
+      command: "/usr/bin/tools",
+      arguments: '--stdio "two words"',
+      variableName: "TOKEN",
+      variableValue: "fixture-1111"
+    })
     await user.click(within(form).getByRole("button", { name: "Add server" }))
     await waitForRenderedWork()
 
@@ -565,7 +1391,10 @@ describe("McpPaneContent", () => {
     expect(listWrittenDocuments(host.commands)).toEqual([
       {
         ...STORED_SETTINGS_DOCUMENT,
-        mcp: { servers: [...STORED_MCP_SETTINGS.servers, added] }
+        mcp: {
+          ...STORED_MCP_SETTINGS,
+          servers: [...STORED_MCP_SETTINGS.servers, added]
+        }
       }
     ])
     expect(useLysStore.getState().settings.mcp.servers).toHaveLength(3)
@@ -626,7 +1455,10 @@ describe("McpPaneContent", () => {
     expect(listWrittenDocuments(host.commands)).toEqual([
       {
         ...STORED_SETTINGS_DOCUMENT,
-        mcp: { servers: [...STORED_MCP_SETTINGS.servers, added] }
+        mcp: {
+          ...STORED_MCP_SETTINGS,
+          servers: [...STORED_MCP_SETTINGS.servers, added]
+        }
       }
     ])
   })
@@ -793,15 +1625,14 @@ describe("McpPaneContent", () => {
     ).toHaveAttribute("aria-invalid", "true")
   })
 
-  it("edits a remote server in place, keeping its place, its token, and saying it is unsaved meanwhile", async () => {
-    const host = startSettingsHost()
-    const { backend } = await startMcpPane({
-      [SYNC_ROUTE]: answerList(STORED_LIST)
-    })
+  it("opens a saved remote server's editor on its values, with its token hidden", async () => {
+    startSettingsHost()
+    await startMcpPane()
     const user = userEvent.setup()
 
     const notes = await expandServer(user, "notes")
     await user.click(within(notes).getByRole("button", { name: "Edit notes" }))
+
     const form = screen.getByRole("form", { name: "notes" })
     expect(
       within(form).getByRole("heading", { name: "editing · notes" })
@@ -819,6 +1650,18 @@ describe("McpPaneContent", () => {
     expect(token).toHaveValue("fixture-0000")
     expect(token).toHaveAttribute("type", "password")
     expect(within(form).queryByLabelText("Name of header 1")).toBeNull()
+  })
+
+  it("edits a remote server in place, keeping its place, its token, and saying it is unsaved meanwhile", async () => {
+    const host = startSettingsHost()
+    const { backend } = await startMcpPane({
+      [SYNC_ROUTE]: answerList(STORED_LIST)
+    })
+    const user = userEvent.setup()
+
+    const notes = await expandServer(user, "notes")
+    await user.click(within(notes).getByRole("button", { name: "Edit notes" }))
+    const form = screen.getByRole("form", { name: "notes" })
     expect(within(form).queryByText("unsaved")).toBeNull()
     const url = within(form).getByRole("textbox", { name: "URL" })
     await user.clear(url)
@@ -831,6 +1674,7 @@ describe("McpPaneContent", () => {
       {
         ...STORED_SETTINGS_DOCUMENT,
         mcp: {
+          ...STORED_MCP_SETTINGS,
           servers: [
             STORED_MCP_SETTINGS.servers[0],
             {
@@ -1098,7 +1942,10 @@ describe("McpPaneContent", () => {
     expect(listWrittenDocuments(host.commands)).toEqual([
       {
         ...STORED_SETTINGS_DOCUMENT,
-        mcp: { servers: [STORED_MCP_SETTINGS.servers[1]] }
+        mcp: {
+          ...STORED_MCP_SETTINGS,
+          servers: [STORED_MCP_SETTINGS.servers[1]]
+        }
       }
     ])
     expect(
@@ -1111,7 +1958,7 @@ describe("McpPaneContent", () => {
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, SYNC_ROUTE])
   })
 
-  it("reports a failed removal in the status line and keeps the server", async () => {
+  it("reports a failed removal in the status line and keeps the server with its details open", async () => {
     startSettingsHost(() => Promise.reject("Disk full"))
     await startMcpPane()
     const user = userEvent.setup()
@@ -1122,6 +1969,8 @@ describe("McpPaneContent", () => {
       "Lys couldn't write the MCP servers to its settings file."
     )
     expect(getServerRow("files")).toBeInTheDocument()
+    expect(getServerToggle("files")).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByRole("button", { name: "Add server" })).not.toHaveFocus()
   })
 
   it("keeps the editor open with an alert when its save fails", async () => {
@@ -1179,6 +2028,62 @@ describe("McpPaneContent", () => {
         name: "Reconnect notes"
       })
     ).toBeInTheDocument()
+  })
+
+  it("applies the saved servers when the backend answers Retry that the server is off, and shows no failure", async () => {
+    startSettingsHost()
+    const { backend } = await startMcpPane({
+      [RECONNECT_NOTES_ROUTE]: () =>
+        buildJsonResponse(409, buildMcpServerOffProblem("notes")),
+      [SYNC_ROUTE]: answerList(
+        buildMcpServerList([
+          STORED_LIST.servers[0],
+          buildMcpServerStatus("notes", "http", CONNECTING_MCP_STATE)
+        ])
+      )
+    })
+    const user = userEvent.setup()
+    const notes = await expandServer(user, "notes")
+
+    await user.click(within(notes).getByRole("button", { name: "Retry notes" }))
+    await waitForRenderedWork()
+
+    expect(listMcpRouteKeys(backend)).toEqual([
+      LIST_ROUTE,
+      RECONNECT_NOTES_ROUTE,
+      SYNC_ROUTE
+    ])
+    expect(getPaneStatus()).toHaveTextContent("")
+    expect(within(getServerRow("notes")).getByRole("status")).toHaveTextContent(
+      /^notes: Connecting/
+    )
+  })
+
+  it("offers no Retry while the email server failed for its account, which the backend refuses to reconnect", async () => {
+    startSettingsHost()
+    const { useLysStore } = await startMcpPane({
+      [LIST_ROUTE]: answerList(
+        buildMcpServerList([
+          ...STORED_LIST.servers.slice(0, 2),
+          buildBuiltInMcpServerStatus(
+            "email",
+            buildFailedMcpState("account-invalid")
+          )
+        ])
+      )
+    })
+    const user = userEvent.setup()
+    useLysStore.setState({ settings: EMAIL_ON_SETTINGS })
+    await waitForRenderedWork()
+
+    const email = await expandServer(user, "email")
+
+    expect(within(email).getAllByRole("status")[0]).toHaveTextContent(
+      "email: FailedThe saved email account is not usable. Save it again below."
+    )
+    expect(
+      within(email).queryByRole("button", { name: "Retry email" })
+    ).toBeNull()
   })
 
   it("says a saved server the backend has not applied is not applied", async () => {
@@ -1450,9 +2355,10 @@ describe("McpPaneContent", () => {
       })
     )
 
-    useLysStore.setState({
-      settings: { ...STORED_SETTINGS, mcp: { servers } }
-    })
+    const mcp = { ...STORED_MCP_SETTINGS, servers }
+    const settings = { ...STORED_SETTINGS, mcp }
+
+    useLysStore.setState({ settings })
     await waitForRenderedWork()
 
     expect(screen.getByRole("button", { name: "Add server" })).toBeDisabled()

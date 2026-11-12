@@ -6,6 +6,8 @@ node_modules
 .astro
 
 # Prettier reads the root .gitignore only, so the paths that
-# apps/desktop/src-tauri/.gitignore ignores are listed again here.
+# apps/desktop/src-tauri/.gitignore and mcps/email/.gitignore ignore are
+# listed again here.
 apps/desktop/src-tauri/target
 apps/desktop/src-tauri/gen/schemas
+mcps/email/target

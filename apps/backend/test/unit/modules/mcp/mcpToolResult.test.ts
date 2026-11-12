@@ -4,8 +4,10 @@ import {
 } from "@modelcontextprotocol/client"
 import { describe, expect, it } from "vitest"
 import type { McpRequestFailure } from "../../../../src/modules/mcp/mcpError"
+import type { McpServerStopReason } from "../../../../src/modules/mcp/mcpServerEvent"
 import {
   formatMcpServerNotConnected,
+  formatMcpServerStopped,
   formatMcpToolCallFailure,
   formatMcpToolNoLongerListed,
   formatMcpToolResult,
@@ -363,6 +365,36 @@ describe("formatMcpServerNotConnected", () => {
       "The call of mcp__notes__lookup failed: the MCP server notes is not connected now. The person can reconnect it in Settings → MCP."
     )
   })
+})
+
+describe("formatMcpServerStopped", () => {
+  it.each<[McpServerStopReason, string]>([
+    [
+      "switched-off",
+      "The call of mcp__notes__lookup failed: the MCP server notes was stopped while the call ran: it was switched off, changed, or removed in Settings → MCP."
+    ],
+    [
+      "changed",
+      "The call of mcp__notes__lookup failed: the MCP server notes was stopped while the call ran: it was switched off, changed, or removed in Settings → MCP."
+    ],
+    [
+      "removed",
+      "The call of mcp__notes__lookup failed: the MCP server notes was stopped while the call ran: it was switched off, changed, or removed in Settings → MCP."
+    ],
+    [
+      "reconnected",
+      "The call of mcp__notes__lookup failed: the MCP server notes was stopped while the call ran: it was restarted or reconnected in Settings → MCP."
+    ],
+    [
+      "shut-down",
+      "The call of mcp__notes__lookup failed: the MCP server notes was stopped while the call ran, because Lys was shutting down."
+    ]
+  ])(
+    "says why the server was stopped when its session stopped as %s",
+    (reason, sentence) => {
+      expect(formatMcpServerStopped(SUBJECT, reason)).toBe(sentence)
+    }
+  )
 })
 
 describe("formatMcpToolNoLongerListed", () => {

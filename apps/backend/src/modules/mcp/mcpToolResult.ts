@@ -8,6 +8,7 @@ import {
 import type { McpRequestFailure } from "./mcpError"
 import { MAXIMUM_MCP_RESPONSE_BYTES } from "./mcpResponseLimit"
 import { MCP_TOOL_CALL_TIMEOUT_MILLISECONDS } from "./mcpServerConnection"
+import type { McpServerStopReason } from "./mcpServerEvent"
 
 /** How one call of an MCP tool ended, as the model reads it. */
 export type McpToolCallOutcome = Readonly<{
@@ -146,6 +147,33 @@ export function formatMcpServerNotConnected(
   subject: McpToolCallSubject
 ): string {
   return `The call of ${subject.toolName} failed: the MCP server ${subject.serverName} is not connected now. The person can reconnect it in Settings → MCP.`
+}
+
+/**
+ * Formats the sentence that says the tool's server was stopped while a
+ * call ran on it, and why.
+ *
+ * @param subject - The call's server and tool.
+ * @param reason - Why the server's session was stopped.
+ * @returns A sentence for the model: one sentence for the settings
+ * switching the server off, changing it, or removing it; one for a restart
+ * or a reconnect; one for Lys shutting down.
+ */
+export function formatMcpServerStopped(
+  subject: McpToolCallSubject,
+  reason: McpServerStopReason
+): string {
+  const stopped = `The call of ${subject.toolName} failed: the MCP server ${subject.serverName} was stopped while the call ran`
+  switch (reason) {
+    case "switched-off":
+    case "changed":
+    case "removed":
+      return `${stopped}: it was switched off, changed, or removed in Settings → MCP.`
+    case "reconnected":
+      return `${stopped}: it was restarted or reconnected in Settings → MCP.`
+    case "shut-down":
+      return `${stopped}, because Lys was shutting down.`
+  }
 }
 
 /**

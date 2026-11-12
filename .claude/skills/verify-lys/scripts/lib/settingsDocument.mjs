@@ -21,7 +21,8 @@ export const SETTINGS_GROUPS = Object.freeze([
   "tools",
   "location",
   "mcp",
-  "providers"
+  "providers",
+  "email"
 ])
 
 /** The document the host writes when no `settings.json` exists. */
@@ -34,15 +35,21 @@ export const DEFAULT_SETTINGS_DOCUMENT = Object.freeze({
   },
   generation: { temperature: 0.7, replyCeiling: 2048 },
   loadConfiguration: { default: {}, models: {} },
-  secrets: { tavilyApiKey: null, ollamaApiKey: null, groqApiKey: null },
+  secrets: {
+    tavilyApiKey: null,
+    ollamaApiKey: null,
+    groqApiKey: null,
+    emailPassword: null
+  },
   tools: { justRun: [], switches: {} },
   location: { city: null, region: null, country: null },
-  mcp: { servers: [] },
+  mcp: { servers: [], builtIn: { email: { enabled: false } } },
   providers: {
     active: "lmStudio",
     lmStudio: { address: null },
     ollama: { address: null }
-  }
+  },
+  email: { account: null }
 })
 
 /** Owner-only file mode the host gives `settings.json`. */

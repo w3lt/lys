@@ -19,24 +19,27 @@ Lys currently shares contracts through two TypeScript workspace packages.
 
 The public backend surface is small and explicit:
 
-| Concern                                                                                  | Contract source                                |
-| ---------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| API prefix and loopback constants                                                        | `packages/protocol/src/constant.ts`            |
-| Chat and reply routes, requests, and SSE payloads                                        | `packages/protocol/src/apis/chat/*.ts`         |
-| Tool offer, tool-approval and tool-call events, and tool-approval and tool-result routes | `packages/protocol/src/apis/chat/*.ts`         |
-| Model list, health, load, and unload routes                                              | `packages/protocol/src/apis/llm/*.ts`          |
-| LM Studio connection status and reconnect routes                                         | `packages/protocol/src/apis/llm/*.ts`          |
-| Conversation list, get, rename, and delete routes                                        | `packages/protocol/src/apis/conversation/*.ts` |
-| Agent list, create, get, update, and delete routes                                       | `packages/protocol/src/apis/agent/*.ts`        |
-| MCP server list, sync, and reconnect routes, and server states                           | `packages/protocol/src/apis/mcp/*.ts`          |
-| Problem Details error bodies                                                             | `packages/protocol/src/http/errors/*.ts`       |
-| Health route path                                                                        | `packages/protocol/src/apis/health/routes.ts`  |
-| Shared conversation shapes                                                               | `packages/share/src/models/conversation.ts`    |
-| Shared agent shapes                                                                      | `packages/share/src/models/agent.ts`           |
-| Shared tool definitions, Lys's own and those of MCP servers                              | `packages/share/src/models/tool.ts`            |
-| Shared MCP server settings and the `mcp__` tool name prefix                              | `packages/share/src/models/mcp.ts`             |
-| Shared JSON values and their nesting bound                                               | `packages/share/src/models/json.ts`            |
-| Distinct-value check shared by those rules                                               | `packages/share/src/models/values.ts`          |
+| Concern                                                                                   | Contract source                                |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| API prefix and loopback constants                                                         | `packages/protocol/src/constant.ts`            |
+| Chat and reply routes, requests, and SSE payloads                                         | `packages/protocol/src/apis/chat/*.ts`         |
+| Tool offer, tool-approval and tool-call events, and tool-approval and tool-result routes  | `packages/protocol/src/apis/chat/*.ts`         |
+| Model list, health, load, and unload routes                                               | `packages/protocol/src/apis/llm/*.ts`          |
+| LM Studio connection status and reconnect routes                                          | `packages/protocol/src/apis/llm/*.ts`          |
+| Conversation list, get, rename, and delete routes                                         | `packages/protocol/src/apis/conversation/*.ts` |
+| Agent list, create, get, update, and delete routes                                        | `packages/protocol/src/apis/agent/*.ts`        |
+| MCP server list, sync, and reconnect routes, server states, and the email account check   | `packages/protocol/src/apis/mcp/*.ts`          |
+| Problem Details error bodies                                                              | `packages/protocol/src/http/errors/*.ts`       |
+| Health route path                                                                         | `packages/protocol/src/apis/health/routes.ts`  |
+| Shared conversation shapes                                                                | `packages/share/src/models/conversation.ts`    |
+| Shared agent shapes                                                                       | `packages/share/src/models/agent.ts`           |
+| Shared tool definitions, Lys's own and those of MCP servers                               | `packages/share/src/models/tool.ts`            |
+| Shared MCP server settings, the switches of the servers Lys ships, and the `mcp__` prefix | `packages/share/src/models/mcp.ts`             |
+| Shared email account and mail server rules                                                | `packages/share/src/models/email.ts`           |
+| Shared API key and email password rules                                                   | `packages/share/src/models/secrets.ts`         |
+| Shared host name and TCP port rule                                                        | `packages/share/src/models/hostName.ts`        |
+| Shared JSON values and their nesting bound                                                | `packages/share/src/models/json.ts`            |
+| Distinct-value check shared by those rules                                                | `packages/share/src/models/values.ts`          |
 
 ## Why the packages are split
 

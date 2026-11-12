@@ -1,0 +1,52 @@
+[
+  {
+    "case": "an account with TLS servers whose Sent copy Lys saves",
+    "account": {
+      "address": "person@example.com",
+      "displayName": "A Person",
+      "userName": "person@example.com",
+      "imap": { "host": "imap.example.com", "port": 993, "security": "tls" },
+      "smtp": { "host": "smtp.example.com", "port": 465, "security": "tls" },
+      "serverKeepsSentCopy": false
+    },
+    "password": "synthetic-password-7f3a",
+    "variable": {
+      "address": "person@example.com",
+      "displayName": "A Person",
+      "userName": "person@example.com",
+      "password": "synthetic-password-7f3a",
+      "imap": { "host": "imap.example.com", "port": 993, "security": "tls" },
+      "smtp": { "host": "smtp.example.com", "port": 465, "security": "tls" },
+      "serverKeepsSentCopy": false
+    }
+  },
+  {
+    "case": "an account with a STARTTLS server and a plain one on the machine itself, whose server keeps the Sent copy",
+    "account": {
+      "address": "jeanne@example.org",
+      "displayName": "Jeanne d'Arc Épée",
+      "userName": "jeanne",
+      "imap": {
+        "host": "mail.example.org",
+        "port": 143,
+        "security": "starttls"
+      },
+      "smtp": { "host": "localhost", "port": 1025, "security": "plain" },
+      "serverKeepsSentCopy": true
+    },
+    "password": "another synthetic password, Grüße",
+    "variable": {
+      "address": "jeanne@example.org",
+      "displayName": "Jeanne d'Arc Épée",
+      "userName": "jeanne",
+      "password": "another synthetic password, Grüße",
+      "imap": {
+        "host": "mail.example.org",
+        "port": 143,
+        "security": "starttls"
+      },
+      "smtp": { "host": "localhost", "port": 1025, "security": "plain" },
+      "serverKeepsSentCopy": true
+    }
+  }
+]

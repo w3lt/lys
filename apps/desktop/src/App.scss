@@ -80,13 +80,20 @@ input:focus-visible,
   border: 0;
 }
 
+/*
+ * Motion a person asked to reduce ends at once. This reset sits outside every
+ * cascade layer, so it outranks motion declared inside one, such as a Tailwind
+ * utility's. A component rule is unlayered too and outranks `*`: it takes its
+ * duration from the tokens, which `index.css` shortens under the same
+ * preference, or it turns its motion off in its own file.
+ */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    scroll-behavior: auto;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
   }
 }

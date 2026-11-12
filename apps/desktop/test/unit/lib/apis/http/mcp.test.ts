@@ -15,6 +15,7 @@ import {
   buildFailedMcpState,
   buildMcpServerList,
   buildMcpServerNotFoundProblem,
+  buildMcpServerOffProblem,
   buildMcpServerStatus,
   CONNECTING_MCP_STATE
 } from "../../../support/mcpFixtures"
@@ -129,6 +130,7 @@ describe("listMcpServers", () => {
               {
                 name: "notes",
                 transport: "http",
+                isBuiltIn: false,
                 state: {
                   status: "connected",
                   toolCount,
@@ -288,6 +290,54 @@ describe("sendMcpServerReconnectRequest", () => {
       })
     }
   )
+
+  it("answers off for the declared server-off problem", async () => {
+    startBackendFake({
+      [RECONNECT_NOTES_ROUTE]: () =>
+        buildJsonResponse(409, buildMcpServerOffProblem("notes"))
+    })
+
+    await expect(
+      sendMcpServerReconnectRequest(CONNECTION, "notes")
+    ).resolves.toEqual({
+      status: "off"
+    })
+  })
+
+  it.each([
+    ["another body", () => buildJsonResponse(409, { message: "Conflict" })],
+    ["no body", () => new Response(null, { status: 409 })],
+    [
+      "the server-not-found problem",
+      () => buildJsonResponse(409, buildMcpServerNotFoundProblem("notes"))
+    ]
+  ])(
+    "rejects a 409 with %s, which does not show the server is off",
+    async (_label, route) => {
+      startBackendFake({ [RECONNECT_NOTES_ROUTE]: route })
+
+      await expect(
+        sendMcpServerReconnectRequest(CONNECTION, "notes")
+      ).rejects.toMatchObject({
+        message:
+          "The backend could not complete the MCP server request (HTTP 409)."
+      })
+    }
+  )
+
+  it("rejects a 404 with the server-off problem, which does not show the server is absent", async () => {
+    startBackendFake({
+      [RECONNECT_NOTES_ROUTE]: () =>
+        buildJsonResponse(404, buildMcpServerOffProblem("notes"))
+    })
+
+    await expect(
+      sendMcpServerReconnectRequest(CONNECTION, "notes")
+    ).rejects.toMatchObject({
+      message:
+        "The backend could not complete the MCP server request (HTTP 404)."
+    })
+  })
 
   it("rejects an answer with another status, naming the status", async () => {
     startBackendFake({

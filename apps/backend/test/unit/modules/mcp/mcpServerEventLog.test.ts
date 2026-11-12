@@ -82,6 +82,46 @@ describe("handleMcpServerEvent", () => {
     })
   })
 
+  it("logs a session the settings stopped, with why", () => {
+    expect(
+      logEvent({
+        kind: "server-stopped",
+        serverName: "files",
+        reason: "switched-off"
+      })
+    ).toEqual({
+      level: "info",
+      mcpServer: "files",
+      reason: "switched-off",
+      msg: "MCP server stopped: the settings switched it off, changed it, or no longer name it"
+    })
+  })
+
+  it("warns of a built-in server that cannot start, with why", () => {
+    expect(
+      logEvent({
+        kind: "built-in-unusable",
+        serverName: "email",
+        reason: "account-missing"
+      })
+    ).toEqual({
+      level: "warn",
+      mcpServer: "email",
+      reason: "account-missing",
+      msg: "Built-in MCP server is switched on but has no usable account; it is not started"
+    })
+  })
+
+  it("warns of a built-in server's name an added server took", () => {
+    expect(
+      logEvent({ kind: "built-in-name-taken", serverName: "email" })
+    ).toEqual({
+      level: "warn",
+      mcpServer: "email",
+      msg: "An added MCP server has a built-in server's name; the built-in server is not applied"
+    })
+  })
+
   it("logs a connected server with its tool counts", () => {
     expect(
       logEvent({

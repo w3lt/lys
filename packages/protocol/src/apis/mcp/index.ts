@@ -14,6 +14,19 @@ export {
   type SkippedMcpToolReason
 } from "./_share"
 export {
+  checkEmailAccountApi,
+  checkEmailAccountApiResponseSchema,
+  emailServerCheckFailureSchema,
+  emailServerCheckSchema,
+  type CheckEmailAccountApiReply,
+  type CheckEmailAccountApiRequestBody,
+  type CheckEmailAccountApiResponse,
+  type CheckEmailAccountApiRoute,
+  type EmailAccountCheckUnavailableReason,
+  type EmailServerCheck,
+  type EmailServerCheckFailure
+} from "./checkEmailAccountRoute"
+export {
   listMcpServersApi,
   type ListMcpServersApiReply,
   type ListMcpServersApiResponse,

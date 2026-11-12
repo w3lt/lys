@@ -31,7 +31,7 @@ The Tauri desktop host reads and writes one JSON settings file at
 `$LYS_HOME/settings.json`.
 
 The current schema contains `runtime`, `generation`, `loadConfiguration`,
-`secrets`, `providers`, `tools`, `location`, and `mcp` groups. Rust
+`secrets`, `providers`, `tools`, `location`, `mcp`, and `email` groups. Rust
 and the TypeScript settings projection use the same camelCase field names. See
 the [configuration reference](/reference/configuration/) for the complete field
 list, defaults, and accepted values.
@@ -75,12 +75,15 @@ The desktop reads the file when Lys starts, so a hand edit of `runtime`,
 starts. The backend reads `tools.justRun` and the Tavily API key from the file
 itself, so a hand edit of either applies without a restart, as the `tools`
 paragraph above and [Tavily API key](#tavily-api-key) describe. It reads `mcp`
-when it starts and when the MCP pane saves; see [MCP servers](#mcp-servers). A save from a
+when it starts and when the MCP pane saves, and `email` with the password in
+`secrets` for the email server; see [MCP servers](#mcp-servers) and
+[Email account](#email-account). A save from a
 settings pane writes the values Lys holds over a hand edit of its group made
 while Lys runs: the Generation pane replaces `generation`, the Model pane
 replaces `loadConfiguration.models` and leaves `default` as it is in the file,
 the Secrets pane replaces `secrets`, the Tools pane replaces `tools` and, on
-Save, `location`, the MCP pane replaces `mcp`, and the
+Save, `location`, the MCP pane replaces `mcp` and, on the email server's
+card, `email` and `secrets.emailPassword`, and the
 Runtime pane replaces `runtime.autoStartBackend` and `runtime.autoStartVmo`
 and leaves the rest of `runtime` as it is in the file.
 
@@ -119,9 +122,14 @@ characters, or the settings file fails to load.
 
 ## MCP servers
 
-Settings → MCP adds MCP servers, whose tools the agents can then use. Each
-server runs as you or receives the headers you give it, so add only servers
-you trust. A server is reached in one of two ways:
+Settings → MCP lists the MCP servers whose tools the agents can use: first the
+server Lys ships, `email`, marked `built-in`, which reads and sends your mail
+once you save an [email account](#email-account) and switch it on, then the
+servers you add. Each server runs as you or receives the headers you give it,
+so add only servers you trust. The switch beside each server turns it on or
+off, and the choice is kept across restarts: off, the server is neither
+started nor reached, and its tools are not offered; an added server starts
+on, and the email server off. An added server is reached in one of two ways:
 
 - **Local program** (`stdio`): Lys's backend starts the command and talks to
   it over its standard input and output. Enter the command's full path, such
@@ -159,20 +167,23 @@ when the config holds more; add the others the same way. A server whose
 Streamable HTTP server, so check that an older server's URL is not its SSE
 endpoint.
 
-Saving a server in the editor, or removing one, writes the `mcp` group of
-`settings.json`. While the backend runs, the pane then asks it to apply the
-group: it closes removed servers, opens new and changed ones in the
+Saving a server in the editor, removing one, or flipping its switch writes
+the `mcp` group of `settings.json`. While the backend runs, the pane then
+asks it to apply the group: it closes removed and switched-off servers, which
+fails a call running on one, opens new, changed, and switched-on ones in the
 background, and keeps an unchanged server's connection, or its failure. A
 server has two minutes to start or answer and list its tools, and each tool
 call five minutes. Each row shows the server's state, and its details say
 more:
 
-| State                      | Meaning                                                                                                                                  |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `Starting` or `Connecting` | The backend is starting the program or reaching the URL, and reading its tools.                                                          |
-| `Running` or `Connected`   | Its tools are listed; `· N skipped` counts the tools Lys cannot offer, which **Skipped tools** lists.                                    |
-| `Failed`                   | It is not connected; the details say why. See [troubleshooting](/operate/troubleshooting/#an-mcp-server-shows-failed).                   |
-| `Not applied`              | The backend does not list the saved server, such as after a save it could not apply. **Start** or **Connect** applies the saved servers. |
+| State                      | Meaning                                                                                                                                                   |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Starting` or `Connecting` | The backend is starting the program or reaching the URL, and reading its tools.                                                                           |
+| `Running` or `Connected`   | Its tools are listed; `· N skipped` counts the tools Lys cannot offer, which **Skipped tools** lists.                                                     |
+| `Failed`                   | It is not connected; the details say why. See [troubleshooting](/operate/troubleshooting/#an-mcp-server-shows-failed).                                    |
+| `Not applied`              | The backend does not list the saved server, such as after a save it could not apply. **Start** or **Connect** applies the saved servers.                  |
+| `Off`                      | Its switch is off, so it is not started or reached, and its tools are not offered. The email server also says what it needs before it can be switched on. |
+| `Name taken`               | An added server has the built-in server's name, so the built-in server is not applied. Rename or remove the added server to use it.                       |
 
 Nothing reconnects by itself. The button beside the state, **Restart** or
 **Reconnect**, or **Retry** after a failure, closes the server's connection
@@ -208,6 +219,55 @@ writes back the servers it holds. The
 rule a server follows, and the [API reference](/reference/api/#mcp-servers)
 the states and failure reasons.
 
+### Email account
+
+The email server Lys ships works with one email account, saved on its card in
+Settings → MCP, under the server's details. Lys signs in to the account's
+IMAP and SMTP servers before it saves anything, so the backend must be
+running; the card says so otherwise. To add the account:
+
+1. Open Settings → MCP and expand the `email` row, then enter the address.
+   For Gmail, iCloud, Yahoo, and Fastmail, the server fields and the Sent
+   copy switch fill themselves from a preset; the note under the address
+   says which, or that there is none, in which case enter the IMAP and SMTP
+   hosts, ports, and security yourself. Outlook.com, Hotmail, and Live
+   accounts cannot be used, because Microsoft refuses passwords over IMAP
+   and SMTP.
+2. Enter the display name the recipients see, the user name the servers
+   expect, usually the address, and the password. Gmail, iCloud, Yahoo, and
+   Fastmail refuse the account password here and need an app password made in
+   the account's security settings.
+3. Switch "Server keeps a copy of sent mail" on for a server that files
+   sent mail itself, as Gmail does; the Gmail, Yahoo, and Fastmail presets
+   switch it on for you. Off, its position without a preset, Lys files the
+   copy in the Sent folder after each send.
+4. Press Save. Lys signs in to both servers, up to 20 seconds each, and the
+   status line says what each answered; a refused sign-in saves nothing.
+   Once both accepted, the account and the password are saved together.
+5. Switch the server on with the switch beside its row. Its ten tools then
+   appear in Settings → Tools under `MCP · email`, each asking before it
+   runs until you choose Just run, unless a Just run choice saved for a tool
+   of the same name of an earlier server named `email` was kept; see
+   [Choices kept by name](/architecture/security/#mcp-servers).
+6. To stop using the account, press **Remove account** and confirm: Lys
+   switches the server off and removes the account and the password.
+
+The account is saved in the `email` group of `settings.json` and the
+password as `emailPassword` in `secrets`, both as plain text readable only by
+your user account; the
+[configuration reference](/reference/configuration/#email-account) lists the
+rules. A hand edit of either applies the next time the backend applies the
+servers, that is when it starts or when the MCP pane saves; the pane shows a
+hand edit the next time Lys starts. The backend hands the account and the
+password to the email server through its environment each time it starts
+it, and the server connects to the mail servers once per tool call, with TLS
+or STARTTLS verified against the system's certificate store; a connection
+without TLS is allowed only to `localhost`, `127.0.0.1`, or `[::1]`. See
+[the email server](/architecture/backend/#the-email-server) for what the
+server does with the account, and
+[troubleshooting](/operate/troubleshooting/#the-email-account-cannot-be-saved)
+when saving fails.
+
 ## Current UI wiring
 
 The desktop loads settings through Tauri during initialization. Generation
@@ -225,8 +285,11 @@ pane autosaves the same way, replacing only the `tools` group, and the Tools
 pane offers the same retry action. Switching an MCP tool's chip or choosing
 Ask me or Just run for a server in the MCP pane saves the `tools` group the
 same way. The MCP pane saves the servers only on Save in its editor or on
-Remove, replacing only the `mcp` group, and then asks the running backend to
-apply them. Changing either startup switch in the
+Remove, and each server's switch when it is flipped, replacing only the
+`mcp` group, and then asks the running backend to apply them; the email
+server's card saves the account and `secrets.emailPassword` together on Save,
+after the backend signed in with them, and removes both on Remove account.
+Changing either startup switch in the
 Runtime pane, for the backend or for vmo, autosaves both switches and keeps
 the rest of the `runtime` group as it is on disk; after a failed save, the
 pane says that the next launch follows the switches last saved, and changing a

@@ -2,7 +2,7 @@ import {
   checkWebSearchKeyApiResponseSchema,
   listBackendToolsApiResponseSchema
 } from "@lys/protocol"
-import type { McpServerSettings } from "@lys/share"
+import { mcpSettingsSchema, type McpServerSettings } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { openMcpServer } from "../../../../../src/modules/mcp/mcpServerOpening"
 import type { McpServerEvent } from "../../../../../src/modules/mcp/mcpServerEvent"
@@ -103,9 +103,11 @@ function createMcpServerRegistry(
 ): McpServerRegistry {
   const events: McpServerEvent[] = []
   const { processGroups } = createOwnedMcpServerProcessGroups()
+  const mcpSettings = mcpSettingsSchema.parse({ servers })
   const registry = new McpServerRegistry({
     readSettings: () =>
-      Promise.resolve({ status: "read", settings: { servers } }),
+      Promise.resolve({ status: "read", settings: mcpSettings }),
+    builtInServers: [],
     openServer: (settings, context) =>
       openMcpServer(settings, context, MCP_OPENING_TIMEOUT_MILLISECONDS),
     workingDirectory: process.cwd(),

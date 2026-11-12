@@ -489,8 +489,15 @@ describe("buildApp", () => {
       settings: "applied",
       servers: [
         {
+          name: "email",
+          transport: "stdio",
+          isBuiltIn: true,
+          state: { status: "off" }
+        },
+        {
           name: "files",
           transport: "stdio",
+          isBuiltIn: false,
           state: expect.objectContaining({ status: expect.any(String) })
         }
       ]

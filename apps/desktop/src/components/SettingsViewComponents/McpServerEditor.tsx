@@ -30,18 +30,17 @@ import { parseMcpServerJson } from "@/lib/models/mcp-server-json"
 import type { McpSettingsSaveState } from "@/lib/store/mcp-settings"
 
 import { handleFocusTargetAttach } from "./focus-target"
+import { McpDraftProblemSummary } from "./McpDraftProblemSummary"
 import {
   McpServerDraftFields,
   type McpFieldRefs
 } from "./McpServerEditorFields"
 import {
-  formatMcpDraftProblemSummaryHeading,
   formatMcpEditorHint,
   formatMcpEditorKind,
   formatMcpServerJsonMessage,
   listMcpDraftProblems,
   MCP_SERVER_JSON_HINT,
-  type McpDraftProblemListing,
   type McpServerJsonMessage
 } from "./mcp-presentation"
 
@@ -462,89 +461,6 @@ function McpEditorTopBar({
   )
 }
 
-/** Properties accepted by {@link McpDraftProblemSummary}. */
-type McpDraftProblemSummaryProps = {
-  /** Fields with a problem, in the editor's order; two or more. */
-  readonly problems: readonly McpDraftProblemListing[]
-  /** Host the parent moves focus to when a save is rejected. */
-  readonly summaryRef: RefObject<HTMLFieldSetElement | null>
-  /** Requests that the parent move focus to one field. */
-  readonly onSelectField: (field: McpServerDraftField) => void
-}
-
-/**
- * Lists every field whose problem stopped a save, each leading to its field.
- *
- * @remarks The parent owns the problems, the host, and moving focus; the
- * summary owns no state. It is a group named by its heading, `Fix N fields
- * to save:`, that takes focus only programmatically. Each field is a button
- * named by the field's label and its problem, in the editor's order, that
- * asks the parent to move focus to the field's control.
- * @param props - Problems, the host, and the parent-owned focus move.
- * @returns The summary.
- */
-function McpDraftProblemSummary({
-  problems,
-  summaryRef,
-  onSelectField
-}: McpDraftProblemSummaryProps): ReactElement {
-  const headingId = useId()
-
-  return (
-    <fieldset
-      aria-labelledby={headingId}
-      className="settings-view__mcp-summary"
-      ref={summaryRef}
-      tabIndex={-1}
-    >
-      <h3 id={headingId}>
-        {formatMcpDraftProblemSummaryHeading(problems.length)}
-      </h3>
-      <ul>
-        {problems.map((listing) => (
-          <McpDraftProblemItem
-            key={listing.field}
-            listing={listing}
-            onSelectField={onSelectField}
-          />
-        ))}
-      </ul>
-    </fieldset>
-  )
-}
-
-/** Properties accepted by {@link McpDraftProblemItem}. */
-type McpDraftProblemItemProps = {
-  /** Field and its problem. */
-  readonly listing: McpDraftProblemListing
-  /** Requests that the parent move focus to the field. */
-  readonly onSelectField: (field: McpServerDraftField) => void
-}
-
-/**
- * Presents one field of the problem summary as a button leading to it.
- *
- * @remarks The list owner supplies the key; the item owns no state.
- * @param props - Field, its problem, and the parent-owned focus move.
- * @returns One list item.
- */
-function McpDraftProblemItem({
-  listing,
-  onSelectField
-}: McpDraftProblemItemProps): ReactElement {
-  return (
-    <li>
-      <button
-        className="settings-view__mcp-summary-link"
-        onClick={() => onSelectField(listing.field)}
-        type="button"
-      >
-        {listing.label}: {listing.problem}
-      </button>
-    </li>
-  )
-}
-
 /** Hosts the editor moves focus to. */
 type McpDraftFocusHosts = {
   /** Field hosts. */
@@ -722,6 +638,7 @@ function McpServerEditorBody({
       ) : null}
       {problemListings.length > 1 ? (
         <McpDraftProblemSummary
+          headingLevel={3}
           onSelectField={(field) =>
             findDraftFieldFocusTarget(focusHosts.fieldRefs, field)?.focus()
           }

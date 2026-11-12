@@ -24,6 +24,9 @@ const SYNTHETIC_TOKEN = "Bearer synthetic-token-0123"
 /** Synthetic variable value standing in for a secret; not a real credential. */
 const SYNTHETIC_VARIABLE_VALUE = "synthetic-variable-4567"
 
+/** Switches of the servers Lys ships, every one off, as the desktop writes them. */
+const BUILT_IN_OFF = Object.freeze({ email: Object.freeze({ enabled: false }) })
+
 /** One server of each transport, as the desktop writes them. */
 const VALID_MCP_GROUP = Object.freeze({
   servers: [
@@ -32,16 +35,22 @@ const VALID_MCP_GROUP = Object.freeze({
       transport: "stdio",
       command: "npx",
       arguments: ["-y", "files-server"],
-      environment: [{ name: "FILES_TOKEN", value: SYNTHETIC_VARIABLE_VALUE }]
+      environment: [{ name: "FILES_TOKEN", value: SYNTHETIC_VARIABLE_VALUE }],
+      enabled: true
     },
     {
       name: "remote-notes",
       transport: "http",
       url: "https://mcp.example.com/mcp",
-      headers: [{ name: "Authorization", value: SYNTHETIC_TOKEN }]
+      headers: [{ name: "Authorization", value: SYNTHETIC_TOKEN }],
+      enabled: false
     }
-  ]
+  ],
+  builtIn: { email: { enabled: true } }
 })
+
+/** The group a file without servers reads as. */
+const NO_SERVER_SETTINGS = Object.freeze({ servers: [], builtIn: BUILT_IN_OFF })
 
 /**
  * Validates one case of the groups shared with the desktop host: an
@@ -110,6 +119,7 @@ function buildLargestSettingsText(mcp: unknown): string {
     { length: MAXIMUM_OFFERED_BACKEND_TOOL_COUNT },
     (_, index) => String(index).padStart(64, "t")
   )
+  const serverHost = `${"h".repeat(63)}.${"h".repeat(63)}.${"h".repeat(63)}.${"h".repeat(61)}`
   const settings = {
     runtime: {
       autoStartBackend: true,
@@ -119,7 +129,10 @@ function buildLargestSettingsText(mcp: unknown): string {
     },
     generation: { temperature: 0.7, replyCeiling: 2048 },
     loadConfiguration: { default: {}, models: {} },
-    secrets: { tavilyApiKey: "tvly-synthetic-".padEnd(256, "0") },
+    secrets: {
+      tavilyApiKey: "tvly-synthetic-".padEnd(256, "0"),
+      emailPassword: "p".repeat(1024)
+    },
     tools: {
       justRun: toolNames,
       switches: Object.fromEntries(toolNames.map((name) => [name, false]))
@@ -129,12 +142,25 @@ function buildLargestSettingsText(mcp: unknown): string {
       region: "r".repeat(100),
       country: "k".repeat(100)
     },
-    mcp
+    mcp,
+    email: {
+      account: {
+        address: `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(61)}`,
+        displayName: "n".repeat(100),
+        userName: "u".repeat(254),
+        imap: { host: serverHost, port: 65535, security: "starttls" },
+        smtp: { host: serverHost, port: 65535, security: "starttls" },
+        serverKeepsSentCopy: false
+      }
+    }
   }
   return `${JSON.stringify(settings, null, 2)}\n`
 }
 
-/** One stdio server of {@link buildMcpGroupOfBytes}, with every list written. */
+/**
+ * One stdio server of {@link buildUnswitchedMcpGroupOfBytes}, with every
+ * list written and no switch.
+ */
 type FilledStdioServer = {
   /** Server name, distinct in the group. */
   name: string
@@ -149,40 +175,96 @@ type FilledStdioServer = {
 }
 
 /**
- * Builds an `mcp` group that takes exactly a number of bytes as compact
- * JSON: the most stdio servers, each with the most one-character arguments
- * and the most environment variables, whose values take the remaining bytes
- * in list order. Its many short entries make the host's indentation add as
- * much as a group of that size can get.
+ * The group {@link buildUnswitchedMcpGroupOfBytes} builds, as the desktop
+ * host wrote it before the switches existed: every list written, but no
+ * `enabled` field and no `builtIn` object.
+ */
+type UnswitchedMcpGroup = {
+  /** The most servers. */
+  servers: FilledStdioServer[]
+}
+
+/** One server of {@link SwitchedMcpGroup}, with its switch written. */
+type SwitchedStdioServer = FilledStdioServer & {
+  /** Whether the server is switched on. */
+  enabled: boolean
+}
+
+/** The group {@link buildSwitchedMcpGroup} builds, with every switch written. */
+type SwitchedMcpGroup = {
+  /** The servers of the unswitched group, each with its switch. */
+  servers: SwitchedStdioServer[]
+  /** Every server Lys ships off. */
+  builtIn: typeof BUILT_IN_OFF
+}
+
+/**
+ * Builds one stdio server of {@link buildUnswitchedMcpGroupOfBytes}: the
+ * most one-character arguments and the most environment variables, whose
+ * values are empty until the group fills them.
+ *
+ * @param serverIndex - Position of the server in the group, which names it.
+ * @returns The server, which a new call builds anew.
+ */
+function buildFilledStdioServer(serverIndex: number): FilledStdioServer {
+  return {
+    name: `server-${serverIndex}`,
+    transport: "stdio",
+    command: "c",
+    arguments: Array.from(
+      { length: MAXIMUM_MCP_COMMAND_ARGUMENT_COUNT },
+      () => "a"
+    ),
+    environment: Array.from(
+      { length: MAXIMUM_MCP_ENVIRONMENT_VARIABLE_COUNT },
+      (_, variableIndex) => ({ name: `V${variableIndex}`, value: "" })
+    )
+  }
+}
+
+/**
+ * Builds an `mcp` group as the desktop host wrote it before the switches
+ * existed, with every list but no switch, that takes exactly a number of
+ * bytes as compact JSON: the most stdio servers, each with the most
+ * one-character arguments and the most environment variables, whose values
+ * take the remaining bytes in list order. Its many short entries make the
+ * host's indentation add as much as a group of that size can get.
  *
  * @param bytes - UTF-8 bytes of the group's compact JSON; at least the bytes
  * of the group with empty values, at most those with full values.
  * @returns The group, which a new call builds anew.
  */
-function buildMcpGroupOfBytes(bytes: number): { servers: FilledStdioServer[] } {
+function buildUnswitchedMcpGroupOfBytes(bytes: number): UnswitchedMcpGroup {
   const servers = Array.from(
     { length: MAXIMUM_MCP_SERVER_COUNT },
-    (_, serverIndex): FilledStdioServer => ({
-      name: `server-${serverIndex}`,
-      transport: "stdio",
-      command: "c",
-      arguments: Array.from(
-        { length: MAXIMUM_MCP_COMMAND_ARGUMENT_COUNT },
-        () => "a"
-      ),
-      environment: Array.from(
-        { length: MAXIMUM_MCP_ENVIRONMENT_VARIABLE_COUNT },
-        (_, variableIndex) => ({ name: `V${variableIndex}`, value: "" })
-      )
-    })
+    (_, serverIndex) => buildFilledStdioServer(serverIndex)
   )
-  let remaining = bytes - Buffer.byteLength(JSON.stringify({ servers }))
+  const group: UnswitchedMcpGroup = { servers }
+  let remaining = bytes - Buffer.byteLength(JSON.stringify(group))
   for (const variable of servers.flatMap((server) => server.environment)) {
     const length = Math.min(remaining, MAXIMUM_MCP_ENVIRONMENT_VALUE_LENGTH)
     variable.value = "v".repeat(length)
     remaining -= length
   }
-  return { servers }
+  return group
+}
+
+/**
+ * Builds a group with every switch written, as the desktop host writes it:
+ * each server switched as `enabled` says, and every server Lys ships off.
+ *
+ * @param group - Group whose servers get their switch; it is not changed.
+ * @param enabled - Switch of every server.
+ * @returns The switched group, whose servers share their lists with `group`.
+ */
+function buildSwitchedMcpGroup(
+  group: UnswitchedMcpGroup,
+  enabled: boolean
+): SwitchedMcpGroup {
+  return {
+    servers: group.servers.map((server) => ({ ...server, enabled })),
+    builtIn: BUILT_IN_OFF
+  }
 }
 
 /** Problem of a group past {@link MAXIMUM_MCP_SETTINGS_BYTES}. */
@@ -396,6 +478,34 @@ function listLetters(range: ListedLetterRange): string[] {
 }
 
 /**
+ * One server of {@link buildLetterServers}: a URL server with no headers,
+ * switched on, as the reader returns it.
+ */
+type LetterServer = UrlServerEntry & {
+  /** No headers. */
+  headers: []
+  /** Always switched on. */
+  enabled: true
+}
+
+/**
+ * Builds one server of {@link buildLetterServers}.
+ *
+ * @param name - Server name, distinct in the group.
+ * @param host - Host of its URL, as the file holds it.
+ * @returns The server, to `https://<host>/mcp`.
+ */
+function buildLetterServer(name: string, host: string): LetterServer {
+  return {
+    name,
+    transport: "http",
+    url: `https://${host}/mcp`,
+    headers: [],
+    enabled: true
+  }
+}
+
+/**
  * Builds the servers of letters, each in a host part between two digits,
  * typed as itself and as the punycode Node writes for it, in uppercase.
  *
@@ -403,25 +513,13 @@ function listLetters(range: ListedLetterRange): string[] {
  * @returns Two servers per letter, with distinct names, as the reader
  * returns them.
  */
-function buildLetterServers(
-  letters: readonly string[]
-): { name: string; transport: "http"; url: string; headers: [] }[] {
+function buildLetterServers(letters: readonly string[]): LetterServer[] {
   return letters.flatMap((letter, index) => {
     const host = `1${letter}2.example`
     const punycodeHost = domainToASCII(host).toUpperCase()
     return [
-      {
-        name: `text-${index}`,
-        transport: "http",
-        url: `https://${host}/mcp`,
-        headers: []
-      },
-      {
-        name: `punycode-${index}`,
-        transport: "http",
-        url: `https://${punycodeHost}/mcp`,
-        headers: []
-      }
+      buildLetterServer(`text-${index}`, host),
+      buildLetterServer(`punycode-${index}`, punycodeHost)
     ]
   })
 }
@@ -436,7 +534,7 @@ describe("readMcpSettings", () => {
     expect(Object.isFrozen(read)).toBe(true)
   })
 
-  it("fills omitted lists and freezes the settings", async () => {
+  it("fills omitted lists and switches and freezes the settings", async () => {
     const path = await writeSettingsFile(
       buildSettingsText({
         servers: [
@@ -461,19 +559,23 @@ describe("readMcpSettings", () => {
             transport: "stdio",
             command: "files-server",
             arguments: [],
-            environment: []
+            environment: [],
+            enabled: true
           },
           {
             name: "local",
             transport: "http",
             url: "http://127.0.0.1:8080/mcp",
-            headers: []
+            headers: [],
+            enabled: true
           }
-        ]
+        ],
+        builtIn: BUILT_IN_OFF
       }
     })
     if (read.status !== "read") throw new Error("Expected the group to be read")
     expect(Object.isFrozen(read.settings)).toBe(true)
+    expect(Object.isFrozen(read.settings.builtIn.email)).toBe(true)
     expect(Object.isFrozen(read.settings.servers)).toBe(true)
     expect(Object.isFrozen(read.settings.servers[0])).toBe(true)
     const [files, local] = read.settings.servers
@@ -489,7 +591,7 @@ describe("readMcpSettings", () => {
 
     const read = await readMcpSettings(path)
 
-    expect(read).toEqual({ status: "read", settings: { servers: [] } })
+    expect(read).toEqual({ status: "read", settings: NO_SERVER_SETTINGS })
     expect(Object.isFrozen(read)).toBe(true)
     if (read.status !== "read") throw new Error("Expected the group to be read")
     expect(Object.isFrozen(read.settings.servers)).toBe(true)
@@ -504,7 +606,7 @@ describe("readMcpSettings", () => {
 
     const read = await readMcpSettings(path)
 
-    expect(read).toEqual({ status: "read", settings: { servers: [] } })
+    expect(read).toEqual({ status: "read", settings: NO_SERVER_SETTINGS })
     if (read.status !== "read") throw new Error("Expected the group to be read")
     expect(Object.isFrozen(read.settings.servers)).toBe(true)
   })
@@ -655,13 +757,16 @@ describe("readMcpSettings", () => {
     })
   })
 
-  it("reads a group of exactly the MCP size limit in a file the host writes with its other groups at their largest", async () => {
-    const group = buildMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES)
+  it("reads a group whose servers take exactly the MCP size limit without their switches, with every switch written, in a file the host writes with its other groups at their largest", async () => {
+    const unswitchedGroup = buildUnswitchedMcpGroupOfBytes(
+      MAXIMUM_MCP_SETTINGS_BYTES
+    )
+    const group = buildSwitchedMcpGroup(unswitchedGroup, false)
     const text = buildLargestSettingsText(group)
 
     const read = await readMcpSettings(await writeSettingsFile(text))
 
-    expect(Buffer.byteLength(JSON.stringify(group))).toBe(
+    expect(Buffer.byteLength(JSON.stringify(unswitchedGroup))).toBe(
       MAXIMUM_MCP_SETTINGS_BYTES
     )
     expect(Buffer.byteLength(text)).toBeLessThanOrEqual(
@@ -670,18 +775,48 @@ describe("readMcpSettings", () => {
     expect(read).toEqual({ status: "read", settings: group })
   })
 
-  it("reports a group one byte over the MCP size limit as invalid", async () => {
-    const group = buildMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES + 1)
+  it("reads a group written before the switches existed of exactly the MCP size limit, filling in every switch", async () => {
+    const group = buildUnswitchedMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES)
 
     const read = await readMcpSettings(
       await writeSettingsFile(buildSettingsText(group))
     )
 
-    expect(read).toEqual({ status: "invalid", problems: [GROUP_SIZE_PROBLEM] })
+    expect(read).toEqual({
+      status: "read",
+      settings: buildSwitchedMcpGroup(group, true)
+    })
   })
 
+  it.each([
+    [
+      "written before the switches existed",
+      () => buildUnswitchedMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES + 1)
+    ],
+    [
+      "with every switch written",
+      () =>
+        buildSwitchedMcpGroup(
+          buildUnswitchedMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES + 1),
+          false
+        )
+    ]
+  ])(
+    "reports a group %s one byte over the MCP size limit as invalid",
+    async (_label, buildGroup) => {
+      const read = await readMcpSettings(
+        await writeSettingsFile(buildSettingsText(buildGroup()))
+      )
+
+      expect(read).toEqual({
+        status: "invalid",
+        problems: [GROUP_SIZE_PROBLEM]
+      })
+    }
+  )
+
   it("counts the group's size in UTF-8 bytes, not in characters", async () => {
-    const group = buildMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES)
+    const group = buildUnswitchedMcpGroupOfBytes(MAXIMUM_MCP_SETTINGS_BYTES)
     const [firstVariable] = group.servers[0]?.environment ?? []
     if (firstVariable === undefined) throw new Error("Expected a variable")
     firstVariable.value = "é".repeat(
@@ -866,7 +1001,7 @@ describe("readMcpSettings", () => {
 
     const after = await readMcpSettings(path)
 
-    expect(before).toEqual({ status: "read", settings: { servers: [] } })
+    expect(before).toEqual({ status: "read", settings: NO_SERVER_SETTINGS })
     expect(after).toEqual({ status: "read", settings: VALID_MCP_GROUP })
   })
 })
@@ -909,7 +1044,7 @@ describe("readMcpSettings on internationalized domain names", () => {
       for (let index = 0; index < letters.length; index += 8) {
         const batch = letters.slice(index, index + 8)
         const servers = buildLetterServers(batch)
-        const settings = { servers }
+        const settings = { servers, builtIn: BUILT_IN_OFF }
         await writeFile(path, buildSettingsText(settings))
 
         expect(await readMcpSettings(path), batch.join(" ")).toEqual({
@@ -941,9 +1076,10 @@ describe("readMcpSettings on internationalized domain names", () => {
       const group = buildPunycodeSampleGroup(sample)
       const writtenServers = group.servers.map((server) => ({
         ...server,
-        headers: []
+        headers: [],
+        enabled: true
       }))
-      const settings = { servers: writtenServers }
+      const settings = { servers: writtenServers, builtIn: BUILT_IN_OFF }
 
       const read = await readMcpSettings(
         await writeSettingsFile(buildSettingsText(group))

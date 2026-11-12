@@ -1,21 +1,26 @@
+import type { MessageGenerationOptions } from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import type {
   ToolKeeper,
   ToolSearch
 } from "../../../src/modules/agent/findToolsTool"
-import { buildNetworkToolDefinition } from "./toolFixtures"
+import { MAXIMUM_RECOMMENDED_TOOL_COUNT } from "../../../src/modules/agent/toolCatalog"
+import { buildNetworkToolDefinition, buildNoteTools } from "./toolFixtures"
 
 /** How every search of a keeper under test ends. */
-export type ToolKeeperScript = "finds-task-tool" | "finds-nothing" | "fails"
+export type ToolKeeperScript = "finds-task-tools" | "finds-nothing" | "fails"
 
 /**
  * Creates one keeper for the current test, whose every search ends as the
- * script says: finding the tool its task names, finding none, or failing
- * after reporting why. The keeper runs two searches at once, and releases
- * what it holds when the test ends. Under `finds-task-tool` it calls
- * `handleToolFound`, when given, each time a search has found its tool and
- * has not settled yet.
+ * script says: finding the tools its task names, finding none, or failing
+ * after reporting why. Under `finds-task-tools` the task is a list of tool
+ * names separated by spaces, and the keeper tries each one, in the task's
+ * order, as its mechanism allows; a name that is not one of the search's
+ * tools may be among them. The keeper runs two searches at once, and
+ * releases what it holds when the test ends. Under `finds-task-tools` it
+ * calls `handleToolFound`, when given, each time a search has tried its
+ * tools and has not settled yet.
  */
 export type ToolKeeperFactory = (
   script: ToolKeeperScript,
@@ -41,8 +46,8 @@ export const TOOL_KEEPER_SEARCH_TOOLS: readonly ToolDefinition[] =
 /** What a case's search differs in from the search of most cases. */
 type SearchOptions = Readonly<{
   /**
-   * Task of the search, the name of the tool a keeper under
-   * `finds-task-tool` finds; `read_page` by default.
+   * Task of the search, the names of the tools a keeper under
+   * `finds-task-tools` tries, separated by spaces; `read_page` by default.
    */
   task?: string
   /** Tools of the search; {@link TOOL_KEEPER_SEARCH_TOOLS} by default. */
@@ -59,12 +64,13 @@ type SearchOptions = Readonly<{
  */
 function buildSearch(options: SearchOptions = {}) {
   const reportFailure = vi.fn<ToolSearch["reportFailure"]>()
+  const generationOptions: MessageGenerationOptions = { temperature: 0.2 }
   const search: ToolSearch = {
     task: options.task ?? "read_page",
     tools: options.tools ?? TOOL_KEEPER_SEARCH_TOOLS,
     conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
     model: "qwen/qwen3-8b",
-    generationOptions: { temperature: 0.2 },
+    generationOptions,
     abortSignal: options.abortSignal ?? new AbortController().signal,
     reportFailure
   }
@@ -83,7 +89,7 @@ export function registerToolKeeperContractSuite(
     it("finds a tool of its search, in a frozen outcome, reporting nothing", async () => {
       const { search, reportFailure } = buildSearch()
 
-      const outcome = await createKeeper("finds-task-tool").findTools(search)
+      const outcome = await createKeeper("finds-task-tools").findTools(search)
 
       expect(outcome).toEqual({ status: "found", toolNames: ["read_page"] })
       expect(Object.isFrozen(outcome)).toBe(true)
@@ -91,6 +97,43 @@ export function registerToolKeeperContractSuite(
         outcome.status === "found" && Object.isFrozen(outcome.toolNames)
       ).toBe(true)
       expect(reportFailure).not.toHaveBeenCalled()
+    })
+
+    it("finds only tools of its search, leaving out a name the search does not hold", async () => {
+      const { search, reportFailure } = buildSearch({
+        task: "web_search read_page"
+      })
+
+      const outcome = await createKeeper("finds-task-tools").findTools(search)
+
+      expect(outcome).toEqual({ status: "found", toolNames: ["read_page"] })
+      expect(reportFailure).not.toHaveBeenCalled()
+    })
+
+    it("lists the tools it found in the order found, each once, whatever the offer order", async () => {
+      const { search } = buildSearch({
+        task: "send_email read_page send_email"
+      })
+
+      const outcome = await createKeeper("finds-task-tools").findTools(search)
+
+      expect(outcome).toEqual({
+        status: "found",
+        toolNames: ["send_email", "read_page"]
+      })
+    })
+
+    it(`finds at most ${MAXIMUM_RECOMMENDED_TOOL_COUNT} tools, the first found`, async () => {
+      const tools = buildNoteTools(MAXIMUM_RECOMMENDED_TOOL_COUNT + 1)
+      const toolNames = tools.map((tool) => tool.name)
+      const { search } = buildSearch({ task: toolNames.join(" "), tools })
+
+      const outcome = await createKeeper("finds-task-tools").findTools(search)
+
+      expect(outcome).toEqual({
+        status: "found",
+        toolNames: toolNames.slice(0, MAXIMUM_RECOMMENDED_TOOL_COUNT)
+      })
     })
 
     it("answers found with no tool when it finds none, in a frozen outcome, reporting nothing", async () => {
@@ -107,7 +150,7 @@ export function registerToolKeeperContractSuite(
     })
 
     it("runs two searches that overlap, each over its own tools to its own outcome, reporting nothing", async () => {
-      const keeper = createKeeper("finds-task-tool")
+      const keeper = createKeeper("finds-task-tools")
       const first = buildSearch({ task: "read_page", tools: [READ_PAGE_TOOL] })
       const second = buildSearch({
         task: "send_email",
@@ -143,7 +186,7 @@ export function registerToolKeeperContractSuite(
       })
 
       await expect(
-        createKeeper("finds-task-tool").findTools(search)
+        createKeeper("finds-task-tools").findTools(search)
       ).rejects.toBe(stopReason)
       expect(reportFailure).not.toHaveBeenCalled()
     })
@@ -155,7 +198,7 @@ export function registerToolKeeperContractSuite(
         abortSignal: stop.signal
       })
 
-      const outcome = createKeeper("finds-task-tool").findTools(search)
+      const outcome = createKeeper("finds-task-tools").findTools(search)
       stop.abort(stopReason)
 
       await expect(outcome).rejects.toBe(stopReason)
@@ -171,7 +214,7 @@ export function registerToolKeeperContractSuite(
       const handleToolFound = vi.fn(() => {
         stop.abort(stopReason)
       })
-      const keeper = createKeeper("finds-task-tool", handleToolFound)
+      const keeper = createKeeper("finds-task-tools", handleToolFound)
 
       await expect(keeper.findTools(search)).rejects.toBe(stopReason)
       expect(handleToolFound).toHaveBeenCalledOnce()

@@ -1,3 +1,4 @@
+import type { MessageGenerationOptions } from "@lys/protocol"
 import {
   ARMITAGE_AGENT_CODE,
   CALIGINIA_AGENT_CODE,
@@ -109,14 +110,14 @@ function createWaitingReplyModel() {
 
 /**
  * Creates the stream of one round of a search whose model recommends the
- * tool the search's task names, then ends.
+ * tools the search's task names, then ends.
  *
  * @param request - The round's request.
- * @param handleToolFound - Called once the tool is recommended, before the
- * stream ends; nothing is called when it is omitted.
- * @returns A stream that calls `recommend_tool` with the text of the
- * request's last message, the task; or, when that message is a tool result,
- * calls `handleToolFound` and finishes.
+ * @param handleToolFound - Called once the tools are recommended, before
+ * the stream ends; nothing is called when it is omitted.
+ * @returns A stream that calls `recommend_tool` once for each word of the
+ * request's last message, the task, in the task's order; or, when that
+ * message is a tool result, calls `handleToolFound` and finishes.
  */
 async function* createTaskToolRecommendationStream(
   request: ReplyStreamRequest,
@@ -128,21 +129,22 @@ async function* createTaskToolRecommendationStream(
     yield { type: "finish", finishReason: "stop" }
     return
   }
-  const toolCall = {
+  const toolNames = String(lastMessage?.content ?? "").split(" ")
+  const toolCalls = toolNames.map((name) => ({
     toolName: "recommend_tool",
-    argumentText: JSON.stringify({ name: lastMessage?.content })
-  }
-  yield { type: "tool-calls", toolCalls: [toolCall] }
+    argumentText: JSON.stringify({ name })
+  }))
+  yield { type: "tool-calls", toolCalls }
 }
 
 /**
  * Creates model access whose every reply follows the script of a search:
- * it recommends the tool the search's task names, then ends; it ends at
+ * it recommends the tools the search's task names, then ends; it ends at
  * once, recommending nothing; or it fails.
  *
  * @param script - How each search ends.
  * @param handleToolFound - Called each time a search under
- * `finds-task-tool` has recommended its tool and has not ended yet.
+ * `finds-task-tools` has recommended its tools and has not ended yet.
  * @returns The model, whose stream opener records each call.
  */
 function createToolKeeperReplyModel(
@@ -150,7 +152,7 @@ function createToolKeeperReplyModel(
   handleToolFound?: () => void
 ): ReplyModel {
   switch (script) {
-    case "finds-task-tool":
+    case "finds-task-tools":
       return {
         openReplyStream: vi.fn<ReplyModel["openReplyStream"]>(async (request) =>
           createTaskToolRecommendationStream(request, handleToolFound)
@@ -172,7 +174,7 @@ function createToolKeeperReplyModel(
  *
  * @param script - How each search ends.
  * @param handleToolFound - Called each time a search under
- * `finds-task-tool` has found its tool and has not settled yet.
+ * `finds-task-tools` has found its tools and has not settled yet.
  * @returns A runtime whose Armitage answers on a model that follows the
  * script.
  */
@@ -607,12 +609,13 @@ describe("AgentRuntimeService", () => {
         conversations: new Map([[conversationId, { title: "Reading list" }]])
       })
 
+      const generationOptions: MessageGenerationOptions = { temperature: 0.2 }
       const search = runtime.findTools({
         task: "read a web page",
         tools: TOOL_KEEPER_SEARCH_TOOLS,
         conversationId,
         model: "qwen/qwen3-8b",
-        generationOptions: { temperature: 0.2 },
+        generationOptions,
         abortSignal: new AbortController().signal,
         reportFailure: vi.fn()
       })
@@ -659,12 +662,15 @@ describe("AgentRuntimeService", () => {
           )
         })
         const reportFailure = vi.fn()
+        const generationOptions: MessageGenerationOptions = {
+          temperature: 0.2
+        }
         const search = runtime.findTools({
           task: "read a web page",
           tools: TOOL_KEEPER_SEARCH_TOOLS,
           conversationId: createFixtureUuidV7(31),
           model: "qwen/qwen3-8b",
-          generationOptions: { temperature: 0.2 },
+          generationOptions,
           abortSignal,
           reportFailure
         })

@@ -1,3 +1,4 @@
+import type { MessageGenerationOptions } from "@lys/protocol"
 import { ARMITAGE_AGENT_CODE } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import Agent, { type AgentProfile } from "../../../../src/modules/agent/agent"
@@ -147,12 +148,13 @@ function buildSearch(
     ),
     buildNetworkToolDefinition("send_email", "Sends an email message.")
   ]
+  const generationOptions: MessageGenerationOptions = { temperature: 0.2 }
   return {
     task: "read a web page",
     tools,
     conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
     model: "qwen/qwen3-8b",
-    generationOptions: { temperature: 0.2 },
+    generationOptions,
     abortSignal,
     reportFailure
   }
@@ -166,10 +168,11 @@ describe("runToolKeeperSearch", () => {
       FINISH_ROUND
     )
     const reportFailure = vi.fn()
+    const search = buildSearch(reportFailure)
 
     const outcome = await runToolKeeperSearch(
       createArmitage(openReplyStream),
-      buildSearch(reportFailure)
+      search
     )
 
     expect(outcome).toEqual({ status: "found", toolNames: ["read_page"] })
@@ -186,7 +189,7 @@ describe("runToolKeeperSearch", () => {
     ])
     expect(request).toMatchObject({
       model: "qwen/qwen3-8b",
-      generationOptions: { temperature: 0.2 }
+      generationOptions: search.generationOptions
     })
     const [lastRequest] = openReplyStream.mock.calls[2] ?? []
     expect(lastRequest?.messages.at(-1)).toMatchObject({

@@ -1,5 +1,6 @@
 import { toolDefinitionSchema, type ToolDefinition } from "@lys/share"
 import { buildAgentStateDefinitions } from "../../../src/modules/agent/agentStateTools"
+import type { ToolSearchOutcome } from "../../../src/modules/agent/findToolsTool"
 import AgentTool from "../../../src/modules/tool/tool"
 
 /**
@@ -84,4 +85,18 @@ export function buildNoteTools(count: number): readonly ToolDefinition[] {
   return Array.from({ length: count }, (_unused, index) =>
     buildNetworkToolDefinition(`note_${index + 1}`, "Keeps a note.")
   )
+}
+
+/**
+ * Builds the outcome of a search that ran to its end, as a keeper returns
+ * it.
+ *
+ * @param toolNames - Names of the tools found, in the order found; copied.
+ * @returns A frozen `found` outcome over a frozen copy of the names.
+ */
+export function buildFoundToolSearchOutcome(
+  toolNames: readonly string[]
+): ToolSearchOutcome {
+  const foundNames = Object.freeze([...toolNames])
+  return Object.freeze({ status: "found", toolNames: foundNames })
 }

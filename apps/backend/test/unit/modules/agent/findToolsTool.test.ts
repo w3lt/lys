@@ -1,3 +1,4 @@
+import type { MessageGenerationOptions } from "@lys/protocol"
 import {
   FIND_TOOLS_TOOL_NAME,
   toolDefinitionSchema,
@@ -17,6 +18,7 @@ import {
   registerBuiltInToolContractSuite,
   type BuiltInToolHarness
 } from "../../support/builtInToolContract"
+import { buildFoundToolSearchOutcome } from "../../support/toolFixtures"
 
 /**
  * Builds the definition of a backend tool that takes no argument.
@@ -78,12 +80,13 @@ function buildContext(
   keeper: ToolKeeper,
   reportFailure: FindToolsContext["reportFailure"] = reportUnexpectedFailure
 ): FindToolsContext {
+  const generationOptions: MessageGenerationOptions = { temperature: 0.4 }
   return {
     keeper,
     tools: TOOLS,
     conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
     model: "qwen/qwen3-8b",
-    generationOptions: { temperature: 0.4 },
+    generationOptions,
     reportFailure
   }
 }
@@ -94,7 +97,7 @@ function buildContext(
  * @returns The contract harness, counting the keeper's searches.
  */
 async function createFindToolsHarness(): Promise<BuiltInToolHarness> {
-  const keeper = createKeeper({ status: "found", toolNames: ["read_page"] })
+  const keeper = createKeeper(buildFoundToolSearchOutcome(["read_page"]))
   return {
     tool: new FindToolsTool(buildContext(keeper)),
     runnableArguments: { task: "read a web page" },
@@ -149,11 +152,13 @@ describe("FindToolsTool", () => {
   registerBuiltInToolContractSuite(createFindToolsHarness)
 
   it("asks the keeper with the trimmed task, the turn's tools, and the run's signal", async () => {
-    const keeper = createKeeper({ status: "found", toolNames: [] })
+    const keeper = createKeeper(buildFoundToolSearchOutcome([]))
     const abortSignal = new AbortController().signal
 
+    const context = buildContext(keeper)
+
     await runFindTools(
-      new FindToolsTool(buildContext(keeper)),
+      new FindToolsTool(context),
       "  read a web page ",
       abortSignal
     )
@@ -163,7 +168,7 @@ describe("FindToolsTool", () => {
       tools: TOOLS,
       conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
       model: "qwen/qwen3-8b",
-      generationOptions: { temperature: 0.4 },
+      generationOptions: context.generationOptions,
       abortSignal,
       reportFailure: reportUnexpectedFailure
     })
@@ -172,10 +177,7 @@ describe("FindToolsTool", () => {
   it("names the tools the keeper found and keeps them for the reply's next round", async () => {
     const tool = new FindToolsTool(
       buildContext(
-        createKeeper({
-          status: "found",
-          toolNames: ["send_email", "read_page"]
-        })
+        createKeeper(buildFoundToolSearchOutcome(["send_email", "read_page"]))
       )
     )
 
@@ -191,13 +193,12 @@ describe("FindToolsTool", () => {
   })
 
   it("keeps every tool found across the reply's calls, each once, in the order found", async () => {
-    const keeper = createKeeper({ status: "found", toolNames: ["read_page"] })
+    const keeper = createKeeper(buildFoundToolSearchOutcome(["read_page"]))
     const tool = new FindToolsTool(buildContext(keeper))
     await runFindTools(tool, "read a page")
-    keeper.findTools.mockResolvedValueOnce({
-      status: "found",
-      toolNames: ["send_email", "read_page"]
-    })
+    keeper.findTools.mockResolvedValueOnce(
+      buildFoundToolSearchOutcome(["send_email", "read_page"])
+    )
 
     await runFindTools(tool, "send an email")
 
@@ -206,7 +207,7 @@ describe("FindToolsTool", () => {
 
   it("says when the keeper found no tool, offering nothing", async () => {
     const tool = new FindToolsTool(
-      buildContext(createKeeper({ status: "found", toolNames: [] }))
+      buildContext(createKeeper(buildFoundToolSearchOutcome([])))
     )
 
     const result = await runFindTools(tool, "book a flight")
@@ -249,7 +250,7 @@ describe("FindToolsTool", () => {
       findTools: async (search) => {
         abortController.abort(stopReason)
         search.abortSignal.throwIfAborted()
-        return { status: "found", toolNames: ["read_page"] }
+        return buildFoundToolSearchOutcome(["read_page"])
       }
     }
     const tool = new FindToolsTool(buildContext(keeper))
@@ -269,7 +270,7 @@ describe("FindToolsTool", () => {
     )
     const run = runFindTools(tool, "read a page", abortController.signal)
 
-    search.resolve({ status: "found", toolNames: ["read_page"] })
+    search.resolve(buildFoundToolSearchOutcome(["read_page"]))
     abortController.abort(stopReason)
 
     await expect(run).rejects.toBe(stopReason)
@@ -277,7 +278,7 @@ describe("FindToolsTool", () => {
   })
 
   it("asks the keeper with a task of 500 characters after trimming", async () => {
-    const keeper = createKeeper({ status: "found", toolNames: [] })
+    const keeper = createKeeper(buildFoundToolSearchOutcome([]))
     const task = "a".repeat(500)
 
     await runFindTools(new FindToolsTool(buildContext(keeper)), ` ${task} `)
@@ -291,7 +292,7 @@ describe("FindToolsTool", () => {
     ["a blank task", "   "],
     ["a task of more than 500 characters", "a".repeat(501)]
   ])("refuses %s without asking the keeper", (_label, task) => {
-    const keeper = createKeeper({ status: "found", toolNames: [] })
+    const keeper = createKeeper(buildFoundToolSearchOutcome([]))
 
     const parsed = new FindToolsTool(buildContext(keeper)).parseToolCall({
       task

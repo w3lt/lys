@@ -35,14 +35,14 @@ const TOOLS = Object.freeze([
 ])
 
 /**
- * Finds one of the tool keeper's tools by name.
+ * Gets one of the tool keeper's tools by name.
  *
  * @param catalog - Catalog of the search.
  * @param name - Name of the tool.
  * @returns The tool.
  * @throws If no tool has the name.
  */
-function findKeeperTool(catalog: ToolCatalog, name: string): TurnBuiltInTool {
+function getKeeperTool(catalog: ToolCatalog, name: string): TurnBuiltInTool {
   const tool = buildToolKeeperTools(catalog).find(
     (entry) => entry.definition.name === name
   )
@@ -64,7 +64,7 @@ async function runKeeperTool(
   name: string,
   callArguments: BuiltInToolCallArguments
 ): Promise<BuiltInToolResult> {
-  const parsed = findKeeperTool(catalog, name).tool.parseToolCall(callArguments)
+  const parsed = getKeeperTool(catalog, name).tool.parseToolCall(callArguments)
   if (parsed.status !== "parsed") throw new Error(parsed.message)
   return await parsed.runToolCall({
     abortSignal: new AbortController().signal,
@@ -85,7 +85,7 @@ function parseKeeperToolCall(
   name: string,
   callArguments: BuiltInToolCallArguments
 ) {
-  return findKeeperTool(catalog, name).tool.parseToolCall(callArguments)
+  return getKeeperTool(catalog, name).tool.parseToolCall(callArguments)
 }
 
 /**
@@ -97,7 +97,7 @@ async function createSearchToolsHarness(): Promise<BuiltInToolHarness> {
   const catalog = new ToolCatalog(TOOLS)
   const listToolMatches = vi.spyOn(catalog, "listToolMatches")
   return {
-    tool: findKeeperTool(catalog, SEARCH_TOOLS_TOOL_NAME).tool,
+    tool: getKeeperTool(catalog, SEARCH_TOOLS_TOOL_NAME).tool,
     runnableArguments: { query: "web page" },
     invalidArguments: { query: "   " },
     countStartedWork: () => listToolMatches.mock.calls.length
@@ -113,7 +113,7 @@ async function createRecommendToolHarness(): Promise<BuiltInToolHarness> {
   const catalog = new ToolCatalog(TOOLS)
   const addRecommendedTool = vi.spyOn(catalog, "addRecommendedTool")
   return {
-    tool: findKeeperTool(catalog, RECOMMEND_TOOL_TOOL_NAME).tool,
+    tool: getKeeperTool(catalog, RECOMMEND_TOOL_TOOL_NAME).tool,
     runnableArguments: { name: "read_page" },
     invalidArguments: { name: "read_file" },
     countStartedWork: () => addRecommendedTool.mock.calls.length

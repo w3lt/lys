@@ -216,18 +216,21 @@ type ReplyStorageOverride<Capability> = (stored: Capability) => Capability
  * the case's model and meter, or the case's own.
  */
 type AgentScenario =
-  | Readonly<{
-      /** Model behavior. */
-      openReplyStream: OpenReplyStream
-      /** Context meter of the model; every context fits by default. */
-      replyContextMeter?: ReplyContextMeter
-      /** Keeper `find_tools` asks; any search fails the case by default. */
-      toolKeeper?: ToolKeeper
-    }>
+  | AgentModelScenario
   | Readonly<{
       /** Agent the case created, to read its activity while it answers. */
       agent: Agent
     }>
+
+/** Test-controlled parts of the agent a case's turn creates. */
+type AgentModelScenario = Readonly<{
+  /** Model behavior. */
+  openReplyStream: OpenReplyStream
+  /** Context meter of the model; every context fits by default. */
+  replyContextMeter?: ReplyContextMeter
+  /** Keeper `find_tools` asks; any search fails the case by default. */
+  toolKeeper?: ToolKeeper
+}>
 
 /** Test-controlled parts of one reply. */
 type AgentReplyScenario = AgentScenario & AgentTurnScenario
@@ -763,16 +766,13 @@ function createTestAgent(
 }
 
 /**
- * Finds the agent that answers a case's turn.
+ * Creates the agent that answers a case's turn when the case brings none.
  *
- * @param scenario - The case's own agent, or its model, meter, and tool
- * keeper.
- * @returns The case's agent, or a new one with {@link AGENT_PROFILE} over
- * the case's model, meter, and tool keeper, whose every state read fails
- * the case.
+ * @param scenario - The case's model, meter, and tool keeper.
+ * @returns A new agent with {@link AGENT_PROFILE} over them, whose every
+ * state read fails the case.
  */
-function findScenarioAgent(scenario: AgentScenario): Agent {
-  if ("agent" in scenario) return scenario.agent
+function createScenarioAgent(scenario: AgentModelScenario): Agent {
   const replyModel = { openReplyStream: scenario.openReplyStream }
   return new Agent(AGENT_PROFILE, {
     replyModel,
@@ -960,12 +960,12 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
   const records = createTurnRecords()
   const storage = buildScenarioReplyStorage(scenario, store)
   const turn = buildScenarioTurn({ scenario, store, storage, records })
-  const settlement = await findScenarioAgent(scenario)
-    .createReply(turn)
-    .then(
-      () => ({ status: "resolved" as const }),
-      (error: unknown) => ({ status: "rejected" as const, error })
-    )
+  const agent =
+    "agent" in scenario ? scenario.agent : createScenarioAgent(scenario)
+  const settlement = await agent.createReply(turn).then(
+    () => ({ status: "resolved" as const }),
+    (error: unknown) => ({ status: "rejected" as const, error })
+  )
   const { reply, sources } = getStoredReply(store)
   return {
     events: records.events,

@@ -202,23 +202,28 @@ type ToolCallPartHandling = Pick<ToolCallHandling, "round" | "replyParts">
 
 /**
  * What starting a checked call needs: the policy and the round's rules, the
- * gate, the round, and the parts.
+ * reply's cancellation, the gate, the round, and the parts.
  */
 type ToolCallStartHandling = Pick<
   ToolCallHandling,
-  "toolCallPolicy" | "toolCallRules" | "gate" | "round" | "replyParts"
+  | "toolCallPolicy"
+  | "toolCallRules"
+  | "abortSignal"
+  | "gate"
+  | "round"
+  | "replyParts"
 >
 
 /** What starting a checked call through the round's gate needs. */
 type GatedToolCallStartHandling = Pick<
   ToolCallHandling,
-  "toolCallPolicy" | "gate" | "round" | "replyParts"
+  "toolCallPolicy" | "abortSignal" | "gate" | "round" | "replyParts"
 >
 
 /** What storing the person's answer to a call's prompt needs. */
 type ToolCallAnswerHandling = Pick<
   ToolCallHandling,
-  "toolCallPolicy" | "replyParts"
+  "toolCallPolicy" | "abortSignal" | "replyParts"
 >
 
 /** What handling a checked call of a client tool needs. */
@@ -282,8 +287,9 @@ type ToolCallApproval =
     }>
   | Readonly<{
       /**
-       * The policy denied the call, which is stored as failed without the
-       * person being asked; it never runs.
+       * The policy denied the call, which is stored as failed; it never
+       * runs. A call denied before the gate was never asked about; one
+       * denied again after the person allowed it was.
        */
       status: "denied"
       /** Message carrying the denial the model reads. */
@@ -492,8 +498,9 @@ export function buildDefinedToolOffer(
  * before the first wait, in the model's order, because each call's handling
  * runs synchronously up to its first send. Nothing runs before its call is
  * allowed; a call the person allowed is decided again, with the folders read
- * again, and one the rules now deny is stored as failed and never runs. Every result the model reads is stored with its call first; the
- * result of a tool that does more than read this machine, a network or MCP
+ * again, and one the rules now deny is stored as failed and never runs.
+ * Every result the model reads is stored with its call first; the result of
+ * a tool that does more than read this machine, a network or MCP
  * tool, is cleaned of invisible characters before that, whichever side
  * answered and however the call ended.
  */
@@ -969,8 +976,8 @@ function startGatedToolCall(
  * @param answer - Settles with the person's answer, with `expired` when the
  * prompt reached its time limit first, or with undefined when the reply was
  * stopped while the prompt waited; never rejects.
- * @param handling - The policy, read again for an allowed call, and the
- * reply's part sequence.
+ * @param handling - The policy, read again for an allowed call, the reply's
+ * cancellation, and its part sequence.
  * @returns As {@link updateAllowedToolCall} returns for an allowed call;
  * `rejected` with the rejection the model reads, once stored; `expired` with
  * the expiry the model reads, once the call is stored as failed; `ended`
@@ -1004,11 +1011,13 @@ async function handleToolCallApprovalAnswer(
  * by the rules with the approved folders read now, before it runs.
  *
  * @param toolCall - Checked call.
- * @param handling - The policy and the reply's part sequence.
+ * @param handling - The policy, the reply's cancellation, and its part
+ * sequence.
  * @returns `allowed` once stored when the rules still let it go on;
  * `denied` with the denial the model reads, once the call is stored as
  * failed, when they now deny it, so it never runs; `ended` when the reply
- * refused either change, so the call never runs.
+ * refused either change, or was stopped while the folders were read, so the
+ * call never runs.
  * @throws When reading the approved folders does.
  * @remarks Spec §4: an approval answers the exact call, and the gateway
  * checks it again against the policy's current state before it runs, so a
@@ -1024,10 +1033,9 @@ async function updateAllowedToolCall(
   const { replyParts } = handling
   if (!replyParts.updateReplyToolCall(toolCall.call.id, { status: "running" }))
     return ENDED_TOOL_CALL_APPROVAL
-  const decision = decideToolCall(
-    buildToolCallRequest(toolCall),
-    await readToolCallRules(handling.toolCallPolicy)
-  )
+  const toolCallRules = await readToolCallRules(handling.toolCallPolicy)
+  if (handling.abortSignal.aborted) return ENDED_TOOL_CALL_APPROVAL
+  const decision = decideToolCall(buildToolCallRequest(toolCall), toolCallRules)
   if (decision.effect !== "deny") return ALLOWED_TOOL_CALL_APPROVAL
   const message = updateFinishedToolCall(
     toolCall,

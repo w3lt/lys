@@ -3714,6 +3714,36 @@ describe("Agent", () => {
       expect(sendClientToolCall).toHaveBeenCalledOnce()
     })
 
+    it("runs nothing and interrupts the call when the reply is stopped while the folders are read again for an allowed call", async () => {
+      const cancellation = new AbortController()
+      const readApprovedFolders = vi.fn<ToolCallPolicy["readApprovedFolders"]>(
+        async () => {
+          if (readApprovedFolders.mock.calls.length === 2) cancellation.abort()
+          return ROOT_FOLDER
+        }
+      )
+      const sendClientToolCall = vi.fn<AgentTurn["sendClientToolCall"]>()
+      const openReplyStream = createRoundStreams(READ_A_ROUND, FINISH_ROUND)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        abortSignal: cancellation.signal,
+        clientTools: [READ_TEXT_FILE_TOOL],
+        justRunToolNames: [],
+        toolCallPolicy: { ...TOOL_CALL_POLICY, readApprovedFolders },
+        sendToolApprovalPrompt: createAllowingPromptSender(),
+        sendClientToolCall
+      })
+
+      expect(readApprovedFolders).toHaveBeenCalledTimes(2)
+      expect(sendClientToolCall).not.toHaveBeenCalled()
+      expect(openReplyStream).toHaveBeenCalledOnce()
+      expect(run.parts).toEqual([
+        expect.objectContaining({ kind: "tool-call", status: "interrupted" })
+      ])
+      expect(run.persistedStates).toEqual([{ status: "interrupted" }])
+    })
+
     /** Round in which the model reads the SSH key of the person. */
     const READ_KEY_ROUND = buildCallRound(
       "read_text_file",

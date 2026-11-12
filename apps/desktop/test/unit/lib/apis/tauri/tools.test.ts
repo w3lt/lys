@@ -51,6 +51,7 @@ describe("readTextFile", () => {
 
   it.each([
     { code: "fileNotFound" },
+    { code: "credentialFile" },
     { code: "fileTooLarge", sizeBytes: 2_000_000, maxSizeBytes: 1_048_576 },
     { code: "readFailed", message: "I/O error" }
   ])("returns the declared $code failure", async (error) => {
@@ -109,6 +110,7 @@ describe("findFiles", () => {
 
   it.each([
     { code: "rootNotFound" },
+    { code: "rootInCredentialFolder" },
     { code: "queryTooLong", maxChars: 200 },
     { code: "searchFailed", message: "walk failed" }
   ])("returns the declared $code failure", async (error) => {

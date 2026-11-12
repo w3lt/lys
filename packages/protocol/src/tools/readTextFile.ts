@@ -54,6 +54,13 @@ export const readTextFileErrorSchema = z.discriminatedUnion("code", [
     /** The path names a directory, FIFO, socket, or device, not a regular file. */
     code: z.literal("notAFile")
   }),
+  buildCodeOnlyFailureSchema({
+    /**
+     * The file's real path has a name of `CREDENTIAL_FILE_LIST` as a part,
+     * or the file is Lys's settings file, so none of it was read.
+     */
+    code: z.literal("credentialFile")
+  }),
   z
     .strictObject({
       /** The file exceeds the desktop's read limit, so none of it was returned. */

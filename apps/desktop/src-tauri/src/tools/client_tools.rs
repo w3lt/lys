@@ -47,7 +47,7 @@ mod tests {
             json!([
                 {
                     "name": "read_text_file",
-                    "description": "Read one UTF-8 text file and return its complete text. A file over 1 MiB or one that is not UTF-8 text is refused, never truncated.",
+                    "description": "Read one UTF-8 text file and return its complete text. A file over 1 MiB or one that is not UTF-8 text is refused, never truncated. Private key and credential files, and Lys's settings file, are refused, wherever a link leads.",
                     "group": "files",
                     "access": "reads",
                     "runner": "client",
@@ -62,7 +62,7 @@ mod tests {
                 },
                 {
                     "name": "search_files",
-                    "description": "Find files under a directory whose name or content contains the query, ignoring case. Returns each matching file's absolute path and, for content matches, its first matching lines with their line numbers.",
+                    "description": "Find files under a directory whose name or content contains the query, ignoring case. Returns each matching file's absolute path and, for content matches, its first matching lines with their line numbers. Private key and credential files and folders, and Lys's settings file, are never searched or returned.",
                     "group": "files",
                     "access": "reads",
                     "runner": "client",

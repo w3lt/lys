@@ -5,17 +5,22 @@
 //! directory tree breadth-first without following symbolic links, compares
 //! names and lines case-insensitively, and stops at fixed result and scan
 //! budgets so that one request cannot read an unbounded amount of the disk.
+//! It never starts inside a credential folder, and it leaves credential files
+//! and folders and Lys's settings file out of its walk.
 
 use std::{
     collections::VecDeque,
     fs::{self, DirEntry},
     io,
+    os::unix::fs::DirEntryExt,
     path::{Path, PathBuf},
 };
 
 use serde::{Deserialize, Serialize};
+use tauri::State;
 
 use super::{
+    credential_files::{CredentialFiles, FileIdentity},
     definition::{
         ToolAccess, ToolArgumentDefinition, ToolArgumentType, ToolDefinition, ToolGroup, ToolRunner,
     },
@@ -129,6 +134,9 @@ pub enum SearchFilesError {
     RootNotFound,
     /// The root exists but is not a directory.
     RootNotADirectory,
+    /// The root's real path has a private key or credential file or folder
+    /// name as a part, so nothing under it is searched.
+    RootInCredentialFolder,
     /// The operating system denied access to the root directory.
     PermissionDenied,
     /// The query is empty or contains only whitespace.
@@ -255,9 +263,17 @@ struct FileSearch {
     /// Number of snippets collected per file, from 1 to
     /// `MAX_SNIPPETS_PER_FILE_LIMIT`.
     max_snippets_per_file: usize,
+    /// Names the walk leaves out, and the check of every file it reads.
+    credential_files: CredentialFiles,
+    /// Identity of Lys's settings file when the search was parsed, or `None`
+    /// when there was none; the walk leaves the file out.
+    settings_file: Option<FileIdentity>,
 }
 
 /// One directory entry, classified without following symbolic links.
+///
+/// A credential file or folder, or Lys's settings file, is
+/// [`ListedEntry::Ignored`] whatever its type.
 enum ListedEntry {
     /// A subdirectory, searched after the current directory level.
     Directory(PathBuf),
@@ -265,8 +281,9 @@ enum ListedEntry {
     File(ListedFile),
     /// An entry whose type could not be read or whose path is not valid UTF-8.
     Unexaminable,
-    /// A symbolic link, FIFO, socket, or device, which is never followed,
-    /// read, or reported.
+    /// A symbolic link, FIFO, socket, or device, or a credential file or
+    /// folder, or Lys's settings file, which is never followed, read, or
+    /// reported.
     Ignored,
 }
 
@@ -334,18 +351,37 @@ struct SearchTally {
 ///
 /// The renderer invokes this command as `find_files` with the argument object
 /// `{ filter }`. Any absolute root that the desktop process can list is
-/// accepted: deciding whether Lys may search a directory belongs to the caller
-/// that runs tool requests. Nothing is modified. The search runs on Tauri's
-/// blocking-task pool so the window stays responsive; it cannot be cancelled
-/// and is bounded by the result, entry, and content-byte budgets reported
-/// through [`SearchCompletion`].
+/// accepted, except one whose real path `credential_files` refuses: whether
+/// Lys may search any other directory is decided by the caller that runs tool
+/// requests. Nothing is modified. The search runs on Tauri's blocking-task
+/// pool so the window stays responsive; it cannot be cancelled and is bounded
+/// by the result, entry, and content-byte budgets reported through
+/// [`SearchCompletion`].
+///
+/// # Errors
+///
+/// Rejects as [`find_files_in_background`] does.
+pub async fn find_files(
+    filter: SearchFilesFilter,
+    credential_files: State<'_, CredentialFiles>,
+) -> Result<SearchFilesReport, SearchFilesError> {
+    find_files_in_background(filter, credential_files.inner().clone()).await
+}
+
+/// Searches with `filter` on Tauri's blocking-task pool.
 ///
 /// # Errors
 ///
 /// Rejects with a [`SearchFilesError`] when the filter is invalid, the root is
-/// missing, not a directory, or cannot be listed, or the search task fails.
-pub async fn find_files(filter: SearchFilesFilter) -> Result<SearchFilesReport, SearchFilesError> {
-    let search_task = tauri::async_runtime::spawn_blocking(move || find_files_under_root(filter));
+/// missing, not a directory, inside a credential folder, or cannot be listed,
+/// or the search task fails.
+async fn find_files_in_background(
+    filter: SearchFilesFilter,
+    credential_files: CredentialFiles,
+) -> Result<SearchFilesReport, SearchFilesError> {
+    let search_task = tauri::async_runtime::spawn_blocking(move || {
+        find_files_under_root(filter, credential_files)
+    });
 
     match search_task.await {
         Ok(search_result) => search_result,
@@ -360,21 +396,29 @@ pub async fn find_files(filter: SearchFilesFilter) -> Result<SearchFilesReport, 
 /// # Errors
 ///
 /// Returns the [`SearchFilesError`] that describes why the search cannot run.
-fn find_files_under_root(filter: SearchFilesFilter) -> Result<SearchFilesReport, SearchFilesError> {
-    let search = parse_search_files_filter(filter)?;
+fn find_files_under_root(
+    filter: SearchFilesFilter,
+    credential_files: CredentialFiles,
+) -> Result<SearchFilesReport, SearchFilesError> {
+    let search = parse_search_files_filter(filter, credential_files)?;
 
     Ok(find_matching_files(&search))
 }
 
-/// Parses a raw filter into a search, applying the documented defaults.
+/// Parses a raw filter into a search that `credential_files` limits, applying
+/// the documented defaults.
 ///
 /// The query and limits are checked before the root is inspected on disk.
+/// The identity of Lys's settings file is looked up once, after the root.
 ///
 /// # Errors
 ///
 /// Returns the [`SearchFilesError`] for the first invalid value, checked in
 /// the order query, `maxResults`, `maxSnippetsPerFile`, root.
-fn parse_search_files_filter(filter: SearchFilesFilter) -> Result<FileSearch, SearchFilesError> {
+fn parse_search_files_filter(
+    filter: SearchFilesFilter,
+    credential_files: CredentialFiles,
+) -> Result<FileSearch, SearchFilesError> {
     let folded_query = parse_search_query(&filter.query)?;
     let max_results = filter.max_results.unwrap_or(DEFAULT_MAX_RESULTS);
 
@@ -394,7 +438,8 @@ fn parse_search_files_filter(filter: SearchFilesFilter) -> Result<FileSearch, Se
         });
     }
 
-    let root = parse_search_root(filter.root)?;
+    let root = parse_search_root(filter.root, &credential_files)?;
+    let settings_file = credential_files.find_settings_file();
 
     Ok(FileSearch {
         root,
@@ -402,6 +447,8 @@ fn parse_search_files_filter(filter: SearchFilesFilter) -> Result<FileSearch, Se
         target: filter.target,
         max_results,
         max_snippets_per_file,
+        credential_files,
+        settings_file,
     })
 }
 
@@ -431,19 +478,25 @@ fn parse_search_query(query: &str) -> Result<String, SearchFilesError> {
 }
 
 /// Validates that `root` is an absolute path to a directory that the desktop
-/// process can list.
+/// process can list and that is not inside a credential folder.
 ///
-/// Symbolic links in the root path are followed. The directory is listed once
-/// to prove access and then closed.
+/// Symbolic links in the root path are followed. The root's real path, with
+/// every link resolved, must have no part that `credential_files` names a
+/// credential. The directory is then listed once to prove access and closed.
+/// The root keeps the form it was given in, so reported paths start with it.
 ///
 /// # Errors
 ///
 /// Returns [`SearchFilesError::RootNotAbsolute`],
 /// [`SearchFilesError::RootNotFound`],
 /// [`SearchFilesError::RootNotADirectory`],
+/// [`SearchFilesError::RootInCredentialFolder`],
 /// [`SearchFilesError::PermissionDenied`], or
 /// [`SearchFilesError::SearchFailed`] for any other operating-system failure.
-fn parse_search_root(root: PathBuf) -> Result<PathBuf, SearchFilesError> {
+fn parse_search_root(
+    root: PathBuf,
+    credential_files: &CredentialFiles,
+) -> Result<PathBuf, SearchFilesError> {
     if !root.is_absolute() {
         return Err(SearchFilesError::RootNotAbsolute);
     }
@@ -452,6 +505,12 @@ fn parse_search_root(root: PathBuf) -> Result<PathBuf, SearchFilesError> {
 
     if !metadata.is_dir() {
         return Err(SearchFilesError::RootNotADirectory);
+    }
+
+    let real_root = fs::canonicalize(&root).map_err(build_root_error)?;
+
+    if credential_files.holds_credential_part(&real_root) {
+        return Err(SearchFilesError::RootInCredentialFolder);
     }
 
     fs::read_dir(&root).map_err(build_root_error)?;
@@ -483,13 +542,15 @@ fn is_limit_in_range(limit: usize, maximum: usize) -> bool {
 /// byte order of their names, so an unchanged tree whose directories each hold
 /// at most [`MAX_SCANNED_ENTRY_COUNT`] entries always yields the same matches
 /// in the same order. Subdirectories that cannot be listed are counted as
-/// skipped.
+/// skipped. Because no link is followed, the real path of every entry is the
+/// root's real path followed by the names walked, so leaving out each
+/// credential name keeps every credential file and folder out of the walk.
 fn find_matching_files(search: &FileSearch) -> SearchFilesReport {
     let mut pending_directories = VecDeque::from([search.root.clone()]);
     let mut tally = SearchTally::default();
 
     while let Some(directory) = pending_directories.pop_front() {
-        let Ok(entries) = list_directory_entries(&directory) else {
+        let Ok(entries) = list_directory_entries(&directory, search) else {
             tally.skipped_path_count += 1;
             continue;
         };
@@ -515,7 +576,8 @@ fn find_matching_files(search: &FileSearch) -> SearchFilesReport {
     build_search_report(tally, SearchCompletion::Complete)
 }
 
-/// Lists the entries of `directory`, sorted in byte order of their names.
+/// Lists the entries of `directory` for `search`, sorted in byte order of
+/// their names.
 ///
 /// At most [`MAX_SCANNED_ENTRY_COUNT`] + 1 entries are read: a search never
 /// examines more than [`MAX_SCANNED_ENTRY_COUNT`], and the one extra entry
@@ -528,13 +590,15 @@ fn find_matching_files(search: &FileSearch) -> SearchFilesReport {
 /// # Errors
 ///
 /// Returns the operating system's error when the directory cannot be opened.
-fn list_directory_entries(directory: &Path) -> io::Result<Vec<ListedEntry>> {
+fn list_directory_entries(directory: &Path, search: &FileSearch) -> io::Result<Vec<ListedEntry>> {
     let mut named_entries = Vec::new();
     let mut unreadable_entry_count = 0;
 
     for entry in fs::read_dir(directory)?.take(MAX_SCANNED_ENTRY_COUNT + 1) {
         match entry {
-            Ok(entry) => named_entries.push((entry.file_name(), build_listed_entry(&entry))),
+            Ok(entry) => {
+                named_entries.push((entry.file_name(), build_listed_entry(&entry, search)))
+            }
             Err(_) => unreadable_entry_count += 1,
         }
     }
@@ -552,7 +616,17 @@ fn list_directory_entries(directory: &Path) -> io::Result<Vec<ListedEntry>> {
 }
 
 /// Classifies one directory entry without following symbolic links.
-fn build_listed_entry(entry: &DirEntry) -> ListedEntry {
+///
+/// An entry with a credential name is ignored before its type is read, and a
+/// regular file that is Lys's settings file is ignored too.
+fn build_listed_entry(entry: &DirEntry, search: &FileSearch) -> ListedEntry {
+    if search
+        .credential_files
+        .is_credential_name(&entry.file_name())
+    {
+        return ListedEntry::Ignored;
+    }
+
     let Ok(file_type) = entry.file_type() else {
         return ListedEntry::Unexaminable;
     };
@@ -565,7 +639,31 @@ fn build_listed_entry(entry: &DirEntry) -> ListedEntry {
         return ListedEntry::Ignored;
     }
 
+    if is_settings_file_entry(entry, search.settings_file) {
+        return ListedEntry::Ignored;
+    }
+
     build_listed_file(entry.path()).map_or(ListedEntry::Unexaminable, ListedEntry::File)
+}
+
+/// Answers whether the regular file `entry` is Lys's settings file, whose
+/// identity is `settings_file`.
+///
+/// The entry's inode number comes with the listing, so the entry is looked up
+/// only when that number is the settings file's. An entry that cannot be
+/// looked up then is treated as the settings file.
+fn is_settings_file_entry(entry: &DirEntry, settings_file: Option<FileIdentity>) -> bool {
+    let Some(settings_file) = settings_file else {
+        return false;
+    };
+
+    if entry.ino() != settings_file.inode() {
+        return false;
+    }
+
+    entry.metadata().map_or(true, |metadata| {
+        FileIdentity::of(&metadata) == settings_file
+    })
 }
 
 /// Builds the listed form of a regular file, or `None` when its path or name
@@ -632,7 +730,11 @@ fn should_search_file_content(target: SearchFilesTarget) -> bool {
 /// Reads the text of the file at `path` and collects snippets of its lines
 /// that contain the query.
 fn read_content_snippets(path: &str, search: &FileSearch) -> ContentScan {
-    match read_regular_text_file(Path::new(path), MAX_SEARCHED_FILE_SIZE_BYTES) {
+    match read_regular_text_file(
+        Path::new(path),
+        MAX_SEARCHED_FILE_SIZE_BYTES,
+        &search.credential_files,
+    ) {
         Ok(content) => ContentScan {
             outcome: ContentScanOutcome::Read {
                 size_bytes: content.len() as u64,
@@ -649,7 +751,8 @@ fn read_content_snippets(path: &str, search: &FileSearch) -> ContentScan {
 /// Builds the totals outcome of a file whose content could not be searched.
 ///
 /// Content that is not UTF-8 was still read, so its bytes count toward the
-/// content budget.
+/// content budget. A credential file reaches a read only when the tree
+/// changed after it was listed, and counts as unreadable.
 fn build_unsearched_content_outcome(error: TextFileReadError) -> ContentScanOutcome {
     match error {
         TextFileReadError::NotUtf8 { size_bytes } => ContentScanOutcome::Read { size_bytes },
@@ -657,6 +760,7 @@ fn build_unsearched_content_outcome(error: TextFileReadError) -> ContentScanOutc
         TextFileReadError::NotFound
         | TextFileReadError::PermissionDenied
         | TextFileReadError::NotARegularFile
+        | TextFileReadError::CredentialFile
         | TextFileReadError::Io(_) => ContentScanOutcome::Unreadable,
     }
 }
@@ -781,7 +885,7 @@ pub(super) fn build_search_files_definition() -> ToolDefinition {
     ToolDefinition {
         name: "search_files",
         description: String::from(
-            "Find files under a directory whose name or content contains the query, ignoring case. Returns each matching file's absolute path and, for content matches, its first matching lines with their line numbers.",
+            "Find files under a directory whose name or content contains the query, ignoring case. Returns each matching file's absolute path and, for content matches, its first matching lines with their line numbers. Private key and credential files and folders, and Lys's settings file, are never searched or returned.",
         ),
         group: ToolGroup::Files,
         access: ToolAccess::Reads,
@@ -858,21 +962,35 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{
-        find_files, find_folded_match_char_index, find_search_stop, parse_search_files_filter,
-        FileMatch, FileSearch, SearchCompletion, SearchFilesError, SearchFilesFilter,
-        SearchFilesReport, SearchFilesTarget, SearchTally, MAX_QUERY_CHARS, MAX_RESULTS_LIMIT,
-        MAX_SCANNED_CONTENT_BYTES, MAX_SCANNED_ENTRY_COUNT, MAX_SEARCHED_FILE_SIZE_BYTES,
-        MAX_SNIPPETS_PER_FILE_LIMIT, MAX_SNIPPET_CHARS, SEARCH_FILES_TARGET_VALUES,
+        find_files_in_background, find_folded_match_char_index, find_search_stop,
+        parse_search_files_filter, FileMatch, FileSearch, SearchCompletion, SearchFilesError,
+        SearchFilesFilter, SearchFilesReport, SearchFilesTarget, SearchTally, MAX_QUERY_CHARS,
+        MAX_RESULTS_LIMIT, MAX_SCANNED_CONTENT_BYTES, MAX_SCANNED_ENTRY_COUNT,
+        MAX_SEARCHED_FILE_SIZE_BYTES, MAX_SNIPPETS_PER_FILE_LIMIT, MAX_SNIPPET_CHARS,
+        SEARCH_FILES_TARGET_VALUES,
     };
-    use crate::tools::test_directory::TestDirectory;
+    use crate::tools::{credential_files::CredentialFiles, test_directory::TestDirectory};
 
     /// Deserializes `filter` as Tauri does for the `filter` argument and finds
-    /// files through the `find_files` command, blocking until it completes.
+    /// files as the `find_files` command does, for a Lys home without a
+    /// settings file, blocking until the search completes.
     fn find_files_blocking(filter: Value) -> Result<SearchFilesReport, SearchFilesError> {
+        find_files_with(
+            filter,
+            CredentialFiles::load_for_test_without_settings_file(),
+        )
+    }
+
+    /// Deserializes `filter` and finds files as the `find_files` command does,
+    /// with `credential_files`, blocking until the search completes.
+    fn find_files_with(
+        filter: Value,
+        credential_files: CredentialFiles,
+    ) -> Result<SearchFilesReport, SearchFilesError> {
         let filter: SearchFilesFilter =
             serde_json::from_value(filter).expect("a filter that deserializes");
 
-        tauri::async_runtime::block_on(find_files(filter))
+        tauri::async_runtime::block_on(find_files_in_background(filter, credential_files))
     }
 
     /// Deserializes and parses `filter` without searching.
@@ -880,7 +998,10 @@ mod tests {
         let filter: SearchFilesFilter =
             serde_json::from_value(filter).expect("a filter that deserializes");
 
-        parse_search_files_filter(filter)
+        parse_search_files_filter(
+            filter,
+            CredentialFiles::load_for_test_without_settings_file(),
+        )
     }
 
     /// Returns the UTF-8 form of a test path.
@@ -995,6 +1116,27 @@ mod tests {
             parse_root(get_path_text(&file.join("child"))),
             Some(SearchFilesError::RootNotFound)
         );
+    }
+
+    #[test]
+    fn refuses_a_root_whose_real_path_is_inside_a_credential_folder() {
+        let directory = TestDirectory::create("filter-credential-root");
+        let keys = directory.create_subdirectory(".ssh/keys");
+        let link = directory.path().join("projects");
+        symlink(directory.path().join(".ssh"), &link).expect("link a credential folder");
+        let parse_root = |root: &Path| {
+            parse_filter(json!({ "root": get_path_text(root), "query": "a", "target": "name" }))
+                .err()
+        };
+
+        for root in [&directory.path().join(".ssh"), &keys, &link] {
+            assert_eq!(
+                parse_root(root),
+                Some(SearchFilesError::RootInCredentialFolder),
+                "{} is inside a credential folder",
+                root.display()
+            );
+        }
     }
 
     #[test]
@@ -1326,6 +1468,65 @@ mod tests {
     }
 
     #[test]
+    fn leaves_credential_files_and_folders_and_the_settings_file_out_of_the_walk() {
+        let directory = TestDirectory::create("search-credentials");
+        let hidden_match = directory.create_file(".hidden/todo.md", "todo");
+        let notes_match = directory.create_file("notes/todo.txt", "todo");
+        directory.create_file(".hidden/.gnupg/todo.txt", "todo");
+        directory.create_file(".ssh/todo.txt", "todo");
+        directory.create_file("app/.env", "todo");
+        directory.create_file("app/.env.production", "todo");
+        directory.create_file("certs/todo.pem", "todo");
+        directory.create_file("vault/todo.KDBX", "todo");
+        let settings_path = directory.create_file("lys/settings.json", "todo");
+        fs::hard_link(
+            &settings_path,
+            directory.path().join("notes/todo-settings.json"),
+        )
+        .expect("link the settings file");
+        let expected = [get_path_text(&hidden_match), get_path_text(&notes_match)];
+
+        for target in ["name", "content", "nameAndContent"] {
+            let report = find_files_with(
+                json!({
+                    "root": get_path_text(directory.path()),
+                    "query": "todo",
+                    "target": target
+                }),
+                CredentialFiles::load_for_test(settings_path.clone()),
+            )
+            .expect("a completed search");
+
+            assert_eq!(list_match_paths(&report), expected, "target {target}");
+            assert_eq!(report.completion, SearchCompletion::Complete);
+            assert_eq!(report.skipped_path_count, 0);
+        }
+    }
+
+    #[test]
+    fn leaves_credential_files_out_of_a_root_reached_through_a_link() {
+        let directory = TestDirectory::create("search-linked-root");
+        let real_root = directory.create_subdirectory("real");
+        directory.create_file("real/.netrc", "machine todo");
+        directory.create_file("real/id_rsa", "todo");
+        directory.create_file("real/todo.txt", "todo");
+        let linked_root = directory.path().join("linked");
+        symlink(&real_root, &linked_root).expect("link the root");
+
+        let report = find_files_blocking(json!({
+            "root": get_path_text(&linked_root),
+            "query": "todo",
+            "target": "nameAndContent"
+        }))
+        .expect("a completed search");
+
+        assert_eq!(
+            list_match_paths(&report),
+            [get_path_text(&linked_root.join("todo.txt"))]
+        );
+    }
+
+    #[test]
     fn ignores_a_fifo_without_waiting_for_a_writer() {
         let directory = TestDirectory::create("search-fifo");
         directory.create_fifo("todo-pipe");
@@ -1505,6 +1706,8 @@ mod tests {
             target: SearchFilesTarget::Content,
             max_results: 10,
             max_snippets_per_file: 3,
+            credential_files: CredentialFiles::load_for_test_without_settings_file(),
+            settings_file: None,
         };
         let find_stop = |scanned_entry_count: usize, scanned_content_bytes: u64| {
             let tally = SearchTally {
@@ -1580,6 +1783,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(SearchFilesError::EmptyQuery).expect("serialize"),
             json!({ "code": "emptyQuery" })
+        );
+        assert_eq!(
+            serde_json::to_value(SearchFilesError::RootInCredentialFolder).expect("serialize"),
+            json!({ "code": "rootInCredentialFolder" })
         );
         assert_eq!(
             serde_json::to_value(SearchFilesError::QueryTooLong {

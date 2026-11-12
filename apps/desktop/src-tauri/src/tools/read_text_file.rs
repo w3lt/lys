@@ -3,8 +3,10 @@
 use std::path::Path;
 
 use serde::Serialize;
+use tauri::State;
 
 use super::{
+    credential_files::CredentialFiles,
     definition::{
         ToolAccess, ToolArgumentDefinition, ToolArgumentType, ToolDefinition, ToolGroup, ToolRunner,
     },
@@ -45,6 +47,10 @@ pub enum ReadTextFileError {
     /// The path names a directory, FIFO, socket, or device instead of a
     /// regular file.
     NotAFile,
+    /// The file's real path has a private key or credential file or folder
+    /// name as a part, or the file is Lys's settings file, so none of it is
+    /// read.
+    CredentialFile,
     /// The file is larger than the read limit, so none of it is returned.
     FileTooLarge {
         /// Smallest size in bytes the file was observed to have.
@@ -68,19 +74,37 @@ pub enum ReadTextFileError {
 ///
 /// The renderer invokes this command as `read_text_file` with the argument
 /// object `{ path }`. Any absolute path that the desktop process can read is
-/// accepted: deciding whether Lys may read a path belongs to the caller that
-/// runs tool requests. Symbolic links are followed and the file is never
+/// accepted, except a file that `credential_files` refuses by its real path:
+/// whether Lys may read any other path is decided by the caller that runs
+/// tool requests. Symbolic links are followed and the file is never
 /// modified. The read runs on Tauri's blocking-task pool so the window stays
 /// responsive; it cannot be cancelled and is bounded by the 1 MiB read limit.
 ///
 /// # Errors
 ///
+/// Rejects as [`read_text_file_in_background`] does.
+pub async fn read_text_file(
+    path: String,
+    credential_files: State<'_, CredentialFiles>,
+) -> Result<String, ReadTextFileError> {
+    read_text_file_in_background(path, credential_files.inner().clone()).await
+}
+
+/// Reads the text file at `path` on Tauri's blocking-task pool.
+///
+/// # Errors
+///
 /// Rejects with a [`ReadTextFileError`] when the path is relative, nothing
-/// exists there, access is denied, it is not a regular file, the file exceeds
-/// the read limit or is not UTF-8, or the read fails.
-pub async fn read_text_file(path: String) -> Result<String, ReadTextFileError> {
-    let read_task =
-        tauri::async_runtime::spawn_blocking(move || read_text_file_at(Path::new(&path)));
+/// exists there, access is denied, it is not a regular file, it is a
+/// credential file or Lys's settings file, the file exceeds the read limit or
+/// is not UTF-8, or the read fails.
+async fn read_text_file_in_background(
+    path: String,
+    credential_files: CredentialFiles,
+) -> Result<String, ReadTextFileError> {
+    let read_task = tauri::async_runtime::spawn_blocking(move || {
+        read_text_file_at(Path::new(&path), &credential_files)
+    });
 
     match read_task.await {
         Ok(read_result) => read_result,
@@ -96,12 +120,16 @@ pub async fn read_text_file(path: String) -> Result<String, ReadTextFileError> {
 ///
 /// Returns the [`ReadTextFileError`] that describes why the file cannot be
 /// returned as text.
-fn read_text_file_at(path: &Path) -> Result<String, ReadTextFileError> {
+fn read_text_file_at(
+    path: &Path,
+    credential_files: &CredentialFiles,
+) -> Result<String, ReadTextFileError> {
     if !path.is_absolute() {
         return Err(ReadTextFileError::PathNotAbsolute);
     }
 
-    read_regular_text_file(path, MAX_TEXT_FILE_SIZE_BYTES).map_err(build_read_text_file_error)
+    read_regular_text_file(path, MAX_TEXT_FILE_SIZE_BYTES, credential_files)
+        .map_err(build_read_text_file_error)
 }
 
 /// Builds the command failure that reports a failed text-file read.
@@ -110,6 +138,7 @@ fn build_read_text_file_error(error: TextFileReadError) -> ReadTextFileError {
         TextFileReadError::NotFound => ReadTextFileError::FileNotFound,
         TextFileReadError::PermissionDenied => ReadTextFileError::PermissionDenied,
         TextFileReadError::NotARegularFile => ReadTextFileError::NotAFile,
+        TextFileReadError::CredentialFile => ReadTextFileError::CredentialFile,
         TextFileReadError::TooLarge { size_bytes } => ReadTextFileError::FileTooLarge {
             size_bytes,
             max_size_bytes: MAX_TEXT_FILE_SIZE_BYTES,
@@ -138,7 +167,7 @@ pub(super) fn build_read_text_file_definition() -> ToolDefinition {
     ToolDefinition {
         name: "read_text_file",
         description: format!(
-            "Read one UTF-8 text file and return its complete text. A file over {max_size_mebibytes} MiB or one that is not UTF-8 text is refused, never truncated."
+            "Read one UTF-8 text file and return its complete text. A file over {max_size_mebibytes} MiB or one that is not UTF-8 text is refused, never truncated. Private key and credential files, and Lys's settings file, are refused, wherever a link leads."
         ),
         group: ToolGroup::Files,
         access: ToolAccess::Reads,
@@ -154,14 +183,30 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        build_read_text_file_error, read_text_file, ReadTextFileError, MAX_TEXT_FILE_SIZE_BYTES,
+        build_read_text_file_error, read_text_file_in_background, ReadTextFileError,
+        MAX_TEXT_FILE_SIZE_BYTES,
     };
-    use crate::tools::{test_directory::TestDirectory, text_file::TextFileReadError};
+    use crate::tools::{
+        credential_files::CredentialFiles, test_directory::TestDirectory,
+        text_file::TextFileReadError,
+    };
 
-    /// Reads the file at `path` through the `read_text_file` command, blocking
-    /// until the command completes.
+    /// Reads the file at `path` as the `read_text_file` command does, for a
+    /// Lys home without a settings file, blocking until the read completes.
     fn read_text_file_blocking(path: &str) -> Result<String, ReadTextFileError> {
-        tauri::async_runtime::block_on(read_text_file(path.to_owned()))
+        read_text_file_with(path, CredentialFiles::load_for_test_without_settings_file())
+    }
+
+    /// Reads the file at `path` as the `read_text_file` command does, with
+    /// `credential_files`, blocking until the read completes.
+    fn read_text_file_with(
+        path: &str,
+        credential_files: CredentialFiles,
+    ) -> Result<String, ReadTextFileError> {
+        tauri::async_runtime::block_on(read_text_file_in_background(
+            path.to_owned(),
+            credential_files,
+        ))
     }
 
     /// Returns the UTF-8 form of a test path.
@@ -190,6 +235,73 @@ mod tests {
         assert_eq!(
             read_text_file_blocking(get_path_text(&link)),
             Ok(String::from("linked text"))
+        );
+    }
+
+    #[test]
+    fn refuses_a_file_with_a_credential_name() {
+        let directory = TestDirectory::create("read-credential-name");
+        let file = directory.create_file("app/.env", "TOKEN=secret\n");
+
+        assert_eq!(
+            read_text_file_blocking(get_path_text(&file)),
+            Err(ReadTextFileError::CredentialFile)
+        );
+    }
+
+    #[test]
+    fn refuses_a_link_that_resolves_into_a_credential_folder() {
+        let directory = TestDirectory::create("read-link-into-ssh");
+        let target = directory.create_file(".ssh/config", "Host example\n");
+        let link = directory.path().join("notes.txt");
+        symlink(&target, &link).expect("create the test symlink");
+
+        assert_eq!(
+            read_text_file_blocking(get_path_text(&link)),
+            Err(ReadTextFileError::CredentialFile)
+        );
+    }
+
+    #[test]
+    fn refuses_a_file_reached_through_a_linked_credential_folder() {
+        let directory = TestDirectory::create("read-linked-folder");
+        directory.create_file(".aws/config", "[default]\n");
+        let folder_link = directory.path().join("settings");
+        symlink(directory.path().join(".aws"), &folder_link).expect("create the test symlink");
+
+        assert_eq!(
+            read_text_file_blocking(get_path_text(&folder_link.join("config"))),
+            Err(ReadTextFileError::CredentialFile)
+        );
+    }
+
+    #[test]
+    fn refuses_the_settings_file_and_a_link_to_it() {
+        let directory = TestDirectory::create("read-settings-file");
+        let settings_path = directory.create_file("lys/settings.json", "{}\n");
+        let link = directory.path().join("notes.json");
+        symlink(&settings_path, &link).expect("create the test symlink");
+
+        for path in [&settings_path, &link] {
+            assert_eq!(
+                read_text_file_with(
+                    get_path_text(path),
+                    CredentialFiles::load_for_test(settings_path.clone())
+                ),
+                Err(ReadTextFileError::CredentialFile)
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_a_credential_file_before_its_size_is_checked() {
+        let directory = TestDirectory::create("read-large-key");
+        let content = "a".repeat(MAX_TEXT_FILE_SIZE_BYTES as usize + 1);
+        let file = directory.create_file("server.pem", content);
+
+        assert_eq!(
+            read_text_file_blocking(get_path_text(&file)),
+            Err(ReadTextFileError::CredentialFile)
         );
     }
 
@@ -309,6 +421,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(ReadTextFileError::PathNotAbsolute).expect("serialize"),
             json!({ "code": "pathNotAbsolute" })
+        );
+        assert_eq!(
+            serde_json::to_value(ReadTextFileError::CredentialFile).expect("serialize"),
+            json!({ "code": "credentialFile" })
         );
         assert_eq!(
             serde_json::to_value(ReadTextFileError::FileTooLarge {

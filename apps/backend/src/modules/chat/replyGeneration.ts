@@ -79,7 +79,8 @@ export type StartReplyGenerationOptions = Readonly<{
  * (resolving at once), because a follower or stop request can race the
  * settlement. Tool calls the reply task sends to run or shows for approval
  * are listed until they are answered, the reply is stopped or disposed, or
- * the reply task settles; there is no timer.
+ * the reply task settles; a prompt also ends when it reaches its time limit,
+ * and a call sent to run has no timer.
  * Concurrency model: single-owner, on the backend's event loop.
  */
 export default class ReplyGeneration implements AsyncDisposable {

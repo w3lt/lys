@@ -383,13 +383,16 @@ For each call, in order:
    their shape for an MCP tool, and a backend tool's `parseToolCall` checks
    them for what it can run; a call either refuses is stored as failed.
 3. `decideToolCall` (`src/modules/toolApproval/toolCallPolicy.ts`) decides
-   the call by fixed rules, whatever the tool: `deny`, `require-approval`,
-   or `allow`, each but `allow` with the rule as its reason.
+   the call by the rules, whatever the tool: `deny`, `require-approval`, or
+   `allow`, each but `allow` with the rule as its reason.
 4. A call the policy requires approval of passes the round's
    [approval gate](#tool-approval), which asks the person even for a tool
    saved as Just run. An allowed call of a backend tool that runs without
    approval starts at once; every other allowed call passes the gate, where
    the person's approval mode decides.
+5. A call the person allows is stored as running, then decided again with
+   the approved folders read at that moment (spec §4): one the rules now deny
+   is stored as failed with the denial and never runs.
 
 The policy reads a `ToolCallRequest` that the gateway builds from what the
 backend trusts, never from what the model claims, in the attribute groups of
@@ -402,11 +405,18 @@ approval is never asked of it.
 A denied call is stored as failed with a sentence the model reads
 (`formatToolCallDenial`), naming the rule it broke and telling the model not
 to reach the target another way: it never runs, and the person is never
-asked, even for a tool saved as Just run. The rules are code and have no
-settings. Their one input from the machine, the settings file path, comes
-from the configuration: `app.ts` hands it to the chat route, every turn
-carries it, and `find_tools` hands it to Armitage's search turn, so
-Armitage's own `search_tools` and `recommend_tool` calls are decided too.
+asked, even for a tool saved as Just run. The rules are code; their one
+setting is the list of folders the person lets tools use. `app.ts` builds a
+`ToolCallPolicy` from the configuration: the settings file path, the home
+folder, and a reader of `tools.approvedFolders` (`readApprovedFolders`,
+`src/infrastructure/settings/approvedFoldersFile.ts`). It hands it to the
+chat route, every turn carries it, and `find_tools` hands it to Armitage's
+search turn, so Armitage's own `search_tools` and `recommend_tool` calls are
+decided too. Each round reads the folders once into the `ToolCallRules` the
+round's calls are decided by (`readToolCallRules`), and the re-check of an
+allowed call reads them again. A missing file or list leaves the folder rule
+off; a file that cannot be read approves no folder, so every call naming a
+path is denied.
 
 The policy reads every text of the call's arguments: the argument names,
 every string value at any depth, and the keys of nested objects; numbers,
@@ -428,6 +438,17 @@ asked over every text before the next:
   file holds the provider and Tavily API keys and the email password. A
   `file:` URL is read by its decoded path; a URL of any other scheme with a
   host names a file on another machine and is left to the next rule.
+- **Outside approved folders.** Only while folders are listed. A text, or
+  one line of it, names a path when it starts with `/` but not `//`, with
+  `~` alone or before `/`, or with `.` or `..` alone or before `/`, or is a
+  `file:` URL, decoded with `fileURLToPath`. `~` names the home folder, and
+  a relative path is resolved against it, because Lys starts MCP servers
+  there. The path is resolved by text with `path.resolve`, and the call is
+  denied when it is not a listed folder or below one by whole parts, so
+  `/work/app-old` is outside `/work/app`. Letter case counts. A `file:` URL
+  with a host other than `localhost`, or with an escaped `/`, names no path on this machine and is
+  outside. A path inside a longer text, such as `cat /etc/hosts`, and a
+  relative name without a leading `.`, such as `notes/a.txt`, are not read.
 - **Blocked address.** A text without whitespace that is a URL with a host,
   or a host without a scheme, is denied when the host is
   `localhost`, a name under `.localhost`, or an IP address in a range Lys
@@ -452,9 +473,11 @@ the names it reaches, and `read_page` checks every resolved address when it
 runs. They follow no symbolic link and read no command, and a text with
 whitespace, such as a sentence or a shell command, is never read as an
 address, so a tool that runs commands can still reach a credential file or a
-local address. The desktop's [file tools](/architecture/host/#file-tools)
-check the real path of every file they read or list against the same list, so
-a link to a key or a search of a folder that holds keys reaches none. A
+local address, or a path outside the approved folders. The desktop's
+[file tools](/architecture/host/#file-tools) check the real path of every
+file they read or list against the same list and the approved folders, so a
+link to a key, a search of a folder that holds keys, or a link out of an
+approved folder reaches none. A
 sentence that holds a credential path, such as a web search query, is denied
 like a path.
 

@@ -147,8 +147,8 @@ the same transaction.
 ## Settings ownership
 
 The settings JSON is a separate host-managed artifact. The backend reads only
-the Tavily API key, the Just run list (`tools.justRun`), and the `mcp` group
-from it, and never writes it. The desktop reaches it through Tauri commands.
+the Tavily API key, the Just run list (`tools.justRun`), the approved folders
+(`tools.approvedFolders`), and the `mcp` group from it, and never writes it. The desktop reaches it through Tauri commands.
 
 Generation, load configuration, tool approval, and runtime startup switch
 edits are saved automatically. Each save reads the document already on disk

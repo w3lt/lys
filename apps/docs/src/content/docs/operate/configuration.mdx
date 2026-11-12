@@ -58,6 +58,15 @@ back on Ask me from the next round; the Tools pane shows the change the next
 time Lys starts, and a save from the pane before then writes back the names it
 holds. If the backend cannot read the file, every tool call asks.
 
+The same group lists, in `approvedFolders`, the folders tools may use, which
+you add in Settings → Tools under "folders tools may use". With none listed,
+tool calls may name any path. Once you list one, a call that names a path
+outside every listed folder is denied without asking you, and the desktop's
+file tools refuse a file outside them, wherever a link leads. The backend and
+the file tools read the list at each round of calls, so a hand edit applies
+at once. If the file exists but cannot be read, no folder is approved. See
+[Approved folders](/reference/configuration/#approved-folders).
+
 The `location` group holds the city, region, and country you type in Settings
 → Tools, each optional, which the `get_location` tool gives a model when it
 calls the tool. Lys never detects your location. The tool reads the group
@@ -72,9 +81,9 @@ the committed default file, which is never copied into `settings.json`.
 
 The desktop reads the file when Lys starts, so a hand edit of `runtime`,
 `model`, `generation`, or `loadConfiguration` takes effect the next time Lys
-starts. The backend reads `tools.justRun` and the Tavily API key from the file
-itself, so a hand edit of either applies without a restart, as the `tools`
-paragraph above and [Tavily API key](#tavily-api-key) describe. It reads `mcp`
+starts. The backend reads `tools.justRun`, `tools.approvedFolders`, and the
+Tavily API key from the file itself, so a hand edit of any of them applies
+without a restart, as the `tools` paragraphs above and [Tavily API key](#tavily-api-key) describe. It reads `mcp`
 when it starts and when the MCP pane saves, and `email` with the password in
 `secrets` for the email server; see [MCP servers](#mcp-servers) and
 [Email account](#email-account). A save from a

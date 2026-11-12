@@ -64,10 +64,10 @@ Terms that mean something specific inside Lys.
   Armitage which of them fit a task, then each tool Armitage finds, from the
   reply's next round. Finding a tool never allows its calls; each still
   passes the tool call policy and the approval gate.
-- **Tool call policy**: the fixed rules the backend asks about every tool
-  call before the approval gate, whatever the tool: a call that names a
-  private key or credential file, or a URL or host of this machine or a
-  private network, is denied, stored as failed with a sentence the model
+- **Tool call policy**: the rules the backend asks about every tool call
+  before the approval gate, whatever the tool: a call that names a private
+  key or credential file, a path outside the approved folders once any is
+  listed, or a URL or host of this machine or a private network, is denied, stored as failed with a sentence the model
   reads, and never runs or asks the person, even on Just run. A call of an
   MCP tool its server marks as destructive requires approval: it asks the
   person even on Just run.

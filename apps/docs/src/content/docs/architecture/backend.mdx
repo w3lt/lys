@@ -490,8 +490,9 @@ Every call the gateway stores gets a decision record, a row of
 [`tool_call_decisions`](/reference/schema/#tool_call_decisions) written in
 the transaction that stores the call. It names the conversation, its agent,
 and the tool, and holds the policy's effect and reason when the call arrived,
-none when step 1 or 2 failed the call, and the same for a call step 5 denies; the approval mode the gate applied, `just-run` or
-`ask-me`, none when the call never reached the gate; the answer that moved a
+none when step 1 or 2 failed the call, and for a call step 5 denies, still
+the decision made when it arrived; the approval mode the gate applied,
+`just-run` or `ask-me`, none when the call never reached the gate; the answer that moved a
 waiting call on, `allowed`, `declined`, or `showFailed`, or `expired` when
 nobody answered its prompt in time, stored in the transaction that changes the
 call; and the call's status as its outcome,

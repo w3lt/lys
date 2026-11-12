@@ -208,6 +208,12 @@ describe("isToolSettingsEqual with approved folders", () => {
         approvedFolderPaths: ["/srv/shared", "/Users/ada"]
       })
     ).toBe(false)
+    expect(
+      isToolSettingsEqual(
+        { ...tools, approvedFolderPaths: ["/srv/shared"] },
+        tools
+      )
+    ).toBe(false)
   })
 })
 

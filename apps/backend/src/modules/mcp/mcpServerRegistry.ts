@@ -76,6 +76,11 @@ export type TurnMcpTool = Readonly<{
   /** Definition offered to the model. */
   definition: McpToolDefinition
   /**
+   * Whether the tool's server marked it as destructive when the turn found
+   * it; the tool call policy then asks the person before each call.
+   */
+  isDestructive: boolean
+  /**
    * Runs one call on the tool's server as it is connected when the call
    * runs.
    *
@@ -697,6 +702,7 @@ export default class McpServerRegistry {
           status: "found",
           tool: Object.freeze({
             definition,
+            isDestructive: lookup.isDestructive,
             sendToolCall: (
               callArguments: McpToolCallArguments,
               abortSignal: AbortSignal

@@ -631,17 +631,21 @@ const ECHO_MOTH_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
  * Builds the MCP echo tool offered for one case.
  *
  * @param sendToolCall - Runs each call; answers `echo: <text>` by default.
+ * @param isDestructive - Whether its server marks it as destructive; false
+ * by default.
  * @returns The tool and a spy over its calls.
  */
 function createMcpEchoTool(
   sendToolCall: TurnMcpTool["sendToolCall"] = async (callArguments) => ({
     status: "succeeded",
     content: `echo: ${JSON.stringify(callArguments)}`
-  })
+  }),
+  isDestructive = false
 ) {
   const call = vi.fn<TurnMcpTool["sendToolCall"]>(sendToolCall)
   const tool: TurnMcpTool = Object.freeze({
     definition: MCP_ECHO_DEFINITION,
+    isDestructive,
     sendToolCall: call
   })
   return { tool, call }
@@ -3642,6 +3646,76 @@ describe("Agent", () => {
         expect.objectContaining({
           status: "failed",
           result: BLOCKED_ADDRESS_DENIAL
+        })
+      ])
+    })
+
+    it("asks the person before an MCP tool marked destructive runs, even on Just run, and runs the call once they allow it", async () => {
+      const { tool, call } = createMcpEchoTool(undefined, true)
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND),
+        mcpTools: [tool],
+        justRunToolNames: ["mcp__files__echo"],
+        sendToolApprovalPrompt
+      })
+
+      expect(sendToolApprovalPrompt.mock.calls).toEqual([
+        [expect.objectContaining({ toolName: "mcp__files__echo" })]
+      ])
+      expect(call).toHaveBeenCalledOnce()
+      expect(run.events.slice(0, 2)).toEqual([
+        buildReplyPartEventMatcher({ status: "awaiting-approval" }),
+        buildReplyPartEventMatcher({ status: "running" })
+      ])
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          status: "succeeded",
+          result: 'echo: {"text":"moth"}'
+        })
+      ])
+    })
+
+    it("never calls the server for a call of an MCP tool marked destructive that the person rejects on Just run", async () => {
+      const { tool, call } = createMcpEchoTool(undefined, true)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND),
+        mcpTools: [tool],
+        justRunToolNames: ["mcp__files__echo"],
+        sendToolApprovalPrompt: async () => DECLINED_APPROVAL
+      })
+
+      expect(call).not.toHaveBeenCalled()
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          status: "rejected",
+          result: DECLINED_APPROVAL.content
+        })
+      ])
+    })
+
+    it("denies a call of an MCP tool marked destructive that names a credential file, without asking the person", async () => {
+      const { tool, call } = createMcpEchoTool(undefined, true)
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          buildCallRound("mcp__files__echo", '{"text":"~/.ssh/id_rsa"}'),
+          FINISH_ROUND
+        ),
+        mcpTools: [tool],
+        justRunToolNames: [],
+        sendToolApprovalPrompt
+      })
+
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+      expect(call).not.toHaveBeenCalled()
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          status: "failed",
+          result: CREDENTIAL_FILE_DENIAL
         })
       ])
     })

@@ -100,8 +100,43 @@ describe("McpToolCatalogBuilder", async () => {
         }
       ],
       skippedTools: [],
-      isToolListCut: false
+      isToolListCut: false,
+      destructiveToolNames: new Set()
     })
+  })
+
+  it.each([
+    ["marked destructive", { destructiveHint: true }, true],
+    [
+      "marked destructive and read-only",
+      { destructiveHint: true, readOnlyHint: true },
+      false
+    ],
+    ["marked not destructive", { destructiveHint: false }, false],
+    ["marked only as not read-only", { readOnlyHint: false }, false],
+    ["without annotations", undefined, false]
+  ])(
+    "names a listed tool %s as destructive only when its server says so: %s",
+    (_label, annotations, isDestructive) => {
+      const catalog = buildCatalog([
+        { ...buildTool("erase"), annotations },
+        buildTool("read")
+      ])
+
+      expect(catalog.destructiveToolNames).toEqual(
+        new Set(isDestructive ? ["mcp__notes__erase"] : [])
+      )
+    }
+  )
+
+  it("never names a skipped tool as destructive", () => {
+    const catalog = buildCatalog([
+      { ...buildTool("erase"), annotations: { destructiveHint: true } },
+      { ...buildTool("erase"), annotations: { destructiveHint: true } }
+    ])
+
+    expect(catalog.skippedTools).toHaveLength(1)
+    expect(catalog.destructiveToolNames).toEqual(new Set(["mcp__notes__erase"]))
   })
 
   it("keeps the server's order", () => {
@@ -652,7 +687,8 @@ describe("McpToolCatalogBuilder", async () => {
     expect(buildCatalog([])).toEqual({
       definitions: [],
       skippedTools: [],
-      isToolListCut: false
+      isToolListCut: false,
+      destructiveToolNames: new Set()
     })
   })
 })

@@ -53,8 +53,9 @@ const ENDED_TOOL_CALL_START: ToolCallStart = Object.freeze({ status: "ended" })
  * the person.
  *
  * @remarks The invariant is that a call goes on without the person only when
- * its tool's name was saved as Just run when the round's calls arrived, and
- * that no prompt is sent for a call that is not stored. The choices never
+ * its tool's name was saved as Just run when the round's calls arrived and
+ * the tool call policy does not require approval of it, and that no prompt
+ * is sent for a call that is not stored. The choices never
  * change after construction, so a change saved later applies from the next
  * round. Concurrency model: single-owner, on the backend's event loop, like
  * the reply's waits that the prompt sender borrows.
@@ -86,21 +87,26 @@ export default class ToolCallGate {
    * it and, when it may not go on without the person, shows it to them, in
    * one synchronous step.
    *
-   * @param toolCall - Checked call of an offered tool.
+   * @param toolCall - Checked call of an offered tool the policy did not
+   * deny.
+   * @param isApprovalRequired - Whether the policy requires the person's
+   * approval of the call, whatever they saved for its tool.
    * @param storeToolCall - Stores the call in the state given; borrowed for
    * this call.
    * @returns `allowed` once the call is stored as running, when its tool was
-   * saved as Just run; `prompted` with the person's answer once it is stored
-   * as awaiting approval and the prompt is sent; `ended` when the store
-   * refused the call, which sends no prompt.
+   * saved as Just run and approval is not required; `prompted` with the
+   * person's answer once it is stored as awaiting approval and the prompt is
+   * sent; `ended` when the store refused the call, which sends no prompt.
    * @remarks The call is stored before its prompt is sent, so a client that
    * sees the prompt can read the call it asks about.
    */
   public startToolCall(
     toolCall: ChatToolCall,
+    isApprovalRequired: boolean,
     storeToolCall: StoreStartedToolCall
   ): ToolCallStart {
-    const isAllowedAtOnce = this.#justRunToolNames.has(toolCall.toolName)
+    const isAllowedAtOnce =
+      !isApprovalRequired && this.#justRunToolNames.has(toolCall.toolName)
     if (!storeToolCall(isAllowedAtOnce ? "running" : "awaiting-approval"))
       return ENDED_TOOL_CALL_START
     if (isAllowedAtOnce) return ALLOWED_TOOL_CALL_START

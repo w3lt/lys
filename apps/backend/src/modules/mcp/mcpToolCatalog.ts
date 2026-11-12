@@ -36,6 +36,12 @@ export type McpToolCatalog = Readonly<{
   skippedTools: readonly SkippedMcpTool[]
   /** Whether the server has more tools than the backend reads. */
   isToolListCut: boolean
+  /**
+   * Model-facing names of the listed tools the server marks as destructive:
+   * its annotations say `destructiveHint: true` and not `readOnlyHint: true`.
+   * The tool call policy asks the person before each of their calls.
+   */
+  destructiveToolNames: ReadonlySet<string>
 }>
 
 /** One listed tool after the SDK's tool schema checked it. */
@@ -57,6 +63,8 @@ type McpToolEntry =
       status: "listed"
       /** Its validated definition. */
       definition: McpToolDefinition
+      /** Whether the server marks it as destructive. */
+      isDestructive: boolean
     }>
   | Readonly<{
       /** The tool is not listed. */
@@ -111,6 +119,8 @@ export default class McpToolCatalogBuilder {
   readonly #skippedTools: SkippedMcpTool[]
   /** Model-facing names of the tools listed so far. */
   readonly #listedNames: Set<string>
+  /** Model-facing names of the listed tools marked as destructive. */
+  readonly #destructiveToolNames: Set<string>
   /** Whether a tool was added after the catalog was full. */
   #isToolListCut: boolean
 
@@ -125,6 +135,7 @@ export default class McpToolCatalogBuilder {
     this.#definitions = []
     this.#skippedTools = []
     this.#listedNames = new Set()
+    this.#destructiveToolNames = new Set()
     this.#isToolListCut = false
   }
 
@@ -162,6 +173,8 @@ export default class McpToolCatalogBuilder {
    * name and the input schema are sent as the server wrote them, so a tool
    * is listed only when both are text a person can see: what the model
    * reads and what the approval prompt and Settings show are then the same.
+   * A listed tool the server marks as destructive is also named in the
+   * catalog's `destructiveToolNames`.
    */
   public addTool(rawTool: unknown): void {
     const toolCount = this.#definitions.length + this.#skippedTools.length
@@ -179,6 +192,8 @@ export default class McpToolCatalogBuilder {
     if (entry.status === "listed") {
       this.#definitions.push(entry.definition)
       this.#listedNames.add(entry.definition.name)
+      if (entry.isDestructive)
+        this.#destructiveToolNames.add(entry.definition.name)
     } else {
       this.#skippedTools.push(
         Object.freeze({
@@ -198,7 +213,8 @@ export default class McpToolCatalogBuilder {
     return Object.freeze({
       definitions: Object.freeze([...this.#definitions]),
       skippedTools: Object.freeze([...this.#skippedTools]),
-      isToolListCut: this.#isToolListCut
+      isToolListCut: this.#isToolListCut,
+      destructiveToolNames: new Set(this.#destructiveToolNames)
     })
   }
 }
@@ -290,7 +306,31 @@ function buildMcpToolEntry(
   })
   if (!parsed.success || parsed.data.runner !== "mcp")
     return buildSkippedEntry("unsupported-input-schema")
-  return Object.freeze({ status: "listed", definition: parsed.data })
+  return Object.freeze({
+    status: "listed",
+    definition: parsed.data,
+    isDestructive: isMarkedDestructive(tool)
+  })
+}
+
+/**
+ * Answers whether a server marks one of its tools as destructive.
+ *
+ * @param tool - Tool the server listed, after the SDK's schema checked it;
+ * still untrusted.
+ * @returns True only when its annotations say `destructiveHint: true` and do
+ * not say `readOnlyHint: true`. MCP reads a tool without the hint as
+ * destructive, but only a tool its server marks so counts here, so a server
+ * that sends no annotations keeps the person's choice of Just run.
+ * @remarks Annotations are the server's own claims. They only ever make Lys
+ * ask the person more, never less, so a false claim cannot let a call skip
+ * approval.
+ */
+function isMarkedDestructive(tool: Tool): boolean {
+  return (
+    tool.annotations?.readOnlyHint !== true &&
+    tool.annotations?.destructiveHint === true
+  )
 }
 
 /**

@@ -4,7 +4,8 @@ import {
   decideToolCall,
   formatToolCallDenial,
   type ToolCallDecision,
-  type ToolCallPolicy
+  type ToolCallPolicy,
+  type ToolCallRequest
 } from "../../../../src/modules/toolApproval/toolCallPolicy"
 
 /** Policy of a machine whose Lys home is `/home/ada/.lys`. */
@@ -13,13 +14,32 @@ const POLICY = Object.freeze({
 } satisfies ToolCallPolicy)
 
 /**
- * Builds the checked arguments of a call with one argument.
+ * Builds what the gateway knows about one call.
+ *
+ * @param callArguments - The call's checked arguments.
+ * @param isDestructive - Whether the tool's server marks it as destructive;
+ * false by default.
+ * @returns The request.
+ */
+function buildRequest(
+  callArguments: ChatToolCall["arguments"],
+  isDestructive = false
+): ToolCallRequest {
+  return Object.freeze({
+    action: Object.freeze({ isDestructive }),
+    resource: Object.freeze({ arguments: callArguments })
+  })
+}
+
+/**
+ * Builds what the gateway knows about a call of a tool not marked
+ * destructive, with one argument.
  *
  * @param value - The argument's value.
- * @returns Arguments holding `value` as `target`.
+ * @returns The request of a call holding `value` as `target`.
  */
-function buildArguments(value: string): ChatToolCall["arguments"] {
-  return Object.freeze({ target: value })
+function buildTargetRequest(value: string): ToolCallRequest {
+  return buildRequest(Object.freeze({ target: value }))
 }
 
 /** Decision for a call naming a private key or credential file. */
@@ -162,20 +182,22 @@ describe("decideToolCall", () => {
   it.each(Object.entries(CREDENTIAL_FILE_CASES))(
     "denies %s as a credential file",
     (_label, value) => {
-      expect(decideToolCall(buildArguments(value), POLICY)).toStrictEqual(
+      expect(decideToolCall(buildTargetRequest(value), POLICY)).toStrictEqual(
         DENIED_CREDENTIAL_FILE
       )
     }
   )
 
   it.each(Object.entries(ALLOWED_PATH_CASES))("allows %s", (_label, value) => {
-    expect(decideToolCall(buildArguments(value), POLICY)).toStrictEqual(ALLOWED)
+    expect(decideToolCall(buildTargetRequest(value), POLICY)).toStrictEqual(
+      ALLOWED
+    )
   })
 
   it.each(Object.entries(BLOCKED_ADDRESS_CASES))(
     "denies %s as a blocked address",
     (_label, value) => {
-      expect(decideToolCall(buildArguments(value), POLICY)).toStrictEqual(
+      expect(decideToolCall(buildTargetRequest(value), POLICY)).toStrictEqual(
         DENIED_BLOCKED_ADDRESS
       )
     }
@@ -184,7 +206,7 @@ describe("decideToolCall", () => {
   it.each(Object.entries(BLOCKED_HOST_FORM_CASES))(
     "denies %s as a blocked address",
     (_label, value) => {
-      expect(decideToolCall(buildArguments(value), POLICY)).toStrictEqual(
+      expect(decideToolCall(buildTargetRequest(value), POLICY)).toStrictEqual(
         DENIED_BLOCKED_ADDRESS
       )
     }
@@ -193,7 +215,7 @@ describe("decideToolCall", () => {
   it.each(Object.entries(ALLOWED_ADDRESS_CASES))(
     "allows %s",
     (_label, value) => {
-      expect(decideToolCall(buildArguments(value), POLICY)).toStrictEqual(
+      expect(decideToolCall(buildTargetRequest(value), POLICY)).toStrictEqual(
         ALLOWED
       )
     }
@@ -206,7 +228,7 @@ describe("decideToolCall", () => {
       })
     })
 
-    expect(decideToolCall(callArguments, POLICY)).toStrictEqual({
+    expect(decideToolCall(buildRequest(callArguments), POLICY)).toStrictEqual({
       effect: "deny",
       reason: "credential-file"
     })
@@ -217,7 +239,7 @@ describe("decideToolCall", () => {
       headers: Object.freeze({ "http://10.0.0.1/": true })
     })
 
-    expect(decideToolCall(callArguments, POLICY)).toStrictEqual({
+    expect(decideToolCall(buildRequest(callArguments), POLICY)).toStrictEqual({
       effect: "deny",
       reason: "blocked-address"
     })
@@ -225,7 +247,7 @@ describe("decideToolCall", () => {
 
   it("reads argument names too", () => {
     expect(
-      decideToolCall(Object.freeze({ id_rsa: "on" }), POLICY)
+      decideToolCall(buildRequest(Object.freeze({ id_rsa: "on" })), POLICY)
     ).toStrictEqual({ effect: "deny", reason: "credential-file" })
   })
 
@@ -236,13 +258,15 @@ describe("decideToolCall", () => {
       note: null
     })
 
-    expect(decideToolCall(callArguments, POLICY)).toStrictEqual({
+    expect(decideToolCall(buildRequest(callArguments), POLICY)).toStrictEqual({
       effect: "allow"
     })
   })
 
   it("allows a call without arguments", () => {
-    expect(decideToolCall(Object.freeze({}), POLICY)).toStrictEqual({
+    expect(
+      decideToolCall(buildRequest(Object.freeze({})), POLICY)
+    ).toStrictEqual({
       effect: "allow"
     })
   })
@@ -253,11 +277,32 @@ describe("decideToolCall", () => {
       path: "~/.ssh/id_rsa"
     })
 
-    expect(decideToolCall(callArguments, POLICY)).toStrictEqual({
+    expect(decideToolCall(buildRequest(callArguments), POLICY)).toStrictEqual({
       effect: "deny",
       reason: "credential-file"
     })
   })
+
+  it("requires approval of a call of a tool marked destructive", () => {
+    const request = buildRequest(Object.freeze({ path: "notes/old.md" }), true)
+
+    expect(decideToolCall(request, POLICY)).toStrictEqual({
+      effect: "require-approval",
+      reason: "destructive-tool"
+    })
+  })
+
+  it.each([
+    ["a credential file", "~/.ssh/id_rsa", DENIED_CREDENTIAL_FILE],
+    ["a blocked address", "http://127.0.0.1/", DENIED_BLOCKED_ADDRESS]
+  ])(
+    "denies a call of a tool marked destructive that names %s, rather than asking",
+    (_label, value, decision) => {
+      const request = buildRequest(Object.freeze({ target: value }), true)
+
+      expect(decideToolCall(request, POLICY)).toStrictEqual(decision)
+    }
+  )
 
   it("compares with the settings file of the policy it is given", () => {
     const policy = Object.freeze({
@@ -265,10 +310,10 @@ describe("decideToolCall", () => {
     } satisfies ToolCallPolicy)
 
     expect(
-      decideToolCall(buildArguments("/srv/lys/settings.json"), policy)
+      decideToolCall(buildTargetRequest("/srv/lys/settings.json"), policy)
     ).toStrictEqual({ effect: "deny", reason: "credential-file" })
     expect(
-      decideToolCall(buildArguments("~/.lys/settings.json"), policy)
+      decideToolCall(buildTargetRequest("~/.lys/settings.json"), policy)
     ).toStrictEqual({ effect: "allow" })
   })
 })

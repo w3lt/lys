@@ -57,7 +57,7 @@ describe("ToolCallGate", () => {
     )
     const storeToolCall = createStore(true)
 
-    expect(gate.startToolCall(PAGE_CALL, storeToolCall)).toEqual({
+    expect(gate.startToolCall(PAGE_CALL, false, storeToolCall)).toEqual({
       status: "allowed"
     })
     expect(storeToolCall.mock.calls).toEqual([["running"]])
@@ -71,7 +71,7 @@ describe("ToolCallGate", () => {
       return { status: "allowed" }
     })
 
-    const start = gate.startToolCall(READ_CALL, (status) => {
+    const start = gate.startToolCall(READ_CALL, false, (status) => {
       steps.push(`store ${status}`)
       return true
     })
@@ -79,6 +79,23 @@ describe("ToolCallGate", () => {
     expect(steps).toEqual(["store awaiting-approval", "prompt read_text_file"])
     expect(start.status).toBe("prompted")
     if (start.status === "prompted") await start.answer
+  })
+
+  it("stores a call of a tool on Just run as awaiting approval and prompts the person when the policy requires approval", async () => {
+    const sendToolApprovalPrompt = createPromptSender({ status: "allowed" })
+    const gate = new ToolCallGate(
+      new Set(["read_page"]),
+      sendToolApprovalPrompt
+    )
+    const storeToolCall = createStore(true)
+
+    const start = gate.startToolCall(PAGE_CALL, true, storeToolCall)
+
+    expect(storeToolCall.mock.calls).toEqual([["awaiting-approval"]])
+    expect(sendToolApprovalPrompt.mock.calls).toEqual([[PAGE_CALL]])
+    expect(start.status).toBe("prompted")
+    if (start.status === "prompted")
+      expect(await start.answer).toEqual({ status: "allowed" })
   })
 
   it.each<[string, ChatToolApprovalAnswer | undefined]>([
@@ -90,7 +107,7 @@ describe("ToolCallGate", () => {
     async (_label, answer) => {
       const gate = new ToolCallGate(new Set(), createPromptSender(answer))
 
-      const start = gate.startToolCall(READ_CALL, createStore(true))
+      const start = gate.startToolCall(READ_CALL, false, createStore(true))
 
       expect(start.status).toBe("prompted")
       if (start.status === "prompted")
@@ -110,7 +127,7 @@ describe("ToolCallGate", () => {
         sendToolApprovalPrompt
       )
 
-      expect(gate.startToolCall(toolCall, createStore(false))).toEqual({
+      expect(gate.startToolCall(toolCall, false, createStore(false))).toEqual({
         status: "ended"
       })
       expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
@@ -126,7 +143,7 @@ describe("ToolCallGate", () => {
     justRunToolNames.add("read_text_file")
     const storeToolCall = createStore(true)
 
-    gate.startToolCall(READ_CALL, storeToolCall)
+    gate.startToolCall(READ_CALL, false, storeToolCall)
 
     expect(storeToolCall.mock.calls).toEqual([["awaiting-approval"]])
   })

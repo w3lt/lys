@@ -83,6 +83,7 @@ const MCP_DEFINITION = parseMcpToolDefinition({
 /** MCP tool of the cases. */
 const MCP_TOOL: TurnMcpTool = Object.freeze({
   definition: MCP_DEFINITION,
+  isDestructive: false,
   sendToolCall: async () => ({ status: "succeeded" as const, content: "echo" })
 })
 

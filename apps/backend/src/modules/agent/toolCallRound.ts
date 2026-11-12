@@ -23,7 +23,8 @@ import {
   decideToolCall,
   formatToolCallDenial,
   type ToolCallDenialReason,
-  type ToolCallPolicy
+  type ToolCallPolicy,
+  type ToolCallRequest
 } from "../toolApproval/toolCallPolicy"
 import type ReplyPartSequence from "./replyPartSequence"
 import type {
@@ -415,24 +416,25 @@ export function buildDefinedToolOffer(
  * than Stop.
  * @remarks Each call gets a new UUIDv7, which is its part's identity. Calls
  * of tools the turn does not offer, named or not, and calls whose arguments
- * do not match are stored as failed with the message the model reads;
- * nobody is asked about them, and none of them runs. Every other call is
- * decided by the fixed tool call policy first: a denied call is stored as
- * failed with the denial the model reads, never runs, and nobody is asked
- * about it, whatever the person saved for the tool. Of the allowed calls, a
- * call of a backend tool that runs without approval is stored as running at
- * once. Every other call passes the round's gate, created once for a round
- * that has a call of a tool that may need it, so the saved choices are read
- * at most once per round and not at all for a round whose calls all run
- * without approval or name no offered tool. The calls' parts, the gate's
- * prompts, each after the part of the call it asks about, and the run
- * requests of calls allowed at once are sent before the first wait, in the
- * model's order, because each call's handling runs synchronously up to its
- * first send. Nothing runs before its call is allowed. Every result the
- * model reads is stored with its call first; the result of a tool that does
- * more than read this machine, a network or MCP tool, is cleaned of
- * invisible characters before that, whichever side answered and however the
- * call ended.
+ * do not match are stored as failed with the message the model reads; nobody
+ * is asked about them, and none of them runs. Every other call is decided by
+ * the fixed tool call policy first: a denied call is stored as failed with
+ * the denial the model reads, never runs, and nobody is asked about it,
+ * whatever the person saved for the tool. A call the policy requires approval
+ * of passes the round's gate, which asks the person even when they saved its
+ * tool as Just run. Of the allowed calls, a call of a backend tool that runs
+ * without approval is stored as running at once. Every other call passes the
+ * round's gate, created once for a round that has a call of a tool that may
+ * need it, so the saved choices are read at most once per round and not at
+ * all for a round whose calls all run without approval or name no offered
+ * tool. The calls' parts, the gate's prompts, each after the part of the call
+ * it asks about, and the run requests of calls allowed at once are sent
+ * before the first wait, in the model's order, because each call's handling
+ * runs synchronously up to its first send. Nothing runs before its call is
+ * allowed. Every result the model reads is stored with its call first; the
+ * result of a tool that does more than read this machine, a network or MCP
+ * tool, is cleaned of invisible characters before that, whichever side
+ * answered and however the call ended.
  */
 export async function handleToolCallRound(
   round: ToolCallRound,
@@ -750,27 +752,53 @@ function startUnpromptedToolCall(
  * @param handling - The policy, the round's gate and index, and the reply's
  * part sequence.
  * @returns `denied` with the denial the model reads, once the call is
- * stored as failed; otherwise as {@link startUnpromptedToolCall} returns
- * for a backend tool that runs without approval, and as
- * {@link startGatedToolCall} returns for any other tool. `ended` when the
- * reply refused to store the call.
+ * stored as failed. For a call the policy requires approval of, as
+ * {@link startGatedToolCall} returns when the person is always asked. For an
+ * allowed call, as {@link startUnpromptedToolCall} returns for a backend
+ * tool that runs without approval, and as {@link startGatedToolCall} returns
+ * for any other tool. `ended` when the reply refused to store the call.
  * @throws As {@link startGatedToolCall} throws.
  * @remarks A denied call never reaches the gate, so it never prompts the
- * person, even for a tool they saved as Just run.
+ * person, even for a tool they saved as Just run. Only an MCP tool can be
+ * marked destructive, so a call the policy requires approval of always names
+ * a tool that passes the gate, and its round has one.
  */
 function startToolCall(
   toolCall: CheckedToolCall,
   handling: ToolCallStartHandling
 ): StartedToolCall {
   const decision = decideToolCall(
-    toolCall.checkedCall.arguments,
+    buildToolCallRequest(toolCall),
     handling.toolCallPolicy
   )
-  if (decision.effect === "deny")
-    return denyToolCall(toolCall, decision.reason, handling)
-  return runsWithoutApproval(toolCall.tool)
-    ? startUnpromptedToolCall(toolCall, handling)
-    : startGatedToolCall(toolCall, handling)
+  switch (decision.effect) {
+    case "deny":
+      return denyToolCall(toolCall, decision.reason, handling)
+    case "require-approval":
+      return startGatedToolCall(toolCall, true, handling)
+    case "allow":
+      return runsWithoutApproval(toolCall.tool)
+        ? startUnpromptedToolCall(toolCall, handling)
+        : startGatedToolCall(toolCall, false, handling)
+  }
+}
+
+/**
+ * Builds what the policy knows about one checked call from what the backend
+ * trusts: the offered tool and the checked arguments.
+ *
+ * @param toolCall - Checked call.
+ * @returns The request: destructive only for an MCP tool its server marks
+ * so.
+ */
+function buildToolCallRequest(toolCall: CheckedToolCall): ToolCallRequest {
+  const { tool } = toolCall
+  return Object.freeze({
+    action: Object.freeze({
+      isDestructive: tool.runner === "mcp" && tool.mcpTool.isDestructive
+    }),
+    resource: Object.freeze({ arguments: toolCall.checkedCall.arguments })
+  })
 }
 
 /**
@@ -803,6 +831,8 @@ function denyToolCall(
  * step.
  *
  * @param toolCall - Checked call.
+ * @param isApprovalRequired - Whether the policy requires the person's
+ * approval, so they are asked even when they saved the tool as Just run.
  * @param handling - The round's gate and index, and the reply's part
  * sequence.
  * @returns `allowed` once the call is stored as running; `waiting` with the
@@ -817,12 +847,15 @@ function denyToolCall(
  */
 function startGatedToolCall(
   toolCall: CheckedToolCall,
+  isApprovalRequired: boolean,
   handling: GatedToolCallStartHandling
 ): StartedToolCall {
   if (handling.gate === undefined)
     throw new Error("The round has no approval gate for a call that needs one")
-  const start = handling.gate.startToolCall(toolCall.checkedCall, (status) =>
-    createStartedToolCall(toolCall, status, handling)
+  const start = handling.gate.startToolCall(
+    toolCall.checkedCall,
+    isApprovalRequired,
+    (status) => createStartedToolCall(toolCall, status, handling)
   )
   switch (start.status) {
     case "allowed":

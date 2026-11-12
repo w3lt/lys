@@ -360,8 +360,12 @@ describe("createSingletonServices", () => {
       arguments: { query: "lys" }
     }
 
-    expect(gate.startToolCall(pageCall, () => true).status).toBe("allowed")
-    expect(gate.startToolCall(searchCall, () => true).status).toBe("prompted")
+    expect(gate.startToolCall(pageCall, false, () => true).status).toBe(
+      "allowed"
+    )
+    expect(gate.startToolCall(searchCall, false, () => true).status).toBe(
+      "prompted"
+    )
     expect(sendToolApprovalPrompt.mock.calls).toEqual([[searchCall]])
   })
 

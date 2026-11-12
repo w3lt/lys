@@ -50,6 +50,8 @@ export type McpSessionToolLookup =
       status: "found"
       /** The tool's definition. */
       definition: McpToolDefinition
+      /** Whether the server marks the tool as destructive. */
+      isDestructive: boolean
     }>
   | Readonly<{
       /** The server is connecting or failed. */
@@ -238,15 +240,20 @@ export default class McpServerSession {
    * Finds one listed tool by its model-facing name.
    *
    * @param toolName - Model-facing name, such as `mcp__files__read`.
-   * @returns `found` with its definition, `not-connected` unless the server
-   * is connected, or `unknown`.
+   * @returns `found` with its definition and whether the server marks it as
+   * destructive, `not-connected` unless the server is connected, or
+   * `unknown`.
    */
   public findTool(toolName: string): McpSessionToolLookup {
     if (this.#state.status !== "connected") return NOT_CONNECTED_LOOKUP
     const definition = this.#state.toolsByName.get(toolName)
     return definition === undefined
       ? UNKNOWN_TOOL_LOOKUP
-      : Object.freeze({ status: "found", definition })
+      : Object.freeze({
+          status: "found",
+          definition,
+          isDestructive: this.#state.catalog.destructiveToolNames.has(toolName)
+        })
   }
 
   /**

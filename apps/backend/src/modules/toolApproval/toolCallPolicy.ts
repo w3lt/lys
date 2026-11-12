@@ -20,19 +20,56 @@ export type ToolCallPolicy = Readonly<{
   settingsFilePath: string
 }>
 
+/**
+ * What the policy knows about one call: the attribute groups of the tool
+ * authorization spec that its rules read, assembled by the gateway from what
+ * the backend trusts, never from what the model claims.
+ *
+ * @remarks No rule reads an attribute of the subject (the agent) or the
+ * environment (the conversation), so the request has none; a rule that needs
+ * one adds it.
+ */
+export type ToolCallRequest = Readonly<{
+  /** What the call does: attributes of the tool it names. */
+  action: Readonly<{
+    /**
+     * Whether the tool's MCP server marks it as one that may destroy data;
+     * false for every tool of Lys's own and for an MCP tool its server does
+     * not mark so.
+     */
+    isDestructive: boolean
+  }>
+  /** What the call acts on. */
+  resource: Readonly<{
+    /** The call's arguments, after `AgentTool` checked their types. */
+    arguments: ToolCallArguments
+  }>
+}>
+
 /** Why the policy denied a call. */
 export type ToolCallDenialReason = "credential-file" | "blocked-address"
+
+/** Why the policy requires the person's approval of a call. */
+export type ToolCallApprovalReason = "destructive-tool"
 
 /**
  * The policy's answer for one call.
  *
- * @remarks `allow` leaves the call to the person's approval mode; `deny`
- * means the call never runs and the person is never asked about it.
+ * @remarks `allow` leaves the call to the person's approval mode: Ask me
+ * asks them, Just run runs it. `require-approval` asks the person in either
+ * mode. `deny` means the call never runs and the person is never asked about
+ * it, so no approval can override it.
  */
 export type ToolCallDecision =
   | Readonly<{
       /** The call may go on to the approval mode. */
       effect: "allow"
+    }>
+  | Readonly<{
+      /** The call runs only once the person allows it, whatever the mode. */
+      effect: "require-approval"
+      /** The rule that requires approval. */
+      reason: ToolCallApprovalReason
     }>
   | Readonly<{
       /** The call never runs. */
@@ -133,6 +170,12 @@ const DENIED_CREDENTIAL_FILE: ToolCallDecision = Object.freeze({
 const DENIED_BLOCKED_ADDRESS: ToolCallDecision = Object.freeze({
   effect: "deny",
   reason: "blocked-address"
+})
+
+/** Answer for a call of a tool its MCP server marks as destructive. */
+const DESTRUCTIVE_TOOL_APPROVAL_REQUIRED: ToolCallDecision = Object.freeze({
+  effect: "require-approval",
+  reason: "destructive-tool"
 })
 
 /** Sentences the model reads for each denial, by reason. */
@@ -327,26 +370,33 @@ function namesBlockedAddress(text: string): boolean {
 /**
  * Decides one tool call by the fixed rules, whatever the tool.
  *
- * @param callArguments - The call's checked arguments.
+ * @param request - What the gateway knows about the call.
  * @param policy - What the rules need to know about this machine.
  * @returns `deny` with `credential-file` when an argument text names a
  * private key or credential file, a folder of them, or Lys's settings file;
  * otherwise `deny` with `blocked-address` when an argument text is a URL or
- * host of this machine or a blocked IP address; otherwise `allow`.
+ * host of this machine or a blocked IP address; otherwise `require-approval`
+ * with `destructive-tool` when the tool is marked destructive; otherwise
+ * `allow`. The deny rules come first, so a call that breaks one is denied
+ * even when it would also need approval.
  * @remarks Reads argument texts only: it resolves no host name and follows
  * no symbolic link, and a text with whitespace is never read as an address.
+ * It does no I/O and throws nothing.
  */
 export function decideToolCall(
-  callArguments: ToolCallArguments,
+  request: ToolCallRequest,
   policy: ToolCallPolicy
 ): ToolCallDecision {
-  const texts = listArgumentTexts(callArguments).map((text) => text.trim())
+  const texts = listArgumentTexts(request.resource.arguments).map((text) =>
+    text.trim()
+  )
   const settingsFileParts = listPathParts(policy.settingsFilePath).slice(
     -SETTINGS_FILE_PART_COUNT
   )
   if (texts.some((text) => namesCredentialFile(text, settingsFileParts)))
     return DENIED_CREDENTIAL_FILE
   if (texts.some(namesBlockedAddress)) return DENIED_BLOCKED_ADDRESS
+  if (request.action.isDestructive) return DESTRUCTIVE_TOOL_APPROVAL_REQUIRED
   return ALLOWED
 }
 

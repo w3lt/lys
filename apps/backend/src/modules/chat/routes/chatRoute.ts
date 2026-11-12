@@ -177,8 +177,8 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      */
     toolCallPolicy: ToolCallPolicy
     /**
-     * Approval gate every tool call the policy allows passes, except a call
-     * of a backend tool that runs without approval.
+     * Approval gate every tool call the policy does not deny passes, except
+     * an allowed call of a backend tool that runs without approval.
      */
     toolApprovals: ToolApprovalService
   }>

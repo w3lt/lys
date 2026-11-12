@@ -144,10 +144,10 @@ export type ToolCallRoundContext = Readonly<{
    */
   toolCallPolicy: ToolCallPolicy
   /**
-   * Creates the approval gate every checked call the policy allows passes,
-   * except a call of a backend tool that runs without approval; called once
-   * for a round that has a call of a tool that may need it, and not at all
-   * otherwise.
+   * Creates the approval gate every checked call the policy does not deny
+   * passes, except an allowed call of a backend tool that runs without
+   * approval; called once for a round that has a call of a tool that may need
+   * it, and not at all otherwise.
    */
   createToolCallGate: CreateToolCallGate
   /** Stops the reply; an allowed backend or MCP tool runs under it. */
@@ -645,9 +645,10 @@ async function handleBuiltInToolCall(
  * reply was stopped while the call waited or ran, or refused to store the
  * call.
  * @throws When the call rejects although the reply was not stopped.
- * @remarks Every call the policy allows passes the gate, which asks the
- * person unless they saved the tool as Just run. The server checks the
- * arguments against its own schema.
+ * @remarks Every call the policy does not deny passes the gate, which asks
+ * the person unless they saved the tool as Just run and the policy allowed
+ * the call; a call of a tool its server marks as destructive is asked about
+ * even on Just run. The server checks the arguments against its own schema.
  */
 async function handleMcpToolCall(
   toolCall: CheckedToolCall,

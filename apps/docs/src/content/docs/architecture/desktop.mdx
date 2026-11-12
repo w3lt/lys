@@ -652,7 +652,7 @@ the folders the person lets tool calls name paths in
 Folder field with Add folder. With none listed, it says tools may use any
 file Lys can read. Enter or Add folder adds the trimmed path when it passes
 `approvedFolderPathSchema` from `@lys/share` (it starts with `/`, has at most
-1024 characters, and no line break) and is not listed yet; otherwise the field
+1024 characters, and no tab or other control character) and is not listed yet; otherwise the field
 is marked invalid and described by what to change, until the person types
 again. Remove moves focus to the field. Whether the folder exists is not
 checked. The section stays shown while the tools are read or cannot be read,

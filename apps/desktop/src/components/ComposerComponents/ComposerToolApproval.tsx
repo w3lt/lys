@@ -1,11 +1,13 @@
 import type { ChatToolCall } from "@lys/protocol"
 import type { ToolAccess, ToolRunner } from "@lys/share"
 import {
+  useCallback,
   useId,
   useLayoutEffect,
   useRef,
   useState,
-  type ReactElement
+  type ReactElement,
+  type RefCallback
 } from "react"
 import { ChevronRight, Lock } from "lucide-react"
 
@@ -55,6 +57,11 @@ type ComposerToolCallRequestProps = {
   readonly onAllowToolCall: () => void
   /** Requests that the parent reject the call, with the draft as reason. */
   readonly onRejectToolCall: () => void
+  /**
+   * Tracks the card's group, so the parent can hand the focus it holds to
+   * the notice that replaces it.
+   */
+  readonly cardRef: RefCallback<HTMLFieldSetElement>
 }
 
 /** Properties accepted by {@link ComposerCalledTool}. */
@@ -93,12 +100,22 @@ type ComposerToolResultFailureProps = {
   readonly error: string
   /** Requests that the parent send the failed answer again. */
   readonly onRetryToolCallAnswer: () => void
+  /**
+   * Tracks the card's group, so the parent can hand the focus it holds to
+   * the notice that replaces it.
+   */
+  readonly cardRef: RefCallback<HTMLFieldSetElement>
 }
 
 /** Properties accepted by {@link ComposerToolApprovalExpiry}. */
 type ComposerToolApprovalExpiryProps = {
   /** Name of the tool whose prompt expired. */
   readonly toolName: string
+  /**
+   * Whether Dismiss takes focus, because the card this notice replaced held
+   * it as it left the page.
+   */
+  readonly takesFocus: boolean
   /** Requests that the parent stop showing the expired prompt. */
   readonly onDismissToolCall: () => void
 }
@@ -234,7 +251,8 @@ function ComposerToolCallRequest({
   answer,
   hasDraft,
   onAllowToolCall,
-  onRejectToolCall
+  onRejectToolCall,
+  cardRef
 }: ComposerToolCallRequestProps): ReactElement {
   const [isArgumentsExpanded, setIsArgumentsExpanded] = useState(
     answer.input.runner === "mcp"
@@ -246,6 +264,7 @@ function ComposerToolCallRequest({
     <fieldset
       aria-label="Tool call waiting for your answer"
       className="composer__approval"
+      ref={cardRef}
     >
       <div className="composer__approval-header">
         <span aria-hidden="true" className="composer__approval-dot" />
@@ -304,13 +323,15 @@ function ComposerToolCallRequest({
 function ComposerToolResultFailure({
   toolName,
   error,
-  onRetryToolCallAnswer
+  onRetryToolCallAnswer,
+  cardRef
 }: ComposerToolResultFailureProps): ReactElement {
   return (
     <fieldset
       aria-label="Tool answer not sent"
       className="composer__approval"
       data-failed=""
+      ref={cardRef}
     >
       <div className="composer__approval-header">
         <span aria-hidden="true" className="composer__approval-dot" />
@@ -342,24 +363,21 @@ function ComposerToolResultFailure({
  * announces the expiry, so the sentence here is not announced again.
  * Dismiss asks the parent to stop showing the card, and the parent moves
  * focus on; Esc and Enter in the composer field leave it alone. When the
- * card mounts with focus on the page body, as when it replaces the waiting
- * card that held focus, Dismiss takes focus before the page paints; focus
- * anywhere else is left alone.
- * @param props - Tool and the dismissal.
+ * parent says the card replaced one that held focus, Dismiss takes that
+ * focus before the page paints; otherwise focus stays where it is.
+ * @param props - Tool, whether Dismiss takes focus, and the dismissal.
  * @returns The expired prompt's card.
  */
 function ComposerToolApprovalExpiry({
   toolName,
+  takesFocus,
   onDismissToolCall
 }: ComposerToolApprovalExpiryProps): ReactElement {
   const dismissButtonRef = useRef<HTMLButtonElement>(null)
 
   useLayoutEffect(() => {
-    const focusedElement = document.activeElement
-    if (focusedElement === null || focusedElement === document.body) {
-      dismissButtonRef.current?.focus()
-    }
-  }, [])
+    if (takesFocus) dismissButtonRef.current?.focus()
+  }, [takesFocus])
 
   return (
     <fieldset
@@ -407,6 +425,13 @@ function ComposerToolApprovalExpiry({
  * Allow anyway while the composer holds text. A failed answer shows the
  * reason and Try again. An expired prompt says why its call did not run and
  * offers Dismiss.
+ *
+ * The component owns whether the call's card held focus as it left the
+ * page. Each card's group reports it through a stable callback ref, whose
+ * cleanup runs before the group's nodes are removed; when focus was inside,
+ * the notice that replaces the card gives it to Dismiss, so it does not fall
+ * to the page body. A notice shown without replacing a focused card leaves
+ * focus alone.
  * @param props - Shown call, whether a draft exists, the answers, and the
  * dismissal.
  * @returns The card for the call's state.
@@ -420,6 +445,16 @@ export default function ComposerToolApproval({
   onDismissToolCall
 }: ComposerToolApprovalProps): ReactElement {
   const { answer } = toolCall
+  const [hasFocusedCardLeft, setHasFocusedCardLeft] = useState(false)
+  const trackCardFocus = useCallback(
+    (card: HTMLFieldSetElement | null): (() => void) | undefined => {
+      if (card === null) return undefined
+      return () => {
+        if (card.contains(document.activeElement)) setHasFocusedCardLeft(true)
+      }
+    },
+    []
+  )
 
   switch (answer.status) {
     case "awaiting-person":
@@ -427,6 +462,7 @@ export default function ComposerToolApproval({
         <ComposerToolCallRequest
           answer={answer}
           call={toolCall.call}
+          cardRef={trackCardFocus}
           hasDraft={hasDraft}
           onAllowToolCall={onAllowToolCall}
           onRejectToolCall={onRejectToolCall}
@@ -435,6 +471,7 @@ export default function ComposerToolApproval({
     case "send-failed":
       return (
         <ComposerToolResultFailure
+          cardRef={trackCardFocus}
           error={answer.error}
           onRetryToolCallAnswer={onRetryToolCallAnswer}
           toolName={toolCall.call.toolName}
@@ -444,6 +481,7 @@ export default function ComposerToolApproval({
       return (
         <ComposerToolApprovalExpiry
           onDismissToolCall={onDismissToolCall}
+          takesFocus={hasFocusedCardLeft}
           toolName={toolCall.call.toolName}
         />
       )

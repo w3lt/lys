@@ -178,14 +178,28 @@ function startToolApproval(
   return answers
 }
 
+/** {@link WAITING_SEARCH} after the person's allowed answer failed to send. */
+const UNSENT_APPROVAL: ShownToolCall = Object.freeze({
+  ...EXPIRED_SEARCH,
+  answer: {
+    status: "send-failed",
+    toolAnswer: { status: "allowed" },
+    error: "Couldn't send the answer to Lys: The backend could not be reached."
+  }
+} satisfies ShownToolCall)
+
 /**
- * Renders {@link WAITING_SEARCH}'s card after a text field, moves focus to
- * the element the case picks, and lets the prompt expire.
+ * Renders a search's card after a text field, moves focus to the element
+ * the case picks, and lets the prompt expire.
  *
+ * @param toolCall - The search's card before the prompt expires.
  * @param findFocusTarget - Finds the element that holds focus before the
- * prompt expires.
+ * prompt expires; undefined leaves focus on the page body.
  */
-function expireAfterFocusing(findFocusTarget: () => HTMLElement): void {
+function expireAfterFocusing(
+  toolCall: ShownToolCall,
+  findFocusTarget?: () => HTMLElement
+): void {
   const answers = {
     onAllowToolCall: vi.fn(),
     onRejectToolCall: vi.fn(),
@@ -195,14 +209,10 @@ function expireAfterFocusing(findFocusTarget: () => HTMLElement): void {
   const { rerender } = render(
     <>
       <textarea aria-label="Message" />
-      <ComposerToolApproval
-        {...answers}
-        hasDraft={false}
-        toolCall={WAITING_SEARCH}
-      />
+      <ComposerToolApproval {...answers} hasDraft={false} toolCall={toolCall} />
     </>
   )
-  findFocusTarget().focus()
+  findFocusTarget?.().focus()
 
   rerender(
     <>
@@ -451,20 +461,33 @@ describe("ComposerToolApproval", () => {
       expect(answers.onRetryToolCallAnswer).not.toHaveBeenCalled()
     })
 
-    it("gives Dismiss the focus the waiting card held when the prompt expires", () => {
-      expireAfterFocusing(() =>
-        screen.getByRole("button", { name: "Allow once" })
-      )
+    it.each([
+      [WAITING_SEARCH, "Allow once"],
+      [UNSENT_APPROVAL, "Try again"]
+    ])(
+      "gives Dismiss the focus the card held when the prompt expires (%#: %s)",
+      (toolCall, focusedButtonName) => {
+        expireAfterFocusing(toolCall, () =>
+          screen.getByRole("button", { name: focusedButtonName })
+        )
 
-      expect(screen.getByRole("button", { name: "Dismiss" })).toHaveFocus()
-    })
+        expect(screen.getByRole("button", { name: "Dismiss" })).toHaveFocus()
+      }
+    )
 
     it("leaves focus in the field when the prompt expires while the person types", () => {
-      expireAfterFocusing(() =>
+      expireAfterFocusing(WAITING_SEARCH, () =>
         screen.getByRole("textbox", { name: "Message" })
       )
 
       expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus()
+    })
+
+    it("leaves focus on the page when the prompt expires while nothing on its card held focus", () => {
+      expireAfterFocusing(WAITING_SEARCH)
+
+      expect(document.body).toHaveFocus()
+      expect(screen.getByRole("button", { name: "Dismiss" })).not.toHaveFocus()
     })
   })
 })

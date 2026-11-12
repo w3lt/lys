@@ -752,11 +752,11 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
   // Lets a decision record store the denial reasons
   // `outside-approved-folders`, for an argument naming a path outside the
   // folders the person lets tools use, and `settings-unreadable`, for one
-  // naming a path while those folders cannot be read. SQLite cannot change a CHECK, so the table is
-  // created again with every other rule unchanged, every row is copied, and
-  // its index and the trigger that copies status changes into it are created
-  // again unchanged, as in the version before. Rows stored before this
-  // version keep their values.
+  // naming a path while those folders cannot be read. SQLite cannot change
+  // a CHECK, so the table is created again with every other rule unchanged,
+  // every row is copied, and its index and the trigger that copies status
+  // changes into it are created again unchanged, as in the version before.
+  // Rows stored before this version keep their values.
   `
     DROP TRIGGER update_tool_call_decision_after_tool_call_update;
 

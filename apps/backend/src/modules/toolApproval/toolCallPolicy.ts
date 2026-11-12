@@ -1,4 +1,4 @@
-import type { ChatToolCall } from "@lys/protocol"
+import { CREDENTIAL_FILE_LIST, type ChatToolCall } from "@lys/protocol"
 import type { JsonValue } from "@lys/share"
 import { isIP } from "node:net"
 import { isLocalUrlHost } from "../tool/builtIn/web/webAddresses"
@@ -79,60 +79,12 @@ export type ToolCallDecision =
     }>
 
 /**
- * Folders, in lowercase, whose every file is treated as a private key or
- * credential: SSH, GnuPG, AWS, Azure, Kubernetes, and Docker settings, and
- * the macOS keychains.
+ * Folder and file names, in lowercase, of `CREDENTIAL_FILE_LIST`, the list
+ * the desktop's file tools refuse too.
  */
-const CREDENTIAL_FOLDER_NAMES: ReadonlySet<string> = new Set([
-  ".ssh",
-  ".gnupg",
-  ".aws",
-  ".azure",
-  ".kube",
-  ".docker",
-  "keychains"
-])
-
-/**
- * File names, in lowercase, of private keys and of files that hold
- * passwords or tokens: SSH keys, `.netrc` files, the PostgreSQL password
- * file, Git's stored credentials, npm and PyPI settings, Apache password
- * files, and `.env` files.
- */
-const CREDENTIAL_FILE_NAMES: ReadonlySet<string> = new Set([
-  "id_rsa",
-  "id_dsa",
-  "id_ecdsa",
-  "id_ed25519",
-  "id_ecdsa_sk",
-  "id_ed25519_sk",
-  ".netrc",
-  "_netrc",
-  ".pgpass",
-  ".git-credentials",
-  ".npmrc",
-  ".pypirc",
-  ".htpasswd",
-  ".env"
-])
-
-/** Start, in lowercase, of the names of `.env` files for one environment. */
-const ENVIRONMENT_FILE_PREFIX = ".env."
-
-/**
- * File name endings, in lowercase, of private keys, certificates with their
- * keys, keystores, and password databases.
- */
-const KEY_FILE_EXTENSIONS: readonly string[] = Object.freeze([
-  ".pem",
-  ".key",
-  ".p8",
-  ".p12",
-  ".pfx",
-  ".ppk",
-  ".jks",
-  ".keystore",
-  ".kdbx"
+const CREDENTIAL_NAMES: ReadonlySet<string> = new Set([
+  ...CREDENTIAL_FILE_LIST.folderNames,
+  ...CREDENTIAL_FILE_LIST.fileNames
 ])
 
 /** Path parts of Lys's settings file a value must hold, in order. */
@@ -246,15 +198,16 @@ function listPathParts(path: string): readonly string[] {
  * a folder of them.
  *
  * @param part - Lowercase path part.
- * @returns True for a credential folder or file name, a `.env.` file name,
- * or a name ending in a key file extension.
+ * @returns True for a folder or file name of `CREDENTIAL_FILE_LIST`, or a
+ * name that starts with one of its starts or ends with one of its ends.
  */
 function isCredentialPart(part: string): boolean {
   return (
-    CREDENTIAL_FOLDER_NAMES.has(part) ||
-    CREDENTIAL_FILE_NAMES.has(part) ||
-    part.startsWith(ENVIRONMENT_FILE_PREFIX) ||
-    KEY_FILE_EXTENSIONS.some((extension) => part.endsWith(extension))
+    CREDENTIAL_NAMES.has(part) ||
+    CREDENTIAL_FILE_LIST.fileNamePrefixes.some((prefix) =>
+      part.startsWith(prefix)
+    ) ||
+    CREDENTIAL_FILE_LIST.fileNameEndings.some((ending) => part.endsWith(ending))
   )
 }
 

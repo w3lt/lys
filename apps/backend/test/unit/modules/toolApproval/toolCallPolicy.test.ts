@@ -1,5 +1,7 @@
 import type { ChatToolCall } from "@lys/protocol"
+import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
+import * as z from "zod"
 import {
   decideToolCall,
   formatToolCallDenial,
@@ -56,6 +58,37 @@ const DENIED_BLOCKED_ADDRESS = Object.freeze({
 
 /** Decision for a call no rule denies. */
 const ALLOWED = Object.freeze({ effect: "allow" } satisfies ToolCallDecision)
+
+/** Validates one case of the shared credential file names. */
+const sharedCredentialNameCaseSchema = z
+  .strictObject({
+    /** What the case checks. */
+    case: z.string(),
+    /** One file or folder name. */
+    name: z.string(),
+    /** Whether the name is a credential name. */
+    credential: z.boolean()
+  })
+  .readonly()
+
+/**
+ * Names that this policy and the desktop's file tools must judge alike; the
+ * host's tests in `src-tauri/src/tools/credential_files.rs` read the same
+ * file.
+ */
+const SHARED_CREDENTIAL_NAME_CASES = z
+  .array(sharedCredentialNameCaseSchema)
+  .parse(
+    JSON.parse(
+      readFileSync(
+        new URL(
+          "../../../../../../packages/share/test/fixtures/credential-file-names.json",
+          import.meta.url
+        ),
+        "utf8"
+      )
+    )
+  )
 
 /** Values naming a private key or credential file, by what each shows. */
 const CREDENTIAL_FILE_CASES = Object.freeze({
@@ -185,6 +218,17 @@ describe("decideToolCall", () => {
       expect(decideToolCall(buildTargetRequest(value), POLICY)).toStrictEqual(
         DENIED_CREDENTIAL_FILE
       )
+    }
+  )
+
+  it.each(
+    SHARED_CREDENTIAL_NAME_CASES.map((nameCase) => [nameCase.case, nameCase])
+  )(
+    "judges %s as the desktop's file tools do",
+    (_label, { name, credential }) => {
+      expect(
+        decideToolCall(buildTargetRequest(`/home/ada/${name}`), POLICY)
+      ).toStrictEqual(credential ? DENIED_CREDENTIAL_FILE : ALLOWED)
     }
   )
 

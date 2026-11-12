@@ -6,12 +6,13 @@ import type {
 } from "../../../src/modules/agent/findToolsTool"
 
 /** How every search of a keeper under test ends. */
-export type ToolKeeperScript = "finds-first-tool" | "fails"
+export type ToolKeeperScript = "finds-first-tool" | "finds-nothing" | "fails"
 
 /**
  * Creates one keeper for the current test, whose every search ends as the
- * script says: finding the first of the search's tools, or failing after
- * reporting why; the keeper releases what it holds when the test ends.
+ * script says: finding the first of the search's tools, finding none, or
+ * failing after reporting why. The keeper runs two searches at once, and
+ * releases what it holds when the test ends.
  */
 export type ToolKeeperFactory = (script: ToolKeeperScript) => ToolKeeper
 
@@ -81,6 +82,36 @@ export function registerToolKeeperContractSuite(
       expect(reportFailure).not.toHaveBeenCalled()
     })
 
+    it("finds nothing for a search no tool fits, frozen, reporting nothing", async () => {
+      const { search, reportFailure } = buildSearch()
+
+      const outcome = await createKeeper("finds-nothing").findTools(search)
+
+      expect(outcome).toEqual({ status: "found", toolNames: [] })
+      expect(
+        outcome.status === "found" && Object.isFrozen(outcome.toolNames)
+      ).toBe(true)
+      expect(reportFailure).not.toHaveBeenCalled()
+    })
+
+    it("runs two searches that overlap, each to its own outcome, reporting nothing", async () => {
+      const keeper = createKeeper("finds-first-tool")
+      const first = buildSearch()
+      const second = buildSearch()
+
+      const outcomes = await Promise.all([
+        keeper.findTools(first.search),
+        keeper.findTools(second.search)
+      ])
+
+      expect(outcomes).toEqual([
+        { status: "found", toolNames: ["read_page"] },
+        { status: "found", toolNames: ["read_page"] }
+      ])
+      expect(first.reportFailure).not.toHaveBeenCalled()
+      expect(second.reportFailure).not.toHaveBeenCalled()
+    })
+
     it("fails a search that ends without finding, after reporting why once", async () => {
       const { search, reportFailure } = buildSearch()
 
@@ -99,6 +130,18 @@ export function registerToolKeeperContractSuite(
       await expect(
         createKeeper("finds-first-tool").findTools(search)
       ).rejects.toBe(stopReason)
+      expect(reportFailure).not.toHaveBeenCalled()
+    })
+
+    it("rejects with the abort reason of a search stopped while it runs, whatever it found, reporting nothing", async () => {
+      const stopReason = new Error("stopped")
+      const stop = new AbortController()
+      const { search, reportFailure } = buildSearch(stop.signal)
+
+      const outcome = createKeeper("finds-first-tool").findTools(search)
+      stop.abort(stopReason)
+
+      await expect(outcome).rejects.toBe(stopReason)
       expect(reportFailure).not.toHaveBeenCalled()
     })
   })

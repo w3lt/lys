@@ -97,6 +97,50 @@ function parseKeeperToolCall(
   return findKeeperTool(catalog, name).tool.parseToolCall(callArguments)
 }
 
+/**
+ * Builds as many tools about notes as asked, all matching the same word.
+ *
+ * @param count - Number of tools.
+ * @returns Tools named `note_1` up.
+ */
+function buildNoteTools(count: number): readonly ToolDefinition[] {
+  return Array.from({ length: count }, (_unused, index) =>
+    buildDefinition(`note_${index + 1}`, "Keeps a note.")
+  )
+}
+
+/**
+ * Creates `search_tools` over a catalog whose searches are counted.
+ *
+ * @returns The contract harness.
+ */
+async function createSearchToolsHarness(): Promise<BuiltInToolHarness> {
+  const catalog = new ToolCatalog(TOOLS)
+  const listToolMatches = vi.spyOn(catalog, "listToolMatches")
+  return {
+    tool: findKeeperTool(catalog, SEARCH_TOOLS_TOOL_NAME).tool,
+    runnableArguments: { query: "web page" },
+    invalidArguments: { query: "   " },
+    countStartedWork: () => listToolMatches.mock.calls.length
+  }
+}
+
+/**
+ * Creates `recommend_tool` over a catalog whose recommendations are counted.
+ *
+ * @returns The contract harness.
+ */
+async function createRecommendToolHarness(): Promise<BuiltInToolHarness> {
+  const catalog = new ToolCatalog(TOOLS)
+  const addRecommendedTool = vi.spyOn(catalog, "addRecommendedTool")
+  return {
+    tool: findKeeperTool(catalog, RECOMMEND_TOOL_TOOL_NAME).tool,
+    runnableArguments: { name: "read_page" },
+    invalidArguments: { name: "read_file" },
+    countStartedWork: () => addRecommendedTool.mock.calls.length
+  }
+}
+
 describe("buildToolKeeperTools", () => {
   it("builds search_tools, then recommend_tool, each reading this machine in the backend without approval", () => {
     const tools = buildToolKeeperTools(new ToolCatalog(TOOLS))
@@ -117,16 +161,7 @@ describe("buildToolKeeperTools", () => {
   })
 
   describe("search_tools", () => {
-    registerBuiltInToolContractSuite(async (): Promise<BuiltInToolHarness> => {
-      const catalog = new ToolCatalog(TOOLS)
-      const listToolMatches = vi.spyOn(catalog, "listToolMatches")
-      return {
-        tool: findKeeperTool(catalog, SEARCH_TOOLS_TOOL_NAME).tool,
-        runnableArguments: { query: "web page" },
-        invalidArguments: { query: "   " },
-        countStartedWork: () => listToolMatches.mock.calls.length
-      }
-    })
+    registerBuiltInToolContractSuite(createSearchToolsHarness)
 
     it("lists the matching tools with their names and descriptions", async () => {
       const result = await runKeeperTool(
@@ -143,12 +178,30 @@ describe("buildToolKeeperTools", () => {
       })
     })
 
-    it("says how many more tools match than it lists", async () => {
-      const tools = Array.from(
-        { length: MAXIMUM_LISTED_TOOL_COUNT + 3 },
-        (_unused, index) =>
-          buildDefinition(`note_${index + 1}`, "Keeps a note.")
-      )
+    it.each([
+      ["1 more tool", 1, "1 more tool matches"],
+      ["3 more tools", 3, "3 more tools match"]
+    ])(
+      "says that %s match than it lists",
+      async (_label, moreCount, sentenceStart) => {
+        const tools = buildNoteTools(MAXIMUM_LISTED_TOOL_COUNT + moreCount)
+
+        const result = await runKeeperTool(
+          new ToolCatalog(tools),
+          SEARCH_TOOLS_TOOL_NAME,
+          { query: "note" }
+        )
+
+        const lines = result.content.split("\n")
+        expect(lines).toHaveLength(MAXIMUM_LISTED_TOOL_COUNT + 2)
+        expect(lines.at(-1)).toBe(
+          `${sentenceStart}; search with other words to narrow the list.`
+        )
+      }
+    )
+
+    it("lists every match without a count of more when all of them fit", async () => {
+      const tools = buildNoteTools(MAXIMUM_LISTED_TOOL_COUNT)
 
       const result = await runKeeperTool(
         new ToolCatalog(tools),
@@ -156,27 +209,44 @@ describe("buildToolKeeperTools", () => {
         { query: "note" }
       )
 
-      expect(result.content.split("\n")).toHaveLength(
-        MAXIMUM_LISTED_TOOL_COUNT + 2
-      )
-      expect(result.content).toContain(
-        "3 more tools match; search with other words to narrow the list."
-      )
+      expect(result.content.split("\n")).toEqual([
+        'Tools that match "note", best first:',
+        ...tools.map((tool) => `- ${tool.name}: Keeps a note.`)
+      ])
     })
 
-    it("shows a description on one line, cut to 200 characters", async () => {
-      const description = `Keeps\na  note. ${"x".repeat(300)}`
+    it("shows a description on one line, each run of whitespace as one space", async () => {
+      const result = await runKeeperTool(
+        new ToolCatalog([
+          buildDefinition("keep_note", "  Keeps\na \t note.\r\n")
+        ]),
+        SEARCH_TOOLS_TOOL_NAME,
+        { query: "note" }
+      )
 
+      expect(result.content.split("\n")[1]).toBe("- keep_note: Keeps a note.")
+    })
+
+    it.each([
+      ["of 200 characters whole", "x".repeat(200), "x".repeat(200)],
+      [
+        "of 201 characters cut to 200, the last an ellipsis",
+        "x".repeat(201),
+        `${"x".repeat(199)}…`
+      ],
+      [
+        "cut inside a surrogate pair without either half of the pair",
+        `${"x".repeat(198)}😀xx`,
+        `${"x".repeat(198)}…`
+      ]
+    ])("shows a description %s", async (_label, description, shown) => {
       const result = await runKeeperTool(
         new ToolCatalog([buildDefinition("keep_note", description)]),
         SEARCH_TOOLS_TOOL_NAME,
         { query: "note" }
       )
 
-      const line = result.content.split("\n")[1] ?? ""
-      expect(line.startsWith("- keep_note: Keeps a note. xxx")).toBe(true)
-      expect(line).toHaveLength("- keep_note: ".length + 200)
-      expect(line.endsWith("…")).toBe(true)
+      expect(result.content.split("\n")[1]).toBe(`- keep_note: ${shown}`)
     })
 
     it("says when no tool matches", async () => {
@@ -192,6 +262,21 @@ describe("buildToolKeeperTools", () => {
           'No tool matches "weather". Search with other words, or recommend nothing if no tool fits.',
         sources: []
       })
+    })
+
+    it("searches with a query of 200 characters after trimming", async () => {
+      const query = `note ${"a".repeat(195)}`
+
+      const result = await runKeeperTool(
+        new ToolCatalog(buildNoteTools(1)),
+        SEARCH_TOOLS_TOOL_NAME,
+        { query: `  ${query}  ` }
+      )
+
+      expect(result.content.split("\n")).toEqual([
+        `Tools that match "${query}", best first:`,
+        "- note_1: Keeps a note."
+      ])
     })
 
     it.each([
@@ -216,16 +301,7 @@ describe("buildToolKeeperTools", () => {
   })
 
   describe("recommend_tool", () => {
-    registerBuiltInToolContractSuite(async (): Promise<BuiltInToolHarness> => {
-      const catalog = new ToolCatalog(TOOLS)
-      const recommendTool = vi.spyOn(catalog, "recommendTool")
-      return {
-        tool: findKeeperTool(catalog, RECOMMEND_TOOL_TOOL_NAME).tool,
-        runnableArguments: { name: "read_page" },
-        invalidArguments: { name: "read_file" },
-        countStartedWork: () => recommendTool.mock.calls.length
-      }
-    })
+    registerBuiltInToolContractSuite(createRecommendToolHarness)
 
     it("recommends a tool of the turn and says how many are recommended", async () => {
       const catalog = new ToolCatalog(TOOLS)
@@ -260,14 +336,10 @@ describe("buildToolKeeperTools", () => {
     })
 
     it("fails once the most tools are recommended", async () => {
-      const tools = Array.from(
-        { length: MAXIMUM_RECOMMENDED_TOOL_COUNT + 1 },
-        (_unused, index) =>
-          buildDefinition(`note_${index + 1}`, "Keeps a note.")
-      )
+      const tools = buildNoteTools(MAXIMUM_RECOMMENDED_TOOL_COUNT + 1)
       const catalog = new ToolCatalog(tools)
       for (const tool of tools.slice(0, MAXIMUM_RECOMMENDED_TOOL_COUNT))
-        catalog.recommendTool(tool.name)
+        catalog.addRecommendedTool(tool.name)
 
       const result = await runKeeperTool(catalog, RECOMMEND_TOOL_TOOL_NAME, {
         name: `note_${MAXIMUM_RECOMMENDED_TOOL_COUNT + 1}`
@@ -281,7 +353,7 @@ describe("buildToolKeeperTools", () => {
 
     it("refuses a name that is not a tool of the turn without recommending", () => {
       const catalog = new ToolCatalog(TOOLS)
-      const recommendTool = vi.spyOn(catalog, "recommendTool")
+      const addRecommendedTool = vi.spyOn(catalog, "addRecommendedTool")
 
       const parsed = parseKeeperToolCall(catalog, RECOMMEND_TOOL_TOOL_NAME, {
         name: "read_file"
@@ -291,7 +363,7 @@ describe("buildToolKeeperTools", () => {
         status: "invalid",
         message: `No tool is named "read_file". Recommend a name ${SEARCH_TOOLS_TOOL_NAME} listed, exactly as it listed it.`
       })
-      expect(recommendTool).not.toHaveBeenCalled()
+      expect(addRecommendedTool).not.toHaveBeenCalled()
     })
   })
 })

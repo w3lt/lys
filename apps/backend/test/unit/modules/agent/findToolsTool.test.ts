@@ -70,16 +70,36 @@ function createKeeper(outcome: ToolSearchOutcome) {
  * Builds the context of `find_tools` for one reply.
  *
  * @param keeper - Keeper of the case.
+ * @param reportFailure - Receives why a search ended without finding; by
+ * default it fails the case.
  * @returns The context over {@link TOOLS}.
  */
-function buildContext(keeper: ToolKeeper): FindToolsContext {
+function buildContext(
+  keeper: ToolKeeper,
+  reportFailure: FindToolsContext["reportFailure"] = reportUnexpectedFailure
+): FindToolsContext {
   return {
     keeper,
     tools: TOOLS,
     conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
     model: "qwen/qwen3-8b",
     generationOptions: { temperature: 0.4 },
-    reportFailure: reportUnexpectedFailure
+    reportFailure
+  }
+}
+
+/**
+ * Creates `find_tools` over a keeper that finds the page reader.
+ *
+ * @returns The contract harness, counting the keeper's searches.
+ */
+async function createFindToolsHarness(): Promise<BuiltInToolHarness> {
+  const keeper = createKeeper({ status: "found", toolNames: ["read_page"] })
+  return {
+    tool: new FindToolsTool(buildContext(keeper)),
+    runnableArguments: { task: "read a web page" },
+    invalidArguments: { task: "  " },
+    countStartedWork: () => keeper.findTools.mock.calls.length
   }
 }
 
@@ -116,29 +136,17 @@ describe("FIND_TOOLS_DEFINITION", () => {
 
 describe("formatToolRoutingNote", () => {
   it.each([
-    [1, "You have 1 tool"],
-    [12, "You have 12 tools"]
-  ])(
-    "counts %i tools and tells the model to call find_tools",
-    (count, start) => {
-      const note = formatToolRoutingNote(count)
-
-      expect(note.startsWith(start)).toBe(true)
-      expect(note).toContain(`call ${FIND_TOOLS_TOOL_NAME}`)
-    }
-  )
+    ["1 tool", 1],
+    ["12 tools", 12]
+  ])("counts %s and tells the model to call find_tools", (tools, count) => {
+    expect(formatToolRoutingNote(count)).toBe(
+      `You have ${tools} that Armitage, the tool keeper, keeps for you. Before you use one, call find_tools with what you need a tool for, such as "read a web page"; the tools Armitage finds are offered to you from your next step.`
+    )
+  })
 })
 
 describe("FindToolsTool", () => {
-  registerBuiltInToolContractSuite(async (): Promise<BuiltInToolHarness> => {
-    const keeper = createKeeper({ status: "found", toolNames: ["read_page"] })
-    return {
-      tool: new FindToolsTool(buildContext(keeper)),
-      runnableArguments: { task: "read a web page" },
-      invalidArguments: { task: "  " },
-      countStartedWork: () => keeper.findTools.mock.calls.length
-    }
-  })
+  registerBuiltInToolContractSuite(createFindToolsHarness)
 
   it("asks the keeper with the trimmed task, the turn's tools, and the run's signal", async () => {
     const keeper = createKeeper({ status: "found", toolNames: [] })
@@ -196,22 +204,6 @@ describe("FindToolsTool", () => {
     expect(tool.listFoundToolNames()).toEqual(["read_page", "send_email"])
   })
 
-  it("ignores a name that is not one of the turn's tools", async () => {
-    const tool = new FindToolsTool(
-      buildContext(
-        createKeeper({
-          status: "found",
-          toolNames: ["read_file", "read_page"]
-        })
-      )
-    )
-
-    const result = await runFindTools(tool, "read a page")
-
-    expect(result.content).toContain("from your next step: read_page.")
-    expect(tool.listFoundToolNames()).toEqual(["read_page"])
-  })
-
   it("says when the keeper found no tool, offering nothing", async () => {
     const tool = new FindToolsTool(
       buildContext(createKeeper({ status: "found", toolNames: [] }))
@@ -228,10 +220,16 @@ describe("FindToolsTool", () => {
     expect(tool.listFoundToolNames()).toEqual([])
   })
 
-  it("fails closed when the keeper could not search, offering nothing", async () => {
-    const tool = new FindToolsTool(
-      buildContext(createKeeper({ status: "failed" }))
-    )
+  it("fails closed when the keeper could not search, offering nothing, and lends the keeper the reply's failure receiver", async () => {
+    const failure = new Error("Armitage's model failed")
+    const keeper: ToolKeeper = {
+      findTools: async (search) => {
+        search.reportFailure(failure)
+        return { status: "failed" }
+      }
+    }
+    const reportFailure = vi.fn()
+    const tool = new FindToolsTool(buildContext(keeper, reportFailure))
 
     const result = await runFindTools(tool, "read a page")
 
@@ -241,6 +239,7 @@ describe("FindToolsTool", () => {
         "Armitage could not search the tools now. Try again, or go on without a tool."
     })
     expect(tool.listFoundToolNames()).toEqual([])
+    expect(reportFailure).toHaveBeenCalledExactlyOnceWith(failure)
   })
 
   it("rejects with the abort reason when stopped during the search, offering nothing", async () => {
@@ -259,6 +258,33 @@ describe("FindToolsTool", () => {
       runFindTools(tool, "read a page", abortController.signal)
     ).rejects.toBe(stopReason)
     expect(tool.listFoundToolNames()).toEqual([])
+  })
+
+  it("rejects with the abort reason when stopped just after the keeper found tools, offering nothing", async () => {
+    const stopReason = new Error("stopped")
+    const abortController = new AbortController()
+    const search = Promise.withResolvers<ToolSearchOutcome>()
+    const tool = new FindToolsTool(
+      buildContext({ findTools: () => search.promise })
+    )
+    const run = runFindTools(tool, "read a page", abortController.signal)
+
+    search.resolve({ status: "found", toolNames: ["read_page"] })
+    abortController.abort(stopReason)
+
+    await expect(run).rejects.toBe(stopReason)
+    expect(tool.listFoundToolNames()).toEqual([])
+  })
+
+  it("asks the keeper with a task of 500 characters after trimming", async () => {
+    const keeper = createKeeper({ status: "found", toolNames: [] })
+    const task = "a".repeat(500)
+
+    await runFindTools(new FindToolsTool(buildContext(keeper)), ` ${task} `)
+
+    expect(keeper.findTools).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ task })
+    )
   })
 
   it.each([

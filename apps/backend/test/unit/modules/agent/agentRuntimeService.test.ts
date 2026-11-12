@@ -2,7 +2,8 @@ import {
   ARMITAGE_AGENT_CODE,
   CALIGINIA_AGENT_CODE,
   LYSIPTERA_AGENT_CODE,
-  type AgentDefinition
+  type AgentDefinition,
+  type BuiltInAgent
 } from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import SqliteAgentRecordStore from "../../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
@@ -15,7 +16,8 @@ import AgentService from "../../../../src/modules/agent/agentService"
 import { buildBuiltInAgents } from "../../../../src/modules/agent/builtInAgents"
 import type {
   ReplyModel,
-  ReplyStreamEvent
+  ReplyStreamEvent,
+  ReplyStreamRequest
 } from "../../../../src/modules/agent/replyModel"
 import { NO_UNOFFERED_TOOLS } from "../../../../src/modules/agent/unofferedTools"
 import {
@@ -64,6 +66,8 @@ const LEADER: AgentIdentity = Object.freeze({
 type RuntimeOptions = Readonly<{
   /** Model access every live agent borrows; ends every reply by default. */
   replyModel?: ReplyModel
+  /** Agents the backend ships with; {@link BUILT_IN_AGENTS} by default. */
+  builtInAgents?: readonly BuiltInAgent[]
   /**
    * Stored conversations by id, each with its title; a conversation it lacks
    * is not stored.
@@ -104,31 +108,66 @@ function createWaitingReplyModel() {
 }
 
 /**
- * Creates model access whose every reply recommends the first tool of a
- * search, then ends, or whose every reply fails.
+ * Creates the stream of one round of a search whose model recommends the
+ * first tool of the search, then ends.
+ *
+ * @param request - The round's request.
+ * @returns A stream that finishes when the request's last message is a tool
+ * result, and that otherwise calls `recommend_tool` with the first of
+ * {@link TOOL_KEEPER_SEARCH_TOOLS}.
+ */
+async function* createFirstToolRecommendationStream(
+  request: ReplyStreamRequest
+): AsyncGenerator<ReplyStreamEvent> {
+  if (request.messages.at(-1)?.role === "tool") {
+    yield { type: "finish", finishReason: "stop" }
+    return
+  }
+  const name = TOOL_KEEPER_SEARCH_TOOLS[0]?.name ?? ""
+  const toolCall = {
+    toolName: "recommend_tool",
+    argumentText: JSON.stringify({ name })
+  }
+  yield { type: "tool-calls", toolCalls: [toolCall] }
+}
+
+/**
+ * Creates model access whose every reply follows the script of a search:
+ * it recommends the first tool of the search, then ends; it ends at once,
+ * recommending nothing; or it fails.
  *
  * @param script - How each search ends.
  * @returns The model, whose stream opener records each call.
  */
-function createToolKeeperReplyModel(script: ToolKeeperScript) {
-  const openReplyStream = vi.fn<ReplyModel["openReplyStream"]>()
-  if (script === "fails") {
-    openReplyStream.mockRejectedValue(new Error("Armitage's model failed"))
-    return { openReplyStream } satisfies ReplyModel
+function createToolKeeperReplyModel(script: ToolKeeperScript): ReplyModel {
+  switch (script) {
+    case "finds-first-tool":
+      return {
+        openReplyStream: vi.fn<ReplyModel["openReplyStream"]>(async (request) =>
+          createFirstToolRecommendationStream(request)
+        )
+      }
+    case "finds-nothing":
+      return createFinishingReplyModel()
+    case "fails":
+      return {
+        openReplyStream: vi
+          .fn<ReplyModel["openReplyStream"]>()
+          .mockRejectedValue(new Error("Armitage's model failed"))
+      }
   }
-  const firstToolName = TOOL_KEEPER_SEARCH_TOOLS[0]?.name ?? ""
-  const toolCall = {
-    toolName: "recommend_tool",
-    argumentText: JSON.stringify({ name: firstToolName })
-  }
-  openReplyStream.mockImplementation(async (request) =>
-    (async function* (): AsyncGenerator<ReplyStreamEvent> {
-      if (request.messages.at(-1)?.role === "tool")
-        yield { type: "finish", finishReason: "stop" }
-      else yield { type: "tool-calls", toolCalls: [toolCall] }
-    })()
-  )
-  return { openReplyStream } satisfies ReplyModel
+}
+
+/**
+ * Creates the keeper of one case of the tool keeper contract suite.
+ *
+ * @param script - How each search ends.
+ * @returns A runtime whose Armitage answers on a model that follows the
+ * script.
+ */
+function createScriptedToolKeeper(script: ToolKeeperScript) {
+  return createRuntime({ replyModel: createToolKeeperReplyModel(script) })
+    .runtime
 }
 
 /**
@@ -142,7 +181,7 @@ function createToolKeeperReplyModel(script: ToolKeeperScript) {
 function createRuntime(options: RuntimeOptions = {}) {
   const agentService = new AgentService({
     recordStore: SqliteAgentRecordStore.create(openTestDatabase()),
-    builtInAgents: BUILT_IN_AGENTS
+    builtInAgents: options.builtInAgents ?? BUILT_IN_AGENTS
   })
   const agents = {
     findAgent: vi.fn((code: string) => agentService.findAgent(code)),
@@ -542,11 +581,7 @@ describe("AgentRuntimeService", () => {
     })
   })
   describe("tool searches", () => {
-    registerToolKeeperContractSuite(
-      (script) =>
-        createRuntime({ replyModel: createToolKeeperReplyModel(script) })
-          .runtime
-    )
+    registerToolKeeperContractSuite(createScriptedToolKeeper)
 
     it("runs each search on Armitage's live agent, with Armitage's prompt, as one of its requests on the asking conversation", async () => {
       const conversationId = createFixtureUuidV7(31)
@@ -590,6 +625,59 @@ describe("AgentRuntimeService", () => {
         }
       })
       expect(runtime.loadChatAgent(ARMITAGE_AGENT_CODE)).toBeUndefined()
+    })
+
+    describe("without Armitage among the built-in agents", () => {
+      /**
+       * Starts a search on a runtime whose built-in agents lack Armitage.
+       *
+       * @param abortSignal - Cancellation of the asking reply.
+       * @returns The search's promise, the spy that receives its failures,
+       * and the runtime's model.
+       */
+      function findToolsWithoutArmitage(abortSignal: AbortSignal) {
+        const replyModel = createFinishingReplyModel()
+        const { runtime } = createRuntime({
+          replyModel,
+          builtInAgents: BUILT_IN_AGENTS.filter(
+            (agent) => agent.code !== ARMITAGE_AGENT_CODE
+          )
+        })
+        const reportFailure = vi.fn()
+        const search = runtime.findTools({
+          task: "read a web page",
+          tools: TOOL_KEEPER_SEARCH_TOOLS,
+          conversationId: createFixtureUuidV7(31),
+          model: "qwen/qwen3-8b",
+          generationOptions: { temperature: 0.2 },
+          abortSignal,
+          reportFailure
+        })
+        return { search, reportFailure, replyModel }
+      }
+
+      it("fails a search, after reporting why once, without reaching the model", async () => {
+        const { search, reportFailure, replyModel } = findToolsWithoutArmitage(
+          new AbortController().signal
+        )
+
+        await expect(search).resolves.toEqual({ status: "failed" })
+        expect(reportFailure).toHaveBeenCalledExactlyOnceWith(
+          new Error("Armitage, the built-in tool keeper, is not defined")
+        )
+        expect(replyModel.openReplyStream).not.toHaveBeenCalled()
+      })
+
+      it("rejects with the abort reason of a search stopped before it starts, reporting nothing", async () => {
+        const stopReason = new Error("stopped")
+
+        const { search, reportFailure } = findToolsWithoutArmitage(
+          AbortSignal.abort(stopReason)
+        )
+
+        await expect(search).rejects.toBe(stopReason)
+        expect(reportFailure).not.toHaveBeenCalled()
+      })
     })
   })
 })

@@ -58,12 +58,42 @@ describe("ToolCatalog", () => {
       expect(result.matchCount).toBe(2)
     })
 
-    it("finds a tool by the words of its name", () => {
-      const catalog = new ToolCatalog(TOOLS)
+    it.each([
+      ["its name", "invoices", ["list_invoices"]],
+      ["its description", "dictionary", ["lookup"]],
+      ["its group", "network", ["list_invoices", "lookup"]]
+    ])("finds a tool by a word only %s holds", (_field, query, toolNames) => {
+      const catalog = new ToolCatalog([
+        buildDefinition("list_invoices", "Shows what is owed."),
+        buildDefinition("lookup", "Finds a term in the dictionary.")
+      ])
 
       expect(
-        catalog.listToolMatches("email").matches.map((tool) => tool.name)
-      ).toEqual(["send_email"])
+        catalog.listToolMatches(query).matches.map((tool) => tool.name)
+      ).toEqual(toolNames)
+    })
+
+    it.each([
+      ["a snake_case name by one of its words", "email", "send_email"],
+      ["a snake_case name by the whole name", "send_email", "send_email"],
+      ["a kebab-case name by one of its words", "calendar", "open-calendar"],
+      ["a camelCase name by one of its words", "issue", "createIssue"],
+      ["a camelCase name by the whole name", "createIssue", "createIssue"],
+      ["a name with an acronym by the word after it", "page", "readHTMLPage"],
+      ["a name with an acronym by the acronym", "html", "readHTMLPage"],
+      ["a name with a digit by the word after it", "upload", "s3Upload"]
+    ])("finds %s", (_label, query, toolName) => {
+      const catalog = new ToolCatalog([
+        buildDefinition("send_email", "Sends a message."),
+        buildDefinition("open-calendar", "Shows the week."),
+        buildDefinition("createIssue", "Opens a ticket."),
+        buildDefinition("readHTMLPage", "Loads a site."),
+        buildDefinition("s3Upload", "Stores a file.")
+      ])
+
+      expect(
+        catalog.listToolMatches(query).matches.map((tool) => tool.name)
+      ).toEqual([toolName])
     })
 
     it("ignores case and punctuation", () => {
@@ -117,19 +147,19 @@ describe("ToolCatalog", () => {
     })
   })
 
-  describe("recommendTool", () => {
+  describe("addRecommendedTool", () => {
     it("recommends tools in the order they were recommended, each once", () => {
       const catalog = new ToolCatalog(TOOLS)
 
-      expect(catalog.recommendTool("web_search")).toEqual({
+      expect(catalog.addRecommendedTool("web_search")).toEqual({
         status: "recommended",
         recommendedCount: 1
       })
-      expect(catalog.recommendTool("read_page")).toEqual({
+      expect(catalog.addRecommendedTool("read_page")).toEqual({
         status: "recommended",
         recommendedCount: 2
       })
-      expect(catalog.recommendTool("web_search")).toEqual({
+      expect(catalog.addRecommendedTool("web_search")).toEqual({
         status: "already-recommended"
       })
       expect(catalog.listRecommendedToolNames()).toEqual([
@@ -141,7 +171,9 @@ describe("ToolCatalog", () => {
     it("recommends nothing that is not a tool of the turn", () => {
       const catalog = new ToolCatalog(TOOLS)
 
-      expect(catalog.recommendTool("read_file")).toEqual({ status: "unknown" })
+      expect(catalog.addRecommendedTool("read_file")).toEqual({
+        status: "unknown"
+      })
       expect(catalog.listRecommendedToolNames()).toEqual([])
     })
 
@@ -149,9 +181,9 @@ describe("ToolCatalog", () => {
       const tools = buildNoteTools(MAXIMUM_RECOMMENDED_TOOL_COUNT + 1)
       const catalog = new ToolCatalog(tools)
       for (const tool of tools.slice(0, MAXIMUM_RECOMMENDED_TOOL_COUNT))
-        catalog.recommendTool(tool.name)
+        catalog.addRecommendedTool(tool.name)
 
-      const outcome = catalog.recommendTool(
+      const outcome = catalog.addRecommendedTool(
         `note_${MAXIMUM_RECOMMENDED_TOOL_COUNT + 1}`
       )
 
@@ -163,10 +195,10 @@ describe("ToolCatalog", () => {
 
     it("returns a frozen list that later recommendations leave as it was", () => {
       const catalog = new ToolCatalog(TOOLS)
-      catalog.recommendTool("read_page")
+      catalog.addRecommendedTool("read_page")
       const names = catalog.listRecommendedToolNames()
 
-      catalog.recommendTool("get_time")
+      catalog.addRecommendedTool("get_time")
 
       expect(Object.isFrozen(names)).toBe(true)
       expect(names).toEqual(["read_page"])

@@ -10,7 +10,7 @@ import FindToolsTool, {
   type ToolKeeper
 } from "./findToolsTool"
 import ReplyToolOffer from "./replyToolOffer"
-import { buildAgentToolset } from "./toolCallRound"
+import { buildAgentToolset, type AgentToolset } from "./toolCallRound"
 import type { UnofferedTools } from "./unofferedTools"
 
 /**
@@ -69,24 +69,36 @@ export type ReplyToolsTurn = Readonly<{
   reportToolSearchFailure: ReportToolSearchFailure
 }>
 
-/** What one reply offers its rounds. */
-export type ReplyTools = Readonly<{
-  /** How the turn offers its client, built-in, and MCP tools. */
-  routing: ToolRouting
-  /** The tools the reply's rounds offer, as each round starts. */
-  toolOffer: ReplyToolOffer
-  /**
-   * The reply's `find_tools`, whose found tools the reply offers from its
-   * next round; undefined when the turn is not routed.
-   */
-  findTools: FindToolsTool | undefined
-}>
-
-/** Routing of a turn that offers every tool from the first round. */
-const DIRECT_TOOL_ROUTING: ToolRouting = Object.freeze({ status: "direct" })
-
-/** Tools of a reply that does not route its tools: none. */
-const NO_ROUTING_TOOLS: readonly TurnBuiltInTool[] = Object.freeze([])
+/**
+ * What one reply offers its rounds.
+ *
+ * @remarks `status` selects the variant. Each variant holds the fields of
+ * the {@link ToolRouting} variant with the same `status`, so a reply's tools
+ * also say how its turn is routed.
+ */
+export type ReplyTools =
+  | Readonly<{
+      /** Every tool of the turn is offered from the first round. */
+      status: "direct"
+      /** The tools the reply's rounds offer, as each round starts. */
+      toolOffer: ReplyToolOffer
+    }>
+  | Readonly<{
+      /**
+       * The reply offers `find_tools` in place of the turn's client,
+       * built-in, and MCP tools.
+       */
+      status: "routed"
+      /** Number of those tools; a positive integer. */
+      toolCount: number
+      /** The tools the reply's rounds offer, as each round starts. */
+      toolOffer: ReplyToolOffer
+      /**
+       * The reply's `find_tools`, whose found tools the reply offers from
+       * its next round.
+       */
+      findTools: FindToolsTool
+    }>
 
 /**
  * Finds how a turn offers its client, built-in, and MCP tools.
@@ -102,7 +114,8 @@ export function findToolRouting(
   trainedForToolUse: boolean,
   toolCount: number
 ): ToolRouting {
-  if (!trainedForToolUse || toolCount === 0) return DIRECT_TOOL_ROUTING
+  if (!trainedForToolUse || toolCount === 0)
+    return Object.freeze({ status: "direct" })
   return Object.freeze({ status: "routed", toolCount })
 }
 
@@ -160,7 +173,7 @@ export function listOfferedDefinitions(
  * tools, `find_tools`, and the state tools; otherwise an offer of every
  * tool and no `find_tools`. The routed reply's other tools stay in its
  * toolset, so each tool `find_tools` finds is offered once
- * {@link offerFoundTools} adds it, and each call of it passes the reply's
+ * {@link addFoundTools} adds it, and each call of it passes the reply's
  * checks and gate.
  * @throws If two tools share a name, as {@link buildAgentToolset} throws.
  */
@@ -175,47 +188,64 @@ export function buildReplyTools(
     ...turn.mcpTools.map((tool) => tool.definition)
   ])
   const routing = findToolRouting(turn.trainedForToolUse, keptTools.length)
-  const findTools =
-    routing.status === "routed"
-      ? new FindToolsTool({
-          keeper,
-          tools: keptTools,
-          conversationId: turn.conversationId,
-          model: turn.model,
-          generationOptions: turn.generationOptions,
-          reportFailure: turn.reportToolSearchFailure
-        })
-      : undefined
-  const routingTools =
-    findTools === undefined
-      ? NO_ROUTING_TOOLS
-      : [buildFindToolsEntry(findTools)]
-  const directTools = Object.freeze([...turn.directTools, ...routingTools])
-  const tools = buildAgentToolset({
+  if (routing.status === "direct") {
+    const tools = buildTurnToolset(turn, turn.directTools, agentStateTools)
+    const toolOffer = new ReplyToolOffer(tools, tools.keys())
+    return Object.freeze({ status: "direct", toolOffer })
+  }
+  const findTools = new FindToolsTool({
+    keeper,
+    tools: keptTools,
+    conversationId: turn.conversationId,
+    model: turn.model,
+    generationOptions: turn.generationOptions,
+    reportFailure: turn.reportToolSearchFailure
+  })
+  const directTools = [...turn.directTools, buildFindToolsEntry(findTools)]
+  const tools = buildTurnToolset(turn, directTools, agentStateTools)
+  const offeredNames = [...directTools, ...agentStateTools].map(
+    (tool) => tool.definition.name
+  )
+  const toolOffer = new ReplyToolOffer(tools, offeredNames)
+  const { toolCount } = routing
+  return Object.freeze({ status: "routed", toolCount, toolOffer, findTools })
+}
+
+/**
+ * Adds the tools a reply's `find_tools` found so far to the reply's offer,
+ * so the reply offers them from its next round.
+ *
+ * @param replyTools - The reply's tools; unchanged when the turn is not
+ * routed.
+ */
+export function addFoundTools(replyTools: ReplyTools): void {
+  if (replyTools.status === "routed")
+    replyTools.toolOffer.addTools(replyTools.findTools.listFoundToolNames())
+}
+
+/**
+ * Builds the toolset of a reply's turn.
+ *
+ * @param turn - The turn's client, built-in, and MCP tools.
+ * @param directTools - Backend tools offered in every round, in offer
+ * order: the turn's own, with `find_tools` after them for a routed turn.
+ * @param agentStateTools - The agent's state tools for the turn; empty when
+ * none is offered.
+ * @returns The toolset, as {@link buildAgentToolset} orders it.
+ * @throws If two tools share a name, as {@link buildAgentToolset} throws.
+ */
+function buildTurnToolset(
+  turn: ReplyToolsTurn,
+  directTools: readonly TurnBuiltInTool[],
+  agentStateTools: readonly TurnBuiltInTool[]
+): AgentToolset {
+  return buildAgentToolset({
     directTools,
     clientTools: turn.clientTools,
     builtInTools: turn.builtInTools,
     mcpTools: turn.mcpTools,
     agentStateTools
   })
-  const offeredNames =
-    findTools === undefined
-      ? tools.keys()
-      : [...directTools, ...agentStateTools].map((tool) => tool.definition.name)
-  const toolOffer = new ReplyToolOffer(tools, offeredNames)
-  return Object.freeze({ routing, toolOffer, findTools })
-}
-
-/**
- * Offers the tools a reply's `find_tools` found so far from the reply's
- * next round.
- *
- * @param replyTools - The reply's tools; unchanged when the turn is not
- * routed.
- */
-export function offerFoundTools(replyTools: ReplyTools): void {
-  if (replyTools.findTools !== undefined)
-    replyTools.toolOffer.addTools(replyTools.findTools.listFoundToolNames())
 }
 
 /**

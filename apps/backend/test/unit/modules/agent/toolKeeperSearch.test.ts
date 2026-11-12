@@ -1,15 +1,15 @@
-import { ARMITAGE_AGENT_CODE, toolDefinitionSchema } from "@lys/share"
+import {
+  ARMITAGE_AGENT_CODE,
+  toolDefinitionSchema,
+  type ToolDefinition
+} from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
-import Agent, { type AgentProfile } from "../../../../src/modules/agent/agent"
+import Agent from "../../../../src/modules/agent/agent"
 import {
   AgentRequestLimitError,
   type AgentRequestState
 } from "../../../../src/modules/agent/agentActivity"
-import type { AgentStateReader } from "../../../../src/modules/agent/agentStateTools"
-import type {
-  ToolKeeper,
-  ToolSearch
-} from "../../../../src/modules/agent/findToolsTool"
+import type { ToolSearch } from "../../../../src/modules/agent/findToolsTool"
 import type { ReplyContextMeter } from "../../../../src/modules/agent/replyContextMeter"
 import type {
   ReplyModel,
@@ -38,14 +38,6 @@ const ARMITAGE_PROMPT = "You are Armitage, the tool keeper."
 /** Request limits of Armitage in every case. */
 const REQUEST_LIMITS = Object.freeze({ slotCount: 2, waitingLimit: 2 })
 
-/** Armitage's profile in every case. */
-const ARMITAGE_PROFILE: AgentProfile = Object.freeze({
-  code: ARMITAGE_AGENT_CODE,
-  role: "tool-keeper",
-  systemPrompt: ARMITAGE_PROMPT,
-  requestLimits: REQUEST_LIMITS
-})
-
 /**
  * Fails a read the case did not arrange.
  *
@@ -55,36 +47,23 @@ function handleUnexpectedRead(): never {
   throw new Error("Unexpected read")
 }
 
-/** State reader Armitage never uses: it has no state tools. */
-const UNEXPECTED_STATE_READER: AgentStateReader = Object.freeze({
-  listAgentMatches: handleUnexpectedRead,
-  findAgentState: handleUnexpectedRead
-})
-
-/** Keeper Armitage never asks: its own turns are never routed. */
-const UNEXPECTED_KEEPER: ToolKeeper = Object.freeze({
-  findTools: handleUnexpectedRead
-})
-
-/** Tools of the asking turn. */
-const TOOLS = Object.freeze([
-  toolDefinitionSchema.parse({
-    name: "read_page",
-    description: "Reads one web page and returns its text.",
-    group: "network",
-    access: "network",
-    runner: "backend",
-    arguments: []
-  }),
-  toolDefinitionSchema.parse({
-    name: "send_email",
-    description: "Sends an email message.",
+/**
+ * Builds the definition of a backend tool that takes no argument.
+ *
+ * @param name - Name of the tool.
+ * @param description - What the tool does.
+ * @returns The validated definition.
+ */
+function buildDefinition(name: string, description: string): ToolDefinition {
+  return toolDefinitionSchema.parse({
+    name,
+    description,
     group: "network",
     access: "network",
     runner: "backend",
     arguments: []
   })
-])
+}
 
 /**
  * Builds a round in which the model calls one tool.
@@ -106,7 +85,7 @@ const SEARCH_ROUND = buildToolCallRound(SEARCH_TOOLS_TOOL_NAME, {
   query: "web page"
 })
 
-/** Round that recommends the page reader. */
+/** Round that recommends the page reader, the first tool of a search. */
 const RECOMMEND_ROUND = buildToolCallRound(RECOMMEND_TOOL_TOOL_NAME, {
   name: "read_page"
 })
@@ -139,17 +118,28 @@ function createRoundStreams(...rounds: (readonly ReplyStreamEvent[])[]) {
  *
  * @param openReplyStream - Model of the case.
  * @param replyContextMeter - Meter of the case; roomy by default.
- * @returns The agent.
+ * @returns The agent, whose state reader and keeper fail the case when
+ * used: Armitage has no state tools, and its own turns are never routed.
  */
 function createArmitage(
   openReplyStream: OpenReplyStream,
   replyContextMeter: ReplyContextMeter = createRoomyReplyContextMeter()
 ): Agent {
-  return new Agent(ARMITAGE_PROFILE, {
+  const profile = {
+    code: ARMITAGE_AGENT_CODE,
+    role: "tool-keeper",
+    systemPrompt: ARMITAGE_PROMPT,
+    requestLimits: REQUEST_LIMITS
+  } as const
+  const stateReader = {
+    listAgentMatches: handleUnexpectedRead,
+    findAgentState: handleUnexpectedRead
+  }
+  return new Agent(profile, {
     replyModel: { openReplyStream },
     replyContextMeter,
-    stateReader: UNEXPECTED_STATE_READER,
-    toolKeeper: UNEXPECTED_KEEPER
+    stateReader,
+    toolKeeper: { findTools: handleUnexpectedRead }
   })
 }
 
@@ -158,15 +148,20 @@ function createArmitage(
  *
  * @param reportFailure - Receives why the search ended without finding.
  * @param abortSignal - Cancellation of the asking reply.
- * @returns The search over {@link TOOLS}.
+ * @returns The search over the asking turn's tools: `read_page`, then
+ * `send_email`.
  */
 function buildSearch(
   reportFailure: (failure: unknown) => void,
   abortSignal: AbortSignal = new AbortController().signal
 ): ToolSearch {
+  const tools = [
+    buildDefinition("read_page", "Reads one web page and returns its text."),
+    buildDefinition("send_email", "Sends an email message.")
+  ]
   return {
     task: "read a web page",
-    tools: TOOLS,
+    tools,
     conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
     model: "qwen/qwen3-8b",
     generationOptions: { temperature: 0.2 },
@@ -209,6 +204,24 @@ describe("runToolKeeperSearch", () => {
     expect(lastRequest?.messages.at(-1)).toMatchObject({
       role: "tool",
       content: "Recommended read_page: 1 of at most 5 tools."
+    })
+  })
+
+  it("finds every tool of the asking turn Armitage recommends, in the order recommended", async () => {
+    const openReplyStream = createRoundStreams(
+      buildToolCallRound(RECOMMEND_TOOL_TOOL_NAME, { name: "send_email" }),
+      RECOMMEND_ROUND,
+      FINISH_ROUND
+    )
+
+    const outcome = await runToolKeeperSearch(
+      createArmitage(openReplyStream),
+      buildSearch(vi.fn())
+    )
+
+    expect(outcome).toEqual({
+      status: "found",
+      toolNames: ["send_email", "read_page"]
     })
   })
 
@@ -352,6 +365,46 @@ describe("runToolKeeperSearch", () => {
         yield* RECOMMEND_ROUND
       })()
     )
+    const reportFailure = vi.fn()
+
+    await expect(
+      runToolKeeperSearch(
+        createArmitage(openReplyStream),
+        buildSearch(reportFailure, abortController.signal)
+      )
+    ).rejects.toBe(stopReason)
+    expect(reportFailure).not.toHaveBeenCalled()
+  })
+
+  it("stops Armitage's reply with the asking reply: its round gets the asking reply's signal, and no round follows the stop", async () => {
+    const abortController = new AbortController()
+    const openReplyStream = vi.fn<OpenReplyStream>(async () =>
+      (async function* () {
+        abortController.abort(new Error("stopped"))
+        yield* RECOMMEND_ROUND
+      })()
+    )
+
+    await expect(
+      runToolKeeperSearch(
+        createArmitage(openReplyStream),
+        buildSearch(vi.fn(), abortController.signal)
+      )
+    ).rejects.toThrow("stopped")
+
+    expect(openReplyStream).toHaveBeenCalledOnce()
+    expect(openReplyStream.mock.calls[0]?.[0].abortSignal).toBe(
+      abortController.signal
+    )
+  })
+
+  it("reports nothing when the model reports a cancellation after the asking reply stopped", async () => {
+    const stopReason = new Error("stopped")
+    const abortController = new AbortController()
+    const openReplyStream = vi.fn<OpenReplyStream>(async () => {
+      abortController.abort(stopReason)
+      throw new ChatCompletionCancelledError(new Error("cancelled"))
+    })
     const reportFailure = vi.fn()
 
     await expect(

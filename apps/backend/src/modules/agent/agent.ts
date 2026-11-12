@@ -69,11 +69,11 @@ import {
   type ToolCallRound
 } from "./toolCallRound"
 import {
+  addFoundTools,
   buildReplyTools,
   findToolRouting,
   formatRoutedSystemPrompt,
   listOfferedDefinitions,
-  offerFoundTools,
   type ReplyTools
 } from "./toolRouting"
 import type { UnofferedTools } from "./unofferedTools"
@@ -312,9 +312,6 @@ const ENDED_REPLY_ROUND = Object.freeze({
 /** State tools of a turn whose model is not trained for tool use. */
 const NO_AGENT_STATE_TOOLS: readonly TurnBuiltInTool[] = Object.freeze([])
 
-/** State tool definitions a measurement for a model not trained for tool use counts. */
-const NO_AGENT_STATE_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([])
-
 /** The next message as a context measurement sends it: without text or files. */
 const EMPTY_USER_MESSAGE = Object.freeze({
   content: "",
@@ -532,6 +529,12 @@ export default class Agent {
   public async findContextMeasurement(
     input: AgentContextInput
   ): Promise<AgentContextMeasurement | undefined> {
+    /**
+     * State tool definitions a measurement for a model not trained for tool
+     * use counts: none.
+     */
+    const noAgentStateDefinitions: readonly ToolDefinition[] = Object.freeze([])
+
     const systemPrompt = this.#systemPrompt
     const routing = findToolRouting(input.trainedForToolUse, input.tools.length)
     const images: AgentContextImages<ReplyContextImageSides> =
@@ -556,7 +559,7 @@ export default class Agent {
       tools: input.tools,
       agentStateTools: input.trainedForToolUse
         ? buildAgentStateDefinitions(this.#identity.role)
-        : NO_AGENT_STATE_DEFINITIONS,
+        : noAgentStateDefinitions,
       routing
     })
     const measurement =
@@ -730,7 +733,7 @@ export default class Agent {
       systemPrompt: formatRoutedSystemPrompt(
         systemPrompt,
         turn.unofferedTools,
-        replyTools.routing
+        replyTools
       ),
       history: turn.history,
       userMessage: turn.userMessage,
@@ -772,7 +775,7 @@ export default class Agent {
       sourceCatalog: state.sourceCatalog
     })
     if (roundMessages === undefined) return undefined
-    offerFoundTools(state.replyTools)
+    addFoundTools(state.replyTools)
     const nextMessages = [...messages, ...roundMessages]
     const nextRound = await this.#createReplyRound(state, {
       messages: nextMessages,

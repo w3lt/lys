@@ -2,6 +2,8 @@ import type {
   ChatReplyEvent,
   ChatReplyPathParams,
   ChatToolApprovalAnswer,
+  ChatToolApprovalApiRequestBody,
+  ChatToolApprovalPrompt,
   ChatToolCall,
   ChatToolCallPathParams,
   ChatToolResult
@@ -132,6 +134,8 @@ export type HeldToolCall =
       readonly call: ChatToolCall
       /** The backend shows the call to the person for approval. */
       readonly step: "approval"
+      /** Single-use token the prompt carried; every answer to it returns it. */
+      readonly approvalToken: string
       /** Where the answer to the prompt stands. */
       readonly answer: HeldToolApprovalAnswer
     }
@@ -244,10 +248,13 @@ type ToolCallStoreDependencies = {
     target: ChatToolCallPathParams,
     result: ChatToolResult
   ) => Promise<SendChatToolCallAnswerResult>
-  /** Sends one prompt's answer; throws when the backend cannot take it. */
+  /**
+   * Sends one prompt's answer with the prompt's token; throws when the
+   * backend cannot take it.
+   */
   readonly sendChatToolApproval: (
     target: ChatToolCallPathParams,
-    answer: ChatToolApprovalAnswer
+    answer: ChatToolApprovalApiRequestBody
   ) => Promise<SendChatToolCallAnswerResult>
   /** Gets the tool list, loading it when it has not been read; never rejects. */
   readonly getToolList: () => Promise<ToolListState>
@@ -369,16 +376,24 @@ function buildToolCallAnswerTarget(
  *
  * @param target - Address of the call's answer.
  * @param call - Call as the backend sent it.
+ * @param approvalToken - Token the call's prompt carried.
  * @param toolAnswer - Approval answer to send.
  * @returns A frozen held call in the approval step.
  */
 function buildSendingToolApproval(
   target: ChatToolCallPathParams,
   call: ChatToolCall,
+  approvalToken: string,
   toolAnswer: ChatToolApprovalAnswer
 ): SendingHeldToolCall {
   const answer = Object.freeze({ status: "sending", toolAnswer } as const)
-  return Object.freeze({ target, call, step: "approval", answer } as const)
+  return Object.freeze({
+    target,
+    call,
+    step: "approval",
+    approvalToken,
+    answer
+  } as const)
 }
 
 /**
@@ -417,7 +432,13 @@ function buildSendFailedHeldToolCall(
         toolAnswer: heldCall.answer.toolAnswer,
         error
       } as const)
-      return Object.freeze({ target, call, step: "approval", answer } as const)
+      return Object.freeze({
+        target,
+        call,
+        step: "approval",
+        approvalToken: heldCall.approvalToken,
+        answer
+      } as const)
     }
     case "run": {
       const answer = Object.freeze({
@@ -446,6 +467,7 @@ function buildAnsweredHeldToolCall(
         target,
         call,
         step: "approval",
+        approvalToken: heldCall.approvalToken,
         answer: ANSWERED_ANSWER
       } as const)
     case "run":
@@ -474,6 +496,7 @@ function buildResentHeldToolCall(
         ? buildSendingToolApproval(
             heldCall.target,
             heldCall.call,
+            heldCall.approvalToken,
             heldCall.answer.toolAnswer
           )
         : undefined
@@ -514,10 +537,10 @@ function createToolCallStore(
   ): Promise<SendChatToolCallAnswerResult> {
     switch (heldCall.step) {
       case "approval":
-        return dependencies.sendChatToolApproval(
-          heldCall.target,
-          heldCall.answer.toolAnswer
-        )
+        return dependencies.sendChatToolApproval(heldCall.target, {
+          ...heldCall.answer.toolAnswer,
+          approvalToken: heldCall.approvalToken
+        })
       case "run":
         return dependencies.sendChatToolResult(
           heldCall.target,
@@ -677,7 +700,8 @@ function createToolCallStore(
      * Holds one prompt of a followed reply and starts answering it.
      *
      * @param target - Reply that made the call, and its conversation.
-     * @param call - Call the backend shows for approval.
+     * @param approvalPrompt - Call the backend shows for approval, and the
+     * token its answer returns.
      * @param list - Tool list the card is described from.
      * @remarks A call already held, including an answered one, is ignored. A
      * prompt the desktop cannot show is answered at once; sending never
@@ -685,9 +709,10 @@ function createToolCallStore(
      */
     function startToolApproval(
       target: ChatReplyPathParams,
-      call: ChatToolCall,
+      approvalPrompt: ChatToolApprovalPrompt,
       list: ToolListState
     ): void {
+      const { call, approvalToken } = approvalPrompt
       if (findHeldToolCall(call.id) !== undefined) return
 
       const answerTarget = buildToolCallAnswerTarget(target, call.id)
@@ -704,6 +729,7 @@ function createToolCallStore(
               target: answerTarget,
               call,
               step: "approval",
+              approvalToken,
               answer
             } as const)
           )
@@ -713,6 +739,7 @@ function createToolCallStore(
           const sending = buildSendingToolApproval(
             answerTarget,
             call,
+            approvalToken,
             prompt.toolAnswer
           )
           addHeldToolCall(sending)
@@ -771,25 +798,25 @@ function createToolCallStore(
      * each one.
      *
      * @param target - Reply that made the calls, and its conversation.
-     * @param calls - Calls in arrival order: one live prompt, or the prompts a
-     * snapshot lists as waiting.
+     * @param approvalPrompts - Prompts in arrival order, each with its
+     * token: one live prompt, or the prompts a snapshot lists as waiting.
      * @returns A promise that settles once the prompts are held. Calls already
      * held are ignored; when the reply stopped being followed while the tool
      * list was read, every call is.
      */
     async function handleToolApprovalArrival(
       target: ChatReplyPathParams,
-      calls: readonly ChatToolCall[]
+      approvalPrompts: readonly ChatToolApprovalPrompt[]
     ): Promise<void> {
-      const arrivedCalls = calls.filter(
-        (call) => findHeldToolCall(call.id) === undefined
+      const arrivedPrompts = approvalPrompts.filter(
+        ({ call }) => findHeldToolCall(call.id) === undefined
       )
-      if (arrivedCalls.length === 0) return
+      if (arrivedPrompts.length === 0) return
       const list = await dependencies.getToolList()
       if (!replyFollows.has(target.assistantMessageId)) return
 
-      for (const call of arrivedCalls) {
-        startToolApproval(target, call, list)
+      for (const approvalPrompt of arrivedPrompts) {
+        startToolApproval(target, approvalPrompt, list)
       }
     }
 
@@ -814,7 +841,9 @@ function createToolCallStore(
           for (const call of event.pendingToolCalls) startToolRun(target, call)
           return "reply-continues"
         case "tool-approval":
-          await handleToolApprovalArrival(target, [event.call])
+          await handleToolApprovalArrival(target, [
+            { call: event.call, approvalToken: event.approvalToken }
+          ])
           return "reply-continues"
         case "tool-call":
           startToolRun(target, event.call)
@@ -929,11 +958,19 @@ function createToolCallStore(
       toolAnswer: ChatToolApprovalAnswer
     ): Promise<void> {
       const heldCall = findHeldToolCall(callId)
-      if (heldCall?.answer.status !== "awaiting-person")
+      if (
+        heldCall?.step !== "approval" ||
+        heldCall.answer.status !== "awaiting-person"
+      )
         return Promise.resolve()
 
       return sendHeldToolAnswer(
-        buildSendingToolApproval(heldCall.target, heldCall.call, toolAnswer)
+        buildSendingToolApproval(
+          heldCall.target,
+          heldCall.call,
+          heldCall.approvalToken,
+          toolAnswer
+        )
       )
     }
 

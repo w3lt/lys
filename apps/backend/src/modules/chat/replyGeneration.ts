@@ -33,10 +33,11 @@ export type ReplyTaskContext = ReplyGenerationTaskContext &
       toolCall: ChatToolCall
     ) => Promise<ChatToolResult | undefined>
     /**
-     * Lists one checked call and shows it to every follower for approval,
-     * then waits for the person's answer. Resolves with that answer, or with
-     * undefined once the reply was stopped, the generation disposed, or the
-     * reply task settled; never rejects.
+     * Lists one checked call with a new single-use token and shows both to
+     * every follower for approval, then waits for the person's answer, which
+     * must carry the token. Resolves with that answer, without the token, or
+     * with undefined once the reply was stopped, the generation disposed, or
+     * the reply task settled; never rejects.
      * Throws if a call with the same identifier is already waiting.
      */
     sendToolApprovalPrompt: (
@@ -231,13 +232,14 @@ export default class ReplyGeneration implements AsyncDisposable {
    *
    * @param toolCallId - Identifier of the call's `tool-call` or
    * `tool-approval` event.
-   * @param answer - Validated result or approval answer, handed to the reply
-   * unchanged.
-   * @returns `accepted` when the call was waiting for that kind of answer;
-   * `not-pending` when it is unknown, already answered, waiting for the other
-   * kind of answer, or ended with its reply. Only `accepted` changes
-   * anything. Calls still waiting when the reply task settles end without an
-   * answer.
+   * @param answer - Validated result, handed to the reply unchanged, or
+   * approval answer with its prompt's token, handed on without the token.
+   * @returns `accepted` when the call was waiting for that kind of answer,
+   * with that token for a prompt; `token-mismatch` when a prompt waits for
+   * the call but the token is not its own; `not-pending` when the call is
+   * unknown, already answered, waiting for the other kind of answer, or ended
+   * with its reply. Only `accepted` changes anything. Calls still waiting
+   * when the reply task settles end without an answer.
    */
   public resolveToolCall(
     toolCallId: string,

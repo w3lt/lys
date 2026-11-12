@@ -12,7 +12,8 @@ import {
   buildBackendToolDefinition,
   buildMcpToolDefinition,
   buildToolCall,
-  buildToolDefinition
+  buildToolDefinition,
+  createFixtureApprovalToken
 } from "../../support/toolFixtures"
 
 /** Search the model asked for; the card lists its arguments in this order. */
@@ -47,6 +48,7 @@ const WAITING_SEARCH: ShownToolCall = Object.freeze({
   target: buildCallTarget(SEARCH_CALL.id),
   call: SEARCH_CALL,
   step: "approval",
+  approvalToken: createFixtureApprovalToken(1),
   answer: {
     status: "awaiting-person",
     definition: buildToolDefinition("search_files"),
@@ -68,6 +70,7 @@ const WAITING_PAGE_READ: ShownToolCall = Object.freeze({
   target: buildCallTarget(PAGE_CALL.id),
   call: PAGE_CALL,
   step: "approval",
+  approvalToken: createFixtureApprovalToken(1),
   answer: {
     status: "awaiting-person",
     definition: buildBackendToolDefinition("read_page"),
@@ -89,6 +92,7 @@ const WAITING_WEB_SEARCH: ShownToolCall = Object.freeze({
   target: buildCallTarget(WEB_SEARCH_CALL.id),
   call: WEB_SEARCH_CALL,
   step: "approval",
+  approvalToken: createFixtureApprovalToken(1),
   answer: {
     status: "awaiting-person",
     definition: buildBackendToolDefinition("web_search"),
@@ -116,6 +120,7 @@ const WAITING_MCP_CALL: ShownToolCall = Object.freeze({
   target: buildCallTarget(MCP_CALL.id),
   call: MCP_CALL,
   step: "approval",
+  approvalToken: createFixtureApprovalToken(1),
   answer: {
     status: "awaiting-person",
     definition: NOTES_SEARCH,

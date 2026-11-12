@@ -260,6 +260,32 @@ const DECLINED_APPROVAL = Object.freeze({
   content: "The person declined this call."
 } satisfies ChatToolApprovalAnswer)
 
+/** Token no prompt was given: right shape, wrong value. */
+const WRONG_TOKEN = "A".repeat(43)
+
+/** Matches the token of any prompt. */
+const ANY_APPROVAL_TOKEN = expect.stringMatching(/^[A-Za-z0-9_-]{43}$/)
+
+/**
+ * Reads the token the waiting prompt of one call of {@link REPLY_TARGET}
+ * carries.
+ *
+ * @param generations - Registry running the reply.
+ * @param callId - Identifier of the prompted call.
+ * @returns The prompt's token.
+ * @throws When the reply waits on no prompt of that call.
+ */
+function readApprovalToken(
+  generations: ReplyGenerationRegistry,
+  callId: string
+): string {
+  const prompt = generations
+    .findReplyGeneration(REPLY_TARGET)
+    ?.pendingToolCalls.toolApprovals.find(({ call }) => call.id === callId)
+  if (prompt === undefined) throw new Error(`No prompt waits for ${callId}`)
+  return prompt.approvalToken
+}
+
 /**
  * Builds the tool-approval URL of one call of {@link REPLY_TARGET}.
  *
@@ -541,7 +567,9 @@ describe("updateFastifyWithChatReplyRoutes", () => {
           data: {
             ...REPLY_SNAPSHOT_EVENT,
             pendingToolCalls: [TOOL_CALL],
-            pendingToolApprovals: [BACKEND_TOOL_CALL]
+            pendingToolApprovals: [
+              { call: BACKEND_TOOL_CALL, approvalToken: ANY_APPROVAL_TOKEN }
+            ]
           }
         }
       ])
@@ -573,7 +601,11 @@ describe("updateFastifyWithChatReplyRoutes", () => {
         { event: "reply-snapshot", data: REPLY_SNAPSHOT_EVENT },
         {
           event: "tool-approval",
-          data: { type: "tool-approval", call: BACKEND_TOOL_CALL }
+          data: {
+            type: "tool-approval",
+            call: BACKEND_TOOL_CALL,
+            approvalToken: ANY_APPROVAL_TOKEN
+          }
         }
       ])
     })
@@ -632,7 +664,10 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       ).toBe(true)
       expect(
         generations.findReplyGeneration(REPLY_TARGET)?.pendingToolCalls
-      ).toEqual({ toolCalls: [], toolApprovals: [TOOL_CALL] })
+      ).toEqual({
+        toolCalls: [],
+        toolApprovals: [{ call: TOOL_CALL, approvalToken: ANY_APPROVAL_TOKEN }]
+      })
     })
 
     it("answers 409 to a second answer for the same call", async () => {
@@ -848,37 +883,45 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       ["allowed", { status: "allowed" }],
       ["rejected", DECLINED_APPROVAL]
     ])(
-      "answers 204 and resumes the reply with an answer of %s",
-      async (_label, payload) => {
+      "answers 204 to an answer of %s with its prompt's token and resumes the reply with the answer alone",
+      async (_label, answer) => {
         const { app, generations } = await createReplyRouteApp()
         const generation = startControlledGeneration(generations, REPLY_TARGET)
         await waitForMicrotasks()
-        const answer =
+        const waitedAnswer =
           generation.replyTask.context.sendToolApprovalPrompt(BACKEND_TOOL_CALL)
-
-        const response = await sendToolApproval(
-          app,
-          BACKEND_TOOL_CALL.id,
-          payload
+        const approvalToken = readApprovalToken(
+          generations,
+          BACKEND_TOOL_CALL.id
         )
+
+        const response = await sendToolApproval(app, BACKEND_TOOL_CALL.id, {
+          ...answer,
+          approvalToken
+        })
 
         expect(response.statusCode).toBe(204)
         expect(response.body).toBe("")
-        expect(await answer).toEqual(payload)
+        expect(await waitedAnswer).toStrictEqual(answer)
       }
     )
 
-    it("answers 409 with the not-pending problem to a second answer for the same prompt", async () => {
+    it("answers 409 with the not-pending problem when the token is sent again after its answer was accepted", async () => {
       const { app, generations } = await createReplyRouteApp()
       const generation = startControlledGeneration(generations, REPLY_TARGET)
       await waitForMicrotasks()
       void generation.replyTask.context.sendToolApprovalPrompt(
         BACKEND_TOOL_CALL
       )
-      await sendToolApproval(app, BACKEND_TOOL_CALL.id, { status: "allowed" })
+      const approvalToken = readApprovalToken(generations, BACKEND_TOOL_CALL.id)
+      await sendToolApproval(app, BACKEND_TOOL_CALL.id, {
+        status: "allowed",
+        approvalToken
+      })
 
       const response = await sendToolApproval(app, BACKEND_TOOL_CALL.id, {
-        status: "allowed"
+        status: "allowed",
+        approvalToken
       })
 
       expect(response.statusCode).toBe(409)
@@ -894,6 +937,42 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       })
     })
 
+    it("answers 409 to an answer with a token that is not its prompt's, logs the refusal without the token, and keeps the prompt waiting", async () => {
+      const { app, generations, log } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      await waitForMicrotasks()
+      const waitedAnswer =
+        generation.replyTask.context.sendToolApprovalPrompt(BACKEND_TOOL_CALL)
+      const approvalToken = readApprovalToken(generations, BACKEND_TOOL_CALL.id)
+
+      const response = await sendToolApproval(app, BACKEND_TOOL_CALL.id, {
+        status: "allowed",
+        approvalToken: WRONG_TOKEN
+      })
+
+      expect(response.statusCode).toBe(409)
+      expect(
+        chatToolCallNotPendingProblemSchema.safeParse(response.json()).success
+      ).toBe(true)
+      expect(log.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          toolCallId: BACKEND_TOOL_CALL.id
+        })
+      )
+      expect(JSON.stringify(log.records)).not.toContain(WRONG_TOKEN)
+      expect(
+        generations.findReplyGeneration(REPLY_TARGET)?.pendingToolCalls
+          .toolApprovals
+      ).toEqual([{ call: BACKEND_TOOL_CALL, approvalToken }])
+      const accepted = await sendToolApproval(app, BACKEND_TOOL_CALL.id, {
+        ...DECLINED_APPROVAL,
+        approvalToken
+      })
+      expect(accepted.statusCode).toBe(204)
+      expect(await waitedAnswer).toStrictEqual(DECLINED_APPROVAL)
+    })
+
     it("answers 409 to an approval for a call waiting for its result, which keeps waiting", async () => {
       const { app, generations } = await createReplyRouteApp()
       const generation = startControlledGeneration(generations, REPLY_TARGET)
@@ -901,7 +980,8 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       void generation.replyTask.context.sendClientToolCall(TOOL_CALL)
 
       const response = await sendToolApproval(app, TOOL_CALL.id, {
-        status: "allowed"
+        status: "allowed",
+        approvalToken: WRONG_TOKEN
       })
 
       expect(response.statusCode).toBe(409)
@@ -922,28 +1002,39 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       if (isGenerating) startControlledGeneration(generations, REPLY_TARGET)
 
       const response = await sendToolApproval(app, callId, {
-        status: "allowed"
+        status: "allowed",
+        approvalToken: WRONG_TOKEN
       })
 
       expect(response.statusCode).toBe(409)
     })
 
     it.each([
+      ["an allowed answer without a token", { status: "allowed" }],
+      [
+        "a rejected answer without a token",
+        { status: "rejected", reason: "declined", content: "x" }
+      ],
+      [
+        "a token of another shape",
+        { status: "allowed", approvalToken: "token" }
+      ],
       [
         "an allowed answer with an unknown field",
-        { status: "allowed", note: "x" }
+        { status: "allowed", approvalToken: WRONG_TOKEN, note: "x" }
       ],
       [
         "a rejected answer without content",
-        { status: "rejected", reason: "declined" }
-      ],
-      [
-        "a rejected answer with empty content",
-        { status: "rejected", reason: "declined", content: "" }
+        { status: "rejected", reason: "declined", approvalToken: WRONG_TOKEN }
       ],
       [
         "a rejected answer with an unknown reason",
-        { status: "rejected", reason: "timedOut", content: "x" }
+        {
+          status: "rejected",
+          reason: "timedOut",
+          content: "x",
+          approvalToken: WRONG_TOKEN
+        }
       ],
       ["a tool result", SUCCEEDED_RESULT]
     ])(
@@ -955,6 +1046,10 @@ describe("updateFastifyWithChatReplyRoutes", () => {
         void generation.replyTask.context.sendToolApprovalPrompt(
           BACKEND_TOOL_CALL
         )
+        const approvalToken = readApprovalToken(
+          generations,
+          BACKEND_TOOL_CALL.id
+        )
 
         const response = await sendToolApproval(
           app,
@@ -965,7 +1060,10 @@ describe("updateFastifyWithChatReplyRoutes", () => {
         expect(response.statusCode).toBe(400)
         expect(
           generations.findReplyGeneration(REPLY_TARGET)?.pendingToolCalls
-        ).toEqual({ toolCalls: [], toolApprovals: [BACKEND_TOOL_CALL] })
+        ).toEqual({
+          toolCalls: [],
+          toolApprovals: [{ call: BACKEND_TOOL_CALL, approvalToken }]
+        })
       }
     )
 
@@ -974,7 +1072,8 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       startControlledGeneration(generations, REPLY_TARGET)
 
       const response = await sendToolApproval(app, "call_0", {
-        status: "allowed"
+        status: "allowed",
+        approvalToken: WRONG_TOKEN
       })
 
       expect(response.statusCode).toBe(400)
@@ -985,7 +1084,8 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       await generations[Symbol.asyncDispose]()
 
       const response = await sendToolApproval(app, BACKEND_TOOL_CALL.id, {
-        status: "allowed"
+        status: "allowed",
+        approvalToken: WRONG_TOKEN
       })
 
       expect(response.statusCode).toBe(500)
@@ -999,7 +1099,10 @@ describe("updateFastifyWithChatReplyRoutes", () => {
         BACKEND_TOOL_CALL
       )
 
-      await sendToolApproval(app, BACKEND_TOOL_CALL.id, DECLINED_APPROVAL)
+      await sendToolApproval(app, BACKEND_TOOL_CALL.id, {
+        ...DECLINED_APPROVAL,
+        approvalToken: readApprovalToken(generations, BACKEND_TOOL_CALL.id)
+      })
 
       expect(log.records).toContainEqual(
         expect.objectContaining({

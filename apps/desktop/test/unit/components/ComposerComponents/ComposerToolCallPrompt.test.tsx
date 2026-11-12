@@ -16,7 +16,11 @@ import {
 } from "../../support/conversationFixtures"
 import { startNativeHostFake } from "../../support/nativeHostFake"
 import { waitForRenderedWork } from "../../support/rendering"
-import { buildToolCall, buildToolDefinition } from "../../support/toolFixtures"
+import {
+  buildToolCall,
+  buildToolDefinition,
+  createFixtureApprovalToken
+} from "../../support/toolFixtures"
 
 /** Reply of the shown conversation that makes the calls. */
 const REPLY = buildStreamingAssistantMessage(3, "")
@@ -57,6 +61,7 @@ function buildWaitingRead(
     target: { conversationId, assistantMessageId: REPLY.id, callId: call.id },
     call,
     step: "approval",
+    approvalToken: createFixtureApprovalToken(1),
     answer: {
       status: "awaiting-person",
       definition: buildToolDefinition("read_text_file"),
@@ -168,7 +173,7 @@ describe("ComposerToolCallPrompt", () => {
 
     expect(host.commands).toEqual([])
     expect(backend.requests.map((request) => request.body)).toEqual([
-      { status: "allowed" }
+      { status: "allowed", approvalToken: createFixtureApprovalToken(1) }
     ])
     expect(screen.getByRole("group")).toHaveTextContent(
       "Read /notes/done.md. Nothing is changed."

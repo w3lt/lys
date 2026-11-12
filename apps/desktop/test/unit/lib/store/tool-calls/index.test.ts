@@ -32,7 +32,8 @@ import {
 import {
   buildBackendToolDefinition,
   buildToolCall,
-  buildToolDefinition
+  buildToolDefinition,
+  createFixtureApprovalToken
 } from "../../../support/toolFixtures"
 
 /** Desktop tool that reads one file on this machine. */
@@ -132,6 +133,17 @@ const SOURCES_EVENT = Object.freeze({
 })
 
 /**
+ * Builds the token the backend sends with the prompt of one call in these
+ * cases.
+ *
+ * @param call - Prompted call, built by `buildToolCall`.
+ * @returns A token distinct for each call.
+ */
+function buildApprovalToken(call: ChatToolCall): string {
+  return createFixtureApprovalToken(Number.parseInt(call.id.slice(-12), 16))
+}
+
+/**
  * Builds the snapshot that starts every stream of {@link REPLY} while it is
  * generating.
  *
@@ -149,7 +161,10 @@ function buildStreamingSnapshot(
     assistantMessage: REPLY,
     sources: [],
     pendingToolCalls,
-    pendingToolApprovals
+    pendingToolApprovals: pendingToolApprovals.map((call) => ({
+      call,
+      approvalToken: buildApprovalToken(call)
+    }))
   }
 }
 
@@ -160,7 +175,11 @@ function buildStreamingSnapshot(
  * @returns The `tool-approval` event.
  */
 function buildApprovalEvent(call: ChatToolCall) {
-  return { type: "tool-approval", call }
+  return {
+    type: "tool-approval",
+    call,
+    approvalToken: buildApprovalToken(call)
+  }
 }
 
 /**
@@ -284,18 +303,26 @@ function listToolAnswers(backend: BackendFake): unknown[] {
 }
 
 /**
- * Builds one answer as {@link listToolAnswers} lists it.
+ * Builds one tool result as {@link listToolAnswers} lists it.
  *
- * @param body - Approval answer or tool result.
- * @returns The answer with the endpoint its kind goes to.
+ * @param body - Tool result.
+ * @returns The result with the endpoint it goes to.
  */
-function buildSentAnswer(body: ChatToolApprovalAnswer | ChatToolResult) {
+function buildSentAnswer(body: ChatToolResult) {
+  return { endpoint: "tool-results", body }
+}
+
+/**
+ * Builds one approval answer as {@link listToolAnswers} lists it.
+ *
+ * @param call - Call whose prompt is answered.
+ * @param answer - Approval answer.
+ * @returns The answer with its prompt's token and the endpoint it goes to.
+ */
+function buildSentApproval(call: ChatToolCall, answer: ChatToolApprovalAnswer) {
   return {
-    endpoint:
-      body.status === "allowed" || body.status === "rejected"
-        ? "tool-approvals"
-        : "tool-results",
-    body
+    endpoint: "tool-approvals",
+    body: { ...answer, approvalToken: buildApprovalToken(call) }
   }
 }
 
@@ -395,6 +422,7 @@ function buildHeldToolCall(
     target: { conversationId, assistantMessageId: REPLY.id, callId: call.id },
     call,
     step: "approval",
+    approvalToken: buildApprovalToken(call),
     answer
   }
 }
@@ -527,6 +555,7 @@ describe("useToolCallStore", () => {
           target: { ...REPLY_TARGET, callId: READ_CALL.id },
           call: READ_CALL,
           step: "approval",
+          approvalToken: buildApprovalToken(READ_CALL),
           answer: {
             status: "awaiting-person",
             definition: READ_TEXT_FILE,
@@ -627,7 +656,7 @@ describe("useToolCallStore", () => {
       ])
 
       expect(listToolAnswers(backend)).toEqual([
-        buildSentAnswer({
+        buildSentApproval(READ_CALL, {
           status: "rejected",
           reason: "showFailed",
           content: "The desktop couldn't read its tool list."
@@ -865,7 +894,7 @@ describe("useToolCallStore", () => {
         { call: READ_CALL, answer: { status: "answered" } }
       ])
       expect(listToolAnswers(backend)).toEqual([
-        buildSentAnswer(DECLINED_APPROVAL)
+        buildSentApproval(READ_CALL, DECLINED_APPROVAL)
       ])
     })
 
@@ -977,7 +1006,12 @@ describe("useToolCallStore", () => {
         assistantMessage: otherReply,
         sources: [],
         pendingToolCalls: [],
-        pendingToolApprovals: [SECOND_READ_CALL]
+        pendingToolApprovals: [
+          {
+            call: SECOND_READ_CALL,
+            approvalToken: buildApprovalToken(SECOND_READ_CALL)
+          }
+        ]
       })
       await waitForMicrotasks()
       const whileBothWait = useToolCallStore.getState()
@@ -1022,7 +1056,7 @@ describe("useToolCallStore", () => {
         { command: "read_text_file", args: { path: "/notes/todo.md" } }
       ])
       expect(listToolAnswers(backend)).toEqual([
-        buildSentAnswer(ALLOWED_APPROVAL),
+        buildSentApproval(READ_CALL, ALLOWED_APPROVAL),
         buildSentAnswer(READ_RESULT)
       ])
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
@@ -1058,7 +1092,7 @@ describe("useToolCallStore", () => {
       await waitForMicrotasks()
 
       expect(listToolAnswers(backend)).toEqual([
-        buildSentAnswer(ALLOWED_APPROVAL),
+        buildSentApproval(READ_CALL, ALLOWED_APPROVAL),
         buildSentAnswer(READ_RESULT)
       ])
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
@@ -1103,9 +1137,25 @@ describe("useToolCallStore", () => {
       await useToolCallStore.getState().resolveToolCall(PAGE_CALL.id)
 
       expect(listToolAnswers(backend)).toEqual([
-        buildSentAnswer(ALLOWED_APPROVAL)
+        buildSentApproval(PAGE_CALL, ALLOWED_APPROVAL)
       ])
       expect(host.commands).toEqual([])
+    })
+
+    it("returns the token of a prompt it found in a snapshot with the person's answer", async () => {
+      const { backend, replyStreams } = startReplyBackend(
+        buildAcceptingToolCallRoutes(READ_CALL)
+      )
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot([READ_CALL])
+      ])
+
+      await useToolCallStore.getState().rejectToolCall(READ_CALL.id, "")
+
+      expect(listToolAnswers(backend)).toEqual([
+        buildSentApproval(READ_CALL, DECLINED_APPROVAL)
+      ])
     })
 
     it("sends the answer once when it is pressed twice", async () => {
@@ -1124,7 +1174,7 @@ describe("useToolCallStore", () => {
       ])
 
       expect(listToolAnswers(backend)).toEqual([
-        buildSentAnswer(ALLOWED_APPROVAL)
+        buildSentApproval(READ_CALL, ALLOWED_APPROVAL)
       ])
     })
 
@@ -1230,7 +1280,11 @@ describe("useToolCallStore", () => {
         await useToolCallStore.getState().rejectToolCall(READ_CALL.id, note)
 
         expect(listToolAnswers(backend)).toEqual([
-          buildSentAnswer({ status: "rejected", reason: "declined", content })
+          buildSentApproval(READ_CALL, {
+            status: "rejected",
+            reason: "declined",
+            content
+          })
         ])
         expect(host.commands).toEqual([])
         expect(useToolCallStore.getState().heldCalls).toMatchObject([
@@ -1466,7 +1520,7 @@ describe("useToolCallStore", () => {
 
       expect(answersBeforeRejection).toBe(0)
       expect(listToolAnswers(backend)).toEqual([
-        buildSentAnswer(DECLINED_APPROVAL)
+        buildSentApproval(READ_CALL, DECLINED_APPROVAL)
       ])
     })
 

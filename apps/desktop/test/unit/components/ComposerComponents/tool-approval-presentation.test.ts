@@ -8,7 +8,11 @@ import {
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
 } from "../../support/conversationFixtures"
-import { buildToolCall, buildToolDefinition } from "../../support/toolFixtures"
+import {
+  buildToolCall,
+  buildToolDefinition,
+  createFixtureApprovalToken
+} from "../../support/toolFixtures"
 
 /** Validated input of a read of the fixture notes. */
 const READ_INPUT: ToolCallInput = Object.freeze({
@@ -112,6 +116,7 @@ describe("formatToolCallAnnouncement", () => {
       target: READ_CALL_TARGET,
       call: READ_CALL,
       step: "approval",
+      approvalToken: createFixtureApprovalToken(1),
       answer: {
         status: "awaiting-person",
         definition: buildToolDefinition("read_text_file"),

@@ -58,7 +58,8 @@ import {
 import {
   buildBackendToolDefinition,
   buildToolCall,
-  buildToolDefinition
+  buildToolDefinition,
+  createFixtureApprovalToken
 } from "../../../support/toolFixtures"
 
 /** Time every transition stamps on the message it changes. */
@@ -994,7 +995,11 @@ describe("createChatViewStore", () => {
       await sendStreamEvents(
         streams[0],
         buildTextPartEvent(40, 0, "Let me look."),
-        { type: "tool-approval", call: buildToolCall(5, "read_text_file") },
+        {
+          type: "tool-approval",
+          call: buildToolCall(5, "read_text_file"),
+          approvalToken: createFixtureApprovalToken(5)
+        },
         { type: "tool-call", call: buildToolCall(4, "read_text_file") }
       )
       const afterToolCall = store.getState()
@@ -1683,9 +1688,18 @@ describe("following a stored reply", () => {
       {
         ...GENERATING_SNAPSHOT_EVENT,
         pendingToolCalls: [buildToolCall(40, "read_text_file")],
-        pendingToolApprovals: [buildToolCall(42, "read_text_file")]
+        pendingToolApprovals: [
+          {
+            call: buildToolCall(42, "read_text_file"),
+            approvalToken: createFixtureApprovalToken(42)
+          }
+        ]
       },
-      { type: "tool-approval", call: buildToolCall(43, "find_files") },
+      {
+        type: "tool-approval",
+        call: buildToolCall(43, "find_files"),
+        approvalToken: createFixtureApprovalToken(43)
+      },
       { type: "tool-call", call: buildToolCall(41, "find_files") },
       buildFragmentEvent(GENERATING_TEXT_PART_ID, "!"),
       { type: "done", finishReason: "stop" }

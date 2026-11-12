@@ -58,7 +58,11 @@ import {
   waitForMicrotasks
 } from "../support/settlement"
 import { openMenuWithKeyboard, waitForRenderedWork } from "../support/rendering"
-import { buildToolCall, buildToolDefinition } from "../support/toolFixtures"
+import {
+  buildToolCall,
+  buildToolDefinition,
+  createFixtureApprovalToken
+} from "../support/toolFixtures"
 
 /** Route key of the chat request. */
 const CHAT_ROUTE = "POST /api/v1/chat"
@@ -122,6 +126,7 @@ const WAITING_READ: HeldToolCall = Object.freeze({
   }),
   call: READ_CALL,
   step: "approval",
+  approvalToken: createFixtureApprovalToken(1),
   answer: Object.freeze({
     status: "awaiting-person",
     definition: buildToolDefinition("read_text_file"),
@@ -1090,7 +1095,8 @@ describe("Composer", () => {
         READ_APPROVAL_ROUTE
       ])
       expect(listRequestsBesideMeasurements(backend)[0]?.body).toEqual({
-        status: "allowed"
+        status: "allowed",
+        approvalToken: createFixtureApprovalToken(1)
       })
       expect(
         screen.queryByRole("group", {
@@ -1126,6 +1132,7 @@ describe("Composer", () => {
           READ_APPROVAL_ROUTE
         ])
         expect(listRequestsBesideMeasurements(backend)[0]?.body).toEqual({
+          approvalToken: createFixtureApprovalToken(1),
           status: "rejected",
           reason: "declined",
           content: "The person declined this call. They said: Not that file"
@@ -1153,6 +1160,7 @@ describe("Composer", () => {
         listRequestsBesideMeasurements(backend).map((request) => request.body)
       ).toEqual([
         {
+          approvalToken: createFixtureApprovalToken(1),
           status: "rejected",
           reason: "declined",
           content: "The person declined this call."
@@ -1181,6 +1189,7 @@ describe("Composer", () => {
         listRequestsBesideMeasurements(backend).map((request) => request.body)
       ).toEqual([
         {
+          approvalToken: createFixtureApprovalToken(1),
           status: "rejected",
           reason: "declined",
           content:

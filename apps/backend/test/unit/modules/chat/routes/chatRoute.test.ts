@@ -1418,15 +1418,18 @@ describe("updateFastifyWithChatRoute", () => {
       const [prompt] = getGeneration().pendingToolCalls.toolApprovals
       if (prompt === undefined) throw new Error("No prompt was sent.")
       expect(testApp.completeChatStream).toHaveBeenCalledOnce()
-      getGeneration().resolveToolCall(prompt.id, { status: "allowed" })
+      getGeneration().resolveToolCall(prompt.call.id, {
+        status: "allowed",
+        approvalToken: prompt.approvalToken
+      })
       const response = await responsePromise
 
       const events = parseSseEvents(response.body)
       expect(events).toContainEqual({
         event: "tool-approval",
-        data: { type: "tool-approval", call: prompt }
+        data: { type: "tool-approval", ...prompt }
       })
-      expect(prompt).toMatchObject({
+      expect(prompt.call).toMatchObject({
         toolName: "look_up_word",
         arguments: { word: "moth" }
       })
@@ -1493,7 +1496,8 @@ describe("updateFastifyWithChatRoute", () => {
       })
       const [prompt] = getGeneration().pendingToolCalls.toolApprovals
       if (prompt === undefined) throw new Error("No prompt was sent.")
-      getGeneration().resolveToolCall(prompt.id, {
+      getGeneration().resolveToolCall(prompt.call.id, {
+        approvalToken: prompt.approvalToken,
         status: "rejected",
         reason: "declined",
         content: "The person declined this call."
@@ -1753,12 +1757,15 @@ describe("updateFastifyWithChatRoute", () => {
       })
       const [prompt] = getGeneration().pendingToolCalls.toolApprovals
       if (prompt === undefined) throw new Error("No prompt was sent.")
-      expect(prompt).toMatchObject({
+      expect(prompt.call).toMatchObject({
         toolName: ECHO_TOOL_NAME,
         arguments: { text: "moth" }
       })
       expect(testApp.completeChatStream).toHaveBeenCalledOnce()
-      getGeneration().resolveToolCall(prompt.id, { status: "allowed" })
+      getGeneration().resolveToolCall(prompt.call.id, {
+        status: "allowed",
+        approvalToken: prompt.approvalToken
+      })
       const response = await responsePromise
 
       expect(
@@ -1808,7 +1815,8 @@ describe("updateFastifyWithChatRoute", () => {
       })
       const [prompt] = getGeneration().pendingToolCalls.toolApprovals
       if (prompt === undefined) throw new Error("No prompt was sent.")
-      getGeneration().resolveToolCall(prompt.id, {
+      getGeneration().resolveToolCall(prompt.call.id, {
+        approvalToken: prompt.approvalToken,
         status: "rejected",
         reason: "declined",
         content: "The person declined this call."
@@ -2925,7 +2933,8 @@ describe("updateFastifyWithChatRoute", () => {
         throw new Error("No generation started.")
       const [prompt] = generation.value.pendingToolCalls.toolApprovals
       if (prompt === undefined) throw new Error("No prompt was sent.")
-      generation.value.resolveToolCall(prompt.id, {
+      generation.value.resolveToolCall(prompt.call.id, {
+        approvalToken: prompt.approvalToken,
         status: "rejected",
         reason: "declined",
         content: "The person declined this call."

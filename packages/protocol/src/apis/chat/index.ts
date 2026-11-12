@@ -26,6 +26,7 @@ export {
 export type {
   ChatGenerationEvent,
   ChatReplyPathParams,
+  ChatToolApprovalPrompt,
   ChatToolCall,
   ChatToolCallPathParams
 } from "./_share"
@@ -42,8 +43,10 @@ export {
 } from "./stopReplyRoute"
 export {
   chatToolApprovalAnswerSchema,
+  chatToolApprovalApiRequestBodySchema,
   sendChatToolApprovalApi,
   type ChatToolApprovalAnswer,
+  type ChatToolApprovalApiRequestBody,
   type SendChatToolApprovalApiReply,
   type SendChatToolApprovalApiRoute
 } from "./toolApprovalRoute"

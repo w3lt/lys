@@ -1,6 +1,7 @@
 import type {
   ChatGenerationEvent,
   ChatToolApprovalAnswer,
+  ChatToolApprovalApiRequestBody,
   ChatToolCall,
   ChatToolResult
 } from "@lys/protocol"
@@ -41,11 +42,51 @@ const DECLINED_ANSWER = Object.freeze({
   content: "The person declined this call."
 } satisfies ChatToolApprovalAnswer)
 
+/** Token no prompt was given: right shape, wrong value. */
+const WRONG_TOKEN = "A".repeat(43)
+
+/** Shape of every token a prompt carries. */
+const APPROVAL_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/
+
 /** Result a client sends for a call it ran. */
 const SUCCEEDED_RESULT = Object.freeze({
   status: "succeeded",
   content: "Buy milk"
 } satisfies ChatToolResult)
+
+/**
+ * Adds a prompt's token to an answer, as the tool-approval route's body does.
+ *
+ * @param answer - The person's answer.
+ * @param approvalToken - Token the body carries.
+ * @returns A body for {@link PendingToolCalls.resolveToolCall}.
+ */
+function withToken(
+  answer: ChatToolApprovalAnswer,
+  approvalToken: string
+): ChatToolApprovalApiRequestBody {
+  return { ...answer, approvalToken }
+}
+
+/**
+ * Finds the token the prompt of one call carried.
+ *
+ * @param sentEvents - Events sent so far, in send order.
+ * @param toolCall - Call whose prompt was sent.
+ * @returns The prompt's token.
+ * @throws When no `tool-approval` event was sent for the call.
+ */
+function findSentApprovalToken(
+  sentEvents: readonly ChatGenerationEvent[],
+  toolCall: ChatToolCall
+): string {
+  const prompt = sentEvents.find(
+    (event) => event.type === "tool-approval" && event.call.id === toolCall.id
+  )
+  if (prompt?.type !== "tool-approval")
+    throw new Error(`No prompt was sent for ${toolCall.id}`)
+  return prompt.approvalToken
+}
 
 /**
  * Creates waiting calls with a sender that records every event.
@@ -104,12 +145,15 @@ describe("PendingToolCalls", () => {
       pendingToolCalls.resolveToolCall(FIRST_CALL.id, SUCCEEDED_RESULT)
     ).toBe("not-pending")
     expect(
-      pendingToolCalls.resolveToolCall(FIRST_CALL.id, ALLOWED_ANSWER)
+      pendingToolCalls.resolveToolCall(
+        FIRST_CALL.id,
+        withToken(ALLOWED_ANSWER, WRONG_TOKEN)
+      )
     ).toBe("not-pending")
   })
 
   it("ends every wait without an answer when cancelled and refuses later answers", async () => {
-    const { pendingToolCalls, sendEvent } = createRecordingCalls()
+    const { pendingToolCalls, sendEvent, sentEvents } = createRecordingCalls()
     const firstAnswer = pendingToolCalls.sendClientToolCall(
       FIRST_CALL,
       sendEvent
@@ -118,6 +162,7 @@ describe("PendingToolCalls", () => {
       BACKEND_CALL,
       sendEvent
     )
+    const approvalToken = findSentApprovalToken(sentEvents, BACKEND_CALL)
 
     pendingToolCalls.cancelToolCalls()
 
@@ -131,7 +176,10 @@ describe("PendingToolCalls", () => {
       pendingToolCalls.resolveToolCall(FIRST_CALL.id, SUCCEEDED_RESULT)
     ).toBe("not-pending")
     expect(
-      pendingToolCalls.resolveToolCall(BACKEND_CALL.id, ALLOWED_ANSWER)
+      pendingToolCalls.resolveToolCall(
+        BACKEND_CALL.id,
+        withToken(ALLOWED_ANSWER, approvalToken)
+      )
     ).toBe("not-pending")
   })
 
@@ -164,38 +212,115 @@ describe("PendingToolCalls", () => {
     expect(sentEvents).toHaveLength(1)
   })
 
-  it("lists a prompt apart from calls and sends a tool-approval event in the same step", () => {
+  it("lists a prompt apart from calls and sends a tool-approval event with its token in the same step", () => {
     const { pendingToolCalls, sendEvent, sentEvents } = createRecordingCalls()
     void pendingToolCalls.sendClientToolCall(FIRST_CALL, sendEvent)
 
     void pendingToolCalls.sendToolApprovalPrompt(BACKEND_CALL, sendEvent)
 
+    const approvalToken = findSentApprovalToken(sentEvents, BACKEND_CALL)
+    expect(approvalToken).toMatch(APPROVAL_TOKEN_PATTERN)
     expect(sentEvents).toEqual([
       { type: "tool-call", call: FIRST_CALL },
-      { type: "tool-approval", call: BACKEND_CALL }
+      { type: "tool-approval", call: BACKEND_CALL, approvalToken }
     ])
     expect(pendingToolCalls.snapshot).toEqual({
       toolCalls: [FIRST_CALL],
-      toolApprovals: [BACKEND_CALL]
+      toolApprovals: [{ call: BACKEND_CALL, approvalToken }]
     })
+  })
+
+  it("gives each prompt its own token", () => {
+    const { pendingToolCalls, sendEvent, sentEvents } = createRecordingCalls()
+
+    void pendingToolCalls.sendToolApprovalPrompt(FIRST_CALL, sendEvent)
+    void pendingToolCalls.sendToolApprovalPrompt(SECOND_CALL, sendEvent)
+
+    const firstToken = findSentApprovalToken(sentEvents, FIRST_CALL)
+    const secondToken = findSentApprovalToken(sentEvents, SECOND_CALL)
+    expect(secondToken).toMatch(APPROVAL_TOKEN_PATTERN)
+    expect(secondToken).not.toBe(firstToken)
+  })
+
+  it.each([
+    ["a wrong token", () => WRONG_TOKEN],
+    ["another prompt's token", (otherToken: string) => otherToken]
+  ])(
+    "refuses an answer with %s and keeps the prompt waiting for its own",
+    async (_label, chooseToken) => {
+      const { pendingToolCalls, sendEvent, sentEvents } = createRecordingCalls()
+      const waitedAnswer = pendingToolCalls.sendToolApprovalPrompt(
+        FIRST_CALL,
+        sendEvent
+      )
+      void pendingToolCalls.sendToolApprovalPrompt(SECOND_CALL, sendEvent)
+      const approvalToken = findSentApprovalToken(sentEvents, FIRST_CALL)
+      const otherToken = findSentApprovalToken(sentEvents, SECOND_CALL)
+
+      expect(
+        pendingToolCalls.resolveToolCall(
+          FIRST_CALL.id,
+          withToken(ALLOWED_ANSWER, chooseToken(otherToken))
+        )
+      ).toBe("token-mismatch")
+      expect(pendingToolCalls.snapshot.toolApprovals).toEqual([
+        { call: FIRST_CALL, approvalToken },
+        { call: SECOND_CALL, approvalToken: otherToken }
+      ])
+      expect(
+        pendingToolCalls.resolveToolCall(
+          FIRST_CALL.id,
+          withToken(DECLINED_ANSWER, approvalToken)
+        )
+      ).toBe("accepted")
+      expect(await waitedAnswer).toEqual(DECLINED_ANSWER)
+    }
+  )
+
+  it("refuses a token sent again after its answer was accepted", async () => {
+    const { pendingToolCalls, sendEvent, sentEvents } = createRecordingCalls()
+    const waitedAnswer = pendingToolCalls.sendToolApprovalPrompt(
+      FIRST_CALL,
+      sendEvent
+    )
+    const approvalToken = findSentApprovalToken(sentEvents, FIRST_CALL)
+    const body = withToken(DECLINED_ANSWER, approvalToken)
+
+    expect(pendingToolCalls.resolveToolCall(FIRST_CALL.id, body)).toBe(
+      "accepted"
+    )
+    expect(
+      pendingToolCalls.resolveToolCall(
+        FIRST_CALL.id,
+        withToken(ALLOWED_ANSWER, approvalToken)
+      )
+    ).toBe("not-pending")
+    expect(await waitedAnswer).toEqual(DECLINED_ANSWER)
   })
 
   it.each([
     ["allowed", ALLOWED_ANSWER],
     ["rejected", DECLINED_ANSWER]
-  ])("resumes a prompt answered as %s", async (_status, answer) => {
-    const { pendingToolCalls, sendEvent } = createRecordingCalls()
-    const waitedAnswer = pendingToolCalls.sendToolApprovalPrompt(
-      BACKEND_CALL,
-      sendEvent
-    )
+  ])(
+    "resumes a prompt answered as %s with its token, handing on the answer without the token",
+    async (_status, answer) => {
+      const { pendingToolCalls, sendEvent, sentEvents } = createRecordingCalls()
+      const waitedAnswer = pendingToolCalls.sendToolApprovalPrompt(
+        BACKEND_CALL,
+        sendEvent
+      )
+      const approvalToken = findSentApprovalToken(sentEvents, BACKEND_CALL)
 
-    expect(pendingToolCalls.resolveToolCall(BACKEND_CALL.id, answer)).toBe(
-      "accepted"
-    )
-    expect(await waitedAnswer).toBe(answer)
-    expect(pendingToolCalls.snapshot.toolApprovals).toEqual([])
-  })
+      expect(
+        pendingToolCalls.resolveToolCall(
+          BACKEND_CALL.id,
+          withToken(answer, approvalToken)
+        )
+      ).toBe("accepted")
+      expect(await waitedAnswer).toStrictEqual(answer)
+      expect(pendingToolCalls.snapshot.toolApprovals).toEqual([])
+    }
+  )
 
   it("keeps a call waiting for its result when it is answered as allowed", async () => {
     const { pendingToolCalls, sendEvent } = createRecordingCalls()
@@ -205,7 +330,10 @@ describe("PendingToolCalls", () => {
     )
 
     expect(
-      pendingToolCalls.resolveToolCall(FIRST_CALL.id, ALLOWED_ANSWER)
+      pendingToolCalls.resolveToolCall(
+        FIRST_CALL.id,
+        withToken(ALLOWED_ANSWER, WRONG_TOKEN)
+      )
     ).toBe("not-pending")
     expect(pendingToolCalls.snapshot.toolCalls).toEqual([FIRST_CALL])
     pendingToolCalls.cancelToolCalls()
@@ -213,16 +341,19 @@ describe("PendingToolCalls", () => {
   })
 
   it("keeps a prompt waiting when it is answered with a result", async () => {
-    const { pendingToolCalls, sendEvent } = createRecordingCalls()
+    const { pendingToolCalls, sendEvent, sentEvents } = createRecordingCalls()
     const waitedAnswer = pendingToolCalls.sendToolApprovalPrompt(
       BACKEND_CALL,
       sendEvent
     )
+    const approvalToken = findSentApprovalToken(sentEvents, BACKEND_CALL)
 
     expect(
       pendingToolCalls.resolveToolCall(BACKEND_CALL.id, SUCCEEDED_RESULT)
     ).toBe("not-pending")
-    expect(pendingToolCalls.snapshot.toolApprovals).toEqual([BACKEND_CALL])
+    expect(pendingToolCalls.snapshot.toolApprovals).toEqual([
+      { call: BACKEND_CALL, approvalToken }
+    ])
     pendingToolCalls.cancelToolCalls()
     expect(await waitedAnswer).toBeUndefined()
   })
@@ -233,13 +364,17 @@ describe("PendingToolCalls", () => {
       FIRST_CALL,
       sendEvent
     )
-    pendingToolCalls.resolveToolCall(FIRST_CALL.id, ALLOWED_ANSWER)
+    const approvalToken = findSentApprovalToken(sentEvents, FIRST_CALL)
+    pendingToolCalls.resolveToolCall(
+      FIRST_CALL.id,
+      withToken(ALLOWED_ANSWER, approvalToken)
+    )
     await prompt
 
     const result = pendingToolCalls.sendClientToolCall(FIRST_CALL, sendEvent)
 
     expect(sentEvents).toEqual([
-      { type: "tool-approval", call: FIRST_CALL },
+      { type: "tool-approval", call: FIRST_CALL, approvalToken },
       { type: "tool-call", call: FIRST_CALL }
     ])
     expect(

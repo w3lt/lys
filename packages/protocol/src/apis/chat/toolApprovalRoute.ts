@@ -4,6 +4,7 @@ import {
   type ChatToolCallNotPendingProblem
 } from "../../http/errors/chat"
 import {
+  chatToolApprovalTokenSchema,
   chatToolCallPathParamsSchema,
   type ChatToolCallPathParams
 } from "./_share"
@@ -50,6 +51,33 @@ export type ChatToolApprovalAnswer = z.infer<
   typeof chatToolApprovalAnswerSchema
 >
 
+/** Field every tool-approval body adds to its answer. */
+const chatToolApprovalTokenField = Object.freeze({
+  /** Token of the prompt being answered, as its prompt carried it. */
+  approvalToken: chatToolApprovalTokenSchema
+})
+
+/**
+ * Validates the body of one answer to an approval prompt: the answer, and
+ * the token the prompt carried.
+ *
+ * @remarks A body without a token fails validation. The backend takes the
+ * answer only when the token is the one it sent with the call's prompt, and
+ * only once; the reply's loop then reads the answer without its token.
+ */
+export const chatToolApprovalApiRequestBodySchema = z.discriminatedUnion(
+  "status",
+  [
+    allowedChatToolApprovalSchema.extend(chatToolApprovalTokenField),
+    rejectedChatToolApprovalSchema.extend(chatToolApprovalTokenField)
+  ]
+)
+
+/** Body of one answer to an approval prompt, with the prompt's token. */
+export type ChatToolApprovalApiRequestBody = z.infer<
+  typeof chatToolApprovalApiRequestBodySchema
+>
+
 /** Selects the tool-approval failure validator by HTTP status. */
 const sendChatToolApprovalApiResponseSchemas = Object.freeze({
   409: chatToolCallNotPendingProblemSchema
@@ -61,18 +89,20 @@ const sendChatToolApprovalApiResponseSchemas = Object.freeze({
  *
  * @remarks Success is a bodyless 204 sent once the answer is accepted; the
  * reply's loop then continues with the call. A call that is unknown, already
- * answered, not waiting for approval, or whose reply ended returns the
- * tool-call-not-pending problem with HTTP 409 and changes nothing, so a
- * repeated request is harmless. The backend sets no time limit on a prompt:
- * it waits until this request, Stop, or backend shutdown. A newer turn in the
- * conversation or deleting the conversation does not end the wait yet.
- * Changing the method, path, or schemas requires coordinated consumers.
+ * answered, not waiting for approval, or whose reply ended, and an answer whose
+ * token is not the prompt's, return the tool-call-not-pending problem with HTTP
+ * 409 and change nothing, so a repeated request is harmless and a wrong token
+ * tells the caller nothing about which calls wait. The backend sets no time
+ * limit on a prompt: it waits until this request, Stop, or backend shutdown. A
+ * newer turn in the conversation or deleting the conversation does not end the
+ * wait yet. Changing the method, path, or schemas requires coordinated
+ * consumers.
  */
 export const sendChatToolApprovalApi = Object.freeze({
   method: "POST",
   path: apiChatReplyToolApprovalRoute,
   params: chatToolCallPathParamsSchema,
-  body: chatToolApprovalAnswerSchema,
+  body: chatToolApprovalApiRequestBodySchema,
   responses: sendChatToolApprovalApiResponseSchemas
 })
 
@@ -88,8 +118,8 @@ export type SendChatToolApprovalApiReply = {
 export type SendChatToolApprovalApiRoute = {
   /** Validated identifiers of the call being answered. */
   readonly Params: ChatToolCallPathParams
-  /** Validated answer. */
-  readonly Body: ChatToolApprovalAnswer
+  /** Validated answer and its prompt's token. */
+  readonly Body: ChatToolApprovalApiRequestBody
   /** Status-specific empty success and Problem Details payloads. */
   readonly Reply: SendChatToolApprovalApiReply
 }

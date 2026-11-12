@@ -1,30 +1,42 @@
+import { randomBytes, timingSafeEqual } from "node:crypto"
 import type {
   ChatGenerationEvent,
   ChatToolApprovalAnswer,
+  ChatToolApprovalApiRequestBody,
+  ChatToolApprovalPrompt,
   ChatToolCall,
   ChatToolResult
 } from "@lys/protocol"
 
 /**
  * Answer a client gives to one waiting call: a client tool's result, or the
- * person's answer to an approval prompt.
+ * person's answer to an approval prompt with the prompt's token.
  */
-export type ToolCallAnswer = ChatToolResult | ChatToolApprovalAnswer
+export type ToolCallAnswer = ChatToolResult | ChatToolApprovalApiRequestBody
 
 /**
  * What resolving one call with an answer did: `accepted` when a call waited
- * for that kind of answer under the identifier and resumes; `not-pending`
- * otherwise, which changes nothing.
+ * for that kind of answer under the identifier and resumes;
+ * `token-mismatch` when a prompt waits under the identifier but the answer
+ * carries another token; `not-pending` otherwise. Only `accepted` changes
+ * anything.
  */
-export type ToolCallAnswerOutcome = "accepted" | "not-pending"
+export type ToolCallAnswerOutcome =
+  "accepted" | "not-pending" | "token-mismatch"
 
 /** Calls one reply waits on, at one point in time. */
 export type PendingToolCallSnapshot = Readonly<{
   /** Calls of client tools sent to run and waiting for their result, in send order. */
   toolCalls: readonly ChatToolCall[]
-  /** Calls shown to the person and waiting for their answer, in send order. */
-  toolApprovals: readonly ChatToolCall[]
+  /**
+   * Prompts shown to the person and waiting for their answer, each with its
+   * token, in send order.
+   */
+  toolApprovals: readonly ChatToolApprovalPrompt[]
 }>
+
+/** Random bytes in one approval token: 256 bits, 43 base64url characters. */
+const APPROVAL_TOKEN_BYTE_COUNT = 32
 
 /** One call a reply waits on, with the settlement of that wait. */
 type PendingToolCall =
@@ -41,6 +53,11 @@ type PendingToolCall =
       kind: "approval"
       /** Call shown to the reply's followers. */
       toolCall: ChatToolCall
+      /**
+       * Single-use token an answer must carry; kept only here, never written
+       * to the database or the log.
+       */
+      approvalToken: string
       /** Settles with the person's answer, or with undefined once cancelled. */
       answer: PromiseWithResolvers<ChatToolApprovalAnswer | undefined>
     }>
@@ -58,13 +75,10 @@ type ToolCallWaitState =
       status: "cancelled"
     }>
 
-/** Waiting calls of a reply that has none. */
-const NO_TOOL_CALLS: readonly ChatToolCall[] = Object.freeze([])
-
 /** Snapshot of a reply whose waits ended. */
 const NO_PENDING_TOOL_CALLS: PendingToolCallSnapshot = Object.freeze({
-  toolCalls: NO_TOOL_CALLS,
-  toolApprovals: NO_TOOL_CALLS
+  toolCalls: Object.freeze([]),
+  toolApprovals: Object.freeze([])
 })
 
 /**
@@ -75,7 +89,10 @@ const NO_PENDING_TOOL_CALLS: PendingToolCallSnapshot = Object.freeze({
  * @remarks The invariant is that a call is listed from the step that sends it
  * until it is answered with an answer that fits it, or cancelled, and its
  * wait settles exactly once. A call sent to run fits a client tool's result;
- * a call shown for approval fits the person's answer. A call identifier waits
+ * a call shown for approval fits the person's answer with the token its
+ * prompt carried, which binds the answer to that prompt: the call that
+ * resumes is the one listed with the token, and the token stops working once
+ * an answer is accepted or the wait ends. A call identifier waits
  * for at most one answer at a time: a client tool's prompt is answered before
  * the same call is sent to run. There is no timer: only an answer or
  * {@link PendingToolCalls.cancelToolCalls} ends a wait. Cancelling is final.
@@ -95,10 +112,26 @@ export default class PendingToolCalls {
    */
   public get snapshot(): PendingToolCallSnapshot {
     if (this.#state.status === "cancelled") return NO_PENDING_TOOL_CALLS
-    const pendingToolCalls = [...this.#state.toolCalls.values()]
+    const toolCalls: ChatToolCall[] = []
+    const toolApprovals: ChatToolApprovalPrompt[] = []
+    for (const pendingToolCall of this.#state.toolCalls.values()) {
+      switch (pendingToolCall.kind) {
+        case "run":
+          toolCalls.push(pendingToolCall.toolCall)
+          break
+        case "approval":
+          toolApprovals.push(
+            Object.freeze({
+              call: pendingToolCall.toolCall,
+              approvalToken: pendingToolCall.approvalToken
+            })
+          )
+          break
+      }
+    }
     return Object.freeze({
-      toolCalls: listToolCallsOfKind(pendingToolCalls, "run"),
-      toolApprovals: listToolCallsOfKind(pendingToolCalls, "approval")
+      toolCalls: Object.freeze(toolCalls),
+      toolApprovals: Object.freeze(toolApprovals)
     })
   }
 
@@ -131,8 +164,9 @@ export default class PendingToolCalls {
   }
 
   /**
-   * Lists one call and shows it to the reply's followers for approval in the
-   * same synchronous step, then waits for the person's answer.
+   * Lists one call with a new single-use token and shows both to the reply's
+   * followers for approval in the same synchronous step, then waits for the
+   * person's answer.
    *
    * @param toolCall - Checked call whose identifier no waiting call has.
    * @param sendEvent - Queues the call's `tool-approval` event for every
@@ -148,10 +182,13 @@ export default class PendingToolCalls {
     sendEvent: (event: ChatGenerationEvent) => void
   ): Promise<ChatToolApprovalAnswer | undefined> {
     const answer = Promise.withResolvers<ChatToolApprovalAnswer | undefined>()
+    const approvalToken = randomBytes(APPROVAL_TOKEN_BYTE_COUNT).toString(
+      "base64url"
+    )
     const isListed = this.#addToolCall(
-      { kind: "approval", toolCall, answer },
+      { kind: "approval", toolCall, approvalToken, answer },
       () => {
-        sendEvent({ type: "tool-approval", call: toolCall })
+        sendEvent({ type: "tool-approval", call: toolCall, approvalToken })
       }
     )
     return isListed ? answer.promise : Promise.resolve(undefined)
@@ -162,13 +199,16 @@ export default class PendingToolCalls {
    * kind of answer.
    *
    * @param toolCallId - Identifier of the call's event.
-   * @param answer - Validated answer, handed to the waiting reply unchanged:
-   * a result for a call sent to run, the person's answer for a call shown for
-   * approval.
-   * @returns `accepted` when the call was waiting for that kind of answer and
-   * resumes; `not-pending` when it is unknown, already answered, cancelled,
-   * or waiting for the other kind of answer. Only `accepted` changes
-   * anything.
+   * @param answer - Validated answer: a result for a call sent to run,
+   * handed to the waiting reply unchanged; the person's answer and the
+   * prompt's token for a call shown for approval, handed on without the
+   * token.
+   * @returns `accepted` when the call was waiting for that kind of answer,
+   * with that token for a prompt, and resumes; `token-mismatch` when a prompt
+   * waits under the identifier but the token is another; `not-pending` when
+   * the call is unknown, already answered, cancelled, or waiting for the
+   * other kind of answer. Only `accepted` changes anything; a prompt keeps
+   * waiting after a `token-mismatch`.
    */
   public resolveToolCall(
     toolCallId: string,
@@ -185,8 +225,15 @@ export default class PendingToolCalls {
         return "accepted"
       case "approval":
         if (!isToolApprovalAnswer(answer)) return "not-pending"
+        if (
+          !isSameApprovalToken(
+            pendingToolCall.approvalToken,
+            answer.approvalToken
+          )
+        )
+          return "token-mismatch"
         this.#state.toolCalls.delete(toolCallId)
-        pendingToolCall.answer.resolve(answer)
+        pendingToolCall.answer.resolve(readToolApprovalAnswer(answer))
         return "accepted"
     }
   }
@@ -229,24 +276,6 @@ export default class PendingToolCalls {
 }
 
 /**
- * Lists the waiting calls of one kind.
- *
- * @param pendingToolCalls - Waiting calls in send order.
- * @param kind - Kind to keep.
- * @returns A frozen list of those calls in send order.
- */
-function listToolCallsOfKind(
-  pendingToolCalls: readonly PendingToolCall[],
-  kind: PendingToolCall["kind"]
-): readonly ChatToolCall[] {
-  return Object.freeze(
-    pendingToolCalls
-      .filter((pendingToolCall) => pendingToolCall.kind === kind)
-      .map(({ toolCall }) => toolCall)
-  )
-}
-
-/**
  * Answers whether an answer is the person's answer to an approval prompt.
  *
  * @param answer - Validated answer.
@@ -254,6 +283,48 @@ function listToolCallsOfKind(
  */
 function isToolApprovalAnswer(
   answer: ToolCallAnswer
-): answer is ChatToolApprovalAnswer {
+): answer is ChatToolApprovalApiRequestBody {
   return answer.status === "allowed" || answer.status === "rejected"
+}
+
+/**
+ * Compares a prompt's token with the token an answer carries, in time that
+ * does not depend on how much of the answer's token matches.
+ *
+ * @param approvalToken - Token the prompt was sent with.
+ * @param answeredToken - Validated token the answer carries.
+ * @returns True only when both are the same text.
+ */
+function isSameApprovalToken(
+  approvalToken: string,
+  answeredToken: string
+): boolean {
+  const expected = Buffer.from(approvalToken)
+  const answered = Buffer.from(answeredToken)
+  return (
+    expected.length === answered.length && timingSafeEqual(expected, answered)
+  )
+}
+
+/**
+ * Reads the person's answer out of a tool-approval body, leaving its token
+ * behind so it never reaches the reply.
+ *
+ * @param body - Validated body whose token matched its prompt.
+ * @returns A frozen answer with the body's status, and for a rejection its
+ * reason and content.
+ */
+function readToolApprovalAnswer(
+  body: ChatToolApprovalApiRequestBody
+): ChatToolApprovalAnswer {
+  switch (body.status) {
+    case "allowed":
+      return Object.freeze({ status: "allowed" })
+    case "rejected":
+      return Object.freeze({
+        status: "rejected",
+        reason: body.reason,
+        content: body.content
+      })
+  }
 }

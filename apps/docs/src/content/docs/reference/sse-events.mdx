@@ -173,7 +173,10 @@ the backend accepts one answer with that token and refuses any other. After
 [MCP server](/reference/api/#mcp-servers), and a client tool's call comes back
 as a `tool-call` event under the same `id`. The event is live only: a client
 that was not following when it was sent finds the call in the next
-`reply-snapshot`'s `pendingToolApprovals`.
+`reply-snapshot`'s `pendingToolApprovals`. A prompt nobody answers within five
+minutes expires: it leaves `pendingToolApprovals`, its token is refused, and a
+`reply-part` event carries the call stored as `failed`, straight from
+`awaiting-approval`, with the sentence the model reads.
 
 ### `tool-call`
 

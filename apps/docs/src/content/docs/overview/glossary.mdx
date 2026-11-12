@@ -74,7 +74,8 @@ Terms that mean something specific inside Lys.
 - **Approval token**: the single-use token of 32 random bytes an approval
   prompt carries in its `tool-approval` event. The backend takes an answer to
   the prompt only when it returns that token, once, and runs the call it
-  stored with the prompt.
+  stored with the prompt. The token expires with its prompt, five minutes
+  after the prompt was sent.
 - **User message**: a persisted message with role `user`, non-empty content,
   and the attachments sent with it.
 - **Attachment**: a file sent with a user message and stored with the

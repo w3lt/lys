@@ -297,17 +297,21 @@ calls it stored are part of the new turn's context.
    characters, and a server that is no longer connected, an error, or a time
    limit becomes a failed call the model reads. Stop tells the server the call
    was cancelled. A rejected call runs nothing; the model
-   reads the rejection, which is stored as the call's result. Once every call of the round has an answer, the
+   reads the rejection, which is stored as the call's result. A prompt nobody
+   answers within five minutes expires: the backend refuses its token from
+   then on, stores the call as `failed` with a sentence naming the limit,
+   which the model reads as it reads a rejection, and the desktop turns the
+   card into a notice that says why the call did not run. Once every call of the round has an answer, the
    backend asks the model again with the results. The loop ends with the
    first round that makes no tool calls, even one that writes no text, then
    `done`. The desktop shows the rounds that called tools as the reply's
    steps, the last round's text as the answer with its `[n]` citations
    linked, and the sources the answer cites under it.
 
-The backend sets no time limit on a prompt or a pending call. It waits until
-the call is answered, the reply is stopped, or the backend shuts down; a newer
-turn or a deletion does not end it yet
-([#137](https://github.com/w3lt/lys/issues/137)). A client that was not
+A prompt waits at most five minutes. The backend sets no time limit on a call
+sent to the desktop to run: it waits until the call is answered, the reply is
+stopped, or the backend shuts down; a newer turn or a deletion does not end it
+yet ([#137](https://github.com/w3lt/lys/issues/137)). A client that was not
 following when a prompt or call was sent finds it in the next
 `reply-snapshot`'s `pendingToolApprovals` or `pendingToolCalls`.
 

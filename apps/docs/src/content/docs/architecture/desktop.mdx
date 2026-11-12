@@ -1079,7 +1079,12 @@ does not bring it back:
    same rule the backend applies. An MCP call is always shown: the backend
    checked that its arguments are a JSON object, and the card shows every
    argument as it is.
-2. Every other prompt waits for the person.
+2. Every other prompt waits for the person, for at most five minutes. When
+   the call arrives stored as `failed` while its prompt still waits, in a
+   `reply-part` event or a later snapshot's parts, the backend ended the prompt
+   at its time limit, and the card becomes a "Prompt expired" notice. A call
+   that arrives as `running` or `rejected` first was answered, so its later
+   failure is not taken for an expiry.
 3. A call to run is run at once and its result sent; a call the desktop
    cannot run is answered `runFailed`. Nothing is shown. The desktop does not
    check that the person allowed the call, so a call that another local
@@ -1102,7 +1107,11 @@ Allow once answers `allowed`, after which the backend runs its tool or sends a
 client tool's call back to run; Allow anyway does the same while keeping the
 text. In the field, Escape rejects,
 Enter with an empty draft allows, and Enter with text rejects with that text.
-Several calls wait in the model's order, one card at a time.
+Several calls wait in the model's order, one card at a time. A call that
+waits for the person comes before a notice of an expired prompt, which shows
+the tool and says that no answer came within five minutes, so the call did not
+run and the reply went on without it; the composer's status line announces it
+once. Dismiss removes the notice, and Escape and Enter leave it alone.
 
 A read sends the file's text, a search sends its report as JSON, and a
 declared tool failure sends the failure as JSON. A backend or MCP tool's
@@ -1116,7 +1125,9 @@ and results to the [tool-result route](/reference/api/#tool-results). When an
 answer cannot be sent, the card says so and Try again sends the same answer
 without running the tool again. An allowed answer still in flight when the
 call's run request arrives does not hold the run back. When the reply ends, by
-finishing, Stop, or backend shutdown, its waiting calls disappear. A newer
+finishing, Stop, or backend shutdown, its waiting calls disappear; a notice of
+an expired prompt stays until it is dismissed or a later reply of its
+conversation is followed. A newer
 turn in the conversation or deleting the conversation does not end a waiting
 reply yet ([#137](https://github.com/w3lt/lys/issues/137)). After a renderer
 reload, a call still waiting is found again through the reply's snapshot when

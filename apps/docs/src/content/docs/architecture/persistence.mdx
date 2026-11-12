@@ -123,7 +123,9 @@ cannot be undone. Version 10 adds `conversation_attachments`. Version 11 adds
 `agents.deleted_at`; agents deleted before it are gone, and their codes stay
 free. Version 13 adds `tool_call_decisions`, one record per tool call of how
 the backend decided it, with a trigger that copies each status change of the
-call into its record; a call stored before it has no record.
+call into its record; a call stored before it has no record. Version 14
+creates that table again, copying every row, so a record may also store the
+answer `expired`.
 Turn creation is atomic and first interrupts a reply still streaming in the same
 conversation: the turn service runs it as one callback inside one write
 transaction of the turn records, which refuse every call once the callback

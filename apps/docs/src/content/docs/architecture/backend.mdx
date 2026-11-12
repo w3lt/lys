@@ -464,8 +464,9 @@ the transaction that stores the call. It names the conversation, its agent,
 and the tool, and holds the policy's effect and reason, none when step 1 or
 2 failed the call; the approval mode the gate applied, `just-run` or
 `ask-me`, none when the call never reached the gate; the answer that moved a
-waiting call on, `allowed`, `declined`, or `showFailed`, stored in the
-transaction that changes the call; and the call's status as its outcome,
+waiting call on, `allowed`, `declined`, or `showFailed`, or `expired` when
+nobody answered its prompt in time, stored in the transaction that changes the
+call; and the call's status as its outcome,
 which a trigger copies on every change, `interrupted` included. It holds no
 argument value; the call's row keeps them. The record goes with its call and
 its conversation, and nothing reads it yet. Armitage's own `search_tools` and
@@ -502,7 +503,7 @@ decides how it goes on. A call of a tool
 on Just run that the policy allowed is stored as `running` and goes on at
 once. Any other call is stored as `awaiting-approval` first; the gate then
 sends a `tool-approval` event, and the round waits for the person's answer
-through the tool-approval route, with no timer. A call the store refuses is
+through the tool-approval route, for at most five minutes. A call the store refuses is
 never prompted. Storing and prompting happen in the same synchronous step, so
 a follower that sees the prompt can read the call, and a round's prompts and
 the run requests of calls allowed at once keep the model's order. When the
@@ -524,10 +525,22 @@ the log; the round then runs the call it stored, never one the answer names. A
 token that is not the prompt's returns `token-mismatch`: the route answers the
 same `409` as for an unknown call and logs a warning with the call's
 identifier, and the prompt keeps waiting. The token ends with its prompt, when
-the answer is accepted or when Stop, shutdown, or the end of the reply cancels
-the wait. It binds an answer to a prompt but does not identify the person: a
+the answer is accepted, when Stop, shutdown, or the end of the reply cancels
+the wait, or when the prompt expires. It binds an answer to a prompt but does not identify the person: a
 caller that can read the reply's events can read it
 ([security](/architecture/security/#candid-limits)).
+
+A prompt expires `TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES` (five) minutes
+after `PendingToolCalls` sent it, a constant of `@lys/protocol` the desktop's
+notice names too. Each prompt owns a timer, started when it is listed and
+cleared as soon as it is answered or cancelled. When the timer fires, the
+prompt is removed, so its token gets the not-pending `409` from then on, and
+the round gets `expired`: it stores the call as `failed`, from
+`awaiting-approval`, with a sentence that names the limit and asks the model
+to tell the person what it wanted the call for, records the answer `expired`,
+and goes on as after a rejection, the model reading that sentence. An answer
+that arrives before the limit is taken. A call sent to the desktop to run has
+no time limit.
 
 The Tools pane's switches are not part of the gateway: they decide only which
 tools a chat request offers, so switching a tool or tool calls off applies
@@ -1442,7 +1455,8 @@ version 10 adds the attachment rows, version 11 adds `agents.deleted_at`, so
 deleting an agent only marks it, version 12 moves a stored agent coded
 `armitage`, deleted or not, and every conversation stored under `armitage`
 to the first `armitage-<n>` code no agent or conversation holds, so the code
-is Armitage's, version 13 adds the tool call decision records, and
+is Armitage's, version 13 adds the tool call decision records, version 14
+lets a record store the answer `expired`, and
 turn persistence's startup recovers streaming assistants and their open tool
 calls without reordering history.
 Two triggers keep `conversations.updated_at` in sync with message and part
@@ -1594,8 +1608,6 @@ for the separate inference and model-management lifetimes.
   and the destructive mark of an MCP tool: no rule keeps calls inside folders
   the person approves ([#341](https://github.com/w3lt/lys/issues/341)), and
   none limits usage or spending, or attaches constraints to an allowed call
-- No time limit on an approval prompt: its token works until the prompt is
-  answered or its reply ends ([#342](https://github.com/w3lt/lys/issues/342))
 
 ## Coming soon
 

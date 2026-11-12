@@ -169,10 +169,11 @@ export type ChatToolCall = z.infer<typeof chatToolCallSchema>
 /**
  * Validates the event asking a client to run one call of a client tool.
  *
- * @remarks Sent only once the call may run: at once for a tool the person
- * saved as Just run, otherwise after the person allowed the call's approval
- * prompt. The client runs it without asking again. Live only: a client that
- * was not following when it was sent finds the call in the next
+ * @remarks Sent only once the call may run: at once when the backend's tool
+ * call policy allows a call of a tool the person saved as Just run, otherwise
+ * after the person allowed the call's approval prompt. A call the policy
+ * denies is never sent. The client runs it without asking again. Live only: a
+ * client that was not following when it was sent finds the call in the next
  * `reply-snapshot`'s `pendingToolCalls`. Calls of backend tools never arrive
  * here; the backend runs them itself.
  */
@@ -186,15 +187,17 @@ export const chatToolCallEventSchema = z.strictObject({
  * Validates the event asking a client to show one call to the person for
  * approval.
  *
- * @remarks The backend sends it for every checked call of a tool that is not
- * saved as Just run, client and backend tools alike, and runs nothing until
- * the person's answer arrives through the tool-approval endpoint. A tool on
- * Just run gets no prompt. Live only: a client that was not following when it
- * was sent finds the call in the next `reply-snapshot`'s
+ * @remarks The backend sends it for every checked call its tool call policy
+ * does not deny, client, backend, and MCP tools alike, unless the policy
+ * allows the call and its tool is saved as Just run or runs without approval;
+ * a call the policy requires approval of is sent even on Just run. It runs
+ * nothing until the person's answer arrives through the tool-approval
+ * endpoint. A denied call gets no prompt. Live only: a client that was not
+ * following when it was sent finds the call in the next `reply-snapshot`'s
  * `pendingToolApprovals`. When a model round's calls arrive, their prompts,
  * and the run requests of calls that need none, are sent in the model's
- * order; a run request that follows an allowed prompt is sent when the
- * answer arrives.
+ * order; a run request that follows an allowed prompt is sent when the answer
+ * arrives.
  */
 export const chatToolApprovalEventSchema = z.strictObject({
   type: z.literal("tool-approval"),

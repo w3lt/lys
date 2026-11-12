@@ -188,8 +188,9 @@ export type AgentTurn = Readonly<{
   builtInTools: readonly TurnBuiltInTool[]
   /**
    * MCP tools found for the turn, each name once and none named like
-   * another offered tool; empty when none are offered. Each call asks the
-   * person first, unless they saved the tool as Just run.
+   * another offered tool; empty when none are offered. Each call the tool
+   * call policy does not deny asks the person first, unless they saved the
+   * tool as Just run and its server does not mark it as destructive.
    */
   mcpTools: readonly TurnMcpTool[]
   /**
@@ -254,10 +255,11 @@ export type AgentTurn = Readonly<{
   toolCallPolicy: ToolCallPolicy
   /**
    * Creates the approval gate of one round of tool calls, which asks the
-   * person through every stream following the reply unless the tool is
-   * saved as Just run. Called once per round that has a call to gate, when
-   * the round's calls arrive; a round whose calls all name tools that run
-   * without approval creates none.
+   * person through every stream following the reply unless the tool is saved
+   * as Just run and the tool call policy does not require approval of the
+   * call. Called once per round that has a call to gate, when the round's
+   * calls arrive; a round whose calls all name tools that run without
+   * approval creates none.
    */
   createToolCallGate: CreateToolCallGate
   /**

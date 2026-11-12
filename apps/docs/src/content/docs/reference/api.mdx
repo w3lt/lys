@@ -1036,7 +1036,7 @@ contain `code`, and an empty body returns `400`. `DELETE` marks the agent
 deleted and returns `204` without a body. From then on `GET`, `PATCH`, and
 `DELETE` answer `404` for it, no new conversation can name it, and its code
 stays taken: the backend keeps the agent's row, with its definition and the
-time it was deleted, so the built-in agents can still look it up with the
+time it was deleted, so the built-in agents but Armitage can still look it up with the
 [agent state tools](/architecture/backend/#agent-state-tools) and a reply it
 was writing when it was deleted runs to its end. A conversation the deleted
 agent answered keeps its messages and its agent code; see

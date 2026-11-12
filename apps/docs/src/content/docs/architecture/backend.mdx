@@ -381,7 +381,8 @@ tools alike, except a call of a backend tool that runs without approval:
 the [agent state tools](#agent-state-tools) only read what agents are
 doing, and [`find_tools`](#tool-routing) and Armitage's search tools only
 read the turn's tool definitions and name tools, running none, so their
-calls are stored as `running` at once and never pass the gate. A call of a
+calls start as `running` at once and never pass the gate; Armitage's are
+kept only in its in-memory reply. A call of a
 tool its round did not offer, such as a routed turn's tool Armitage has not
 found, is stored as failed with a result the model reads and never reaches
 the gate. When a
@@ -815,10 +816,10 @@ which run at once without approval:
 | `search_tools`   | `query`, 1 to 200 characters, with a word                                                                         | Up to 8 of the asking turn's tools whose name, group, and description best match the query, ranked with BM25 (`ToolCatalog`, `toolCatalog.ts`), each with its description on one line cut to 200 characters, and how many more match. |
 | `recommend_tool` | `name`, the exact name of one of the asking turn's tools, as `search_tools` lists them; any other name is refused | Records the tool as fitting the task, at most 5 per search.                                                                                                                                                                           |
 
-A search reads a tool's name by its words: `_`, `-`, and the word starts of
-a camelCase name split it, in the tool's name and in the query alike, so
-`email` finds `send_email`, `issue` finds `createIssue`, and a whole name
-finds its tool.
+A search reads a tool's name whole and by its words: `_`, `-`, and the word
+starts of a camelCase name split it, so `email` and `send_email` both find
+`send_email`, and `issue` and `createIssue` both find `createIssue`. Each
+word of the query is searched as written, ignoring case.
 
 Armitage reads only the asking turn's definitions and runs none of its
 tools. `MemoryReply` (`memoryReply.ts`) keeps Armitage's reply in memory;

@@ -7,7 +7,10 @@ use std::{
     path::Path,
 };
 
-use super::credential_files::{CredentialFiles, FileIdentity};
+use super::{
+    approved_folders::ApprovedFolders,
+    credential_files::{CredentialFiles, FileIdentity},
+};
 
 /// Why the text of a regular file could not be read.
 ///
@@ -25,6 +28,9 @@ pub enum TextFileReadError {
     /// The file's real path has a credential name as a part, or the file is
     /// Lys's settings file; nothing of it was read.
     CredentialFile,
+    /// The file's real path is outside every folder the person lets tools
+    /// use; nothing of it was read.
+    OutsideApprovedFolders,
     /// The file is larger than the caller's limit; its content was not read.
     TooLarge {
         /// Smallest size in bytes the file was observed to have, which exceeds
@@ -41,7 +47,7 @@ pub enum TextFileReadError {
 }
 
 /// Reads the complete UTF-8 text of the regular file at `path`, unless
-/// `credential_files` refuses it.
+/// `credential_files` refuses it or it is outside `approved_folders`.
 ///
 /// Symbolic links are followed. The path is looked up before it is opened, so
 /// a directory, FIFO, socket, or device is rejected as
@@ -58,12 +64,13 @@ pub enum TextFileReadError {
 ///
 /// Returns the matching [`TextFileReadError`] when the path cannot be looked
 /// up or opened, is not a regular file, is a credential file or Lys's
-/// settings file, is larger than `max_size_bytes`, cannot be read, or is not
-/// valid UTF-8.
+/// settings file, is outside the approved folders, is larger than
+/// `max_size_bytes`, cannot be read, or is not valid UTF-8.
 pub fn read_regular_text_file(
     path: &Path,
     max_size_bytes: u64,
     credential_files: &CredentialFiles,
+    approved_folders: &ApprovedFolders,
 ) -> Result<String, TextFileReadError> {
     let path_metadata = fs::metadata(path).map_err(build_path_error)?;
 
@@ -73,7 +80,7 @@ pub fn read_regular_text_file(
 
     let file = open_file_without_blocking(path).map_err(build_path_error)?;
     let file_metadata = file.metadata().map_err(TextFileReadError::Io)?;
-    check_opened_file(path, &file_metadata, credential_files)?;
+    check_opened_file(path, &file_metadata, credential_files, approved_folders)?;
     let size_bytes = get_regular_file_size_bytes(&file_metadata)?;
 
     if size_bytes > max_size_bytes {
@@ -114,13 +121,16 @@ fn open_file_without_blocking(path: &Path) -> io::Result<File> {
 /// # Errors
 ///
 /// Returns [`TextFileReadError::CredentialFile`] when `credential_files`
-/// refuses the real file, [`TextFileReadError::Io`] when the real path names
+/// refuses the real file, [`TextFileReadError::OutsideApprovedFolders`] when
+/// `approved_folders` does not hold its real path, [`TextFileReadError::Io`]
+/// when the real path names
 /// another file than the one opened, or the matching path failure when the
 /// real path cannot be resolved or looked up.
 fn check_opened_file(
     path: &Path,
     file_metadata: &Metadata,
     credential_files: &CredentialFiles,
+    approved_folders: &ApprovedFolders,
 ) -> Result<(), TextFileReadError> {
     let real_path = fs::canonicalize(path).map_err(build_path_error)?;
     let real_metadata = fs::metadata(&real_path).map_err(build_path_error)?;
@@ -134,6 +144,10 @@ fn check_opened_file(
 
     if credential_files.refuses_real_file(&real_path, identity) {
         return Err(TextFileReadError::CredentialFile);
+    }
+
+    if !approved_folders.holds_real_path(&real_path) {
+        return Err(TextFileReadError::OutsideApprovedFolders);
     }
 
     Ok(())
@@ -200,7 +214,10 @@ mod tests {
     };
 
     use super::{build_path_error, check_opened_file, TextFileReadError};
-    use crate::tools::{credential_files::CredentialFiles, test_directory::TestDirectory};
+    use crate::tools::{
+        approved_folders::ApprovedFolders, credential_files::CredentialFiles,
+        test_directory::TestDirectory,
+    };
 
     #[test]
     fn path_errors_keep_missing_and_denied_paths_distinct() {
@@ -229,6 +246,7 @@ mod tests {
             &path,
             &opened_metadata,
             &CredentialFiles::load_for_test_without_settings_file(),
+            &ApprovedFolders::Any,
         );
 
         let Err(TextFileReadError::Io(error)) = failure else {

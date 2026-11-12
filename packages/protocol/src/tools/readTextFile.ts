@@ -61,6 +61,13 @@ export const readTextFileErrorSchema = z.discriminatedUnion("code", [
      */
     code: z.literal("credentialFile")
   }),
+  buildCodeOnlyFailureSchema({
+    /**
+     * The file's real path is outside every folder the person lets tools
+     * use, so none of it was read.
+     */
+    code: z.literal("outsideApprovedFolders")
+  }),
   z
     .strictObject({
       /** The file exceeds the desktop's read limit, so none of it was returned. */

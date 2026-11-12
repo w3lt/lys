@@ -184,6 +184,11 @@ impl LysSettings {
         &self.location
     }
 
+    /// Returns the tool choices the person saved.
+    pub fn tools(&self) -> &ToolSettings {
+        &self.tools
+    }
+
     /// Serializes settings as pretty-printed JSON and replaces the settings file
     /// under `lys_home` atomically, readable only by its owner.
     ///

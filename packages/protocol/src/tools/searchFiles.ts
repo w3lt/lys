@@ -172,6 +172,13 @@ export const searchFilesErrorSchema = z.discriminatedUnion("code", [
     code: z.literal("rootInCredentialFolder")
   }),
   buildCodeOnlyFailureSchema({
+    /**
+     * The root's real path is outside every folder the person lets tools
+     * use, so nothing under it was searched.
+     */
+    code: z.literal("rootOutsideApprovedFolders")
+  }),
+  buildCodeOnlyFailureSchema({
     /** The operating system denied access to the root directory. */
     code: z.literal("permissionDenied")
   }),

@@ -1255,6 +1255,34 @@ describe("Composer", () => {
     })
 
     it.each(["Escape", "Enter"])(
+      "leaves %s to the field while only an expired prompt is shown, sending nothing",
+      async (key) => {
+        startNativeHostFake({})
+        const backend = startBackendFake(MEASURING_BACKEND_ROUTES)
+        const { Composer } = await loadFreshComposerWithWaitingCall()
+        const { useToolCallStore } = await import("@/lib/store/tool-calls")
+        useToolCallStore.setState({
+          heldCalls: [{ ...WAITING_READ, answer: { status: "expired" } }]
+        })
+        const user = userEvent.setup()
+        render(
+          <Composer
+            messageFieldRef={createRef()}
+            onStartConversation={vi.fn()}
+          />
+        )
+
+        await user.type(getMessageField(), `{${key}}`)
+        await waitForRenderedWork()
+
+        expect(listRequestsBesideMeasurements(backend)).toEqual([])
+        expect(
+          screen.getByRole("group", { name: "Tool call prompt expired" })
+        ).toBeInTheDocument()
+      }
+    )
+
+    it.each(["Escape", "Enter"])(
       "leaves an %s that belongs to text composition to the input method while a call waits",
       async (key) => {
         startNativeHostFake({})

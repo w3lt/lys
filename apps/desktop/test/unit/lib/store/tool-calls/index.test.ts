@@ -1449,6 +1449,40 @@ describe("useToolCallStore", () => {
       ])
     })
 
+    it("sends an unsent approval again with its prompt's token", async () => {
+      const approval = createControlledRoute()
+      const { backend, replyStreams } = startReplyBackend({
+        [buildToolApprovalRouteKey(READ_CALL)]: approval.route
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot(),
+        buildApprovalEvent(READ_CALL)
+      ])
+      const resolution = useToolCallStore
+        .getState()
+        .resolveToolCall(READ_CALL.id)
+      approval.responses[0]?.reject(createTransportFailure())
+      await resolution
+
+      const retry = useToolCallStore
+        .getState()
+        .sendUnsentToolCallAnswer(READ_CALL.id)
+      await waitForMicrotasks()
+      approval.responses[1]?.resolve(
+        new Response(null, { status: ACCEPTED_STATUS })
+      )
+      await retry
+
+      expect(listToolAnswers(backend)).toEqual([
+        buildSentApproval(READ_CALL, ALLOWED_APPROVAL),
+        buildSentApproval(READ_CALL, ALLOWED_APPROVAL)
+      ])
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { step: "approval", answer: { status: "answered" } }
+      ])
+    })
+
     it("leaves a prompt that waits again alone when the answer sent before its follow ended fails", async () => {
       const approval = createControlledRoute()
       const { replyStreams } = startInterruptedReplyBackend({

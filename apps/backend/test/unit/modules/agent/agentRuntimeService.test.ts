@@ -109,42 +109,51 @@ function createWaitingReplyModel() {
 
 /**
  * Creates the stream of one round of a search whose model recommends the
- * first tool of the search, then ends.
+ * tool the search's task names, then ends.
  *
  * @param request - The round's request.
- * @returns A stream that finishes when the request's last message is a tool
- * result, and that otherwise calls `recommend_tool` with the first of
- * {@link TOOL_KEEPER_SEARCH_TOOLS}.
+ * @param handleToolFound - Called once the tool is recommended, before the
+ * stream ends; nothing is called when it is omitted.
+ * @returns A stream that calls `recommend_tool` with the text of the
+ * request's last message, the task; or, when that message is a tool result,
+ * calls `handleToolFound` and finishes.
  */
-async function* createFirstToolRecommendationStream(
-  request: ReplyStreamRequest
+async function* createTaskToolRecommendationStream(
+  request: ReplyStreamRequest,
+  handleToolFound?: () => void
 ): AsyncGenerator<ReplyStreamEvent> {
-  if (request.messages.at(-1)?.role === "tool") {
+  const lastMessage = request.messages.at(-1)
+  if (lastMessage?.role === "tool") {
+    handleToolFound?.()
     yield { type: "finish", finishReason: "stop" }
     return
   }
-  const name = TOOL_KEEPER_SEARCH_TOOLS[0]?.name ?? ""
   const toolCall = {
     toolName: "recommend_tool",
-    argumentText: JSON.stringify({ name })
+    argumentText: JSON.stringify({ name: lastMessage?.content })
   }
   yield { type: "tool-calls", toolCalls: [toolCall] }
 }
 
 /**
  * Creates model access whose every reply follows the script of a search:
- * it recommends the first tool of the search, then ends; it ends at once,
- * recommending nothing; or it fails.
+ * it recommends the tool the search's task names, then ends; it ends at
+ * once, recommending nothing; or it fails.
  *
  * @param script - How each search ends.
+ * @param handleToolFound - Called each time a search under
+ * `finds-task-tool` has recommended its tool and has not ended yet.
  * @returns The model, whose stream opener records each call.
  */
-function createToolKeeperReplyModel(script: ToolKeeperScript): ReplyModel {
+function createToolKeeperReplyModel(
+  script: ToolKeeperScript,
+  handleToolFound?: () => void
+): ReplyModel {
   switch (script) {
-    case "finds-first-tool":
+    case "finds-task-tool":
       return {
         openReplyStream: vi.fn<ReplyModel["openReplyStream"]>(async (request) =>
-          createFirstToolRecommendationStream(request)
+          createTaskToolRecommendationStream(request, handleToolFound)
         )
       }
     case "finds-nothing":
@@ -162,19 +171,25 @@ function createToolKeeperReplyModel(script: ToolKeeperScript): ReplyModel {
  * Creates the keeper of one case of the tool keeper contract suite.
  *
  * @param script - How each search ends.
+ * @param handleToolFound - Called each time a search under
+ * `finds-task-tool` has found its tool and has not settled yet.
  * @returns A runtime whose Armitage answers on a model that follows the
  * script.
  */
-function createScriptedToolKeeper(script: ToolKeeperScript) {
-  return createRuntime({ replyModel: createToolKeeperReplyModel(script) })
-    .runtime
+function createScriptedToolKeeper(
+  script: ToolKeeperScript,
+  handleToolFound?: () => void
+) {
+  const replyModel = createToolKeeperReplyModel(script, handleToolFound)
+  return createRuntime({ replyModel }).runtime
 }
 
 /**
  * Creates the runtime service over an agent service on an in-memory database
  * owned by the current test, every live agent with {@link REQUEST_LIMITS}.
  *
- * @param options - Model access and stored conversations.
+ * @param options - Model access, built-in agents, and stored
+ * conversations.
  * @returns The runtime, the agent service it reads, and how many agent
  * lookups and searches it made.
  */
@@ -633,11 +648,11 @@ describe("AgentRuntimeService", () => {
        *
        * @param abortSignal - Cancellation of the asking reply.
        * @returns The search's promise, the spy that receives its failures,
-       * and the runtime's model.
+       * the runtime's model, and the count of the runtime's agent reads.
        */
       function findToolsWithoutArmitage(abortSignal: AbortSignal) {
         const replyModel = createFinishingReplyModel()
-        const { runtime } = createRuntime({
+        const { runtime, countAgentReads } = createRuntime({
           replyModel,
           builtInAgents: BUILT_IN_AGENTS.filter(
             (agent) => agent.code !== ARMITAGE_AGENT_CODE
@@ -653,7 +668,7 @@ describe("AgentRuntimeService", () => {
           abortSignal,
           reportFailure
         })
-        return { search, reportFailure, replyModel }
+        return { search, reportFailure, replyModel, countAgentReads }
       }
 
       it("fails a search, after reporting why once, without reaching the model", async () => {
@@ -668,14 +683,14 @@ describe("AgentRuntimeService", () => {
         expect(replyModel.openReplyStream).not.toHaveBeenCalled()
       })
 
-      it("rejects with the abort reason of a search stopped before it starts, reporting nothing", async () => {
+      it("rejects with the abort reason of a search stopped before it starts, reading no agent and reporting nothing", async () => {
         const stopReason = new Error("stopped")
 
-        const { search, reportFailure } = findToolsWithoutArmitage(
-          AbortSignal.abort(stopReason)
-        )
+        const { search, reportFailure, countAgentReads } =
+          findToolsWithoutArmitage(AbortSignal.abort(stopReason))
 
         await expect(search).rejects.toBe(stopReason)
+        expect(countAgentReads()).toBe(0)
         expect(reportFailure).not.toHaveBeenCalled()
       })
     })

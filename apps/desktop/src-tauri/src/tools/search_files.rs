@@ -281,12 +281,16 @@ struct FileSearch {
     /// Identity of Lys's settings file when the search was parsed, or `None`
     /// when there was none; the walk leaves the file out.
     settings_file: Option<FileIdentity>,
+    /// Identity of the folder that holds Lys's settings file when the search
+    /// was parsed, or `None` when there was none; the walk leaves out the
+    /// copies of the settings file that stopped saves left in it.
+    settings_folder: Option<FileIdentity>,
 }
 
 /// One directory entry, classified without following symbolic links.
 ///
-/// A credential file or folder, or Lys's settings file, is
-/// [`ListedEntry::Ignored`] whatever its type.
+/// A credential file or folder, Lys's settings file, or a copy of it that a
+/// stopped save left, is [`ListedEntry::Ignored`] whatever its type.
 enum ListedEntry {
     /// A subdirectory, searched after the current directory level.
     Directory(PathBuf),
@@ -466,6 +470,7 @@ fn parse_search_files_filter(
 
     let root = parse_search_root(filter.root, &credential_files, &approved_folders)?;
     let settings_file = credential_files.find_settings_file();
+    let settings_folder = credential_files.find_settings_folder();
 
     Ok(FileSearch {
         root,
@@ -476,6 +481,7 @@ fn parse_search_files_filter(
         credential_files,
         approved_folders,
         settings_file,
+        settings_folder,
     })
 }
 
@@ -657,7 +663,8 @@ fn list_directory_entries(directory: &Path, search: &FileSearch) -> io::Result<V
 /// Classifies one directory entry without following symbolic links.
 ///
 /// An entry with a credential name is ignored before its type is read, and a
-/// regular file that is Lys's settings file is ignored too.
+/// regular file that is Lys's settings file, or a copy of it that a stopped
+/// save left, is ignored too.
 fn build_listed_entry(entry: &DirEntry, search: &FileSearch) -> ListedEntry {
     if search
         .credential_files
@@ -678,7 +685,11 @@ fn build_listed_entry(entry: &DirEntry, search: &FileSearch) -> ListedEntry {
         return ListedEntry::Ignored;
     }
 
-    if is_settings_file_entry(entry, search.settings_file) {
+    if is_settings_file_entry(entry, search.settings_file)
+        || search
+            .credential_files
+            .is_settings_file_copy(&entry.path(), search.settings_folder)
+    {
         return ListedEntry::Ignored;
     }
 
@@ -1625,6 +1636,37 @@ mod tests {
     }
 
     #[test]
+    fn leaves_a_leftover_copy_of_the_settings_file_out_but_not_its_name_elsewhere() {
+        let directory = TestDirectory::create("search-settings-copy");
+        let settings_path = directory.create_file("lys/settings.json", "todo");
+        directory.create_file("lys/settings.json.4242.0.tmp", "todo");
+        directory.create_file("lys/todo.txt", "todo");
+        let same_name_elsewhere = directory.create_file("notes/settings.json.4242.0.tmp", "todo");
+        let todo_path = directory.path().join("lys/todo.txt");
+        let elsewhere = get_path_text(&same_name_elsewhere);
+        let content_matches = vec![get_path_text(&todo_path), elsewhere.clone()];
+
+        for (target, query, expected) in [
+            ("name", "settings", vec![elsewhere]),
+            ("content", "todo", content_matches.clone()),
+            ("nameAndContent", "todo", content_matches),
+        ] {
+            let report = find_files_with(
+                json!({
+                    "root": get_path_text(directory.path()),
+                    "query": query,
+                    "target": target
+                }),
+                CredentialFiles::load_for_test(settings_path.clone()),
+            )
+            .expect("a completed search");
+
+            assert_eq!(list_match_paths(&report), expected, "target {target}");
+            assert_eq!(report.skipped_path_count, 0);
+        }
+    }
+
+    #[test]
     fn leaves_credential_files_out_of_a_root_reached_through_a_link() {
         let directory = TestDirectory::create("search-linked-root");
         let real_root = directory.create_subdirectory("real");
@@ -1830,6 +1872,7 @@ mod tests {
             credential_files: CredentialFiles::load_for_test_without_settings_file(),
             approved_folders: ApprovedFolders::Any,
             settings_file: None,
+            settings_folder: None,
         };
         let find_stop = |scanned_entry_count: usize, scanned_content_bytes: u64| {
             let tally = SearchTally {

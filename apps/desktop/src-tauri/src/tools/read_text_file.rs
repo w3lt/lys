@@ -390,6 +390,40 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_leftover_copy_of_the_settings_file_and_a_link_to_it() {
+        let directory = TestDirectory::create("read-settings-copy");
+        let settings_path = directory.create_file("lys/settings.json", "{}\n");
+        let copy = directory.create_file("lys/settings.json.4242.0.tmp", "{}\n");
+        let link = directory.path().join("notes.json");
+        symlink(&copy, &link).expect("create the test symlink");
+
+        for path in [&copy, &link] {
+            assert_eq!(
+                read_text_file_with(
+                    get_path_text(path),
+                    CredentialFiles::load_for_test(settings_path.clone())
+                ),
+                Err(ReadTextFileError::CredentialFile)
+            );
+        }
+    }
+
+    #[test]
+    fn reads_a_file_named_like_a_leftover_copy_in_another_folder() {
+        let directory = TestDirectory::create("read-settings-copy-name");
+        let settings_path = directory.path().join("lys/settings.json");
+        let file = directory.create_file("notes/settings.json.4242.0.tmp", "notes\n");
+
+        assert_eq!(
+            read_text_file_with(
+                get_path_text(&file),
+                CredentialFiles::load_for_test(settings_path)
+            ),
+            Ok(String::from("notes\n"))
+        );
+    }
+
+    #[test]
     fn refuses_a_credential_file_before_its_size_is_checked() {
         let directory = TestDirectory::create("read-large-key");
         let content = "a".repeat(MAX_TEXT_FILE_SIZE_BYTES as usize + 1);

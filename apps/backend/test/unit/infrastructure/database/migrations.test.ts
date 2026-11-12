@@ -3,7 +3,7 @@ import { describe, expect, it, onTestFinished } from "vitest"
 import { migrateDatabase } from "../../../../src/infrastructure/database/migrations"
 
 /** Schema version produced by the current migration list. */
-const CURRENT_SCHEMA_VERSION = 13
+const CURRENT_SCHEMA_VERSION = 14
 
 /**
  * Opens an empty in-memory database owned by the current test.
@@ -211,8 +211,8 @@ function createVersion11Database(): DatabaseSync {
  *
  * @returns A connection at `user_version` 12, closed when the test finishes.
  * @remarks Migration 13 only adds the decision table, its index, and its
- * trigger, so dropping them from a current database leaves exactly the
- * version-12 schema.
+ * trigger, and migration 14 only creates them again, so dropping them from a
+ * current database leaves exactly the version-12 schema.
  */
 function createVersion12Database(): DatabaseSync {
   const database = openEmptyDatabase()
@@ -222,6 +222,48 @@ function createVersion12Database(): DatabaseSync {
     DROP TABLE tool_call_decisions;
     PRAGMA user_version = 12
   `)
+  return database
+}
+
+/**
+ * Creates a database at version 13: the current schema whose decision
+ * records cannot store the answer `expired`.
+ *
+ * @returns A connection at `user_version` 13, closed when the test finishes.
+ * @remarks Migration 14 only creates the decision table again with
+ * `expired` added to its answer rule, and its index and trigger again
+ * unchanged, so the current table's own SQL without `expired` is the
+ * version-13 table.
+ * @throws If the current table's SQL no longer lists `expired` after
+ * `showFailed`, which this derivation relies on.
+ */
+function createVersion13Database(): DatabaseSync {
+  const database = openEmptyDatabase()
+  migrateDatabase(database)
+  const readSql = (name: string): string => {
+    const row = database
+      .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
+      .get(name)
+    if (typeof row?.sql !== "string") throw new Error(`${name} has no SQL`)
+    return row.sql
+  }
+  const tableSql = readSql("tool_call_decisions")
+  const indexSql = readSql("tool_call_decisions_conversation_idx")
+  const triggerSql = readSql("update_tool_call_decision_after_tool_call_update")
+  const version13TableSql = tableSql.replace(
+    "'showFailed', 'expired'",
+    "'showFailed'"
+  )
+  if (version13TableSql === tableSql)
+    throw new Error("The decision table's answer rule changed")
+  database.exec(`
+    DROP TRIGGER update_tool_call_decision_after_tool_call_update;
+    DROP TABLE tool_call_decisions;
+  `)
+  database.exec(version13TableSql)
+  database.exec(indexSql)
+  database.exec(triggerSql)
+  database.exec("PRAGMA user_version = 13")
   return database
 }
 
@@ -1549,7 +1591,8 @@ describe("migrateDatabase", () => {
       "an allowed call the client could not show":
         "'allow', NULL, 'ask-me', 'showFailed'",
       "a destructive call the person declined":
-        "'require-approval', 'destructive-tool', 'just-run', 'declined'"
+        "'require-approval', 'destructive-tool', 'just-run', 'declined'",
+      "a call whose prompt expired": "'allow', NULL, 'ask-me', 'expired'"
     })
   )("stores the decision record of %s", (_label, values) => {
     const database = openEmptyDatabase()
@@ -1613,6 +1656,39 @@ describe("migrateDatabase", () => {
         VALUES (${values}, 'web_search', '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z')
       `)
     ).toThrow(/constraint failed/)
+  })
+
+  it("upgrades a version-13 database by letting a decision record store the answer expired, keeping every record, its index, and its trigger", () => {
+    const database = createVersion13Database()
+    saveWaitingToolCall(database)
+    saveToolCallDecision(database, "'allow', NULL, 'ask-me', NULL")
+    const readRecords = () =>
+      database.prepare("SELECT * FROM tool_call_decisions").all()
+    const version13Records = readRecords()
+    expect(() =>
+      database.exec(
+        "UPDATE tool_call_decisions SET answer = 'expired' WHERE call_id = 'p1'"
+      )
+    ).toThrow(/constraint failed/)
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
+    expect(readRecords()).toEqual(version13Records)
+    expect(listSchemaObjects(database, "index")).toContain(
+      "tool_call_decisions_conversation_idx"
+    )
+    database.exec(`
+      UPDATE tool_call_decisions SET answer = 'expired' WHERE call_id = 'p1';
+      UPDATE conversation_messages SET status = 'failed', content = 'Expired.', updated_at = '2026-01-04T00:00:00.000Z' WHERE id = 'p1'
+    `)
+    expect(readRecords()).toMatchObject([
+      {
+        answer: "expired",
+        outcome: "failed",
+        updated_at: "2026-01-04T00:00:00.000Z"
+      }
+    ])
   })
 
   it("copies each status change of a call into its decision record with the call's update time", () => {

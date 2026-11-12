@@ -330,10 +330,12 @@ export interface ReplyPartRecordWriter {
    * @param input - Reply, call, change, and part timestamp.
    * @returns The call as stored, or undefined when the reply is finalized or
    * not stored, or the call is not one of its calls in a state the change
-   * follows (`running` and `rejected` follow `awaiting-approval`;
-   * `succeeded` and `failed` follow `running`), which changes nothing. The
-   * call's decision record takes the new state as its outcome; `running`
-   * also records the answer `allowed`, and `rejected` its reason.
+   * follows (`running`, `rejected`, and `expired` follow
+   * `awaiting-approval`; `succeeded` and `failed` follow `running`), which
+   * changes nothing. `expired` is stored as `failed`. The call's decision
+   * record takes the new state as its outcome; `running` also records the
+   * answer `allowed`, `rejected` its reason, and `expired` the answer
+   * `expired`.
    * @throws If the store is closed, the write fails, or the conversation
    * stores a source's number for another URL or its URL under another
    * number; nothing is then changed. A source whose number and URL the

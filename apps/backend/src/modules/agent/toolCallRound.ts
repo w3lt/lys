@@ -1,7 +1,8 @@
-import type {
-  ChatToolApprovalAnswer,
-  ChatToolCall,
-  ChatToolResult
+import {
+  TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES,
+  type ChatToolApprovalAnswer,
+  type ChatToolCall,
+  type ChatToolResult
 } from "@lys/protocol"
 import {
   FIND_TOOLS_TOOL_NAME,
@@ -20,6 +21,7 @@ import { formatNetworkToolResult } from "../tool/networkToolResult"
 import AgentTool from "../tool/tool"
 import type { ToolCallDecisionRecord } from "../toolApproval/toolCallDecisionRecord"
 import type ToolCallGate from "../toolApproval/toolCallGate"
+import type { ToolApprovalPromptOutcome } from "../toolApproval/toolCallGate"
 import {
   decideToolCall,
   formatToolCallDenial,
@@ -278,6 +280,15 @@ type ToolCallApproval =
       message: ToolResultMessage
     }>
   | Readonly<{
+      /**
+       * Nobody answered the call's prompt within its time limit; the call is
+       * stored as failed and never runs.
+       */
+      status: "expired"
+      /** Message carrying the expiry the model reads. */
+      message: ToolResultMessage
+    }>
+  | Readonly<{
       /** The reply ended while the call waited, or refused to store it. */
       status: "ended"
     }>
@@ -334,6 +345,12 @@ const ENDED_TOOL_CALL_APPROVAL: ToolCallApproval = Object.freeze({
 const ALLOWED_TOOL_CALL_APPROVAL: ToolCallApproval = Object.freeze({
   status: "allowed"
 })
+
+/**
+ * Text the model reads for a call whose approval prompt reached its time
+ * limit without an answer.
+ */
+const EXPIRED_TOOL_APPROVAL_RESULT = `This call did not run: nobody answered its approval prompt within ${TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES} minutes, so the prompt expired. Tell the person what you wanted it for; they can ask you to try again.`
 
 /**
  * Builds the tools of one turn from the offered tools.
@@ -929,27 +946,33 @@ function startGatedToolCall(
 }
 
 /**
- * Handles the person's answer about a stored call: waits for it and stores
- * it.
+ * Handles how a stored call's prompt ends: waits for it and stores it.
  *
  * @param toolCall - Checked call, stored as awaiting approval.
- * @param answer - Settles with the person's answer, or with undefined when
- * the reply was stopped while the prompt waited; never rejects.
+ * @param answer - Settles with the person's answer, with `expired` when the
+ * prompt reached its time limit first, or with undefined when the reply was
+ * stopped while the prompt waited; never rejects.
  * @param replyParts - The reply's part sequence.
  * @returns `allowed` once the call is stored as running; `rejected` with the
- * rejection the model reads, once stored; `ended` when the reply was stopped
- * while the prompt waited, or refused to store the answer.
+ * rejection the model reads, once stored; `expired` with the expiry the
+ * model reads, once the call is stored as failed; `ended` when the reply was
+ * stopped while the prompt waited, or refused to store the outcome.
  */
 async function handleToolCallApprovalAnswer(
   toolCall: CheckedToolCall,
-  answer: Promise<ChatToolApprovalAnswer | undefined>,
+  answer: Promise<ToolApprovalPromptOutcome | undefined>,
   replyParts: ReplyPartSequence
 ): Promise<ToolCallApproval> {
   const settledAnswer = await answer
   if (settledAnswer === undefined) return ENDED_TOOL_CALL_APPROVAL
-  return settledAnswer.status === "allowed"
-    ? updateAllowedToolCall(toolCall, replyParts)
-    : updateRejectedToolCall(toolCall, settledAnswer, replyParts)
+  switch (settledAnswer.status) {
+    case "allowed":
+      return updateAllowedToolCall(toolCall, replyParts)
+    case "rejected":
+      return updateRejectedToolCall(toolCall, settledAnswer, replyParts)
+    case "expired":
+      return updateExpiredToolCall(toolCall, replyParts)
+  }
 }
 
 /**
@@ -996,6 +1019,29 @@ function updateRejectedToolCall(
   return Object.freeze({
     status: "rejected",
     message: buildToolResultMessage(toolCall.call, result)
+  })
+}
+
+/**
+ * Stores a waiting call whose prompt reached its time limit as failed.
+ *
+ * @param toolCall - Checked call.
+ * @param replyParts - The reply's part sequence.
+ * @returns `expired` with the message the model reads once stored; `ended`
+ * when the reply refused it, so the call never runs.
+ */
+function updateExpiredToolCall(
+  toolCall: CheckedToolCall,
+  replyParts: ReplyPartSequence
+): ToolCallApproval {
+  const isStored = replyParts.updateReplyToolCall(toolCall.call.id, {
+    status: "expired",
+    result: EXPIRED_TOOL_APPROVAL_RESULT
+  })
+  if (!isStored) return ENDED_TOOL_CALL_APPROVAL
+  return Object.freeze({
+    status: "expired",
+    message: buildToolResultMessage(toolCall.call, EXPIRED_TOOL_APPROVAL_RESULT)
   })
 }
 

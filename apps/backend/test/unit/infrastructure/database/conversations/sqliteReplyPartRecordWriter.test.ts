@@ -275,6 +275,54 @@ describe("SqliteReplyPartRecordWriter", () => {
     }
   )
 
+  it("stores a waiting call whose prompt expired as failed with its result, recording the answer expired", () => {
+    const records = openRecordsWithReply()
+    const call = createDeleteCall({ status: "awaiting-approval" })
+    records.replyPartRecordWriter.createReplyPart({
+      assistantMessageId: REPLY_ID,
+      part: call,
+      toolCallDecision: ASK_ME_TOOL_CALL_DECISION
+    })
+
+    const stored = records.replyPartRecordWriter.updateReplyToolCall({
+      assistantMessageId: REPLY_ID,
+      toolCallId: call.id,
+      change: { status: "expired", result: "Nobody answered." },
+      updatedAt: CHANGED_AT
+    })
+
+    expect(stored).toMatchObject({
+      status: "failed",
+      result: "Nobody answered.",
+      updatedAt: CHANGED_AT
+    })
+    expect(readToolCallDecisionRows(records.database)).toMatchObject([
+      { answer: "expired", outcome: "failed", updatedAt: CHANGED_AT }
+    ])
+  })
+
+  it("refuses an expired prompt for a call that already runs, changing nothing", () => {
+    const records = openRecordsWithReply()
+    const call = createDeleteCall({ status: "running" })
+    records.replyPartRecordWriter.createReplyPart({
+      assistantMessageId: REPLY_ID,
+      part: call,
+      toolCallDecision: ASK_ME_TOOL_CALL_DECISION
+    })
+
+    const stored = records.replyPartRecordWriter.updateReplyToolCall({
+      assistantMessageId: REPLY_ID,
+      toolCallId: call.id,
+      change: { status: "expired", result: "Nobody answered." },
+      updatedAt: CHANGED_AT
+    })
+
+    expect(stored).toBeUndefined()
+    expect(readToolCallDecisionRows(records.database)).toMatchObject([
+      { answer: null, outcome: "running" }
+    ])
+  })
+
   it("changes a call stored without a decision record and records nothing for it", () => {
     const call = createDeleteCall({ status: "awaiting-approval" })
     const records = openRecordsWithReply("streaming", [call])

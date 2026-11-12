@@ -96,6 +96,11 @@ describe("MemoryReply", () => {
       "awaiting-approval",
       { status: "rejected", result: "Not allowed.", reason: "declined" },
       { status: "rejected", result: "Not allowed." }
+    ],
+    [
+      "awaiting-approval",
+      { status: "expired", result: "Nobody answered." },
+      { status: "failed", result: "Nobody answered." }
     ]
   ] as const)(
     "changes a %s tool call as %o",
@@ -115,6 +120,7 @@ describe("MemoryReply", () => {
   it.each([
     ["running", { status: "running" }],
     ["running", { status: "rejected", result: "No.", reason: "declined" }],
+    ["running", { status: "expired", result: "Nobody answered." }],
     ["awaiting-approval", { status: "succeeded", result: "", sources: [] }],
     ["awaiting-approval", { status: "failed", result: "Broke." }]
   ] as const)(

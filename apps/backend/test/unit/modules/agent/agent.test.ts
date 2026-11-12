@@ -1,9 +1,10 @@
 import { isDeepStrictEqual } from "node:util"
-import type {
-  ChatGenerationEvent,
-  ChatToolApprovalAnswer,
-  ChatToolCall,
-  ChatToolResult
+import {
+  TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES,
+  type ChatGenerationEvent,
+  type ChatToolApprovalAnswer,
+  type ChatToolCall,
+  type ChatToolResult
 } from "@lys/protocol"
 import {
   calculateImageTokens,
@@ -592,6 +593,9 @@ const DECLINED_APPROVAL = Object.freeze({
   reason: "declined",
   content: "The person declined this call. Their note: not now"
 } satisfies ChatToolApprovalAnswer)
+
+/** Outcome of a prompt nobody answered within its time limit. */
+const EXPIRED_PROMPT = Object.freeze({ status: "expired" } as const)
 
 /**
  * Creates a prompt sender whose prompts the person allows.
@@ -2959,6 +2963,36 @@ describe("Agent", () => {
       ])
     })
 
+    it("stores a call whose prompt expired as failed, naming the time limit, and hands the model the same text without running the tool", async () => {
+      const { tool, entry } = createLookUpWordTool()
+      const openReplyStream = createRoundStreams(
+        LOOK_UP_MOTH_ROUND,
+        FINISH_ROUND
+      )
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        builtInTools: [entry],
+        justRunToolNames: [],
+        sendToolApprovalPrompt: async () => EXPIRED_PROMPT
+      })
+
+      const modelMessage = openReplyStream.mock.calls[1]?.[0].messages.at(-1)
+      expect(tool.startedWords).toEqual([])
+      expect(modelMessage).toMatchObject({
+        role: "tool",
+        content: expect.stringContaining(
+          `within ${TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES} minutes`
+        )
+      })
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          status: "failed",
+          result: modelMessage?.content
+        })
+      ])
+    })
+
     it("interrupts without running the tool, and marks the waiting call interrupted, when the reply is stopped while the prompt waits", async () => {
       const cancellation = new AbortController()
       const { tool, entry } = createLookUpWordTool()
@@ -3886,6 +3920,22 @@ describe("Agent", () => {
             approvalMode: "ask-me",
             answer: "showFailed",
             outcome: "rejected"
+          }
+        },
+        "a client tool's call whose prompt expired": {
+          createScenario: () => ({
+            openReplyStream: createRoundStreams(READ_A_ROUND, FINISH_ROUND),
+            clientTools: [READ_TEXT_FILE_TOOL],
+            justRunToolNames: [],
+            sendToolApprovalPrompt: async () => EXPIRED_PROMPT
+          }),
+          record: {
+            toolName: "read_text_file",
+            policyEffect: "allow",
+            policyReason: null,
+            approvalMode: "ask-me",
+            answer: "expired",
+            outcome: "failed"
           }
         },
         "a credential file read the policy denied on Just run": {

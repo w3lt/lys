@@ -1,9 +1,9 @@
 import type {
   ChatGenerationEvent,
-  ChatToolApprovalAnswer,
   ChatToolCall,
   ChatToolResult
 } from "@lys/protocol"
+import type { SendToolApprovalPrompt } from "../toolApproval/toolCallGate"
 import PendingToolCalls, {
   type PendingToolCallSnapshot,
   type ToolCallAnswer,
@@ -35,14 +35,13 @@ export type ReplyTaskContext = ReplyGenerationTaskContext &
     /**
      * Lists one checked call with a new single-use token and shows both to
      * every follower for approval, then waits for the person's answer, which
-     * must carry the token. Resolves with that answer, without the token, or
-     * with undefined once the reply was stopped, the generation disposed, or
-     * the reply task settled; never rejects.
+     * must carry the token and arrive before the prompt's time limit.
+     * Resolves with that answer, without the token; with `expired` at the
+     * limit; or with undefined once the reply was stopped, the generation
+     * disposed, or the reply task settled; never rejects.
      * Throws if a call with the same identifier is already waiting.
      */
-    sendToolApprovalPrompt: (
-      toolCall: ChatToolCall
-    ) => Promise<ChatToolApprovalAnswer | undefined>
+    sendToolApprovalPrompt: SendToolApprovalPrompt
   }>
 
 /** Work and failure reporting for one generation. */
@@ -219,9 +218,9 @@ export default class ReplyGeneration implements AsyncDisposable {
    * Lists the tool calls and approval prompts the reply waits on.
    *
    * @returns A frozen snapshot of the calls sent to run and the calls shown
-   * for approval that are not yet answered, each in send order; both empty
-   * once the reply was stopped, the generation disposed, the reply task
-   * settled, or every call answered.
+   * for approval that are not yet answered or expired, each in send order;
+   * both empty once the reply was stopped, the generation disposed, the reply
+   * task settled, or every call answered or expired.
    */
   public get pendingToolCalls(): PendingToolCallSnapshot {
     return this.#pendingToolCalls.snapshot
@@ -237,8 +236,8 @@ export default class ReplyGeneration implements AsyncDisposable {
    * @returns `accepted` when the call was waiting for that kind of answer,
    * with that token for a prompt; `token-mismatch` when a prompt waits for
    * the call but the token is not its own; `not-pending` when the call is
-   * unknown, already answered, waiting for the other kind of answer, or ended
-   * with its reply. Only `accepted` changes anything. Calls still waiting
+   * unknown, already answered, expired, waiting for the other kind of answer,
+   * or ended with its reply. Only `accepted` changes anything. Calls still waiting
    * when the reply task settles end without an answer.
    */
   public resolveToolCall(

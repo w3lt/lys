@@ -9,6 +9,7 @@ import {
   sendChatToolApprovalApi,
   sendChatToolResultApi,
   stopChatReplyApi,
+  TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES,
   type ChatGenerationEvent,
   type ChatToolApprovalAnswer,
   type ChatToolCall,
@@ -971,6 +972,36 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       })
       expect(accepted.statusCode).toBe(204)
       expect(await waitedAnswer).toStrictEqual(DECLINED_APPROVAL)
+    })
+
+    it("answers 409 with the not-pending problem to the token of a prompt that reached its time limit", async () => {
+      const { app, generations } = await createReplyRouteApp()
+      const generation = startControlledGeneration(generations, REPLY_TARGET)
+      await waitForMicrotasks()
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+      onTestFinished(() => {
+        vi.useRealTimers()
+      })
+      const outcome =
+        generation.replyTask.context.sendToolApprovalPrompt(BACKEND_TOOL_CALL)
+      const approvalToken = readApprovalToken(generations, BACKEND_TOOL_CALL.id)
+      vi.advanceTimersByTime(TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES * 60_000)
+      vi.useRealTimers()
+
+      const response = await sendToolApproval(app, BACKEND_TOOL_CALL.id, {
+        status: "allowed",
+        approvalToken
+      })
+
+      expect(response.statusCode).toBe(409)
+      expect(
+        chatToolCallNotPendingProblemSchema.safeParse(response.json()).success
+      ).toBe(true)
+      expect(await outcome).toEqual({ status: "expired" })
+      expect(
+        generations.findReplyGeneration(REPLY_TARGET)?.pendingToolCalls
+          .toolApprovals
+      ).toEqual([])
     })
 
     it("answers 409 to an approval for a call waiting for its result, which keeps waiting", async () => {

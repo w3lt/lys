@@ -23,6 +23,26 @@ type ToolCallResultChange = Exclude<
   { status: "running" }
 >
 
+/**
+ * What ended a call's prompt, as its decision record stores it: the person
+ * allowed the call, declined it, the client could not show it, or nobody
+ * answered within the prompt's time limit.
+ */
+type ToolCallDecisionAnswer = "allowed" | "declined" | "showFailed" | "expired"
+
+/** How one result change is written. */
+type ToolCallResultWrite = Readonly<{
+  /** Status the call is stored with. */
+  status: "succeeded" | "failed" | "rejected"
+  /** The one status the change follows. */
+  previousStatus: "awaiting-approval" | "running"
+  /**
+   * Answer the call's decision record gets; undefined for an outcome of the
+   * run, whose answer was stored when the call started running.
+   */
+  answer: ToolCallDecisionAnswer | undefined
+}>
+
 /** Column values of one stored piece that differ by kind and state. */
 type ReplyPartColumns = Readonly<{
   /** Stored role of the piece. */
@@ -181,16 +201,38 @@ function buildReplyPartColumns(part: ReplyPart): ReplyPartColumns {
 }
 
 /**
- * Selects the call state a change follows.
+ * Builds how a result change is written.
  *
  * @param change - Change of a call's result.
- * @returns `awaiting-approval` for a rejection; `running` for an outcome of
- * the run.
+ * @returns For an outcome of the run, its status after `running` and no
+ * answer; for a rejection, `rejected` after `awaiting-approval` with its
+ * reason as the answer; for an expired prompt, `failed` after
+ * `awaiting-approval` with the answer `expired`.
  */
-function getPreviousToolCallStatus(
+function buildToolCallResultWrite(
   change: ToolCallResultChange
-): "awaiting-approval" | "running" {
-  return change.status === "rejected" ? "awaiting-approval" : "running"
+): ToolCallResultWrite {
+  switch (change.status) {
+    case "succeeded":
+    case "failed":
+      return {
+        status: change.status,
+        previousStatus: "running",
+        answer: undefined
+      }
+    case "rejected":
+      return {
+        status: "rejected",
+        previousStatus: "awaiting-approval",
+        answer: change.reason
+      }
+    case "expired":
+      return {
+        status: "failed",
+        previousStatus: "awaiting-approval",
+        answer: "expired"
+      }
+  }
 }
 
 /**
@@ -244,22 +286,23 @@ function updateToolCallResult(
   change: ToolCallResultChange
 ): boolean {
   const sources = listChangeSources(change)
+  const write = buildToolCallResultWrite(change)
   const isUpdated =
     statements
       .getStatement(UPDATE_REPLY_TOOL_CALL_RESULT_SQL)
       .run(
-        change.status,
+        write.status,
         change.result,
         buildSourceNumbersColumn(sources.map((source) => source.number)),
         input.updatedAt,
         input.toolCallId,
         input.assistantMessageId,
-        getPreviousToolCallStatus(change),
+        write.previousStatus,
         input.assistantMessageId
       ).changes === 1
   if (!isUpdated) return false
-  if (change.status === "rejected")
-    updateToolCallDecisionAnswer(statements, input.toolCallId, change.reason)
+  if (write.answer !== undefined)
+    updateToolCallDecisionAnswer(statements, input.toolCallId, write.answer)
   const createSource = statements.getStatement(CREATE_CONVERSATION_SOURCE_SQL)
   for (const source of sources)
     createSource.run(
@@ -327,7 +370,7 @@ function createToolCallDecision(
  *
  * @param statements - Statement compilation lent to the caller's transaction.
  * @param toolCallId - UUIDv7 of the call, changed in this transaction.
- * @param answer - `allowed`, or the rejection's reason.
+ * @param answer - `allowed`, the rejection's reason, or `expired`.
  * @remarks A call stored before the schema had decision records has none,
  * and its answer is not recorded; every call stored since gets its record in
  * the write that stores it.
@@ -336,7 +379,7 @@ function createToolCallDecision(
 function updateToolCallDecisionAnswer(
   statements: DatabaseStatementCompiler,
   toolCallId: string,
-  answer: "allowed" | "declined" | "showFailed"
+  answer: ToolCallDecisionAnswer
 ): void {
   statements
     .getStatement(UPDATE_TOOL_CALL_DECISION_ANSWER_SQL)

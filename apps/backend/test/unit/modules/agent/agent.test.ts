@@ -3806,6 +3806,18 @@ describe("Agent", () => {
       answer: null
     })
 
+    /**
+     * Columns of the record of a call Lys's own checks failed before the
+     * policy was asked.
+     */
+    const FAILED_BEFORE_POLICY = Object.freeze({
+      policyEffect: null,
+      policyReason: null,
+      approvalMode: null,
+      answer: null,
+      outcome: "failed"
+    })
+
     it.each(
       Object.entries({
         "a client tool's call the person allowed on Ask me": {
@@ -3833,8 +3845,10 @@ describe("Agent", () => {
           }),
           record: {
             toolName: "read_text_file",
-            ...ALLOWED_WITHOUT_GATE,
+            policyEffect: "allow",
+            policyReason: null,
             approvalMode: "just-run",
+            answer: null,
             outcome: "succeeded"
           }
         },
@@ -3930,14 +3944,27 @@ describe("Agent", () => {
             ),
             clientTools: [READ_TEXT_FILE_TOOL]
           }),
-          record: {
-            toolName: "delete_everything",
-            policyEffect: null,
-            policyReason: null,
-            approvalMode: null,
-            answer: null,
-            outcome: "failed"
-          }
+          record: { toolName: "delete_everything", ...FAILED_BEFORE_POLICY }
+        },
+        "a client tool's call with arguments the tool cannot take": {
+          createScenario: () => ({
+            openReplyStream: createRoundStreams(
+              buildCallRound("read_text_file", '{"path":1}'),
+              FINISH_ROUND
+            ),
+            clientTools: [READ_TEXT_FILE_TOOL]
+          }),
+          record: { toolName: "read_text_file", ...FAILED_BEFORE_POLICY }
+        },
+        "a backend tool's call its parser refuses": {
+          createScenario: () => ({
+            openReplyStream: createRoundStreams(
+              buildCallRound("look_up_word", '{"word":"unknown"}'),
+              FINISH_ROUND
+            ),
+            builtInTools: [createLookUpWordTool().entry]
+          }),
+          record: { toolName: "look_up_word", ...FAILED_BEFORE_POLICY }
         }
       })
     )(

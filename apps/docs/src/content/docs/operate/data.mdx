@@ -95,9 +95,14 @@ The checked-in schema currently creates:
 - `conversation_sources`
 - `conversation_attachments`
 - `agents`
-- one index on `(conversation_id, created_at, id)`, and one unique index on
-  each reply's part positions
-- triggers that keep `conversations.updated_at` in sync
+- `tool_call_decisions`, one record per stored tool call of how it was
+  decided, the answer that moved it on, and its outcome, without its
+  arguments; it is deleted with its conversation
+- one index on `(conversation_id, created_at, id)`, one unique index on
+  each reply's part positions, and one index on each decision record's
+  conversation
+- triggers that keep `conversations.updated_at` in sync, and one that copies
+  each tool call's status into its decision record
 
 SQLite `PRAGMA user_version` tracks the applied migration level. On startup the
 backend applies any missing forward migrations and refuses to open a database

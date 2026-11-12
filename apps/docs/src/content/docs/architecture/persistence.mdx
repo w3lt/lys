@@ -93,7 +93,7 @@ On startup the database owner:
 1. Opens the SQLite file with foreign keys enabled.
 2. Acquires a write transaction and reads `PRAGMA user_version`.
 3. Rejects unsupported future versions or applies each missing migration in order.
-4. Records the latest version, 11, and commits; a migration failure rolls back
+4. Records the latest version, 13, and commits; a migration failure rolls back
    all pending work.
 5. Switches to write-ahead logging with `synchronous = NORMAL`. A database from
    a newer version was refused in step 3, before anything changed its file.
@@ -121,7 +121,9 @@ text, and tool calls are rows of their own under the reply's row, moves each
 stored reply's text into one text part, and adds `conversation_sources`; it
 cannot be undone. Version 10 adds `conversation_attachments`. Version 11 adds
 `agents.deleted_at`; agents deleted before it are gone, and their codes stay
-free.
+free. Version 13 adds `tool_call_decisions`, one record per tool call of how
+the backend decided it, with a trigger that copies each status change of the
+call into its record; a call stored before it has no record.
 Turn creation is atomic and first interrupts a reply still streaming in the same
 conversation: the turn service runs it as one callback inside one write
 transaction of the turn records, which refuse every call once the callback
@@ -131,7 +133,10 @@ the conversation's activity time forward, to a later time when the message's
 time is not later than the stored one. A rename validates
 the renamed conversation before it commits, so an invalid stored row rolls the
 rename back. Every reply part, fragment, tool call change, and source is
-committed before it is sent to any stream following the reply. The fragment
+committed before it is sent to any stream following the reply. A tool call's
+decision record is written in the transaction that stores the call, and the
+answer that moves a waiting call on in the transaction that changes it; see
+[Database schemas](/reference/schema/#tool_call_decisions). The fragment
 `UPDATE`, like every statement, is compiled on its first use and reused; each
 write runs in one write transaction, guarded by the reply still streaming.
 Finalizing a reply marks its waiting and running tool calls interrupted in

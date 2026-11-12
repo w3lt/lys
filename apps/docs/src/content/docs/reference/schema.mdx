@@ -78,6 +78,28 @@ The file itself is at
 `$LYS_HOME/attachments/<conversation_id>/<message_id>/<name>`; see
 [Data and storage](/operate/data/).
 
+### `tool_call_decisions`
+
+One row per tool call stored since version 13: how the backend decided the
+call before it ran, the answer that moved it on, and its outcome. The row is
+written in the same transaction as the call's row and holds no argument
+value; the call's row keeps the arguments. Nothing reads the table yet. The
+table is `STRICT`.
+
+| Column            | Type            | Notes                                                                                                                                                                                                      |
+| ----------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `call_id`         | `TEXT`          | Primary key; foreign key to the call's `conversation_messages(id)` with `ON DELETE CASCADE`                                                                                                                |
+| `conversation_id` | `TEXT NOT NULL` | Foreign key to `conversations(id)` with `ON DELETE CASCADE`                                                                                                                                                |
+| `agent_code`      | `TEXT NOT NULL` | Non-empty code of the conversation's agent when the call was stored                                                                                                                                        |
+| `tool_name`       | `TEXT NOT NULL` | The called tool, as the model named it                                                                                                                                                                     |
+| `policy_effect`   | `TEXT`          | The tool call policy's answer: `allow`, `require-approval`, or `deny`; null when Lys's own checks failed the call first, because it names a tool the round did not offer or arguments the tool cannot take |
+| `policy_reason`   | `TEXT`          | `credential-file` or `blocked-address` for `deny`, `destructive-tool` for `require-approval`; null otherwise                                                                                               |
+| `approval_mode`   | `TEXT`          | Mode the approval gate applied: `just-run` when the tool was saved as Just run, `ask-me` otherwise; null when the call never reached the gate                                                              |
+| `answer`          | `TEXT`          | Answer that moved a waiting call on: `allowed`, or the rejection's reason, `declined` or `showFailed`; null while none came or none was asked for                                                          |
+| `outcome`         | `TEXT NOT NULL` | The call's `status`, which a trigger copies on every change                                                                                                                                                |
+| `created_at`      | `TEXT NOT NULL` | The call's creation time                                                                                                                                                                                   |
+| `updated_at`      | `TEXT NOT NULL` | The call's latest update time, copied with its status                                                                                                                                                      |
+
 ### `agents`
 
 | Column          | Type            | Notes                                                                          |
@@ -135,13 +157,26 @@ The file itself is at
   and a bio of at most 128 UTF-16 code units; trimmed text without a lone
   UTF-16 surrogate; and millisecond ISO timestamps. A row that breaks them
   fails to read.
+- Decision records must have a non-empty `agent_code` and an `outcome` that
+  is a tool call status. A null `policy_effect` has no reason and no mode;
+  `deny` has the reason `credential-file` or `blocked-address` and no mode;
+  `require-approval` has the reason `destructive-tool` and a mode; `allow`
+  has no reason and may have a mode. A mode is `ask-me` or `just-run`, and an
+  answer, `allowed`, `declined`, or `showFailed`, needs a mode. A comparison
+  with `NULL` makes a check pass in SQLite, so every comparison on a nullable
+  column is guarded with `IS NOT NULL`. SQLite does not check that a record's
+  conversation, agent, and tool match its call's; the backend copies them
+  from the call's row in the statement that stores the record.
 
 The current backend inserts a reply row without parts before generation. It
 then stores each part, and appends each fragment to the last reasoning or
 text part, before publishing it, stores each change of a tool call before
 publishing it, and finally updates the reply's status and finish reason. A
 succeeded call's sources are stored in the same transaction as the call: a
-URL the conversation already numbered keeps its row and title. Ending a reply,
+URL the conversation already numbered keeps its row and title. Each tool
+call's decision record is stored in the transaction that stores the call, and
+the change that moves a waiting call on records its answer in the same
+transaction. Ending a reply,
 superseding it with a newer turn, and startup recovery mark its waiting and
 running calls `interrupted`. Partial parts are retained on failure or
 interruption.
@@ -158,17 +193,20 @@ its source rows in `number` order.
 
 ## Indexes and triggers
 
-| Name                                       | Kind    | Purpose                                                                      |
-| ------------------------------------------ | ------- | ---------------------------------------------------------------------------- |
-| `conversation_messages_conversation_idx`   | index   | Orders messages by conversation, creation time, and id                       |
-| `conversation_messages_reply_part_idx`     | index   | Unique: one part per position of a reply                                     |
-| `update_conversation_after_message_insert` | trigger | Updates `conversations.updated_at` after inserts, parts included             |
-| `update_conversation_updated_at`           | trigger | Keeps explicit activity updates monotonic; title-only updates do not fire it |
-| `update_conversation_after_message_update` | trigger | Updates `conversations.updated_at` after a row's `content` changes           |
+| Name                                               | Kind    | Purpose                                                                                    |
+| -------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------ |
+| `conversation_messages_conversation_idx`           | index   | Orders messages by conversation, creation time, and id                                     |
+| `conversation_messages_reply_part_idx`             | index   | Unique: one part per position of a reply                                                   |
+| `update_conversation_after_message_insert`         | trigger | Updates `conversations.updated_at` after inserts, parts included                           |
+| `update_conversation_updated_at`                   | trigger | Keeps explicit activity updates monotonic; title-only updates do not fire it               |
+| `update_conversation_after_message_update`         | trigger | Updates `conversations.updated_at` after a row's `content` changes                         |
+| `tool_call_decisions_conversation_idx`             | index   | Finds a conversation's decision records                                                    |
+| `update_tool_call_decision_after_tool_call_update` | trigger | Copies a tool call's new `status` and `updated_at` into its decision record as its outcome |
 
 `conversation_attachments` has no named index: SQLite builds the indexes of
 its primary key on `(message_id, name)` and of its unique
-`(conversation_id, number)` constraint.
+`(conversation_id, number)` constraint. SQLite also builds the index of the
+`tool_call_decisions` primary key.
 
 ## Migration strategy
 
@@ -209,7 +247,10 @@ because Armitage, the tool keeper, now ships under that code and a built-in
 agent's code hides a stored agent's. Names, bios, prompts, times, a
 deletion, titles, and messages stay, and a database without such rows is
 left as it was. Builds that support only version 11 refuse a version-12
-database.
+database. Version 13 adds `tool_call_decisions`, its index, and its trigger,
+and changes no existing row: a call stored before it has no decision record,
+because its decision was never stored. Builds that support only version 12
+refuse a version-13 database.
 Versions 1–3 are unchanged. Missing migrations
 and the version marker commit together. At startup, streaming replies
 become interrupted with a refreshed `updated_at`; their waiting and running

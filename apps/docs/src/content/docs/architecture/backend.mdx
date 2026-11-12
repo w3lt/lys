@@ -455,6 +455,21 @@ reach a credential file or a local address;
 paths of the desktop's file tools on the host. A sentence that holds a
 credential path, such as a web search query, is denied like a path.
 
+Every call the gateway stores gets a decision record, a row of
+[`tool_call_decisions`](/reference/schema/#tool_call_decisions) written in
+the transaction that stores the call. It names the conversation, its agent,
+and the tool, and holds the policy's effect and reason, none when step 1 or
+2 failed the call; the approval mode the gate applied, `just-run` or
+`ask-me`, none when the call never reached the gate; the answer that moved a
+waiting call on, `allowed`, `declined`, or `showFailed`, stored in the
+transaction that changes the call; and the call's status as its outcome,
+which a trigger copies on every change, `interrupted` included. It holds no
+argument value; the call's row keeps them. The record goes with its call and
+its conversation, and nothing reads it yet. Armitage's own `search_tools` and
+`recommend_tool` calls belong to a search turn kept in memory and never
+stored, so they get no record; the `find_tools` call that started the search
+does.
+
 ## Tool approval
 
 `ToolApprovalService` (`src/modules/toolApproval/toolApprovalService.ts`) is the
@@ -479,7 +494,8 @@ list means no tool is on Just run. A round whose calls all run without
 approval or name no offered tool creates no gate and does not read the file.
 
 For each call that passes the gate, in the model's order, the gate's
-`startToolCall` stores the call and decides how it goes on. A call of a tool
+`startToolCall` stores the call, with the approval mode it applied, and
+decides how it goes on. A call of a tool
 on Just run that the policy allowed is stored as `running` and goes on at
 once. Any other call is stored as `awaiting-approval` first; the gate then
 sends a `tool-approval` event, and the round waits for the person's answer
@@ -1423,7 +1439,7 @@ version 10 adds the attachment rows, version 11 adds `agents.deleted_at`, so
 deleting an agent only marks it, version 12 moves a stored agent coded
 `armitage`, deleted or not, and every conversation stored under `armitage`
 to the first `armitage-<n>` code no agent or conversation holds, so the code
-is Armitage's, and
+is Armitage's, version 13 adds the tool call decision records, and
 turn persistence's startup recovers streaming assistants and their open tool
 calls without reordering history.
 Two triggers keep `conversations.updated_at` in sync with message and part
@@ -1575,9 +1591,6 @@ for the separate inference and model-management lifetimes.
   and the destructive mark of an MCP tool: no rule keeps calls inside folders
   the person approves ([#341](https://github.com/w3lt/lys/issues/341)), and
   none limits usage or spending, or attaches constraints to an allowed call
-- No stored audit record of tool decisions
-  ([#337](https://github.com/w3lt/lys/issues/337)), part of #330's tool
-  authorization spec
 - No time limit on an approval prompt: its token works until the prompt is
   answered or its reply ends ([#342](https://github.com/w3lt/lys/issues/342))
 

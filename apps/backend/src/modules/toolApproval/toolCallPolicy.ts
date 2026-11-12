@@ -50,7 +50,7 @@ export type ToolCallRequest = Readonly<{
 export type ToolCallDenialReason = "credential-file" | "blocked-address"
 
 /** Why the policy requires the person's approval of a call. */
-export type ToolCallApprovalReason = "destructive-tool"
+type ToolCallApprovalReason = "destructive-tool"
 
 /**
  * The policy's answer for one call.

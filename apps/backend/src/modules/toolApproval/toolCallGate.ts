@@ -54,11 +54,11 @@ const ENDED_TOOL_CALL_START: ToolCallStart = Object.freeze({ status: "ended" })
  *
  * @remarks The invariant is that a call goes on without the person only when
  * its tool's name was saved as Just run when the round's calls arrived and
- * the tool call policy does not require approval of it, and that no prompt
- * is sent for a call that is not stored. The choices never
- * change after construction, so a change saved later applies from the next
- * round. Concurrency model: single-owner, on the backend's event loop, like
- * the reply's waits that the prompt sender borrows.
+ * the tool call policy does not require approval of it, and that no prompt is
+ * sent for a call that is not stored. The choices never change after
+ * construction, so a change saved later applies from the next round.
+ * Concurrency model: single-owner, on the backend's event loop, like the
+ * reply's waits that the prompt sender borrows.
  */
 export default class ToolCallGate {
   /** Names of the tools on Just run for this round; owned, never changed. */

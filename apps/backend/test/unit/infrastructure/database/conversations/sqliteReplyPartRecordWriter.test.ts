@@ -316,6 +316,25 @@ describe("SqliteReplyPartRecordWriter", () => {
     expect(readToolCallDecisionRows(records.database)).toEqual([])
   })
 
+  it("stores neither the call nor its record when the record breaks the table's rules", () => {
+    const records = openRecordsWithReply()
+
+    expect(() =>
+      records.replyPartRecordWriter.createReplyPart({
+        assistantMessageId: REPLY_ID,
+        part: createDeleteCall({ status: "failed", result: "Denied." }),
+        toolCallDecision: {
+          policyDecision: { effect: "deny", reason: "credential-file" },
+          approvalMode: "ask-me"
+        }
+      })
+    ).toThrow(/constraint failed/)
+    expect(
+      records.recordReader.findConversation(CONVERSATION_ID)?.messages
+    ).toMatchObject([{ id: REPLY_ID, parts: [] }])
+    expect(readToolCallDecisionRows(records.database)).toEqual([])
+  })
+
   it("stores no decision record for a call the finalized reply refuses", () => {
     const records = openRecordsWithReply("interrupted")
 

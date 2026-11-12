@@ -1522,6 +1522,21 @@ describe("migrateDatabase", () => {
     expect(listReplyPartRows(database)).toMatchObject([
       { id: "p1", status: "awaiting-approval" }
     ])
+    expect(listSchemaObjects(database, "trigger")).toContain(
+      "update_tool_call_decision_after_tool_call_update"
+    )
+    expect(listSchemaObjects(database, "index")).toContain(
+      "tool_call_decisions_conversation_idx"
+    )
+
+    database.exec(
+      "UPDATE conversation_messages SET status = 'running' WHERE id = 'p1'"
+    )
+
+    expect(listReplyPartRows(database)).toMatchObject([
+      { id: "p1", status: "running" }
+    ])
+    expect(listToolCallDecisionOutcomes(database)).toEqual([])
   })
 
   it.each(

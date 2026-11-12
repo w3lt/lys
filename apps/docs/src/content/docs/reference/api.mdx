@@ -483,8 +483,8 @@ document). For `read_page`, it is `page-reader-not-ready`: vmo did not answer
 and asks vmo's health route, contacts nothing else, and never contains the
 key. `read_attachment`, the attachment reader, the agent state tools,
 `read_my_state`, `find_agents`, and `read_agent_state`, and `find_tools` are
-not listed and cannot be offered by name: the chat route adds them to a turn
-by itself; see [attachments](#attachments),
+not listed and cannot be offered by name: the backend adds them to a turn by
+itself; see [attachments](#attachments),
 [agent state tools](/architecture/backend/#agent-state-tools), and
 [tool routing](/architecture/backend/#tool-routing).
 

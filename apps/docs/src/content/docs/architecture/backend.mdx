@@ -795,9 +795,13 @@ asks the `ToolKeeper` for the turn's tools that fit the task and answers
 with their names, and each one is offered from the reply's next round to its
 end. Discovery is not authorization: each call of a found tool passes the
 argument check and the [approval gate](#tool-approval) as any other, and a
-call of a tool its round did not offer is stored as failed and never runs,
-with a result that lists the tools the model can call and points to
-`find_tools`, without saying whether the turn has that tool. When Armitage
+call of a tool its round did not offer is stored as failed and never runs.
+A call of a tool the request names as switched off or unavailable, or any
+call while tool calls are off, gets the result that
+[tools the turn does not offer](/reference/api/#tools-the-turn-does-not-offer)
+gives for it; any other such call gets a result that lists the tools the
+model can call and points to `find_tools`, without saying whether the turn
+has that tool. When Armitage
 cannot search, the call fails with a result saying so, no tool is offered
 for it, the reply goes on, and the chat route logs a warning with the
 request's logger.
@@ -818,8 +822,9 @@ which run at once without approval:
 
 A search reads a tool's name whole and by its words: `_`, `-`, and the word
 starts of a camelCase name split it, so `email` and `send_email` both find
-`send_email`, and `issue` and `createIssue` both find `createIssue`. Each
-word of the query is searched as written, ignoring case.
+`send_email`, `issue` and `createIssue` both find `createIssue`, and `urls`
+finds `getURLs`. Each word of the query is searched as written, ignoring
+case.
 
 Armitage reads only the asking turn's definitions and runs none of its
 tools. `MemoryReply` (`memoryReply.ts`) keeps Armitage's reply in memory;

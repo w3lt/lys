@@ -77,6 +77,7 @@ rules; see [MCP servers](#mcp-servers).
 | Route-local abort handling  | Closing the SSE connection aborts the backend chat task.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Tool call policy            | Before a tool call asks or runs, fixed rules in the backend read its arguments, whatever the tool, and deny a call that names a private key or credential file, such as `~/.ssh/id_rsa`, `.env`, a `.pem` file, or Lys's `settings.json`, or a URL or host of this machine or a blocked address. A denied call is stored as failed with a sentence the model reads and never runs or asks, even on Just run. A call of an MCP tool marked destructive asks even on Just run. See [Tool call policy](/architecture/backend/#tool-call-policy).              |
 | Approval gateway            | The backend's tool approval service decides every tool call the tool call policy does not deny, client, backend, and MCP tools alike, except `read_attachment`, which reads only what the person attached, the agent state tools, which only read what agents are doing, and `find_tools` and Armitage's search tools, which only name tools: a tool asks first unless it is set to Just run in `settings.json`, and every call asks when that file cannot be read. The desktop shows the prompts and runs only the client tools' calls the backend sends. |
+| Approval token              | Each approval prompt carries a single-use token, 32 random bytes, that the answer must return: the backend accepts one answer with the prompt's token, compared in constant time, and runs the call it stored with the prompt, never one the answer names. A missing token fails validation; a wrong or reused one gets the not-pending problem and changes nothing. The token is never written to the database or the log; a caller that can read the reply's events can read it ([#171](https://github.com/w3lt/lys/issues/171)).                        |
 | Approval of web reads       | `read_page` runs only once the person allows the call on the card (full URL), or at once on Just run. Allowing a read lets the page load what it needs from public hosts. It starts off.                                                                                                                                                                                                                                                                                                                                                                   |
 | Address rule                | A read whose URL names, or whose host name resolves to, a loopback, private, link-local, shared, documentation, benchmarking, multicast, or reserved address is refused before vmo is asked. Only that URL is checked; see [Web reads](#web-reads).                                                                                                                                                                                                                                                                                                        |
 | VM isolation                | Each read runs in a fresh micro VM that vmo deletes before it answers; nothing is kept between reads.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
@@ -148,15 +149,16 @@ rules; see [MCP servers](#mcp-servers).
   neither the `Host` nor the `Origin` header, so a page that uses DNS
   rebinding can call it like a local process
   ([#171](https://github.com/w3lt/lys/issues/171)).
-- Nothing ties an answer to an approval prompt to the person. Any caller that
+- Nothing ties an answer to an approval prompt to the person. The prompt's
+  single-use token binds an answer to that prompt, once, but any caller that
   reaches the backend, a local process or a page that uses DNS rebinding, can
-  read a waiting prompt from the reply's events and answer it with `allowed`.
-  For the client tools, such as `read_text_file`, `search_files`, and
-  `get_location`, the desktop then runs the call with
-  the person's account on a reply it follows, including one it starts
-  following when the person opens the conversation, and even while the call's
-  card still waits for the person. The model reads what the call returns.
-  This stays open until callers are authenticated
+  read a waiting prompt and its token from the reply's events and answer it
+  with `allowed`. For the client tools, such as `read_text_file`,
+  `search_files`, and `get_location`, the desktop then runs the call with the
+  person's account on a reply it follows, including one it starts following
+  when the person opens the conversation, and even while the call's card still
+  waits for the person. The model reads what the call returns. This stays open
+  until callers are authenticated
   ([#171](https://github.com/w3lt/lys/issues/171)).
 - Every tool call's full result is stored with its reply: the text of a file
   `read_text_file` read, the matches of `search_files`, the time

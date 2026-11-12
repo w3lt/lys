@@ -1064,12 +1064,13 @@ when a call arrives.
 
 The tool-call store follows every reply the chat store starts or follows on
 its own reply-events connection, so tool calls keep moving while another
-conversation is shown. It takes each prompt from a `tool-approval` event or the
-snapshot's `pendingToolApprovals`, and each call to run from a `tool-call`
-event or the snapshot's `pendingToolCalls`, once. A held call keeps its step,
-approval or run, so a client tool's prompt and its later run request share one
-identifier, and an answered call stays held while the store follows its reply,
-so a snapshot built before the answer arrived does not bring it back:
+conversation is shown. It takes each prompt, with its approval token, from a
+`tool-approval` event or the snapshot's `pendingToolApprovals`, and each call
+to run from a `tool-call` event or the snapshot's `pendingToolCalls`, once. A
+held call keeps its step, approval or run, so a client tool's prompt and its
+later run request share one identifier, and an answered call stays held while
+the store follows its reply, so a snapshot built before the answer arrived
+does not bring it back:
 
 1. A prompt the desktop cannot show (a tool it does not list, or arguments it
    cannot describe) is answered `showFailed` at once. A backend tool's call is
@@ -1105,22 +1106,23 @@ Several calls wait in the model's order, one card at a time.
 
 A read sends the file's text, a search sends its report as JSON, and a
 declared tool failure sends the failure as JSON. A backend or MCP tool's
-result goes from the backend to the model; the desktop receives it only as part of the
-stored call, in a `reply-part` event while the reply streams and in the
-reply's parts of a `reply-snapshot` or of the stored conversation, and shows
-it in the reply's steps.
-Approval answers go
-to the [tool-approval route](/reference/api/#tool-approvals) and results to
-the [tool-result route](/reference/api/#tool-results). When an answer cannot
-be sent, the card says so and Try again sends the same answer without running
-the tool again. An allowed answer still in flight when the call's run request
-arrives does not hold the run back. When the reply ends, by finishing, Stop, or backend shutdown, its
-waiting calls disappear. A newer turn in the conversation or deleting the
-conversation does not end a waiting reply yet
-([#137](https://github.com/w3lt/lys/issues/137)). After a renderer reload, a
-call still waiting is found again through the reply's snapshot when its
-conversation is shown. Quitting the app stops the backend, so its waiting calls
-are gone and the reply is marked interrupted when the backend next starts.
+result goes from the backend to the model; the desktop receives it only as
+part of the stored call, in a `reply-part` event while the reply streams and
+in the reply's parts of a `reply-snapshot` or of the stored conversation, and
+shows it in the reply's steps. Approval answers go, each with the token its
+prompt carried, which the store keeps with the call while it is in its
+approval step, to the [tool-approval route](/reference/api/#tool-approvals)
+and results to the [tool-result route](/reference/api/#tool-results). When an
+answer cannot be sent, the card says so and Try again sends the same answer
+without running the tool again. An allowed answer still in flight when the
+call's run request arrives does not hold the run back. When the reply ends, by
+finishing, Stop, or backend shutdown, its waiting calls disappear. A newer
+turn in the conversation or deleting the conversation does not end a waiting
+reply yet ([#137](https://github.com/w3lt/lys/issues/137)). After a renderer
+reload, a call still waiting is found again through the reply's snapshot when
+its conversation is shown. Quitting the app stops the backend, so its waiting
+calls are gone and the reply is marked interrupted when the backend next
+starts.
 
 ## Current limitations
 

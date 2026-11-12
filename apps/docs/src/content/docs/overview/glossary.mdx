@@ -71,6 +71,10 @@ Terms that mean something specific inside Lys.
   reads, and never runs or asks the person, even on Just run. A call of an
   MCP tool its server marks as destructive requires approval: it asks the
   person even on Just run.
+- **Approval token**: the single-use token of 32 random bytes an approval
+  prompt carries in its `tool-approval` event. The backend takes an answer to
+  the prompt only when it returns that token, once, and runs the call it
+  stored with the prompt.
 - **User message**: a persisted message with role `user`, non-empty content,
   and the attachments sent with it.
 - **Attachment**: a file sent with a user message and stored with the

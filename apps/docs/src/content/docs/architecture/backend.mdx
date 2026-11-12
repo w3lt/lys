@@ -288,22 +288,22 @@ after a prior title event was lost.
 title task per conversation: a turn sent while an earlier turn's title task is
 still running gets none, so its streams close when its reply ends. A
 `ReplyGeneration` owns one turn's reply task and optional title task, their
-cancellation, and the SSE streams following them; no HTTP connection owns it. It
-also lists what its reply waits on (`PendingToolCalls`): calls sent to the
-desktop to run and approval prompts, which the reply-events snapshot reports
-and the tool-result and tool-approval routes answer. Each stream is
-a `ReplyEventSubscription`, an ordered queue that never makes the generation
-wait and closes a follower that falls 4,096 events behind. Only the reply-stop
-route (reply task only) and shutdown (both tasks) cancel work. A newer turn or a
-deletion also ends a reply, but only when the model sends its next content: that
-write is refused, which ends the upstream request. A reply waiting for a tool
-result or an approval is not ended this way
-([#137](https://github.com/w3lt/lys/issues/137)).
-The title task of a deleted conversation still runs to its end. The registry is
-disposed in Fastify's `preClose` hook, while streams are still open: it closes
-admission, cancels every generation, and waits until each has stored its final
-state before singleton disposal closes SQLite. Task failures are logged by the
-generation that owns them.
+cancellation, and the SSE streams following them; no HTTP connection owns it.
+It also lists what its reply waits on (`PendingToolCalls`): calls sent to the
+desktop to run and approval prompts with their tokens, which the reply-events
+snapshot reports and the tool-result and tool-approval routes answer. Each
+stream is a `ReplyEventSubscription`, an ordered queue that never makes the
+generation wait and closes a follower that falls 4,096 events behind. Only the
+reply-stop route (reply task only) and shutdown (both tasks) cancel work. A
+newer turn or a deletion also ends a reply, but only when the model sends its
+next content: that write is refused, which ends the upstream request. A reply
+waiting for a tool result or an approval is not ended this way
+([#137](https://github.com/w3lt/lys/issues/137)). The title task of a deleted
+conversation still runs to its end. The registry is disposed in Fastify's
+`preClose` hook, while streams are still open: it closes admission, cancels
+every generation, and waits until each has stored its final state before
+singleton disposal closes SQLite. Task failures are logged by the generation
+that owns them.
 
 ### Attachments
 
@@ -492,6 +492,23 @@ invalid, no tool is on Just run, every call of the round asks, and the chat
 route logs a warning with the request's logger. A choice the desktop saves
 applies from the next round. The desktop is the file's only writer; the
 backend never writes it.
+
+Each prompt carries an approval token. `PendingToolCalls` creates it when it
+lists the prompt, 32 bytes from `crypto.randomBytes` written as unpadded
+base64url, keeps it beside the frozen call, and sends both in the
+`tool-approval` event and the snapshot's `pendingToolApprovals`. The
+tool-approval route hands the body to `ReplyGeneration.resolveToolCall`, which
+compares the token with the prompt's in constant time (`timingSafeEqual`). On
+a match it removes the prompt and gives the round the answer without its
+token, so the token works once and never reaches the model, a reply part, or
+the log; the round then runs the call it stored, never one the answer names. A
+token that is not the prompt's returns `token-mismatch`: the route answers the
+same `409` as for an unknown call and logs a warning with the call's
+identifier, and the prompt keeps waiting. The token ends with its prompt, when
+the answer is accepted or when Stop, shutdown, or the end of the reply cancels
+the wait. It binds an answer to a prompt but does not identify the person: a
+caller that can read the reply's events can read it
+([security](/architecture/security/#candid-limits)).
 
 The Tools pane's switches are not part of the gateway: they decide only which
 tools a chat request offers, so switching a tool or tool calls off applies
@@ -1558,10 +1575,11 @@ for the separate inference and model-management lifetimes.
   and the destructive mark of an MCP tool: no rule keeps calls inside folders
   the person approves ([#341](https://github.com/w3lt/lys/issues/341)), and
   none limits usage or spending, or attaches constraints to an allowed call
-- No approval bound to one exact call
-  ([#336](https://github.com/w3lt/lys/issues/336)) and no stored audit
-  record of tool decisions ([#337](https://github.com/w3lt/lys/issues/337)),
-  parts of #330's tool authorization spec
+- No stored audit record of tool decisions
+  ([#337](https://github.com/w3lt/lys/issues/337)), part of #330's tool
+  authorization spec
+- No time limit on an approval prompt: its token works until the prompt is
+  answered or its reply ends ([#342](https://github.com/w3lt/lys/issues/342))
 
 ## Coming soon
 

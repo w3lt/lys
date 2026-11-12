@@ -121,9 +121,10 @@ function handleUnexpectedHistoryCall(operationName: string): never {
  * spy for the history read the routes perform.
  * @remarks The routes read the decorated history reader at registration, so
  * the returned spy controls every snapshot; it throws until the case
- * configures it and no database row is read. When the test finishes, the
- * registry is disposed first, then the in-memory conversation database, then
- * the application.
+ * configures it and no database row is read. They find generations in the
+ * decorated reply generation registry, which is the returned one. When the
+ * test finishes, the registry is disposed first, then the in-memory
+ * conversation database, then the application.
  */
 async function createReplyRouteApp() {
   const testFastify = createTestFastify()
@@ -137,7 +138,8 @@ async function createReplyRouteApp() {
     .mockImplementation(() => handleUnexpectedHistoryCall("getConversation"))
   await updateFastifyWithHttpTransport(testFastify.app)
   testFastify.app.decorate("conversationHistoryReader", history)
-  await updateFastifyWithChatReplyRoutes(testFastify.app, generations)
+  testFastify.app.decorate("replyGenerations", generations)
+  await updateFastifyWithChatReplyRoutes(testFastify.app)
   return { ...testFastify, generations, getConversation }
 }
 

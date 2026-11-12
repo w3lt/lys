@@ -4,6 +4,8 @@ import type AgentRuntimeService from "./modules/agent/agentRuntimeService"
 import type AgentService from "./modules/agent/agentService"
 import type AttachmentFileStore from "./modules/attachment/attachmentFileStore"
 import type ChatService from "./modules/chat/chatService"
+import type ReplyGenerationRegistry from "./modules/chat/replyGenerationRegistry"
+import type { StartTurn } from "./modules/chat/turnStart"
 import type StoredConversationHistoryEditor from "./modules/conversation/historyEditor"
 import type StoredConversationHistoryReader from "./modules/conversation/historyReader"
 import type StoredReplyParts from "./modules/conversation/replyParts"
@@ -67,5 +69,15 @@ declare module "fastify" {
      * attachments directory.
      */
     attachmentFileStore: AttachmentFileStore
+    /**
+     * Application-scoped registry of every running reply generation, which
+     * the application disposes before its HTTP server closes.
+     */
+    replyGenerations: ReplyGenerationRegistry
+    /**
+     * Starts the generation of one stored turn and registers it with the
+     * application's reply generation registry.
+     */
+    startTurn: StartTurn
   }
 }

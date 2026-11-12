@@ -21,9 +21,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import type ReplyGeneration from "../../../../../src/modules/chat/replyGeneration"
-import updateFastifyWithChatRoute, {
-  type ChatRouteOptions
-} from "../../../../../src/modules/chat/routes/chatRoute"
+import updateFastifyWithChatRoute from "../../../../../src/modules/chat/routes/chatRoute"
 import type { DownloadedLlmModel } from "../../../../../src/modules/llm/llmRuntimeTypes"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
@@ -61,11 +59,6 @@ import {
   READ_TEXT_FILE_FORMAT,
   READ_TEXT_FILE_TOOL
 } from "../../../support/toolFixtures"
-
-/** Settings applied by the chat route in every case. */
-const CHAT_ROUTE_OPTIONS = Object.freeze({
-  titleGenerationMaxAttempts: 2
-} satisfies ChatRouteOptions)
 
 /** Valid request body starting a new conversation that Caliginia answers. */
 const NEW_CONVERSATION_REQUEST = Object.freeze({
@@ -147,11 +140,7 @@ function registerStoringChatRoute(testApp: ChatRouteTestApp): void {
     })()
   )
   testApp.generateTitle.mockResolvedValue("Trip plan")
-  updateFastifyWithChatRoute(testApp.app, {
-    ...CHAT_ROUTE_OPTIONS,
-    generations: testApp.generations,
-    findModelCapabilities: testApp.findModelCapabilities
-  })
+  updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 }
 
 /**
@@ -245,11 +234,7 @@ function listOfferedToolNames(
 describe("updateFastifyWithChatRoute", () => {
   it("responds with the missing-conversation problem before storing a turn or contacting the model", async () => {
     const testApp = await createChatRouteTestApp()
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
     const conversationId = createFixtureUuidV7(404)
 
     const response = await sendChatRequest(testApp.app, {
@@ -277,11 +262,7 @@ describe("updateFastifyWithChatRoute", () => {
     testApp.createConversationTurn.mockImplementation(() => {
       throw storageFailure
     })
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(
       testApp.app,
@@ -504,11 +485,7 @@ describe("updateFastifyWithChatRoute", () => {
     ]
   ])("rejects %s before storing a turn", async (_label, payload) => {
     const testApp = await createChatRouteTestApp()
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(testApp.app, payload)
 
@@ -522,11 +499,7 @@ describe("updateFastifyWithChatRoute", () => {
     "responds with the missing-agent problem before storing a turn when a new conversation names the code %s, which no agent has",
     async (agentCode) => {
       const testApp = await createChatRouteTestApp()
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
@@ -768,11 +741,7 @@ describe("updateFastifyWithChatRoute", () => {
 
   it("rejects a backend tool the backend does not run before storing a turn, naming it", async () => {
     const testApp = await createChatRouteTestApp()
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
@@ -793,11 +762,7 @@ describe("updateFastifyWithChatRoute", () => {
 
   it("rejects more backend tool names than one request offers before looking any up", async () => {
     const testApp = await createChatRouteTestApp()
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
     const backendToolNames = Array.from(
       { length: MAXIMUM_OFFERED_BACKEND_TOOL_COUNT + 1 },
       (_, index) => `tool_${index}`
@@ -817,11 +782,7 @@ describe("updateFastifyWithChatRoute", () => {
 
   it("refuses a backend tool that cannot run now before storing a turn, naming it and why", async () => {
     const testApp = await createChatRouteTestApp()
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
@@ -853,11 +814,7 @@ describe("updateFastifyWithChatRoute", () => {
 
   it("still refuses an unknown backend tool before looking any up", async () => {
     const testApp = await createChatRouteTestApp()
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
@@ -879,11 +836,7 @@ describe("updateFastifyWithChatRoute", () => {
       })()
     )
     testApp.generateTitle.mockResolvedValue("Trip plan")
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
@@ -911,11 +864,7 @@ describe("updateFastifyWithChatRoute", () => {
       })()
     )
     testApp.generateTitle.mockResolvedValue("Trip plan")
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
@@ -943,11 +892,7 @@ describe("updateFastifyWithChatRoute", () => {
       })()
     )
     testApp.generateTitle.mockResolvedValue("Trip plan")
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     const response = await sendChatRequest(testApp.app, {
       ...NEW_CONVERSATION_REQUEST,
@@ -1022,11 +967,7 @@ describe("updateFastifyWithChatRoute", () => {
     "rejects a request with %s before storing a turn",
     async (_label, fields, message) => {
       const testApp = await createChatRouteTestApp()
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
@@ -1080,11 +1021,7 @@ describe("updateFastifyWithChatRoute", () => {
     "rejects a request with the backend's own tool %s %s before storing a turn",
     async (_name, _position, fields, message) => {
       const testApp = await createChatRouteTestApp()
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
@@ -1129,11 +1066,7 @@ describe("updateFastifyWithChatRoute", () => {
       })()
     )
     testApp.generateTitle.mockResolvedValue("Trip plan")
-    updateFastifyWithChatRoute(testApp.app, {
-      ...CHAT_ROUTE_OPTIONS,
-      generations: testApp.generations,
-      findModelCapabilities: testApp.findModelCapabilities
-    })
+    updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
     await sendChatRequest(
       testApp.app,
@@ -1168,11 +1101,7 @@ describe("updateFastifyWithChatRoute", () => {
       testApp.createConversationTurn.mockRestore()
       testApp.completeChatStream.mockRejectedValue(rejection)
       testApp.generateTitle.mockResolvedValue("Trip plan")
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(
         testApp.app,
@@ -1461,11 +1390,7 @@ describe("updateFastifyWithChatRoute", () => {
         testApp.generations,
         "startReplyGeneration"
       )
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       /**
        * Gets the generation the route started.
@@ -1639,11 +1564,7 @@ describe("updateFastifyWithChatRoute", () => {
         testApp.generations,
         "startReplyGeneration"
       )
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       /**
        * Gets the generation the route started.
@@ -1667,11 +1588,7 @@ describe("updateFastifyWithChatRoute", () => {
         buildFakeStdioServerSettings("files", { exitOnStart: 1 }),
         "failed"
       )
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
@@ -1707,11 +1624,7 @@ describe("updateFastifyWithChatRoute", () => {
         buildFakeStdioServerSettings("files", { exitOnStart: 1 }),
         "failed"
       )
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
@@ -1738,11 +1651,7 @@ describe("updateFastifyWithChatRoute", () => {
         buildFakeStdioServerSettings("files"),
         "connected"
       )
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
@@ -1934,11 +1843,7 @@ describe("updateFastifyWithChatRoute", () => {
         status: "read",
         toolNames: new Set(["look_up_word"])
       })
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
       return testApp
     }
 
@@ -2666,11 +2571,7 @@ describe("updateFastifyWithChatRoute", () => {
         throw storageFailure
       })
       testApp.listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, NOTES_REQUEST)
 
@@ -2726,11 +2627,7 @@ describe("updateFastifyWithChatRoute", () => {
         "deleteConversationAttachments"
       ).mockRejectedValue(deletionFailure)
       testApp.listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL_INFO])
-      updateFastifyWithChatRoute(testApp.app, {
-        ...CHAT_ROUTE_OPTIONS,
-        generations: testApp.generations,
-        findModelCapabilities: testApp.findModelCapabilities
-      })
+      updateFastifyWithChatRoute(testApp.app, testApp.findModelCapabilities)
 
       const response = await sendChatRequest(testApp.app, NOTES_REQUEST)
 

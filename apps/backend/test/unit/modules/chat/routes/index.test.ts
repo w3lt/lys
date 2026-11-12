@@ -25,9 +25,7 @@ describe("registerChatRoutes", () => {
   ])("installs the %s endpoint", async (_label, endpoint) => {
     const testApp = await createChatRouteTestApp()
 
-    await registerChatRoutes(testApp.app, {
-      titleGenerationMaxAttempts: 1
-    })
+    await registerChatRoutes(testApp.app)
 
     expect(
       testApp.app.hasRoute({ method: endpoint.method, url: endpoint.path })
@@ -46,7 +44,7 @@ describe("registerChatRoutes", () => {
     testApp.listDownloadedLlmModels.mockResolvedValue([
       createDownloadedLlmModel({ modelKey: MODEL })
     ])
-    await registerChatRoutes(testApp.app, { titleGenerationMaxAttempts: 1 })
+    await registerChatRoutes(testApp.app)
 
     const chat = await sendChatRequest(testApp.app, {
       conversation: { kind: "new", agentCode: "caliginia" },

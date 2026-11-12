@@ -24,7 +24,10 @@ import StoredConversationHistoryReader from "../../src/modules/conversation/hist
 import StoredReplyParts from "../../src/modules/conversation/replyParts"
 import StoredConversationTurns from "../../src/modules/conversation/turns"
 import { TEST_BACKEND_CONFIG } from "./support/backendConfig"
+import { sendChatRequest } from "./support/chatRouteTestApp"
+import ControlledReplyTask from "./support/controlledReplyTask"
 import {
+  createFixtureUuidV7,
   createNewConversationTarget,
   createTurnUserMessage
 } from "./support/conversationFixtures"
@@ -34,6 +37,7 @@ import {
   fakeLmStudio,
   type FakeLmStudioOperations
 } from "./support/lmStudioSdkFake"
+import { createChatCompletionChunk } from "./support/openAiEndpointFake"
 import { createFailingOutput, createWorkingOutput } from "./support/testOutputs"
 
 vi.mock("@lmstudio/sdk", () => import("./support/lmStudioSdkFake"))
@@ -117,6 +121,15 @@ const MCP_SERVER_WAIT_MILLISECONDS = 10_000
 
 /** Fastify's default request body limit, in bytes, stated in the API reference. */
 const REQUEST_BODY_LIMIT = 1_048_576
+
+/**
+ * Creates the stream of a model that replies `Hi` and stops.
+ *
+ * @returns A stream of one chunk.
+ */
+async function* createHiReplyStream() {
+  yield createChatCompletionChunk({ content: "Hi", finishReason: "stop" })
+}
 
 /**
  * Serializes a new agent definition whose JSON body has an exact size.
@@ -245,6 +258,82 @@ describe("buildApp", () => {
     expect(
       app.conversationHistoryReader.getConversation(turn.conversation.id)
     ).toMatchObject({ messages: [turn.userMessage, { parts: [part] }] })
+  })
+
+  it("answers a chat request through the decorated turn start, which stores the reply and the generated title", async () => {
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(new CapturedLogDestination())
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    // No provider is connected: the model calls are answered here instead.
+    vi.spyOn(app.llmService, "listDownloadedLlmModels").mockResolvedValue([])
+    vi.spyOn(app.llmService, "findLlmContextMeasurement").mockImplementation(
+      async (_model, texts) => ({
+        contextLength: 1_000_000,
+        textTokenCounts: texts.map(() => 1)
+      })
+    )
+    vi.spyOn(app.chatService, "completeChatStream").mockImplementation(
+      async () => createHiReplyStream()
+    )
+    vi.spyOn(app.chatService, "generateTitle").mockResolvedValue("Greeting")
+
+    const chat = await sendChatRequest(app, {
+      conversation: { kind: "new", agentCode: "caliginia" },
+      message: "Hello",
+      model: "qwen/qwen3-8b",
+      generationOptions: { temperature: 0.4 }
+    })
+    const history = await app.inject({
+      method: "GET",
+      url: "/api/v1/conversations"
+    })
+
+    expect(chat.statusCode).toBe(200)
+    expect(history.json()).toMatchObject({
+      storedCount: 1,
+      conversations: [
+        { title: "Greeting", preview: { role: "assistant", content: "Hi" } }
+      ]
+    })
+  })
+
+  it("ends every running reply generation of the decorated registry before it closes its HTTP server", async () => {
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(new CapturedLogDestination())
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    const closeServer = vi.spyOn(app.server, "close")
+    const replyTask = new ControlledReplyTask()
+    app.replyGenerations.startReplyGeneration(
+      {
+        conversationId: createFixtureUuidV7(1),
+        assistantMessageId: createFixtureUuidV7(2)
+      },
+      {
+        startReplyTask: (context) => replyTask.start(context),
+        startTitleTask: undefined,
+        reportTaskFailure: vi.fn()
+      }
+    )
+    onTestFinished(() => {
+      replyTask.resolve()
+    })
+
+    const closing = app.close()
+    await vi.waitFor(() => {
+      expect(replyTask.context.abortSignal.aborted).toBe(true)
+    })
+    const serverCloseCountWhileGenerating = closeServer.mock.calls.length
+    replyTask.resolve()
+    await closing
+
+    expect(serverCloseCountWhileGenerating).toBe(0)
+    expect(closeServer).toHaveBeenCalledOnce()
   })
 
   it("logs a request by its full URL, query string included", async () => {

@@ -5,35 +5,18 @@ import {
   type ChatApiStreamEvent,
   type ChatAttachmentUnsupportedProblem,
   type ChatBackendToolUnavailableProblem,
-  type ChatImageNeedsVisionProblem,
-  type MessageGenerationOptions
+  type ChatImageNeedsVisionProblem
 } from "@lys/protocol"
-import type {
-  Conversation,
-  ConversationAssistantMessageStatus,
-  ToolDefinition
-} from "@lys/share"
-import type { FastifyBaseLogger, FastifyInstance } from "fastify"
+import type { Conversation, ToolDefinition } from "@lys/share"
+import type { FastifyInstance } from "fastify"
 import { v7 as uuidv7 } from "uuid"
-import type { BackendConfig } from "../../../config"
 import type Agent from "../../agent/agent"
-import type { AgentTurn } from "../../agent/agent"
-import { AgentRequestLimitError } from "../../agent/agentActivity"
-import type { FindAttachmentImage } from "../../agent/agentContext"
 import type { UnofferedTools } from "../../agent/unofferedTools"
 import type AttachmentFileStore from "../../attachment/attachmentFileStore"
-import { buildAttachmentImageReader } from "../../attachment/attachmentImageReader"
 import {
   parseChatAttachments,
   type ParsedChatAttachment
 } from "../../attachment/chatAttachments"
-import ReadAttachmentTool, {
-  buildReadAttachmentDefinition,
-  hasReadableTextAttachment,
-  listReadableAttachments,
-  type ReadableAttachment,
-  type ReadAttachmentFile
-} from "../../attachment/readAttachmentTool"
 import handleLlmServiceRequestFailure from "../../llm/routes/handleLlmServiceRequestFailure"
 import type {
   McpTurnToolLookup,
@@ -44,26 +27,16 @@ import type {
   TurnBuiltInTool
 } from "../../tool/builtIn/builtInTool"
 import { findTurnBuiltInTools } from "../../tool/builtIn/builtInTools"
-import type ToolApprovalService from "../../toolApproval/toolApprovalService"
-import type { TitleGenerationOptions } from "../chatService"
 import type {
   ConversationTurn,
   ConversationTurnAuthor,
   ConversationTurnTarget,
   ConversationTurnUserMessage,
   ConversationTurnWriter,
-  CreateConversationTurnOptions,
-  GeneratedConversationTitleWriter,
-  ReplyPartWriter
+  CreateConversationTurnOptions
 } from "../persistence"
 import ReplyEventSubscription from "../replyEventSubscription"
-import type ReplyGeneration from "../replyGeneration"
-import type {
-  ReplyGenerationTaskContext,
-  ReplyTaskContext
-} from "../replyGeneration"
-import type ReplyGenerationRegistry from "../replyGenerationRegistry"
-import createTitleGenerationTask from "../titleGenerationTask"
+import type { StartTurn, TurnSettings } from "../turnStart"
 import {
   findListedModelCapabilities,
   type FindModelCapabilities,
@@ -89,46 +62,22 @@ import {
   type TurnAgentLookups
 } from "./turnRequest"
 
-/** Backend settings the chat route applies to every request. */
-export type ChatRouteOptions = Pick<BackendConfig, "titleGenerationMaxAttempts">
-
-/**
- * Settings, the generation registry, and the capability lookup the chat
- * route is installed with.
- */
-export type ChatRouteRegistration = ChatRouteOptions &
-  Readonly<{
-    /** Registry owning every generation this route starts; not disposed here. */
-    generations: ReplyGenerationRegistry
-    /**
-     * Capabilities of the model a request names, read from the connected
-     * provider's inventory and remembered by the lookup while that provider
-     * stays connected; shared with the chat-context route.
-     */
-    findModelCapabilities: FindModelCapabilities
-  }>
-
 /** What the chat route does with attachment files. */
 type AttachmentFiles = Pick<
   AttachmentFileStore,
   | "saveMessageAttachments"
   | "deleteMessageAttachments"
   | "deleteConversationAttachments"
-  | "readAttachment"
 >
 
 /**
- * Capabilities and settings borrowed for the lifetime of a registered chat
- * route, including the agent lookup.
+ * Capabilities borrowed for the lifetime of a registered chat route,
+ * including the agent lookup.
  */
 type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
   Readonly<{
-    /** Turn persistence whose lifetime outlives all active generations. */
-    turns: ConversationTurnWriter
-    /** Reply-part persistence whose lifetime outlives all active generations. */
-    replyParts: ReplyPartWriter
-    /** Conditional generated-title persistence borrowed for the route lifetime. */
-    titleWriter: GeneratedConversationTitleWriter
+    /** Turn persistence that stores each request's turn. */
+    turns: Pick<ConversationTurnWriter, "createConversationTurn">
     /**
      * Stored conversation with its messages and their attachments; undefined
      * means it is not stored.
@@ -140,22 +89,10 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      */
     findModelCapabilities: FindModelCapabilities
     /**
-     * Saves each turn's attachment files, deletes them when the turn is not
-     * stored, and reads stored ones.
+     * Saves each turn's attachment files, and deletes them when the turn is
+     * not stored.
      */
     attachmentFiles: AttachmentFiles
-    /** Bound title operation retained separately from chat completion. */
-    generateTitle: (options: TitleGenerationOptions) => Promise<string>
-    /**
-     * Context length a model is loaded with, observed through the
-     * model-operation queue without loading it; undefined when it is not
-     * loaded.
-     */
-    findLoadedContextLength: (model: string) => Promise<number | undefined>
-    /** Inclusive maximum number of title requests permitted for one turn. */
-    titleGenerationMaxAttempts: number
-    /** Registry that owns every generation this route starts. */
-    generations: ReplyGenerationRegistry
     /** Every built-in tool, which a request may offer by name. */
     builtInTools: readonly BuiltInToolEntry[]
     /**
@@ -164,10 +101,10 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      */
     findMcpTool: (toolName: string) => McpTurnToolLookup
     /**
-     * Approval gateway every tool call passes, except a call of a backend
-     * tool that runs without approval.
+     * Starts the generation of each stored turn, in the registry that owns
+     * every running generation.
      */
-    toolApprovals: ToolApprovalService
+    startTurn: StartTurn
   }>
 
 /** Problems the chat route sends before the stream starts. */
@@ -226,69 +163,18 @@ type SavedTurn = Readonly<{
 /** Outcome of storing a turn: the stored turn, or why no agent answers it. */
 type SavedTurnOutcome = SavedTurn | MissingRequestedAgentOutcome
 
-/** What the generation input of a stored turn is built from. */
-type TurnGenerationSource = Readonly<{
-  /** Validated chat input and request logger. */
-  request: ChatRouteRequest
-  /** What the request parsed and looked up before the turn was stored. */
-  accepted: AcceptedTurnRequest
-  /** The stored turn and the agent that answers it. */
-  saved: SavedTurn
-}>
-
-/** Warning logged when a round's calls all ask because the choices are unreadable. */
-const UNREADABLE_JUST_RUN_CHOICES_MESSAGE =
-  "The saved Just run choices could not be read from settings.json; every tool call of this round asks the person"
-
 /** Client tools of a request that offered none. */
 const NO_REQUESTED_TOOLS: readonly ToolDefinition[] = Object.freeze([])
-
-/** Values one turn's tasks keep after the request that started them ended. */
-type TurnGenerationInput = Readonly<{
-  /** Stored turn and prior transcript snapshot. */
-  turn: ConversationTurn
-  /** Agent that answers the turn. */
-  agent: Agent
-  /** Model selected by the request. */
-  model: string
-  /** Sampling and reply length controls sent with the request. */
-  generationOptions: MessageGenerationOptions
-  /** Client tools the request offered, each name once; empty when it offered none. */
-  clientTools: readonly ToolDefinition[]
-  /**
-   * Backend tools of the turn, each name once: the ones the request offered,
-   * then the attachment reader when the turn offers it; empty when none.
-   */
-  builtInTools: readonly TurnBuiltInTool[]
-  /**
-   * MCP tools the request offered, each name once; each call runs on its
-   * server as connected when the call runs. Empty when none.
-   */
-  mcpTools: readonly TurnMcpTool[]
-  /** What the request names about the tools the turn does not offer. */
-  unofferedTools: UnofferedTools
-  /** Whether the model sees images. */
-  canSeeImages: boolean
-  /**
-   * Whether the model is trained for tool use, so the agent adds its state
-   * tools to the turn.
-   */
-  trainedForToolUse: boolean
-  /** Reads the bytes of one stored image attachment of the conversation. */
-  findAttachmentImage: FindAttachmentImage
-  /** Logger of the request that started the turn. */
-  logger: FastifyBaseLogger
-  /** Route capabilities borrowed for the route lifetime. */
-  dependencies: ChatRouteDependencies
-}>
 
 /**
  * Installs the chat endpoint, which stores a turn, starts its generation, and
  * follows that generation on the response stream.
  *
- * @param app - Backend with SSE, validation, and singleton services installed.
- * @param registration - Title attempt limit, the registry that owns the
- * started generations, and the model capability lookup.
+ * @param app - Backend with SSE, validation, and singleton services
+ * installed, whose turn start starts each stored turn's generation.
+ * @param findModelCapabilities - Capabilities of the model a request names,
+ * read from the connected provider's inventory and remembered by the lookup
+ * while that provider stays connected; shared with the chat-context route.
  * @throws If route registration fails.
  * @remarks The route accepts bodies up to the chat contract's limit, so a
  * message can carry its attachments. A full model-operation queue and a
@@ -297,34 +183,20 @@ type TurnGenerationInput = Readonly<{
  */
 export default function updateFastifyWithChatRoute(
   app: FastifyInstance,
-  {
-    titleGenerationMaxAttempts,
-    generations,
-    findModelCapabilities
-  }: ChatRouteRegistration
+  findModelCapabilities: FindModelCapabilities
 ): void {
-  const turns = app.conversationTurns
   const dependencies = {
-    turns,
-    replyParts: app.replyParts,
-    titleWriter: turns,
+    turns: app.conversationTurns,
     loadChatAgent: (code: string) =>
       app.agentRuntimeService.loadChatAgent(code),
     findConversation: (conversationId: string) =>
       app.conversationHistoryReader.getConversation(conversationId),
     findModelCapabilities,
     attachmentFiles: app.attachmentFileStore,
-    generateTitle: (options: TitleGenerationOptions) =>
-      app.chatService.generateTitle(options),
-    findLoadedContextLength: async (model: string) =>
-      (await app.llmService.findLlmContextMeasurement(model, []))
-        ?.contextLength,
-    titleGenerationMaxAttempts,
-    generations,
     builtInTools: app.builtInTools,
     findMcpTool: (toolName: string) =>
       app.mcpServerRegistry.findTurnTool(toolName),
-    toolApprovals: app.toolApprovalService
+    startTurn: app.startTurn
   }
   app.route<ChatApiRoute>({
     method: chatApi.method,
@@ -344,7 +216,7 @@ export default function updateFastifyWithChatRoute(
  *
  * @param request - Validated chat input and request logger.
  * @param reply - SSE or pre-stream error response owner.
- * @param dependencies - Borrowed persistence, agents, files, and registry.
+ * @param dependencies - Borrowed persistence, agents, files, and turn start.
  * @returns Settlement after the stream ends, or after a problem response.
  * @throws An `UnknownBackendToolError`, before anything is stored, when the
  * request offers a backend tool the backend does not run, such as a tool no
@@ -381,9 +253,13 @@ async function handleChatRequest(
     sendUnansweredTurnProblem(reply, saved, request.url)
     return
   }
-  const generation = startTurnGeneration(
-    buildTurnGenerationInput({ request, accepted, saved }, dependencies)
-  )
+  const generation = dependencies.startTurn({
+    turn: saved.turn,
+    agent: saved.agent,
+    settings: buildTurnSettings(request.body, accepted),
+    startedBy: "person",
+    logger: request.log
+  })
   const subscription = new ReplyEventSubscription<ChatApiStreamEvent>(
     createEventSender<ChatApiStreamEvent>(reply.sse)
   )
@@ -798,344 +674,31 @@ async function deleteAttachmentsAfterFailure(
 }
 
 /**
- * Builds the values a stored turn's tasks keep.
+ * Builds the settings a stored turn's reply is written with.
  *
- * @param source - The request, what it parsed and looked up, and the stored
- * turn with its agent.
- * @param dependencies - Route capabilities borrowed for the route lifetime.
- * @returns The turn with its agent, request values, the backend tools of the
- * turn, which are the offered ones followed by the attachment reader as
- * {@link buildTurnBuiltInTools} adds it for a model trained for tool use,
- * whether the model sees images, and the reader of the conversation's
- * stored images.
+ * @param body - Validated chat input.
+ * @param accepted - What the request parsed and looked up before the turn
+ * was stored.
+ * @returns The request's model, generation options, and client tools, none
+ * when it offered none; the backend tools found for the turn, to which the
+ * turn start adds the attachment reader; what the request names about the
+ * tools the turn does not offer; and whether the model sees images and is
+ * trained for tool use.
  */
-function buildTurnGenerationInput(
-  source: TurnGenerationSource,
-  dependencies: ChatRouteDependencies
-): TurnGenerationInput {
-  const { request, accepted, saved } = source
-  const { body } = request
-  const { turn } = saved
-  const { attachmentFiles } = dependencies
-  const conversationId = turn.conversation.id
+function buildTurnSettings(
+  body: ChatApiRequestBody,
+  accepted: AcceptedTurnRequest
+): TurnSettings {
   return {
-    turn,
-    agent: saved.agent,
     model: body.model,
     generationOptions: body.generationOptions,
     clientTools: body.tools?.definitions ?? NO_REQUESTED_TOOLS,
-    builtInTools: accepted.capabilities.trainedForToolUse
-      ? buildTurnBuiltInTools(
-          accepted.builtInTools,
-          listReadableAttachments(conversationId, [
-            ...turn.conversation.messages,
-            turn.userMessage
-          ]),
-          (location) => attachmentFiles.readAttachment(location)
-        )
-      : accepted.builtInTools,
+    builtInTools: accepted.builtInTools,
     mcpTools: accepted.mcpTools,
     unofferedTools: accepted.unofferedTools,
     canSeeImages: accepted.capabilities.vision,
-    trainedForToolUse: accepted.capabilities.trainedForToolUse,
-    findAttachmentImage: buildAttachmentImageReader(
-      conversationId,
-      attachmentFiles
-    ),
-    logger: request.log,
-    dependencies
+    trainedForToolUse: accepted.capabilities.trainedForToolUse
   }
-}
-
-/**
- * Builds the backend tools of a turn whose model is trained for tool use.
- *
- * @param offeredTools - Backend tools the request offered, found for the
- * turn.
- * @param attachments - Every attachment of the conversation, the new
- * message's included.
- * @param readAttachmentFile - Reads an attachment's file; lent for the turn.
- * @returns The offered tools, followed by the attachment reader when an
- * attachment is a text file; the reader's calls run without approval, as
- * they read only what the person attached to this conversation. A model
- * that is not trained for tool use gets the offered tools alone, without a
- * call here.
- */
-function buildTurnBuiltInTools(
-  offeredTools: readonly TurnBuiltInTool[],
-  attachments: readonly ReadableAttachment[],
-  readAttachmentFile: ReadAttachmentFile
-): readonly TurnBuiltInTool[] {
-  if (!hasReadableTextAttachment(attachments)) return offeredTools
-  return [
-    ...offeredTools,
-    {
-      definition: buildReadAttachmentDefinition(),
-      tool: new ReadAttachmentTool(attachments, readAttachmentFile),
-      runsWithoutApproval: true
-    }
-  ]
-}
-
-/**
- * Starts the generation that writes one stored turn's reply and, for an
- * untitled conversation, its title unless another turn of that conversation
- * is already generating one.
- *
- * @param input - Stored turn and the request values its tasks keep.
- * @returns The registered generation.
- * @throws If the registry no longer admits generations; the stored reply is
- * finalized as interrupted first, so no reply stays streaming.
- */
-function startTurnGeneration(input: TurnGenerationInput): ReplyGeneration {
-  const { turn, dependencies, logger } = input
-  const target = {
-    conversationId: turn.conversation.id,
-    assistantMessageId: turn.assistantMessage.id
-  }
-  try {
-    return dependencies.generations.startReplyGeneration(target, {
-      startReplyTask: (context) => createTurnReplyTask(input, context),
-      startTitleTask:
-        turn.conversation.title === null
-          ? (context) => createTurnTitleTask(input, context)
-          : undefined,
-      reportTaskFailure: (error) => {
-        logger.error({ err: error }, "Conversation task failed")
-      }
-    })
-  } catch (error) {
-    dependencies.turns.updateAssistantMessageState(turn.assistantMessage.id, {
-      status: "interrupted"
-    })
-    throw error
-  }
-}
-
-/**
- * Has the turn's agent write its reply, then finalizes a reply it left
- * streaming.
- *
- * @param input - Stored turn, its agent, and the request values the reply
- * keeps.
- * @param context - Generation-owned cancellation, event sender, tool call
- * sender, and approval prompt sender.
- * @returns Settlement after the reply is final.
- * @throws The agent's failure after the fallback finalization; an
- * `AggregateError` of the agent's failure and the fallback's failure when the
- * fallback also fails; or the fallback's failure after an agent that
- * succeeded. The generation reports it.
- * @remarks The fallback stores `interrupted` after cancellation and `failed`
- * otherwise; it changes nothing when the agent already finalized the reply.
- */
-async function createTurnReplyTask(
-  input: TurnGenerationInput,
-  context: ReplyTaskContext
-): Promise<void> {
-  const { turn, dependencies } = input
-  const { abortSignal } = context
-  const assistantMessageId = turn.assistantMessage.id
-  try {
-    await input.agent.createReply(buildAgentTurn(input, context))
-  } catch (taskError) {
-    try {
-      updateUnfinishedReplyState(
-        dependencies.turns,
-        assistantMessageId,
-        abortSignal
-      )
-    } catch (finalizationError) {
-      throw new AggregateError(
-        [taskError, finalizationError],
-        "Reply failure could not be finalized",
-        { cause: finalizationError }
-      )
-    }
-    throw taskError
-  }
-  updateUnfinishedReplyState(
-    dependencies.turns,
-    assistantMessageId,
-    abortSignal
-  )
-}
-
-/**
- * Builds the turn the agent answers for one stored turn.
- *
- * @param input - Stored turn, its tools, and the request values the reply
- * keeps.
- * @param context - Generation-owned cancellation, event sender, tool call
- * sender, and approval prompt sender.
- * @returns The agent turn, whose parts and final state go to the stored
- * reply and whose reply state is read back from the stored conversation,
- * which numbers new sources after the conversation's stored ones,
- * whose tool calls pass the approval gateway, and whose images are read
- * from the conversation's attachment files. With the request's logger, an
- * unreadable settings file, and a reply refused because its agent's request
- * slots and line were full, are logged as warnings; a cancelled reply, and a
- * round that was not sent because it did not fit or its model was not
- * loaded, at debug level; and any other reply failure as an error.
- */
-function buildAgentTurn(
-  input: TurnGenerationInput,
-  {
-    abortSignal,
-    sendEvent,
-    sendClientToolCall,
-    sendToolApprovalPrompt
-  }: ReplyTaskContext
-): AgentTurn {
-  const { turn, dependencies } = input
-  const { replyParts } = dependencies
-  const assistantMessageId = turn.assistantMessage.id
-  return {
-    conversationId: turn.conversation.id,
-    requestId: assistantMessageId,
-    history: turn.conversation.messages,
-    sources: turn.conversation.sources,
-    userMessage: turn.userMessage,
-    canSeeImages: input.canSeeImages,
-    findAttachmentImage: input.findAttachmentImage,
-    model: input.model,
-    trainedForToolUse: input.trainedForToolUse,
-    generationOptions: input.generationOptions,
-    clientTools: input.clientTools,
-    builtInTools: input.builtInTools,
-    mcpTools: input.mcpTools,
-    unofferedTools: input.unofferedTools,
-    abortSignal,
-    createReplyPart: (draft) =>
-      replyParts.createReplyPart(assistantMessageId, draft),
-    updateReplyPartContent: (partId, content) =>
-      replyParts.updateReplyPartContent(assistantMessageId, partId, content),
-    updateReplyToolCall: (toolCallId, change) =>
-      replyParts.updateReplyToolCall(assistantMessageId, toolCallId, change),
-    updateAssistantMessageState: (completion) =>
-      dependencies.turns.updateAssistantMessageState(
-        assistantMessageId,
-        completion
-      ),
-    findReplyStatus: () =>
-      findStoredReplyStatus(
-        dependencies.findConversation(turn.conversation.id),
-        assistantMessageId
-      ),
-    sendEvent,
-    sendClientToolCall,
-    createToolCallGate: () =>
-      dependencies.toolApprovals.createToolCallGate(
-        sendToolApprovalPrompt,
-        () => {
-          input.logger.warn(UNREADABLE_JUST_RUN_CHOICES_MESSAGE)
-        }
-      ),
-    ...buildReplyFailureReporters(input.logger)
-  }
-}
-
-/**
- * Finds the status one reply of a conversation has as stored.
- *
- * @param conversation - The stored conversation; undefined when it is not
- * stored.
- * @param assistantMessageId - UUIDv7 of the reply.
- * @returns The reply's status; undefined when the conversation or the reply
- * is not stored.
- */
-function findStoredReplyStatus(
-  conversation: Conversation | undefined,
-  assistantMessageId: string
-): ConversationAssistantMessageStatus | undefined {
-  const message = conversation?.messages.find(
-    (stored) => stored.id === assistantMessageId
-  )
-  return message?.role === "assistant" ? message.status : undefined
-}
-
-/**
- * Builds the reporters that log how a reply ended without finishing.
- *
- * @param logger - Request logger, borrowed for the reply.
- * @returns Reporters that log a reply refused because its agent's request
- * slots and line were full as a warning, a cancellation and a round that was
- * not sent because it did not fit or its model was not loaded as debug
- * entries, and a failed stream as an error.
- */
-function buildReplyFailureReporters(
-  logger: FastifyBaseLogger
-): Pick<
-  AgentTurn,
-  "reportReplyCancellation" | "reportReplyRefusal" | "reportReplyFailure"
-> {
-  return {
-    reportReplyCancellation: (failure) => {
-      logger.debug({ err: failure }, "Chat completion was cancelled")
-    },
-    reportReplyRefusal: (failure) => {
-      if (failure instanceof AgentRequestLimitError)
-        logger.warn(
-          { err: failure },
-          "Chat reply was refused because its agent was too busy"
-        )
-      else
-        logger.debug({ err: failure }, "Chat round was not sent to the model")
-    },
-    reportReplyFailure: (failure) => {
-      logger.error({ err: failure }, "Chat completion stream failed")
-    }
-  }
-}
-
-/**
- * Stores a final state for a reply its task left streaming.
- *
- * @param turns - Turn persistence borrowed for the route lifetime.
- * @param assistantMessageId - UUIDv7 of the reply.
- * @param abortSignal - The reply task's cancellation; aborted means the reply
- * was stopped or shut down.
- * @throws If the state cannot be stored.
- * @remarks Stores `interrupted` after cancellation and `failed` otherwise. A
- * reply that is already final, superseded, or deleted is left unchanged.
- */
-function updateUnfinishedReplyState(
-  turns: ConversationTurnWriter,
-  assistantMessageId: string,
-  abortSignal: AbortSignal
-): void {
-  turns.updateAssistantMessageState(assistantMessageId, {
-    status: abortSignal.aborted ? "interrupted" : "failed"
-  })
-}
-
-/**
- * Runs one turn's title task for a conversation without a stored title.
- *
- * @param input - Stored turn and the request values the task keeps.
- * @param context - Generation-owned cancellation and event sender.
- * @returns Settlement after the title is sent or its outcome is logged; it
- * does not reject.
- */
-function createTurnTitleTask(
-  input: TurnGenerationInput,
-  { abortSignal, sendEvent }: ReplyGenerationTaskContext
-): Promise<void> {
-  const { turn, dependencies } = input
-  return createTitleGenerationTask({
-    generateTitle: dependencies.generateTitle,
-    findLoadedContextLength: dependencies.findLoadedContextLength,
-    userMessageContent: turn.userMessage.content,
-    model: input.model,
-    abortSignal,
-    sendEvent,
-    logger: input.logger,
-    titleGenerationMaxAttempts: dependencies.titleGenerationMaxAttempts,
-    updateConversationTitle: (title) =>
-      dependencies.titleWriter.updateGeneratedConversationTitle(
-        turn.conversation.id,
-        title
-      )
-  })
 }
 
 /**

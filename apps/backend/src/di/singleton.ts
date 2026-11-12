@@ -15,6 +15,12 @@ import ChatService, {
 } from "../modules/chat/chatService"
 import LlmReplyContextMeter from "../modules/chat/llmReplyContextMeter"
 import OpenAiReplyModel from "../modules/chat/openAiReplyModel"
+import ReplyGenerationRegistry from "../modules/chat/replyGenerationRegistry"
+import {
+  startTurn,
+  type StartTurn,
+  type TurnStartDependencies
+} from "../modules/chat/turnStart"
 import SqliteConversationRecordEditor from "../infrastructure/database/conversations/sqliteConversationRecordEditor"
 import SqliteConversationRecordReader from "../infrastructure/database/conversations/sqliteConversationRecordReader"
 import SqliteConversationTurnRecordWriter from "../infrastructure/database/conversations/sqliteConversationTurnRecordWriter"
@@ -165,7 +171,8 @@ export type SingletonServices = Readonly<{
   toolApprovalService: ToolApprovalService
   /**
    * Connections to the MCP servers the settings file names, and their
-   * tools; the bundle's cleanup closes it first.
+   * tools; the bundle's cleanup closes it once every reply generation has
+   * ended, before the services acquired earlier.
    */
   mcpServerRegistry: McpServerRegistry
   /**
@@ -179,9 +186,38 @@ export type SingletonServices = Readonly<{
    * directory; it owns nothing to release.
    */
   attachmentFileStore: AttachmentFileStore
+  /**
+   * Every running reply generation, registered by the turn start; the
+   * bundle's cleanup disposes it first, which ends every generation.
+   */
+  replyGenerations: ReplyGenerationRegistry
+  /**
+   * Starts the generation of one stored turn in the registry, over the
+   * conversation services, the chat and LLM services, the tool approval
+   * service, and the attachment file store; it owns nothing to release.
+   */
+  startTurn: StartTurn
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
+
+/**
+ * What starts turns: the registry of the running reply generations, which
+ * the bundle disposes, and the turn start bound to it.
+ */
+type TurnStartServices = Pick<
+  SingletonServices,
+  "replyGenerations" | "startTurn"
+>
+
+/**
+ * The services a bundle's turn start is created over: every service of the
+ * bundle except the turn start and its registry.
+ */
+type CoreServices = Omit<
+  SingletonServices,
+  keyof TurnStartServices | typeof CLOSE_SINGLETON_SERVICES
+>
 
 /**
  * Services that run, find, and approve tools; only the MCP server registry
@@ -212,8 +248,9 @@ type DatabaseServices = Pick<
  * provider from, the title-generation prompt and title length limit given to
  * the chat service, the built-in agents' system prompts given to the agent service,
  * vmo's host and port given to the read-page tool, the attachments
- * directory given to the attachment file store, and the MCP process groups
- * file given to the holder of the MCP servers' process groups.
+ * directory given to the attachment file store, the MCP process groups
+ * file given to the holder of the MCP servers' process groups, and the title
+ * attempt limit given to the turn start.
  * @param logReporters - Receive, for logging, the LLM runtime failures that
  * no caller observes, the causes of read failures the model learns only by
  * kind, the LM Studio SDK's messages, the MCP servers' events, and the
@@ -239,9 +276,13 @@ type DatabaseServices = Pick<
  * creation and own nothing to release.
  * The web search tool provider, the built-in tools, the tool approval
  * service, the MCP server registry, and the attachment file store are
- * created last; they read and contact nothing at creation. Only the MCP
- * server registry owns resources, the connections it opens later; the
- * bundle's cleanup closes it first.
+ * created next; they read and contact nothing at creation. The reply
+ * generation registry and the turn start are created last, over the
+ * services before them. The MCP server registry owns the connections it
+ * opens later, and the reply generation registry the generations the turn
+ * start starts later: the bundle's cleanup disposes the reply generation
+ * registry first, which ends every generation, then closes the MCP server
+ * registry.
  * Creation stops at the first failure. The database is not part of the
  * returned bundle: the bundle's cleanup closes it last, after the chat
  * service and the LLM runtime service.
@@ -288,7 +329,7 @@ export async function createSingletonServices(
     const toolServices = createToolServices(config, logReporters)
     serviceLifetime.defer(() => toolServices.mcpServerRegistry.close())
 
-    return Object.freeze({
+    return createSingletonServiceBundle(config, serviceLifetime, {
       chatService,
       llmService,
       llmRuntimeService: llmRuntimeServiceAcquisition.service,
@@ -297,8 +338,7 @@ export async function createSingletonServices(
       ...toolServices,
       attachmentFileStore: new AttachmentFileStore(
         config.attachmentsDirectoryPath
-      ),
-      [CLOSE_SINGLETON_SERVICES]: buildCloseSingletonServices(serviceLifetime)
+      )
     })
   } catch (creationError) {
     return await throwCreationFailureAfterClosingResources(
@@ -306,6 +346,82 @@ export async function createSingletonServices(
       serviceLifetime,
       "Singleton service creation and cleanup both failed."
     )
+  }
+}
+
+/**
+ * Creates the turn start and its registry over a bundle's other services,
+ * and builds the bundle.
+ *
+ * @param config - Title attempt limit given to the turn start.
+ * @param serviceLifetime - Owner of every service the bundle acquired; it
+ * takes over the disposal of the reply generation registry, which it then
+ * disposes before everything it took over earlier.
+ * @param coreServices - The bundle's other services, which the turn start
+ * borrows for the bundle's lifetime.
+ * @returns The frozen bundle of owned services, with its cleanup capability.
+ */
+function createSingletonServiceBundle(
+  config: Pick<BackendConfig, "titleGenerationMaxAttempts">,
+  serviceLifetime: AsyncDisposableStack,
+  coreServices: CoreServices
+): SingletonServices {
+  const turnStartServices = createTurnStartServices(config, coreServices)
+  serviceLifetime.use(turnStartServices.replyGenerations)
+  return Object.freeze({
+    ...coreServices,
+    replyGenerations: turnStartServices.replyGenerations,
+    startTurn: turnStartServices.startTurn,
+    [CLOSE_SINGLETON_SERVICES]: buildCloseSingletonServices(serviceLifetime)
+  })
+}
+
+/**
+ * Creates the registry of the running reply generations and the turn start
+ * bound to it.
+ *
+ * @param config - Inclusive maximum number of title requests for one turn.
+ * @param services - Services the turn start borrows for the bundle's
+ * lifetime: turn, reply-part, and history persistence, the attachment file
+ * store, the chat service that generates titles, the LLM service that tells
+ * whether a model is loaded, and the tool approval service.
+ * @returns The registry, whose disposal the caller owns, and the turn start,
+ * which registers every generation it starts with that registry; they read
+ * and contact nothing at creation.
+ */
+function createTurnStartServices(
+  config: Pick<BackendConfig, "titleGenerationMaxAttempts">,
+  services: Pick<
+    SingletonServices,
+    | "conversationTurns"
+    | "replyParts"
+    | "conversationHistoryReader"
+    | "attachmentFileStore"
+    | "chatService"
+    | "llmService"
+    | "toolApprovalService"
+  >
+): TurnStartServices {
+  const { conversationTurns, conversationHistoryReader } = services
+  const { chatService, llmService } = services
+  const replyGenerations = new ReplyGenerationRegistry()
+  const dependencies: TurnStartDependencies = {
+    generations: replyGenerations,
+    turns: conversationTurns,
+    replyParts: services.replyParts,
+    titleWriter: conversationTurns,
+    findConversation: (conversationId) =>
+      conversationHistoryReader.getConversation(conversationId),
+    attachmentFiles: services.attachmentFileStore,
+    generateTitle: (options) => chatService.generateTitle(options),
+    findLoadedContextLength: async (model) =>
+      (await llmService.findLlmContextMeasurement(model, []))?.contextLength,
+    titleGenerationMaxAttempts: config.titleGenerationMaxAttempts,
+    toolApprovals: services.toolApprovalService
+  }
+  return {
+    replyGenerations,
+    startTurn: (options) => startTurn(dependencies, options)
   }
 }
 

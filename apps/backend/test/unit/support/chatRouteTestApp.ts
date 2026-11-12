@@ -21,6 +21,10 @@ import {
   createModelCapabilitiesLookup,
   type FindModelCapabilities
 } from "../../../src/modules/chat/routes/modelCapabilities"
+import {
+  startTurn,
+  type TurnStartDependencies
+} from "../../../src/modules/chat/turnStart"
 import LlmRuntimeService from "../../../src/modules/llm/llmRuntimeService"
 import LlmService from "../../../src/modules/llm/llmService"
 import McpServerRegistry from "../../../src/modules/mcp/mcpServerRegistry"
@@ -52,6 +56,12 @@ const CHAT_PATH = "/api/v1/chat"
 
 /** Longest a test MCP server may take to open. */
 const MCP_TEST_OPENING_TIMEOUT_MILLISECONDS = 10_000
+
+/**
+ * Most title requests the chat route test app's turn start makes for one
+ * turn.
+ */
+const TEST_TITLE_GENERATION_MAX_ATTEMPTS = 2
 
 /**
  * System prompts of the built-in agents in the chat route test app; each
@@ -117,7 +127,8 @@ export type ChatRouteTestApp = TestFastify &
      */
     attachmentsDirectoryPath: string
     /**
-     * Registry a case passes to the chat route; disposed when the test
+     * Registry of `app.replyGenerations`, with which `app.startTurn`
+     * registers every generation it starts; disposed when the test
      * finishes, before the conversation database closes.
      */
     generations: ReplyGenerationRegistry
@@ -171,7 +182,10 @@ export type ChatRouteTestApp = TestFastify &
  * for that provider. The decorated MCP server registry is real, reads its
  * settings through the `readMcpSettings` spy, which reads no server, opens
  * servers with a 10-second limit, and logs nothing; it holds no server until
- * a case applies settings, and it is closed when the test finishes. When the
+ * a case applies settings, and it is closed when the test finishes. The
+ * decorated turn start is the real one, as {@link registerTestTurnStart}
+ * binds it to the decorated services and to the decorated reply generation
+ * registry, which is the returned one. When the
  * test finishes, the generation
  * registry is disposed first, so every generation it holds has stored its
  * final state before the in-memory conversation database is closed; the
@@ -318,6 +332,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
       })
     ])
   )
+  registerTestTurnStart(testFastify.app, generations)
   return Object.freeze({
     ...testFastify,
     createConversationTurn,
@@ -335,6 +350,45 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     readMcpSettings,
     database
   })
+}
+
+/**
+ * Registers a reply generation registry and the turn start bound to it with
+ * the chat route test app, as the backend's composition root binds its own.
+ *
+ * @param app - Application with the conversation services, the chat and LLM
+ * services, the tool approval service, and the attachment file store
+ * registered; the turn start borrows them for the test.
+ * @param generations - Registry the turn start registers every generation
+ * with; the caller disposes it.
+ * @throws If the application already has a reply generation registry or a
+ * turn start.
+ * @remarks Title requests and loaded checks go through `app.chatService` and
+ * `app.llmService` when they run, so a case's spies on them apply. A turn
+ * gets at most {@link TEST_TITLE_GENERATION_MAX_ATTEMPTS} title requests.
+ */
+function registerTestTurnStart(
+  app: FastifyInstance,
+  generations: ReplyGenerationRegistry
+): void {
+  const turns = app.conversationTurns
+  const dependencies: TurnStartDependencies = {
+    generations,
+    turns,
+    replyParts: app.replyParts,
+    titleWriter: turns,
+    findConversation: (conversationId) =>
+      app.conversationHistoryReader.getConversation(conversationId),
+    attachmentFiles: app.attachmentFileStore,
+    generateTitle: (options) => app.chatService.generateTitle(options),
+    findLoadedContextLength: async (model) =>
+      (await app.llmService.findLlmContextMeasurement(model, []))
+        ?.contextLength,
+    titleGenerationMaxAttempts: TEST_TITLE_GENERATION_MAX_ATTEMPTS,
+    toolApprovals: app.toolApprovalService
+  }
+  app.decorate("replyGenerations", generations)
+  app.decorate("startTurn", (options) => startTurn(dependencies, options))
 }
 
 /**

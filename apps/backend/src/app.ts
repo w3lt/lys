@@ -58,9 +58,7 @@ export async function buildApp(
   // =============== REGISTER THE ROUTES =============== //
   await app.register(registerHealthRoutes)
   await app.register(updateFastifyWithLlmRoutes)
-  await app.register(registerChatRoutes, {
-    titleGenerationMaxAttempts: config.titleGenerationMaxAttempts
-  })
+  await app.register(registerChatRoutes)
   await app.register(updateFastifyWithConversationRoutes)
   await app.register(updateFastifyWithAgentRoutes)
   await app.register(registerToolRoutes)

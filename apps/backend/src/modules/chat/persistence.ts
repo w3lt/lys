@@ -179,7 +179,7 @@ export interface GeneratedConversationTitleWriter {
 
 /**
  * Stores the parts of a streaming reply before they are sent to its
- * followers, for the chat route that lends them to the reply's agent.
+ * followers, for the turn start that lends them to the reply's agent.
  *
  * @remarks Each call reads the current time once and stores it with the part
  * or change. A reply that is finalized, superseded, or deleted refuses every

@@ -46,15 +46,15 @@ type ChatReplyRouteDependencies = Readonly<{
  * Installs the endpoints that follow, stop, and answer the tool calls and
  * approval prompts of one reply's generation.
  *
- * @param app - Backend with SSE, validation, and conversation persistence.
- * @param generations - Registry shared with the chat route; its owner
- * disposes it.
+ * @param app - Backend with SSE, validation, conversation persistence, and
+ * the reply generation registry every turn start registers its generation
+ * with; the registry's owner disposes it.
  * @throws If route registration fails.
  */
 export default function updateFastifyWithChatReplyRoutes(
-  app: FastifyInstance,
-  generations: ReplyGenerationRegistry
+  app: FastifyInstance
 ): void {
+  const generations = app.replyGenerations
   const dependencies = {
     history: app.conversationHistoryReader,
     generations

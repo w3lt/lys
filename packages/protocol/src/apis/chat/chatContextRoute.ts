@@ -104,7 +104,8 @@ export const chatContextApiResponseSchema = z
  * Selects the validator of a chat-context failure by HTTP status.
  *
  * @remarks A 404 is the agent-not-found problem when a new conversation names
- * a code no agent has, and the conversation-not-found problem when a
+ * a code no agent has, a deleted agent's, or Armitage's, which answers no
+ * chat, and the conversation-not-found problem when a
  * continued conversation is not stored. A 409 is the conversation agent
  * missing problem. A 503 is the LLM service busy problem, the LLM runtime
  * unavailable problem, or the model-not-loaded problem when no loaded

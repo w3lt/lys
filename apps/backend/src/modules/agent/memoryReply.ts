@@ -188,6 +188,8 @@ export default class MemoryReply {
    * @returns The call as kept, frozen; undefined once the final state is
    * kept, or when the reply keeps no tool call with the identity in the
    * state the change follows.
+   * @throws If the changed call breaks the part contract, such as an empty
+   * result.
    */
   public updateReplyToolCall(
     toolCallId: string,

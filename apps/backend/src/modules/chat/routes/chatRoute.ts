@@ -692,8 +692,9 @@ function buildTurnOptions(
  * @param dependencies - Borrowed turn persistence and agent and conversation
  * lookups.
  * @returns The stored turn with its agent; or why no agent answers, with
- * nothing stored: a new conversation names a code no agent has, the
- * continued conversation is not stored, or its agent no longer exists.
+ * nothing stored: a new conversation names a code no agent has, a deleted
+ * agent's, or Armitage's, which answers no chat; the continued conversation
+ * is not stored; or its agent no longer exists.
  * @throws Any persistence failure of a lookup, and the turn persistence's
  * failure.
  * @remarks Nothing awaits between the lookup and the write, so the stored

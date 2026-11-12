@@ -56,23 +56,29 @@ export type ToolRecommendation =
  * `send-email` as it finds `send_email`.
  */
 function buildRankedToolText(definition: ToolDefinition): string {
+  /** Matches a run of `_` or `-`, which splits `send_email`. */
+  const separatorPattern = /[_-]+/g
   /**
-   * Matches where one word of a tool name ends and the next starts: a run
-   * of `_` or `-`, the place between a lowercase letter or digit and an
-   * uppercase letter, or the place before the last uppercase letter of a
-   * run that a lowercase letter follows, unless that letter is a plural `s`
-   * that ends the name or comes before an uppercase letter. So
-   * `send_email`, `createIssue`, `XMLHttpRequest`, and `getURLs` each split
-   * into their words.
+   * Matches the place between a lowercase letter or digit and an uppercase
+   * letter, which splits `createIssue`.
    */
-  const nameWordBreakPattern =
-    /[_-]+|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z](?!s(?:[A-Z]|$))[a-z])/g
+  const wordStartPattern = /(?<=[a-z0-9])(?=[A-Z])/g
+  /**
+   * Matches the place before the last uppercase letter of a run that a
+   * lowercase letter follows, which splits `XMLHttp` before `H`, unless
+   * that letter is a plural `s` that no lowercase letter follows, so
+   * `getURLs` and `listAPIsByOwner` keep `URLs` and `APIs` whole.
+   */
+  const acronymEndPattern = /(?<=[A-Z])(?=[A-Z](?!s(?![a-z]))[a-z])/g
 
   const { name } = definition
   // The word segmenter splits a name at `-` but keeps `_`, so the whole
   // name is ranked with `_` to stay one word.
   const wholeName = name.replaceAll("-", "_")
-  const nameWords = name.replaceAll(nameWordBreakPattern, " ")
+  const nameWords = name
+    .replaceAll(separatorPattern, " ")
+    .replaceAll(wordStartPattern, " ")
+    .replaceAll(acronymEndPattern, " ")
   const rankedName =
     nameWords === name ? wholeName : `${wholeName} ${nameWords}`
   return `${rankedName} ${definition.group} ${definition.description}`

@@ -93,7 +93,8 @@ describe("ToolCatalog", () => {
         "gitlab_create_issue"
       ],
       ["a plural acronym that ends its name", "urls", "getURLs"],
-      ["a plural acronym before a word of its name", "apis", "listAPIsByOwner"]
+      ["a plural acronym before a word of its name", "apis", "listAPIsByOwner"],
+      ["a plural acronym before an underscore", "ids", "find_IDs_by_owner"]
     ])("finds a tool by %s", (_label, query, toolName) => {
       const catalog = new ToolCatalog([
         buildNetworkToolDefinition("open_ticket", "Opens a ticket on GitHub."),
@@ -103,7 +104,8 @@ describe("ToolCatalog", () => {
         buildNetworkToolDefinition(
           "listAPIsByOwner",
           "Lists services by owner."
-        )
+        ),
+        buildNetworkToolDefinition("find_IDs_by_owner", "Lists records.")
       ])
 
       expect(

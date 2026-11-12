@@ -57,7 +57,8 @@ export type ReadApprovedFolders = () => Promise<ApprovedFolders>
 export type ToolCallPolicy = Readonly<{
   /**
    * Absolute path of Lys's settings file, which holds its API keys and
-   * passwords; a call naming it is denied.
+   * passwords; a call naming it, or a copy of it that a stopped save left,
+   * is denied.
    */
   settingsFilePath: string
   /**
@@ -159,6 +160,17 @@ const CREDENTIAL_NAMES: ReadonlySet<string> = new Set([
 
 /** Path parts of Lys's settings file a value must hold, in order. */
 const SETTINGS_FILE_PART_COUNT = 2
+
+/**
+ * What follows the settings file's name in the name of the temporary copy
+ * a save writes beside it: `.`, a process id, `.`, a number, and `.tmp`, as
+ * `build_temporary_path` in the desktop's `src-tauri/src/settings.rs`
+ * writes it. A save that stops midway leaves the copy, which holds the same
+ * secrets; the shared cases in
+ * `packages/share/test/fixtures/settings-file-copy-names.json` keep both
+ * sides alike.
+ */
+const SETTINGS_FILE_COPY_ENDING_PATTERN = /^\.\d+\.\d+\.tmp$/u
 
 /** A run of path separators, `/` or `\`. */
 const PATH_SEPARATOR_PATTERN = /[/\\]+/u
@@ -344,22 +356,47 @@ function holdsPathSequence(
 }
 
 /**
+ * Reads a path part that names a leftover copy of Lys's settings file as
+ * the settings file's name.
+ *
+ * @param part - Lowercase path part.
+ * @param settingsFileName - Name of Lys's settings file, in lowercase.
+ * @returns `settingsFileName` when `part` is that name followed by
+ * `SETTINGS_FILE_COPY_ENDING_PATTERN`; otherwise `part`.
+ */
+function readCopyAsSettingsFileName(
+  part: string,
+  settingsFileName: string
+): string {
+  return part.startsWith(settingsFileName) &&
+    SETTINGS_FILE_COPY_ENDING_PATTERN.test(part.slice(settingsFileName.length))
+    ? settingsFileName
+    : part
+}
+
+/**
  * Answers whether a path names a private key or credential file, a folder
- * of them, or Lys's settings file.
+ * of them, Lys's settings file, or a copy of it that a stopped save left.
  *
  * @param path - Path, or text that holds one.
  * @param settingsFileParts - Last parts of Lys's settings file path, in
  * lowercase: its folder and its name.
  * @returns True when one of its parts is a credential name, or its parts
- * hold `settingsFileParts`.
+ * hold `settingsFileParts`, a copy's name read as the settings file's.
  */
 function namesCredentialPath(
   path: string,
   settingsFileParts: readonly string[]
 ): boolean {
   const parts = listPathParts(path)
+  const settingsFileName = settingsFileParts.at(-1)
+  const settingsParts =
+    settingsFileName === undefined
+      ? parts
+      : parts.map((part) => readCopyAsSettingsFileName(part, settingsFileName))
   return (
-    parts.some(isCredentialPart) || holdsPathSequence(parts, settingsFileParts)
+    parts.some(isCredentialPart) ||
+    holdsPathSequence(settingsParts, settingsFileParts)
   )
 }
 
@@ -550,8 +587,9 @@ function namesBlockedAddress(text: string): boolean {
  * @param rules - What the rules need to know about this machine and the
  * folders the person lets tools use.
  * @returns `deny` with `credential-file` when an argument text names a
- * private key or credential file, a folder of them, or Lys's settings file;
- * otherwise `deny` with `outside-approved-folders` when folders are listed
+ * private key or credential file, a folder of them, Lys's settings file, or
+ * a copy of it that a stopped save left; otherwise `deny` with
+ * `outside-approved-folders` when folders are listed
  * and an argument text, or a line of one, names a path outside them, or with
  * `settings-unreadable` when it names any path while the folders cannot be
  * read;

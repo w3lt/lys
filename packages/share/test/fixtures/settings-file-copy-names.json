@@ -1,0 +1,82 @@
+[
+  {
+    "case": "a copy a stopped save left",
+    "name": "settings.json.4242.0.tmp",
+    "copy": true
+  },
+  {
+    "case": "a copy with the largest numbers a save writes",
+    "name": "settings.json.4294967295.18446744073709551615.tmp",
+    "copy": true
+  },
+  {
+    "case": "a copy in capitals",
+    "name": "SETTINGS.JSON.17.3.TMP",
+    "copy": true
+  },
+  {
+    "case": "the settings file's name with one number",
+    "name": "settings.json.4242.tmp",
+    "copy": false
+  },
+  {
+    "case": "the settings file's name with three numbers",
+    "name": "settings.json.4242.0.1.tmp",
+    "copy": false
+  },
+  {
+    "case": "an empty number",
+    "name": "settings.json..0.tmp",
+    "copy": false
+  },
+  {
+    "case": "a number with a letter",
+    "name": "settings.json.42a.0.tmp",
+    "copy": false
+  },
+  {
+    "case": "a number with a sign",
+    "name": "settings.json.+42.0.tmp",
+    "copy": false
+  },
+  {
+    "case": "a number with a space",
+    "name": "settings.json. 42.0.tmp",
+    "copy": false
+  },
+  {
+    "case": "a number in other digits",
+    "name": "settings.json.٤٢.0.tmp",
+    "copy": false
+  },
+  {
+    "case": "another ending",
+    "name": "settings.json.4242.0.bak",
+    "copy": false
+  },
+  {
+    "case": "text after the ending",
+    "name": "settings.json.4242.0.tmp.old",
+    "copy": false
+  },
+  {
+    "case": "a longer name that starts with the settings file's",
+    "name": "settings.jsonc.4242.0.tmp",
+    "copy": false
+  },
+  {
+    "case": "another name as long as the settings file's",
+    "name": "settings.yaml.4242.0.tmp",
+    "copy": false
+  },
+  {
+    "case": "a copy of another file",
+    "name": "notes.json.4242.0.tmp",
+    "copy": false
+  },
+  {
+    "case": "a backup of the settings file",
+    "name": "settings.json.bak",
+    "copy": false
+  }
+]

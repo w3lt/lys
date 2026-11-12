@@ -95,6 +95,33 @@ const DENIED_BLOCKED_ADDRESS = Object.freeze({
 /** Decision for a call no rule denies. */
 const ALLOWED = Object.freeze({ effect: "allow" } satisfies ToolCallDecision)
 
+/**
+ * Reads the cases of a fixture the host's tests read too.
+ *
+ * @param fileName - Name of a file in `packages/share/test/fixtures`.
+ * @param caseSchema - Schema of one case.
+ * @returns The cases, validated.
+ * @throws When the file cannot be read or a case does not match the schema.
+ */
+function readSharedCases<CaseSchema extends z.ZodType>(
+  fileName: string,
+  caseSchema: CaseSchema
+): readonly z.output<CaseSchema>[] {
+  return z
+    .array(caseSchema)
+    .parse(
+      JSON.parse(
+        readFileSync(
+          new URL(
+            `../../../../../../packages/share/test/fixtures/${fileName}`,
+            import.meta.url
+          ),
+          "utf8"
+        )
+      )
+    )
+}
+
 /** Validates one case of the shared credential file names. */
 const sharedCredentialNameCaseSchema = z
   .strictObject({
@@ -112,19 +139,35 @@ const sharedCredentialNameCaseSchema = z
  * host's tests in `src-tauri/src/tools/credential_files.rs` read the same
  * file.
  */
-const SHARED_CREDENTIAL_NAME_CASES = z
-  .array(sharedCredentialNameCaseSchema)
-  .parse(
-    JSON.parse(
-      readFileSync(
-        new URL(
-          "../../../../../../packages/share/test/fixtures/credential-file-names.json",
-          import.meta.url
-        ),
-        "utf8"
-      )
-    )
-  )
+const SHARED_CREDENTIAL_NAME_CASES = readSharedCases(
+  "credential-file-names.json",
+  sharedCredentialNameCaseSchema
+)
+
+/**
+ * Validates one case of the names that may be a leftover copy of the
+ * settings file.
+ */
+const sharedSettingsFileCopyNameCaseSchema = z
+  .strictObject({
+    /** What the case checks. */
+    case: z.string(),
+    /** One file name, beside a settings file named `settings.json`. */
+    name: z.string(),
+    /** Whether the name is that of a copy a stopped save left. */
+    copy: z.boolean()
+  })
+  .readonly()
+
+/**
+ * Names that this policy and the desktop's file tools must judge alike as
+ * leftover copies of the settings file; the host's tests in
+ * `src-tauri/src/settings.rs` read the same file.
+ */
+const SHARED_SETTINGS_FILE_COPY_NAME_CASES = readSharedCases(
+  "settings-file-copy-names.json",
+  sharedSettingsFileCopyNameCaseSchema
+)
 
 /** Values naming a private key or credential file, by what each shows. */
 const CREDENTIAL_FILE_CASES = Object.freeze({
@@ -169,7 +212,11 @@ const CREDENTIAL_FILE_CASES = Object.freeze({
   "Lys's settings file with a doubled slash": "~/.lys//settings.json",
   "a command reading Lys's settings file": "cat ~/.lys/settings.json",
   "Lys's settings file in other letter case": "/HOME/ADA/.LYS/Settings.JSON",
-  "Lys's settings file as a file URL": "file:///home/ada/.lys/settings.json"
+  "Lys's settings file as a file URL": "file:///home/ada/.lys/settings.json",
+  "a copy a stopped save left": "~/.lys/settings.json.4242.0.tmp",
+  "a leftover copy as a file URL":
+    "file:///home/ada/.lys/settings.json.4242.0.tmp",
+  "a leftover copy in other letter case": "/HOME/ADA/.LYS/SETTINGS.JSON.1.0.TMP"
 })
 
 /** Values that look like a credential path but name none, by what each shows. */
@@ -177,6 +224,9 @@ const ALLOWED_PATH_CASES = Object.freeze({
   "a public key outside the SSH folder": "keys/id_rsa.pub",
   "a guide about SSH": "docs/ssh-guide.md",
   "another settings file": "/home/ada/project/settings.json",
+  "a copy's name in another folder":
+    "/home/ada/project/settings.json.4242.0.tmp",
+  "a copy's name without its folder": "settings.json.4242.0.tmp",
   "a settings file without its folder": "settings.json",
   "another file in Lys's home": "~/.lys/notes.json",
   "a name that only starts like .env": ".environment",
@@ -265,6 +315,20 @@ describe("decideToolCall", () => {
       expect(
         decideToolCall(buildTargetRequest(`/home/ada/${name}`), RULES)
       ).toStrictEqual(credential ? DENIED_CREDENTIAL_FILE : ALLOWED)
+    }
+  )
+
+  it.each(
+    SHARED_SETTINGS_FILE_COPY_NAME_CASES.map((nameCase) => [
+      nameCase.case,
+      nameCase
+    ])
+  )(
+    "judges %s in Lys's home as the desktop's file tools do",
+    (_label, { name, copy }) => {
+      expect(
+        decideToolCall(buildTargetRequest(`/home/ada/.lys/${name}`), RULES)
+      ).toStrictEqual(copy ? DENIED_CREDENTIAL_FILE : ALLOWED)
     }
   )
 
@@ -396,6 +460,23 @@ describe("decideToolCall", () => {
     expect(
       decideToolCall(buildTargetRequest("~/.lys/settings.json"), policy)
     ).toStrictEqual({ effect: "allow" })
+  })
+
+  it("reads a leftover copy by the name of the policy's settings file", () => {
+    const policy = Object.freeze({
+      ...RULES,
+      settingsFilePath: "/srv/lys/lys.json"
+    } satisfies ToolCallRules)
+
+    expect(
+      decideToolCall(buildTargetRequest("/srv/lys/lys.json.4242.0.tmp"), policy)
+    ).toStrictEqual(DENIED_CREDENTIAL_FILE)
+    expect(
+      decideToolCall(
+        buildTargetRequest("/srv/lys/settings.json.4242.0.tmp"),
+        policy
+      )
+    ).toStrictEqual(ALLOWED)
   })
 })
 

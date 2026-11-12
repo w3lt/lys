@@ -91,7 +91,9 @@ repository today; it is not a promise of unreleased work.
   asks the person first unless its tool is set to Just run, which the backend
   decides for every tool from the saved choices; before that, the backend
   denies a call that names a private key or credential file, or a local or
-  private network address, which then never runs or asks; both web tools start off. Lys's instructions do not
+  private network address, which then never runs or asks, and asks before
+  every call of an MCP tool its server marks as destructive, even on Just
+  run; both web tools start off. Lys's instructions do not
   give her today's date yet
   ([#148](https://github.com/w3lt/lys/issues/148)).
 - The email server works with one account, signed in with a password or an app

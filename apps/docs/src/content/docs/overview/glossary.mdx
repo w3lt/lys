@@ -68,7 +68,9 @@ Terms that mean something specific inside Lys.
   call before the approval gate, whatever the tool: a call that names a
   private key or credential file, or a URL or host of this machine or a
   private network, is denied, stored as failed with a sentence the model
-  reads, and never runs or asks the person, even on Just run.
+  reads, and never runs or asks the person, even on Just run. A call of an
+  MCP tool its server marks as destructive requires approval: it asks the
+  person even on Just run.
 - **User message**: a persisted message with role `user`, non-empty content,
   and the attachments sent with it.
 - **Attachment**: a file sent with a user message and stored with the

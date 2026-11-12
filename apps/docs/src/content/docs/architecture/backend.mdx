@@ -385,10 +385,21 @@ For each call, in order:
    their shape for an MCP tool, and a backend tool's `parseToolCall` checks
    them for what it can run; a call either refuses is stored as failed.
 3. `decideToolCall` (`src/modules/toolApproval/toolCallPolicy.ts`) decides
-   the call by fixed rules, whatever the tool.
-4. An allowed call of a backend tool that runs without approval starts at
-   once; every other allowed call passes the round's
-   [approval gate](#tool-approval).
+   the call by fixed rules, whatever the tool: `deny`, `require-approval`,
+   or `allow`, each but `allow` with the rule as its reason.
+4. A call the policy requires approval of passes the round's
+   [approval gate](#tool-approval), which asks the person even for a tool
+   saved as Just run. An allowed call of a backend tool that runs without
+   approval starts at once; every other allowed call passes the gate, where
+   the person's approval mode decides.
+
+The policy reads a `ToolCallRequest` that the gateway builds from what the
+backend trusts, never from what the model claims, in the attribute groups of
+#330's tool authorization spec that its rules read: `action`, the tool's
+attributes, and `resource`, the checked arguments. It does no I/O and throws
+nothing; a defect that made it throw would end the reply as failed before
+the call ran. A deny always wins: the person cannot allow a denied call, and
+approval is never asked of it.
 
 A denied call is stored as failed with a sentence the model reads
 (`formatToolCallDenial`), naming the rule it broke and telling the model not
@@ -401,8 +412,8 @@ Armitage's own `search_tools` and `recommend_tool` calls are decided too.
 
 The policy reads every text of the call's arguments: the argument names,
 every string value at any depth, and the keys of nested objects; numbers,
-booleans, and `null` are not read. Each text is trimmed, and the first rule
-is asked over every text before the second:
+booleans, and `null` are not read. Each text is trimmed, and each rule is
+asked over every text before the next:
 
 - **Credential file.** The text is split into parts at `/` and `\`, without
   empty and `.` parts, and compared in lowercase. The call is denied when a
@@ -428,6 +439,13 @@ is asked over every text before the second:
   with `@`, and anything after a `:`, `/`, or `\` that follows it is left
   aside, so `10.0.0.1:22`, `admin@192.168.1.10`, `git@10.0.0.2:repo.git`,
   and `\\10.0.0.5\share` are all denied.
+- **Destructive tool.** A call that no deny rule matches requires approval
+  when its tool is an MCP tool whose server marks it as destructive: its
+  annotations say `destructiveHint: true` and not `readOnlyHint: true`
+  (`McpToolCatalog.destructiveToolNames`). MCP reads a tool without the hint
+  as destructive, but only an explicit mark counts, so a server that sends no
+  annotations keeps the person's Just run choice. A server's annotations can
+  only make Lys ask more, never less. Lys's own tools are never marked.
 
 The rules read text only. They resolve no host name: an MCP server resolves
 the names it reaches, and `read_page` checks every resolved address when it
@@ -462,9 +480,10 @@ parse failures dropped unread. A missing file, `tools` group, or `justRun`
 list means no tool is on Just run. A round whose calls all run without
 approval or name no offered tool creates no gate and does not read the file.
 
-For each allowed call that passes the gate, in the model's order, the gate's
-`startToolCall` stores the call and decides how it goes on. A call of a tool on Just run is
-stored as `running` and goes on at once. Any other call is stored as
+For each call that passes the gate, in the model's order, the gate's
+`startToolCall` stores the call and decides how it goes on. A call of a tool
+on Just run that the policy allowed is stored as `running` and goes on at
+once. Any other call is stored as
 `awaiting-approval` first; the gate then sends a `tool-approval` event, and
 the round waits for the person's answer through the tool-approval route,
 with no timer. A call the store refuses is never prompted. Storing and
@@ -1182,9 +1201,11 @@ schema requires, at most 32 levels of nesting, and no `__proto__` key. The
 server checks the values.
 
 `handleMcpToolCall` (`src/modules/agent/toolCallRound.ts`) sends every call
-the [tool call policy](#tool-call-policy) allows through the round's
-[approval gate](#tool-approval), which asks the person
-unless they saved the tool as Just run. An allowed call runs on its server as
+the [tool call policy](#tool-call-policy) does not deny through the round's
+[approval gate](#tool-approval), which asks the person unless they saved the
+tool as Just run and the server does not mark it as destructive; the turn
+keeps that mark with the tool, as the server listed it when the turn found
+it. An allowed call runs on its server as
 the server is connected when the call runs, with five minutes to answer, and
 the reply's Stop signal tells the server that the call was cancelled. A call
 whose server is no longer connected, or no longer lists the tool, fails with a
@@ -1536,9 +1557,10 @@ for the separate inference and model-management lifetimes.
   MCP resources, prompts, sampling, elicitation, or roots
   ([#255](https://github.com/w3lt/lys/issues/255))
 - No provider fallback or budget-accounting logic
-- No attribute-based policy engine: the
-  [tool call policy](#tool-call-policy) applies fixed rules to argument
-  text, and answers allow or deny, never a request for approval of its own
+- The [tool call policy](#tool-call-policy)'s rules read only argument text
+  and the destructive mark of an MCP tool: no rule keeps calls inside folders
+  the person approves ([#341](https://github.com/w3lt/lys/issues/341)), and
+  none limits usage or spending, or attaches constraints to an allowed call
 - No approval bound to one exact call
   ([#336](https://github.com/w3lt/lys/issues/336)) and no stored audit
   record of tool decisions ([#337](https://github.com/w3lt/lys/issues/337)),

@@ -262,11 +262,11 @@ calls it stored are part of the new turn's context.
    stored as a part too, `running` or `awaiting-approval`, and each later
    change of it is stored and sent as a `reply-part` event.
 4. The backend's tool approval service reads the Just run choices from the
-   settings file once for the round. For each call the policy allows, in the
-   model's order:
-   a tool saved as Just run goes on at once; any other tool's call is stored
-   as `awaiting-approval` and then shown to the person with a `tool-approval`
-   event, in the same step. A call the store refuses, because the reply has
+   settings file once for the round. For each call the policy does not deny,
+   in the model's order: a tool saved as Just run goes on at once, unless the
+   policy requires approval because the tool is an MCP tool its server marks
+   as destructive; any other call is stored as `awaiting-approval` and then
+   shown to the person with a `tool-approval` event, in the same step. A call the store refuses, because the reply has
    ended, is never shown. If the settings file cannot be read, every call is
    shown and the backend logs a warning.
 5. The desktop's tool-call store, which follows the reply on its own

@@ -1,1 +1,2 @@
 pnpm exec lint-staged
+node tools/code-standards/check-changed-code.mts --staged

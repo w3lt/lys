@@ -6,7 +6,10 @@ import {
 import { readFileSync } from "node:fs"
 import { describe, expect, it, vi } from "vitest"
 import * as z from "zod"
-import type { EmailAccountRead } from "../../../../../../src/infrastructure/settings/emailAccountFile"
+import type {
+  EmailAccountRead,
+  EmailAccountsRead
+} from "../../../../../../src/infrastructure/settings/emailAccountFile"
 import {
   buildEmailServerCommand,
   buildEmailServerSettings,
@@ -121,26 +124,39 @@ describe("buildEmailServerSettings", () => {
   })
 })
 
+/**
+ * Builds the read of both accounts with the person's as given and no
+ * account for Lys.
+ *
+ * @param person - Read of the person's account.
+ * @returns The read of both accounts.
+ */
+function buildAccountsRead(person: EmailAccountRead): EmailAccountsRead {
+  return { person, lys: { status: "missing" } }
+}
+
 describe("createEmailMcpServer", () => {
   it("is the stdio server named email, which reads nothing until asked", () => {
-    const readAccount = vi.fn<() => Promise<EmailAccountRead>>()
+    const readAccounts = vi.fn<() => Promise<EmailAccountsRead>>()
 
-    const server = createEmailMcpServer(INSTALLED_COMMAND, readAccount)
+    const server = createEmailMcpServer(INSTALLED_COMMAND, readAccounts)
 
     expect(server.name).toBe("email")
     expect(server.transport).toBe("stdio")
-    expect(readAccount).not.toHaveBeenCalled()
+    expect(readAccounts).not.toHaveBeenCalled()
   })
 
   it("reads the saved account again on each read, and builds the settings that start the server with it", async () => {
-    const readAccount = vi.fn<() => Promise<EmailAccountRead>>(() =>
-      Promise.resolve({
-        status: "read",
-        account: ACCOUNT,
-        password: SYNTHETIC_EMAIL_PASSWORD
-      })
+    const readAccounts = vi.fn<() => Promise<EmailAccountsRead>>(() =>
+      Promise.resolve(
+        buildAccountsRead({
+          status: "read",
+          account: ACCOUNT,
+          password: SYNTHETIC_EMAIL_PASSWORD
+        })
+      )
     )
-    const server = createEmailMcpServer(INSTALLED_COMMAND, readAccount)
+    const server = createEmailMcpServer(INSTALLED_COMMAND, readAccounts)
 
     const first = await server.readServer()
     const second = await server.readServer()
@@ -148,7 +164,7 @@ describe("createEmailMcpServer", () => {
     expect(first).toEqual({ status: "read", settings: EXPECTED_SETTINGS })
     expect(second).toEqual(first)
     expect(Object.isFrozen(first)).toBe(true)
-    expect(readAccount).toHaveBeenCalledTimes(2)
+    expect(readAccounts).toHaveBeenCalledTimes(2)
   })
 
   it.each([
@@ -167,7 +183,7 @@ describe("createEmailMcpServer", () => {
     "reads %s as a server that cannot start",
     async (_label, read, status) => {
       const server = createEmailMcpServer(INSTALLED_COMMAND, () =>
-        Promise.resolve(read)
+        Promise.resolve(buildAccountsRead(read))
       )
 
       expect(await server.readServer()).toEqual({ status })

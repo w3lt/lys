@@ -122,13 +122,14 @@ type EmailSettingsDependencies = {
 }
 
 /**
- * Builds the settings that hold an account and its password, or neither.
+ * Builds the settings that hold the person's account and its password, or
+ * neither.
  *
  * @param settings - Settings before the change.
  * @param account - Account the file now holds, or null after a removal.
  * @param password - Its password, or null after a removal.
- * @returns The settings with the `email` group and the email password
- * replaced, every other group and secret kept.
+ * @returns The settings with the person's account and email password
+ * replaced, every other group, account, and secret kept.
  */
 function buildEmailAccountSettings(
   settings: LysSettings,
@@ -139,7 +140,7 @@ function buildEmailAccountSettings(
     ...settings.secrets,
     emailPassword: password
   })
-  const email: EmailSettings = Object.freeze({ account })
+  const email: EmailSettings = Object.freeze({ ...settings.email, account })
   return { ...settings, secrets, email }
 }
 

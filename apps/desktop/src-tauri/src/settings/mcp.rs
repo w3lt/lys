@@ -237,20 +237,24 @@ fn calculate_servers_bytes_without_switches(servers: &[McpServer]) -> Option<usi
 /// and unknown fields are rejected: the renderer and the backend know the
 /// same servers.
 struct BuiltInMcpSettings {
-    /// Switch of the email server.
+    /// Switches of the email server's two mailboxes.
     #[serde(deserialize_with = "parse_json_object")]
-    email: BuiltInMcpServerSettings,
+    email: EmailMcpServerSettings,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-/// Switch of one MCP server Lys ships.
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+/// Switches of the email server's mailboxes, the person's and Lys's own.
 ///
-/// A missing switch is off. The switch may not be `null`, and unknown fields
-/// are rejected.
-struct BuiltInMcpServerSettings {
-    /// Whether Lys starts the server.
+/// A missing switch is off. A switch may not be `null`, and unknown fields
+/// are rejected. The server runs while either switch is on.
+struct EmailMcpServerSettings {
+    /// Whether the server serves the person's mailbox. It keeps the name of
+    /// the server's one switch from before Lys had a mailbox, so a file
+    /// written then keeps its meaning.
     enabled: bool,
+    /// Whether the server serves Lys's own mailbox.
+    lys_enabled: bool,
 }
 
 /// Returns the switch of a server the file does not switch: on.
@@ -800,7 +804,7 @@ mod tests {
     /// Returns the `builtIn` object of a group with every server Lys ships
     /// off, as the host writes it.
     fn get_built_in_off() -> Value {
-        json!({ "email": { "enabled": false } })
+        json!({ "email": { "enabled": false, "lysEnabled": false } })
     }
 
     /// Reads a group holding only `server`.
@@ -991,8 +995,9 @@ mod tests {
     }
 
     /// Checks that an MCP group writes back each server switch and the email
-    /// server's switch as stored, and reads a `builtIn` object without a
-    /// switch as every built-in server off.
+    /// server's two mailbox switches as stored, and reads a `builtIn` object
+    /// without a switch, or an email entry written before Lys's switch
+    /// existed, as every missing switch off.
     #[test]
     fn reads_missing_built_in_switches_as_off_and_writes_every_switch_back() {
         let stored = json!({
@@ -1000,16 +1005,25 @@ mod tests {
                 build_stdio_server_with("enabled", json!(false)),
                 build_http_server("docs")
             ],
-            "builtIn": { "email": { "enabled": true } }
+            "builtIn": { "email": { "enabled": true, "lysEnabled": true } }
         });
 
         let settings = parse_mcp_settings(stored.clone()).expect("a valid group");
         let unswitched = parse_mcp_settings(json!({ "builtIn": {} })).expect("a valid group");
+        let before_lys = parse_mcp_settings(json!({ "builtIn": { "email": { "enabled": true } } }))
+            .expect("a valid group");
 
         assert_eq!(serde_json::to_value(&settings).expect("serialize"), stored);
         assert_eq!(
             serde_json::to_value(&unswitched).expect("serialize"),
             json!({ "servers": [], "builtIn": get_built_in_off() })
+        );
+        assert_eq!(
+            serde_json::to_value(&before_lys).expect("serialize"),
+            json!({
+                "servers": [],
+                "builtIn": { "email": { "enabled": true, "lysEnabled": false } }
+            })
         );
     }
 
@@ -1030,6 +1044,8 @@ mod tests {
             json!({ "builtIn": { "email": { "enabled": null } } }),
             json!({ "builtIn": { "email": { "enabled": 1 } } }),
             json!({ "builtIn": { "email": { "enabled": true, "extra": 1 } } }),
+            json!({ "builtIn": { "email": { "lysEnabled": "yes" } } }),
+            json!({ "builtIn": { "email": { "lysEnabled": null } } }),
             json!({ "builtIn": { "github": { "enabled": true } } }),
             json!({ "servers": [build_stdio_server_with("enabled", Value::Null)] }),
             json!({ "servers": [build_stdio_server_with("enabled", json!(1))] }),
@@ -1117,7 +1133,7 @@ mod tests {
             false,
         );
         let switch_bytes = SERVER_MAX_COUNT * r#","enabled":false"#.len()
-            + r#","builtIn":{"email":{"enabled":false}}"#.len();
+            + r#","builtIn":{"email":{"enabled":false,"lysEnabled":false}}"#.len();
 
         let settings = parse_mcp_settings(group.clone()).expect("a group at the limit");
         let failure = parse_mcp_settings(too_large_group).expect_err("a group past the limit");

@@ -255,7 +255,7 @@ describe("createMcpSettingsSlice", () => {
 
     expect(store.getState().settings.mcp).toEqual({
       servers: [ADDED_SERVER],
-      builtIn: { email: { enabled: true } }
+      builtIn: { email: { enabled: true, lysEnabled: false } }
     })
     expect(listSettingsWrites(host.commands)).toEqual([
       {
@@ -263,7 +263,7 @@ describe("createMcpSettingsSlice", () => {
           ...STORED_SETTINGS_DOCUMENT,
           mcp: {
             servers: [ADDED_SERVER],
-            builtIn: { email: { enabled: true } }
+            builtIn: { email: { enabled: true, lysEnabled: false } }
           }
         }
       }
@@ -285,7 +285,7 @@ describe("createMcpSettingsSlice", () => {
       expect(whileWriting.settings.mcp).toEqual(STORED_MCP_SETTINGS)
       expect(store.getState().settings.mcp).toEqual({
         servers: STORED_MCP_SETTINGS.servers,
-        builtIn: { email: { enabled: true } }
+        builtIn: { email: { enabled: true, lysEnabled: false } }
       })
       expect(listSettingsWrites(host.commands)).toEqual([
         {
@@ -293,7 +293,7 @@ describe("createMcpSettingsSlice", () => {
             ...STORED_SETTINGS_DOCUMENT,
             mcp: {
               servers: STORED_MCP_SETTINGS.servers,
-              builtIn: { email: { enabled: true } }
+              builtIn: { email: { enabled: true, lysEnabled: false } }
             }
           }
         }

@@ -57,8 +57,10 @@ type SettingsDocumentSecrets = {
   readonly ollamaApiKey: string | null
   /** Saved Groq key, or null. */
   readonly groqApiKey: string | null
-  /** Saved password of the email account, or null. */
+  /** Saved password of the person's email account, or null. */
   readonly emailPassword: string | null
+  /** Saved password of Lys's own email account, or null. */
+  readonly lysEmailPassword: string | null
 }
 
 /**
@@ -225,7 +227,8 @@ function buildSecretsSettings(
       "Ollama"
     ),
     groqApiKey: buildApiKey(groqApiKeySchema, secrets.groqApiKey, "Groq"),
-    emailPassword: buildEmailPassword(secrets.emailPassword)
+    emailPassword: buildEmailPassword(secrets.emailPassword),
+    lysEmailPassword: buildEmailPassword(secrets.lysEmailPassword)
   }
 }
 
@@ -606,8 +609,8 @@ export async function saveRuntimeAutoStartSettings(
 }
 
 /**
- * Persists the email account and its password together while preserving
- * everything else already on disk.
+ * Persists the person's email account and its password together while
+ * preserving everything else already on disk, Lys's account included.
  * @param account - Account to save, or null to remove the saved one.
  * @param password - Password of the account, or null to remove the saved
  * one; a secret.
@@ -632,7 +635,7 @@ export async function saveEmailAccountSettings(
     ...persistedSettings.secrets,
     emailPassword: password
   }
-  const email: EmailSettings = { account }
+  const email: EmailSettings = { ...persistedSettings.email, account }
   await saveSettings({ ...persistedSettings, secrets, email })
 }
 

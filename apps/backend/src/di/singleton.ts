@@ -32,7 +32,7 @@ import { buildLlmChatEndpoint } from "../modules/llm/llmProviderAccess"
 import { findLlmProviderAccess } from "../infrastructure/settings/llmProviderSettingsFile"
 import ToolApprovalService from "../modules/toolApproval/toolApprovalService"
 import { readJustRunToolNames } from "../infrastructure/settings/justRunToolsFile"
-import { readEmailAccount } from "../infrastructure/settings/emailAccountFile"
+import { readEmailAccounts } from "../infrastructure/settings/emailAccountFile"
 import { readMcpSettings } from "../infrastructure/settings/mcpSettingsFile"
 import { readTavilyApiKey } from "../infrastructure/settings/tavilyApiKeyFile"
 import type { BuiltInToolEntry } from "../modules/tool/builtIn/builtInTool"
@@ -477,7 +477,7 @@ function createToolServices(
     readSettings: () => readMcpSettings(config.settingsFilePath),
     builtInServers: [
       createEmailMcpServer(emailServerCommand, () =>
-        readEmailAccount(config.settingsFilePath)
+        readEmailAccounts(config.settingsFilePath)
       )
     ],
     openServer: (settings, context) =>

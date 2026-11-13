@@ -139,14 +139,15 @@ export const STORED_EMAIL_PASSWORD: EmailPassword = emailPasswordSchema.parse(
 
 /**
  * Secrets group on disk, distinct from the first-run group, which has no key:
- * a Tavily key, a Groq key, and the email account's password, and no Ollama
- * key.
+ * a Tavily key, a Groq key, and the person's email password, and no Ollama
+ * key or password of Lys's account.
  */
 const STORED_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
   tavilyApiKey: STORED_TAVILY_API_KEY,
   ollamaApiKey: null,
   groqApiKey: STORED_GROQ_API_KEY,
-  emailPassword: STORED_EMAIL_PASSWORD
+  emailPassword: STORED_EMAIL_PASSWORD,
+  lysEmailPassword: null
 })
 
 /**
@@ -219,11 +220,33 @@ export const STORED_EMAIL_ACCOUNT: EmailAccount = emailAccountSchema.parse({
 })
 
 /**
- * Email group on disk: the stored account, distinct from the first-run group,
- * which saves no account.
+ * Lys's own email account: a Fastmail account of another made-up address,
+ * so it is a mailbox other than {@link STORED_EMAIL_ACCOUNT}'s.
+ */
+export const LYS_EMAIL_ACCOUNT: EmailAccount = emailAccountSchema.parse({
+  address: "lys-fixture@fastmail.com",
+  displayName: "Lys",
+  userName: "lys-fixture@fastmail.com",
+  imap: { host: "imap.fastmail.com", port: 993, security: "tls" },
+  smtp: { host: "smtp.fastmail.com", port: 465, security: "tls" },
+  serverKeepsSentCopy: true
+})
+
+/**
+ * Password of {@link LYS_EMAIL_ACCOUNT}: a made-up value, never a password
+ * of a real account.
+ */
+export const LYS_EMAIL_PASSWORD: EmailPassword = emailPasswordSchema.parse(
+  "fixture-lys-app-password-0000"
+)
+
+/**
+ * Email group on disk: the person's stored account, distinct from the
+ * first-run group, which saves no account, and no account of Lys's.
  */
 export const STORED_EMAIL_SETTINGS: EmailSettings = Object.freeze({
-  account: STORED_EMAIL_ACCOUNT
+  account: STORED_EMAIL_ACCOUNT,
+  lysAccount: null
 })
 
 /**
@@ -283,7 +306,7 @@ export const STORED_SETTINGS: LysSettings = Object.freeze({
  */
 export const EMAIL_ON_MCP_SETTINGS: McpSettings = mcpSettingsSchema.parse({
   servers: STORED_MCP_SETTINGS.servers,
-  builtIn: { email: { enabled: true } }
+  builtIn: { email: { enabled: true, lysEnabled: false } }
 })
 
 /** {@link STORED_SETTINGS} with the email server Lys ships switched on. */

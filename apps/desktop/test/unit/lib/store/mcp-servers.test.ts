@@ -732,7 +732,7 @@ describe("useMcpServerStore", () => {
 
       expect(useLysStore.getState().settings.mcp).toEqual({
         ...STORED_MCP_SETTINGS,
-        builtIn: { email: { enabled: true } }
+        builtIn: { email: { enabled: true, lysEnabled: false } }
       })
       expect(
         host.commands.filter((invoked) => invoked.command === "save_settings")

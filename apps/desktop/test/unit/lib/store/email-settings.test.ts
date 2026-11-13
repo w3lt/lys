@@ -170,7 +170,10 @@ describe("createEmailSettingsSlice", () => {
         outcome: ACCEPTED_CHECK
       })
       expect(store.getState().emailAccountSave).toEqual({ status: "saved" })
-      expect(store.getState().settings.email).toEqual({ account: NEW_ACCOUNT })
+      expect(store.getState().settings.email).toEqual({
+        account: NEW_ACCOUNT,
+        lysAccount: null
+      })
       expect(store.getState().settings.secrets).toEqual({
         ...STORED_SETTINGS.secrets,
         emailPassword: NEW_PASSWORD
@@ -187,7 +190,7 @@ describe("createEmailSettingsSlice", () => {
               ...STORED_SETTINGS_DOCUMENT.secrets,
               emailPassword: NEW_PASSWORD
             },
-            email: { account: NEW_ACCOUNT }
+            email: { account: NEW_ACCOUNT, lysAccount: null }
           }
         }
       ])
@@ -282,7 +285,10 @@ describe("createEmailSettingsSlice", () => {
         status: "checked",
         outcome: ACCEPTED_CHECK
       })
-      expect(store.getState().settings.email).toEqual({ account: NEW_ACCOUNT })
+      expect(store.getState().settings.email).toEqual({
+        account: NEW_ACCOUNT,
+        lysAccount: null
+      })
     })
 
     it("keeps the stored account in memory and reports a failed save without the host's detail", async () => {
@@ -361,7 +367,10 @@ describe("createEmailSettingsSlice", () => {
       expect(second).toBe("busy")
       expect(backend.requests).toHaveLength(1)
       expect(listSettingsWrites(host.commands)).toHaveLength(1)
-      expect(store.getState().settings.email).toEqual({ account: NEW_ACCOUNT })
+      expect(store.getState().settings.email).toEqual({
+        account: NEW_ACCOUNT,
+        lysAccount: null
+      })
     })
 
     it("answers busy while a removal runs", async () => {
@@ -381,7 +390,10 @@ describe("createEmailSettingsSlice", () => {
 
       expect(save).toBe("busy")
       expect(backend.requests).toHaveLength(0)
-      expect(store.getState().settings.email).toEqual({ account: null })
+      expect(store.getState().settings.email).toEqual({
+        account: null,
+        lysAccount: null
+      })
     })
   })
 
@@ -407,7 +419,10 @@ describe("createEmailSettingsSlice", () => {
       expect(whileWriting).toEqual({ status: "saving" })
       expect(store.getState().emailAccountCheck).toEqual({ status: "idle" })
       expect(store.getState().emailAccountSave).toEqual({ status: "saved" })
-      expect(store.getState().settings.email).toEqual({ account: null })
+      expect(store.getState().settings.email).toEqual({
+        account: null,
+        lysAccount: null
+      })
       expect(store.getState().settings.secrets).toEqual({
         ...STORED_SETTINGS.secrets,
         emailPassword: null
@@ -420,7 +435,7 @@ describe("createEmailSettingsSlice", () => {
               ...STORED_SETTINGS_DOCUMENT.secrets,
               emailPassword: null
             },
-            email: { account: null }
+            email: { account: null, lysAccount: null }
           }
         }
       ])
@@ -463,7 +478,10 @@ describe("createEmailSettingsSlice", () => {
       expect(removal).toBe("busy")
       expect(saveEmailServerSwitchOff).not.toHaveBeenCalled()
       expect(listSettingsWrites(host.commands)).toHaveLength(1)
-      expect(store.getState().settings.email).toEqual({ account: NEW_ACCOUNT })
+      expect(store.getState().settings.email).toEqual({
+        account: NEW_ACCOUNT,
+        lysAccount: null
+      })
     })
 
     it("switches the email server off first while it is on, saving until the account is removed too", async () => {
@@ -497,7 +515,10 @@ describe("createEmailSettingsSlice", () => {
       expect(save).toBe("busy")
       expect(whileWriting).toEqual({ status: "saving" })
       expect(store.getState().emailAccountSave).toEqual({ status: "saved" })
-      expect(store.getState().settings.email).toEqual({ account: null })
+      expect(store.getState().settings.email).toEqual({
+        account: null,
+        lysAccount: null
+      })
       expect(listSettingsWrites(host.commands)).toHaveLength(1)
     })
 

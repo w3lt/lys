@@ -318,17 +318,80 @@ export type EmailAccount = z.infer<typeof emailAccountSchema>
 export type EmailAccountCandidate = z.input<typeof emailAccountSchema>
 
 /**
- * Validates the `email` settings group: the one email account the person
- * saved, or `null`. The output is frozen; unknown fields are rejected.
+ * Folds the ASCII letters of a text to lowercase and keeps every other
+ * character, as Rust's `eq_ignore_ascii_case` compares texts.
  *
- * @remarks An omitted account means none. The desktop host is the only
+ * @param text - Text to fold.
+ * @returns The folded text.
+ */
+function foldAsciiCase(text: string): string {
+  return text.replaceAll(/[A-Z]/g, (letter) => letter.toLowerCase())
+}
+
+/**
+ * Answers whether two email accounts sign in to the same mailbox: the same
+ * address, or the same user name on the same IMAP host and port, with texts
+ * compared without regard to ASCII case.
+ *
+ * @param first - One account.
+ * @param second - The other account.
+ * @returns True when the accounts are one mailbox.
+ * @remarks The desktop host checks the same rule, in its own copy, when it
+ * loads the settings file, and the email server checks it again, in a third
+ * copy, before it serves two mailboxes. Changing it changes which settings
+ * files load and requires a coordinated release of the desktop host, the
+ * backend, and the email server.
+ */
+export function isSameEmailMailbox(
+  first: EmailAccount,
+  second: EmailAccount
+): boolean {
+  if (foldAsciiCase(first.address) === foldAsciiCase(second.address))
+    return true
+  return (
+    foldAsciiCase(first.userName) === foldAsciiCase(second.userName) &&
+    foldAsciiCase(first.imap.host) === foldAsciiCase(second.imap.host) &&
+    first.imap.port === second.imap.port
+  )
+}
+
+/**
+ * Answers whether the accounts of an `email` group are distinct mailboxes:
+ * true when either account is missing.
+ *
+ * @param group - The group's two accounts, each already valid.
+ * @returns False when both accounts are saved and are one mailbox.
+ */
+function hasDistinctMailboxes(
+  group: Readonly<{
+    account: EmailAccount | null
+    lysAccount: EmailAccount | null
+  }>
+): boolean {
+  if (group.account === null || group.lysAccount === null) return true
+  return !isSameEmailMailbox(group.account, group.lysAccount)
+}
+
+/**
+ * Validates the `email` settings group: the person's email account and
+ * Lys's own, each saved or `null`. The output is frozen; unknown fields are
+ * rejected.
+ *
+ * @remarks An omitted account means none. The two accounts may not be one
+ * mailbox, as {@link isSameEmailMailbox} tells. The desktop host is the only
  * writer of the group; the backend only reads it.
  */
 export const emailSettingsSchema = z
   .strictObject({
-    /** The saved account; `null` when none is saved. */
-    account: emailAccountSchema.nullable().default(null)
+    /** The person's saved account; `null` when none is saved. */
+    account: emailAccountSchema.nullable().default(null),
+    /** Lys's own saved account; `null` when none is saved. */
+    lysAccount: emailAccountSchema.nullable().default(null)
   })
+  .refine(
+    hasDistinctMailboxes,
+    "Lys's email account must be a mailbox of its own: an address other than the person's, and not the person's user name on the same IMAP host and port."
+  )
   .readonly()
 
 /** The `email` settings group. */

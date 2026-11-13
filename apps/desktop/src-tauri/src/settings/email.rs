@@ -1,13 +1,17 @@
-//! The email account stored under the `email` settings group.
+//! The email accounts stored under the `email` settings group.
 //!
-//! The person saves one email account on the email server's card in
-//! Settings → MCP: the address mail is sent from and received at, the name
-//! sent with it, the user name the account signs in with, and the IMAP and
-//! SMTP servers Lys reaches. A missing group, a missing `account` field, and
-//! a settings file written before the group existed all mean no account. The
+//! The person saves up to two email accounts on the email server's cards in
+//! Settings → MCP: their own, as `account`, and Lys's own, as `lysAccount`.
+//! Each holds the address mail is sent from and received at, the name sent
+//! with it, the user name the account signs in with, and the IMAP and SMTP
+//! servers Lys reaches. A missing group, a missing field, and a settings file
+//! written before the field existed all mean no account. The two accounts
+//! may not be one mailbox: the same address, or the same user name on the
+//! same IMAP host and port, compared without regard to ASCII case. The
 //! backend reads the group from the saved file and starts the built-in email
-//! MCP server with it; this module only stores it. The password is not here:
-//! it lives in the `secrets` group as `emailPassword`.
+//! MCP server with it; this module only stores it. The passwords are not
+//! here: they live in the `secrets` group as `emailPassword` and
+//! `lysEmailPassword`.
 //!
 //! Every rule matches `emailSettingsSchema` in `@lys/share`, which the
 //! renderer and the backend check. A text with a lone surrogate, which that
@@ -29,13 +33,17 @@ use super::host_name::is_host_name;
 use super::json::parse_json_object;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
-/// Email account persisted under the `email` JSON object.
+#[serde(rename_all = "camelCase")]
+/// Email accounts persisted under the `email` JSON object.
 ///
-/// A missing group or a missing `account` field means no account. The group
-/// may not be `null`, and unknown fields are rejected.
+/// A missing group or a missing field means no account. The group may not
+/// be `null`, unknown fields are rejected, and the two accounts may not be
+/// one mailbox.
 pub struct EmailSettings {
-    /// The saved account; `None`, JSON `null`, when none is saved.
+    /// The person's saved account; `None`, JSON `null`, when none is saved.
     account: Option<EmailAccount>,
+    /// Lys's own saved account; `None`, JSON `null`, when none is saved.
+    lys_account: Option<EmailAccount>,
 }
 
 /// Deserializes the group and applies its rules.
@@ -45,26 +53,39 @@ impl<'de> Deserialize<'de> for EmailSettings {
     /// # Errors
     ///
     /// Returns the deserializer's error when the input is not an object with
-    /// only an `account` field, or the account breaks a rule.
+    /// only `account` and `lysAccount` fields, an account breaks a rule, or
+    /// the two accounts are one mailbox. The error never contains a value.
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
+        /// Error for two accounts that are one mailbox.
+        const SAME_MAILBOX_ERROR: &str = "Lys's email account must be a mailbox of its own: an address other than the person's, and not the person's user name on the same IMAP host and port";
+
         let stored: StoredEmailSettings = parse_json_object(deserializer)?;
+        if let (Some(account), Some(lys_account)) = (&stored.account, &stored.lys_account) {
+            if account.is_same_mailbox(lys_account) {
+                return Err(D::Error::custom(SAME_MAILBOX_ERROR));
+            }
+        }
 
         Ok(Self {
             account: stored.account,
+            lys_account: stored.lys_account,
         })
     }
 }
 
 #[derive(Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 /// The `email` JSON object before the group's own rules apply.
 struct StoredEmailSettings {
-    /// The saved account, already valid on its own; a missing field means
-    /// none.
+    /// The person's saved account, already valid on its own; a missing
+    /// field means none.
     account: Option<EmailAccount>,
+    /// Lys's own saved account, already valid on its own; a missing field
+    /// means none.
+    lys_account: Option<EmailAccount>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -110,6 +131,24 @@ impl<'de> Deserialize<'de> for EmailAccount {
             parse_json_object(deserializer).map_err(|_| D::Error::custom(ACCOUNT_SHAPE_ERROR))?;
 
         Self::try_from(stored).map_err(D::Error::custom)
+    }
+}
+
+impl EmailAccount {
+    /// Reports whether `other` signs in to the same mailbox: the same
+    /// address, or the same user name on the same IMAP host and port, with
+    /// texts compared without regard to ASCII case. Matches
+    /// `isSameEmailMailbox` in `@lys/share`.
+    fn is_same_mailbox(&self, other: &Self) -> bool {
+        self.address.0.eq_ignore_ascii_case(&other.address.0) || self.is_same_sign_in(other)
+    }
+
+    /// Reports whether `other` signs in with the same user name on the same
+    /// IMAP host and port, with texts compared without regard to ASCII case.
+    fn is_same_sign_in(&self, other: &Self) -> bool {
+        self.user_name.0.eq_ignore_ascii_case(&other.user_name.0)
+            && self.imap.host.0.eq_ignore_ascii_case(&other.imap.host.0)
+            && self.imap.port == other.imap.port
     }
 }
 
@@ -588,34 +627,71 @@ mod tests {
         }
     }
 
-    /// Checks that an email group without an account, or with a null one,
-    /// reads as no account and writes `account` as null, as the default
-    /// group does.
+    /// Checks that an email group without an account, or with null ones,
+    /// reads as no account and writes `account` and `lysAccount` as null, as
+    /// the default group does.
     #[test]
-    fn reads_a_missing_account_as_none_and_writes_a_null_account() {
-        for stored in [json!({}), json!({ "account": null })] {
+    fn reads_missing_accounts_as_none_and_writes_null_accounts() {
+        for stored in [
+            json!({}),
+            json!({ "account": null }),
+            json!({ "account": null, "lysAccount": null }),
+        ] {
             let settings = parse_email_settings(stored).expect("a group without an account");
 
             assert_eq!(
                 serde_json::to_value(&settings).expect("serialize"),
-                json!({ "account": null })
+                json!({ "account": null, "lysAccount": null })
             );
         }
         assert_eq!(
             serde_json::to_value(EmailSettings::default()).expect("serialize"),
-            json!({ "account": null })
+            json!({ "account": null, "lysAccount": null })
         );
     }
 
-    /// Checks that an email group with a valid account writes back exactly
-    /// as it was stored.
+    /// Checks that an email group with valid accounts, the person's and
+    /// Lys's, writes back exactly as it was stored.
     #[test]
-    fn writes_an_account_back_unchanged() {
-        let stored = json!({ "account": get_account() });
+    fn writes_both_accounts_back_unchanged() {
+        let mut lys_account = get_account();
+        lys_account["address"] = json!("lys@example.net");
+        lys_account["userName"] = json!("lys@example.net");
+        let stored = json!({ "account": get_account(), "lysAccount": lys_account });
 
         let settings = parse_email_settings(stored.clone()).expect("a valid group");
 
         assert_eq!(serde_json::to_value(&settings).expect("serialize"), stored);
+    }
+
+    /// Checks that a group whose two accounts are one mailbox, by address or
+    /// by user name on the same IMAP host and port, is refused by a failure
+    /// that names the rule and quotes neither address, user name, nor host.
+    #[test]
+    fn refuses_two_accounts_of_one_mailbox_without_quoting_them() {
+        let mut same_address = get_account();
+        same_address["userName"] = json!("other-sign-in");
+        let mut same_sign_in = get_account();
+        same_sign_in["address"] = json!("other@example.net");
+
+        for lys_account in [same_address, same_sign_in] {
+            let failure = parse_email_settings(json!({
+                "account": get_account(),
+                "lysAccount": lys_account
+            }))
+            .expect_err("one mailbox twice")
+            .to_string();
+
+            assert!(failure.contains("a mailbox of its own"), "{failure}");
+            for personal in [
+                "person@example.com",
+                "other@example.net",
+                "other-sign-in",
+                "imap.example.com",
+            ] {
+                assert!(!failure.contains(personal), "{failure}");
+            }
+        }
     }
 
     /// Checks that an email group is refused when it is null, an array, or

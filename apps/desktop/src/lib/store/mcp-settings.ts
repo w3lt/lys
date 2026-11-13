@@ -202,6 +202,7 @@ export function createMcpSettingsSlice(
   ): Promise<McpSettingsSaveOutcome> {
     const { servers, builtIn } = get().settings.mcp
     const serverSwitch: McpSettings["builtIn"][BuiltInMcpServerName] = {
+      ...builtIn[serverName],
       enabled: isOn
     }
     const switches: McpSettings["builtIn"] = {

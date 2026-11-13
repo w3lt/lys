@@ -288,7 +288,7 @@ describe("createSettingsGroupSaves", () => {
     expect(readStoredDocument()).toEqual({
       ...STORED_SETTINGS_DOCUMENT,
       mcp: noServers,
-      email: { account: editedAccount }
+      email: { account: editedAccount, lysAccount: null }
     })
   })
 

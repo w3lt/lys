@@ -297,8 +297,11 @@ function buildSettingsRead(
   return Object.freeze({ status: "read", settings })
 }
 
-/** The switch of a built-in server that is on. */
-const SWITCH_ON: BuiltInMcpSettings["email"] = Object.freeze({ enabled: true })
+/** The switches of the email server with the person's mailbox on. */
+const SWITCH_ON: BuiltInMcpSettings["email"] = Object.freeze({
+  enabled: true,
+  lysEnabled: false
+})
 
 /** Switches that switch the built-in email server on. */
 const EMAIL_ON: BuiltInMcpSettings = Object.freeze({ email: SWITCH_ON })

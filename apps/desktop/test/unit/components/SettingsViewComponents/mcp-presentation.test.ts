@@ -335,7 +335,7 @@ describe("listed servers", () => {
       name: "email"
     }
     const mcp = { ...EMAIL_ON_MCP_SETTINGS, servers: [emailNamedServer] }
-    const noAccount = { account: null }
+    const noAccount = { account: null, lysAccount: null }
 
     const servers = listMcpServers({ mcp, email: noAccount })
 

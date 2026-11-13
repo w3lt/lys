@@ -125,10 +125,15 @@ export type SecretsSettings = {
   /** Saved Groq API key, or null when none is saved; a secret. */
   readonly groqApiKey: GroqApiKey | null
   /**
-   * Password of the saved email account, or null when none is saved; a
-   * secret. Saved and removed together with the account.
+   * Password of the person's saved email account, or null when none is
+   * saved; a secret. Saved and removed together with the account.
    */
   readonly emailPassword: EmailPassword | null
+  /**
+   * Password of Lys's own saved email account, or null when none is saved;
+   * a secret. Saved and removed together with that account.
+   */
+  readonly lysEmailPassword: EmailPassword | null
 }
 
 /**
@@ -281,7 +286,8 @@ const INITIAL_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
   tavilyApiKey: null,
   ollamaApiKey: null,
   groqApiKey: null,
-  emailPassword: null
+  emailPassword: null,
+  lysEmailPassword: null
 })
 
 /**
@@ -318,9 +324,9 @@ const INITIAL_LOCATION_SETTINGS: LocationSettings = Object.freeze({
 /** Added MCP servers of a first-run settings file: none. */
 const NO_ADDED_MCP_SERVERS: McpSettings["servers"] = Object.freeze([])
 
-/** The email server's switch in a first-run settings file: off. */
+/** The email server's mailbox switches in a first-run settings file: off. */
 const INITIAL_EMAIL_SERVER_SWITCH: McpSettings["builtIn"]["email"] =
-  Object.freeze({ enabled: false })
+  Object.freeze({ enabled: false, lysEnabled: false })
 
 /** Switches of the MCP servers Lys ships in a first-run settings file. */
 const INITIAL_BUILT_IN_MCP_SWITCHES: McpSettings["builtIn"] = Object.freeze({
@@ -337,10 +343,13 @@ const INITIAL_MCP_SETTINGS: McpSettings = Object.freeze({
 })
 
 /**
- * Email account shown before Tauri initialization completes: none, as in a
+ * Email accounts shown before Tauri initialization completes: none, as in a
  * first-run settings file.
  */
-const INITIAL_EMAIL_SETTINGS: EmailSettings = Object.freeze({ account: null })
+const INITIAL_EMAIL_SETTINGS: EmailSettings = Object.freeze({
+  account: null,
+  lysAccount: null
+})
 
 /**
  * Renderer-side fallback settings used before Tauri initialization completes.

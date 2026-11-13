@@ -503,24 +503,35 @@ mod tests {
                     "enabled": false
                 }
             ],
-            "builtIn": { "email": { "enabled": true } }
+            "builtIn": { "email": { "enabled": true, "lysEnabled": true } }
         });
         settings["secrets"]["ollamaApiKey"] = json!("ollama-synthetic-0123456789");
         settings["secrets"]["groqApiKey"] = json!("gsk_synthetic_0123456789");
         settings["secrets"]["emailPassword"] = json!("email-synthetic-password");
+        settings["secrets"]["lysEmailPassword"] = json!("lys-email-synthetic-password");
         settings["providers"] = json!({
             "active": "groq",
             "lmStudio": { "address": "studio-box.local:1234" },
             "ollama": { "address": null }
         });
-        settings["email"] = json!({ "account": {
-            "address": "person@example.com",
-            "displayName": "A Person",
-            "userName": "person@example.com",
-            "imap": { "host": "imap.example.com", "port": 993, "security": "tls" },
-            "smtp": { "host": "smtp.example.com", "port": 587, "security": "starttls" },
-            "serverKeepsSentCopy": true
-        } });
+        settings["email"] = json!({
+            "account": {
+                "address": "person@example.com",
+                "displayName": "A Person",
+                "userName": "person@example.com",
+                "imap": { "host": "imap.example.com", "port": 993, "security": "tls" },
+                "smtp": { "host": "smtp.example.com", "port": 587, "security": "starttls" },
+                "serverKeepsSentCopy": true
+            },
+            "lysAccount": {
+                "address": "lys@example.net",
+                "displayName": "Lys",
+                "userName": "lys@example.net",
+                "imap": { "host": "imap.example.net", "port": 993, "security": "tls" },
+                "smtp": { "host": "smtp.example.net", "port": 465, "security": "tls" },
+                "serverKeepsSentCopy": false
+            }
+        });
 
         settings
     }
@@ -531,7 +542,8 @@ mod tests {
             "tavilyApiKey": null,
             "ollamaApiKey": null,
             "groqApiKey": null,
-            "emailPassword": null
+            "emailPassword": null,
+            "lysEmailPassword": null
         })
     }
 
@@ -559,12 +571,15 @@ mod tests {
     /// MCP group of a settings file that lists no server and switches every
     /// server Lys ships off.
     fn get_empty_mcp() -> Value {
-        json!({ "servers": [], "builtIn": { "email": { "enabled": false } } })
+        json!({
+            "servers": [],
+            "builtIn": { "email": { "enabled": false, "lysEnabled": false } }
+        })
     }
 
     /// Email group of a settings file without a saved account.
     fn get_empty_email() -> Value {
-        json!({ "account": null })
+        json!({ "account": null, "lysAccount": null })
     }
 
     /// Email account of the complete settings as an array of its six fields
@@ -824,9 +839,10 @@ mod tests {
     }
 
     /// Checks that loading fails with a parse failure, leaving the file's
-    /// text as it was, for an unusable MCP switch, an unusable email group or
-    /// account, an unknown field in either, or an email password with a
-    /// control character.
+    /// text as it was, for an unusable MCP switch, Lys's mailbox switch
+    /// included, an unusable email group or account, an unknown field in
+    /// either, Lys's account naming the person's mailbox, or an email
+    /// password, Lys's included, with a control character.
     #[test]
     fn fails_on_unusable_switches_or_email_settings_without_rewriting_the_file() {
         let mut null_built_in = get_complete_settings();
@@ -847,6 +863,13 @@ mod tests {
         newer_account_field["email"]["account"]["signature"] = json!("Regards");
         let mut control_character_password = get_complete_settings();
         control_character_password["secrets"]["emailPassword"] = json!("email-synthetic\n");
+        let mut same_mailbox_twice = get_complete_settings();
+        same_mailbox_twice["email"]["lysAccount"] =
+            get_complete_settings()["email"]["account"].clone();
+        let mut control_character_lys_password = get_complete_settings();
+        control_character_lys_password["secrets"]["lysEmailPassword"] = json!("lys-synthetic\n");
+        let mut text_lys_switch = get_complete_settings();
+        text_lys_switch["mcp"]["builtIn"]["email"]["lysEnabled"] = json!("on");
         let unusable_files = [
             null_built_in.to_string(),
             unknown_built_in_server.to_string(),
@@ -857,6 +880,9 @@ mod tests {
             newer_email_field.to_string(),
             newer_account_field.to_string(),
             control_character_password.to_string(),
+            same_mailbox_twice.to_string(),
+            control_character_lys_password.to_string(),
+            text_lys_switch.to_string(),
         ];
 
         for stored_text in unusable_files {
@@ -1078,11 +1104,12 @@ mod tests {
         );
     }
 
-    /// Checks that loading reads the saved email group and its password as
-    /// stored, and that the settings' `Debug` output holds none of the
-    /// account's address, name, IMAP host, or password.
+    /// Checks that loading reads the saved email group, the person's account
+    /// and Lys's, and both passwords as stored, and that the settings'
+    /// `Debug` output holds none of either account's address, name, IMAP
+    /// host, or password.
     #[test]
-    fn reads_the_saved_email_account_and_hides_it_and_its_password_from_debug_output() {
+    fn reads_the_saved_email_accounts_and_hides_them_and_their_passwords_from_debug_output() {
         let directory = TestDirectory::create("settings-email");
         let path = directory.create_file("settings.json", get_complete_settings().to_string());
 
@@ -1094,12 +1121,18 @@ mod tests {
             settings_json["secrets"]["emailPassword"],
             json!("email-synthetic-password")
         );
+        assert_eq!(
+            settings_json["secrets"]["lysEmailPassword"],
+            json!("lys-email-synthetic-password")
+        );
         let debug_output = format!("{settings:?}");
         for personal in [
             "person@example.com",
             "A Person",
             "imap.example.com",
             "email-synthetic",
+            "lys@example.net",
+            "imap.example.net",
         ] {
             assert!(!debug_output.contains(personal), "{debug_output}");
         }

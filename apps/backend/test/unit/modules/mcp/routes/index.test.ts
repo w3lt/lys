@@ -12,7 +12,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
-import { readEmailAccount } from "../../../../../src/infrastructure/settings/emailAccountFile"
+import { readEmailAccounts } from "../../../../../src/infrastructure/settings/emailAccountFile"
 import { readMcpSettings } from "../../../../../src/infrastructure/settings/mcpSettingsFile"
 import EmailAccountChecker, {
   type EmailAccountCheckEvent
@@ -225,7 +225,7 @@ async function createMcpRouteApp(
   const builtInServers: BuiltInMcpServer[] = options.withBuiltInEmailServer
     ? [
         createEmailMcpServer(emailServerCommand, () =>
-          readEmailAccount(settingsFilePath)
+          readEmailAccounts(settingsFilePath)
         )
       ]
     : []

@@ -6,7 +6,7 @@ import {
   type McpEnvironmentVariable,
   type McpServerSettings
 } from "@lys/share"
-import type { EmailAccountRead } from "../../../../infrastructure/settings/emailAccountFile"
+import type { EmailAccountsRead } from "../../../../infrastructure/settings/emailAccountFile"
 import type {
   BuiltInMcpServer,
   BuiltInMcpServerRead
@@ -54,18 +54,19 @@ export function buildEmailServerCommand(
  *
  * @param serverCommand - How the email server is run; borrowed for the
  * server's lifetime.
- * @param readAccount - Reads the saved email account and its password
+ * @param readAccounts - Reads the saved email accounts and their passwords
  * again; borrowed for the server's lifetime.
  * @returns A frozen server named `email` over stdio, whose read builds the
- * settings that start the server with the saved account and password in
- * the {@link EMAIL_ACCOUNT_VARIABLE_NAME} variable; a missing account reads
- * as `account-missing`, and an account or password that fails its rules,
- * or a settings file that could not be read, as `account-invalid`.
+ * settings that start the server with the person's saved account and
+ * password in the {@link EMAIL_ACCOUNT_VARIABLE_NAME} variable; a missing
+ * account reads as `account-missing`, and an account or password that fails
+ * its rules, or a settings file that could not be read, as
+ * `account-invalid`.
  * @remarks Reads and starts nothing until the registry asks.
  */
 export function createEmailMcpServer(
   serverCommand: EmailServerCommand,
-  readAccount: () => Promise<EmailAccountRead>
+  readAccounts: () => Promise<EmailAccountsRead>
 ): BuiltInMcpServer {
   return Object.freeze({
     name: EMAIL_SERVER_NAME,
@@ -81,7 +82,7 @@ export function createEmailMcpServer(
         status: "account-invalid"
       })
 
-      const read = await readAccount()
+      const { person: read } = await readAccounts()
       switch (read.status) {
         case "read":
           return Object.freeze({

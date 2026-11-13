@@ -562,7 +562,10 @@ describe("McpPaneContent", () => {
     expect(listWrittenDocuments(host.commands)).toEqual([
       {
         ...STORED_SETTINGS_DOCUMENT,
-        mcp: { ...STORED_MCP_SETTINGS, builtIn: { email: { enabled: true } } }
+        mcp: {
+          ...STORED_MCP_SETTINGS,
+          builtIn: { email: { enabled: true, lysEnabled: false } }
+        }
       }
     ])
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, SYNC_ROUTE])
@@ -668,7 +671,7 @@ describe("McpPaneContent", () => {
     const user = userEvent.setup()
 
     const secrets = { ...STORED_SETTINGS.secrets, emailPassword: null }
-    const noAccount = { account: null }
+    const noAccount = { account: null, lysAccount: null }
     const settings = { ...STORED_SETTINGS, secrets, email: noAccount }
 
     useLysStore.setState({ settings })
@@ -829,7 +832,7 @@ describe("McpPaneContent", () => {
           ...STORED_SETTINGS_DOCUMENT.secrets,
           emailPassword: "new-app-password"
         },
-        email: { account: editedAccount }
+        email: { account: editedAccount, lysAccount: null }
       }
     ])
     expect(listMcpRouteKeys(backend)).toEqual([
@@ -1034,7 +1037,7 @@ describe("McpPaneContent", () => {
       {
         ...STORED_SETTINGS_DOCUMENT,
         secrets: { ...STORED_SETTINGS_DOCUMENT.secrets, emailPassword: null },
-        email: { account: null }
+        email: { account: null, lysAccount: null }
       }
     ])
     expect(listMcpRouteKeys(backend)).toEqual([LIST_ROUTE, SYNC_ROUTE])

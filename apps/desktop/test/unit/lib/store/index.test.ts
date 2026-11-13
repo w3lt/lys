@@ -140,7 +140,7 @@ const EVERY_GROUP_EDITED_DOCUMENT: SettingsDocument = Object.freeze({
   tools: { justRun: ["find_files"], switches: { web_search: true } },
   location: NO_LOCATION_SETTINGS,
   mcp: { ...DISK_SETTINGS_DOCUMENT.mcp, servers: [] },
-  email: { account: null }
+  email: { account: null, lysAccount: null }
 })
 
 /** Inventory listed once LM Studio is connected. */
@@ -391,7 +391,8 @@ describe("useLysStore", () => {
       tavilyApiKey: null,
       ollamaApiKey: null,
       groqApiKey: null,
-      emailPassword: null
+      emailPassword: null,
+      lysEmailPassword: null
     })
     expect(useLysStore.getState().settings.providers).toEqual({
       active: "lmStudio",

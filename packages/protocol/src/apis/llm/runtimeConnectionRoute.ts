@@ -3,24 +3,28 @@ import {
   llmServiceBusyProblemSchema,
   type LlmServiceBusyProblem
 } from "../../http/errors/llmServiceBusy"
+import { llmProviderApiParamsSchema, type LlmProviderApiParams } from "./_share"
 import { apiLlmRuntimeConnectRoute, apiLlmRuntimeStatusRoute } from "./routes"
 
 /**
- * Validates the backend's connection status to its LLM runtime.
+ * Validates the backend's connection status to one provider's LLM runtime.
  *
  * @remarks `connecting` means no attempt has settled since startup or a new
  * runtime is being acquired; `connected` means the latest acquisition or
  * availability probe succeeded; `unreachable` means the latest attempt failed
- * or a held runtime stopped answering. The values are transmitted and not
- * persisted; changing them requires coordinated consumers.
+ * or a held runtime stopped answering; `off` means the latest attempt found
+ * the provider turned off, so the backend holds no runtime for it and tried
+ * nothing. The values are transmitted and not persisted; changing them
+ * requires coordinated consumers.
  */
 const llmRuntimeConnectionStatusSchema = z.enum([
   "connecting",
   "connected",
-  "unreachable"
+  "unreachable",
+  "off"
 ])
 
-/** Backend connection status to its LLM runtime. */
+/** Backend connection status to one provider's LLM runtime. */
 export type LlmRuntimeConnectionStatus = z.infer<
   typeof llmRuntimeConnectionStatusSchema
 >
@@ -44,7 +48,8 @@ const llmRuntimeStatusApiResponseSchemas = Object.freeze({
 })
 
 /**
- * Describes the GET endpoint that reports the backend's LLM runtime connection status.
+ * Describes the GET endpoint that reports the backend's connection status to
+ * one provider's LLM runtime.
  *
  * @remarks The backend answers from its in-memory status without contacting
  * the runtime or entering the model-operation queue, so this endpoint has no
@@ -54,6 +59,7 @@ const llmRuntimeStatusApiResponseSchemas = Object.freeze({
 export const llmRuntimeStatusApi = Object.freeze({
   method: "GET",
   path: apiLlmRuntimeStatusRoute,
+  params: llmProviderApiParamsSchema,
   responses: llmRuntimeStatusApiResponseSchemas
 })
 
@@ -65,6 +71,8 @@ type LlmRuntimeStatusApiReply = {
 
 /** Fastify route type for the runtime-status response. */
 export type LlmRuntimeStatusApiRoute = {
+  /** Validated provider whose status is read. */
+  readonly Params: LlmProviderApiParams
   /** Status-specific runtime-status payloads. */
   readonly Reply: LlmRuntimeStatusApiReply
 }
@@ -76,19 +84,22 @@ const llmRuntimeConnectApiResponseSchemas = Object.freeze({
 })
 
 /**
- * Describes the POST endpoint that connects the backend to its LLM runtime.
+ * Describes the POST endpoint that connects the backend to one provider's LLM
+ * runtime.
  *
  * @remarks A connected backend keeps a runtime that still answers; otherwise
- * it acquires a new one. Concurrent requests share one attempt while it is
+ * it acquires a new one. A provider that is off is not contacted: a held
+ * runtime is released and the status is `off`. Concurrent requests share one attempt while it is
  * for the provider saved when they arrive. The attempt
  * occupies one position in the model-operation queue, so a full queue answers
  * with service-busy Problem Details and starts no attempt. A 200 response
- * carries the settled status, `connected` or `unreachable`. A client that
+ * carries the settled status, `connected`, `unreachable`, or `off`. A client that
  * disconnects does not cancel an accepted attempt.
  */
 export const llmRuntimeConnectApi = Object.freeze({
   method: "POST",
   path: apiLlmRuntimeConnectRoute,
+  params: llmProviderApiParamsSchema,
   responses: llmRuntimeConnectApiResponseSchemas
 })
 
@@ -102,6 +113,8 @@ type LlmRuntimeConnectApiReply = {
 
 /** Fastify route type for the runtime-connect response. */
 export type LlmRuntimeConnectApiRoute = {
+  /** Validated provider the backend connects to. */
+  readonly Params: LlmProviderApiParams
   /** Status-specific runtime-connect payloads. */
   readonly Reply: LlmRuntimeConnectApiReply
 }

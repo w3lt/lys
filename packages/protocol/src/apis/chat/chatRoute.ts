@@ -11,6 +11,7 @@ import {
   hasDistinctToolNames,
   hasDistinctValues,
   isEveryToolRunBy,
+  llmModelReferenceSchema,
   MAXIMUM_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_COUNT,
@@ -481,8 +482,11 @@ export const chatApiRequestBodySchema = z
     conversation: chatConversationTargetSchema,
     /** Non-empty user-authored prompt sent to the selected model. */
     message: z.string().min(1),
-    /** Non-empty model identifier resolved by the backend runtime. */
-    model: z.string().min(1),
+    /**
+     * Model the turn is sent to: its provider answers the reply, the title,
+     * and the tool keeper's searches, and the reply is stored with both.
+     */
+    model: llmModelReferenceSchema,
     /** Required generation controls; absence is not represented by this contract. */
     generationOptions: messageGenerationOptionsSchema,
     /**

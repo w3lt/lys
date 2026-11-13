@@ -10,7 +10,11 @@ import {
   type LlmProviderLoadsModelsProblem,
   type LlmRuntimeUnavailableProblem
 } from "../../http/errors/llm"
-import { llmInfoSchema } from "./_share"
+import {
+  llmInfoSchema,
+  llmProviderApiParamsSchema,
+  type LlmProviderApiParams
+} from "./_share"
 import { apiLlmLoadModelRoute } from "./routes"
 
 /**
@@ -76,11 +80,12 @@ const llmLoadModelApiResponseSchemas = Object.freeze({
  * continue under the service owner even if the requesting client disconnects.
  * Runtime-unavailable responses mean the backend has no connected LLM runtime;
  * no load ran, or the runtime stopped answering during it. A 409 response
- * means the connected provider loads its own models, so no load ran.
+ * means the provider loads its own models, so no load ran.
  */
 export const llmLoadModelApi = Object.freeze({
   method: "POST",
   path: apiLlmLoadModelRoute,
+  params: llmProviderApiParamsSchema,
   body: llmLoadModelApiRequestBodySchema,
   response: llmLoadModelApiResponseBodySchema,
   responses: llmLoadModelApiResponseSchemas
@@ -96,7 +101,7 @@ export type LlmLoadModelApiResponse = z.infer<typeof llmLoadModelApi.response>
 export type LlmLoadModelApiReply = {
   /** Metadata of the canonical model after loading completed. */
   readonly 200: LlmLoadModelApiResponse
-  /** The connected provider loads its own models; no load ran. */
+  /** The provider loads its own models; no load ran. */
   readonly 409: LlmProviderLoadsModelsProblem
   /** The load was refused before acceptance, or no LLM runtime is connected. */
   readonly 503: LlmServiceBusyProblem | LlmRuntimeUnavailableProblem
@@ -104,6 +109,8 @@ export type LlmLoadModelApiReply = {
 
 /** Fastify route type for the model-load request and response. */
 export type LlmLoadModelApiRoute = {
+  /** Validated provider whose model is loaded. */
+  readonly Params: LlmProviderApiParams
   /** Validated model identifier and load settings supplied to the backend handler. */
   readonly Body: LlmLoadModelApiRequestBody
   /** Status-specific model metadata and service-unavailable payloads. */

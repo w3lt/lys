@@ -1,10 +1,18 @@
-import type {
-  ChatToolApprovalAnswer,
-  ChatToolCall,
-  ChatToolResult
+import {
+  activityEventSchema,
+  type ActivityEvent,
+  type ActivityReply,
+  type ChatToolApprovalAnswer,
+  type ChatToolCall,
+  type ChatToolResult
 } from "@lys/protocol"
 import { describe, expect, it, vi } from "vitest"
-import { findShownToolCall, type HeldToolCall } from "@/lib/store/tool-calls"
+import {
+  findShownToolCall,
+  isReplyAwaitingApproval,
+  type HeldToolCall
+} from "@/lib/store/tool-calls"
+import { buildActivityReply } from "../../../support/activityFixtures"
 import {
   buildJsonResponse,
   createControlledRoute,
@@ -19,10 +27,13 @@ import {
 } from "../../../support/backendFake"
 import {
   buildCompletedAssistantMessage,
+  buildJob,
   buildTextPart,
   buildStreamingAssistantMessage,
   createFixtureUuidV7,
-  FIXTURE_CONVERSATION_ID
+  FIXTURE_CONVERSATION_ID,
+  FIXTURE_JOB_ID,
+  FIXTURE_JOB_REPLY_ID
 } from "../../../support/conversationFixtures"
 import { startNativeHostFake } from "../../../support/nativeHostFake"
 import {
@@ -78,6 +89,13 @@ const READ_RESULT = Object.freeze({
   status: "succeeded",
   content: "Buy milk."
 } satisfies ChatToolResult)
+
+/** Answer of a prompt that waits for the person, for the selector cases. */
+const AWAITING_PERSON_ANSWER = Object.freeze({
+  status: "awaiting-person",
+  definition: READ_TEXT_FILE,
+  input: READ_INPUT
+})
 
 /** Answer of a person who rejected a call without a reason. */
 const DECLINED_APPROVAL = Object.freeze({
@@ -171,6 +189,72 @@ function buildApprovalEvent(call: ChatToolCall) {
  */
 function buildRunEvent(call: ChatToolCall) {
   return { type: "tool-call", call }
+}
+
+/** The job's reply as the activity stream names it. */
+const JOB_REPLY_TARGET = Object.freeze({
+  conversationId: FIXTURE_JOB_ID,
+  parentConversationId: FIXTURE_CONVERSATION_ID,
+  assistantMessageId: FIXTURE_JOB_REPLY_ID
+})
+
+/** A call made inside the job: a read of the fixture notes. */
+const JOB_CALL = buildToolCall(70, "read_text_file")
+
+/** A call made inside the job to the desktop tool that reads the time. */
+const JOB_TIME_CALL = buildToolCall(71, "get_current_time", {})
+
+/** Activity event that announces the job's reply. */
+const JOB_REPLY_STARTED_EVENT = activityEventSchema.parse({
+  type: "reply-started",
+  ...JOB_REPLY_TARGET
+})
+
+/**
+ * Builds the activity event that starts every activity stream.
+ *
+ * @param replies - Backend-started replies generating now.
+ * @returns The validated `activity-snapshot` event.
+ */
+function buildActivitySnapshotEvent(
+  replies: readonly ActivityReply[]
+): ActivityEvent {
+  return activityEventSchema.parse({ type: "activity-snapshot", replies })
+}
+
+/** Activity snapshot in which the job's reply waits for {@link JOB_CALL}. */
+const JOB_PROMPT_SNAPSHOT_EVENT = buildActivitySnapshotEvent([
+  buildActivityReply({ pendingToolApprovals: [JOB_CALL] })
+])
+
+/**
+ * Builds the activity event that shows one call of the job's reply for
+ * approval.
+ *
+ * @param call - Call shown.
+ * @returns The validated `tool-approval` event.
+ */
+function buildJobApprovalEvent(call: ChatToolCall): ActivityEvent {
+  return activityEventSchema.parse({
+    type: "tool-approval",
+    ...JOB_REPLY_TARGET,
+    call
+  })
+}
+
+/**
+ * Builds the activity event that asks the desktop to run one call of the
+ * job's reply.
+ *
+ * @param call - Call to run.
+ * @returns The validated `tool-call` event.
+ */
+function buildJobRunEvent(call: ChatToolCall): ActivityEvent {
+  return activityEventSchema.parse({
+    type: "tool-call",
+    ...JOB_REPLY_TARGET,
+    call
+  })
 }
 
 /**
@@ -425,42 +509,37 @@ describe("findShownToolCall", () => {
   const shownConversationId = FIXTURE_CONVERSATION_ID
   /** Another conversation with calls of its own. */
   const otherConversationId = createFixtureUuidV7(2)
-  /** Answer of a call that waits for the person. */
-  const awaitingPerson = {
-    status: "awaiting-person",
-    definition: READ_TEXT_FILE,
-    input: {
-      runner: "client",
-      toolName: "read_text_file",
-      input: { path: "/notes/todo.md" }
-    }
-  } as const
 
   it("shows nothing before a conversation is shown", () => {
     const heldCalls = [
-      buildHeldToolCall(20, shownConversationId, awaitingPerson)
+      buildHeldToolCall(20, shownConversationId, AWAITING_PERSON_ANSWER)
     ]
 
-    expect(findShownToolCall({ heldCalls }, undefined)).toBeUndefined()
+    expect(
+      findShownToolCall({ heldCalls, activityReplies: new Map() }, undefined)
+    ).toBeUndefined()
   })
 
   it("shows the earliest call of the shown conversation that needs the person, as the same object", () => {
     const earliestWaiting = buildHeldToolCall(
       23,
       shownConversationId,
-      awaitingPerson
+      AWAITING_PERSON_ANSWER
     )
     const heldCalls = [
-      buildHeldToolCall(20, otherConversationId, awaitingPerson),
+      buildHeldToolCall(20, otherConversationId, AWAITING_PERSON_ANSWER),
       buildRunningToolCall(21, shownConversationId),
       buildHeldToolCall(22, shownConversationId, { status: "answered" }),
       earliestWaiting,
-      buildHeldToolCall(24, shownConversationId, awaitingPerson)
+      buildHeldToolCall(24, shownConversationId, AWAITING_PERSON_ANSWER)
     ]
 
-    expect(findShownToolCall({ heldCalls }, shownConversationId)).toBe(
-      earliestWaiting
-    )
+    expect(
+      findShownToolCall(
+        { heldCalls, activityReplies: new Map() },
+        shownConversationId
+      )
+    ).toBe(earliestWaiting)
   })
 
   it("shows a call whose answer failed to send", () => {
@@ -477,18 +556,88 @@ describe("findShownToolCall", () => {
       unsent
     ]
 
-    expect(findShownToolCall({ heldCalls }, shownConversationId)).toBe(unsent)
+    expect(
+      findShownToolCall(
+        { heldCalls, activityReplies: new Map() },
+        shownConversationId
+      )
+    ).toBe(unsent)
   })
 
   it("shows nothing while every call of the conversation is being handled without the person", () => {
     const heldCalls = [
       buildRunningToolCall(20, shownConversationId),
-      buildHeldToolCall(21, otherConversationId, awaitingPerson)
+      buildHeldToolCall(21, otherConversationId, AWAITING_PERSON_ANSWER)
     ]
 
     expect(
-      findShownToolCall({ heldCalls }, shownConversationId)
+      findShownToolCall(
+        { heldCalls, activityReplies: new Map() },
+        shownConversationId
+      )
     ).toBeUndefined()
+  })
+})
+
+describe("isReplyAwaitingApproval", () => {
+  it.each([
+    [
+      "waits while its prompt waits for the person",
+      buildHeldToolCall(20, FIXTURE_CONVERSATION_ID, AWAITING_PERSON_ANSWER),
+      true
+    ],
+    [
+      "waits while the answer to its prompt failed to send",
+      buildHeldToolCall(20, FIXTURE_CONVERSATION_ID, {
+        status: "send-failed",
+        toolAnswer: DECLINED_APPROVAL,
+        error: "Couldn't send the answer to Lys."
+      }),
+      true
+    ],
+    [
+      "does not wait while the answer to its prompt is being sent",
+      buildHeldToolCall(20, FIXTURE_CONVERSATION_ID, {
+        status: "sending",
+        toolAnswer: DECLINED_APPROVAL
+      }),
+      false
+    ],
+    [
+      "does not wait once its prompt was answered",
+      buildHeldToolCall(20, FIXTURE_CONVERSATION_ID, { status: "answered" }),
+      false
+    ],
+    [
+      "does not wait while the result of a run failed to send",
+      {
+        target: {
+          conversationId: FIXTURE_CONVERSATION_ID,
+          assistantMessageId: REPLY.id,
+          callId: READ_CALL.id
+        },
+        call: READ_CALL,
+        step: "run",
+        answer: {
+          status: "send-failed",
+          toolAnswer: READ_RESULT,
+          error: "Couldn't send the answer to Lys."
+        }
+      } satisfies HeldToolCall,
+      false
+    ]
+  ])("answers that a reply %s", (_label, heldCall, isAwaiting) => {
+    expect(isReplyAwaitingApproval([heldCall], REPLY.id)).toBe(isAwaiting)
+  })
+
+  it("answers that a reply does not wait when only another reply's prompt waits", () => {
+    const heldCalls = [
+      buildHeldToolCall(20, FIXTURE_CONVERSATION_ID, AWAITING_PERSON_ANSWER)
+    ]
+
+    expect(isReplyAwaitingApproval(heldCalls, createFixtureUuidV7(99))).toBe(
+      false
+    )
   })
 })
 
@@ -994,6 +1143,236 @@ describe("useToolCallStore", () => {
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
         { target: { ...otherTarget, callId: SECOND_READ_CALL.id } }
       ])
+    })
+  })
+
+  describe("handleActivityEvent", () => {
+    it("holds a prompt of a job the snapshot lists and shows it in the job and in its parent", async () => {
+      startBackendFake({})
+      const { useToolCallStore } = await loadFreshToolCallStore()
+
+      await useToolCallStore
+        .getState()
+        .handleActivityEvent(JOB_PROMPT_SNAPSHOT_EVENT)
+
+      const state = useToolCallStore.getState()
+      expect(findShownToolCall(state, FIXTURE_JOB_ID)?.call.id).toBe(
+        JOB_CALL.id
+      )
+      expect(findShownToolCall(state, FIXTURE_CONVERSATION_ID)?.call.id).toBe(
+        JOB_CALL.id
+      )
+      expect(findShownToolCall(state, createFixtureUuidV7(99))).toBeUndefined()
+      expect(
+        isReplyAwaitingApproval(state.heldCalls, FIXTURE_JOB_REPLY_ID)
+      ).toBe(true)
+    })
+
+    it("opens no connection of its own for a reply the stream announced", async () => {
+      const backend = startBackendFake({})
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await useToolCallStore
+        .getState()
+        .handleActivityEvent(JOB_REPLY_STARTED_EVENT)
+
+      useToolCallStore.getState().startReplyToolCallFollow({
+        conversationId: FIXTURE_JOB_ID,
+        assistantMessageId: FIXTURE_JOB_REPLY_ID
+      })
+      await waitForMicrotasks()
+
+      expect(backend.requests).toEqual([])
+    })
+
+    it.each([
+      ["the event that it started", JOB_REPLY_STARTED_EVENT],
+      ["a snapshot", JOB_PROMPT_SNAPSHOT_EVENT]
+    ])(
+      "ends its own follow and keeps the held prompt when the stream announces the reply in %s",
+      async (_label, announcement) => {
+        const jobEventsRoute = `GET /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/events`
+        const replyStream = startBackendEventStream()
+        const backend = startBackendFake({
+          [jobEventsRoute]: () => replyStream.response
+        })
+        const { useToolCallStore } = await loadFreshToolCallStore()
+        useToolCallStore.getState().startReplyToolCallFollow({
+          conversationId: FIXTURE_JOB_ID,
+          assistantMessageId: FIXTURE_JOB_REPLY_ID
+        })
+        await waitForMicrotasks()
+        replyStream.sendEvent({
+          type: "reply-snapshot",
+          conversationTitle: null,
+          // Sequence 61 builds the reply FIXTURE_JOB_REPLY_ID names.
+          assistantMessage: buildStreamingAssistantMessage(61, ""),
+          sources: [],
+          pendingToolCalls: [],
+          pendingToolApprovals: [JOB_CALL]
+        })
+        await waitForMicrotasks()
+        const [heldPrompt] = useToolCallStore.getState().heldCalls
+
+        await useToolCallStore.getState().handleActivityEvent(announcement)
+        await waitForMicrotasks()
+
+        expect(replyStream.isCancelled()).toBe(true)
+        expect(listRouteKeys(backend)).toEqual([jobEventsRoute])
+        expect(heldPrompt?.call.id).toBe(JOB_CALL.id)
+        expect(useToolCallStore.getState().heldCalls).toEqual([heldPrompt])
+        expect(
+          findShownToolCall(useToolCallStore.getState(), FIXTURE_JOB_ID)
+        ).toBe(heldPrompt)
+      }
+    )
+
+    it.each([
+      ["a later event", buildJobApprovalEvent(JOB_CALL)],
+      ["a new snapshot", JOB_PROMPT_SNAPSHOT_EVENT]
+    ])(
+      "holds a call once when the snapshot and %s both carry it",
+      async (_label, laterEvent) => {
+        startBackendFake({})
+        const { useToolCallStore } = await loadFreshToolCallStore()
+        await useToolCallStore
+          .getState()
+          .handleActivityEvent(JOB_PROMPT_SNAPSHOT_EVENT)
+        const [heldPrompt] = useToolCallStore.getState().heldCalls
+
+        await useToolCallStore.getState().handleActivityEvent(laterEvent)
+
+        expect(heldPrompt?.call.id).toBe(JOB_CALL.id)
+        expect(useToolCallStore.getState().heldCalls).toEqual([heldPrompt])
+        expect(useToolCallStore.getState().heldCalls[0]).toBe(heldPrompt)
+      }
+    )
+
+    it("drops the held calls of a reply the stream reports ended", async () => {
+      startBackendFake({})
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await useToolCallStore
+        .getState()
+        .handleActivityEvent(JOB_PROMPT_SNAPSHOT_EVENT)
+
+      await useToolCallStore.getState().handleActivityEvent(
+        activityEventSchema.parse({
+          type: "reply-ended",
+          ...JOB_REPLY_TARGET,
+          status: "completed"
+        })
+      )
+
+      expect(useToolCallStore.getState().heldCalls).toEqual([])
+      expect(useToolCallStore.getState().activityReplies.size).toBe(0)
+    })
+
+    it("drops the held calls of a reply a new snapshot no longer lists, and keeps those of a reply it follows itself", async () => {
+      const { replyStreams } = startReplyBackend()
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot(),
+        buildApprovalEvent(READ_CALL)
+      ])
+      await useToolCallStore
+        .getState()
+        .handleActivityEvent(JOB_PROMPT_SNAPSHOT_EVENT)
+      const whileBothWait = useToolCallStore.getState().heldCalls
+
+      await useToolCallStore
+        .getState()
+        .handleActivityEvent(buildActivitySnapshotEvent([]))
+
+      expect(whileBothWait.map(({ call }) => call.id)).toEqual([
+        READ_CALL.id,
+        JOB_CALL.id
+      ])
+      expect(useToolCallStore.getState().heldCalls).toEqual([whileBothWait[0]])
+      expect(useToolCallStore.getState().activityReplies.size).toBe(0)
+    })
+
+    it.each([
+      ["a prompt", buildJobApprovalEvent(JOB_CALL)],
+      ["a call to run", buildJobRunEvent(JOB_TIME_CALL)]
+    ])(
+      "ignores %s of a reply the stream did not announce",
+      async (_label, event) => {
+        startNativeHostFake({})
+        const backend = startBackendFake({})
+        const { useToolCallStore } = await loadFreshToolCallStore()
+
+        await useToolCallStore.getState().handleActivityEvent(event)
+        await waitForMicrotasks()
+
+        expect(useToolCallStore.getState().heldCalls).toEqual([])
+        expect(backend.requests).toEqual([])
+      }
+    )
+
+    it("sends the answer to the conversation and reply the event named", async () => {
+      const approvalRoute = `POST /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/tool-approvals/${JOB_CALL.id}`
+      const backend = startBackendFake({
+        [approvalRoute]: () => new Response(null, { status: ACCEPTED_STATUS })
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const { handleActivityEvent } = useToolCallStore.getState()
+      await handleActivityEvent(JOB_REPLY_STARTED_EVENT)
+      await handleActivityEvent(buildJobApprovalEvent(JOB_CALL))
+
+      await useToolCallStore.getState().resolveToolCall(JOB_CALL.id)
+
+      expect(listRouteKeys(backend)).toEqual([approvalRoute])
+      expect(listToolAnswers(backend)).toEqual([
+        buildSentAnswer(ALLOWED_APPROVAL)
+      ])
+    })
+
+    it("runs a desktop tool call of a job and sends its result", async () => {
+      const host = startNativeHostFake({
+        get_current_time: () => ({
+          dateTime: "2026-10-22T21:30:05+02:00",
+          weekday: "Thursday",
+          utcOffset: "+02:00",
+          timeZone: "Europe/Paris"
+        })
+      })
+      const resultRoute = `POST /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/tool-results/${JOB_TIME_CALL.id}`
+      const backend = startBackendFake({
+        [resultRoute]: () => new Response(null, { status: ACCEPTED_STATUS })
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await useToolCallStore
+        .getState()
+        .handleActivityEvent(JOB_REPLY_STARTED_EVENT)
+
+      await useToolCallStore
+        .getState()
+        .handleActivityEvent(buildJobRunEvent(JOB_TIME_CALL))
+      await waitForMicrotasks()
+
+      expect(host.commands).toEqual([{ command: "get_current_time", args: {} }])
+      expect(listRouteKeys(backend)).toEqual([resultRoute])
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { step: "run", answer: { status: "answered" } }
+      ])
+    })
+
+    it("changes nothing when a job is updated", async () => {
+      startBackendFake({})
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await useToolCallStore
+        .getState()
+        .handleActivityEvent(JOB_PROMPT_SNAPSHOT_EVENT)
+      const beforeUpdate = useToolCallStore.getState()
+
+      await useToolCallStore.getState().handleActivityEvent(
+        activityEventSchema.parse({
+          type: "job-updated",
+          parentConversationId: FIXTURE_CONVERSATION_ID,
+          job: buildJob({ state: "replied" })
+        })
+      )
+
+      expect(useToolCallStore.getState()).toBe(beforeUpdate)
     })
   })
 

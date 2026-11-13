@@ -192,8 +192,9 @@ export type ChatViewStoreDependencies = {
   /**
    * Starts answering the tool calls of a reply this store starts or follows.
    *
-   * @remarks The receiver follows the reply on its own and ignores a reply it
-   * already follows, so this store does not stop it.
+   * @remarks The receiver follows the reply on its own, or takes its calls
+   * from the activity stream when the stream announced it, and ignores a
+   * reply it already follows, so this store does not stop it.
    */
   readonly startReplyToolCallFollow: (target: ChatReplyPathParams) => void
 }
@@ -493,8 +494,8 @@ type ToolCallStoreEvent = Extract<
  *
  * @param event - Generation event of a chat or followed-reply stream.
  * @returns True for `tool-approval` and `tool-call`: the tool-call store
- * follows the reply itself and owns its prompts and calls, so the chat view
- * leaves them to it.
+ * follows the reply itself, or takes its calls from the activity stream, and
+ * owns its prompts and calls, so the chat view leaves them to it.
  */
 function isToolCallStoreEvent(
   event: ChatGenerationEvent

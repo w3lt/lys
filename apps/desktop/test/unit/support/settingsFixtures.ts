@@ -314,3 +314,23 @@ export const EMAIL_ON_SETTINGS: LysSettings = Object.freeze({
   ...STORED_SETTINGS,
   mcp: EMAIL_ON_MCP_SETTINGS
 })
+
+/**
+ * {@link STORED_SETTINGS} that also hold Lys's own account and her password,
+ * with her mailbox switched on and the person's off.
+ */
+export const LYS_MAILBOX_ON_SETTINGS: LysSettings = Object.freeze({
+  ...STORED_SETTINGS,
+  secrets: Object.freeze({
+    ...STORED_SETTINGS.secrets,
+    lysEmailPassword: LYS_EMAIL_PASSWORD
+  }),
+  email: Object.freeze({
+    ...STORED_EMAIL_SETTINGS,
+    lysAccount: LYS_EMAIL_ACCOUNT
+  }),
+  mcp: mcpSettingsSchema.parse({
+    servers: STORED_MCP_SETTINGS.servers,
+    builtIn: { email: { enabled: false, lysEnabled: true } }
+  })
+})

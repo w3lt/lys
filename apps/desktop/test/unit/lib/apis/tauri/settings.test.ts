@@ -870,7 +870,7 @@ describe("saveEmailAccountSettings", () => {
     displayName: "Ada Edited"
   }
 
-  it("replaces the email account and its password together, in one write", async () => {
+  it("replaces the person's email account and its password together, in one write", async () => {
     const host = startNativeHostFake({
       load_settings: () => ({
         ...STORED_SETTINGS_DOCUMENT,
@@ -880,7 +880,11 @@ describe("saveEmailAccountSettings", () => {
       save_settings: () => null
     })
 
-    await saveEmailAccountSettings(editedAccount, STORED_EMAIL_PASSWORD)
+    await saveEmailAccountSettings(
+      "person",
+      editedAccount,
+      STORED_EMAIL_PASSWORD
+    )
 
     expect(host.commands).toEqual([
       { command: "load_settings", args: {} },
@@ -902,7 +906,7 @@ describe("saveEmailAccountSettings", () => {
       save_settings: () => null
     })
 
-    await saveEmailAccountSettings(null, null)
+    await saveEmailAccountSettings("person", null, null)
 
     expect(host.commands.at(-1)).toEqual({
       command: "save_settings",
@@ -922,7 +926,11 @@ describe("saveEmailAccountSettings", () => {
       save_settings: () => null
     })
 
-    await saveEmailAccountSettings(editedAccount, STORED_EMAIL_PASSWORD)
+    await saveEmailAccountSettings(
+      "person",
+      editedAccount,
+      STORED_EMAIL_PASSWORD
+    )
 
     expect(host.commands.at(-1)).toEqual({
       command: "save_settings",
@@ -935,6 +943,26 @@ describe("saveEmailAccountSettings", () => {
     })
   })
 
+  it("saves and removes Lys's own account and her password, keeping the person's", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveEmailAccountSettings("lys", LYS_EMAIL_ACCOUNT, LYS_EMAIL_PASSWORD)
+    await saveEmailAccountSettings("lys", null, null)
+
+    expect(
+      host.commands.filter((invoked) => invoked.command === "save_settings")
+    ).toEqual([
+      { command: "save_settings", args: { newSettings: LYS_ACCOUNT_DOCUMENT } },
+      {
+        command: "save_settings",
+        args: { newSettings: STORED_SETTINGS_DOCUMENT }
+      }
+    ])
+  })
+
   it("writes nothing when the document cannot be loaded", async () => {
     const host = startNativeHostFake({
       load_settings: () => Promise.reject("Failed to read settings.json"),
@@ -942,7 +970,7 @@ describe("saveEmailAccountSettings", () => {
     })
 
     await expect(
-      saveEmailAccountSettings(editedAccount, STORED_EMAIL_PASSWORD)
+      saveEmailAccountSettings("person", editedAccount, STORED_EMAIL_PASSWORD)
     ).rejects.toBe("Failed to read settings.json")
     expect(host.commands.map((invoked) => invoked.command)).toEqual([
       "load_settings"
@@ -956,7 +984,7 @@ describe("saveEmailAccountSettings", () => {
     })
 
     await expect(
-      saveEmailAccountSettings(editedAccount, STORED_EMAIL_PASSWORD)
+      saveEmailAccountSettings("person", editedAccount, STORED_EMAIL_PASSWORD)
     ).rejects.toBe("Disk full")
   })
 })

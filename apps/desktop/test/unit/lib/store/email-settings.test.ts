@@ -25,6 +25,9 @@ import {
 } from "../../support/settlement"
 import {
   EMAIL_ON_SETTINGS,
+  LYS_EMAIL_ACCOUNT,
+  LYS_EMAIL_PASSWORD,
+  LYS_MAILBOX_ON_SETTINGS,
   STORED_EMAIL_ACCOUNT,
   STORED_SETTINGS,
   STORED_SETTINGS_DOCUMENT
@@ -60,8 +63,7 @@ const REFUSED_CHECK = checkEmailAccountApiResponseSchema.parse({
 })
 
 /**
- * Builds a spy for the capability a removal switches the email server off
- * with.
+ * Builds a spy for the capability a removal switches the mailbox off with.
  *
  * @param outcome - What saving the switch answers; `saved` by default.
  * @returns The spy.
@@ -126,12 +128,18 @@ function listSettingsWrites(
 }
 
 describe("createEmailSettingsSlice", () => {
-  it("starts with no save and no check", () => {
+  it("starts with no save and no check of either mailbox", () => {
     const store = createEmailStore()
 
     expect(store.getState()).toMatchObject({
-      emailAccountSave: { status: "idle" },
-      emailAccountCheck: { status: "idle" }
+      emailAccountSaves: {
+        person: { status: "idle" },
+        lys: { status: "idle" }
+      },
+      emailAccountChecks: {
+        person: { status: "idle" },
+        lys: { status: "idle" }
+      }
     })
   })
 
@@ -153,23 +161,27 @@ describe("createEmailSettingsSlice", () => {
       })
       const store = createEmailStore()
 
-      const save = store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+      const save = store
+        .getState()
+        .saveEmailAccount("person", NEW_ACCOUNT, NEW_PASSWORD)
       await waitForMicrotasks()
-      const whileChecking = store.getState().emailAccountCheck
+      const whileChecking = store.getState().emailAccountChecks.person
       expect(listSettingsWrites(host.commands)).toEqual([])
       accountCheck.responses[0]?.resolve(buildJsonResponse(200, ACCEPTED_CHECK))
       await waitForMicrotasks()
-      const whileWriting = store.getState().emailAccountSave
+      const whileWriting = store.getState().emailAccountSaves.person
       writes[0]?.resolve(null)
 
       await expect(save).resolves.toBe("saved")
       expect(whileChecking).toEqual({ status: "checking" })
       expect(whileWriting).toEqual({ status: "saving" })
-      expect(store.getState().emailAccountCheck).toEqual({
+      expect(store.getState().emailAccountChecks.person).toEqual({
         status: "checked",
         outcome: ACCEPTED_CHECK
       })
-      expect(store.getState().emailAccountSave).toEqual({ status: "saved" })
+      expect(store.getState().emailAccountSaves.person).toEqual({
+        status: "saved"
+      })
       expect(store.getState().settings.email).toEqual({
         account: NEW_ACCOUNT,
         lysAccount: null
@@ -209,14 +221,16 @@ describe("createEmailSettingsSlice", () => {
         const store = createEmailStore()
 
         await expect(
-          store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+          store.getState().saveEmailAccount("person", NEW_ACCOUNT, NEW_PASSWORD)
         ).resolves.toBe("refused")
 
-        expect(store.getState().emailAccountCheck).toEqual({
+        expect(store.getState().emailAccountChecks.person).toEqual({
           status: "checked",
           outcome
         })
-        expect(store.getState().emailAccountSave).toEqual({ status: "idle" })
+        expect(store.getState().emailAccountSaves.person).toEqual({
+          status: "idle"
+        })
         expect(store.getState().settings.email).toEqual(STORED_SETTINGS.email)
         expect(store.getState().settings.secrets).toEqual(
           STORED_SETTINGS.secrets
@@ -242,14 +256,16 @@ describe("createEmailSettingsSlice", () => {
         const store = createEmailStore()
 
         await expect(
-          store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+          store.getState().saveEmailAccount("person", NEW_ACCOUNT, NEW_PASSWORD)
         ).resolves.toBe("failed")
 
-        expect(store.getState().emailAccountCheck).toEqual({
+        expect(store.getState().emailAccountChecks.person).toEqual({
           status: "failed",
           error: "Lys couldn't reach its backend to check the account."
         })
-        expect(store.getState().emailAccountSave).toEqual({ status: "idle" })
+        expect(store.getState().emailAccountSaves.person).toEqual({
+          status: "idle"
+        })
         expect(listSettingsWrites(host.commands)).toEqual([])
       }
     )
@@ -266,10 +282,14 @@ describe("createEmailSettingsSlice", () => {
         }
       })
       const store = createEmailStore()
-      await store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
-      const afterUnaskedCheck = store.getState().emailAccountCheck
+      await store
+        .getState()
+        .saveEmailAccount("person", NEW_ACCOUNT, NEW_PASSWORD)
+      const afterUnaskedCheck = store.getState().emailAccountChecks.person
 
-      const save = store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+      const save = store
+        .getState()
+        .saveEmailAccount("person", NEW_ACCOUNT, NEW_PASSWORD)
       await waitForMicrotasks()
       await waitForMicrotasks()
       writes[0]?.resolve(null)
@@ -281,7 +301,7 @@ describe("createEmailSettingsSlice", () => {
       })
       expect(checks).toBe(2)
       expect(listSettingsWrites(host.commands)).toHaveLength(1)
-      expect(store.getState().emailAccountCheck).toEqual({
+      expect(store.getState().emailAccountChecks.person).toEqual({
         status: "checked",
         outcome: ACCEPTED_CHECK
       })
@@ -298,13 +318,15 @@ describe("createEmailSettingsSlice", () => {
       })
       const store = createEmailStore()
 
-      const save = store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+      const save = store
+        .getState()
+        .saveEmailAccount("person", NEW_ACCOUNT, NEW_PASSWORD)
       await waitForMicrotasks()
       await waitForMicrotasks()
       writes[0]?.reject("EACCES: /Users/someone/.lys/settings.json")
 
       await expect(save).resolves.toBe("failed")
-      expect(store.getState().emailAccountSave).toEqual({
+      expect(store.getState().emailAccountSaves.person).toEqual({
         status: "failed",
         error: "Lys couldn't write the email account to its settings file."
       })
@@ -328,19 +350,23 @@ describe("createEmailSettingsSlice", () => {
         }
       })
       const store = createEmailStore()
-      await store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
-      const afterFailedWrite = store.getState().emailAccountSave
+      await store
+        .getState()
+        .saveEmailAccount("person", NEW_ACCOUNT, NEW_PASSWORD)
+      const afterFailedWrite = store.getState().emailAccountSaves.person
 
       await expect(
-        store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+        store.getState().saveEmailAccount("person", NEW_ACCOUNT, NEW_PASSWORD)
       ).resolves.toBe("refused")
 
       expect(afterFailedWrite).toEqual({
         status: "failed",
         error: "Lys couldn't write the email account to its settings file."
       })
-      expect(store.getState().emailAccountSave).toEqual({ status: "idle" })
-      expect(store.getState().emailAccountCheck).toEqual({
+      expect(store.getState().emailAccountSaves.person).toEqual({
+        status: "idle"
+      })
+      expect(store.getState().emailAccountChecks.person).toEqual({
         status: "checked",
         outcome: REFUSED_CHECK
       })
@@ -354,11 +380,13 @@ describe("createEmailSettingsSlice", () => {
       })
       const store = createEmailStore()
 
-      const first = store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+      const first = store
+        .getState()
+        .saveEmailAccount("person", NEW_ACCOUNT, NEW_PASSWORD)
       await waitForMicrotasks()
       const second = await store
         .getState()
-        .saveEmailAccount(STORED_EMAIL_ACCOUNT, NEW_PASSWORD)
+        .saveEmailAccount("person", STORED_EMAIL_ACCOUNT, NEW_PASSWORD)
       accountCheck.responses[0]?.resolve(buildJsonResponse(200, ACCEPTED_CHECK))
       await waitForMicrotasks()
       writes[0]?.resolve(null)
@@ -380,11 +408,13 @@ describe("createEmailSettingsSlice", () => {
       })
       const store = createEmailStore()
 
-      const removal = store.getState().deleteEmailAccount(buildSwitchOffSpy())
+      const removal = store
+        .getState()
+        .deleteEmailAccount("person", buildSwitchOffSpy())
       await waitForMicrotasks()
       const save = await store
         .getState()
-        .saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+        .saveEmailAccount("person", NEW_ACCOUNT, NEW_PASSWORD)
       writes[0]?.resolve(null)
       await removal
 
@@ -398,27 +428,33 @@ describe("createEmailSettingsSlice", () => {
   })
 
   describe("deleteEmailAccount", () => {
-    it("removes the account and the password in one write and resets the check, leaving the switch of a server that is off alone", async () => {
+    it("removes the account and the password in one write and resets the check, leaving the switch of a mailbox that is off alone", async () => {
       const { host, writes } = startControlledSettingsHost()
       startBackendFake({
         [ACCOUNT_CHECK_ROUTE]: () => buildJsonResponse(200, REFUSED_CHECK)
       })
       const store = createEmailStore()
-      await store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+      await store
+        .getState()
+        .saveEmailAccount("person", NEW_ACCOUNT, NEW_PASSWORD)
       const saveEmailServerSwitchOff = buildSwitchOffSpy()
 
       const removal = store
         .getState()
-        .deleteEmailAccount(saveEmailServerSwitchOff)
+        .deleteEmailAccount("person", saveEmailServerSwitchOff)
       await waitForMicrotasks()
-      const whileWriting = store.getState().emailAccountSave
+      const whileWriting = store.getState().emailAccountSaves.person
       writes[0]?.resolve(null)
 
       await expect(removal).resolves.toBe("saved")
       expect(saveEmailServerSwitchOff).not.toHaveBeenCalled()
       expect(whileWriting).toEqual({ status: "saving" })
-      expect(store.getState().emailAccountCheck).toEqual({ status: "idle" })
-      expect(store.getState().emailAccountSave).toEqual({ status: "saved" })
+      expect(store.getState().emailAccountChecks.person).toEqual({
+        status: "idle"
+      })
+      expect(store.getState().emailAccountSaves.person).toEqual({
+        status: "saved"
+      })
       expect(store.getState().settings.email).toEqual({
         account: null,
         lysAccount: null
@@ -445,12 +481,14 @@ describe("createEmailSettingsSlice", () => {
       const { writes } = startControlledSettingsHost()
       const store = createEmailStore()
 
-      const removal = store.getState().deleteEmailAccount(buildSwitchOffSpy())
+      const removal = store
+        .getState()
+        .deleteEmailAccount("person", buildSwitchOffSpy())
       await waitForMicrotasks()
       writes[0]?.reject("EACCES: /Users/someone/.lys/settings.json")
 
       await expect(removal).resolves.toBe("failed")
-      expect(store.getState().emailAccountSave).toEqual({
+      expect(store.getState().emailAccountSaves.person).toEqual({
         status: "failed",
         error: "Lys couldn't write the email account to its settings file."
       })
@@ -465,12 +503,14 @@ describe("createEmailSettingsSlice", () => {
       })
       const store = createEmailStore()
 
-      const save = store.getState().saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+      const save = store
+        .getState()
+        .saveEmailAccount("person", NEW_ACCOUNT, NEW_PASSWORD)
       await waitForMicrotasks()
       const saveEmailServerSwitchOff = buildSwitchOffSpy()
       const removal = await store
         .getState()
-        .deleteEmailAccount(saveEmailServerSwitchOff)
+        .deleteEmailAccount("person", saveEmailServerSwitchOff)
       await waitForMicrotasks()
       writes[0]?.resolve(null)
       await save
@@ -484,7 +524,7 @@ describe("createEmailSettingsSlice", () => {
       })
     })
 
-    it("switches the email server off first while it is on, saving until the account is removed too", async () => {
+    it("switches the mailbox off first while it is on, saving until the account is removed too", async () => {
       const { host, writes } = startControlledSettingsHost()
       const store = createEmailStore(EMAIL_ON_SETTINGS)
       const switchOff = createControlledPromise<McpSettingsSaveOutcome>()
@@ -492,19 +532,19 @@ describe("createEmailSettingsSlice", () => {
 
       const removal = store
         .getState()
-        .deleteEmailAccount(saveEmailServerSwitchOff)
+        .deleteEmailAccount("person", saveEmailServerSwitchOff)
       await waitForMicrotasks()
-      const whileSwitching = store.getState().emailAccountSave
+      const whileSwitching = store.getState().emailAccountSaves.person
       const writesWhileSwitching = listSettingsWrites(host.commands).length
       const secondRemoval = await store
         .getState()
-        .deleteEmailAccount(buildSwitchOffSpy())
+        .deleteEmailAccount("person", buildSwitchOffSpy())
       const save = await store
         .getState()
-        .saveEmailAccount(NEW_ACCOUNT, NEW_PASSWORD)
+        .saveEmailAccount("person", NEW_ACCOUNT, NEW_PASSWORD)
       switchOff.resolve("saved")
       await waitForMicrotasks()
-      const whileWriting = store.getState().emailAccountSave
+      const whileWriting = store.getState().emailAccountSaves.person
       writes[0]?.resolve(null)
 
       await expect(removal).resolves.toBe("saved")
@@ -514,7 +554,9 @@ describe("createEmailSettingsSlice", () => {
       expect(secondRemoval).toBe("busy")
       expect(save).toBe("busy")
       expect(whileWriting).toEqual({ status: "saving" })
-      expect(store.getState().emailAccountSave).toEqual({ status: "saved" })
+      expect(store.getState().emailAccountSaves.person).toEqual({
+        status: "saved"
+      })
       expect(store.getState().settings.email).toEqual({
         account: null,
         lysAccount: null
@@ -523,11 +565,11 @@ describe("createEmailSettingsSlice", () => {
     })
 
     it.each(["failed", "busy"] as const)(
-      "keeps the account and says why when switching the email server off answers %s, writing nothing",
+      "keeps the account and says why when switching the mailbox off answers %s, writing nothing",
       async (outcome) => {
         /** Why a removal kept the account because the server stayed on. */
         const switchOffFailure =
-          "Lys couldn't switch the email server off, so the account wasn't removed."
+          "Lys couldn't switch this mailbox off, so the account wasn't removed."
 
         const host = startNativeHostFake({
           load_settings: () => STORED_SETTINGS_DOCUMENT,
@@ -536,10 +578,12 @@ describe("createEmailSettingsSlice", () => {
         const store = createEmailStore(EMAIL_ON_SETTINGS)
 
         await expect(
-          store.getState().deleteEmailAccount(buildSwitchOffSpy(outcome))
+          store
+            .getState()
+            .deleteEmailAccount("person", buildSwitchOffSpy(outcome))
         ).resolves.toBe("failed")
 
-        expect(store.getState().emailAccountSave).toEqual({
+        expect(store.getState().emailAccountSaves.person).toEqual({
           status: "failed",
           error: switchOffFailure
         })
@@ -550,5 +594,118 @@ describe("createEmailSettingsSlice", () => {
         expect(listSettingsWrites(host.commands)).toEqual([])
       }
     )
+  })
+
+  describe("Lys's own mailbox", () => {
+    it("saves her account and password in fields of their own, keeping the person's account, save, and check", async () => {
+      const host = startNativeHostFake({
+        load_settings: () => STORED_SETTINGS_DOCUMENT,
+        save_settings: () => null
+      })
+      startBackendFake({
+        [ACCOUNT_CHECK_ROUTE]: () => buildJsonResponse(200, ACCEPTED_CHECK)
+      })
+      const store = createEmailStore()
+
+      await expect(
+        store
+          .getState()
+          .saveEmailAccount("lys", LYS_EMAIL_ACCOUNT, LYS_EMAIL_PASSWORD)
+      ).resolves.toBe("saved")
+
+      expect(store.getState().settings.email).toEqual({
+        account: STORED_EMAIL_ACCOUNT,
+        lysAccount: LYS_EMAIL_ACCOUNT
+      })
+      expect(store.getState().settings.secrets).toEqual({
+        ...STORED_SETTINGS.secrets,
+        lysEmailPassword: LYS_EMAIL_PASSWORD
+      })
+      expect(store.getState().emailAccountSaves).toEqual({
+        person: { status: "idle" },
+        lys: { status: "saved" }
+      })
+      expect(store.getState().emailAccountChecks.person).toEqual({
+        status: "idle"
+      })
+      expect(listSettingsWrites(host.commands)).toEqual([
+        {
+          newSettings: {
+            ...STORED_SETTINGS_DOCUMENT,
+            secrets: {
+              ...STORED_SETTINGS_DOCUMENT.secrets,
+              lysEmailPassword: LYS_EMAIL_PASSWORD
+            },
+            email: {
+              account: STORED_EMAIL_ACCOUNT,
+              lysAccount: LYS_EMAIL_ACCOUNT
+            }
+          }
+        }
+      ])
+    })
+
+    it("checks her account while the person's check runs", async () => {
+      startControlledSettingsHost()
+      const accountCheck = createControlledRoute()
+      const backend = startBackendFake({
+        [ACCOUNT_CHECK_ROUTE]: accountCheck.route
+      })
+      const store = createEmailStore()
+
+      const person = store
+        .getState()
+        .saveEmailAccount("person", NEW_ACCOUNT, NEW_PASSWORD)
+      await waitForMicrotasks()
+      const lys = store
+        .getState()
+        .saveEmailAccount("lys", LYS_EMAIL_ACCOUNT, LYS_EMAIL_PASSWORD)
+      await waitForMicrotasks()
+      const checksWhileBothRun = store.getState().emailAccountChecks
+      for (const response of accountCheck.responses)
+        response.resolve(buildJsonResponse(200, REFUSED_CHECK))
+
+      await expect(Promise.all([person, lys])).resolves.toEqual([
+        "refused",
+        "refused"
+      ])
+      expect(checksWhileBothRun).toEqual({
+        person: { status: "checking" },
+        lys: { status: "checking" }
+      })
+      expect(backend.requests.map((request) => request.body)).toEqual([
+        { account: NEW_ACCOUNT, password: NEW_PASSWORD },
+        { account: LYS_EMAIL_ACCOUNT, password: LYS_EMAIL_PASSWORD }
+      ])
+    })
+
+    it("removes her account and password after switching only her mailbox off", async () => {
+      startNativeHostFake({
+        load_settings: () => STORED_SETTINGS_DOCUMENT,
+        save_settings: () => null
+      })
+      const store = createEmailStore(LYS_MAILBOX_ON_SETTINGS)
+      const saveMailboxSwitchOff = buildSwitchOffSpy()
+      const personRemovalSwitchOff = buildSwitchOffSpy()
+
+      await expect(
+        store.getState().deleteEmailAccount("lys", saveMailboxSwitchOff)
+      ).resolves.toBe("saved")
+      await store
+        .getState()
+        .deleteEmailAccount("person", personRemovalSwitchOff)
+
+      expect(saveMailboxSwitchOff).toHaveBeenCalledOnce()
+      expect(personRemovalSwitchOff).not.toHaveBeenCalled()
+      expect(store.getState().settings.email).toEqual({
+        account: null,
+        lysAccount: null
+      })
+      expect(store.getState().settings.secrets).toEqual({
+        ...STORED_SETTINGS.secrets,
+        emailPassword: null,
+        lysEmailPassword: null
+      })
+    })
   })
 })

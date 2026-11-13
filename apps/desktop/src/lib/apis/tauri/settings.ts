@@ -16,6 +16,10 @@ import {
   type ModelLoadConfiguration
 } from "@lys/share"
 
+import {
+  buildEmailMailboxAccountSettings,
+  type EmailMailbox
+} from "@/lib/models/email-mailbox"
 import type {
   GenerationSettings,
   LoadConfigurationSettings,
@@ -609,8 +613,12 @@ export async function saveRuntimeAutoStartSettings(
 }
 
 /**
- * Persists the person's email account and its password together while
- * preserving everything else already on disk, Lys's account included.
+ * Persists one mailbox's email account and its password together while
+ * preserving everything else already on disk, the other mailbox's account
+ * included.
+ * @param mailbox - Whose account it is: the person's, kept in `account`
+ * and `emailPassword`, or Lys's own, kept in `lysAccount` and
+ * `lysEmailPassword`.
  * @param account - Account to save, or null to remove the saved one.
  * @param password - Password of the account, or null to remove the saved
  * one; a secret.
@@ -627,16 +635,17 @@ export async function saveRuntimeAutoStartSettings(
  * group or each other's stale key.
  */
 export async function saveEmailAccountSettings(
+  mailbox: EmailMailbox,
   account: EmailAccount | null,
   password: EmailPassword | null
 ): Promise<void> {
   const persistedSettings = await loadSettings()
-  const secrets: SecretsSettings = {
-    ...persistedSettings.secrets,
-    emailPassword: password
-  }
-  const email: EmailSettings = { ...persistedSettings.email, account }
-  await saveSettings({ ...persistedSettings, secrets, email })
+  await saveSettings(
+    buildEmailMailboxAccountSettings(persistedSettings, mailbox, {
+      account,
+      password
+    })
+  )
 }
 
 /**

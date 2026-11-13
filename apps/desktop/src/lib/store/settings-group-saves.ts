@@ -11,6 +11,7 @@ import {
   saveSecretsSettings,
   saveToolSettings
 } from "@/lib/apis/tauri/settings"
+import type { EmailMailbox } from "@/lib/models/email-mailbox"
 
 import type {
   GenerationSettings,
@@ -94,15 +95,17 @@ export type SettingsGroupSaves = {
    */
   readonly saveMcpSettings: (mcp: McpSettings) => Promise<void>
   /**
-   * Saves the email account and its password, in one write, after every
-   * save sent earlier has settled.
+   * Saves one mailbox's email account and its password, in one write, after
+   * every save sent earlier has settled.
    *
+   * @param mailbox - Whose account it is.
    * @param account - Account to persist, or null to remove the saved one.
    * @param password - Its password, or null to remove the saved one.
    * @returns Resolves after the settings file is written, and rejects with
    * the native load or save rejection.
    */
   readonly saveEmailAccountSettings: (
+    mailbox: EmailMailbox,
     account: EmailAccount | null,
     password: EmailPassword | null
   ) => Promise<void>
@@ -182,9 +185,9 @@ export function createSettingsGroupSaves(): SettingsGroupSaves {
       saveSettingsGroupInOrder(() => saveLocationSettings(location)),
     saveMcpSettings: (mcp) =>
       saveSettingsGroupInOrder(() => saveMcpSettings(mcp)),
-    saveEmailAccountSettings: (account, password) =>
+    saveEmailAccountSettings: (mailbox, account, password) =>
       saveSettingsGroupInOrder(() =>
-        saveEmailAccountSettings(account, password)
+        saveEmailAccountSettings(mailbox, account, password)
       ),
     saveRuntimeAutoStartSettings: (autoStart) =>
       saveSettingsGroupInOrder(() => saveRuntimeAutoStartSettings(autoStart))

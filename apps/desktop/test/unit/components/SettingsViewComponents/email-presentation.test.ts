@@ -34,7 +34,7 @@ import {
 type EmailAccountStatusInput = Parameters<typeof formatEmailAccountMessage>[0]
 
 /** The fields of an empty card. */
-const EMPTY_DRAFT = buildEmailAccountDraft(null)
+const EMPTY_DRAFT = buildEmailAccountDraft(null, "person")
 
 /** A valid edit of the stored account. */
 const CHANGED_PARSE: EmailAccountDraftParse = Object.freeze({
@@ -276,7 +276,7 @@ describe("formatEmailAccountMessage", () => {
     expect(
       formatEmailAccountMessage({ ...RESTING_INPUT, savedAccount: null })
     ).toEqual({
-      text: "No account yet. The email server stays off until you save one.",
+      text: "No account yet. This mailbox stays off until you save one.",
       tone: "muted"
     })
   })
@@ -391,7 +391,7 @@ describe("formatEmailAccountMessage", () => {
       "an empty card nobody typed in",
       { savedAccount: null, draftParse: INVALID_PARSE },
       {
-        text: "No account yet. The email server stays off until you save one.",
+        text: "No account yet. This mailbox stays off until you save one.",
         tone: "muted"
       }
     ],
@@ -576,7 +576,7 @@ describe("formatEmailAccountMessage", () => {
         saveState: SAVED_STATE
       })
     ).toEqual({
-      text: "No account yet. The email server stays off until you save one.",
+      text: "No account yet. This mailbox stays off until you save one.",
       tone: "muted"
     })
   })

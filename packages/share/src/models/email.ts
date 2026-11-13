@@ -332,6 +332,42 @@ function foldAsciiCase(text: string): string {
 }
 
 /**
+ * Answers whether two email accounts have the same address, compared
+ * without regard to ASCII case: one half of {@link isSameEmailMailbox}.
+ *
+ * @param first - One account.
+ * @param second - The other account.
+ * @returns True when the addresses are equal.
+ */
+export function isSameEmailAddress(
+  first: EmailAccount,
+  second: EmailAccount
+): boolean {
+  return foldAsciiCase(first.address) === foldAsciiCase(second.address)
+}
+
+/**
+ * Answers whether two email accounts sign in with the same user name on
+ * the same IMAP host and port, with texts compared without regard to ASCII
+ * case: the other half of {@link isSameEmailMailbox}.
+ *
+ * @param first - One account.
+ * @param second - The other account.
+ * @returns True when both sign in alike.
+ */
+export function isSameEmailSignIn(
+  first: EmailAccount,
+  second: EmailAccount
+): boolean {
+  if (foldAsciiCase(first.userName) !== foldAsciiCase(second.userName))
+    return false
+  return (
+    foldAsciiCase(first.imap.host) === foldAsciiCase(second.imap.host) &&
+    first.imap.port === second.imap.port
+  )
+}
+
+/**
  * Answers whether two email accounts sign in to the same mailbox: the same
  * address, or the same user name on the same IMAP host and port, with texts
  * compared without regard to ASCII case.
@@ -349,13 +385,7 @@ export function isSameEmailMailbox(
   first: EmailAccount,
   second: EmailAccount
 ): boolean {
-  if (foldAsciiCase(first.address) === foldAsciiCase(second.address))
-    return true
-  return (
-    foldAsciiCase(first.userName) === foldAsciiCase(second.userName) &&
-    foldAsciiCase(first.imap.host) === foldAsciiCase(second.imap.host) &&
-    first.imap.port === second.imap.port
-  )
+  return isSameEmailAddress(first, second) || isSameEmailSignIn(first, second)
 }
 
 /**

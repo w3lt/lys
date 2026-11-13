@@ -7,6 +7,13 @@ import {
 } from "@lys/share"
 import type { StoreApi } from "zustand"
 
+import {
+  buildEmailMailboxSwitches,
+  readEmailMailboxAccount,
+  type EmailMailbox,
+  type EmailMailboxSwitches
+} from "@/lib/models/email-mailbox"
+
 import type { LysSettings } from "./settings"
 
 /** Lifecycle of the latest save of the MCP servers. */
@@ -53,7 +60,9 @@ export type McpSettingsSlice = {
   ) => Promise<McpSettingsSaveOutcome>
   /**
    * Saves the switch of one MCP server Lys ships, keeping the added servers
-   * as they are.
+   * as they are. For `email`, whose switch sums up its mailboxes' switches,
+   * off switches both mailboxes off and on switches on each mailbox whose
+   * account is saved.
    * @param serverName - Name of the built-in server.
    * @param isOn - Whether the backend starts the server.
    * @returns `saved` after the settings file holds the switch and the store
@@ -64,6 +73,19 @@ export type McpSettingsSlice = {
    */
   readonly saveBuiltInMcpServerSwitch: (
     serverName: BuiltInMcpServerName,
+    isOn: boolean
+  ) => Promise<McpSettingsSaveOutcome>
+  /**
+   * Saves the switch of one mailbox of the email server, keeping the other
+   * mailbox's switch and the added servers as they are.
+   * @param mailbox - The mailbox.
+   * @param isOn - Whether the email server serves it.
+   * @returns The outcome, as {@link McpSettingsSlice.saveBuiltInMcpServerSwitch}
+   * gives it.
+   * @remarks Saving does not apply the switch, as for the server's switch.
+   */
+  readonly saveEmailMailboxSwitch: (
+    mailbox: EmailMailbox,
     isOn: boolean
   ) => Promise<McpSettingsSaveOutcome>
 }
@@ -191,6 +213,19 @@ export function createMcpSettingsSlice(
   }
 
   /**
+   * Saves the email server's mailbox switches, keeping the added servers
+   * and the other built-in servers' switches.
+   * @param email - The email server's new switches.
+   * @returns The save outcome.
+   */
+  function saveEmailSwitches(
+    email: EmailMailboxSwitches
+  ): Promise<McpSettingsSaveOutcome> {
+    const { servers, builtIn } = get().settings.mcp
+    return saveMcpGroup({ servers, builtIn: { ...builtIn, email } })
+  }
+
+  /**
    * Implements {@link McpSettingsSlice.saveBuiltInMcpServerSwitch}.
    * @param serverName - Name of the built-in server.
    * @param isOn - Whether the backend starts it.
@@ -200,21 +235,34 @@ export function createMcpSettingsSlice(
     serverName: BuiltInMcpServerName,
     isOn: boolean
   ): Promise<McpSettingsSaveOutcome> {
-    const { servers, builtIn } = get().settings.mcp
-    const serverSwitch: McpSettings["builtIn"][BuiltInMcpServerName] = {
-      ...builtIn[serverName],
-      enabled: isOn
+    const { settings } = get()
+    switch (serverName) {
+      case "email":
+        return saveEmailSwitches({
+          enabled: isOn && readEmailMailboxAccount(settings, "person") !== null,
+          lysEnabled: isOn && readEmailMailboxAccount(settings, "lys") !== null
+        })
     }
-    const switches: McpSettings["builtIn"] = {
-      ...builtIn,
-      [serverName]: serverSwitch
-    }
-    return saveMcpGroup({ servers, builtIn: switches })
+  }
+
+  /**
+   * Implements {@link McpSettingsSlice.saveEmailMailboxSwitch}.
+   * @param mailbox - The mailbox.
+   * @param isOn - Whether the email server serves it.
+   * @returns The save outcome.
+   */
+  function saveEmailMailboxSwitch(
+    mailbox: EmailMailbox,
+    isOn: boolean
+  ): Promise<McpSettingsSaveOutcome> {
+    const switches = get().settings.mcp.builtIn.email
+    return saveEmailSwitches(buildEmailMailboxSwitches(switches, mailbox, isOn))
   }
 
   return {
     mcpSettingsSave: IDLE_SAVE,
     saveMcpServers,
-    saveBuiltInMcpServerSwitch
+    saveBuiltInMcpServerSwitch,
+    saveEmailMailboxSwitch
   }
 }

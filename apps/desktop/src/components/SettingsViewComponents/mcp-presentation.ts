@@ -12,6 +12,7 @@ import {
   buildMcpToolNamePrefix,
   BUILT_IN_MCP_SERVER_NAMES,
   getTypedHostAndPort,
+  isBuiltInMcpServerOn,
   MAXIMUM_MCP_SERVER_COUNT,
   MAXIMUM_MCP_SERVER_NAME_LENGTH,
   type BuiltInMcpServerName,
@@ -75,11 +76,14 @@ export type McpListedServer =
       readonly kind: "built-in"
       /** Its name, which is also its key in the group's switches. */
       readonly name: BuiltInMcpServerName
-      /** Whether the person switched it on. */
+      /** Whether the person switched it on: for `email`, either mailbox. */
       readonly isOn: boolean
       /** Whether an added server has its name, which keeps it from being applied. */
       readonly isNameTaken: boolean
-      /** Whether it has what it needs to run: for `email`, a saved account. */
+      /**
+       * Whether it has what it needs to run: for `email`, the person's
+       * account or Lys's own.
+       */
       readonly isReady: boolean
     }
 
@@ -237,12 +241,14 @@ const MCP_CONNECTION_WORDS = Object.freeze({
 } satisfies Readonly<Record<McpServerTransport, McpConnectionWords>>)
 
 /** What the email server needs before it runs, and why it failed without it. */
-const EMAIL_ACCOUNT_MISSING_NOTE = "Needs an email account. Add one below."
+const EMAIL_ACCOUNT_MISSING_NOTE =
+  "Needs an email account. Add yours or Lys's below."
 
 /** How the email server is shown. */
 const EMAIL_SERVER_PRESENTATION: BuiltInMcpServerPresentation = Object.freeze({
   transport: "stdio",
-  blurb: "Reads, searches, and sends your email over IMAP and SMTP.",
+  blurb:
+    "Reads, searches, and sends your email and Lys's own over IMAP and SMTP.",
   needsNote: EMAIL_ACCOUNT_MISSING_NOTE,
   startFailure:
     "Lys couldn't start its email server. Run build.sh to install it."
@@ -259,10 +265,10 @@ const BUILT_IN_MCP_SERVER_PRESENTATIONS = Object.freeze({
  * Tells whether the email server has what it needs before it runs.
  *
  * @param settings - The `email` group.
- * @returns True once an email account is saved.
+ * @returns True once the person's account or Lys's own is saved.
  */
 function isEmailServerReady(settings: Pick<LysSettings, "email">): boolean {
-  return settings.email.account !== null
+  return settings.email.account !== null || settings.email.lysAccount !== null
 }
 
 /** State of a server whose command is starting. */
@@ -509,9 +515,9 @@ export function canSwitchMcpServer(server: McpListedServer): boolean {
  *
  * @param settings - The `mcp` and `email` groups.
  * @returns A frozen list: the servers Lys ships first, in their fixed
- * order, each with its switch, whether an added server took its name, and
- * whether it has what it needs, which for `email` is a saved account; then
- * the added servers in list order.
+ * order, each on while any of its switches is, with whether an added
+ * server took its name and whether it has what it needs, which for `email`
+ * is either saved account; then the added servers in list order.
  */
 export function listMcpServers(
   settings: Pick<LysSettings, "mcp" | "email">
@@ -533,7 +539,7 @@ export function listMcpServers(
   const builtIn = BUILT_IN_MCP_SERVER_NAMES.map((name): McpListedServer => ({
     kind: "built-in",
     name,
-    isOn: settings.mcp.builtIn[name].enabled,
+    isOn: isBuiltInMcpServerOn(settings.mcp.builtIn, name),
     isNameTaken: addedNames.has(name),
     isReady: builtInMcpServerReadiness[name](settings)
   }))

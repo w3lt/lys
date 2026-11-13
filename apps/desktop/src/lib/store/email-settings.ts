@@ -3,13 +3,20 @@ import type {
   CheckEmailAccountApiResponse,
   EmailServerCheck
 } from "@lys/protocol"
-import type { EmailAccount, EmailPassword, EmailSettings } from "@lys/share"
+import type { EmailAccount, EmailPassword } from "@lys/share"
 import type { StoreApi } from "zustand"
 
-import type { McpSettingsSaveOutcome } from "./mcp-settings"
-import type { LysSettings, SecretsSettings } from "./settings"
+import {
+  buildEmailMailboxAccountSettings,
+  isEmailMailboxOn,
+  type EmailMailbox,
+  type EmailMailboxAccount
+} from "@/lib/models/email-mailbox"
 
-/** Lifecycle of the latest save or removal of the email account. */
+import type { McpSettingsSaveOutcome } from "./mcp-settings"
+import type { LysSettings } from "./settings"
+
+/** Lifecycle of the latest save or removal of one mailbox's account. */
 export type EmailAccountSaveState =
   | { readonly status: "idle" }
   | { readonly status: "saving" }
@@ -19,6 +26,9 @@ export type EmailAccountSaveState =
       /** Caller-safe reason, without the account, the password, or a native path. */
       readonly error: string
     }
+
+/** One state of each mailbox's account. */
+export type EmailMailboxStates<TState> = Readonly<Record<EmailMailbox, TState>>
 
 /** Lifecycle of the latest check of an account, which every save starts with. */
 export type EmailAccountCheckState =
@@ -46,56 +56,65 @@ export type EmailAccountSaveOutcome = "saved" | "refused" | "failed" | "busy"
 
 /**
  * Outcome of one removal: `saved` once the file holds no account and no
- * password, `failed` when the email server could not be switched off or the
+ * password, `failed` when the mailbox could not be switched off or the
  * removal failed, so the account stays, and `busy` when another save or
  * removal was still running, so nothing was removed.
  */
 export type EmailAccountRemovalOutcome = "saved" | "failed" | "busy"
 
-/** Email account state and its commands. */
+/** Email account state of each mailbox and its commands. */
 export type EmailSettingsSlice = {
-  /** Latest save or removal, retained across pane unmounts. */
-  readonly emailAccountSave: EmailAccountSaveState
-  /** Latest check, retained across pane unmounts. */
-  readonly emailAccountCheck: EmailAccountCheckState
+  /** Latest save or removal of each mailbox, retained across pane unmounts. */
+  readonly emailAccountSaves: EmailMailboxStates<EmailAccountSaveState>
+  /** Latest check of each mailbox, retained across pane unmounts. */
+  readonly emailAccountChecks: EmailMailboxStates<EmailAccountCheckState>
   /**
    * Signs in to the account's servers through the backend and, once both
-   * accepted, saves the account and its password together.
+   * accepted, saves it and its password together as one mailbox's.
+   * @param mailbox - Whose account it is; only its account, password, save,
+   * and check change.
    * @param account - Account that passed the shared account schema.
    * @param password - Password that passed the shared password schema.
    * @returns `saved` after the settings file holds the account and the
    * password and the store does too, `refused` when a server did not accept
    * the sign-in or the backend could not run the check, `failed` when the
    * backend could not be asked or the save failed, or `busy` without
-   * checking or saving while another save or removal runs. It never rejects.
+   * checking or saving while another save or removal of the mailbox runs.
+   * It never rejects.
    * @remarks The check ends within about a minute; a store reset does not
    * cancel it. The account is saved only after an accepted check, so the
    * file never holds an account the email server could not sign in with at
-   * that moment.
+   * that moment. The two mailboxes save independently; a save that would
+   * make them one mailbox is refused by the desktop host and fails.
    */
   readonly saveEmailAccount: (
+    mailbox: EmailMailbox,
     account: EmailAccount,
     password: EmailPassword
   ) => Promise<EmailAccountSaveOutcome>
   /**
-   * Switches the email server off while it is on, then removes the saved
-   * account and its password together.
-   * @param saveEmailServerSwitchOff - Saves the email server's switch as off
-   * and has the running backend apply it; called only while the switch is
-   * on, and expected never to reject.
+   * Switches the mailbox off while it is on, then removes its saved account
+   * and its password together.
+   * @param mailbox - Whose account to remove; only its account, password,
+   * save, and check change.
+   * @param saveMailboxSwitchOff - Saves the mailbox's switch as off and has
+   * the running backend apply it; called only while the switch is on, and
+   * expected never to reject.
    * @returns `saved` after the settings file holds neither and the store
    * does too; `failed` when the switch's save did not answer `saved`, such
    * as while another save of the MCP group runs, or when the removal
    * failed, in which case the account stays; or `busy` without switching or
-   * removing while another save or removal runs. It never rejects.
-   * @remarks The email server cannot run without an account, so it is
-   * switched off before the account goes. The save state is `saving` from
-   * the switch's save until the removal settled, so no other save or
-   * removal starts meanwhile. A removal resets the check, so an outcome of
-   * the removed account is no longer shown.
+   * removing while another save or removal of the mailbox runs. It never
+   * rejects.
+   * @remarks The email server cannot serve a mailbox without its account,
+   * so the mailbox is switched off before the account goes. The save state
+   * is `saving` from the switch's save until the removal settled, so no
+   * other save or removal of the mailbox starts meanwhile. A removal resets
+   * the check, so an outcome of the removed account is no longer shown.
    */
   readonly deleteEmailAccount: (
-    saveEmailServerSwitchOff: () => Promise<McpSettingsSaveOutcome>
+    mailbox: EmailMailbox,
+    saveMailboxSwitchOff: () => Promise<McpSettingsSaveOutcome>
   ) => Promise<EmailAccountRemovalOutcome>
 }
 
@@ -108,10 +127,11 @@ type EmailSettingsStore = EmailSettingsSlice & {
 /** Capabilities the email slice uses. */
 type EmailSettingsDependencies = {
   /**
-   * Saves the account and its password in one write, serialized with the
-   * other group saves; null removes both.
+   * Saves one mailbox's account and its password in one write, serialized
+   * with the other group saves; null removes both.
    */
   readonly saveEmailAccountSettings: (
+    mailbox: EmailMailbox,
     account: EmailAccount | null,
     password: EmailPassword | null
   ) => Promise<void>
@@ -122,26 +142,19 @@ type EmailSettingsDependencies = {
 }
 
 /**
- * Builds the settings that hold the person's account and its password, or
- * neither.
+ * Builds the states of both mailboxes with one mailbox's replaced.
  *
- * @param settings - Settings before the change.
- * @param account - Account the file now holds, or null after a removal.
- * @param password - Its password, or null after a removal.
- * @returns The settings with the person's account and email password
- * replaced, every other group, account, and secret kept.
+ * @param states - The states before the change.
+ * @param mailbox - The mailbox whose state changes.
+ * @param state - Its new state.
+ * @returns Frozen states, the other mailbox's kept.
  */
-function buildEmailAccountSettings(
-  settings: LysSettings,
-  account: EmailAccount | null,
-  password: EmailPassword | null
-): LysSettings {
-  const secrets: SecretsSettings = Object.freeze({
-    ...settings.secrets,
-    emailPassword: password
-  })
-  const email: EmailSettings = Object.freeze({ ...settings.email, account })
-  return { ...settings, secrets, email }
+function replaceMailboxState<TState>(
+  states: EmailMailboxStates<TState>,
+  mailbox: EmailMailbox,
+  state: TState
+): EmailMailboxStates<TState> {
+  return Object.freeze({ ...states, [mailbox]: state })
 }
 
 /**
@@ -259,12 +272,12 @@ export function isEmailAccountSaved(outcome: EmailAccountSaveOutcome): boolean {
  * @param dependencies - Group save and account check capabilities.
  * @returns The slice.
  * @remarks A save runs its check and its write one after the other, and no
- * second save or removal starts meanwhile, so the outcome shown always
- * concerns the account the file holds or the one just tried. The store's
- * account changes only after the file holds it, because the backend reads
- * the file: the MCP pane never shows an account as saved that the email
- * server would not get. Native writes are not cancellable; leaving the pane
- * cancels nothing.
+ * second save or removal of the same mailbox starts meanwhile, so the
+ * outcome shown always concerns the account the file holds or the one just
+ * tried. The store's account changes only after the file holds it, because
+ * the backend reads the file: the MCP pane never shows an account as saved
+ * that the email server would not get. Native writes are not cancellable;
+ * leaving the pane cancels nothing.
  */
 export function createEmailSettingsSlice(
   set: StoreApi<EmailSettingsStore>["setState"],
@@ -281,37 +294,109 @@ export function createEmailSettingsSlice(
   const idleCheck: EmailAccountCheckState = Object.freeze({ status: "idle" })
 
   /**
-   * Answers whether a save or removal, or the check of a save, runs now.
+   * Answers whether a save or removal of a mailbox's account, or the check
+   * of a save, runs now.
    *
-   * @returns True while one does, so another must wait.
+   * @param mailbox - The mailbox.
+   * @returns True while one does, so another of the mailbox must wait.
    */
-  function isBusy(): boolean {
-    const { emailAccountSave, emailAccountCheck } = get()
+  function isBusy(mailbox: EmailMailbox): boolean {
+    const { emailAccountSaves, emailAccountChecks } = get()
     return (
-      isEmailAccountSaveRunning(emailAccountSave) ||
-      isEmailAccountCheckRunning(emailAccountCheck)
+      isEmailAccountSaveRunning(emailAccountSaves[mailbox]) ||
+      isEmailAccountCheckRunning(emailAccountChecks[mailbox])
     )
   }
 
   /**
-   * Saves an account and its password, or removes both, and publishes the
-   * outcome.
+   * Publishes the latest save or removal of a mailbox's account.
    *
-   * @param account - Account to save, or null to remove the saved one.
-   * @param password - Its password, or null to remove the saved one.
+   * @param mailbox - The mailbox.
+   * @param save - Its new save state.
+   */
+  function publishSave(
+    mailbox: EmailMailbox,
+    save: EmailAccountSaveState
+  ): void {
+    set((state) => ({
+      emailAccountSaves: replaceMailboxState(
+        state.emailAccountSaves,
+        mailbox,
+        save
+      )
+    }))
+  }
+
+  /**
+   * Publishes the latest check of a mailbox's account.
+   *
+   * @param mailbox - The mailbox.
+   * @param check - Its new check state.
+   */
+  function publishCheck(
+    mailbox: EmailMailbox,
+    check: EmailAccountCheckState
+  ): void {
+    set((state) => ({
+      emailAccountChecks: replaceMailboxState(
+        state.emailAccountChecks,
+        mailbox,
+        check
+      )
+    }))
+  }
+
+  /**
+   * Publishes a new check of a mailbox's account, and the save state it
+   * starts with, in one change.
+   *
+   * @param mailbox - The mailbox.
+   * @param check - Its new check state.
+   * @param save - Its new save state.
+   */
+  function publishCheckAndSave(
+    mailbox: EmailMailbox,
+    check: EmailAccountCheckState,
+    save: EmailAccountSaveState
+  ): void {
+    set((state) => ({
+      emailAccountChecks: replaceMailboxState(
+        state.emailAccountChecks,
+        mailbox,
+        check
+      ),
+      emailAccountSaves: replaceMailboxState(
+        state.emailAccountSaves,
+        mailbox,
+        save
+      )
+    }))
+  }
+
+  /**
+   * Saves a mailbox's account and its password, or removes both, and
+   * publishes the outcome.
+   *
+   * @param mailbox - The mailbox.
+   * @param saved - Account and password to save, both null to remove the
+   * saved ones.
    * @returns `saved` once the file and the store hold the new value, or
    * `failed`.
    */
   async function saveAccountWithPassword(
-    account: EmailAccount | null,
-    password: EmailPassword | null
+    mailbox: EmailMailbox,
+    saved: EmailMailboxAccount
   ): Promise<"saved" | "failed"> {
     /** Save state after a save or removal. */
-    const saved: EmailAccountSaveState = Object.freeze({ status: "saved" })
+    const savedState: EmailAccountSaveState = Object.freeze({ status: "saved" })
 
-    set({ emailAccountSave: saving })
+    publishSave(mailbox, saving)
     try {
-      await dependencies.saveEmailAccountSettings(account, password)
+      await dependencies.saveEmailAccountSettings(
+        mailbox,
+        saved.account,
+        saved.password
+      )
     } catch {
       /** Save state after a failed save or removal. */
       const saveFailed: EmailAccountSaveState = Object.freeze({
@@ -319,27 +404,33 @@ export function createEmailSettingsSlice(
         error: "Lys couldn't write the email account to its settings file."
       })
 
-      set({ emailAccountSave: saveFailed })
+      publishSave(mailbox, saveFailed)
       return "failed"
     }
-    set((state) => {
-      const settings = buildEmailAccountSettings(
+    set((state) => ({
+      settings: buildEmailMailboxAccountSettings(
         state.settings,
-        account,
-        password
+        mailbox,
+        saved
+      ),
+      emailAccountSaves: replaceMailboxState(
+        state.emailAccountSaves,
+        mailbox,
+        savedState
       )
-      return { settings, emailAccountSave: saved }
-    })
+    }))
     return "saved"
   }
 
   /**
    * Implements {@link EmailSettingsSlice.saveEmailAccount}.
+   * @param mailbox - Whose account it is.
    * @param account - Account to check and save.
    * @param password - Its password.
    * @returns The save outcome.
    */
   async function saveEmailAccount(
+    mailbox: EmailMailbox,
     account: EmailAccount,
     password: EmailPassword
   ): Promise<EmailAccountSaveOutcome> {
@@ -348,8 +439,8 @@ export function createEmailSettingsSlice(
       status: "checking"
     })
 
-    if (isBusy()) return "busy"
-    set({ emailAccountCheck: checking, emailAccountSave: idleSave })
+    if (isBusy(mailbox)) return "busy"
+    publishCheckAndSave(mailbox, checking, idleSave)
     let outcome: CheckEmailAccountApiResponse
     try {
       outcome = await dependencies.sendEmailAccountCheck({ account, password })
@@ -360,46 +451,50 @@ export function createEmailSettingsSlice(
         error: "Lys couldn't reach its backend to check the account."
       })
 
-      set({ emailAccountCheck: checkFailed })
+      publishCheck(mailbox, checkFailed)
       return "failed"
     }
-    const checked: EmailAccountCheckState = Object.freeze({
-      status: "checked",
-      outcome
-    })
-    set({ emailAccountCheck: checked })
+    publishCheck(mailbox, Object.freeze({ status: "checked", outcome }))
     if (!isEmailAccountCheckAccepted(outcome)) return "refused"
-    return await saveAccountWithPassword(account, password)
+    return await saveAccountWithPassword(mailbox, { account, password })
   }
 
   /**
    * Implements {@link EmailSettingsSlice.deleteEmailAccount}.
-   * @param saveEmailServerSwitchOff - Saves the email server's switch as off.
+   * @param mailbox - Whose account to remove.
+   * @param saveMailboxSwitchOff - Saves the mailbox's switch as off.
    * @returns The removal outcome.
    */
   async function deleteEmailAccount(
-    saveEmailServerSwitchOff: () => Promise<McpSettingsSaveOutcome>
+    mailbox: EmailMailbox,
+    saveMailboxSwitchOff: () => Promise<McpSettingsSaveOutcome>
   ): Promise<EmailAccountRemovalOutcome> {
-    if (isBusy()) return "busy"
-    set({ emailAccountCheck: idleCheck, emailAccountSave: saving })
-    if (get().settings.mcp.builtIn.email.enabled) {
+    /** Account and password of a mailbox once its account is removed. */
+    const removed: EmailMailboxAccount = Object.freeze({
+      account: null,
+      password: null
+    })
+
+    if (isBusy(mailbox)) return "busy"
+    publishCheckAndSave(mailbox, idleCheck, saving)
+    if (isEmailMailboxOn(get().settings.mcp.builtIn.email, mailbox)) {
       /**
-       * Save state after a removal that kept the account, because the email
-       * server stayed on.
+       * Save state after a removal that kept the account, because the
+       * mailbox stayed on.
        */
       const switchOffFailed: EmailAccountSaveState = Object.freeze({
         status: "failed",
         error:
-          "Lys couldn't switch the email server off, so the account wasn't removed."
+          "Lys couldn't switch this mailbox off, so the account wasn't removed."
       })
 
-      const switchOutcome = await saveEmailServerSwitchOff()
+      const switchOutcome = await saveMailboxSwitchOff()
       switch (switchOutcome) {
         case "saved":
           break
         case "failed":
         case "busy":
-          set({ emailAccountSave: switchOffFailed })
+          publishSave(mailbox, switchOffFailed)
           return "failed"
         default: {
           const unhandledOutcome: never = switchOutcome
@@ -407,12 +502,12 @@ export function createEmailSettingsSlice(
         }
       }
     }
-    return await saveAccountWithPassword(null, null)
+    return await saveAccountWithPassword(mailbox, removed)
   }
 
   return {
-    emailAccountSave: idleSave,
-    emailAccountCheck: idleCheck,
+    emailAccountSaves: Object.freeze({ person: idleSave, lys: idleSave }),
+    emailAccountChecks: Object.freeze({ person: idleCheck, lys: idleCheck }),
     saveEmailAccount,
     deleteEmailAccount
   }

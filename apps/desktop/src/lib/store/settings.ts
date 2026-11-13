@@ -243,16 +243,18 @@ export type LysSettings = {
    */
   mcp: McpSettings
   /**
-   * The email account the built-in email server works with, as the shared
-   * `email` group schema validates it, or none.
+   * The email accounts the built-in email server works with, the person's
+   * and Lys's own, as the shared `email` group schema validates them, each
+   * or none.
    *
    * @remarks Rust validates the group on load with the same rules, and the
-   * Tauri settings adapter parses it again with the shared schema. The group
-   * is saved, together with the password in the secrets group, only by Save
-   * or Remove account on the MCP pane's email server; the backend reads it
-   * from the settings file each time it starts the email server. The account
-   * is personal data: the renderer never logs it, and sends it only to the
-   * backend's account check and the Tauri settings commands.
+   * Tauri settings adapter parses it again with the shared schema. Each
+   * account is saved, together with its password in the secrets group, only
+   * by Save or Remove account on its card under the MCP pane's email server;
+   * the backend reads the group from the settings file each time it starts
+   * the email server. The accounts are personal data: the renderer never
+   * logs them, and sends them only to the backend's account check and the
+   * Tauri settings commands.
    */
   email: EmailSettings
 }

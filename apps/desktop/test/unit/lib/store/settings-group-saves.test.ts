@@ -273,6 +273,7 @@ describe("createSettingsGroupSaves", () => {
 
     const mcpSave = saves.saveMcpSettings(noServers)
     const emailSave = saves.saveEmailAccountSettings(
+      "person",
       editedAccount,
       STORED_EMAIL_PASSWORD
     )

@@ -54,12 +54,19 @@ const diffOptions = Object.freeze([
 ])
 
 /**
- * Directories git is resolved from. Only an administrator can write them, so
- * a writable entry earlier in the caller's `PATH` cannot stand in for git.
- * Git is installed there on macOS with the Command Line Tools, which the
- * repository's setup requires, and on the Linux CI runners.
+ * Absolute path of git. An absolute path keeps a writable directory in the
+ * caller's `PATH` from standing in for git. macOS with the Command Line Tools,
+ * which the repository's setup requires, and the Linux CI runners install git
+ * there.
  */
-const gitSearchPath = "/usr/bin:/bin"
+const gitExecutable = "/usr/bin/git"
+
+/**
+ * Accepted `--base` value: a branch, tag, remote-tracking ref, commit, or
+ * revision expression such as `HEAD~1`. It cannot start with `-`, so git can
+ * never read it as an option.
+ */
+const baseRefPattern = /^\w[\w./@^~-]*$/
 
 /** Largest git output read, in bytes. */
 const gitOutputLimit = 256 * 1024 * 1024
@@ -67,19 +74,15 @@ const gitOutputLimit = 256 * 1024 * 1024
 /**
  * Runs git in the repository and returns its standard output.
  *
- * @remarks Git runs with the caller's environment, which carries the index
- * a pre-commit hook uses, except that `PATH` lists only `gitSearchPath`.
  * @param root - Directory git runs in.
  * @param args - Arguments after `git`.
  * @returns Standard output.
  * @throws If git cannot run or exits with a failure status.
  */
 function runGit(root: string, args: readonly string[]): string {
-  const env = { ...process.env, PATH: gitSearchPath }
-  return execFileSync("git", args, {
+  return execFileSync(gitExecutable, args, {
     cwd: root,
     encoding: "utf8",
-    env,
     maxBuffer: gitOutputLimit
   })
 }
@@ -89,7 +92,8 @@ function runGit(root: string, args: readonly string[]): string {
  *
  * @param args - Arguments after the script path.
  * @returns The change source.
- * @throws If the arguments name no source, both sources, or unknown options.
+ * @throws If the arguments name no source, both sources, unknown options, or
+ * a base that is not a ref or commit.
  */
 function parseChangeSource(args: readonly string[]): ChangeSource {
   const staged = Object.freeze({ type: "boolean" as const })
@@ -98,6 +102,9 @@ function parseChangeSource(args: readonly string[]): ChangeSource {
   const { values } = parseArgs({ args: [...args], options })
   if (values.staged === (values.base !== undefined)) {
     throw new Error(usage)
+  }
+  if (values.base !== undefined && !baseRefPattern.test(values.base)) {
+    throw new Error(`--base must name a ref or commit: ${values.base}`)
   }
   return values.base === undefined
     ? Object.freeze({ kind: "staged" })
@@ -116,7 +123,12 @@ function listChangedFiles(checkout: Checkout): ChangedFile[] {
   if (source.kind === "staged") {
     return parseUnifiedDiff(runGit(root, [...diffOptions, "--cached"]))
   }
-  const mergeBase = runGit(root, ["merge-base", source.baseRef, "HEAD"]).trim()
+  const mergeBase = runGit(root, [
+    "merge-base",
+    "--end-of-options",
+    source.baseRef,
+    "HEAD"
+  ]).trim()
   const untrackedPaths = runGit(root, [
     "ls-files",
     "--others",

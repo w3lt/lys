@@ -37,10 +37,17 @@ describe("check-changed-code command line", () => {
     assert.match(stderr, /^Usage: /)
   })
 
-  it("rejects a base that git could read as an option", () => {
+  it("exits with status 2 when the base names no commit", () => {
+    const { status, stderr } = runCheck("--base", "refs/heads/no-such-branch")
+
+    assert.equal(status, 2)
+    assert.match(stderr, /^--base names no commit: refs\/heads\/no-such-branch/)
+  })
+
+  it("does not pass a base that looks like an option to git as one", () => {
     const { status, stderr } = runCheck("--base=--output=changed.txt")
 
     assert.equal(status, 2)
-    assert.match(stderr, /--base must name a ref or commit/)
+    assert.match(stderr, /^--base names no commit: --output=changed.txt/)
   })
 })

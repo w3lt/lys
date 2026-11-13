@@ -61,12 +61,8 @@ const diffOptions = Object.freeze([
  */
 const gitExecutable = "/usr/bin/git"
 
-/**
- * Accepted `--base` value: a branch, tag, remote-tracking ref, commit, or
- * revision expression such as `HEAD~1`. It cannot start with `-`, so git can
- * never read it as an option.
- */
-const baseRefPattern = /^\w[\w./@^~-]*$/
+/** Object name of a commit, in SHA-1 or SHA-256 hexadecimal form. */
+const commitNamePattern = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
 
 /** Largest git output read, in bytes. */
 const gitOutputLimit = 256 * 1024 * 1024
@@ -76,15 +72,39 @@ const gitOutputLimit = 256 * 1024 * 1024
  *
  * @param root - Directory git runs in.
  * @param args - Arguments after `git`.
+ * @param input - Standard input, if the command reads any.
  * @returns Standard output.
  * @throws If git cannot run or exits with a failure status.
  */
-function runGit(root: string, args: readonly string[]): string {
+function runGit(root: string, args: readonly string[], input?: string): string {
   return execFileSync(gitExecutable, args, {
     cwd: root,
     encoding: "utf8",
+    input,
     maxBuffer: gitOutputLimit
   })
+}
+
+/**
+ * Resolves the `--base` value to the commit it names.
+ *
+ * @remarks Git reads the value from standard input, never as an argument, so
+ * no value can act as an option.
+ * @param root - Repository the value is resolved in.
+ * @param baseRef - Branch, tag, commit, or revision expression.
+ * @returns The commit's object name.
+ * @throws If the value names no commit, or git fails.
+ */
+function resolveBaseCommit(root: string, baseRef: string): string {
+  const resolved = runGit(
+    root,
+    ["cat-file", "--batch-check=%(objectname)"],
+    `${baseRef}^{commit}\n`
+  ).trim()
+  if (!commitNamePattern.test(resolved)) {
+    throw new Error(`--base names no commit: ${baseRef}`)
+  }
+  return resolved
 }
 
 /**
@@ -92,8 +112,7 @@ function runGit(root: string, args: readonly string[]): string {
  *
  * @param args - Arguments after the script path.
  * @returns The change source.
- * @throws If the arguments name no source, both sources, unknown options, or
- * a base that is not a ref or commit.
+ * @throws If the arguments name no source, both sources, or unknown options.
  */
 function parseChangeSource(args: readonly string[]): ChangeSource {
   const staged = Object.freeze({ type: "boolean" as const })
@@ -103,9 +122,6 @@ function parseChangeSource(args: readonly string[]): ChangeSource {
   const isStaged = values.staged === true
   if (isStaged === (values.base !== undefined)) {
     throw new Error(usage)
-  }
-  if (values.base !== undefined && !baseRefPattern.test(values.base)) {
-    throw new Error(`--base must name a ref or commit: ${values.base}`)
   }
   return values.base === undefined
     ? Object.freeze({ kind: "staged" })
@@ -117,19 +133,15 @@ function parseChangeSource(args: readonly string[]): ChangeSource {
  *
  * @param checkout - Repository and change to inspect.
  * @returns Changed files; an untracked file counts as changed in full.
- * @throws If a git command fails.
+ * @throws If the base names no commit, or a git command fails.
  */
 function listChangedFiles(checkout: Checkout): ChangedFile[] {
   const { root, source } = checkout
   if (source.kind === "staged") {
     return parseUnifiedDiff(runGit(root, [...diffOptions, "--cached"]))
   }
-  const mergeBase = runGit(root, [
-    "merge-base",
-    "--end-of-options",
-    source.baseRef,
-    "HEAD"
-  ]).trim()
+  const baseCommit = resolveBaseCommit(root, source.baseRef)
+  const mergeBase = runGit(root, ["merge-base", baseCommit, "HEAD"]).trim()
   const untrackedPaths = runGit(root, [
     "ls-files",
     "--others",

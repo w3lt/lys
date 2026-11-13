@@ -27,6 +27,7 @@ import {
   type Mock
 } from "vitest"
 import Agent, {
+  type AgentContextInput,
   type AgentProfile,
   type AgentTurn,
   type AssistantMessageCompletion
@@ -89,7 +90,8 @@ import {
   createTextPart,
   createToolCallPart,
   createTurnUserMessage,
-  createUserMessage
+  createUserMessage,
+  UUID_V7_PATTERN
 } from "../../support/conversationFixtures"
 import { waitForMicrotasks } from "../../support/microtasks"
 import {
@@ -106,6 +108,7 @@ import {
   type BuiltInToolRunScript
 } from "../../support/scriptedBuiltInTool"
 import {
+  buildFoundToolSearchOutcome,
   LEADER_STATE_TOOL_NAMES,
   READ_TEXT_FILE_FORMAT,
   READ_TEXT_FILE_TOOL,
@@ -223,18 +226,21 @@ type ReplyStorageOverride<Capability> = (stored: Capability) => Capability
  * the case's model and meter, or the case's own.
  */
 type AgentScenario =
-  | Readonly<{
-      /** Model behavior. */
-      openReplyStream: OpenReplyStream
-      /** Context meter of the model; every context fits by default. */
-      replyContextMeter?: ReplyContextMeter
-      /** Keeper `find_tools` asks; any search fails the case by default. */
-      toolKeeper?: ToolKeeper
-    }>
+  | AgentModelScenario
   | Readonly<{
       /** Agent the case created, to read its activity while it answers. */
       agent: Agent
     }>
+
+/** Test-controlled parts of the agent a case's turn creates. */
+type AgentModelScenario = Readonly<{
+  /** Model behavior. */
+  openReplyStream: OpenReplyStream
+  /** Context meter of the model; every context fits by default. */
+  replyContextMeter?: ReplyContextMeter
+  /** Keeper `find_tools` asks; any search fails the case by default. */
+  toolKeeper?: ToolKeeper
+}>
 
 /** Test-controlled parts of one reply. */
 type AgentReplyScenario = AgentScenario & AgentTurnScenario
@@ -707,10 +713,6 @@ function createCharacterReplyContextMeter(contextLength: number) {
   } satisfies ReplyContextMeter
 }
 
-/** Matches a UUIDv7 the agent or the store gave a call or part. */
-const UUID_V7_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-
 /**
  * Builds the gate factory of one case.
  *
@@ -778,44 +780,207 @@ const UNEXPECTED_TOOL_KEEPER: ToolKeeper = Object.freeze({
 })
 
 /**
- * Creates an agent with {@link AGENT_PROFILE}.
+ * Creates an agent with {@link AGENT_PROFILE}, whose every tool search
+ * fails the case.
  *
  * @param replyModel - Model access of the case.
  * @param replyContextMeter - Context meter of the same model.
  * @param stateReader - Reader of the state tools; any read fails the case by
  * default.
- * @param toolKeeper - Keeper `find_tools` asks; any search fails the case
- * by default.
  * @returns The ready agent.
  */
 function createTestAgent(
   replyModel: ReplyModel,
   replyContextMeter: ReplyContextMeter,
-  stateReader: AgentStateReader = UNEXPECTED_STATE_READER,
-  toolKeeper: ToolKeeper = UNEXPECTED_TOOL_KEEPER
+  stateReader: AgentStateReader = UNEXPECTED_STATE_READER
 ): Agent {
   return new Agent(AGENT_PROFILE, {
     replyModel,
     replyContextMeter,
     stateReader,
-    toolKeeper
+    toolKeeper: UNEXPECTED_TOOL_KEEPER
   })
 }
 
 /**
- * Finds the agent that answers a case's turn.
+ * Creates the agent that answers a case's turn when the case brings none.
  *
- * @param scenario - The case's own agent, or its model and meter.
- * @returns The case's agent, or a new one with {@link AGENT_PROFILE}.
+ * @param scenario - The case's model, meter, and tool keeper.
+ * @returns A new agent with {@link AGENT_PROFILE} over them, whose every
+ * state read fails the case.
  */
-function findScenarioAgent(scenario: AgentScenario): Agent {
-  if ("agent" in scenario) return scenario.agent
-  return createTestAgent(
-    { openReplyStream: scenario.openReplyStream },
-    scenario.replyContextMeter ?? createRoomyReplyContextMeter(),
-    UNEXPECTED_STATE_READER,
-    scenario.toolKeeper
-  )
+function createScenarioAgent(scenario: AgentModelScenario): Agent {
+  const replyModel = { openReplyStream: scenario.openReplyStream }
+  return new Agent(AGENT_PROFILE, {
+    replyModel,
+    replyContextMeter:
+      scenario.replyContextMeter ?? createRoomyReplyContextMeter(),
+    stateReader: UNEXPECTED_STATE_READER,
+    toolKeeper: scenario.toolKeeper ?? UNEXPECTED_TOOL_KEEPER
+  })
+}
+
+/** What a case's turn records while its reply runs; every list is live. */
+type TurnRecords = Readonly<{
+  /** Events the turn sent, in order. */
+  events: ChatGenerationEvent[]
+  /** Parts stored when each event was sent, in the events' order. */
+  storedPartsAtEvents: (readonly ReplyPart[])[]
+  /** Final states the reply asked its storage to keep, in order. */
+  persistedStates: AssistantMessageCompletion[]
+  /** Cancellations the reply reported, in order. */
+  reportedCancellations: unknown[]
+  /** Refusals the reply reported, in order. */
+  reportedRefusals: unknown[]
+  /** Failures the reply reported, in order. */
+  reportedFailures: unknown[]
+  /** Tool search failures the reply reported, in order. */
+  reportedToolSearchFailures: unknown[]
+}>
+
+/**
+ * Creates the records of a case's turn.
+ *
+ * @returns The records, each list empty.
+ */
+function createTurnRecords(): TurnRecords {
+  return {
+    events: [],
+    storedPartsAtEvents: [],
+    persistedStates: [],
+    reportedCancellations: [],
+    reportedRefusals: [],
+    reportedFailures: [],
+    reportedToolSearchFailures: []
+  }
+}
+
+/** The reporters of a turn. */
+type TurnReporters = Pick<
+  AgentTurn,
+  | "reportReplyCancellation"
+  | "reportReplyRefusal"
+  | "reportReplyFailure"
+  | "reportToolSearchFailure"
+>
+
+/**
+ * Builds the reporters of a case's turn.
+ *
+ * @param records - Records of the case's turn.
+ * @returns Reporters that add what each receives to the records.
+ */
+function buildRecordingReporters(records: TurnRecords): TurnReporters {
+  return {
+    reportReplyCancellation: (failure) => {
+      records.reportedCancellations.push(failure)
+    },
+    reportReplyRefusal: (failure) => {
+      records.reportedRefusals.push(failure)
+    },
+    reportReplyFailure: (failure) => {
+      records.reportedFailures.push(failure)
+    },
+    reportToolSearchFailure: (failure) => {
+      records.reportedToolSearchFailures.push(failure)
+    }
+  }
+}
+
+/** The tools of a turn and what answers their calls. */
+type TurnTools = Pick<
+  AgentTurn,
+  | "directTools"
+  | "clientTools"
+  | "builtInTools"
+  | "mcpTools"
+  | "unofferedTools"
+  | "sendClientToolCall"
+  | "createToolCallGate"
+>
+
+/**
+ * Builds the tools of a case's turn and what answers their calls.
+ *
+ * @param scenario - Tools, client results, and approvals of the case.
+ * @returns The turn's tool fields, each with the default its scenario field
+ * documents.
+ */
+function buildScenarioTools(scenario: AgentReplyScenario): TurnTools {
+  return {
+    directTools: scenario.directTools ?? [],
+    clientTools: scenario.clientTools ?? [],
+    builtInTools: scenario.builtInTools ?? [],
+    mcpTools: scenario.mcpTools ?? [],
+    unofferedTools: scenario.unofferedTools ?? NO_UNOFFERED_TOOLS,
+    sendClientToolCall: scenario.sendClientToolCall ?? handleUnexpectedToolCall,
+    createToolCallGate:
+      scenario.createToolCallGate ?? buildCreateToolCallGate(scenario)
+  }
+}
+
+/** What building a case's turn needs. */
+type ScenarioTurnInput = Readonly<{
+  /** Model, history, tools, and cancellation behavior of the case. */
+  scenario: AgentReplyScenario
+  /** Stored turn of the case. */
+  store: AgentTurnStore
+  /** Storage spies of the case. */
+  storage: ReturnType<typeof buildScenarioReplyStorage>
+  /** Records the turn adds to while its reply runs. */
+  records: TurnRecords
+}>
+
+/**
+ * Builds the turn of a case over its stored turn.
+ *
+ * @param input - The case's scenario, stored turn, storage spies, and
+ * records.
+ * @returns The turn, each field with the default its scenario field
+ * documents; it adds each event with the parts stored then, each final
+ * state, and each report to the records.
+ */
+function buildScenarioTurn(input: ScenarioTurnInput): AgentTurn {
+  const { scenario, store, storage, records } = input
+  const tools = buildScenarioTools(scenario)
+  const reporters = buildRecordingReporters(records)
+  return {
+    ...TURN_REQUEST,
+    toolCallPolicy: scenario.toolCallPolicy ?? TURN_REQUEST.toolCallPolicy,
+    conversationId: store.conversationId,
+    requestId: store.replyId,
+    trainedForToolUse: scenario.trainedForToolUse ?? false,
+    userMessage: scenario.userMessage ?? TURN_REQUEST.userMessage,
+    canSeeImages: scenario.canSeeImages ?? false,
+    findAttachmentImage:
+      scenario.findAttachmentImage ?? handleUnexpectedImageRead,
+    history: scenario.history ?? [],
+    sources: getStoredReply(store).sources,
+    directTools: tools.directTools,
+    clientTools: tools.clientTools,
+    builtInTools: tools.builtInTools,
+    mcpTools: tools.mcpTools,
+    unofferedTools: tools.unofferedTools,
+    sendClientToolCall: tools.sendClientToolCall,
+    createToolCallGate: tools.createToolCallGate,
+    abortSignal: scenario.abortSignal ?? new AbortController().signal,
+    sendEvent: (event) => {
+      records.events.push(event)
+      records.storedPartsAtEvents.push(getStoredReply(store).reply.parts)
+    },
+    reportReplyCancellation: reporters.reportReplyCancellation,
+    reportReplyRefusal: reporters.reportReplyRefusal,
+    reportReplyFailure: reporters.reportReplyFailure,
+    reportToolSearchFailure: reporters.reportToolSearchFailure,
+    createReplyPart: storage.createReplyPart,
+    updateReplyPartContent: storage.updateReplyPartContent,
+    updateReplyToolCall: storage.updateReplyToolCall,
+    updateAssistantMessageState: (completion) => {
+      records.persistedStates.push(completion)
+      return storage.updateAssistantMessageState(completion)
+    },
+    findReplyStatus: storage.findReplyStatus
+  }
 }
 
 /**
@@ -830,76 +995,25 @@ function findScenarioAgent(scenario: AgentScenario): Agent {
  */
 async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
   const store = scenario.store ?? openAgentTurnStore()
-  const events: ChatGenerationEvent[] = []
-  const storedPartsAtEvents: (readonly ReplyPart[])[] = []
-  const reportedCancellations: unknown[] = []
-  const reportedRefusals: unknown[] = []
-  const reportedFailures: unknown[] = []
-  const reportedToolSearchFailures: unknown[] = []
-  const persistedStates: AssistantMessageCompletion[] = []
+  const records = createTurnRecords()
   const storage = buildScenarioReplyStorage(scenario, store)
-  const settlement = await findScenarioAgent(scenario)
-    .createReply({
-      ...TURN_REQUEST,
-      toolCallPolicy: scenario.toolCallPolicy ?? TURN_REQUEST.toolCallPolicy,
-      conversationId: store.conversationId,
-      requestId: store.replyId,
-      trainedForToolUse: scenario.trainedForToolUse ?? false,
-      userMessage: scenario.userMessage ?? TURN_REQUEST.userMessage,
-      canSeeImages: scenario.canSeeImages ?? false,
-      findAttachmentImage:
-        scenario.findAttachmentImage ?? handleUnexpectedImageRead,
-      history: scenario.history ?? [],
-      sources: getStoredReply(store).sources,
-      directTools: scenario.directTools ?? [],
-      clientTools: scenario.clientTools ?? [],
-      builtInTools: scenario.builtInTools ?? [],
-      mcpTools: scenario.mcpTools ?? [],
-      unofferedTools: scenario.unofferedTools ?? NO_UNOFFERED_TOOLS,
-      sendClientToolCall:
-        scenario.sendClientToolCall ?? handleUnexpectedToolCall,
-      createToolCallGate:
-        scenario.createToolCallGate ?? buildCreateToolCallGate(scenario),
-      abortSignal: scenario.abortSignal ?? new AbortController().signal,
-      sendEvent: (event) => {
-        events.push(event)
-        storedPartsAtEvents.push(getStoredReply(store).reply.parts)
-      },
-      reportReplyCancellation: (failure) => {
-        reportedCancellations.push(failure)
-      },
-      reportReplyRefusal: (failure) => {
-        reportedRefusals.push(failure)
-      },
-      reportReplyFailure: (failure) => {
-        reportedFailures.push(failure)
-      },
-      reportToolSearchFailure: (failure) => {
-        reportedToolSearchFailures.push(failure)
-      },
-      createReplyPart: storage.createReplyPart,
-      updateReplyPartContent: storage.updateReplyPartContent,
-      updateReplyToolCall: storage.updateReplyToolCall,
-      updateAssistantMessageState: (completion) => {
-        persistedStates.push(completion)
-        return storage.updateAssistantMessageState(completion)
-      },
-      findReplyStatus: storage.findReplyStatus
-    })
-    .then(
-      () => ({ status: "resolved" as const }),
-      (error: unknown) => ({ status: "rejected" as const, error })
-    )
+  const turn = buildScenarioTurn({ scenario, store, storage, records })
+  const agent =
+    "agent" in scenario ? scenario.agent : createScenarioAgent(scenario)
+  const settlement = await agent.createReply(turn).then(
+    () => ({ status: "resolved" as const }),
+    (error: unknown) => ({ status: "rejected" as const, error })
+  )
   const { reply, sources } = getStoredReply(store)
   return {
-    events,
-    storedPartsAtEvents,
-    persistedStates,
+    events: records.events,
+    storedPartsAtEvents: records.storedPartsAtEvents,
+    persistedStates: records.persistedStates,
     storage,
-    reportedCancellations,
-    reportedRefusals,
-    reportedFailures,
-    reportedToolSearchFailures,
+    reportedCancellations: records.reportedCancellations,
+    reportedRefusals: records.reportedRefusals,
+    reportedFailures: records.reportedFailures,
+    reportedToolSearchFailures: records.reportedToolSearchFailures,
     settlement,
     reply,
     parts: reply.parts,
@@ -1795,6 +1909,28 @@ describe("Agent", () => {
   })
 
   describe("findContextMeasurement", () => {
+    /**
+     * Builds the measurement input of a turn without tools whose model sees
+     * no image.
+     *
+     * @param history - Transcript before the measured turn.
+     * @returns The input, with tool calls on and no tool named.
+     */
+    function buildToolFreeContextInput(
+      history: readonly ConversationMessage[]
+    ): AgentContextInput {
+      return {
+        directTools: [],
+        trainedForToolUse: false,
+        history,
+        model: TURN_REQUEST.model,
+        canSeeImages: false,
+        getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
+        tools: [],
+        unofferedTools: NO_UNOFFERED_TOOLS
+      }
+    }
+
     it("measures its system prompt, the usable history, the offered tools, and an empty new message as a turn sends them", async () => {
       const replyContextMeter = createRoomyReplyContextMeter()
       replyContextMeter.findReplyContextMeasurement.mockResolvedValue({
@@ -1908,10 +2044,8 @@ describe("Agent", () => {
         { status: "succeeded", result: "Buy milk", sourceNumbers: [] }
       )
 
-      const measurement = await agent.findContextMeasurement({
-        directTools: [],
-        trainedForToolUse: false,
-        history: [
+      const measurement = await agent.findContextMeasurement(
+        buildToolFreeContextInput([
           createUserMessage(1, "What does /a say?"),
           createAssistantMessage(
             2,
@@ -1926,13 +2060,8 @@ describe("Agent", () => {
             ],
             { status: "completed", finishReason: "stop" }
           )
-        ],
-        model: TURN_REQUEST.model,
-        canSeeImages: false,
-        getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
-        tools: [],
-        unofferedTools: NO_UNOFFERED_TOOLS
-      })
+        ])
+      )
 
       expect(measurement).toMatchObject({
         historyTokens: 100,
@@ -1952,16 +2081,7 @@ describe("Agent", () => {
       )
 
       await expect(
-        agent.findContextMeasurement({
-          directTools: [],
-          trainedForToolUse: false,
-          history: [],
-          model: TURN_REQUEST.model,
-          canSeeImages: false,
-          getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
-          tools: [],
-          unofferedTools: NO_UNOFFERED_TOOLS
-        })
+        agent.findContextMeasurement(buildToolFreeContextInput([]))
       ).resolves.toBeUndefined()
     })
 
@@ -5086,9 +5206,6 @@ describe("Agent", () => {
       '{"task":"define a word"}'
     )
 
-    /** Round in which the model looks up `moth`. */
-    const LOOK_UP_MOTH_ROUND = buildCallRound("look_up_word", '{"word":"moth"}')
-
     /**
      * Creates a keeper whose every search ends one way.
      *
@@ -5132,13 +5249,20 @@ describe("Agent", () => {
       ])
     })
 
-    it("asks the keeper for the turn's tools that fit a task without approval, and offers the found ones from the next round", async () => {
+    /**
+     * Has an agent answer a routed turn in which the model asks for a tool,
+     * the keeper finds the word look-up, and the model calls it.
+     *
+     * @returns The reply's outcome with the stored turn, the keeper, the
+     * model's stream opener, the look-up tool, the turn's MCP tool, and the
+     * gate factory, whose gate runs the look-up without asking.
+     */
+    async function getFoundToolReplyOutcome() {
       const store = openAgentTurnStore()
       const lookUp = createLookUpWordTool()
-      const keeper = createKeeper(async () => ({
-        status: "found",
-        toolNames: ["look_up_word"]
-      }))
+      const keeper = createKeeper(async () =>
+        buildFoundToolSearchOutcome(["look_up_word"])
+      )
       const createToolCallGate = vi.fn(
         async () =>
           new ToolCallGate(new Set(["look_up_word"]), handleUnexpectedToolCall)
@@ -5149,7 +5273,6 @@ describe("Agent", () => {
         FINISH_ROUND
       )
       const mcpTool = createMcpEchoTool().tool
-
       const run = await getAgentReplyOutcome({
         openReplyStream,
         toolKeeper: keeper,
@@ -5160,6 +5283,19 @@ describe("Agent", () => {
         mcpTools: [mcpTool],
         createToolCallGate
       })
+      return {
+        run,
+        store,
+        keeper,
+        openReplyStream,
+        lookUp,
+        mcpTool,
+        createToolCallGate
+      }
+    }
+
+    it("asks the keeper for the turn's tools that fit a task, and tells the model which it found", async () => {
+      const { run, store, keeper, mcpTool } = await getFoundToolReplyOutcome()
 
       expect(keeper.findTools).toHaveBeenCalledExactlyOnceWith({
         task: "define a word",
@@ -5172,6 +5308,22 @@ describe("Agent", () => {
         reportFailure: expect.any(Function),
         toolCallPolicy: TOOL_CALL_POLICY
       })
+      expect(run.parts[0]).toMatchObject({
+        toolName: "find_tools",
+        status: "succeeded",
+        result:
+          "Armitage found these tools for the task, and you can call them from your next step: look_up_word."
+      })
+    })
+
+    it("offers the found tools from the next round to the reply's end, and runs a call of one through the round's gate", async () => {
+      const { run, openReplyStream, lookUp, createToolCallGate } =
+        await getFoundToolReplyOutcome()
+
+      expect(listOfferedToolNames(openReplyStream)).toEqual([
+        "find_tools",
+        ...LEADER_STATE_TOOL_NAMES
+      ])
       expect(listOfferedToolNames(openReplyStream, 1)).toEqual([
         "find_tools",
         "look_up_word",
@@ -5183,14 +5335,66 @@ describe("Agent", () => {
       expect(
         run.parts.map((part) => part.kind === "tool-call" && part.status)
       ).toEqual(["succeeded", "succeeded"])
-      expect(run.parts[0]).toMatchObject({
-        toolName: "find_tools",
-        result:
-          "Armitage found these tools for the task, and you can call them from your next step: look_up_word."
-      })
       expect(lookUp.tool.startedWords).toEqual(["moth"])
       expect(createToolCallGate).toHaveBeenCalledOnce()
       expect(run.events.at(-1)).toEqual({ type: "done", finishReason: "stop" })
+    })
+
+    it("asks the person before a found tool that is not on Just run runs, and never about find_tools", async () => {
+      const lookUp = createLookUpWordTool()
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+
+      await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          FIND_TOOLS_ROUND,
+          LOOK_UP_MOTH_ROUND,
+          FINISH_ROUND
+        ),
+        toolKeeper: createKeeper(async () =>
+          buildFoundToolSearchOutcome(["look_up_word"])
+        ),
+        trainedForToolUse: true,
+        builtInTools: [lookUp.entry],
+        justRunToolNames: [],
+        sendToolApprovalPrompt
+      })
+
+      expect(sendToolApprovalPrompt.mock.calls).toEqual([
+        [
+          {
+            id: expect.stringMatching(UUID_V7_PATTERN),
+            toolName: "look_up_word",
+            arguments: { word: "moth" }
+          }
+        ]
+      ])
+      expect(lookUp.tool.startedWords).toEqual(["moth"])
+    })
+
+    it("does not run a found tool whose call the person declines", async () => {
+      const lookUp = createLookUpWordTool()
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          FIND_TOOLS_ROUND,
+          LOOK_UP_MOTH_ROUND,
+          FINISH_ROUND
+        ),
+        toolKeeper: createKeeper(async () =>
+          buildFoundToolSearchOutcome(["look_up_word"])
+        ),
+        trainedForToolUse: true,
+        builtInTools: [lookUp.entry],
+        justRunToolNames: [],
+        sendToolApprovalPrompt: async () => DECLINED_APPROVAL
+      })
+
+      expect(lookUp.tool.startedWords).toEqual([])
+      expect(run.parts[1]).toMatchObject({
+        toolName: "look_up_word",
+        status: "rejected",
+        result: DECLINED_APPROVAL.content
+      })
     })
 
     it("does not run a tool of the turn the keeper has not found, and tells the model to call find_tools", async () => {

@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { MessageGenerationOptions } from "@lys/protocol"
 import { ARMITAGE_AGENT_CODE, groqApiKeySchema } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import { backendConfigSchema } from "../../../src/config"
@@ -560,13 +561,15 @@ describe("createSingletonServices", () => {
       .mockRejectedValue(failure)
     const reportFailure = vi.fn()
 
+    const generationOptions: MessageGenerationOptions = { temperature: 0.4 }
+
     const outcome = await services.agentRuntimeService.findTools({
       task: "read a web page",
       searchCallId: SEARCH_CALL_ID,
       tools: [READ_TEXT_FILE_TOOL],
       conversationId: createFixtureUuidV7(1),
       model: "qwen/qwen3-8b",
-      generationOptions: { temperature: 0.4 },
+      generationOptions,
       abortSignal: new AbortController().signal,
       reportFailure,
       toolCallPolicy: TOOL_CALL_POLICY

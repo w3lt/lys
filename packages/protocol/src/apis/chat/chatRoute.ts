@@ -192,7 +192,8 @@ function hasOnlyClientTools(definitions: readonly ToolDefinition[]): boolean {
 /**
  * Lists the tools the backend adds to a turn itself for a refusal message.
  *
- * @returns `a, b, c, or d`, in {@link BACKEND_INTERNAL_TOOL_NAMES} order.
+ * @returns The names separated by commas, with `or` before the last, in
+ * {@link BACKEND_INTERNAL_TOOL_NAMES} order.
  */
 function formatBackendInternalToolNames(): string {
   const names = [...BACKEND_INTERNAL_TOOL_NAMES]
@@ -572,8 +573,9 @@ export const chatApiStreamEventSchema = z.discriminatedUnion("type", [
  * @remarks A 400 is the attachment-unsupported problem when an attachment's
  * content is neither text nor an image Lys sends; a body that fails
  * validation is answered with Fastify's own 400. A 404 is the
- * agent-not-found problem when a new conversation names a code no agent has
- * or a deleted agent's, and the conversation-not-found problem when a
+ * agent-not-found problem when a new conversation names a code no agent has,
+ * a deleted agent's, or Armitage's, which answers no chat, and the
+ * conversation-not-found problem when a
  * continued conversation is not stored. A 409 is the conversation agent
  * missing problem when the continued conversation is stored but its agent no
  * longer exists, the backend tool unavailable problem when an offered

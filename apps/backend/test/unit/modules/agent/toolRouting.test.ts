@@ -1,18 +1,20 @@
+import type { MessageGenerationOptions } from "@lys/protocol"
 import { FIND_TOOLS_TOOL_NAME } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import { formatSystemPrompt } from "../../../../src/modules/agent/agentContext"
 import { buildAgentStateDefinitions } from "../../../../src/modules/agent/agentStateTools"
-import {
+import FindToolsTool, {
   FIND_TOOLS_DEFINITION,
   formatToolRoutingNote,
   type ToolKeeper
 } from "../../../../src/modules/agent/findToolsTool"
+import ReplyToolOffer from "../../../../src/modules/agent/replyToolOffer"
 import {
+  addFoundTools,
   buildReplyTools,
-  findToolRouting,
+  calculateToolRouting,
   formatRoutedSystemPrompt,
   listOfferedDefinitions,
-  offerFoundTools,
   type ReplyToolsTurn,
   type ToolRouting
 } from "../../../../src/modules/agent/toolRouting"
@@ -29,6 +31,7 @@ import {
   ScriptedBuiltInTool
 } from "../../support/scriptedBuiltInTool"
 import {
+  buildFoundToolSearchOutcome,
   READ_TEXT_FILE_TOOL,
   RUN_TOOL_CALL_ID,
   TOOL_CALL_POLICY
@@ -51,12 +54,6 @@ function buildTurnTool(
     runsWithoutApproval
   })
 }
-
-/** Direct tool of the cases: offered in every round. */
-const DIRECT_TOOL = buildTurnTool(CHECK_SPELLING_TOOL, true)
-
-/** Built-in tool of the cases. */
-const BUILT_IN_TOOL = buildTurnTool(LOOK_UP_WORD_TOOL, false)
 
 /** State tools of a leader, as a trained turn offers them. */
 const STATE_DEFINITIONS = buildAgentStateDefinitions("leader")
@@ -88,23 +85,8 @@ const MCP_TOOL: TurnMcpTool = Object.freeze({
   sendToolCall: async () => ({ status: "succeeded" as const, content: "echo" })
 })
 
-/** Generation controls of the cases. */
-const GENERATION_OPTIONS = Object.freeze({ temperature: 0.7 })
-
 /** Routing of a turn that offers every tool from the first round. */
 const DIRECT_ROUTING: ToolRouting = Object.freeze({ status: "direct" })
-
-/** Routing of a turn with two tools to keep. */
-const TWO_ROUTED_TOOLS: ToolRouting = Object.freeze({
-  status: "routed",
-  toolCount: 2
-})
-
-/** Routing of a turn with four tools to keep. */
-const FOUR_ROUTED_TOOLS: ToolRouting = Object.freeze({
-  status: "routed",
-  toolCount: 4
-})
 
 /**
  * Creates a keeper that finds the client tool for every task.
@@ -113,10 +95,9 @@ const FOUR_ROUTED_TOOLS: ToolRouting = Object.freeze({
  */
 function createKeeper() {
   return {
-    findTools: vi.fn<ToolKeeper["findTools"]>(async () => ({
-      status: "found",
-      toolNames: [READ_TEXT_FILE_TOOL.name]
-    }))
+    findTools: vi.fn<ToolKeeper["findTools"]>(async () =>
+      buildFoundToolSearchOutcome([READ_TEXT_FILE_TOOL.name])
+    )
   } satisfies ToolKeeper
 }
 
@@ -124,33 +105,53 @@ function createKeeper() {
  * Builds the turn of a reply's tools.
  *
  * @param trainedForToolUse - Whether the model is trained for tool use.
- * @returns A turn with a direct, a client, a built-in, and an MCP tool.
+ * @returns A turn with a direct tool that is offered in every round, a
+ * client, a built-in, and an MCP tool.
  */
 function buildTurn(trainedForToolUse: boolean): ReplyToolsTurn {
+  const generationOptions: MessageGenerationOptions = { temperature: 0.7 }
   return {
     conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
     model: "qwen/qwen3-8b",
     trainedForToolUse,
-    generationOptions: GENERATION_OPTIONS,
-    directTools: [DIRECT_TOOL],
+    generationOptions,
+    directTools: [buildTurnTool(CHECK_SPELLING_TOOL, true)],
     clientTools: [READ_TEXT_FILE_TOOL],
-    builtInTools: [BUILT_IN_TOOL],
+    builtInTools: [buildTurnTool(LOOK_UP_WORD_TOOL, false)],
     mcpTools: [MCP_TOOL],
     reportToolSearchFailure: vi.fn(),
     toolCallPolicy: TOOL_CALL_POLICY
   }
 }
 
-describe("findToolRouting", () => {
+/**
+ * Builds the tools of a routed reply.
+ *
+ * @param keeper - Keeper the reply's `find_tools` asks.
+ * @returns The reply's tools, of a turn whose model is trained for tool use.
+ * @throws If the turn was not routed.
+ */
+function buildRoutedReplyTools(keeper: ToolKeeper) {
+  const replyTools = buildReplyTools(buildTurn(true), STATE_TOOLS, keeper)
+  if (replyTools.status !== "routed") throw new Error("The turn is not routed")
+  return replyTools
+}
+
+describe("calculateToolRouting", () => {
   it("routes the tools of a model trained for tool use through find_tools", () => {
-    expect(findToolRouting(true, 3)).toEqual({ status: "routed", toolCount: 3 })
+    expect(calculateToolRouting(true, 3)).toEqual({
+      status: "routed",
+      toolCount: 3
+    })
   })
 
   it.each([
     ["a model not trained for tool use", false, 3],
     ["a turn without tools to keep", true, 0]
   ])("offers the tools directly for %s", (_label, trained, toolCount) => {
-    expect(findToolRouting(trained, toolCount)).toEqual({ status: "direct" })
+    expect(calculateToolRouting(trained, toolCount)).toEqual({
+      status: "direct"
+    })
   })
 })
 
@@ -163,11 +164,10 @@ describe("formatRoutedSystemPrompt", () => {
 
   it("ends a routed prompt with the routing note after a blank line", () => {
     expect(
-      formatRoutedSystemPrompt(
-        "You are Lys.",
-        NO_UNOFFERED_TOOLS,
-        FOUR_ROUTED_TOOLS
-      )
+      formatRoutedSystemPrompt("You are Lys.", NO_UNOFFERED_TOOLS, {
+        status: "routed",
+        toolCount: 4
+      })
     ).toBe(`You are Lys.\n\n${formatToolRoutingNote(4)}`)
   })
 })
@@ -191,12 +191,9 @@ describe("listOfferedDefinitions", () => {
   })
 
   it("lists find_tools in place of a routed turn's tools", () => {
-    expect(
-      listOfferedDefinitions({
-        ...input,
-        routing: TWO_ROUTED_TOOLS
-      })
-    ).toEqual([
+    const routing: ToolRouting = { status: "routed", toolCount: 2 }
+
+    expect(listOfferedDefinitions({ ...input, routing })).toEqual([
       CHECK_SPELLING_TOOL,
       FIND_TOOLS_DEFINITION,
       ...STATE_DEFINITIONS
@@ -212,8 +209,10 @@ describe("buildReplyTools", () => {
       createKeeper()
     )
 
-    expect(replyTools.routing).toEqual({ status: "direct" })
-    expect(replyTools.findTools).toBeUndefined()
+    expect(replyTools).toEqual({
+      status: "direct",
+      toolOffer: expect.any(ReplyToolOffer)
+    })
     expect([...replyTools.toolOffer.listOfferedToolset().keys()]).toEqual([
       CHECK_SPELLING_TOOL.name,
       READ_TEXT_FILE_TOOL.name,
@@ -224,13 +223,14 @@ describe("buildReplyTools", () => {
   })
 
   it("offers a routed reply its direct tools, find_tools, and its state tools from the first round", () => {
-    const replyTools = buildReplyTools(
-      buildTurn(true),
-      STATE_TOOLS,
-      createKeeper()
-    )
+    const replyTools = buildRoutedReplyTools(createKeeper())
 
-    expect(replyTools.routing).toEqual({ status: "routed", toolCount: 3 })
+    expect(replyTools).toEqual({
+      status: "routed",
+      toolCount: 3,
+      toolOffer: expect.any(ReplyToolOffer),
+      findTools: expect.any(FindToolsTool)
+    })
     expect([...replyTools.toolOffer.listOfferedToolset().keys()]).toEqual([
       CHECK_SPELLING_TOOL.name,
       FIND_TOOLS_TOOL_NAME,
@@ -243,16 +243,16 @@ describe("buildReplyTools", () => {
 
   it("offers a found tool of the turn once added, as the turn's toolset holds it", async () => {
     const keeper = createKeeper()
-    const replyTools = buildReplyTools(buildTurn(true), STATE_TOOLS, keeper)
-    const parsed = replyTools.findTools?.parseToolCall({ task: "read a file" })
-    if (parsed?.status !== "parsed") throw new Error("find_tools did not parse")
+    const replyTools = buildRoutedReplyTools(keeper)
+    const parsed = replyTools.findTools.parseToolCall({ task: "read a file" })
+    if (parsed.status !== "parsed") throw new Error("find_tools did not parse")
     await parsed.runToolCall({
       toolCallId: RUN_TOOL_CALL_ID,
       abortSignal: new AbortController().signal,
       addWebSources: () => []
     })
 
-    offerFoundTools(replyTools)
+    addFoundTools(replyTools)
 
     expect([...replyTools.toolOffer.listOfferedToolset().keys()]).toEqual([
       CHECK_SPELLING_TOOL.name,
@@ -279,9 +279,11 @@ describe("buildReplyTools", () => {
 
     const replyTools = buildReplyTools(turn, STATE_TOOLS, createKeeper())
 
-    expect(replyTools.routing).toEqual({ status: "direct" })
-    expect(replyTools.findTools).toBeUndefined()
-    offerFoundTools(replyTools)
+    expect(replyTools).toEqual({
+      status: "direct",
+      toolOffer: expect.any(ReplyToolOffer)
+    })
+    addFoundTools(replyTools)
     expect([...replyTools.toolOffer.listOfferedToolset().keys()]).toEqual([
       CHECK_SPELLING_TOOL.name,
       ...STATE_DEFINITIONS.map((definition) => definition.name)

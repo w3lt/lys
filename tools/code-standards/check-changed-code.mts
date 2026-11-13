@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { parseArgs } from "node:util"
 import { ESLint, type Linter } from "eslint"
 import {
+  intersectChanges,
   overlapsChange,
   parseUnifiedDiff,
   wholeFileRange,
@@ -41,12 +42,19 @@ type Violation = {
 const usage =
   "Usage: node tools/code-standards/check-changed-code.mts (--staged | --base <ref>)"
 
-/** Options for the git commands whose diffs `parseUnifiedDiff` reads. */
+/**
+ * Options for the git commands whose diffs `parseUnifiedDiff` reads. They fix
+ * every setting the parser depends on, whatever the user configures: path
+ * quoting, the `a/` and `b/` prefixes, and hunks without context lines.
+ */
 const diffOptions = Object.freeze([
   "-c",
   "core.quotePath=false",
   "diff",
   "-U0",
+  "--inter-hunk-context=0",
+  "--src-prefix=a/",
+  "--dst-prefix=b/",
   "--no-color",
   "--no-ext-diff",
   "-M",
@@ -86,25 +94,47 @@ function runGit(root: string, args: readonly string[], input?: string): string {
 }
 
 /**
- * Resolves the `--base` value to the commit it names.
+ * Resolves a revision to the commit it names.
  *
- * @remarks Git reads the value from standard input, never as an argument, so
- * no value can act as an option.
- * @param root - Repository the value is resolved in.
- * @param baseRef - Branch, tag, commit, or revision expression.
- * @returns The commit's object name.
- * @throws If the value names no commit, or git fails.
+ * @remarks Git reads the revision from standard input, never as an argument,
+ * so no revision can act as an option.
+ * @param root - Repository the revision is resolved in.
+ * @param revision - Branch, tag, commit, pseudo-ref, or revision expression.
+ * @returns The commit's object name, or `null` when the revision names no
+ * commit.
+ * @throws If git fails.
  */
-function resolveBaseCommit(root: string, baseRef: string): string {
+function resolveCommit(root: string, revision: string): string | null {
   const resolved = runGit(
     root,
     ["cat-file", "--batch-check=%(objectname)"],
-    `${baseRef}^{commit}\n`
+    `${revision}^{commit}\n`
   ).trim()
-  if (!commitNamePattern.test(resolved)) {
-    throw new Error(`--base names no commit: ${baseRef}`)
+  return commitNamePattern.test(resolved) ? resolved : null
+}
+
+/**
+ * Lists the files the staged changes add or modify, with their changed lines.
+ *
+ * @remarks While a merge is being committed, a line counts as changed only
+ * when it differs from both the current commit and the merged commit, so the
+ * lines a resolution keeps from either branch are not checked again.
+ * @param root - Repository whose index is read.
+ * @returns Changed files of the index.
+ * @throws If a git command fails.
+ */
+function listStagedChanges(root: string): ChangedFile[] {
+  const changes = parseUnifiedDiff(runGit(root, [...diffOptions, "--cached"]))
+  const mergeHead = resolveCommit(root, "MERGE_HEAD")
+  if (mergeHead === null) {
+    return changes
   }
-  return resolved
+  const diffAgainstMergeHead = runGit(root, [
+    ...diffOptions,
+    "--cached",
+    mergeHead
+  ])
+  return intersectChanges(changes, parseUnifiedDiff(diffAgainstMergeHead))
 }
 
 /**
@@ -138,9 +168,12 @@ function parseChangeSource(args: readonly string[]): ChangeSource {
 function listChangedFiles(checkout: Checkout): ChangedFile[] {
   const { root, source } = checkout
   if (source.kind === "staged") {
-    return parseUnifiedDiff(runGit(root, [...diffOptions, "--cached"]))
+    return listStagedChanges(root)
   }
-  const baseCommit = resolveBaseCommit(root, source.baseRef)
+  const baseCommit = resolveCommit(root, source.baseRef)
+  if (baseCommit === null) {
+    throw new Error(`--base names no commit: ${source.baseRef}`)
+  }
   const mergeBase = runGit(root, ["merge-base", baseCommit, "HEAD"]).trim()
   const untrackedPaths = runGit(root, [
     "ls-files",

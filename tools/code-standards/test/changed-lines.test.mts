@@ -1,6 +1,10 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { overlapsChange, parseUnifiedDiff } from "../changed-lines.mts"
+import {
+  intersectChanges,
+  overlapsChange,
+  parseUnifiedDiff
+} from "../changed-lines.mts"
 
 /** Diff of a modified, an added, a deleted, and a renamed file. */
 const diff = [
@@ -58,7 +62,7 @@ describe("parseUnifiedDiff", () => {
     assert.deepEqual(files[1]?.ranges, [{ start: 1, end: 2 }])
   })
 
-  it("decodes a quoted path and lists a pure rename without changed lines", () => {
+  it("decodes the quoted path of a renamed and modified file", () => {
     const renameHeader = [
       'diff --git "a/old \\"name\\".ts" "b/new \\"name\\".ts"',
       "similarity index 90%",
@@ -76,6 +80,51 @@ describe("parseUnifiedDiff", () => {
 
     assert.equal(renamed?.path, 'new "name".ts')
     assert.deepEqual(renamed?.ranges, [{ start: 1, end: 1 }])
+  })
+
+  it("drops the tab that ends a path containing a space", () => {
+    const header = [
+      "diff --git a/with space.ts b/with space.ts",
+      "--- a/with space.ts\t",
+      "+++ b/with space.ts\t",
+      "@@ -1 +1 @@",
+      "-a()",
+      "+b()"
+    ].join("\n")
+
+    const [file] = parseUnifiedDiff(header)
+
+    assert.equal(file?.path, "with space.ts")
+  })
+})
+
+describe("intersectChanges", () => {
+  /** Lines of three files changed against the first parent of a merge. */
+  const againstFirstParent = Object.freeze([
+    {
+      path: "both.ts",
+      ranges: [
+        { start: 2, end: 2 },
+        { start: 4, end: 7 }
+      ]
+    },
+    { path: "first-only.ts", ranges: [{ start: 1, end: 3 }] },
+    { path: "deletion.ts", ranges: [{ start: 9.5, end: 9.5 }] }
+  ])
+
+  /** Lines of the same new versions changed against the second parent. */
+  const againstSecondParent = Object.freeze([
+    { path: "both.ts", ranges: [{ start: 1, end: 2 }] },
+    { path: "deletion.ts", ranges: [{ start: 8, end: 12 }] }
+  ])
+
+  it("keeps only the lines changed against both versions", () => {
+    const changes = intersectChanges(againstFirstParent, againstSecondParent)
+
+    assert.deepEqual(changes, [
+      { path: "both.ts", ranges: [{ start: 2, end: 2 }] },
+      { path: "deletion.ts", ranges: [{ start: 9.5, end: 9.5 }] }
+    ])
   })
 })
 

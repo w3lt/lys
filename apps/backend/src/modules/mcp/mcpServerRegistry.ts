@@ -1,5 +1,6 @@
 import type { McpServerList, McpServerState } from "@lys/protocol"
 import {
+  isBuiltInMcpServerOn,
   MCP_TOOL_NAME_PREFIX,
   type BuiltInMcpServerName,
   type McpServerSettings,
@@ -52,10 +53,11 @@ export type BuiltInMcpServer = Readonly<{
   transport: McpServerTransport
   /**
    * Reads what the server needs, such as a saved account, and builds the
-   * settings it starts with; called each time the settings are applied
-   * with the server switched on and its name free.
+   * settings it starts with; called with the applied `mcp` group each time
+   * it is applied with the server switched on, as
+   * `isBuiltInMcpServerOn` tells, and its name free.
    */
-  readServer: () => Promise<BuiltInMcpServerRead>
+  readServer: (settings: McpSettings) => Promise<BuiltInMcpServerRead>
 }>
 
 /**
@@ -777,8 +779,8 @@ async function createBuiltInServerPlans(
 ): Promise<readonly ServerPlan[]> {
   const outcomes = await Promise.allSettled(
     builtIns.map((builtIn) =>
-      settings.builtIn[builtIn.name].enabled
-        ? createBuiltInServerPlan(builtIn)
+      isBuiltInMcpServerOn(settings.builtIn, builtIn.name)
+        ? createBuiltInServerPlan(builtIn, settings)
         : Promise.resolve(buildOffBuiltInServerPlan(builtIn))
     )
   )
@@ -795,14 +797,16 @@ async function createBuiltInServerPlans(
  * reading what it needs.
  *
  * @param server - The built-in server.
+ * @param settings - The group, which switches it on.
  * @returns A start with the settings its read built, or why it cannot
  * start.
  * @throws The read's failure.
  */
 async function createBuiltInServerPlan(
-  server: BuiltInMcpServer
+  server: BuiltInMcpServer,
+  settings: McpSettings
 ): Promise<ServerPlan> {
-  const read = await server.readServer()
+  const read = await server.readServer(settings)
   const run: PlannedRun =
     read.status === "read"
       ? Object.freeze({ status: "start", settings: read.settings })

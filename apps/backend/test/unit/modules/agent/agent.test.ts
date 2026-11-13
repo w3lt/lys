@@ -29,6 +29,7 @@ import {
 } from "vitest"
 import Agent, {
   type AgentContextInput,
+  type AgentDependencies,
   type AgentProfile,
   type AgentTurn,
   type AssistantMessageCompletion
@@ -832,6 +833,27 @@ const UNEXPECTED_STATE_READER: AgentStateReader = Object.freeze({
   findAgentState: handleUnexpectedToolCall
 })
 
+/**
+ * Reads the email address of an agent whose case gives it none.
+ *
+ * @returns Null.
+ */
+function readNoEmailAddress(): null {
+  return null
+}
+
+/** What a case's agent reads its own state with. */
+type StateDependencies = Pick<
+  AgentDependencies,
+  "stateReader" | "readEmailAddress"
+>
+
+/** State of an agent whose case reads none: any read fails it, no address. */
+const UNEXPECTED_STATE: StateDependencies = Object.freeze({
+  stateReader: UNEXPECTED_STATE_READER,
+  readEmailAddress: readNoEmailAddress
+})
+
 /** Keeper of an agent whose case searches no tool; any search fails it. */
 const UNEXPECTED_TOOL_KEEPER: ToolKeeper = Object.freeze({
   findTools: handleUnexpectedToolCall
@@ -843,19 +865,19 @@ const UNEXPECTED_TOOL_KEEPER: ToolKeeper = Object.freeze({
  *
  * @param replyModel - Model access of the case.
  * @param replyContextMeter - Context meter of the same model.
- * @param stateReader - Reader of the state tools; any read fails the case by
- * default.
+ * @param state - Reader of the state tools and of the agent's email
+ * address; by default any state read fails the case, and it has no address.
  * @returns The ready agent.
  */
 function createTestAgent(
   replyModel: ReplyModel,
   replyContextMeter: ReplyContextMeter,
-  stateReader: AgentStateReader = UNEXPECTED_STATE_READER
+  state: StateDependencies = UNEXPECTED_STATE
 ): Agent {
   return new Agent(AGENT_PROFILE, {
     replyModel,
     replyContextMeter,
-    stateReader,
+    ...state,
     toolKeeper: UNEXPECTED_TOOL_KEEPER
   })
 }
@@ -874,7 +896,8 @@ function createScenarioAgent(scenario: AgentModelScenario): Agent {
     replyContextMeter:
       scenario.replyContextMeter ?? createRoomyReplyContextMeter(),
     stateReader: UNEXPECTED_STATE_READER,
-    toolKeeper: scenario.toolKeeper ?? UNEXPECTED_TOOL_KEEPER
+    toolKeeper: scenario.toolKeeper ?? UNEXPECTED_TOOL_KEEPER,
+    readEmailAddress: readNoEmailAddress
   })
 }
 
@@ -4847,7 +4870,8 @@ describe("Agent", () => {
           replyModel: { openReplyStream },
           replyContextMeter,
           stateReader: UNEXPECTED_STATE_READER,
-          toolKeeper: UNEXPECTED_TOOL_KEEPER
+          toolKeeper: UNEXPECTED_TOOL_KEEPER,
+          readEmailAddress: readNoEmailAddress
         }
       )
       return {
@@ -5177,7 +5201,8 @@ describe("Agent", () => {
           replyModel: { openReplyStream },
           replyContextMeter: createRoomyReplyContextMeter(),
           stateReader: UNEXPECTED_STATE_READER,
-          toolKeeper: UNEXPECTED_TOOL_KEEPER
+          toolKeeper: UNEXPECTED_TOOL_KEEPER,
+          readEmailAddress: readNoEmailAddress
         }
       )
 
@@ -5215,7 +5240,7 @@ describe("Agent", () => {
       ["on", NO_UNOFFERED_TOOLS],
       ["off", TOOL_CALLS_OFF]
     ])(
-      "runs a read_my_state call at once while tool calls are %s, telling the agent the reply it writes",
+      "runs a read_my_state call at once while tool calls are %s, telling the agent the reply it writes and the email address it read for the turn",
       async (_label, unofferedTools) => {
         const store = openAgentTurnStore()
         const findAgentState = vi.fn<AgentStateReader["findAgentState"]>(
@@ -5243,10 +5268,17 @@ describe("Agent", () => {
           ],
           FINISH_ROUND
         )
+        const readEmailAddress = vi.fn(() => "lys@example.net")
         const agent = createTestAgent(
           { openReplyStream },
           createRoomyReplyContextMeter(),
-          { listAgentMatches: handleUnexpectedToolCall, findAgentState }
+          {
+            stateReader: {
+              listAgentMatches: handleUnexpectedToolCall,
+              findAgentState
+            },
+            readEmailAddress
+          }
         )
         const createToolCallGate = vi.fn(handleUnexpectedToolCall)
 
@@ -5259,13 +5291,14 @@ describe("Agent", () => {
         })
 
         const result = [
-          "You are Lys (code lys), a leader. As a leader you can find other agents with find_agents and read their state with read_agent_state.",
+          "You are Lys (code lys), a leader. As a leader you can find other agents with find_agents and read their state with read_agent_state. Your email address is lys@example.net.",
           `Now: ${NOW}.`,
           "Request slots: 1 of 2 in use.",
           `1. This reply, in this conversation: started ${NOW} (less than a minute ago) with ${TURN_REQUEST.model}; using tools: read_my_state running.`,
           "Nothing else is in progress."
         ].join("\n")
         expect(createToolCallGate).not.toHaveBeenCalled()
+        expect(readEmailAddress).toHaveBeenCalledOnce()
         expect(findAgentState).toHaveBeenCalledExactlyOnceWith(
           { code: AGENT_PROFILE.code, role: "leader" },
           AGENT_PROFILE.code
@@ -5335,7 +5368,8 @@ describe("Agent", () => {
           replyModel: { openReplyStream: createEventStream() },
           replyContextMeter,
           stateReader: UNEXPECTED_STATE_READER,
-          toolKeeper: UNEXPECTED_TOOL_KEEPER
+          toolKeeper: UNEXPECTED_TOOL_KEEPER,
+          readEmailAddress: readNoEmailAddress
         }
       )
 

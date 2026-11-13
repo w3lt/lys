@@ -9,7 +9,8 @@ import {
   mcpSettingsSchema,
   type BuiltInMcpSettings,
   type McpEnvironmentVariable,
-  type McpServerSettings
+  type McpServerSettings,
+  type McpSettings
 } from "@lys/share"
 import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -310,8 +311,10 @@ const EMAIL_ON: BuiltInMcpSettings = Object.freeze({ email: SWITCH_ON })
 type FakeBuiltInServer = Readonly<{
   /** The server, over stdio, named `email`. */
   server: BuiltInMcpServer
-  /** Records every read. */
-  readServer: MockInstance<() => Promise<BuiltInMcpServerRead>>
+  /** Records every read, with the group it was read with. */
+  readServer: MockInstance<
+    (settings: McpSettings) => Promise<BuiltInMcpServerRead>
+  >
   /**
    * Makes every later read return this outcome.
    *
@@ -333,7 +336,9 @@ function createFakeBuiltInServer(
   )
 ): FakeBuiltInServer {
   let nextRead = read
-  const readServer = vi.fn(() => Promise.resolve(nextRead))
+  const readServer = vi.fn<
+    (settings: McpSettings) => Promise<BuiltInMcpServerRead>
+  >(() => Promise.resolve(nextRead))
   const server: BuiltInMcpServer = Object.freeze({
     name: "email",
     transport: "stdio",
@@ -2135,6 +2140,27 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         harness.openServer.mock.calls.map(([settings]) => settings.name)
       ).toEqual(["alpha"])
     })
+
+    it.each([
+      ["the person's mailbox", SWITCH_ON],
+      ["Lys's own mailbox", { enabled: false, lysEnabled: true }]
+    ])(
+      "reads the email server with the applied group while %s alone is on",
+      async (_label, email) => {
+        const builtIn = createFakeBuiltInServer()
+        const harness = createRegistryHarness({
+          builtInServers: [builtIn.server]
+        })
+        harness.updateReadServers([], { email })
+
+        await harness.registry.updateServers()
+
+        expect(builtIn.readServer).toHaveBeenCalledOnce()
+        expect(builtIn.readServer.mock.calls[0]?.[0].builtIn.email).toEqual(
+          email
+        )
+      }
+    )
 
     it("opens a switched-on built-in server with the settings its read builds, and keeps its session while a later read builds equal settings", async () => {
       const builtIn = createFakeBuiltInServer()

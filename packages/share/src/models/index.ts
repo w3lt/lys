@@ -107,6 +107,7 @@ export {
   MAXIMUM_EMAIL_USER_NAME_LENGTH,
   type EmailAccount,
   type EmailAccountCandidate,
+  type EmailAddress,
   type EmailSecurity,
   type EmailServerSettings,
   type EmailSettings

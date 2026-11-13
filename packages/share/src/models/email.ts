@@ -190,6 +190,9 @@ export const emailAddressSchema = z
     `An email address is a name of 1 to ${MAXIMUM_EMAIL_LOCAL_PART_LENGTH} ASCII letters, digits, dots, and ! # $ % & ' * + - / = ? ^ _ \` { | } ~, with no dot at either end or two in a row, then @ and an ASCII host name, up to ${MAXIMUM_EMAIL_ADDRESS_LENGTH} characters in all.`
   )
 
+/** The address of an email account; personal data. */
+export type EmailAddress = z.infer<typeof emailAddressSchema>
+
 /**
  * Validates the display name sent with an email account's address; empty
  * sends the address alone.

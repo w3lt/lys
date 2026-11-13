@@ -18,7 +18,7 @@ import EmailAccountChecker, {
   type EmailAccountCheckEvent
 } from "../../../../../src/modules/mcp/builtIn/email/emailAccountCheck"
 import {
-  createEmailMcpServer,
+  EmailMcpServer,
   type EmailServerCommand
 } from "../../../../../src/modules/mcp/builtIn/email/emailServer"
 import type { McpServerConnectionContext } from "../../../../../src/modules/mcp/mcpServerConnection"
@@ -224,7 +224,7 @@ async function createMcpRouteApp(
   const { processGroups } = createOwnedMcpServerProcessGroups()
   const builtInServers: BuiltInMcpServer[] = options.withBuiltInEmailServer
     ? [
-        createEmailMcpServer(emailServerCommand, () =>
+        new EmailMcpServer(emailServerCommand, () =>
           readEmailAccounts(settingsFilePath)
         )
       ]

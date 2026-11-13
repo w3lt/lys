@@ -1,14 +1,23 @@
+import type { McpServerList } from "@lys/protocol"
 import {
+  isBuiltInMcpServerOn,
   mcpServerSettingsSchema,
   type BuiltInMcpServerName,
+  type BuiltInMcpSettings,
   type EmailAccount,
+  type EmailAddress,
   type EmailPassword,
   type McpEnvironmentVariable,
-  type McpServerSettings
+  type McpServerSettings,
+  type McpSettings
 } from "@lys/share"
-import type { EmailAccountsRead } from "../../../../infrastructure/settings/emailAccountFile"
+import type {
+  EmailAccountRead,
+  EmailAccountsRead
+} from "../../../../infrastructure/settings/emailAccountFile"
 import type {
   BuiltInMcpServer,
+  BuiltInMcpServerProblem,
   BuiltInMcpServerRead
 } from "../../mcpServerRegistry"
 
@@ -16,10 +25,17 @@ import type {
 export const EMAIL_SERVER_NAME = "email" satisfies BuiltInMcpServerName
 
 /**
- * Environment variable the email server reads its account and password
- * from, as the JSON text {@link buildEmailAccountVariable} writes.
+ * Environment variable the email server reads the person's account and
+ * password from, and its account check the account to check, as the JSON
+ * text {@link buildEmailAccountVariable} writes.
  */
 export const EMAIL_ACCOUNT_VARIABLE_NAME = "LYS_EMAIL_ACCOUNT"
+
+/**
+ * Environment variable the email server reads Lys's own account and
+ * password from, as the JSON text {@link buildEmailAccountVariable} writes.
+ */
+export const LYS_EMAIL_ACCOUNT_VARIABLE_NAME = "LYS_EMAIL_LYS_ACCOUNT"
 
 /** How the email server Lys ships is run, before any subcommand. */
 export type EmailServerCommand = Readonly<{
@@ -31,6 +47,28 @@ export type EmailServerCommand = Readonly<{
   /** Arguments before the subcommand; none for the installed server. */
   arguments: readonly string[]
 }>
+
+/** One mailbox the email server serves, with what it signs in with. */
+export type EmailServerMailbox = Readonly<{
+  /** Environment variable the server reads the mailbox's account from. */
+  variableName:
+    typeof EMAIL_ACCOUNT_VARIABLE_NAME | typeof LYS_EMAIL_ACCOUNT_VARIABLE_NAME
+  /** Account the server signs in with; personal data. */
+  account: EmailAccount
+  /** Its password; a secret. */
+  password: EmailPassword
+}>
+
+/** One mailbox that is switched on, and the read of its saved account. */
+type SwitchedOnMailbox = Readonly<{
+  /** Environment variable the server would read the account from. */
+  variableName: EmailServerMailbox["variableName"]
+  /** Read of the mailbox's saved account and password. */
+  read: EmailAccountRead
+}>
+
+/** Mailboxes of a read that serves none, as one whose account is unusable. */
+const NO_MAILBOXES: readonly EmailServerMailbox[] = Object.freeze([])
 
 /**
  * Builds the command that runs the installed email server.
@@ -50,68 +88,200 @@ export function buildEmailServerCommand(
 }
 
 /**
- * Creates the built-in email server the MCP server registry applies.
+ * The built-in email server the MCP server registry applies: one process
+ * that serves the person's mailbox, Lys's own, or both, whichever the
+ * settings switch on.
  *
- * @param serverCommand - How the email server is run; borrowed for the
- * server's lifetime.
- * @param readAccounts - Reads the saved email accounts and their passwords
- * again; borrowed for the server's lifetime.
- * @returns A frozen server named `email` over stdio, whose read builds the
- * settings that start the server with the person's saved account and
- * password in the {@link EMAIL_ACCOUNT_VARIABLE_NAME} variable; a missing
- * account reads as `account-missing`, and an account or password that fails
- * its rules, or a settings file that could not be read, as
- * `account-invalid`.
- * @remarks Reads and starts nothing until the registry asks.
+ * Each read reads the saved accounts again and builds the settings that
+ * start the server, and keeps the address of Lys's account while the read
+ * serves her mailbox, which {@link EmailMcpServer.readLysEmailAddress}
+ * gives while the registry lists the server as applied and on. Invariant:
+ * the address kept is that of the last read that ended, or null when that
+ * read did not serve Lys's mailbox or no read has ended. Concurrency model:
+ * reads may overlap, and the one that ends last sets the address; the
+ * registry applies settings one at a time, so its last read is the one it
+ * applied. Resource ownership: owns no resource and starts nothing; it
+ * borrows the command and the account reader for its lifetime.
  */
-export function createEmailMcpServer(
-  serverCommand: EmailServerCommand,
-  readAccounts: () => Promise<EmailAccountsRead>
-): BuiltInMcpServer {
-  return Object.freeze({
-    name: EMAIL_SERVER_NAME,
-    transport: "stdio",
-    readServer: async (): Promise<BuiltInMcpServerRead> => {
-      /** Read of a built-in server whose account is not saved. */
-      const accountMissing: BuiltInMcpServerRead = Object.freeze({
-        status: "account-missing"
-      })
+export class EmailMcpServer implements BuiltInMcpServer {
+  /** Name it is listed under: `email`. */
+  public readonly name = EMAIL_SERVER_NAME
 
-      /** Read of a built-in server whose saved account is not usable. */
-      const accountInvalid: BuiltInMcpServerRead = Object.freeze({
-        status: "account-invalid"
-      })
+  /** How the backend talks to it: over stdio. */
+  public readonly transport = "stdio"
 
-      const { person: read } = await readAccounts()
-      switch (read.status) {
-        case "read":
-          return Object.freeze({
-            status: "read",
-            settings: buildEmailServerSettings(
-              serverCommand,
-              read.account,
-              read.password
-            )
-          })
-        case "missing":
-          return accountMissing
-        case "invalid":
-        case "unreadable":
-          return accountInvalid
-      }
-    }
-  })
+  /** How the email server is run; borrowed. */
+  readonly #serverCommand: EmailServerCommand
+
+  /** Reads the saved email accounts and their passwords again; borrowed. */
+  readonly #readAccounts: () => Promise<EmailAccountsRead>
+
+  /** Address of Lys's account while the last read served her mailbox. */
+  #lysAddress: EmailAddress | null = null
+
+  /**
+   * Keeps how the server is run and how its accounts are read, without
+   * reading or starting anything.
+   * @param serverCommand - How the email server is run; borrowed for the
+   * server's lifetime.
+   * @param readAccounts - Reads the saved email accounts and their
+   * passwords again; borrowed for the server's lifetime.
+   */
+  public constructor(
+    serverCommand: EmailServerCommand,
+    readAccounts: () => Promise<EmailAccountsRead>
+  ) {
+    this.#serverCommand = serverCommand
+    this.#readAccounts = readAccounts
+  }
+
+  /**
+   * Implements {@link BuiltInMcpServer.readServer} for the email server.
+   * @param settings - The applied `mcp` group, whose `builtIn.email`
+   * switches say which mailboxes the server serves; the registry reads the
+   * server only while one is on.
+   * @returns `read` with the settings {@link buildEmailServerSettings}
+   * builds for each mailbox that is on, whose account and password are
+   * saved and usable; else `account-invalid` when an account of a mailbox
+   * that is on fails its rules, the two accounts are one mailbox, or the
+   * settings file could not be read, and `account-missing` when such an
+   * account is not saved. A mailbox that is off never puts its account or
+   * password in the settings.
+   * @throws {TypeError} If both mailboxes are off, which the registry never
+   * reads; nothing is read then. The read's failure, which keeps the
+   * address of the last read that ended.
+   */
+  public async readServer(
+    settings: McpSettings
+  ): Promise<BuiltInMcpServerRead> {
+    if (!isBuiltInMcpServerOn(settings.builtIn, EMAIL_SERVER_NAME))
+      throw new TypeError("The email server was read with both mailboxes off.")
+    const accounts = await this.#readAccounts()
+    const switchedOn = listSwitchedOnMailboxes(settings.builtIn.email, accounts)
+    const problem = findMailboxProblem(switchedOn)
+    const served =
+      problem === undefined ? listServedMailboxes(switchedOn) : NO_MAILBOXES
+    this.#lysAddress = findLysAddress(served)
+    if (problem !== undefined) return Object.freeze({ status: problem })
+    return Object.freeze({
+      status: "read",
+      settings: buildEmailServerSettings(this.#serverCommand, served)
+    })
+  }
+
+  /**
+   * Reads the address of Lys's own mailbox while the email server serves
+   * it.
+   * @param servers - The servers the registry applied, as it lists them
+   * now.
+   * @returns The address of Lys's account when the list holds the built-in
+   * `email` server not switched off, and the last read served her mailbox;
+   * else null, as when her mailbox is off, its account is unusable, or an
+   * added server took the name `email`. The address is personal data.
+   */
+  public readLysEmailAddress(servers: McpServerList): EmailAddress | null {
+    const applied = servers.servers.find(
+      (server) => server.name === EMAIL_SERVER_NAME
+    )
+    const isServing =
+      applied !== undefined &&
+      applied.isBuiltIn &&
+      applied.state.status !== "off"
+    return isServing ? this.#lysAddress : null
+  }
 }
 
 /**
- * Builds the settings that start the email server for one account.
+ * Lists the mailboxes the switches turn on, the person's first, each with
+ * the read of its account.
+ *
+ * @param switches - The email server's mailbox switches.
+ * @param accounts - The read of both saved accounts.
+ * @returns The frozen list; empty when both mailboxes are off.
+ */
+function listSwitchedOnMailboxes(
+  switches: BuiltInMcpSettings["email"],
+  accounts: EmailAccountsRead
+): readonly SwitchedOnMailbox[] {
+  const mailboxes: SwitchedOnMailbox[] = []
+  if (switches.enabled)
+    mailboxes.push({
+      variableName: EMAIL_ACCOUNT_VARIABLE_NAME,
+      read: accounts.person
+    })
+  if (switches.lysEnabled)
+    mailboxes.push({
+      variableName: LYS_EMAIL_ACCOUNT_VARIABLE_NAME,
+      read: accounts.lys
+    })
+  return Object.freeze(mailboxes)
+}
+
+/**
+ * Finds why the mailboxes that are on cannot be served.
+ *
+ * @param mailboxes - The mailboxes that are on, with their reads.
+ * @returns `account-invalid` when any account fails its rules or could not
+ * be read, which a person must fix before anything else; else
+ * `account-missing` when any account is not saved; else undefined.
+ */
+function findMailboxProblem(
+  mailboxes: readonly SwitchedOnMailbox[]
+): BuiltInMcpServerProblem | undefined {
+  const statuses = new Set(mailboxes.map((mailbox) => mailbox.read.status))
+  if (statuses.has("invalid") || statuses.has("unreadable"))
+    return "account-invalid"
+  return statuses.has("missing") ? "account-missing" : undefined
+}
+
+/**
+ * Lists the mailboxes the server serves: those whose accounts read.
+ *
+ * @param mailboxes - The mailboxes that are on, with their reads.
+ * @returns The frozen list, in the order given, of each mailbox whose
+ * account and password are saved and usable.
+ */
+function listServedMailboxes(
+  mailboxes: readonly SwitchedOnMailbox[]
+): readonly EmailServerMailbox[] {
+  return Object.freeze(
+    mailboxes.flatMap(({ variableName, read }) =>
+      read.status === "read"
+        ? [
+            Object.freeze({
+              variableName,
+              account: read.account,
+              password: read.password
+            })
+          ]
+        : []
+    )
+  )
+}
+
+/**
+ * Finds the address of Lys's account among the mailboxes served.
+ *
+ * @param mailboxes - The mailboxes the server serves.
+ * @returns Her address, or null when her mailbox is not among them.
+ */
+function findLysAddress(
+  mailboxes: readonly EmailServerMailbox[]
+): EmailAddress | null {
+  const lys = mailboxes.find(
+    (mailbox) => mailbox.variableName === LYS_EMAIL_ACCOUNT_VARIABLE_NAME
+  )
+  return lys === undefined ? null : lys.account.address
+}
+
+/**
+ * Builds the settings that start the email server for its mailboxes.
  *
  * @param serverCommand - How the email server is run.
- * @param account - Account the server signs in with.
- * @param password - Its password.
- * @returns Frozen stdio settings named `email`, switched on, whose only
- * environment variable is {@link EMAIL_ACCOUNT_VARIABLE_NAME} holding the
- * account and the password; they pass the shared MCP server rules, as every
+ * @param mailboxes - The mailboxes it serves, each variable once.
+ * @returns Frozen stdio settings named `email`, switched on, whose
+ * environment holds one variable per mailbox, in the order given, with its
+ * account and password; they pass the shared MCP server rules, as every
  * command the backend starts does.
  * @throws {z.ZodError} If the command fails the shared rules, such as a
  * path longer than a command may be, which the backend configuration
@@ -119,25 +289,26 @@ export function createEmailMcpServer(
  */
 export function buildEmailServerSettings(
   serverCommand: EmailServerCommand,
-  account: EmailAccount,
-  password: EmailPassword
+  mailboxes: readonly EmailServerMailbox[]
 ): McpServerSettings {
-  const accountVariable: McpEnvironmentVariable = {
-    name: EMAIL_ACCOUNT_VARIABLE_NAME,
-    value: buildEmailAccountVariable(account, password)
-  }
+  const environment: McpEnvironmentVariable[] = mailboxes.map(
+    ({ variableName, account, password }) => ({
+      name: variableName,
+      value: buildEmailAccountVariable(account, password)
+    })
+  )
   return mcpServerSettingsSchema.parse({
     name: EMAIL_SERVER_NAME,
     transport: "stdio",
     command: serverCommand.command,
     arguments: serverCommand.arguments,
-    environment: [accountVariable],
+    environment,
     enabled: true
   })
 }
 
 /**
- * Builds the text the email server reads its account and password from.
+ * Builds the text the email server reads an account and its password from.
  *
  * @param account - Account the server signs in with.
  * @param password - Its password.

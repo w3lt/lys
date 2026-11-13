@@ -501,7 +501,8 @@ function createTestAgentServices(
     requestLimits: TEST_AGENT_REQUEST_LIMITS,
     toolSearchCallRecords: new SqliteToolSearchCallRecordWriter(
       conversation.database
-    )
+    ),
+    readLysEmailAddress: () => null
   })
   return Object.freeze({ agentService, agentRuntimeService })
 }

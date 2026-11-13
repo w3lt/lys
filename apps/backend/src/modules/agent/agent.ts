@@ -8,6 +8,7 @@ import type {
   ConversationMessage,
   ConversationSource,
   ConversationUserMessage,
+  EmailAddress,
   ReplyPart,
   ToolCallReplyPart,
   ToolDefinition
@@ -114,6 +115,11 @@ export type AgentDependencies = Readonly<{
    * task.
    */
   toolKeeper: ToolKeeper
+  /**
+   * Reads the email address that is the agent's own now, which its state
+   * tools give it, or null when it has none; read once per turn.
+   */
+  readEmailAddress: () => EmailAddress | null
 }>
 
 /** Valid terminal assistant state; only completed replies carry a finish reason. */
@@ -464,6 +470,8 @@ export default class Agent {
   readonly #stateReader: AgentStateReader
   /** Borrowed keeper of a routed turn's tools, which `find_tools` asks. */
   readonly #toolKeeper: ToolKeeper
+  /** Borrowed reader of the agent's own email address. */
+  readonly #readEmailAddress: () => EmailAddress | null
   /**
    * Requests this agent is working on, the step each is at, and its request
    * slots.
@@ -476,7 +484,8 @@ export default class Agent {
    * @param profile - Trusted code, role, system prompt, and request limits
    * of the agent.
    * @param dependencies - Model access, its context meter, the state
-   * reader, and the tool keeper, lent for the agent's lifetime.
+   * reader, the tool keeper, and the reader of its email address, lent for
+   * the agent's lifetime.
    */
   public constructor(profile: AgentProfile, dependencies: AgentDependencies) {
     this.#identity = Object.freeze({ code: profile.code, role: profile.role })
@@ -486,6 +495,7 @@ export default class Agent {
     this.#replyContextMeter = dependencies.replyContextMeter
     this.#stateReader = dependencies.stateReader
     this.#toolKeeper = dependencies.toolKeeper
+    this.#readEmailAddress = dependencies.readEmailAddress
   }
 
   /**
@@ -727,7 +737,8 @@ export default class Agent {
       ? buildAgentStateTools({
           self: this.#identity,
           requestId: turn.requestId,
-          reader: this.#stateReader
+          reader: this.#stateReader,
+          emailAddress: this.#readEmailAddress()
         })
       : NO_AGENT_STATE_TOOLS
     const replyTools = buildReplyTools(turn, agentStateTools, this.#toolKeeper)

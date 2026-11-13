@@ -79,7 +79,8 @@ describe("findRequestedBackendTools", () => {
     expect(found).toEqual({
       builtInTools: [BUILT_IN_TOOLS[1], BUILT_IN_TOOLS[0]],
       mcpTools: [ECHO_TOOL],
-      notConnectedMcpToolName: undefined
+      notConnectedMcpToolName: undefined,
+      offersDelegateWork: false
     })
     expect(findMcpTool.mock.calls).toEqual([["mcp__files__echo"]])
   })
@@ -94,8 +95,26 @@ describe("findRequestedBackendTools", () => {
     ).toEqual({
       builtInTools: [],
       mcpTools: [],
-      notConnectedMcpToolName: undefined
+      notConnectedMcpToolName: undefined,
+      offersDelegateWork: false
     })
+  })
+
+  it("says that a request offers delegate_work, and looks the name up among neither the built-in nor the MCP tools", () => {
+    const findMcpTool = createMcpToolLookup()
+
+    const found = findRequestedBackendTools(BUILT_IN_TOOLS, findMcpTool, {
+      definitions: [],
+      backendToolNames: ["look_up_word", "delegate_work", "mcp__files__echo"]
+    })
+
+    expect(found).toEqual({
+      builtInTools: [BUILT_IN_TOOLS[0]],
+      mcpTools: [ECHO_TOOL],
+      notConnectedMcpToolName: undefined,
+      offersDelegateWork: true
+    })
+    expect(findMcpTool.mock.calls).toEqual([["mcp__files__echo"]])
   })
 
   it("names the first offered MCP tool whose server is not connected", () => {

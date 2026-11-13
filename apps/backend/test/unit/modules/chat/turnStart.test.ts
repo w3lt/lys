@@ -1,4 +1,7 @@
-import type { MessageGenerationOptions } from "@lys/protocol"
+import type {
+  ChatGenerationEvent,
+  MessageGenerationOptions
+} from "@lys/protocol"
 import {
   CALIGINIA_AGENT_CODE,
   type ConversationAssistantMessageStatus,
@@ -14,16 +17,25 @@ import type {
   ReplyStreamEvent,
   ReplyStreamRequest
 } from "../../../../src/modules/agent/replyModel"
+import {
+  NO_TURN_DELEGATION,
+  type TurnDelegation
+} from "../../../../src/modules/agent/turnDelegation"
 import { NO_UNOFFERED_TOOLS } from "../../../../src/modules/agent/unofferedTools"
 import type {
   ConversationTurn,
   ConversationTurnTarget,
   ConversationTurnUserMessage
 } from "../../../../src/modules/chat/persistence"
+import ReplyEventSubscription from "../../../../src/modules/chat/replyEventSubscription"
 import ReplyGenerationRegistry from "../../../../src/modules/chat/replyGenerationRegistry"
 import {
+  NO_TURN_DELEGATION_HOOKS,
   startTurn,
+  type EndedReply,
   type StartTurnOptions,
+  type TurnDelegationContext,
+  type TurnDelegationHooks,
   type TurnSettings,
   type TurnStartDependencies
 } from "../../../../src/modules/chat/turnStart"
@@ -39,6 +51,7 @@ import {
   createNewConversationTarget,
   createTurnUserMessage
 } from "../../support/conversationFixtures"
+import { getThrownFailure } from "../../support/databaseTransactionsContract"
 import {
   createTestFastify,
   type CapturedLogDestination
@@ -56,6 +69,7 @@ import {
   LEADER_STATE_TOOL_NAMES,
   READ_TEXT_FILE_TOOL
 } from "../../support/toolFixtures"
+import { buildTurnDelegation } from "../../support/turnDelegationFakes"
 
 /** Opens one reply stream for the agent that answers a case's turns. */
 type OpenReplyStream = ReplyModel["openReplyStream"]
@@ -169,6 +183,29 @@ type RequestedSettings = Readonly<{
   toolNames: readonly string[]
 }>
 
+/** Spies over the hooks a case starts a turn with. */
+type TurnDelegationHookSpies = Readonly<{
+  /** Records each turn the starter was told started. */
+  handleTurnStarted: Mock<TurnDelegationHooks["handleTurnStarted"]>
+  /** Records each turn the starter was asked to create the delegation of. */
+  createTurnDelegation: Mock<TurnDelegationHooks["createTurnDelegation"]>
+  /** Records each reply the starter was told ended. */
+  handleReplyEnded: Mock<TurnDelegationHooks["handleReplyEnded"]>
+}>
+
+/** The hooks of a case that reads how its turn's reply is stored at its end. */
+type StatusReadingHooks = Readonly<{
+  /** Hooks the case starts its turn with. */
+  hooks: TurnDelegationHookSpies
+  /**
+   * Status the turn's reply had as stored at each call of the end hook, in
+   * call order; undefined for a call at which the reply was not stored.
+   */
+  statusesAtReplyEnd: readonly (
+    ConversationAssistantMessageStatus | undefined
+  )[]
+}>
+
 /**
  * Opens what a case starts turns with: real conversation services over the
  * case's own database, a real registry, and a captured log.
@@ -225,8 +262,8 @@ function openTurnStartHarness(): TurnStartHarness {
  *
  * @param trainedForToolUse - Whether the model is trained for tool use.
  * @returns Frozen settings, with frozen tool lists, that offer the client
- * tool `read_text_file` and the backend tool `look_up_word` to a model that
- * sees no images.
+ * tool `read_text_file` and the backend tool `look_up_word`, and no
+ * `delegate_work`, to a model that sees no images.
  */
 function buildTurnSettings(trainedForToolUse: boolean): TurnSettings {
   const lookUpWordTool: TurnBuiltInTool = Object.freeze({
@@ -240,6 +277,7 @@ function buildTurnSettings(trainedForToolUse: boolean): TurnSettings {
     clientTools: Object.freeze([READ_TEXT_FILE_TOOL]),
     builtInTools: Object.freeze([lookUpWordTool]),
     mcpTools: NO_MCP_TOOLS,
+    offersDelegateWork: false,
     unofferedTools: NO_UNOFFERED_TOOLS,
     canSeeImages: false,
     trainedForToolUse
@@ -375,6 +413,81 @@ function listRequestedSettings(
   }))
 }
 
+/**
+ * Creates the hooks a case starts a turn with.
+ *
+ * @param delegation - Delegation the hooks create for every turn; by default
+ * the one of a turn that takes no part in delegation.
+ * @returns Spies that record their calls. Telling them that a turn started
+ * or a reply ended does nothing more.
+ */
+function createDelegationHooks(
+  delegation: TurnDelegation = NO_TURN_DELEGATION
+): TurnDelegationHookSpies {
+  return {
+    handleTurnStarted: vi.fn<TurnDelegationHooks["handleTurnStarted"]>(),
+    createTurnDelegation: vi.fn<TurnDelegationHooks["createTurnDelegation"]>(
+      () => delegation
+    ),
+    handleReplyEnded: vi.fn<TurnDelegationHooks["handleReplyEnded"]>()
+  }
+}
+
+/**
+ * Creates hooks whose end hook reads how the turn's reply is stored at the
+ * moment the hook is called.
+ *
+ * @param services - Conversation services of the case.
+ * @param turn - The stored turn the case starts.
+ * @returns The hooks, and the statuses their end hook read.
+ */
+function createStatusReadingHooks(
+  services: ConversationTestServices,
+  turn: ConversationTurn
+): StatusReadingHooks {
+  const hooks = createDelegationHooks()
+  const statusesAtReplyEnd: (ConversationAssistantMessageStatus | undefined)[] =
+    []
+  hooks.handleReplyEnded.mockImplementation(() => {
+    statusesAtReplyEnd.push(findStoredReplyStatus(services, turn))
+  })
+  return { hooks, statusesAtReplyEnd }
+}
+
+/**
+ * Builds what the end hook is told about a turn's reply.
+ *
+ * @param turn - The stored turn.
+ * @param errorMessage - Sentence of the reply's `error` event; undefined
+ * when the reply sent none.
+ * @returns The ended reply of the turn.
+ */
+function buildEndedReply(
+  turn: ConversationTurn,
+  errorMessage: string | undefined
+): EndedReply {
+  return {
+    conversationId: turn.conversation.id,
+    assistantMessageId: turn.assistantMessage.id,
+    errorMessage
+  }
+}
+
+/**
+ * Builds the matcher of a log record that says one of a turn's tasks failed.
+ *
+ * @param message - Text the logged failure's message contains.
+ * @returns A matcher of the error record with that failure, matching any
+ * other field of the record.
+ */
+function buildTaskFailureRecord(message: string): unknown {
+  return expect.objectContaining({
+    level: "error",
+    msg: "Conversation task failed",
+    err: expect.objectContaining({ message: expect.stringContaining(message) })
+  })
+}
+
 describe("startTurn", () => {
   it("starts the turn's generation, registers it under the reply's id, and hands the agent the turn's model, options, and tools from the settings", async () => {
     const harness = openTurnStartHarness()
@@ -386,6 +499,7 @@ describe("startTurn", () => {
       agent: createTestAgent(openReplyStream),
       settings: buildTurnSettings(true),
       startedBy: "backend",
+      delegation: NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     const registered = harness.generations.findReplyGeneration({
@@ -421,6 +535,7 @@ describe("startTurn", () => {
       agent,
       settings,
       startedBy: "backend",
+      delegation: NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await first.settled
@@ -429,6 +544,7 @@ describe("startTurn", () => {
       agent,
       settings,
       startedBy: "backend",
+      delegation: NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await second.settled
@@ -449,6 +565,7 @@ describe("startTurn", () => {
       agent: createTestAgent(openReplyStream),
       settings: buildTurnSettings(true),
       startedBy: "backend",
+      delegation: NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await generation.settled
@@ -471,6 +588,7 @@ describe("startTurn", () => {
       agent: createTestAgent(openReplyStream),
       settings: buildTurnSettings(true),
       startedBy: "backend",
+      delegation: NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await generation.settled
@@ -513,6 +631,7 @@ describe("startTurn", () => {
         agent: createTestAgent(openReplyStream),
         settings: buildTurnSettings(trainedForToolUse),
         startedBy: "backend",
+        delegation: NO_TURN_DELEGATION_HOOKS,
         logger: harness.logger
       })
       await generation.settled
@@ -533,6 +652,7 @@ describe("startTurn", () => {
       agent: createTestAgent(createEventStream(HI_REPLY)),
       settings: buildTurnSettings(false),
       startedBy: "person",
+      delegation: NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await generation.settled
@@ -555,6 +675,7 @@ describe("startTurn", () => {
       agent: createTestAgent(createEventStream(HI_REPLY)),
       settings: buildTurnSettings(false),
       startedBy: "backend",
+      delegation: NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await generation.settled
@@ -582,6 +703,7 @@ describe("startTurn", () => {
       agent: createTestAgent(createEventStream(HI_REPLY)),
       settings: buildTurnSettings(false),
       startedBy: "person",
+      delegation: NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await generation.settled
@@ -613,6 +735,7 @@ describe("startTurn", () => {
       agent: createTestAgent(createEventStream(HI_REPLY)),
       settings: buildTurnSettings(false),
       startedBy: "backend",
+      delegation: NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await generation.settled
@@ -645,6 +768,7 @@ describe("startTurn", () => {
       agent: createTestAgent(openReplyStream),
       settings: buildTurnSettings(false),
       startedBy: "backend",
+      delegation: NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await vi.waitFor(() => {
@@ -673,6 +797,7 @@ describe("startTurn", () => {
       agent: createTestAgent(createEventStream(HI_REPLY)),
       settings: buildTurnSettings(false),
       startedBy: "backend",
+      delegation: NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     })
     await generation.settled
@@ -696,6 +821,7 @@ describe("startTurn", () => {
       agent: createTestAgent(openReplyStream),
       settings: buildTurnSettings(false),
       startedBy: "person",
+      delegation: NO_TURN_DELEGATION_HOOKS,
       logger: harness.logger
     }
     await harness.generations[Symbol.asyncDispose]()
@@ -707,5 +833,321 @@ describe("startTurn", () => {
 
     expect(findStoredReplyStatus(harness.services, turn)).toBe("interrupted")
     expect(openReplyStream).not.toHaveBeenCalled()
+  })
+
+  it("tells the turn's starter that the turn started, then has it create the turn's delegation, each once and before the model is asked", async () => {
+    const harness = openTurnStartHarness()
+    const openReplyStream = createEventStream(HI_REPLY)
+    const hooks = createDelegationHooks()
+    const turn = createStoredTurn(harness.services)
+    const settings = buildTurnSettings(false)
+    const context: TurnDelegationContext = {
+      turn,
+      settings,
+      startedBy: "backend"
+    }
+
+    const generation = startTurn(harness.dependencies, {
+      turn,
+      agent: createTestAgent(openReplyStream),
+      settings,
+      startedBy: "backend",
+      delegation: hooks,
+      logger: harness.logger
+    })
+    await generation.settled
+
+    expect(hooks.handleTurnStarted.mock.calls).toEqual([[context]])
+    expect(hooks.createTurnDelegation.mock.calls).toEqual([[context]])
+    expect(hooks.handleTurnStarted).toHaveBeenCalledBefore(
+      hooks.createTurnDelegation
+    )
+    expect(hooks.createTurnDelegation).toHaveBeenCalledBefore(openReplyStream)
+  })
+
+  it("hands the agent's turn the delegation its starter created", async () => {
+    const harness = openTurnStartHarness()
+    const openReplyStream = createEventStream(HI_REPLY)
+    const agent = createTestAgent(openReplyStream)
+    const createReply = vi.spyOn(agent, "createReply")
+    const delegation = buildTurnDelegation({
+      mayDelegate: true,
+      hasJobs: false,
+      job: undefined
+    })
+
+    const generation = startTurn(harness.dependencies, {
+      turn: createStoredTurn(harness.services),
+      agent,
+      settings: buildTurnSettings(true),
+      startedBy: "backend",
+      delegation: createDelegationHooks(delegation),
+      logger: harness.logger
+    })
+    await generation.settled
+
+    expect(createReply.mock.calls[0]?.[0].delegation).toBe(delegation)
+    expect(listRequestedSettings(openReplyStream)[0]?.toolNames).toEqual([
+      ...SETTINGS_TOOL_NAMES,
+      ...LEADER_STATE_TOOL_NAMES,
+      "delegate_work"
+    ])
+  })
+
+  it("tells the turn's starter once that a completed reply ended, after the reply's final state is stored", async () => {
+    const harness = openTurnStartHarness()
+    const turn = createStoredTurn(harness.services)
+    const { hooks, statusesAtReplyEnd } = createStatusReadingHooks(
+      harness.services,
+      turn
+    )
+
+    const generation = startTurn(harness.dependencies, {
+      turn,
+      agent: createTestAgent(createEventStream(HI_REPLY)),
+      settings: buildTurnSettings(false),
+      startedBy: "backend",
+      delegation: hooks,
+      logger: harness.logger
+    })
+    await generation.settled
+
+    expect(hooks.handleReplyEnded.mock.calls).toEqual([
+      [buildEndedReply(turn, undefined)]
+    ])
+    expect(statusesAtReplyEnd).toEqual(["completed"])
+  })
+
+  it("tells the turn's starter once that a failed reply ended, with the sentence of the reply's error event", async () => {
+    const harness = openTurnStartHarness()
+    const openReplyStream = vi.fn<OpenReplyStream>(() =>
+      Promise.reject(new Error("The model is down"))
+    )
+    const turn = createStoredTurn(harness.services)
+    const { hooks, statusesAtReplyEnd } = createStatusReadingHooks(
+      harness.services,
+      turn
+    )
+    const sentEvents: ChatGenerationEvent[] = []
+    const follower = new ReplyEventSubscription<ChatGenerationEvent>(
+      async (event) => {
+        sentEvents.push(event)
+      }
+    )
+
+    const generation = startTurn(harness.dependencies, {
+      turn,
+      agent: createTestAgent(openReplyStream),
+      settings: buildTurnSettings(false),
+      startedBy: "backend",
+      delegation: hooks,
+      logger: harness.logger
+    })
+    generation.openSubscription(follower)
+    await generation.settled
+    await follower.closed
+
+    const errorMessage = hooks.handleReplyEnded.mock.calls[0]?.[0].errorMessage
+    expect(errorMessage).toEqual(expect.any(String))
+    expect(sentEvents).toContainEqual({ type: "error", message: errorMessage })
+    expect(hooks.handleReplyEnded.mock.calls).toEqual([
+      [buildEndedReply(turn, errorMessage)]
+    ])
+    expect(statusesAtReplyEnd).toEqual(["failed"])
+  })
+
+  it("tells the turn's starter that a stopped reply ended before stopReply resolves", async () => {
+    const harness = openTurnStartHarness()
+    const openReplyStream = vi.fn<OpenReplyStream>(waitForRequestCancellation)
+    const turn = createStoredTurn(harness.services)
+    const { hooks, statusesAtReplyEnd } = createStatusReadingHooks(
+      harness.services,
+      turn
+    )
+
+    const generation = startTurn(harness.dependencies, {
+      turn,
+      agent: createTestAgent(openReplyStream),
+      settings: buildTurnSettings(false),
+      startedBy: "backend",
+      delegation: hooks,
+      logger: harness.logger
+    })
+    await vi.waitFor(() => {
+      expect(openReplyStream).toHaveBeenCalledOnce()
+    })
+    await generation.stopReply()
+
+    expect(hooks.handleReplyEnded.mock.calls).toEqual([
+      [buildEndedReply(turn, undefined)]
+    ])
+    expect(statusesAtReplyEnd).toEqual(["interrupted"])
+  })
+
+  it.each([
+    ["whose start its starter cannot handle", "handleTurnStarted"],
+    ["whose delegation cannot be created", "createTurnDelegation"]
+  ] as const)(
+    "stores the reply of a turn %s as interrupted, tells the starter that the reply ended, and throws the failure",
+    async (_label, failingHook) => {
+      const harness = openTurnStartHarness()
+      const openReplyStream = createEventStream(HI_REPLY)
+      const turn = createStoredTurn(harness.services)
+      const { hooks, statusesAtReplyEnd } = createStatusReadingHooks(
+        harness.services,
+        turn
+      )
+      const hookFailure = new Error("The conversation's jobs cannot be read")
+      hooks[failingHook].mockImplementation(() => {
+        throw hookFailure
+      })
+      const options: StartTurnOptions = {
+        turn,
+        agent: createTestAgent(openReplyStream),
+        settings: buildTurnSettings(false),
+        startedBy: "backend",
+        delegation: hooks,
+        logger: harness.logger
+      }
+
+      expect(() => startTurn(harness.dependencies, options)).toThrow(
+        hookFailure
+      )
+      await waitForMicrotasks()
+
+      expect(hooks.handleReplyEnded.mock.calls).toEqual([
+        [buildEndedReply(turn, undefined)]
+      ])
+      expect(statusesAtReplyEnd).toEqual(["interrupted"])
+      expect(openReplyStream).not.toHaveBeenCalled()
+    }
+  )
+
+  it("reports a failure of the starter's end hook without hiding the reply task's own failure", async () => {
+    const harness = openTurnStartHarness()
+    vi.spyOn(
+      harness.services.turns,
+      "updateAssistantMessageState"
+    ).mockImplementation(() => {
+      throw new Error("database is locked")
+    })
+    const hooks = createDelegationHooks()
+    hooks.handleReplyEnded.mockImplementation(() => {
+      throw new Error("The activity hub is closed")
+    })
+
+    const generation = startTurn(harness.dependencies, {
+      turn: createStoredTurn(harness.services),
+      agent: createTestAgent(createEventStream(HI_REPLY)),
+      settings: buildTurnSettings(false),
+      startedBy: "backend",
+      delegation: hooks,
+      logger: harness.logger
+    })
+    await generation.settled
+
+    expect(hooks.handleReplyEnded).toHaveBeenCalledOnce()
+    expect(harness.log.records).toContainEqual(
+      buildTaskFailureRecord("The activity hub is closed")
+    )
+    expect(harness.log.records).toContainEqual(
+      buildTaskFailureRecord("Reply failure could not be finalized")
+    )
+  })
+
+  it("tells the turn's starter that the reply ended when the registry is closed, after the reply is stored as interrupted", async () => {
+    const harness = openTurnStartHarness()
+    const turn = createStoredTurn(harness.services)
+    const { hooks, statusesAtReplyEnd } = createStatusReadingHooks(
+      harness.services,
+      turn
+    )
+    const options: StartTurnOptions = {
+      turn,
+      agent: createTestAgent(createEventStream(HI_REPLY)),
+      settings: buildTurnSettings(false),
+      startedBy: "backend",
+      delegation: hooks,
+      logger: harness.logger
+    }
+    await harness.generations[Symbol.asyncDispose]()
+
+    expect(() => startTurn(harness.dependencies, options)).toThrow(
+      "Reply generation registry is closed"
+    )
+
+    expect(hooks.handleReplyEnded.mock.calls).toEqual([
+      [buildEndedReply(turn, undefined)]
+    ])
+    expect(statusesAtReplyEnd).toEqual(["interrupted"])
+  })
+
+  it("throws the registry's failure and reports the end hook's failure when a turn cannot start and its end hook fails", async () => {
+    const harness = openTurnStartHarness()
+    const hooks = createDelegationHooks()
+    hooks.handleReplyEnded.mockImplementation(() => {
+      throw new Error("The activity hub is closed")
+    })
+    const options: StartTurnOptions = {
+      turn: createStoredTurn(harness.services),
+      agent: createTestAgent(createEventStream(HI_REPLY)),
+      settings: buildTurnSettings(false),
+      startedBy: "backend",
+      delegation: hooks,
+      logger: harness.logger
+    }
+    await harness.generations[Symbol.asyncDispose]()
+
+    expect(() => startTurn(harness.dependencies, options)).toThrow(
+      "Reply generation registry is closed"
+    )
+
+    expect(hooks.handleReplyEnded).toHaveBeenCalledOnce()
+    expect(harness.log.records).toContainEqual(
+      buildTaskFailureRecord("The activity hub is closed")
+    )
+  })
+
+  it("tells the turn's starter that the reply ended, and throws the start failure together with the storage failure, when a turn cannot start and its reply cannot be stored as interrupted", () => {
+    const harness = openTurnStartHarness()
+    const turn = createStoredTurn(harness.services)
+    const { hooks, statusesAtReplyEnd } = createStatusReadingHooks(
+      harness.services,
+      turn
+    )
+    const startFailure = new Error("The conversation's jobs cannot be read")
+    hooks.handleTurnStarted.mockImplementation(() => {
+      throw startFailure
+    })
+    const storageFailure = new Error("database is locked")
+    vi.spyOn(
+      harness.services.turns,
+      "updateAssistantMessageState"
+    ).mockImplementation(() => {
+      throw storageFailure
+    })
+    const options: StartTurnOptions = {
+      turn,
+      agent: createTestAgent(createEventStream(HI_REPLY)),
+      settings: buildTurnSettings(false),
+      startedBy: "backend",
+      delegation: hooks,
+      logger: harness.logger
+    }
+
+    const thrown = getThrownFailure(() =>
+      startTurn(harness.dependencies, options)
+    )
+
+    expect(thrown).toBeInstanceOf(AggregateError)
+    expect(thrown).toMatchObject({
+      message: "Turn start failure could not be finalized",
+      errors: [startFailure, storageFailure],
+      cause: storageFailure
+    })
+    expect(hooks.handleReplyEnded.mock.calls).toEqual([
+      [buildEndedReply(turn, undefined)]
+    ])
+    expect(statusesAtReplyEnd).toEqual(["streaming"])
   })
 })

@@ -17,7 +17,10 @@ import type ReplyGeneration from "../../../src/modules/chat/replyGeneration"
 import ReplyGenerationRegistry, {
   type ReplyTarget
 } from "../../../src/modules/chat/replyGenerationRegistry"
-import type { TurnSettings } from "../../../src/modules/chat/turnStart"
+import {
+  NO_TURN_DELEGATION_HOOKS,
+  type TurnSettings
+} from "../../../src/modules/chat/turnStart"
 import StoredConversationHistoryEditor from "../../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../../src/modules/conversation/historyReader"
 import AttachmentFileStore from "../../../src/modules/attachment/attachmentFileStore"
@@ -79,6 +82,7 @@ const PLAIN_TURN_SETTINGS: TurnSettings = Object.freeze({
   clientTools: Object.freeze([]),
   builtInTools: Object.freeze([]),
   mcpTools: Object.freeze([]),
+  offersDelegateWork: false,
   unofferedTools: NO_UNOFFERED_TOOLS,
   canSeeImages: false,
   trainedForToolUse: false
@@ -354,8 +358,8 @@ function createModelSpies(
  * @param settings - Model, controls, and tools the turn is started with.
  * @param attachments - Attachments of the turn's message; no file is written
  * for them.
- * @returns The stored turn and its generation, which is already running and
- * logs to a destination no case reads.
+ * @returns The stored turn and its generation, which is already running,
+ * takes no part in delegation, and logs to a destination no case reads.
  * @throws If Caliginia is not live.
  */
 function startHelloTurn(
@@ -378,6 +382,7 @@ function startHelloTurn(
     agent,
     settings,
     startedBy: "person",
+    delegation: NO_TURN_DELEGATION_HOOKS,
     logger: createBackendLogger(new CapturedLogDestination())
   })
   return { turn, generation }

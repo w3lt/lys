@@ -6,7 +6,7 @@ import type {
   ConversationIsJobProblem,
   ConversationNotFoundProblem
 } from "@lys/protocol"
-import { MCP_TOOL_NAME_PREFIX } from "@lys/share"
+import { DELEGATE_WORK_TOOL_NAME, MCP_TOOL_NAME_PREFIX } from "@lys/share"
 import type { FastifyReply } from "fastify"
 import type Agent from "../../agent/agent"
 import {
@@ -140,21 +140,29 @@ export type RequestedBackendTools = Readonly<{
    * connected now; undefined when there is none.
    */
   notConnectedMcpToolName: string | undefined
+  /**
+   * Whether the request offers `delegate_work`. The tool is in neither list:
+   * the agent adds it itself to a turn that may delegate.
+   */
+  offersDelegateWork: boolean
 }>
 
 /**
  * Finds the backend tools a request offers: the built-in tools, and the
- * tools of the MCP servers, whose names start with `mcp__`.
+ * tools of the MCP servers, whose names start with `mcp__`; and whether it
+ * offers `delegate_work`.
  *
  * @param builtInTools - Every built-in tool.
  * @param findMcpTool - Looks up one MCP tool in the servers as they are
  * now.
  * @param tools - Validated tool offer of the request; absence offers none.
- * @returns The offered tools by kind, each list in offer order, and the
- * first offered MCP tool whose server is not connected.
- * @throws An {@link UnknownBackendToolError} naming every offered name, in
- * offer order, that belongs to no built-in tool and to no applied server's
- * listed tool.
+ * @returns The offered tools by kind, each list in offer order, the first
+ * offered MCP tool whose server is not connected, and whether the offer
+ * names `delegate_work`. That name is taken out before the lookups, so it is
+ * looked up among neither the built-in tools nor the servers' tools.
+ * @throws An {@link UnknownBackendToolError} naming every other offered
+ * name, in offer order, that belongs to no built-in tool and to no applied
+ * server's listed tool.
  */
 export function findRequestedBackendTools(
   builtInTools: readonly BuiltInToolEntry[],
@@ -164,9 +172,13 @@ export function findRequestedBackendTools(
   const builtInByName = new Map(
     builtInTools.map((entry) => [entry.definition.name, entry])
   )
+  const offeredNames = tools?.backendToolNames ?? []
+  const lookedUpNames = offeredNames.filter(
+    (name) => name !== DELEGATE_WORK_TOOL_NAME
+  )
   const offeredBuiltInTools: BuiltInToolEntry[] = []
   const otherNames: string[] = []
-  for (const name of tools?.backendToolNames ?? []) {
+  for (const name of lookedUpNames) {
     const builtInTool = builtInByName.get(name)
     if (builtInTool === undefined) otherNames.push(name)
     else offeredBuiltInTools.push(builtInTool)
@@ -177,7 +189,8 @@ export function findRequestedBackendTools(
   return Object.freeze({
     builtInTools: Object.freeze(offeredBuiltInTools),
     mcpTools: offeredMcpTools.tools,
-    notConnectedMcpToolName: offeredMcpTools.notConnectedToolName
+    notConnectedMcpToolName: offeredMcpTools.notConnectedToolName,
+    offersDelegateWork: offeredNames.includes(DELEGATE_WORK_TOOL_NAME)
   })
 }
 

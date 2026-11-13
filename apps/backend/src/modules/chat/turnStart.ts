@@ -1,4 +1,7 @@
-import type { MessageGenerationOptions } from "@lys/protocol"
+import type {
+  ChatGenerationEvent,
+  MessageGenerationOptions
+} from "@lys/protocol"
 import type {
   Conversation,
   ConversationAssistantMessageStatus,
@@ -9,7 +12,10 @@ import type Agent from "../agent/agent"
 import type { AgentTurn } from "../agent/agent"
 import { AgentRequestLimitError } from "../agent/agentActivity"
 import type { FindAttachmentImage } from "../agent/agentContext"
-import { NO_TURN_DELEGATION } from "../agent/turnDelegation"
+import {
+  NO_TURN_DELEGATION,
+  type TurnDelegation
+} from "../agent/turnDelegation"
 import type { UnofferedTools } from "../agent/unofferedTools"
 import type AttachmentFileStore from "../attachment/attachmentFileStore"
 import { buildAttachmentImageReader } from "../attachment/attachmentImageReader"
@@ -62,6 +68,12 @@ export type TurnSettings = Readonly<{
    * as connected when the call runs. Empty when none.
    */
   mcpTools: readonly TurnMcpTool[]
+  /**
+   * Whether the turn's tool offer names `delegate_work`. The tool is not
+   * among the tools above: the agent adds it itself to a turn that may
+   * delegate.
+   */
+  offersDelegateWork: boolean
   /** What is named about the tools the turn does not offer. */
   unofferedTools: UnofferedTools
   /** Whether the model sees images. */
@@ -79,6 +91,53 @@ export type TurnSettings = Readonly<{
  */
 export type TurnStarter = "person" | "backend"
 
+/** A turn that is starting, as the hooks of its starter are told about it. */
+export type TurnDelegationContext = Readonly<{
+  /** Stored turn and the snapshot of its conversation before it. */
+  turn: ConversationTurn
+  /** Model, controls, and tools the turn's reply is written with. */
+  settings: TurnSettings
+  /** Who starts the turn. */
+  startedBy: TurnStarter
+}>
+
+/** A reply that ended, as the hooks of its turn's starter are told about it. */
+export type EndedReply = Readonly<{
+  /** UUIDv7 of the conversation that holds the reply. */
+  conversationId: string
+  /** UUIDv7 of the reply. */
+  assistantMessageId: string
+  /** Sentence of the reply's `error` event; undefined when it sent none. */
+  errorMessage: string | undefined
+}>
+
+/** What the starter of a turn supplies so the turn takes part in delegation. */
+export type TurnDelegationHooks = Readonly<{
+  /**
+   * Called once per turn, before its delegation is created. A throw keeps
+   * the turn's generation from starting: its delegation is not created, and
+   * {@link startTurn} throws the failure.
+   */
+  handleTurnStarted: (context: TurnDelegationContext) => void
+  /**
+   * Called once per turn, before its reply task starts. The turn's agent is
+   * handed the returned delegation unchanged. A throw keeps the turn's
+   * generation from starting, and {@link startTurn} throws the failure.
+   */
+  createTurnDelegation: (context: TurnDelegationContext) => TurnDelegation
+  /**
+   * Called once per reply, after its final state is stored, also when its
+   * generation could not start, which stores the reply as `interrupted`. For
+   * a started generation the call is made inside the reply task, so
+   * `stopReply` of the generation resolves only after the hook returned; for
+   * one that could not start, it is made before {@link startTurn} throws.
+   * When the final state could not be stored, the hook is called all the
+   * same, and the reply is still stored as `streaming`. A throw is logged as
+   * an error with the turn's logger and changes nothing else.
+   */
+  handleReplyEnded: (reply: EndedReply) => void
+}>
+
 /** One stored turn to start, with who answers it and what with. */
 export type StartTurnOptions = Readonly<{
   /** Stored turn and the snapshot of its conversation before it. */
@@ -92,6 +151,11 @@ export type StartTurnOptions = Readonly<{
    * its conversation's title.
    */
   startedBy: TurnStarter
+  /**
+   * Hooks of whoever starts the turn, through which the turn takes part in
+   * delegation; called as {@link TurnDelegationHooks} describes.
+   */
+  delegation: TurnDelegationHooks
   /** Logger the turn's tasks log to, kept until the generation settles. */
   logger: FastifyBaseLogger
 }>
@@ -138,7 +202,7 @@ export type TurnStartDependencies = Readonly<{
  * composition root.
  *
  * @param options - The stored turn, its agent, its settings, who starts it,
- * and the logger its tasks log to.
+ * the starter's delegation hooks, and the logger its tasks log to.
  * @returns The registered generation, as {@link startTurn} returns it.
  * @throws As {@link startTurn} does.
  */
@@ -146,7 +210,10 @@ export type StartTurn = (options: StartTurnOptions) => ReplyGeneration
 
 /** What a started turn's reply task keeps until the reply is final. */
 type TurnReplyInput = Readonly<{
-  /** The stored turn, its agent, its settings, and its logger. */
+  /**
+   * The stored turn, its agent, its settings, its starter's hooks, and its
+   * logger.
+   */
   options: StartTurnOptions
   /**
    * Backend tools of the turn, each name once: the settings' tools, then the
@@ -155,6 +222,8 @@ type TurnReplyInput = Readonly<{
   builtInTools: readonly TurnBuiltInTool[]
   /** Reads the bytes of one stored image attachment of the conversation. */
   findAttachmentImage: FindAttachmentImage
+  /** The turn's part in delegation, as its starter's hooks created it. */
+  turnDelegation: TurnDelegation
 }>
 
 /** What a turn's reply task borrows until the reply is final. */
@@ -177,6 +246,21 @@ type ReplyStorage = Pick<
 type ReplyRefusal = Parameters<AgentTurn["reportReplyRefusal"]>[0]
 
 /**
+ * Hooks of a starter whose turns take no part in delegation: they do nothing
+ * when a turn starts or a reply ends, and every turn gets
+ * {@link NO_TURN_DELEGATION}.
+ *
+ * @remarks The chat route passes them until the delegation policies are
+ * wired into the composition root; the commit that wires them removes this
+ * constant.
+ */
+export const NO_TURN_DELEGATION_HOOKS: TurnDelegationHooks = Object.freeze({
+  handleTurnStarted: () => undefined,
+  createTurnDelegation: () => NO_TURN_DELEGATION,
+  handleReplyEnded: () => undefined
+})
+
+/**
  * Starts the generation that writes one stored turn's reply and, for a
  * person's turn in an untitled conversation, its title unless another turn of
  * that conversation is already generating one.
@@ -184,60 +268,147 @@ type ReplyRefusal = Parameters<AgentTurn["reportReplyRefusal"]>[0]
  * @param dependencies - Registry, persistence, attachment files, title
  * generation, and approval gateway, borrowed until the generation settles.
  * @param options - The stored turn, its agent, its settings, who starts it,
- * and the logger its tasks log to.
+ * the starter's delegation hooks, and the logger its tasks log to.
  * @returns The registered generation. Open its first followers before
  * awaiting anything, so they receive every task event.
- * @throws If the registry no longer admits generations; the stored reply is
- * finalized as interrupted first, so no reply stays streaming.
- * @remarks The backend tools of the turn are the settings' tools, followed by
- * the attachment reader as {@link buildTurnBuiltInTools} adds it for a model
+ * @throws If the registry no longer admits generations, or the starter's
+ * `handleTurnStarted` or `createTurnDelegation` throws; the stored reply is
+ * finalized as interrupted first, so no reply stays streaming, and the
+ * starter is told that the reply ended. If that state cannot be stored, an
+ * `AggregateError` of the failure and the storage failure is thrown instead,
+ * after the starter was told.
+ * @remarks The starter's hooks are called as {@link TurnDelegationHooks}
+ * describes, and the turn's agent is handed the delegation they create. The
+ * backend tools of the turn are the settings' tools, followed by the
+ * attachment reader as {@link buildTurnBuiltInTools} adds it for a model
  * trained for tool use. A backend-started turn gets no title task, whatever
- * its conversation's title. A failure of either task is logged as an error
- * with the turn's logger.
+ * its conversation's title. A failure of either task, or of the starter's
+ * `handleReplyEnded`, is logged as an error with the turn's logger.
  */
 export function startTurn(
   dependencies: TurnStartDependencies,
   options: StartTurnOptions
 ): ReplyGeneration {
-  const { turn, logger } = options
-  const input = buildTurnReplyInput(options, dependencies)
+  const { turn, settings, startedBy, delegation, logger } = options
+  const delegationContext: TurnDelegationContext = Object.freeze({
+    turn,
+    settings,
+    startedBy
+  })
   const target: ReplyTarget = {
     conversationId: turn.conversation.id,
     assistantMessageId: turn.assistantMessage.id
   }
   try {
+    delegation.handleTurnStarted(delegationContext)
+    const turnDelegation = delegation.createTurnDelegation(delegationContext)
+    const input = buildTurnReplyInput(options, dependencies, turnDelegation)
     return dependencies.generations.startReplyGeneration(target, {
       startReplyTask: (context) =>
         createTurnReplyTask(dependencies, input, context),
       startTitleTask:
-        options.startedBy === "person" && turn.conversation.title === null
+        startedBy === "person" && turn.conversation.title === null
           ? (context) => createTurnTitleTask(dependencies, options, context)
           : undefined,
-      reportTaskFailure: (error) => {
-        logger.error({ err: error }, "Conversation task failed")
+      reportTaskFailure: (failure) => {
+        handleTaskFailure(logger, failure)
       }
     })
   } catch (error) {
-    dependencies.turns.updateAssistantMessageState(turn.assistantMessage.id, {
-      status: "interrupted"
-    })
+    handleTurnStartFailure(dependencies.turns, options, error)
     throw error
   }
 }
 
 /**
+ * Ends the stored reply of a turn whose generation could not start: stores
+ * it as interrupted, then tells the turn's starter that it ended.
+ *
+ * @param turns - Turn persistence borrowed while turns are started.
+ * @param options - The stored turn, its starter's hooks, and its logger.
+ * @param startFailure - What kept the generation from starting.
+ * @throws An `AggregateError` holding `startFailure` followed by the
+ * persistence failure when the state cannot be stored; the starter is told
+ * all the same, before it is thrown.
+ */
+function handleTurnStartFailure(
+  turns: TurnStartDependencies["turns"],
+  options: Pick<StartTurnOptions, "turn" | "delegation" | "logger">,
+  startFailure: unknown
+): void {
+  try {
+    turns.updateAssistantMessageState(options.turn.assistantMessage.id, {
+      status: "interrupted"
+    })
+  } catch (persistenceError) {
+    throw new AggregateError(
+      [startFailure, persistenceError],
+      "Turn start failure could not be finalized",
+      { cause: persistenceError }
+    )
+  } finally {
+    handleTurnReplyEnded(options, undefined)
+  }
+}
+
+/**
+ * Tells the starter of a turn that the turn's reply ended.
+ *
+ * @param options - The stored turn, its starter's hooks, and its logger.
+ * @param errorMessage - Sentence of the reply's `error` event; undefined
+ * when the reply sent none.
+ * @remarks A failure of the starter's `handleReplyEnded` is not thrown: it is
+ * logged as an error with the turn's logger, like a failure of one of the
+ * turn's tasks.
+ */
+function handleTurnReplyEnded(
+  {
+    turn,
+    delegation,
+    logger
+  }: Pick<StartTurnOptions, "turn" | "delegation" | "logger">,
+  errorMessage: string | undefined
+): void {
+  const reply: EndedReply = Object.freeze({
+    conversationId: turn.conversation.id,
+    assistantMessageId: turn.assistantMessage.id,
+    errorMessage
+  })
+  try {
+    delegation.handleReplyEnded(reply)
+  } catch (failure) {
+    handleTaskFailure(logger, failure)
+  }
+}
+
+/**
+ * Logs the failure of one of a turn's tasks, or of the starter's
+ * `handleReplyEnded` for the turn's reply.
+ *
+ * @param logger - Logger of the turn.
+ * @param failure - What the task rejected with, or the hook threw.
+ */
+function handleTaskFailure(logger: FastifyBaseLogger, failure: unknown): void {
+  logger.error({ err: failure }, "Conversation task failed")
+}
+
+/**
  * Builds what a turn's reply task keeps, before the turn's generation starts.
  *
- * @param options - The stored turn, its agent, its settings, and its logger.
+ * @param options - The stored turn, its agent, its settings, its starter's
+ * hooks, and its logger.
  * @param dependencies - Attachment files, read while the reply is written.
+ * @param turnDelegation - The turn's part in delegation, as its starter's
+ * hooks created it.
  * @returns The options with the backend tools of the turn, which are the
  * settings' tools followed by the attachment reader as
- * {@link buildTurnBuiltInTools} adds it for a model trained for tool use, and
- * the reader of the conversation's stored images.
+ * {@link buildTurnBuiltInTools} adds it for a model trained for tool use,
+ * the reader of the conversation's stored images, and the turn's delegation.
  */
 function buildTurnReplyInput(
   options: StartTurnOptions,
-  { attachmentFiles }: Pick<TurnStartDependencies, "attachmentFiles">
+  { attachmentFiles }: Pick<TurnStartDependencies, "attachmentFiles">,
+  turnDelegation: TurnDelegation
 ): TurnReplyInput {
   const { turn, settings } = options
   const conversationId = turn.conversation.id
@@ -257,7 +428,8 @@ function buildTurnReplyInput(
     findAttachmentImage: buildAttachmentImageReader(
       conversationId,
       attachmentFiles
-    )
+    ),
+    turnDelegation
   }
 }
 
@@ -291,22 +463,70 @@ function buildTurnBuiltInTools(
 }
 
 /**
- * Has the turn's agent write its reply, then finalizes a reply it left
- * streaming.
+ * Runs one turn's reply task: has the agent write the reply and finalizes a
+ * reply it left streaming, as {@link createTurnReply} describes, then tells
+ * the turn's starter that the reply ended.
  *
  * @param dependencies - Persistence and approval gateway the reply uses.
  * @param input - Stored turn, its agent, and what the reply keeps.
  * @param context - Generation-owned cancellation, event sender, tool call
  * sender, and approval prompt sender.
+ * @returns Settlement after the reply is final and the starter was told.
+ * @throws As {@link createTurnReply} does, after the starter was told. The
+ * generation reports it.
+ * @remarks The starter is told the sentence of the reply's `error` event,
+ * which is remembered as the agent sends the event: a follower of the
+ * generation would receive the event too late. A failure of the starter's
+ * `handleReplyEnded` is logged as {@link handleTurnReplyEnded} describes and
+ * does not change how the task settles.
+ */
+async function createTurnReplyTask(
+  dependencies: TurnReplyDependencies,
+  input: TurnReplyInput,
+  context: ReplyTaskContext
+): Promise<void> {
+  let errorMessage: string | undefined = undefined
+  const replyContext: ReplyTaskContext = {
+    ...context,
+    sendEvent: (event) => {
+      errorMessage = findErrorEventMessage(event) ?? errorMessage
+      context.sendEvent(event)
+    }
+  }
+  try {
+    await createTurnReply(dependencies, input, replyContext)
+  } finally {
+    handleTurnReplyEnded(input.options, errorMessage)
+  }
+}
+
+/**
+ * Finds the sentence an event of a reply says the reply's failure with.
+ *
+ * @param event - One event a reply task sends.
+ * @returns The message of an `error` event; undefined for any other event.
+ */
+function findErrorEventMessage(event: ChatGenerationEvent): string | undefined {
+  return event.type === "error" ? event.message : undefined
+}
+
+/**
+ * Has the turn's agent write its reply, then finalizes a reply it left
+ * streaming.
+ *
+ * @param dependencies - Persistence and approval gateway the reply uses.
+ * @param input - Stored turn, its agent, and what the reply keeps.
+ * @param context - The reply task's cancellation, event sender, tool call
+ * sender, and approval prompt sender.
  * @returns Settlement after the reply is final.
  * @throws The agent's failure after the fallback finalization; an
  * `AggregateError` of the agent's failure and the fallback's failure when the
  * fallback also fails; or the fallback's failure after an agent that
- * succeeded. The generation reports it.
+ * succeeded.
  * @remarks The fallback stores `interrupted` after cancellation and `failed`
  * otherwise; it changes nothing when the agent already finalized the reply.
  */
-async function createTurnReplyTask(
+async function createTurnReply(
   dependencies: TurnReplyDependencies,
   input: TurnReplyInput,
   context: ReplyTaskContext
@@ -343,16 +563,16 @@ async function createTurnReplyTask(
  * Builds the turn the agent answers for one stored turn.
  *
  * @param dependencies - Persistence and approval gateway the reply uses.
- * @param input - Stored turn, its tools, and what the reply keeps.
- * @param context - Generation-owned cancellation, event sender, tool call
+ * @param input - Stored turn, its tools, its delegation, and what the reply
+ * keeps.
+ * @param context - The reply task's cancellation, event sender, tool call
  * sender, and approval prompt sender.
  * @returns The agent turn, whose parts and final state go to the stored
  * reply and whose reply state is read back from the stored conversation,
  * which numbers new sources after the conversation's stored ones,
  * whose tool calls pass the approval gateway, and whose images are read
- * from the conversation's attachment files. The turn takes no part in
- * delegation: it offers no delegation tool, and its instructions carry no
- * note about a job. With the turn's logger, an
+ * from the conversation's attachment files. The turn's part in delegation
+ * is the one its starter's hooks created. With the turn's logger, an
  * unreadable settings file, and a reply refused because its agent's request
  * slots and line were full, are logged as warnings; a cancelled reply, and a
  * round that was not sent because it did not fit or its model was not
@@ -384,7 +604,7 @@ function buildAgentTurn(
     builtInTools: input.builtInTools,
     mcpTools: settings.mcpTools,
     unofferedTools: settings.unofferedTools,
-    delegation: NO_TURN_DELEGATION,
+    delegation: input.turnDelegation,
     abortSignal: context.abortSignal,
     createReplyPart: storage.createReplyPart,
     updateReplyPartContent: storage.updateReplyPartContent,

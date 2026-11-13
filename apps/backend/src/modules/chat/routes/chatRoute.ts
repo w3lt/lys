@@ -36,7 +36,11 @@ import type {
   CreateConversationTurnOptions
 } from "../persistence"
 import ReplyEventSubscription from "../replyEventSubscription"
-import type { StartTurn, TurnSettings } from "../turnStart"
+import {
+  NO_TURN_DELEGATION_HOOKS,
+  type StartTurn,
+  type TurnSettings
+} from "../turnStart"
 import {
   findListedModelCapabilities,
   type FindModelCapabilities,
@@ -124,6 +128,8 @@ type AcceptedTurnRequest = Readonly<{
   builtInTools: readonly TurnBuiltInTool[]
   /** MCP tools the request offered, each of a connected server. */
   mcpTools: readonly TurnMcpTool[]
+  /** Whether the request offered `delegate_work`. */
+  offersDelegateWork: boolean
   /** What the request names about the tools the turn does not offer. */
   unofferedTools: UnofferedTools
   /**
@@ -139,6 +145,11 @@ type OfferedBackendTools = Readonly<{
   builtInTools: readonly TurnBuiltInTool[]
   /** Offered MCP tools, each of a connected server, in offer order. */
   mcpTools: readonly TurnMcpTool[]
+  /**
+   * Whether the request offers `delegate_work`, which is in neither list:
+   * the agent adds it itself to a turn that may delegate.
+   */
+  offersDelegateWork: boolean
 }>
 
 /**
@@ -239,7 +250,9 @@ export default function updateFastifyWithChatRoute(
  * key saved or removed while it runs applies from the next request. An MCP
  * tool's call runs on its server as connected when the call runs, and fails
  * for the model when the server is no longer connected or no longer lists
- * the tool.
+ * the tool. The turn is started with {@link NO_TURN_DELEGATION_HOOKS}, so it
+ * takes no part in delegation: the model is offered no delegation tool, also
+ * when the request offers `delegate_work`.
  */
 async function handleChatRequest(
   request: ChatRouteRequest,
@@ -258,6 +271,7 @@ async function handleChatRequest(
     agent: saved.agent,
     settings: buildTurnSettings(request.body, accepted),
     startedBy: "person",
+    delegation: NO_TURN_DELEGATION_HOOKS,
     logger: request.log
   })
   const subscription = new ReplyEventSubscription<ChatApiStreamEvent>(
@@ -290,7 +304,9 @@ async function handleChatRequest(
  * failure of a lookup.
  * @remarks The attachments are decoded first, then the tools named as
  * unable to run are checked and every offered backend tool is looked up:
- * the built-in tools' availability first, then the MCP tools' servers;
+ * the built-in tools' availability first, then the MCP tools' servers,
+ * while `delegate_work` is only noted as offered, because the agent adds
+ * that tool itself;
  * then the conversation is read once and an agent is
  * looked up for the request, so a request no agent answers is refused
  * before the inventory is read; the conversation's stored attachments come
@@ -344,6 +360,7 @@ async function parseTurnRequest(
     attachments: attachments.attachments,
     builtInTools: backendTools.builtInTools,
     mcpTools: backendTools.mcpTools,
+    offersDelegateWork: backendTools.offersDelegateWork,
     unofferedTools,
     capabilities
   }
@@ -411,9 +428,10 @@ function findTurnConversation(
  * @param reply - Response owner; the response has not started.
  * @param dependencies - Every built-in tool and the MCP tool lookup.
  * @returns The offered built-in and MCP tools found for the turn, each in
- * offer order; or undefined once the backend-tool-unavailable problem was
- * sent for an offered built-in tool that cannot run now or, after those, an
- * offered MCP tool whose server is not connected.
+ * offer order, and whether the request offers `delegate_work`; or undefined
+ * once the backend-tool-unavailable problem was sent for an offered built-in
+ * tool that cannot run now or, after those, an offered MCP tool whose server
+ * is not connected.
  * @throws An `UnknownBackendToolError` for an offered backend tool the
  * backend does not run.
  */
@@ -450,7 +468,11 @@ async function findOfferedBackendTools(
     )
     return undefined
   }
-  return { builtInTools: found.tools, mcpTools: requested.mcpTools }
+  return {
+    builtInTools: found.tools,
+    mcpTools: requested.mcpTools,
+    offersDelegateWork: requested.offersDelegateWork
+  }
 }
 
 /**
@@ -681,9 +703,9 @@ async function deleteAttachmentsAfterFailure(
  * was stored.
  * @returns The request's model, generation options, and client tools, none
  * when it offered none; the backend tools found for the turn, to which the
- * turn start adds the attachment reader; what the request names about the
- * tools the turn does not offer; and whether the model sees images and is
- * trained for tool use.
+ * turn start adds the attachment reader; whether the request offered
+ * `delegate_work`; what the request names about the tools the turn does not
+ * offer; and whether the model sees images and is trained for tool use.
  */
 function buildTurnSettings(
   body: ChatApiRequestBody,
@@ -695,6 +717,7 @@ function buildTurnSettings(
     clientTools: body.tools?.definitions ?? NO_REQUESTED_TOOLS,
     builtInTools: accepted.builtInTools,
     mcpTools: accepted.mcpTools,
+    offersDelegateWork: accepted.offersDelegateWork,
     unofferedTools: accepted.unofferedTools,
     canSeeImages: accepted.capabilities.vision,
     trainedForToolUse: accepted.capabilities.trainedForToolUse

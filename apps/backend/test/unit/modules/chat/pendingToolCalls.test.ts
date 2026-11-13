@@ -1,11 +1,12 @@
-import type {
-  ChatGenerationEvent,
-  ChatToolApprovalAnswer,
-  ChatToolApprovalApiRequestBody,
-  ChatToolCall,
-  ChatToolResult
+import {
+  TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES,
+  type ChatGenerationEvent,
+  type ChatToolApprovalAnswer,
+  type ChatToolApprovalApiRequestBody,
+  type ChatToolCall,
+  type ChatToolResult
 } from "@lys/protocol"
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import PendingToolCalls from "../../../../src/modules/chat/pendingToolCalls"
 import { createFixtureUuidV7 } from "../../support/conversationFixtures"
 
@@ -47,6 +48,9 @@ const WRONG_TOKEN = "A".repeat(43)
 
 /** Shape of every token a prompt carries. */
 const APPROVAL_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/
+
+/** Milliseconds after which a prompt expires. */
+const PROMPT_TIME_LIMIT_MS = TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES * 60_000
 
 /** Result a client sends for a call it ran. */
 const SUCCEEDED_RESULT = Object.freeze({
@@ -103,6 +107,14 @@ function createRecordingCalls() {
 }
 
 describe("PendingToolCalls", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it("lists a call and sends its event in the same step", () => {
     const { pendingToolCalls, sendEvent, sentEvents } = createRecordingCalls()
 
@@ -200,6 +212,7 @@ describe("PendingToolCalls", () => {
       toolCalls: [],
       toolApprovals: []
     })
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it("rejects a second call with a waiting call's identifier without sending it", () => {
@@ -210,6 +223,7 @@ describe("PendingToolCalls", () => {
       pendingToolCalls.sendToolApprovalPrompt(FIRST_CALL, sendEvent)
     ).toThrow("A tool call with this identifier is already waiting")
     expect(sentEvents).toHaveLength(1)
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it("lists a prompt apart from calls and sends a tool-approval event with its token in the same step", () => {
@@ -377,6 +391,93 @@ describe("PendingToolCalls", () => {
       { type: "tool-approval", call: FIRST_CALL, approvalToken },
       { type: "tool-call", call: FIRST_CALL }
     ])
+    expect(
+      pendingToolCalls.resolveToolCall(FIRST_CALL.id, SUCCEEDED_RESULT)
+    ).toBe("accepted")
+    expect(await result).toBe(SUCCEEDED_RESULT)
+  })
+
+  it("takes an answer that arrives just before the prompt's time limit, and the prompt never expires", async () => {
+    const { pendingToolCalls, sendEvent, sentEvents } = createRecordingCalls()
+    const outcome = pendingToolCalls.sendToolApprovalPrompt(
+      BACKEND_CALL,
+      sendEvent
+    )
+    const approvalToken = findSentApprovalToken(sentEvents, BACKEND_CALL)
+
+    vi.advanceTimersByTime(PROMPT_TIME_LIMIT_MS - 1)
+    const answerOutcome = pendingToolCalls.resolveToolCall(
+      BACKEND_CALL.id,
+      withToken(ALLOWED_ANSWER, approvalToken)
+    )
+
+    expect(answerOutcome).toBe("accepted")
+    expect(vi.getTimerCount()).toBe(0)
+    expect(await outcome).toEqual(ALLOWED_ANSWER)
+  })
+
+  it("ends a prompt at its time limit as expired and refuses its token from then on", async () => {
+    const { pendingToolCalls, sendEvent, sentEvents } = createRecordingCalls()
+    const outcome = pendingToolCalls.sendToolApprovalPrompt(
+      BACKEND_CALL,
+      sendEvent
+    )
+    const approvalToken = findSentApprovalToken(sentEvents, BACKEND_CALL)
+
+    vi.advanceTimersByTime(PROMPT_TIME_LIMIT_MS)
+
+    expect(await outcome).toEqual({ status: "expired" })
+    expect(pendingToolCalls.snapshot).toEqual({
+      toolCalls: [],
+      toolApprovals: []
+    })
+    expect(
+      pendingToolCalls.resolveToolCall(
+        BACKEND_CALL.id,
+        withToken(ALLOWED_ANSWER, approvalToken)
+      )
+    ).toBe("not-pending")
+    expect(sentEvents).toHaveLength(1)
+  })
+
+  it("times each prompt from when it was sent, ending only the one that reached its limit", async () => {
+    const { pendingToolCalls, sendEvent, sentEvents } = createRecordingCalls()
+    const firstOutcome = pendingToolCalls.sendToolApprovalPrompt(
+      FIRST_CALL,
+      sendEvent
+    )
+    vi.advanceTimersByTime(PROMPT_TIME_LIMIT_MS / 2)
+    void pendingToolCalls.sendToolApprovalPrompt(SECOND_CALL, sendEvent)
+    const secondToken = findSentApprovalToken(sentEvents, SECOND_CALL)
+
+    vi.advanceTimersByTime(PROMPT_TIME_LIMIT_MS / 2)
+
+    expect(await firstOutcome).toEqual({ status: "expired" })
+    expect(pendingToolCalls.snapshot.toolApprovals).toEqual([
+      { call: SECOND_CALL, approvalToken: secondToken }
+    ])
+  })
+
+  it("clears a prompt's timer when cancelled, so the prompt can no longer expire", async () => {
+    const { pendingToolCalls, sendEvent } = createRecordingCalls()
+    const outcome = pendingToolCalls.sendToolApprovalPrompt(
+      BACKEND_CALL,
+      sendEvent
+    )
+
+    pendingToolCalls.cancelToolCalls()
+
+    expect(vi.getTimerCount()).toBe(0)
+    expect(await outcome).toBeUndefined()
+  })
+
+  it("starts no timer for a call sent to run, which waits for its result past the prompt limit", async () => {
+    const { pendingToolCalls, sendEvent } = createRecordingCalls()
+    const result = pendingToolCalls.sendClientToolCall(FIRST_CALL, sendEvent)
+
+    vi.advanceTimersByTime(PROMPT_TIME_LIMIT_MS)
+
+    expect(vi.getTimerCount()).toBe(0)
     expect(
       pendingToolCalls.resolveToolCall(FIRST_CALL.id, SUCCEEDED_RESULT)
     ).toBe("accepted")

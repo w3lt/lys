@@ -94,8 +94,9 @@ export type ChatRouteOptions = Pick<
 > &
   Readonly<{
     /**
-     * What the fixed tool call rules know about this machine; every tool
-     * call of every turn the route starts is decided by them.
+     * What the tool call rules know about this machine, and the reader of
+     * the folders the person lets tools use; every tool call of every turn
+     * the route starts is decided by them.
      */
     toolCallPolicy: ToolCallPolicy
   }>
@@ -172,8 +173,9 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      */
     findMcpTool: (toolName: string) => McpTurnToolLookup
     /**
-     * What the fixed tool call rules know about this machine; every checked
-     * call is decided by them before its approval.
+     * What the tool call rules know about this machine, and the reader of
+     * the folders the person lets tools use; every checked call is decided
+     * by them before its approval, and again once the person allows it.
      */
     toolCallPolicy: ToolCallPolicy
     /**
@@ -252,6 +254,10 @@ type TurnGenerationSource = Readonly<{
 /** Warning logged when a round's calls all ask because the choices are unreadable. */
 const UNREADABLE_JUST_RUN_CHOICES_MESSAGE =
   "The saved Just run choices could not be read from settings.json; every tool call of this round asks the person"
+
+/** Warning logged when a read of the approved folders finds them unreadable. */
+const UNREADABLE_APPROVED_FOLDERS_MESSAGE =
+  "The folders tools may use could not be read from settings.json; every tool call of this round that names a file or folder is denied"
 
 /** Client tools of a request that offered none. */
 const NO_REQUESTED_TOOLS: readonly ToolDefinition[] = Object.freeze([])
@@ -1030,7 +1036,12 @@ function buildAgentTurn(
       ),
     sendEvent,
     sendClientToolCall,
-    toolCallPolicy: dependencies.toolCallPolicy,
+    toolCallPolicy: reportUnreadableApprovedFolders(
+      dependencies.toolCallPolicy,
+      () => {
+        input.logger.warn(UNREADABLE_APPROVED_FOLDERS_MESSAGE)
+      }
+    ),
     createToolCallGate: () =>
       dependencies.toolApprovals.createToolCallGate(
         sendToolApprovalPrompt,
@@ -1040,6 +1051,34 @@ function buildAgentTurn(
       ),
     ...buildReplyFailureReporters(input.logger)
   }
+}
+
+/**
+ * Wraps a tool call policy so that each read of the approved folders that
+ * finds them unreadable is reported.
+ *
+ * @param toolCallPolicy - The backend's policy, left unchanged.
+ * @param reportApprovedFoldersUnreadable - Called once per such read, before
+ * the read settles; must not throw.
+ * @returns A frozen policy with the same paths, whose reads settle as the
+ * policy's do.
+ * @remarks The policy denies every call that names a path while the folders
+ * cannot be read, so the report is what tells an operator why, as the Just
+ * run read reports the same file.
+ */
+function reportUnreadableApprovedFolders(
+  toolCallPolicy: ToolCallPolicy,
+  reportApprovedFoldersUnreadable: () => void
+): ToolCallPolicy {
+  return Object.freeze({
+    ...toolCallPolicy,
+    readApprovedFolders: async () => {
+      const approvedFolders = await toolCallPolicy.readApprovedFolders()
+      if (approvedFolders.kind === "unreadable")
+        reportApprovedFoldersUnreadable()
+      return approvedFolders
+    }
+  })
 }
 
 /**

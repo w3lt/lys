@@ -1661,28 +1661,30 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
       ])
     })
 
-    it("finds a tool its server marks as destructive as destructive, and an unmarked one as not", async () => {
+    it("finds a tool its server marks as destructive or as an open-world write as such, and an unmarked one as neither", async () => {
       const harness = createRegistryHarness()
       harness.updateReadServers([
         buildFakeStdioServerSettings("alpha", {
           tools: [
             ECHO_TOOL,
-            { ...buildTool("erase"), annotations: { destructiveHint: true } }
+            { ...buildTool("erase"), annotations: { destructiveHint: true } },
+            { ...buildTool("send"), annotations: { openWorldHint: true } }
           ]
         })
       ])
       await harness.registry.updateServers()
       await waitForServerList(
         harness.registry,
-        buildList([buildStdioStatus("alpha", buildConnectedState(2))])
+        buildList([buildStdioStatus("alpha", buildConnectedState(3))])
       )
+      const readMarks = (name: string) => {
+        const tool = findTool(harness.registry, name)
+        return [tool.isDestructive, tool.isOpenWorldWrite]
+      }
 
-      expect(
-        findTool(harness.registry, "mcp__alpha__erase").isDestructive
-      ).toBe(true)
-      expect(findTool(harness.registry, "mcp__alpha__echo").isDestructive).toBe(
-        false
-      )
+      expect(readMarks("mcp__alpha__erase")).toEqual([true, false])
+      expect(readMarks("mcp__alpha__send")).toEqual([false, true])
+      expect(readMarks("mcp__alpha__echo")).toEqual([false, false])
     })
 
     it("finds a listed tool of a connected server, and tells a server that is not connected from an unknown name", async () => {
@@ -1727,6 +1729,7 @@ describe("McpServerRegistry", { timeout: CASE_TIMEOUT_MILLISECONDS }, () => {
         tool: {
           definition: harness.registry.listToolDefinitions()[1],
           isDestructive: false,
+          isOpenWorldWrite: false,
           sendToolCall: expect.any(Function)
         }
       })

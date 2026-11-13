@@ -841,6 +841,19 @@
   background: var(--app-status-danger);
 }
 
+/*
+ * A prompt that expired waits for nothing: the card drops its raised shadow
+ * and its dot turns neutral.
+ */
+.composer__approval[data-expired] {
+  box-shadow: none;
+}
+
+.composer__approval[data-expired] .composer__approval-dot {
+  background: var(--app-status-neutral);
+  box-shadow: none;
+}
+
 .composer__approval-label {
   flex: 1;
   font-family: var(--font-mono);

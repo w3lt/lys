@@ -254,16 +254,18 @@ calls it stored are part of the new turn's context.
    any call while tool calls are off, or a call with invalid arguments is
    answered by the backend itself and stored as a `failed` call. So is a valid
    call the [tool call policy](/architecture/backend/#tool-call-policy) denies
-   because it names a private key or credential file, or a local or private
-   network address: it never runs and is never shown to the person, even on
-   Just run. Every other call is stored as a part too, `running` or
+   because it names a private key or credential file, a path outside the
+   folders the person lets tools use, once any is listed, or a local or
+   private network address: it never runs and is never shown to the person,
+   even on Just run. Every other call is stored as a part too, `running` or
    `awaiting-approval`, and each later change of it is stored and sent as a
    `reply-part` event.
 4. The backend's tool approval service reads the Just run choices from the
    settings file once for the round. For each call the policy does not deny,
    in the model's order: a tool saved as Just run goes on at once, unless the
    policy requires approval because the tool is an MCP tool its server marks
-   as destructive; any other call is stored as `awaiting-approval` and then
+   as destructive or as an open-world write, or because it is a reply's
+   `web_search` call from its sixth on; any other call is stored as `awaiting-approval` and then
    shown to the person with a `tool-approval` event that carries a single-use
    approval token, in the same step. A call the store refuses, because the
    reply has ended, is never shown. If the settings file cannot be read, every
@@ -273,7 +275,10 @@ calls it stored are part of the new turn's context.
    `showFailed` at once when it cannot describe the call. Allow once and
    Reject send the answer, with the prompt's token, to
    `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`.
-6. An allowed client tool's call goes to the desktop as a `tool-call` event
+6. A call the person allows is stored as `running` and decided again with
+   the approved folders read at that moment; one they no longer approve is
+   stored as `failed` with the denial and never runs. An allowed client
+   tool's call goes to the desktop as a `tool-call` event
    under the same `id`; the store runs the Tauri command at once and sends its
    result to
    `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`.
@@ -297,17 +302,21 @@ calls it stored are part of the new turn's context.
    characters, and a server that is no longer connected, an error, or a time
    limit becomes a failed call the model reads. Stop tells the server the call
    was cancelled. A rejected call runs nothing; the model
-   reads the rejection, which is stored as the call's result. Once every call of the round has an answer, the
+   reads the rejection, which is stored as the call's result. A prompt nobody
+   answers within five minutes expires: the backend refuses its token from
+   then on, stores the call as `failed` with a sentence naming the limit,
+   which the model reads as it reads a rejection, and the desktop turns the
+   card into a notice that says why the call did not run. Once every call of the round has an answer, the
    backend asks the model again with the results. The loop ends with the
    first round that makes no tool calls, even one that writes no text, then
    `done`. The desktop shows the rounds that called tools as the reply's
    steps, the last round's text as the answer with its `[n]` citations
    linked, and the sources the answer cites under it.
 
-The backend sets no time limit on a prompt or a pending call. It waits until
-the call is answered, the reply is stopped, or the backend shuts down; a newer
-turn or a deletion does not end it yet
-([#137](https://github.com/w3lt/lys/issues/137)). A client that was not
+A prompt waits at most five minutes. The backend sets no time limit on a call
+sent to the desktop to run: it waits until the call is answered, the reply is
+stopped, or the backend shuts down; a newer turn or a deletion does not end it
+yet ([#137](https://github.com/w3lt/lys/issues/137)). A client that was not
 following when a prompt or call was sent finds it in the next
 `reply-snapshot`'s `pendingToolApprovals` or `pendingToolCalls`.
 

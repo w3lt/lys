@@ -64,7 +64,9 @@ export type ReplyPartDraft =
  *
  * @remarks `running` follows the person's approval of a waiting call;
  * `rejected` answers a waiting call that was not allowed, with why;
- * `succeeded` and `failed` end a running call with the text the model reads.
+ * `expired` ends a waiting call whose prompt reached its time limit, and is
+ * stored as `failed`; `succeeded` and `failed` end a running call with the
+ * text the model reads.
  */
 export type ReplyToolCallChange =
   | Readonly<{
@@ -98,6 +100,15 @@ export type ReplyToolCallChange =
        * when the client could not show it to them.
        */
       reason: Extract<ChatToolApprovalAnswer, { status: "rejected" }>["reason"]
+    }>
+  | Readonly<{
+      /**
+       * Nobody answered the call's prompt within its time limit, so the
+       * call never ran; stored as failed.
+       */
+      status: "expired"
+      /** Non-empty explanation the model reads. */
+      result: string
     }>
 
 /**

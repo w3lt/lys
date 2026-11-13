@@ -335,7 +335,7 @@ export function readToolCallDecisionRows(
         `SELECT call_id AS callId, conversation_id AS conversationId,
         agent_code AS agentCode, tool_name AS toolName,
         policy_effect AS policyEffect, policy_reason AS policyReason,
-        approval_mode AS approvalMode, answer, outcome,
+        policy_id AS policyId, approval_mode AS approvalMode, answer, outcome,
         created_at AS createdAt, updated_at AS updatedAt
         FROM tool_call_decisions ORDER BY call_id`
       )

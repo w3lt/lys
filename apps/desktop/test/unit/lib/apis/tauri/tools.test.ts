@@ -51,6 +51,9 @@ describe("readTextFile", () => {
 
   it.each([
     { code: "fileNotFound" },
+    { code: "credentialFile" },
+    { code: "outsideApprovedFolders" },
+    { code: "settingsUnreadable" },
     { code: "fileTooLarge", sizeBytes: 2_000_000, maxSizeBytes: 1_048_576 },
     { code: "readFailed", message: "I/O error" }
   ])("returns the declared $code failure", async (error) => {
@@ -109,6 +112,9 @@ describe("findFiles", () => {
 
   it.each([
     { code: "rootNotFound" },
+    { code: "rootInCredentialFolder" },
+    { code: "rootOutsideApprovedFolders" },
+    { code: "settingsUnreadable" },
     { code: "queryTooLong", maxChars: 200 },
     { code: "searchFailed", message: "walk failed" }
   ])("returns the declared $code failure", async (error) => {

@@ -23,7 +23,7 @@ import {
   type ChatApiStreamEvent,
   type ChatReplyEvent,
   type ChatReplyPathParams,
-  type ChatToolApprovalAnswer,
+  type ChatToolApprovalApiRequestBody,
   type ChatToolCallPathParams,
   type ChatToolResult
 } from "@lys/protocol"
@@ -173,8 +173,8 @@ export type SendChatToolCallAnswerResult =
     }
   | {
       /**
-       * The call was not waiting for an answer: it was already answered, or
-       * its reply ended. Nothing changed.
+       * The call was not waiting for an answer: it was already answered, its
+       * approval prompt expired, or its reply ended. Nothing changed.
        */
       readonly status: "not-pending"
     }
@@ -434,20 +434,20 @@ export async function sendChatToolResult(
  * Sends the person's answer to one approval prompt of a running reply.
  *
  * @param target - Call and the reply and conversation that hold it.
- * @param answer - Validated answer: `allowed`, after which the backend runs
- * its tool or sends the desktop's tool's call to run, or `rejected`, whose
- * `content` the model reads.
+ * @param answer - Validated answer with the token its prompt carried:
+ * `allowed`, after which the backend runs its tool or sends the desktop's
+ * tool's call to run, or `rejected`, whose `content` the model reads.
  * @param connection - Backend origin. The request is deliberately not
  * cancellable, so an answer the person gave still reaches the backend.
  * @returns `accepted` after the backend took the answer, or `not-pending`
- * when the prompt was already answered or its reply ended. Sending the same
- * answer again is therefore safe.
+ * when the prompt was already answered, its reply ended, or the token is not
+ * the prompt's. Sending the same answer again is therefore safe.
  * @throws A caller-safe error when the backend cannot be reached or answers
  * with an undeclared response.
  */
 export async function sendChatToolApproval(
   target: ChatToolCallPathParams,
-  answer: ChatToolApprovalAnswer,
+  answer: ChatToolApprovalApiRequestBody,
   connection: Pick<ChatReplyConnection, "backendUrl">
 ): Promise<SendChatToolCallAnswerResult> {
   return sendChatToolCallAnswer(
@@ -467,7 +467,7 @@ type ChatToolCallAnswerRequest = {
   /** HTTP method of the endpoint. */
   readonly method: string
   /** Validated answer, serialized as JSON. */
-  readonly body: ChatToolResult | ChatToolApprovalAnswer
+  readonly body: ChatToolResult | ChatToolApprovalApiRequestBody
 }
 
 /**

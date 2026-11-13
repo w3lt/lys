@@ -490,10 +490,14 @@ describe("ReplyGeneration", () => {
       await waitForMicrotasks()
 
       const answer = replyTask.context.sendToolApprovalPrompt(BACKEND_TOOL_CALL)
+      const [prompt] = generation.pendingToolCalls.toolApprovals
       expect(generation.pendingToolCalls).toEqual({
         toolCalls: [],
-        toolApprovals: [BACKEND_TOOL_CALL]
+        toolApprovals: [
+          { call: BACKEND_TOOL_CALL, approvalToken: expect.any(String) }
+        ]
       })
+      const approvalToken = prompt?.approvalToken ?? ""
       expect(
         generation.resolveToolCall(BACKEND_TOOL_CALL.id, {
           status: "succeeded",
@@ -501,16 +505,19 @@ describe("ReplyGeneration", () => {
         })
       ).toBe("not-pending")
       expect(
-        generation.resolveToolCall(BACKEND_TOOL_CALL.id, { status: "allowed" })
+        generation.resolveToolCall(BACKEND_TOOL_CALL.id, {
+          status: "allowed",
+          approvalToken
+        })
       ).toBe("accepted")
 
-      expect(await answer).toEqual({ status: "allowed" })
+      expect(await answer).toStrictEqual({ status: "allowed" })
       replyTask.resolve()
       titleTask.resolve()
       await generation.settled
       await follower.subscription.closed
       expect(follower.written).toEqual([
-        { type: "tool-approval", call: BACKEND_TOOL_CALL }
+        { type: "tool-approval", call: BACKEND_TOOL_CALL, approvalToken }
       ])
     })
 

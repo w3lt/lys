@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react"
+import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { UnavailableBackendTool } from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
@@ -147,6 +147,35 @@ describe("ToolPaneContent", () => {
     }
   })
 
+  it("saves a folder added in the folders section, while the tools cannot be read, and lists it", async () => {
+    const host = startNativeHostFake({
+      list_tools: () => Promise.reject("command list_tools failed"),
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+    await startToolPane()
+    const user = userEvent.setup()
+    const section = screen.getByRole("region", {
+      name: "folders tools may use"
+    })
+
+    await user.type(
+      within(section).getByRole("textbox", { name: "Folder" }),
+      "/Users/ada/work{Enter}"
+    )
+    await waitForRenderedWork()
+
+    expect(
+      within(section).getByRole("list", { name: "Folders tools may use" })
+    ).toHaveTextContent("/Users/ada/work")
+    expect(host.commands.at(-1)).toMatchObject({
+      command: "save_settings",
+      args: {
+        newSettings: { tools: { approvedFolders: ["/Users/ada/work"] } }
+      }
+    })
+  })
+
   it("shows a failed read with Retry, which reads the tools again", async () => {
     const reads: (() => unknown)[] = [
       () => Promise.reject("command list_tools failed")
@@ -226,6 +255,7 @@ describe("ToolPaneContent", () => {
         settings: {
           ...settings,
           tools: {
+            approvedFolderPaths: [],
             justRunToolNames: new Set(),
             switches: new Map([
               ["read_page", true],

@@ -197,6 +197,7 @@ describe("createSettingsGroupSaves", () => {
 
     const secretsSave = saves.saveSecretsSettings({ tavilyApiKey: null })
     const toolsSave = saves.saveToolSettings({
+      approvedFolderPaths: [],
       justRunToolNames: new Set(["find_files"]),
       switches: new Map([["web_search", true]])
     })
@@ -296,6 +297,7 @@ describe("createSettingsGroupSaves", () => {
     const saves = createSettingsGroupSaves()
 
     const toolsSave = saves.saveToolSettings({
+      approvedFolderPaths: [],
       justRunToolNames: new Set(["find_files"]),
       switches: new Map()
     })

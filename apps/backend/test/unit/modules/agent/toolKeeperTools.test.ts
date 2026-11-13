@@ -19,7 +19,8 @@ import {
 } from "../../support/builtInToolContract"
 import {
   buildNetworkToolDefinition,
-  buildNoteTools
+  buildNoteTools,
+  RUN_TOOL_CALL_ID
 } from "../../support/toolFixtures"
 
 /** Tools of the asking turn in most cases, in offer order. */
@@ -67,6 +68,7 @@ async function runKeeperTool(
   const parsed = getKeeperTool(catalog, name).tool.parseToolCall(callArguments)
   if (parsed.status !== "parsed") throw new Error(parsed.message)
   return await parsed.runToolCall({
+    toolCallId: RUN_TOOL_CALL_ID,
     abortSignal: new AbortController().signal,
     addWebSources: () => []
   })

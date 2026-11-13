@@ -118,8 +118,10 @@ export type ComposerProps = {
  *
  * Above the field, the tool-call prompt shows the first tool call of the
  * shown conversation that waits for the person or whose answer failed to
- * send, and announces each call that starts waiting; the tool-call store owns
- * the calls and their answers. While a call waits, Escape in the field
+ * send, else the first whose prompt expired, and announces each call that
+ * starts waiting and each prompt that expires; the tool-call store owns the
+ * calls and their answers. Dismissing an expired prompt moves focus to the
+ * field. While a call waits, Escape in the field
  * rejects it with the draft as the reason, and Enter without Shift allows it
  * once when the draft is empty or rejects it with the draft as the reason
  * otherwise. A rejection, from the field or the card, clears the draft; Allow
@@ -238,6 +240,17 @@ export function Composer({
   function rejectShownToolCall(callId: string): void {
     void useToolCallStore.getState().rejectToolCall(callId, inputDraft)
     setInputDraft("")
+  }
+
+  /**
+   * Stops showing an expired tool call prompt and moves focus to the message
+   * field, because Dismiss leaves with the card.
+   *
+   * @param callId - Call whose prompt expired.
+   */
+  function dismissShownToolCall(callId: string): void {
+    useToolCallStore.getState().dismissExpiredToolCall(callId)
+    messageFieldRef.current?.focus()
   }
 
   /**
@@ -430,6 +443,7 @@ export function Composer({
       <div className="composer__inner">
         <ComposerToolCallPrompt
           agentName={agentName}
+          onDismissToolCall={dismissShownToolCall}
           onRejectToolCall={rejectShownToolCall}
         />
 

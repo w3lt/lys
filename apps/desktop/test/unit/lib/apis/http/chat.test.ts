@@ -3,7 +3,7 @@ import {
   chatAttachmentUnsupportedProblemSchema,
   chatBackendToolUnavailableProblemSchema,
   chatImageNeedsVisionProblemSchema,
-  chatToolApprovalAnswerSchema,
+  chatToolApprovalApiRequestBodySchema,
   chatToolCallNotPendingProblemSchema,
   chatToolResultSchema,
   conversationAgentMissingProblemSchema,
@@ -48,7 +48,8 @@ import {
 } from "../../../support/chatContextFixtures"
 import {
   buildToolCall,
-  buildToolDefinition
+  buildToolDefinition,
+  createFixtureApprovalToken
 } from "../../../support/toolFixtures"
 
 /** Reply the reply cases follow or stop. */
@@ -102,9 +103,12 @@ const TOOL_RESULT_ROUTE = `POST /api/v1/chat/${REPLY_TARGET.conversationId}/repl
 /** Route key of the tool-approval endpoint for {@link TOOL_CALL_TARGET}. */
 const TOOL_APPROVAL_ROUTE = `POST /api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/tool-approvals/${TOOL_CALL.id}`
 
-/** Answer of a person who allowed a call. */
+/** Answer of a person who allowed a call, with its prompt's token. */
 const ALLOWED_TOOL_APPROVAL = Object.freeze(
-  chatToolApprovalAnswerSchema.parse({ status: "allowed" })
+  chatToolApprovalApiRequestBodySchema.parse({
+    status: "allowed",
+    approvalToken: createFixtureApprovalToken(1)
+  })
 )
 
 /** Answer of a tool that ran and returned its output. */
@@ -502,9 +506,18 @@ describe("readChatReplyEvents", () => {
         assistantMessage: buildStreamingAssistantMessage(3, "Hi"),
         sources: [],
         pendingToolCalls: [TOOL_CALL],
-        pendingToolApprovals: [buildToolCall(6, "read_text_file")]
+        pendingToolApprovals: [
+          {
+            call: buildToolCall(6, "read_text_file"),
+            approvalToken: createFixtureApprovalToken(6)
+          }
+        ]
       },
-      { type: "tool-approval", call: buildToolCall(7, "find_files") },
+      {
+        type: "tool-approval",
+        call: buildToolCall(7, "find_files"),
+        approvalToken: createFixtureApprovalToken(7)
+      },
       { type: "tool-call", call: buildToolCall(5, "find_files") },
       { type: "reply-part", part: buildTextPart(41, 1, "There") },
       { type: "done", finishReason: "length" }
@@ -712,7 +725,7 @@ describe("sendChatToolResult", () => {
 })
 
 describe("sendChatToolApproval", () => {
-  it("sends the answer to the call's approval route and reports it accepted, without a cancellation signal", async () => {
+  it("sends the answer with its token to the call's approval route and reports it accepted, without a cancellation signal", async () => {
     const backend = startBackendFake({
       [TOOL_APPROVAL_ROUTE]: () => new Response(null, { status: 204 })
     })
@@ -726,7 +739,10 @@ describe("sendChatToolApproval", () => {
     expect(backend.requests[0]?.url).toBe(
       `${FIXTURE_BACKEND_URL}/api/v1/chat/${REPLY_TARGET.conversationId}/replies/${REPLY_TARGET.assistantMessageId}/tool-approvals/${TOOL_CALL.id}`
     )
-    expect(backend.requests[0]?.body).toEqual({ status: "allowed" })
+    expect(backend.requests[0]?.body).toEqual({
+      status: "allowed",
+      approvalToken: createFixtureApprovalToken(1)
+    })
     expect(backend.requests[0]?.headers.get("Content-Type")).toBe(
       "application/json"
     )

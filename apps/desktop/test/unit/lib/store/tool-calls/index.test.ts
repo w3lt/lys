@@ -20,6 +20,7 @@ import {
 import {
   buildCompletedAssistantMessage,
   buildTextPart,
+  buildToolCallPart,
   buildStreamingAssistantMessage,
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
@@ -32,7 +33,8 @@ import {
 import {
   buildBackendToolDefinition,
   buildToolCall,
-  buildToolDefinition
+  buildToolDefinition,
+  createFixtureApprovalToken
 } from "../../../support/toolFixtures"
 
 /** Desktop tool that reads one file on this machine. */
@@ -123,6 +125,17 @@ const READING_DELTA_EVENT = Object.freeze({
   updatedAt: "2026-01-02T03:04:06.000Z"
 })
 
+/** {@link READ_CALL} as stored once the backend ended its prompt at the limit. */
+const EXPIRED_READ_PART_EVENT = Object.freeze({
+  type: "reply-part",
+  part: buildToolCallPart(10, 0, {
+    toolName: "read_text_file",
+    argumentText: "{}",
+    status: "failed",
+    result: "Nobody answered its approval prompt in time."
+  })
+})
+
 /** Sources a call of the reply showed. */
 const SOURCES_EVENT = Object.freeze({
   type: "sources",
@@ -130,6 +143,17 @@ const SOURCES_EVENT = Object.freeze({
     { number: 1, url: "https://example.com/docs", title: "Example docs" }
   ]
 })
+
+/**
+ * Builds the token the backend sends with the prompt of one call in these
+ * cases.
+ *
+ * @param call - Prompted call, built by `buildToolCall`.
+ * @returns A token distinct for each call.
+ */
+function buildApprovalToken(call: ChatToolCall): string {
+  return createFixtureApprovalToken(Number.parseInt(call.id.slice(-12), 16))
+}
 
 /**
  * Builds the snapshot that starts every stream of {@link REPLY} while it is
@@ -149,7 +173,10 @@ function buildStreamingSnapshot(
     assistantMessage: REPLY,
     sources: [],
     pendingToolCalls,
-    pendingToolApprovals
+    pendingToolApprovals: pendingToolApprovals.map((call) => ({
+      call,
+      approvalToken: buildApprovalToken(call)
+    }))
   }
 }
 
@@ -160,7 +187,11 @@ function buildStreamingSnapshot(
  * @returns The `tool-approval` event.
  */
 function buildApprovalEvent(call: ChatToolCall) {
-  return { type: "tool-approval", call }
+  return {
+    type: "tool-approval",
+    call,
+    approvalToken: buildApprovalToken(call)
+  }
 }
 
 /**
@@ -209,6 +240,24 @@ function buildAcceptingToolCallRoutes(call: ChatToolCall): BackendRoutes {
     [buildToolResultRouteKey(call)]: () =>
       new Response(null, { status: ACCEPTED_STATUS })
   }
+}
+
+/**
+ * Builds the backend's answer to an answer whose call no longer waits.
+ *
+ * @returns A new `409` not-pending problem response.
+ */
+function buildNotPendingResponse(): Response {
+  return buildJsonResponse(
+    409,
+    {
+      type: "urn:lys:problem:chat:tool-call-not-pending",
+      title: "Tool call not pending",
+      status: 409,
+      detail: "No tool call is waiting under this identifier."
+    },
+    "application/problem+json"
+  )
 }
 
 /**
@@ -284,18 +333,26 @@ function listToolAnswers(backend: BackendFake): unknown[] {
 }
 
 /**
- * Builds one answer as {@link listToolAnswers} lists it.
+ * Builds one tool result as {@link listToolAnswers} lists it.
  *
- * @param body - Approval answer or tool result.
- * @returns The answer with the endpoint its kind goes to.
+ * @param body - Tool result.
+ * @returns The result with the endpoint it goes to.
  */
-function buildSentAnswer(body: ChatToolApprovalAnswer | ChatToolResult) {
+function buildSentAnswer(body: ChatToolResult) {
+  return { endpoint: "tool-results", body }
+}
+
+/**
+ * Builds one approval answer as {@link listToolAnswers} lists it.
+ *
+ * @param call - Call whose prompt is answered.
+ * @param answer - Approval answer.
+ * @returns The answer with its prompt's token and the endpoint it goes to.
+ */
+function buildSentApproval(call: ChatToolCall, answer: ChatToolApprovalAnswer) {
   return {
-    endpoint:
-      body.status === "allowed" || body.status === "rejected"
-        ? "tool-approvals"
-        : "tool-results",
-    body
+    endpoint: "tool-approvals",
+    body: { ...answer, approvalToken: buildApprovalToken(call) }
   }
 }
 
@@ -395,6 +452,7 @@ function buildHeldToolCall(
     target: { conversationId, assistantMessageId: REPLY.id, callId: call.id },
     call,
     step: "approval",
+    approvalToken: buildApprovalToken(call),
     answer
   }
 }
@@ -480,6 +538,23 @@ describe("findShownToolCall", () => {
     expect(findShownToolCall({ heldCalls }, shownConversationId)).toBe(unsent)
   })
 
+  it("shows a call that needs the person before an earlier expired prompt, and the expired prompt once none does", () => {
+    const expired = buildHeldToolCall(20, shownConversationId, {
+      status: "expired"
+    })
+    const waiting = buildHeldToolCall(21, shownConversationId, awaitingPerson)
+    const answered = buildHeldToolCall(21, shownConversationId, {
+      status: "answered"
+    })
+
+    expect(
+      findShownToolCall({ heldCalls: [expired, waiting] }, shownConversationId)
+    ).toBe(waiting)
+    expect(
+      findShownToolCall({ heldCalls: [expired, answered] }, shownConversationId)
+    ).toBe(expired)
+  })
+
   it("shows nothing while every call of the conversation is being handled without the person", () => {
     const heldCalls = [
       buildRunningToolCall(20, shownConversationId),
@@ -527,6 +602,7 @@ describe("useToolCallStore", () => {
           target: { ...REPLY_TARGET, callId: READ_CALL.id },
           call: READ_CALL,
           step: "approval",
+          approvalToken: buildApprovalToken(READ_CALL),
           answer: {
             status: "awaiting-person",
             definition: READ_TEXT_FILE,
@@ -627,7 +703,7 @@ describe("useToolCallStore", () => {
       ])
 
       expect(listToolAnswers(backend)).toEqual([
-        buildSentAnswer({
+        buildSentApproval(READ_CALL, {
           status: "rejected",
           reason: "showFailed",
           content: "The desktop couldn't read its tool list."
@@ -865,7 +941,7 @@ describe("useToolCallStore", () => {
         { call: READ_CALL, answer: { status: "answered" } }
       ])
       expect(listToolAnswers(backend)).toEqual([
-        buildSentAnswer(DECLINED_APPROVAL)
+        buildSentApproval(READ_CALL, DECLINED_APPROVAL)
       ])
     })
 
@@ -977,7 +1053,12 @@ describe("useToolCallStore", () => {
         assistantMessage: otherReply,
         sources: [],
         pendingToolCalls: [],
-        pendingToolApprovals: [SECOND_READ_CALL]
+        pendingToolApprovals: [
+          {
+            call: SECOND_READ_CALL,
+            approvalToken: buildApprovalToken(SECOND_READ_CALL)
+          }
+        ]
       })
       await waitForMicrotasks()
       const whileBothWait = useToolCallStore.getState()
@@ -993,6 +1074,261 @@ describe("useToolCallStore", () => {
       ).toEqual(SECOND_READ_CALL)
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
         { target: { ...otherTarget, callId: SECOND_READ_CALL.id } }
+      ])
+    })
+  })
+
+  describe("a prompt that expires", () => {
+    /**
+     * Follows a reply with one prompt and has the person allow it, with the
+     * backend refusing the answer before the call's stored state arrives.
+     *
+     * @returns The store and the reply's event stream.
+     */
+    async function startRefusedAnswer() {
+      const approvals = createControlledRoute()
+      const { replyStreams } = startReplyBackend({
+        [buildToolApprovalRouteKey(READ_CALL)]: approvals.route
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const stream = await startFollowWithEvents(
+        useToolCallStore,
+        replyStreams,
+        [buildStreamingSnapshot(), buildApprovalEvent(READ_CALL)]
+      )
+      const sending = useToolCallStore.getState().resolveToolCall(READ_CALL.id)
+      await waitForMicrotasks()
+      approvals.responses[0]?.resolve(buildNotPendingResponse())
+      await sending
+      return { useToolCallStore, replyStreams, stream }
+    }
+
+    it("shows the expired prompt in place of its card once its call is stored as failed, and keeps it after the reply ends", async () => {
+      const { backend, replyStreams } = startReplyBackend()
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const stream = await startFollowWithEvents(
+        useToolCallStore,
+        replyStreams,
+        [
+          buildStreamingSnapshot(),
+          buildApprovalEvent(READ_CALL),
+          EXPIRED_READ_PART_EVENT
+        ]
+      )
+      const whileGenerating = useToolCallStore.getState()
+
+      stream.sendEvent({ type: "done", finishReason: "stop" })
+      await waitForMicrotasks()
+
+      expect(
+        findShownToolCall(whileGenerating, REPLY_TARGET.conversationId)
+      ).toMatchObject({ call: READ_CALL, answer: { status: "expired" } })
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: READ_CALL, answer: { status: "expired" } }
+      ])
+      expect(listToolAnswers(backend)).toEqual([])
+    })
+
+    it("drops an expired prompt once the person dismisses it", async () => {
+      const { replyStreams } = startReplyBackend()
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot(),
+        buildApprovalEvent(READ_CALL),
+        EXPIRED_READ_PART_EVENT
+      ])
+
+      useToolCallStore.getState().dismissExpiredToolCall(READ_CALL.id)
+
+      expect(useToolCallStore.getState().heldCalls).toEqual([])
+    })
+
+    it("marks a prompt expired from a later snapshot that stores its call as failed", async () => {
+      const { replyStreams } = startReplyBackend()
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const firstStream = await startFollowWithEvents(
+        useToolCallStore,
+        replyStreams,
+        [buildStreamingSnapshot(), buildApprovalEvent(READ_CALL)]
+      )
+
+      firstStream.close()
+      await waitForMicrotasks()
+      replyStreams[1]?.sendEvent({
+        ...buildStreamingSnapshot(),
+        assistantMessage: buildStreamingAssistantMessage(3, [
+          EXPIRED_READ_PART_EVENT.part
+        ])
+      })
+      await waitForMicrotasks()
+
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: READ_CALL, answer: { status: "expired" } }
+      ])
+    })
+
+    it("shows the expired prompt when it expires while the person's answer is being sent, which the backend then refuses", async () => {
+      const approvals = createControlledRoute()
+      const { replyStreams } = startReplyBackend({
+        [buildToolApprovalRouteKey(READ_CALL)]: approvals.route
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const stream = await startFollowWithEvents(
+        useToolCallStore,
+        replyStreams,
+        [buildStreamingSnapshot(), buildApprovalEvent(READ_CALL)]
+      )
+      const sending = useToolCallStore.getState().resolveToolCall(READ_CALL.id)
+      await waitForMicrotasks()
+
+      stream.sendEvent(EXPIRED_READ_PART_EVENT)
+      await waitForMicrotasks()
+      approvals.responses[0]?.resolve(buildNotPendingResponse())
+      await sending
+
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: READ_CALL, answer: { status: "expired" } }
+      ])
+    })
+
+    it("hides a refused answer's call until it arrives as failed, then shows the expired prompt", async () => {
+      const { useToolCallStore, stream } = await startRefusedAnswer()
+      const whileRefused = useToolCallStore.getState()
+
+      stream.sendEvent(EXPIRED_READ_PART_EVENT)
+      await waitForMicrotasks()
+
+      expect(whileRefused.heldCalls).toMatchObject([
+        { call: READ_CALL, answer: { status: "refused" } }
+      ])
+      expect(
+        findShownToolCall(whileRefused, REPLY_TARGET.conversationId)
+      ).toBeUndefined()
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: READ_CALL, answer: { status: "expired" } }
+      ])
+    })
+
+    it("marks a refused answer answered when its call arrives as running, because another caller answered first", async () => {
+      const { useToolCallStore, stream } = await startRefusedAnswer()
+
+      stream.sendEvent({
+        type: "reply-part",
+        part: buildToolCallPart(10, 0, {
+          toolName: "read_text_file",
+          argumentText: "{}",
+          status: "running"
+        })
+      })
+      await waitForMicrotasks()
+
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: READ_CALL, answer: { status: "answered" } }
+      ])
+    })
+
+    it("marks a refused answer expired from a later snapshot that stores its call as failed", async () => {
+      const { useToolCallStore, replyStreams, stream } =
+        await startRefusedAnswer()
+
+      stream.close()
+      await waitForMicrotasks()
+      replyStreams[1]?.sendEvent({
+        ...buildStreamingSnapshot(),
+        assistantMessage: buildStreamingAssistantMessage(3, [
+          EXPIRED_READ_PART_EVENT.part
+        ])
+      })
+      await waitForMicrotasks()
+
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: READ_CALL, answer: { status: "expired" } }
+      ])
+    })
+
+    it("keeps a prompt whose allowed answer is still being sent answered, not expired, when its call runs and then fails", async () => {
+      const approvals = createControlledRoute()
+      const { replyStreams } = startReplyBackend({
+        [buildToolApprovalRouteKey(PAGE_CALL)]: approvals.route
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      const stream = await startFollowWithEvents(
+        useToolCallStore,
+        replyStreams,
+        [buildStreamingSnapshot(), buildApprovalEvent(PAGE_CALL)]
+      )
+      const pageCall = { toolName: "read_page", argumentText: "{}" }
+      const sending = useToolCallStore.getState().resolveToolCall(PAGE_CALL.id)
+      await waitForMicrotasks()
+
+      stream.sendEvent({
+        type: "reply-part",
+        part: buildToolCallPart(12, 0, { ...pageCall, status: "running" })
+      })
+      stream.sendEvent({
+        type: "reply-part",
+        part: buildToolCallPart(12, 0, {
+          ...pageCall,
+          status: "failed",
+          result: "The page could not be read."
+        })
+      })
+      await waitForMicrotasks()
+      approvals.responses[0]?.resolve(
+        new Response(null, { status: ACCEPTED_STATUS })
+      )
+      await sending
+
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: PAGE_CALL, answer: { status: "answered" } }
+      ])
+    })
+
+    it("drops a conversation's expired prompts once a later reply of it is followed, keeping other conversations' ones", async () => {
+      const laterReply = buildStreamingAssistantMessage(5, "")
+      const laterTarget = {
+        conversationId: REPLY_TARGET.conversationId,
+        assistantMessageId: laterReply.id
+      }
+      const otherReply = buildStreamingAssistantMessage(6, "")
+      const otherTarget = {
+        conversationId: createFixtureUuidV7(4),
+        assistantMessageId: otherReply.id
+      }
+      const otherStream = startBackendEventStream()
+      const { replyStreams } = startReplyBackend({
+        [`GET /api/v1/chat/${laterTarget.conversationId}/replies/${laterTarget.assistantMessageId}/events`]:
+          () => startBackendEventStream().response,
+        [`GET /api/v1/chat/${otherTarget.conversationId}/replies/${otherTarget.assistantMessageId}/events`]:
+          () => otherStream.response
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot(),
+        buildApprovalEvent(READ_CALL),
+        EXPIRED_READ_PART_EVENT
+      ])
+      useToolCallStore.getState().startReplyToolCallFollow(otherTarget)
+      await waitForMicrotasks()
+      otherStream.sendEvent({
+        ...buildStreamingSnapshot([SECOND_READ_CALL]),
+        assistantMessage: otherReply
+      })
+      otherStream.sendEvent({
+        type: "reply-part",
+        part: buildToolCallPart(11, 0, {
+          toolName: "read_text_file",
+          argumentText: "{}",
+          status: "failed",
+          result: "Nobody answered its approval prompt in time."
+        })
+      })
+      await waitForMicrotasks()
+
+      useToolCallStore.getState().startReplyToolCallFollow(laterTarget)
+
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { call: SECOND_READ_CALL, answer: { status: "expired" } }
       ])
     })
   })
@@ -1022,7 +1358,7 @@ describe("useToolCallStore", () => {
         { command: "read_text_file", args: { path: "/notes/todo.md" } }
       ])
       expect(listToolAnswers(backend)).toEqual([
-        buildSentAnswer(ALLOWED_APPROVAL),
+        buildSentApproval(READ_CALL, ALLOWED_APPROVAL),
         buildSentAnswer(READ_RESULT)
       ])
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
@@ -1058,7 +1394,7 @@ describe("useToolCallStore", () => {
       await waitForMicrotasks()
 
       expect(listToolAnswers(backend)).toEqual([
-        buildSentAnswer(ALLOWED_APPROVAL),
+        buildSentApproval(READ_CALL, ALLOWED_APPROVAL),
         buildSentAnswer(READ_RESULT)
       ])
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
@@ -1103,9 +1439,25 @@ describe("useToolCallStore", () => {
       await useToolCallStore.getState().resolveToolCall(PAGE_CALL.id)
 
       expect(listToolAnswers(backend)).toEqual([
-        buildSentAnswer(ALLOWED_APPROVAL)
+        buildSentApproval(PAGE_CALL, ALLOWED_APPROVAL)
       ])
       expect(host.commands).toEqual([])
+    })
+
+    it("returns the token of a prompt it found in a snapshot with the person's answer", async () => {
+      const { backend, replyStreams } = startReplyBackend(
+        buildAcceptingToolCallRoutes(READ_CALL)
+      )
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot([READ_CALL])
+      ])
+
+      await useToolCallStore.getState().rejectToolCall(READ_CALL.id, "")
+
+      expect(listToolAnswers(backend)).toEqual([
+        buildSentApproval(READ_CALL, DECLINED_APPROVAL)
+      ])
     })
 
     it("sends the answer once when it is pressed twice", async () => {
@@ -1124,7 +1476,7 @@ describe("useToolCallStore", () => {
       ])
 
       expect(listToolAnswers(backend)).toEqual([
-        buildSentAnswer(ALLOWED_APPROVAL)
+        buildSentApproval(READ_CALL, ALLOWED_APPROVAL)
       ])
     })
 
@@ -1230,7 +1582,11 @@ describe("useToolCallStore", () => {
         await useToolCallStore.getState().rejectToolCall(READ_CALL.id, note)
 
         expect(listToolAnswers(backend)).toEqual([
-          buildSentAnswer({ status: "rejected", reason: "declined", content })
+          buildSentApproval(READ_CALL, {
+            status: "rejected",
+            reason: "declined",
+            content
+          })
         ])
         expect(host.commands).toEqual([])
         expect(useToolCallStore.getState().heldCalls).toMatchObject([
@@ -1239,19 +1595,9 @@ describe("useToolCallStore", () => {
       }
     )
 
-    it("marks the call answered when the backend no longer waits for it", async () => {
+    it("holds the call as refused, and no longer shows it, when the backend no longer waits for it", async () => {
       const { replyStreams } = startReplyBackend({
-        [buildToolApprovalRouteKey(READ_CALL)]: () =>
-          buildJsonResponse(
-            409,
-            {
-              type: "urn:lys:problem:chat:tool-call-not-pending",
-              title: "Tool call not pending",
-              status: 409,
-              detail: "No tool call is waiting under this identifier."
-            },
-            "application/problem+json"
-          )
+        [buildToolApprovalRouteKey(READ_CALL)]: buildNotPendingResponse
       })
       const { useToolCallStore } = await loadFreshToolCallStore()
       await startFollowWithEvents(useToolCallStore, replyStreams, [
@@ -1262,8 +1608,14 @@ describe("useToolCallStore", () => {
       await useToolCallStore.getState().rejectToolCall(READ_CALL.id, "")
 
       expect(useToolCallStore.getState().heldCalls).toMatchObject([
-        { answer: { status: "answered" } }
+        { answer: { status: "refused" } }
       ])
+      expect(
+        findShownToolCall(
+          useToolCallStore.getState(),
+          REPLY_TARGET.conversationId
+        )
+      ).toBeUndefined()
     })
 
     it("rejects with a store listener's failure after the backend took the rejection, instead of showing it as unsent", async () => {
@@ -1395,6 +1747,40 @@ describe("useToolCallStore", () => {
       ])
     })
 
+    it("sends an unsent approval again with its prompt's token", async () => {
+      const approval = createControlledRoute()
+      const { backend, replyStreams } = startReplyBackend({
+        [buildToolApprovalRouteKey(READ_CALL)]: approval.route
+      })
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot(),
+        buildApprovalEvent(READ_CALL)
+      ])
+      const resolution = useToolCallStore
+        .getState()
+        .resolveToolCall(READ_CALL.id)
+      approval.responses[0]?.reject(createTransportFailure())
+      await resolution
+
+      const retry = useToolCallStore
+        .getState()
+        .sendUnsentToolCallAnswer(READ_CALL.id)
+      await waitForMicrotasks()
+      approval.responses[1]?.resolve(
+        new Response(null, { status: ACCEPTED_STATUS })
+      )
+      await retry
+
+      expect(listToolAnswers(backend)).toEqual([
+        buildSentApproval(READ_CALL, ALLOWED_APPROVAL),
+        buildSentApproval(READ_CALL, ALLOWED_APPROVAL)
+      ])
+      expect(useToolCallStore.getState().heldCalls).toMatchObject([
+        { step: "approval", answer: { status: "answered" } }
+      ])
+    })
+
     it("leaves a prompt that waits again alone when the answer sent before its follow ended fails", async () => {
       const approval = createControlledRoute()
       const { replyStreams } = startInterruptedReplyBackend({
@@ -1442,6 +1828,20 @@ describe("useToolCallStore", () => {
       expect(backend.requests).toEqual([])
     })
 
+    it("keeps a waiting prompt when asked to dismiss it, as only an expired prompt is dismissed", async () => {
+      const { replyStreams } = startReplyBackend()
+      const { useToolCallStore } = await loadFreshToolCallStore()
+      await startFollowWithEvents(useToolCallStore, replyStreams, [
+        buildStreamingSnapshot(),
+        buildApprovalEvent(READ_CALL)
+      ])
+      const before = useToolCallStore.getState().heldCalls
+
+      useToolCallStore.getState().dismissExpiredToolCall(READ_CALL.id)
+
+      expect(useToolCallStore.getState().heldCalls).toBe(before)
+    })
+
     it("neither answers a prompt again nor resends an answer that did not fail", async () => {
       startNativeHostFake({})
       const { backend, replyStreams } = startReplyBackend(
@@ -1466,7 +1866,7 @@ describe("useToolCallStore", () => {
 
       expect(answersBeforeRejection).toBe(0)
       expect(listToolAnswers(backend)).toEqual([
-        buildSentAnswer(DECLINED_APPROVAL)
+        buildSentApproval(READ_CALL, DECLINED_APPROVAL)
       ])
     })
 

@@ -28,7 +28,11 @@ import updateFastifyWithChatRoute, {
 import type { DownloadedLlmModel } from "../../../../../src/modules/llm/llmRuntimeTypes"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
-import { formatToolCallDenial } from "../../../../../src/modules/toolApproval/toolCallPolicy"
+import {
+  TOOL_CALL_POLICY_ID,
+  formatToolCallDenial,
+  type ToolCallPolicy
+} from "../../../../../src/modules/toolApproval/toolCallPolicy"
 import { ChatCompletionCancelledError } from "../../../../../src/utils/errors"
 import {
   createPngBytes,
@@ -1349,10 +1353,15 @@ describe("updateFastifyWithChatRoute", () => {
      * `look_up_word` in its first round and answers `Done` in its second.
      *
      * @param argumentText - Arguments of the call; `moth` by default.
+     * @param toolCallPolicy - Policy the route decides calls by; the
+     * fixture's, which lists no folder, by default.
      * @returns The application and the generation the route starts, once
      * started.
      */
-    async function createLookUpApp(argumentText = '{"word":"moth"}') {
+    async function createLookUpApp(
+      argumentText = '{"word":"moth"}',
+      toolCallPolicy: ToolCallPolicy = TOOL_CALL_POLICY
+    ) {
       const testApp = await createChatRouteTestApp()
       testApp.createConversationTurn.mockRestore()
       testApp.completeChatStream
@@ -1386,6 +1395,7 @@ describe("updateFastifyWithChatRoute", () => {
       )
       updateFastifyWithChatRoute(testApp.app, {
         ...CHAT_ROUTE_OPTIONS,
+        toolCallPolicy,
         generations: testApp.generations,
         findModelCapabilities: testApp.findModelCapabilities
       })
@@ -1419,15 +1429,18 @@ describe("updateFastifyWithChatRoute", () => {
       const [prompt] = getGeneration().pendingToolCalls.toolApprovals
       if (prompt === undefined) throw new Error("No prompt was sent.")
       expect(testApp.completeChatStream).toHaveBeenCalledOnce()
-      getGeneration().resolveToolCall(prompt.id, { status: "allowed" })
+      getGeneration().resolveToolCall(prompt.call.id, {
+        status: "allowed",
+        approvalToken: prompt.approvalToken
+      })
       const response = await responsePromise
 
       const events = parseSseEvents(response.body)
       expect(events).toContainEqual({
         event: "tool-approval",
-        data: { type: "tool-approval", call: prompt }
+        data: { type: "tool-approval", ...prompt }
       })
-      expect(prompt).toMatchObject({
+      expect(prompt.call).toMatchObject({
         toolName: "look_up_word",
         arguments: { word: "moth" }
       })
@@ -1484,6 +1497,33 @@ describe("updateFastifyWithChatRoute", () => {
       expect(events.at(-1)?.event).toBe("done")
     })
 
+    it("denies a call naming a path and logs a warning with the request's logger when the approved folders cannot be read", async () => {
+      const { testApp } = await createLookUpApp('{"word":"~/notes.txt"}', {
+        ...TOOL_CALL_POLICY,
+        readApprovedFolders: () => Promise.resolve({ kind: "unreadable" })
+      })
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set(["look_up_word"])
+      })
+      const denial = formatToolCallDenial("settings-unreadable")
+
+      const response = await sendChatRequest(testApp.app, LOOK_UP_REQUEST)
+
+      const events = parseSseEvents(response.body)
+      expect(events.map(({ event }) => event)).not.toContain("tool-approval")
+      expect(
+        testApp.completeChatStream.mock.calls[1]?.[0].messages.at(-1)
+      ).toMatchObject({ role: "tool", content: denial })
+      expect(testApp.log.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          reqId: expect.any(String),
+          msg: expect.stringContaining("folders tools may use")
+        })
+      )
+    })
+
     it("asks the person and logs a warning with the request's logger when the saved choices cannot be read", async () => {
       const { testApp, getGeneration } = await createLookUpApp()
       testApp.readJustRunToolNames.mockResolvedValue({ status: "unreadable" })
@@ -1494,7 +1534,8 @@ describe("updateFastifyWithChatRoute", () => {
       })
       const [prompt] = getGeneration().pendingToolCalls.toolApprovals
       if (prompt === undefined) throw new Error("No prompt was sent.")
-      getGeneration().resolveToolCall(prompt.id, {
+      getGeneration().resolveToolCall(prompt.call.id, {
+        approvalToken: prompt.approvalToken,
         status: "rejected",
         reason: "declined",
         content: "The person declined this call."
@@ -1754,12 +1795,15 @@ describe("updateFastifyWithChatRoute", () => {
       })
       const [prompt] = getGeneration().pendingToolCalls.toolApprovals
       if (prompt === undefined) throw new Error("No prompt was sent.")
-      expect(prompt).toMatchObject({
+      expect(prompt.call).toMatchObject({
         toolName: ECHO_TOOL_NAME,
         arguments: { text: "moth" }
       })
       expect(testApp.completeChatStream).toHaveBeenCalledOnce()
-      getGeneration().resolveToolCall(prompt.id, { status: "allowed" })
+      getGeneration().resolveToolCall(prompt.call.id, {
+        status: "allowed",
+        approvalToken: prompt.approvalToken
+      })
       const response = await responsePromise
 
       expect(
@@ -1809,7 +1853,8 @@ describe("updateFastifyWithChatRoute", () => {
       })
       const [prompt] = getGeneration().pendingToolCalls.toolApprovals
       if (prompt === undefined) throw new Error("No prompt was sent.")
-      getGeneration().resolveToolCall(prompt.id, {
+      getGeneration().resolveToolCall(prompt.call.id, {
+        approvalToken: prompt.approvalToken,
         status: "rejected",
         reason: "declined",
         content: "The person declined this call."
@@ -2794,7 +2839,8 @@ describe("updateFastifyWithChatRoute", () => {
       if (result?.type !== "return") throw new Error("No generation started.")
       const [prompt] = result.value.pendingToolCalls.toolApprovals
       if (prompt === undefined) throw new Error("No prompt was sent.")
-      result.value.resolveToolCall(prompt.id, {
+      result.value.resolveToolCall(prompt.call.id, {
+        approvalToken: prompt.approvalToken,
         status: "rejected",
         reason: "declined",
         content: "The person declined this call."
@@ -2897,6 +2943,32 @@ describe("updateFastifyWithChatRoute", () => {
         }),
         expect.objectContaining({ kind: "text", content: "Hi" })
       ])
+      const [findToolsCall] = listStoredReplyParts(testApp, response)
+      expect(
+        testApp.database.handleDatabaseReadRequest((statements) =>
+          statements
+            .getStatement(
+              `SELECT search_call_id AS searchCallId,
+              conversation_id AS conversationId, agent_code AS agentCode,
+              tool_name AS toolName, argument_text AS argumentText,
+              policy_effect AS policyEffect, policy_reason AS policyReason,
+              policy_id AS policyId, outcome FROM tool_search_call_decisions`
+            )
+            .all()
+        )
+      ).toEqual([
+        {
+          searchCallId: findToolsCall?.id,
+          conversationId: findStartedConversationId(response.body),
+          agentCode: "armitage",
+          toolName: "recommend_tool",
+          argumentText: '{"name":"look_up_word"}',
+          policyEffect: "allow",
+          policyReason: null,
+          policyId: TOOL_CALL_POLICY_ID,
+          outcome: "succeeded"
+        }
+      ])
     })
 
     it("asks the person before a found tool that is not saved as Just run runs, and does not run a call the person declines", async () => {
@@ -2924,13 +2996,13 @@ describe("updateFastifyWithChatRoute", () => {
       const prompt = rejectPendingToolCall(startReplyGeneration.mock.results)
       const response = await responsePromise
 
-      expect(prompt).toMatchObject({
+      expect(prompt.call).toMatchObject({
         toolName: "look_up_word",
         arguments: { word: "moth" }
       })
       expect(parseSseEvents(response.body)).toContainEqual({
         event: "tool-approval",
-        data: { type: "tool-approval", call: prompt }
+        data: { type: "tool-approval", ...prompt }
       })
       expect(listStoredReplyParts(testApp, response)[1]).toMatchObject({
         toolName: "look_up_word",

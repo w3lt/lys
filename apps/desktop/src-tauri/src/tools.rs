@@ -6,17 +6,25 @@
 //! directory tree by file name or content, `get_current_time` returns the
 //! local date, time, and time zone, and `get_location` returns the location
 //! the person saved in Settings. The file commands accept any absolute
-//! path that the desktop process can read. No command decides whether Lys may
-//! use a tool or a path; that decision belongs to the caller that runs tool
-//! requests. `read_text_file` and `find_files` run on Tauri's blocking-task
-//! pool so the window stays responsive; `get_current_time` and `get_location`
-//! read a few bytes and run on the main thread, like `load_settings`.
+//! path that the desktop process can read, except a private key or
+//! credential file, or Lys's settings file, and, when the person listed the
+//! folders tools may use, a path outside them, which they refuse by its real
+//! path. Whether Lys may use a tool or another path is decided by the caller
+//! that runs tool requests. `read_text_file` and `find_files` run on Tauri's
+//! blocking-task pool so the window stays responsive; `get_current_time` and
+//! `get_location` read a few bytes and run on the main thread, like
+//! `load_settings`.
 //!
 //! `list_tools` returns the definition of every client tool, which the Tools
 //! settings pane lists and a model will be offered.
 
+/// Reads the folders the person lets tools use, which the file tools check.
+pub mod approved_folders;
 /// Provides the `list_tools` command and the list of every client tool.
 pub mod client_tools;
+/// Decides which files the file tools refuse, from the credential file list
+/// the backend shares.
+pub mod credential_files;
 /// Types of the client tool definitions that `list_tools` returns.
 mod definition;
 /// Provides the `get_current_time` command.

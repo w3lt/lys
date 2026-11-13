@@ -60,7 +60,7 @@ describe("ToolCallGate", () => {
     expect(gate.startToolCall(PAGE_CALL, false, storeToolCall)).toEqual({
       status: "allowed"
     })
-    expect(storeToolCall.mock.calls).toEqual([["running"]])
+    expect(storeToolCall.mock.calls).toEqual([["running", "just-run"]])
     expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
   })
 
@@ -71,12 +71,19 @@ describe("ToolCallGate", () => {
       return { status: "allowed" }
     })
 
-    const start = gate.startToolCall(READ_CALL, false, (status) => {
-      steps.push(`store ${status}`)
-      return true
-    })
+    const start = gate.startToolCall(
+      READ_CALL,
+      false,
+      (status, approvalMode) => {
+        steps.push(`store ${status} ${approvalMode}`)
+        return true
+      }
+    )
 
-    expect(steps).toEqual(["store awaiting-approval", "prompt read_text_file"])
+    expect(steps).toEqual([
+      "store awaiting-approval ask-me",
+      "prompt read_text_file"
+    ])
     expect(start.status).toBe("prompted")
     if (start.status === "prompted") await start.answer
   })
@@ -91,7 +98,9 @@ describe("ToolCallGate", () => {
 
     const start = gate.startToolCall(PAGE_CALL, true, storeToolCall)
 
-    expect(storeToolCall.mock.calls).toEqual([["awaiting-approval"]])
+    expect(storeToolCall.mock.calls).toEqual([
+      ["awaiting-approval", "just-run"]
+    ])
     expect(sendToolApprovalPrompt.mock.calls).toEqual([[PAGE_CALL]])
     expect(start.status).toBe("prompted")
     if (start.status === "prompted")
@@ -145,6 +154,6 @@ describe("ToolCallGate", () => {
 
     gate.startToolCall(READ_CALL, false, storeToolCall)
 
-    expect(storeToolCall.mock.calls).toEqual([["awaiting-approval"]])
+    expect(storeToolCall.mock.calls).toEqual([["awaiting-approval", "ask-me"]])
   })
 })

@@ -10,11 +10,13 @@ import { ConversationNotFoundError } from "../../../../src/utils/errors"
 import {
   openConversationTestServices,
   openTestDatabase,
+  readToolCallDecisionRows,
   saveAssistantMessageRow,
   saveConversationRow,
   saveUserMessageRow
 } from "../../support/conversationDatabase"
 import {
+  ASK_ME_TOOL_CALL_DECISION,
   createFixtureUuidV7,
   createNewConversationTarget,
   createTextPart,
@@ -295,8 +297,9 @@ describe("StoredConversationTurns", () => {
       }
     )
 
-    it("interrupts the reply's open tool calls at the time it finalizes the reply", () => {
-      const { turns, replyParts, history } = openConversationTestServices()
+    it("interrupts the reply's open tool calls and their decision records at the time it finalizes the reply", () => {
+      const { database, turns, replyParts, history } =
+        openConversationTestServices()
       const turn = turns.createConversationTurn({
         conversation: createNewConversationTarget("lys"),
         userMessage: createTurnUserMessage("Hello"),
@@ -308,6 +311,7 @@ describe("StoredConversationTurns", () => {
         round: 0,
         toolName: "web_search",
         argumentText: '{"query":"moths"}',
+        decision: ASK_ME_TOOL_CALL_DECISION,
         status: "running"
       })
       vi.setSystemTime(new Date(LATER))
@@ -323,6 +327,9 @@ describe("StoredConversationTurns", () => {
         status: "completed",
         parts: [{ ...call, status: "interrupted", updatedAt: LATER }]
       })
+      expect(readToolCallDecisionRows(database)).toMatchObject([
+        { callId: call?.id, outcome: "interrupted", updatedAt: LATER }
+      ])
     })
 
     it("finalizes a reply only once", () => {

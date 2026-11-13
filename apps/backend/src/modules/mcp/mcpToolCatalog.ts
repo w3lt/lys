@@ -42,6 +42,13 @@ export type McpToolCatalog = Readonly<{
    * The tool call policy asks the person before each of their calls.
    */
   destructiveToolNames: ReadonlySet<string>
+  /**
+   * Model-facing names of the listed tools the server marks as reaching
+   * beyond Lys and this machine without marking them read-only: their
+   * annotations say `openWorldHint: true` and not `readOnlyHint: true`. The
+   * tool call policy asks the person before each of their calls.
+   */
+  openWorldWriteToolNames: ReadonlySet<string>
 }>
 
 /** One listed tool after the SDK's tool schema checked it. */
@@ -65,6 +72,8 @@ type McpToolEntry =
       definition: McpToolDefinition
       /** Whether the server marks it as destructive. */
       isDestructive: boolean
+      /** Whether the server marks it as an open-world write. */
+      isOpenWorldWrite: boolean
     }>
   | Readonly<{
       /** The tool is not listed. */
@@ -121,6 +130,8 @@ export default class McpToolCatalogBuilder {
   readonly #listedNames: Set<string>
   /** Model-facing names of the listed tools marked as destructive. */
   readonly #destructiveToolNames: Set<string>
+  /** Model-facing names of the listed tools marked as open-world writes. */
+  readonly #openWorldWriteToolNames: Set<string>
   /** Whether a tool was added after the catalog was full. */
   #isToolListCut: boolean
 
@@ -136,6 +147,7 @@ export default class McpToolCatalogBuilder {
     this.#skippedTools = []
     this.#listedNames = new Set()
     this.#destructiveToolNames = new Set()
+    this.#openWorldWriteToolNames = new Set()
     this.#isToolListCut = false
   }
 
@@ -194,6 +206,8 @@ export default class McpToolCatalogBuilder {
       this.#listedNames.add(entry.definition.name)
       if (entry.isDestructive)
         this.#destructiveToolNames.add(entry.definition.name)
+      if (entry.isOpenWorldWrite)
+        this.#openWorldWriteToolNames.add(entry.definition.name)
     } else {
       this.#skippedTools.push(
         Object.freeze({
@@ -214,7 +228,8 @@ export default class McpToolCatalogBuilder {
       definitions: Object.freeze([...this.#definitions]),
       skippedTools: Object.freeze([...this.#skippedTools]),
       isToolListCut: this.#isToolListCut,
-      destructiveToolNames: new Set(this.#destructiveToolNames)
+      destructiveToolNames: new Set(this.#destructiveToolNames),
+      openWorldWriteToolNames: new Set(this.#openWorldWriteToolNames)
     })
   }
 }
@@ -309,7 +324,8 @@ function buildMcpToolEntry(
   return Object.freeze({
     status: "listed",
     definition: parsed.data,
-    isDestructive: isMarkedDestructive(tool)
+    isDestructive: isMarkedDestructive(tool),
+    isOpenWorldWrite: isMarkedOpenWorldWrite(tool)
   })
 }
 
@@ -330,6 +346,29 @@ function isMarkedDestructive(tool: Tool): boolean {
   return (
     tool.annotations?.readOnlyHint !== true &&
     tool.annotations?.destructiveHint === true
+  )
+}
+
+/**
+ * Answers whether a server marks one of its tools as reaching beyond Lys
+ * and this machine while changing something, such as a tool that sends an
+ * email.
+ *
+ * @param tool - Tool the server listed, after the SDK's schema checked it;
+ * still untrusted.
+ * @returns True only when its annotations say `openWorldHint: true` and do
+ * not say `readOnlyHint: true`. MCP reads a tool without the hints as
+ * open-world and not read-only, but only a tool its server marks so counts
+ * here, so a server that sends no annotations keeps the person's choice of
+ * Just run.
+ * @remarks Annotations are the server's own claims. They only ever make Lys
+ * ask the person more, never less, so a false claim cannot let a call skip
+ * approval.
+ */
+function isMarkedOpenWorldWrite(tool: Tool): boolean {
+  return (
+    tool.annotations?.readOnlyHint !== true &&
+    tool.annotations?.openWorldHint === true
   )
 }
 

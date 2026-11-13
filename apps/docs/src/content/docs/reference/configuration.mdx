@@ -205,6 +205,7 @@ defaults:
 | `providers`                 | object                  | The model provider every request goes to, and where to find it; see [Providers](#providers)                                           |
 | `tools.justRun`             | array of tool names     | Tools that run without asking when a model calls them; every other tool asks; see [Tools](#tools)                                     |
 | `tools.switches`            | object of `boolean`     | Whether each tool the person switched is on, by tool name; any other tool starts at its default; see [Tools](#tools)                  |
+| `tools.approvedFolders`     | array of absolute paths | Folders tool calls may name paths in; absent or empty lets them name any path; see [Approved folders](#approved-folders)              |
 | `location.city`             | `string \|null`         | City the person saved for `get_location`; see [Location](#location)                                                                   |
 | `location.region`           | `string \|null`         | State, province, or other region the person saved; see [Location](#location)                                                          |
 | `location.country`          | `string \|null`         | Country the person saved; see [Location](#location)                                                                                   |
@@ -232,7 +233,10 @@ creates the parent directory and writes the default document.
 Every save writes a temporary file beside `settings.json`, readable and
 writable only by its owner on Unix, flushes it to disk, and renames it over the
 file, so a reader sees the previous document or the whole new one, never part
-of a write. The Tauri host is the file's only writer; the backend reads it for
+of a write. A save that stops midway leaves its temporary file,
+`settings.json.<process id>.<number>.tmp`; the tool call policy and the
+desktop's file tools refuse it as they refuse `settings.json`. The Tauri host
+is the file's only writer; the backend reads it for
 the model provider and its key, the Tavily API key, the Just run choices,
 the MCP servers with their switches, and the email account with its password.
 
@@ -392,6 +396,44 @@ off.
 An older Lys build does not know the group. It ignores it and removes it the
 next time it saves settings, so every tool asks again and every switch returns
 to its default after going back to an older build.
+
+### Approved folders
+
+`tools.approvedFolders` lists the folders tool calls may name paths in, which
+the person adds and removes in Settings → Tools, under "folders tools may
+use". With no folder listed, the list is left out of the file and tool calls
+may name any path, as before the list existed. Once one folder is listed, a
+call whose arguments name a path outside every listed folder is denied, for
+every tool, before Ask me or Just run is applied: it is stored as failed with
+a result the model reads, never runs, and the person is not asked.
+
+- A path starts with `/`, has at most 1024 characters, no line break or
+  other control character, and no space at its end. Any other value, `null`
+  for the list, or a list that is not an array makes loading the settings
+  fail. A path listed twice counts once; Lys writes the list in ascending
+  order. Whether the folder exists is not checked; a listed folder that does
+  not exist approves nothing on the desktop's file tools.
+- The backend's tool call policy reads the list from this file when each round
+  of tool calls arrives, and again when the person allows a call, before it
+  runs; a call whose path the list no longer approves is then stored as failed
+  and never runs. It compares paths by their text: `.` and `..` parts are
+  resolved, letter case counts, and no link is followed. A text is read as a
+  path when it, or one of its lines, starts with `/` (not `//`), `~`, `./`,
+  or `../`, or is a `file:` URL; `~` names the home folder, and a relative
+  path is resolved against it, the folder Lys starts MCP servers in. A path
+  inside a longer text, such as a shell command, and a relative name without a
+  leading `.`, such as `notes/a.txt`, are not read.
+- The desktop's `read_text_file` and `find_files` read the list at each call
+  and compare real paths, with every link followed, so a link inside a listed
+  folder that points outside it is refused too.
+- When the file exists but cannot be read or parsed, no folder is approved:
+  the backend denies every call that names a path with the reason
+  `settings-unreadable` and a sentence saying the settings file cannot be
+  read, and logs a warning, and the desktop's file tools refuse every file
+  with `settingsUnreadable`. A missing file lists no folder.
+- A build older than the list cannot load a settings file that holds it,
+  because the `tools` group rejects unknown fields; remove the folders, or the
+  `approvedFolders` key, before going back to one.
 
 ### Location
 

@@ -499,8 +499,9 @@ asked over every text before the next:
   reaching beyond Lys and this machine without marking it read-only: its
   annotations say `openWorldHint: true` and not `readOnlyHint: true`
   (`McpToolCatalog.openWorldWriteToolNames`). The built-in email server marks
-  `send_email`, `send_draft`, and `save_draft` so, which its server does not
-  mark destructive, so sending an email asks even on Just run. As with the
+  `send_email`, `send_draft`, and `save_draft` so, and their `lys_` twins on
+  Lys's own mailbox, which its server does not mark destructive, so sending
+  an email from either mailbox asks even on Just run. As with the
   destructive mark, only an explicit mark counts.
 - **Paid tool.** Otherwise, a `web_search` call requires approval with the
   reason `paid-tool` when the reply already made
@@ -879,11 +880,11 @@ other tool of the turn. Their definitions have group `agents`, access
 choice, and their calls run without approval. Which ones an agent gets
 follows its role (see [roles](#roles)):
 
-| Tool               | Offered to                       | Arguments                    | Result                                                                                                                                                                    |
-| ------------------ | -------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `read_my_state`    | every agent but Armitage         | none                         | Who the agent is, its role, how many of its request slots are in use, and each request it is working on or that waits for a slot, the reply that calls the tool included. |
-| `find_agents`      | the built-in agents but Armitage | `query`, 1 to 100 characters | Up to 20 agents whose code, name, or bio contains the query, deleted ones included, and how many match.                                                                   |
-| `read_agent_state` | the built-in agents but Armitage | `code`, an agent code        | Another agent's name, role, when it was deleted if it was, how many of its request slots are in use, and the requests it is working on or that wait for a slot.           |
+| Tool               | Offered to                       | Arguments                    | Result                                                                                                                                                                                                                                                                                                 |
+| ------------------ | -------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `read_my_state`    | every agent but Armitage         | none                         | Who the agent is, its role, how many of its request slots are in use, and each request it is working on or that waits for a slot, the reply that calls the tool included. For Caliginia and Lysiptera, also the address of Lys's own mailbox while the email server serves it, or that none is in use. |
+| `find_agents`      | the built-in agents but Armitage | `query`, 1 to 100 characters | Up to 20 agents whose code, name, or bio contains the query, deleted ones included, and how many match.                                                                                                                                                                                                |
+| `read_agent_state` | the built-in agents but Armitage | `code`, an agent code        | Another agent's name, role, when it was deleted if it was, how many of its request slots are in use, and the requests it is working on or that wait for a slot.                                                                                                                                        |
 
 A state names each request's conversation by its title, read when the tool
 runs (`This reply, in this conversation` for the calling reply, otherwise
@@ -1082,8 +1083,9 @@ switched on; an unchanged one keeps its session, with its connection or its
 failure; a removed or switched-off one's session is stopped, and the list
 reports a switched-off server as `off`. The servers Lys ships come first, in
 their fixed order: while one is switched on, each apply reads what it needs,
-for the email server the saved account and its password, and starts it in a
-session, or lists it as `failed` with `account-missing` or `account-invalid`
+for the email server the saved accounts of the mailboxes switched on and
+their passwords, and starts it in a session, or lists it as `failed` with
+`account-missing` or `account-invalid`
 and logs a warning once per reason; an added server with a built-in server's
 name takes its place, and the built-in server is not applied until the added
 one is renamed or removed, which is logged as a warning once. A missing file
@@ -1396,40 +1398,57 @@ signal. No entry holds the account or the password. See
 ### The email server
 
 Lys ships one MCP server of its own, `email`, which reads, searches, sends,
-and files the person's mail over one IMAP and SMTP account. It is a Rust
-program at `mcps/email`, installed by `build.sh` as
-`$LYS_HOME/runtime/email/email` and named to the backend as `emailServerPath`,
-from `LYS_EMAIL_SERVER_PATH`, which the desktop host sets to the workspace
-build in development; see the
+and files mail over IMAP and SMTP for up to two mailboxes, each an account of
+its own: the person's, and Lys's own, which she reads and sends from as an
+agent of her own. One process serves both. It is a Rust program at
+`mcps/email`, installed by `build.sh` as `$LYS_HOME/runtime/email/email` and
+named to the backend as `emailServerPath`, from `LYS_EMAIL_SERVER_PATH`, which
+the desktop host sets to the workspace build in development; see the
 [configuration reference](/reference/configuration/#lys-home-directory).
-`createEmailMcpServer` (`src/modules/mcp/builtIn/email/emailServer.ts`)
-describes it to the registry as a built-in stdio server. At each apply while
-its switch, `mcp.builtIn.email.enabled`, is on, the registry reads the saved
-account and its password with `readEmailAccount`
-(`src/infrastructure/settings/emailAccountFile.ts`), which takes only the
-`email` and `secrets` groups of `settings.json` and reports `read`,
-`missing`, `invalid`, or `unreadable`, and builds the server's settings: the
-executable as the command, no argument, and one environment variable,
-`LYS_EMAIL_ACCOUNT`, holding the account and the password as one line of
-JSON. Those settings pass the shared server rules like any command the
-backend starts, so the server runs through the same session, process group,
-log line, message line, and stop code as an added stdio server, and a
-changed account or password is a changed setting that restarts it. A
-missing account, or an account or password that fails its rules or cannot
-be read, lists the server as `failed` with `account-missing` or
-`account-invalid`, and nothing is started; a missing executable fails the
-start as `start-failed`.
+`EmailMcpServer` (`src/modules/mcp/builtIn/email/emailServer.ts`) describes
+it to the registry as a built-in stdio server. Each mailbox has a switch,
+`mcp.builtIn.email.enabled` for the person's and
+`mcp.builtIn.email.lysEnabled` for Lys's, and the server is on while either
+is. At each apply while it is on, the registry hands it the applied group,
+and it reads both saved accounts and their passwords with `readEmailAccounts`
+(`src/infrastructure/settings/emailAccountFile.ts`), in one read that takes
+only the `email` and `secrets` groups of `settings.json` and reports each
+account as `read`, `missing`, `invalid`, or `unreadable`; two accounts that
+open one mailbox read as `invalid` for both. It then builds the server's
+settings: the executable as the command, no argument, and one environment
+variable for each mailbox switched on, `LYS_EMAIL_ACCOUNT` for the person's
+and `LYS_EMAIL_LYS_ACCOUNT` for Lys's, each holding that account and its
+password as one line of JSON. A mailbox that is off never puts its account or
+password in the environment. Those settings pass the shared server rules like
+any command the backend starts, so the server runs through the same session,
+process group, log line, message line, and stop code as an added stdio
+server, and a changed switch, account, or password of either mailbox is a
+changed setting that restarts the one process; a call running on the other
+mailbox then fails as it does on any restart. When a mailbox that is on has no
+saved account, or an account or password that fails its rules or cannot be
+read, the server is listed as `failed` with `account-missing` or
+`account-invalid`, and nothing is started, for the other mailbox either; a
+missing executable fails the start as `start-failed`.
 
-The server reads the variable back under the same rules, because anyone on the
-machine can start the binary with a variable of their own, then serves MCP
-over stdio with ten tools: `search_emails`, `read_email`, `read_conversation`,
-`read_attachment`, `list_folders`, `manage_folder`, `send_email`,
-`save_draft`, `send_draft`, and `delete_draft`; the [API
-reference](/reference/api/#the-email-servers-tools) says what each does. Every
-call opens at most one IMAP and one SMTP connection of its own and closes them
-before answering. A reply, a forward, and `send_draft` keep their IMAP
-connection open while they send; any other send that files a copy in Sent
-opens IMAP only after the send. Nothing stays open between calls, and
+The server reads each variable back under the same rules, because anyone on
+the machine can start the binary with variables of their own, and exits with
+code 2, naming the variable and the rule but never a value, when neither is
+set, one that is set fails its rules, or the two accounts open one mailbox.
+It then serves MCP over stdio with ten tools for each mailbox it was given:
+`search_emails`, `read_email`, `read_conversation`, `read_attachment`,
+`list_folders`, `manage_folder`, `send_email`, `save_draft`, `send_draft`,
+and `delete_draft` for the person's, and the same ten with `lys_` before
+their names, such as `lys_send_email`, for Lys's. Both copies of a tool come
+from its one definition, with the same arguments and annotations; each
+description begins with the mailbox it works on, and those of the two send
+tools end with that mailbox's address, so the model can give it as their
+required `from`. Ids of Lys's mailbox begin with `lys.`, and each tool
+refuses an id of the other mailbox, saying which tools take it; the [API
+reference](/reference/api/#the-email-servers-tools) says what each tool does.
+Every call opens at most one IMAP and one SMTP connection of its own and
+closes them before answering. A reply, a forward, and `send_draft` keep their
+IMAP connection open while they send; any other send that files a copy in
+Sent opens IMAP only after the send. Nothing stays open between calls, and
 stopping the process closes every connection. A connection is protected as
 the account says: TLS from the first byte, STARTTLS before any credential,
 or none, which the rules allow only to `localhost`, `127.0.0.1`, or `[::1]`;
@@ -1442,10 +1461,19 @@ greeting with EHLO, STARTTLS with its handshake and second EHLO, the sign-in,
 MAIL, each recipient, DATA, or QUIT, at most 30, and a message's content with
 the SMTP server's answer at most 120. A longer successful result is cut so
 that, with its note, it holds at most 20,000 UTF-16 code units, the length the
-backend keeps of every MCP result, error or not. The server's standard error
-lines, which the backend keeps as `MCP server log line` entries, name an
-operation, counts, and the class of a failure, never the password, an
-address, a subject, or a body.
+backend keeps of every MCP result, error or not. Each `Message-ID` the server
+writes comes from one sequence for the whole process, so two mailboxes on one
+domain never write the same one. The server's standard error lines, which the
+backend keeps as `MCP server log line` entries, name an operation by its
+tool, whose `lys_` tells the mailbox, counts, and the class of a failure,
+never the password, an address, a subject, or a body.
+
+While the registry lists the built-in `email` server as applied and not off,
+and its last read served Lys's mailbox, `EmailMcpServer.readLysEmailAddress`
+gives the address of her account. A turn of Caliginia or Lysiptera passes it
+to `read_my_state`, which says "Your email address is …", or "You have no
+email address in use." while there is none; another agent's state never names
+it, so no other agent takes Lys's address for its own.
 
 ### Email account check
 
@@ -1453,7 +1481,8 @@ address, a subject, or a body.
 answers `POST /api/v1/mcp/email/account-check`, which the desktop sends before
 it saves an account: it runs the email server's `check` subcommand in the
 person's home folder, with the candidate account and password in
-`LYS_EMAIL_ACCOUNT`, as the server itself is started, and the subcommand signs
+`LYS_EMAIL_ACCOUNT`, whichever mailbox the account is for, as the server
+itself is started, and the subcommand signs
 in to the IMAP and the SMTP server at the same time, within 20 seconds each
 with the logout, and prints one JSON line with both outcomes; a sign-in whose
 closing LOGOUT or QUIT fails or goes unanswered still counts as accepted, and
@@ -1674,7 +1703,7 @@ See the [health response contract](/reference/api/#model-health-responses).
 | An MCP tool call fails before the server returns a result (five minutes passed, the connection ended, an HTTP error, a refusal)                                        | The call is stored `failed` with the reason the model reads, and the backend logs it; the reply goes on.                                                                                                                                                           |
 | The `mcp` settings group fails its rules, or the settings file cannot be read, when it is applied                                                                      | The servers applied before are kept, the server list reports `invalid` or `unreadable`, and the backend logs a warning without any value.                                                                                                                          |
 | An MCP server is switched off in Settings → MCP                                                                                                                        | Its session is stopped and its tools are no longer listed; a call running on it fails with a sentence saying the server was stopped, and the list reports `off`. Reconnect answers `409` with `urn:lys:problem:mcp:server-off`.                                    |
-| The built-in email server is switched on while no usable account is saved                                                                                              | The server is `failed` with `account-missing` or `account-invalid`, nothing is started, and the backend logs a warning once per reason; Reconnect answers `409` with `urn:lys:problem:mcp:server-off`, and saving an account applies the group again.              |
+| A mailbox of the built-in email server is switched on while its account is not saved or not usable                                                                     | The server is `failed` with `account-missing` or `account-invalid`, nothing is started, and the backend logs a warning once per reason; Reconnect answers `409` with `urn:lys:problem:mcp:server-off`, and saving an account applies the group again.              |
 | An added MCP server has the built-in email server's name                                                                                                               | The added server is applied and listed; the built-in server is not, and the backend logs a warning until the added server is renamed or removed.                                                                                                                   |
 | The email server's executable is missing, or an account check does not report                                                                                          | The server fails as `start-failed`; a check answers `unavailable` with `server-missing` or `server-failed`, and the backend logs a warning for a missing server, or an error with the server's error lines; a check that has not ended after one minute is killed. |
 | An account check arrives while another runs                                                                                                                            | It is answered `unavailable` with `busy` at once, without running and without keeping the account or the password, and the backend logs a warning.                                                                                                                 |

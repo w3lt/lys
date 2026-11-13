@@ -174,8 +174,8 @@ details. A save that changes the server also tries again.
 | `unreachable`     | No connection could be made: the host or port is wrong, the name does not resolve, or the server is not running. A server on `localhost` must be started before Lys connects.                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `http-error`      | The server answered another HTTP error, or a redirect, which Lys does not follow. Check the URL's path, such as a missing `/mcp`, and use the address a redirect points to.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `protocol-error`  | The server's answers are not valid MCP, or an answer is larger than 16 MiB while connecting, or it refused to connect or to list its tools; a `refused` failure in the log carries its message. Check that the URL is the server's MCP endpoint, not a web page, and that it speaks Streamable HTTP.                                                                                                                                                                                                                                                                                                         |
-| `account-missing` | The email server Lys ships is switched on, but no email account is saved. Save one on its card; see [the email account cannot be saved](#the-email-account-cannot-be-saved).                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `account-invalid` | The saved email account or its password fails its rules, or the settings file could not be read. Save the account again on its card, or fix a hand edit of the `email` or `secrets` group; see the [configuration reference](/reference/configuration/#email-account).                                                                                                                                                                                                                                                                                                                                       |
+| `account-missing` | A mailbox of the email server Lys ships is switched on, but its email account is not saved. Save it on the mailbox's card, or switch the mailbox off there; see [the email account cannot be saved](#the-email-account-cannot-be-saved).                                                                                                                                                                                                                                                                                                                                                                     |
+| `account-invalid` | The saved email account of a mailbox that is on, or its password, fails its rules, the two accounts open one mailbox, or the settings file could not be read. Save the account again on its card, or fix a hand edit of the `email` or `secrets` group; see the [configuration reference](/reference/configuration/#email-account).                                                                                                                                                                                                                                                                          |
 
 Lys speaks only Streamable HTTP to a URL server. A server that offers only the
 older HTTP+SSE transport cannot be used yet
@@ -232,8 +232,8 @@ unchanged.
 
 ## The email account cannot be saved
 
-Save on the email server's card first signs in to the IMAP and the SMTP
-server through the backend, so the backend must be running; the card's status
+Save on an email account card, yours or Lys's, first signs in to the IMAP and
+the SMTP server through the backend, so the backend must be running; the card's status
 line then says what each server answered, as
 `IMAP: accepted · SMTP: the user name or password was refused`, and nothing is
 saved until both accept.
@@ -263,6 +263,11 @@ again once it has. "Lys couldn't reach its backend to check the account."
 means the backend is not running or did not answer; start it in
 Settings → Runtime. A save the backend accepted can still fail to write the
 file; the status line then says so, and the fields keep what you typed.
+
+A card refuses, before any sign-in, an account that opens the other card's
+mailbox: its address in any letter case, or its user name on the same IMAP
+host and port. Lys's mailbox must be one of her own, so give her an address
+of her own rather than an alias of yours.
 
 ## A message fails because an MCP server is not connected
 

@@ -74,8 +74,9 @@ repository today; it is not a promise of unreleased work.
   over Streamable HTTP, fills a new one from a pasted config, switches each
   server on or off, shows whether each is connected, switches its tools and
   sets whether they ask first, lists the tools Lys skipped, and reconnects
-  one; the email server's card saves the one email account it works with,
-  after signing in to its IMAP and SMTP servers. The Secrets pane saves the
+  one; the email server's two cards each save an email account it works with,
+  the person's own and one of Lys's own, after signing in to its IMAP and
+  SMTP servers, and switch that mailbox on or off. The Secrets pane saves the
   Tavily API key `web_search` needs, and checks it.
 - A chat offers the switched-on tools to a model trained for tool use and
   answers its tool calls: file tools run in the desktop, `read_page` asks vmo
@@ -86,8 +87,11 @@ repository today; it is not a promise of unreleased work.
   `read_page` is likewise unavailable until vmo answers its health route. An
   MCP tool runs on its server, which the backend calls while the server is
   switched on and connected; MCP tools start on. The email server Lys ships,
-  off until an email account is saved and its switch is on, reads, searches,
-  sends, and files mail over IMAP and SMTP. Each call
+  off until an email account is saved and its mailbox is switched on, reads,
+  searches, sends, and files mail over IMAP and SMTP, in one process for the
+  person's mailbox and Lys's own: Lys's own address lets her receive and send
+  mail as an agent of her own, through `lys_` tools, and Caliginia and
+  Lysiptera learn it from `read_my_state`; every send asks first. Each call
   asks the person first unless its tool is set to Just run, which the backend
   decides for every tool from the saved choices; before that, the backend
   denies a call that names a private key or credential file, a path outside

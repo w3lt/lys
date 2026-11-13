@@ -11,36 +11,36 @@ presentation state, not durable conversation storage.
 
 ## Main responsibilities
 
-| Area                | Current implementation                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                                                                                                                                                                                                                                                                           |
-| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                                                                                                                                                                                                                                                                   |
-| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.                                                                                                                                                                                                                                                             |
-| Chat state          | `src/lib/store/chat-view` owns the active conversation, the agent selected for a new one, request lifecycle, conversation opening, and error presentation.                                                                                                                                                                                                                 |
-| History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                                                                                                                                                                                                                                                |
-| Agent state         | `src/lib/store/agents` owns the list of built-in and stored agents, the Agents pane's editor and draft, and the agent create, update, and delete calls.                                                                                                                                                                                                                    |
-| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of every tool, the app's and the backend's, the session-only Tool calls switch, and the offer each request makes from them.                                                                                                                                                                                            |
-| Tool calls          | `src/lib/store/tool-calls` follows each running reply, shows the backend's approval prompts, runs the client tools' calls the backend sends, and sends every answer.                                                                                                                                                                                                       |
-| Tool approvals      | `src/lib/store/tool-settings.ts` owns each tool's switch and its Ask me or Just run, saved as the `tools` group of `settings.json`, and their automatic save.                                                                                                                                                                                                              |
-| MCP servers         | `src/lib/store/mcp-servers.ts` owns the backend's states of the MCP servers, their sync and reconnect, and the polling while one connects; the application store's `mcp-settings.ts` slice saves the `mcp` group, the added servers and every switch, and its `email-settings.ts` slice checks, saves, and removes the email account the built-in email server works with. |
-| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend and vmo run, and settings loaded from Tauri; `vmo-runtime.ts` owns vmo's state and its start and stop, and `runtime-autostart-settings.ts` saves the two startup switches.                                                                                                                         |
-| Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer.                                                                                                                                                                                                                                               |
-| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops, approval answers, and tool results.                                                                                                                                                                                                                 |
-| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                                                                                                                                                                                                                                                              |
+| Area                | Current implementation                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| App shell           | `App.tsx` swaps between chat and settings views and runs startup initialization.                                                                                                                                                                                                                                                                                                                                         |
+| Chat UI             | `ChatView` renders the transcript, composer, jump-to-latest controls, and the past-conversations dialog.                                                                                                                                                                                                                                                                                                                 |
+| Message rendering   | `MarkdownMessage` renders assistant replies as Markdown with KaTeX math and highlighted, copyable code blocks.                                                                                                                                                                                                                                                                                                           |
+| Chat state          | `src/lib/store/chat-view` owns the active conversation, the agent selected for a new one, request lifecycle, conversation opening, and error presentation.                                                                                                                                                                                                                                                               |
+| History state       | `src/lib/store/conversation-history` owns the past-conversations dialog, its search and pages, and rename and delete calls.                                                                                                                                                                                                                                                                                              |
+| Agent state         | `src/lib/store/agents` owns the list of built-in and stored agents, the Agents pane's editor and draft, and the agent create, update, and delete calls.                                                                                                                                                                                                                                                                  |
+| Tool state          | `src/lib/store/tools.ts` owns the Tools pane's list of every tool, the app's and the backend's, the session-only Tool calls switch, and the offer each request makes from them.                                                                                                                                                                                                                                          |
+| Tool calls          | `src/lib/store/tool-calls` follows each running reply, shows the backend's approval prompts, runs the client tools' calls the backend sends, and sends every answer.                                                                                                                                                                                                                                                     |
+| Tool approvals      | `src/lib/store/tool-settings.ts` owns each tool's switch and its Ask me or Just run, saved as the `tools` group of `settings.json`, and their automatic save.                                                                                                                                                                                                                                                            |
+| MCP servers         | `src/lib/store/mcp-servers.ts` owns the backend's states of the MCP servers, their sync and reconnect, and the polling while one connects; the application store's `mcp-settings.ts` slice saves the `mcp` group, the added servers and every switch, and its `email-settings.ts` slice checks, saves, and removes the email accounts the built-in email server works with, the person's and Lys's own, each on its own. |
+| Shell/runtime state | `src/lib/store/index.ts` tracks which view is open, whether the backend and vmo run, and settings loaded from Tauri; `vmo-runtime.ts` owns vmo's state and its start and stop, and `runtime-autostart-settings.ts` saves the two startup switches.                                                                                                                                                                       |
+| Model lifecycle     | `src/lib/store/model-actions.ts` owns real inventory, load, unload, and health requests shared by settings and the composer.                                                                                                                                                                                                                                                                                             |
+| SSE consumption     | `src/lib/apis/http/chat.ts` opens chat and reply-events SSE streams, validates events with Zod, and sends reply stops, approval answers, and tool results.                                                                                                                                                                                                                                                               |
+| Theme               | `src/app/theme.ts` applies light or dark mode and stores the choice as `lys.theme` in WebView `localStorage`.                                                                                                                                                                                                                                                                                                            |
 
 ## Chat state split
 
 The desktop currently has seven separate state systems:
 
-| Store                    | Owns                                                                                                                                                                                                                                           |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat Zustand store       | Active conversation, the agent selected for a new conversation, request and open tokens, local abort controllers, streamed reply parts and sources, the staged files and the last refusal of one, inline error text                            |
-| History Zustand store    | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes                                                                                                                 |
-| Agent Zustand store      | Every listed built-in and stored agent, the open editor or read-only view and its draft, the save attempt, the pending save or delete, the most recently saved agent                                                                           |
-| Tool Zustand store       | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch                                                                                                                                                  |
-| Tool-call Zustand store  | Every approval prompt and tool call held until the backend takes its answer, and the reply follows that deliver them                                                                                                                           |
-| MCP server Zustand store | The backend's list of applied MCP servers and their states, and why the latest sync or reconnect failed                                                                                                                                        |
-| Shell Zustand store      | Active top-level view, loaded settings (each tool's saved approval, the saved MCP servers with their switches, and the email account included) and the latest save of the servers and of the account, backend process status, startup progress |
+| Store                    | Owns                                                                                                                                                                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Chat Zustand store       | Active conversation, the agent selected for a new conversation, request and open tokens, local abort controllers, streamed reply parts and sources, the staged files and the last refusal of one, inline error text                              |
+| History Zustand store    | Dialog visibility, search query, displayed conversation pages, the row being renamed or confirmed, pending renames and deletes                                                                                                                   |
+| Agent Zustand store      | Every listed built-in and stored agent, the open editor or read-only view and its draft, the save attempt, the pending save or delete, the most recently saved agent                                                                             |
+| Tool Zustand store       | The tool list read from the desktop and the backend, tool calls on or off, each tool's switch                                                                                                                                                    |
+| Tool-call Zustand store  | Every approval prompt and tool call held until the backend takes its answer, and the reply follows that deliver them                                                                                                                             |
+| MCP server Zustand store | The backend's list of applied MCP servers and their states, and why the latest sync or reconnect failed                                                                                                                                          |
+| Shell Zustand store      | Active top-level view, loaded settings (each tool's saved approval, the saved MCP servers with their switches, and the email accounts included) and the latest save of the servers and of each account, backend process status, startup progress |
 
 The transcript shown in the window is built from backend events for the current
 request, or from the stored transcript read when a past conversation is opened.
@@ -724,8 +724,12 @@ the group, so switching off stops the server at once, its tools leave the
 list, and a call running on it fails, and switching on connects it. The
 switch is disabled while a save of the group runs, while an added server has
 the built-in server's name, and while a built-in server lacks what it needs,
-the email server a saved account; a server that is on can always be switched
-off. The servers Lys ships start off; an added server starts on.
+the email server a saved account, the person's or Lys's own; a server that is
+on can always be switched off. The servers Lys ships start off; an added
+server starts on. The email server's switch sums up its two mailboxes: it is
+on while either mailbox is, switching it off switches both off, and switching
+it on switches on each mailbox whose account is saved; each mailbox's own
+switch is on its [account card](#email-account).
 
 The details hold four parts:
 
@@ -766,7 +770,8 @@ taken` while an added server has the built-in server's name; `Not applied`
   variables, or the URL with its query hidden, the sign-in (`none` or
   `bearer token`), and the names of the other headers. A built-in server
   shows its own panel instead, and has no Remove or Edit: the email
-  server's panel is the [email account card](#email-account).
+  server's panel holds two [email account cards](#email-account), the
+  person's, then Lys's own.
 
 A status line below the list and the editor, named `Tool choices save`, says
 "Saving tool choices…" while a change of a tool's switch or approval is
@@ -888,11 +893,31 @@ and it reads the tool list once when it was never read.
 
 ### Email account
 
-The email server's details end with the Email account card, a form for the one
-account the server works with, saved in the `email` group of `settings.json`
-with its password in the `secrets` group; the [configuration
-reference](/reference/configuration/#email-account) gives the rules. The card
-holds Address, Display name, User name, and Password, then two groups, IMAP
+The email server's details end with two account cards, one for each mailbox
+the server can serve: "Your email account", the person's own, and "Lys's
+email account", an account of Lys's own that she reads and sends from as an
+agent of her own. Each is the same form, `EmailAccountCard` with its
+`mailbox`, for one account saved in the `email` group of `settings.json`
+with its password in the `secrets` group, the person's as `account` and
+`emailPassword` and Lys's as `lysAccount` and `lysEmailPassword`
+(`src/lib/models/email-mailbox.ts` maps each mailbox to its fields); the
+[configuration reference](/reference/configuration/#email-account) gives the
+rules. Each card saves, checks, and removes only its own account, with a save
+and a check state of its own in the application store's email slice, so one
+card can save while the other checks. Lys's empty card starts with `Lys` as
+its display name.
+
+Under its heading and note, each card holds a switch, "Use this mailbox",
+which saves its
+mailbox's switch, `mcp.builtIn.email.enabled` for the person's and
+`mcp.builtIn.email.lysEnabled` for Lys's, keeping the other's and the added
+servers, and then, while the backend runs, asks it to apply the group, so the
+one email server starts again with the mailboxes that are on. It is disabled
+while a save of the `mcp` group runs, and while it is off and no account is
+saved, with the note "Save this account first."; a mailbox that is on can
+always be switched off.
+
+A card holds Address, Display name, User name, and Password, then two groups, IMAP
 server and SMTP server, each with Host, Port, and Security, a choice of TLS,
 STARTTLS, or None, and a switch, "Server keeps a copy of sent mail". Address,
 User name, each Host and Port, and Password while none is saved say `required`
@@ -929,7 +954,14 @@ edit.
 
 Save, or Enter in a field, reads the fields with the shared account and
 password rules, which `src/lib/models/email-account-draft.ts` places on the
-inputs: from then on each field shows its first problem as the person types,
+inputs, and refuses an account that opens the other card's mailbox, as
+`@lys/share`'s `isSameEmailAddress` and `isSameEmailSignIn` tell: the same
+address, ignoring case, is marked on Address, and the same user name on the
+same IMAP host and port on User name, on Lys's card as "This is the address
+of your own account. Lys needs an address of her own." or "This signs in to
+your own mailbox. Lys needs a mailbox of her own.", and on the person's as
+"This is the address of Lys's account." or "This signs in to Lys's
+mailbox."; the desktop host refuses such a file too. From then on each field shows its first problem as the person types,
 the port in the card's words and the rule about connections without TLS at the
 host. When one field has a problem, focus moves to it; when several have,
 focus moves to a summary above the fields, a heading `Fix N fields to save:`
@@ -941,7 +973,7 @@ check](/reference/api/#email-account-check), which signs in to both servers
 through the email server Lys ships, and saves the account and the password, in
 one write of both groups serialized with the other group saves, only once both
 servers accepted; the store's account changes once the file holds it, because
-the backend reads the file. When the email server is switched on once the
+the backend reads the file. When the card's mailbox is switched on once the
 account is saved, read after the save, so also when it was switched on during
 the check, the MCP server store then asks the backend to apply the group, so
 the server starts again with it. Save is disabled while the backend is not
@@ -961,24 +993,27 @@ or removed, each server's outcome, as
 backend could not be asked, that another check is still running, that Lys
 could not start its email server, which `build.sh` installs, or that the
 server failed while checking; then that the fields are unsaved; and
-otherwise that no account is saved yet and the server stays off until one
+otherwise that no account is saved yet and the mailbox stays off until one
 is, that the account was saved, or `Saved · <address>`.
 
 Remove account shows while an account is saved and the fields are not
-edited. It asks "Remove the email account and its password? The email server
-is switched off.", with Keep, which takes focus, and Remove; Escape keeps the
-account. Removing first saves the email server's switch off, when it is on,
-because the server cannot run without an account, and, while the backend
-runs, asks it to apply the group without waiting for its answer; then it
-removes the account and the password in one write; the card shows
+edited. It asks "Remove the email account and its password? This mailbox is
+switched off.", with Keep, which takes focus, and Remove; Escape keeps the
+account. Removing first saves the card's mailbox switch off, when it is on,
+keeping the other mailbox's, because the server cannot serve a mailbox
+without its account, and, while the backend runs, asks it to apply the group without waiting for its answer; then it
+removes the card's account and password in one write, keeping the other
+card's; the card shows
 `Saving…` from the switch's save until the account is removed. When the
 switch cannot be saved, also while another save of the servers runs,
-nothing is removed and the status line says "Lys couldn't switch the email
-server off, so the account wasn't removed." After
+nothing is removed and the status line says "Lys couldn't switch this
+mailbox off, so the account wasn't removed." After
 a removal, focus moves to the address field; after a confirmation that kept
-the account, or a failed removal, back to Remove account. Every action is
-disabled while a check, save, or removal runs, the removal's switch-off
-included, and the slice refuses a second save or removal meanwhile.
+the account, or a failed removal, back to Remove account. Every action of a
+card is disabled while its check, save, or removal runs, the removal's
+switch-off included, and the slice refuses a second save or removal of that
+mailbox meanwhile; the other card stays usable, and when two saves would make
+the accounts one mailbox, the host refuses the second write.
 
 ## Providers
 

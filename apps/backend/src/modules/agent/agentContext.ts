@@ -413,15 +413,21 @@ function listImageAttachments(
  * @param systemPrompt - The agent's own instructions.
  * @param unofferedTools - What the request names about the tools the turn
  * does not offer.
+ * @param jobNote - Note about the job the turn works on; undefined outside a
+ * job's turn.
  * @returns The instructions unchanged when there is nothing to say about
- * those tools; otherwise the instructions followed by each note
- * {@link listUnofferedToolNotes} lists, each after a blank line.
+ * those tools and no job note; otherwise the instructions, then each note
+ * {@link listUnofferedToolNotes} lists, then the job note as the last
+ * paragraph, each after a blank line.
  */
 export function formatSystemPrompt(
   systemPrompt: string,
-  unofferedTools: UnofferedTools
+  unofferedTools: UnofferedTools,
+  jobNote: string | undefined
 ): string {
-  return [systemPrompt, ...listUnofferedToolNotes(unofferedTools)].join("\n\n")
+  const paragraphs = [systemPrompt, ...listUnofferedToolNotes(unofferedTools)]
+  if (jobNote !== undefined) paragraphs.push(jobNote)
+  return paragraphs.join("\n\n")
 }
 
 /**

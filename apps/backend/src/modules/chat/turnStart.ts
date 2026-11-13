@@ -9,6 +9,7 @@ import type Agent from "../agent/agent"
 import type { AgentTurn } from "../agent/agent"
 import { AgentRequestLimitError } from "../agent/agentActivity"
 import type { FindAttachmentImage } from "../agent/agentContext"
+import { NO_TURN_DELEGATION } from "../agent/turnDelegation"
 import type { UnofferedTools } from "../agent/unofferedTools"
 import type AttachmentFileStore from "../attachment/attachmentFileStore"
 import { buildAttachmentImageReader } from "../attachment/attachmentImageReader"
@@ -349,7 +350,9 @@ async function createTurnReplyTask(
  * reply and whose reply state is read back from the stored conversation,
  * which numbers new sources after the conversation's stored ones,
  * whose tool calls pass the approval gateway, and whose images are read
- * from the conversation's attachment files. With the turn's logger, an
+ * from the conversation's attachment files. The turn takes no part in
+ * delegation: it offers no delegation tool, and its instructions carry no
+ * note about a job. With the turn's logger, an
  * unreadable settings file, and a reply refused because its agent's request
  * slots and line were full, are logged as warnings; a cancelled reply, and a
  * round that was not sent because it did not fit or its model was not
@@ -381,6 +384,7 @@ function buildAgentTurn(
     builtInTools: input.builtInTools,
     mcpTools: settings.mcpTools,
     unofferedTools: settings.unofferedTools,
+    delegation: NO_TURN_DELEGATION,
     abortSignal: context.abortSignal,
     createReplyPart: storage.createReplyPart,
     updateReplyPartContent: storage.updateReplyPartContent,

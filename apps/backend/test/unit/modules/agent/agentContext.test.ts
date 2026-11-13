@@ -575,18 +575,22 @@ describe("buildAgentContext", () => {
 
 describe("formatSystemPrompt", () => {
   it("leaves the agent's instructions unchanged when tool calls are on and no tool is named", () => {
-    expect(formatSystemPrompt("You are Lys.", NO_UNOFFERED_TOOLS)).toBe(
-      "You are Lys."
-    )
+    expect(
+      formatSystemPrompt("You are Lys.", NO_UNOFFERED_TOOLS, undefined)
+    ).toBe("You are Lys.")
   })
 
   it("adds a note after the instructions that names each switched-off tool in request order", () => {
     expect(
-      formatSystemPrompt("You are Lys.", {
-        status: "tool-calls-on",
-        switchedOffToolNames: ["web_search", "read_text_file"],
-        unavailableTools: []
-      })
+      formatSystemPrompt(
+        "You are Lys.",
+        {
+          status: "tool-calls-on",
+          switchedOffToolNames: ["web_search", "read_text_file"],
+          unavailableTools: []
+        },
+        undefined
+      )
     ).toBe(
       "You are Lys.\n\nThese tools are turned off in Settings → Tools, so you cannot call them now: web_search, read_text_file. If a request needs one of them, say that it is turned off and can be turned on in Settings → Tools; do not guess what it would return or claim to have used it."
     )
@@ -594,14 +598,18 @@ describe("formatSystemPrompt", () => {
 
   it("adds the switched-off note, then a note naming each switched-on tool that cannot run with why and what fixes it", () => {
     expect(
-      formatSystemPrompt("You are Lys.", {
-        status: "tool-calls-on",
-        switchedOffToolNames: ["get_location"],
-        unavailableTools: [
-          { name: "web_search", reason: "api-key-missing" },
-          { name: "read_page", reason: "page-reader-not-ready" }
-        ]
-      })
+      formatSystemPrompt(
+        "You are Lys.",
+        {
+          status: "tool-calls-on",
+          switchedOffToolNames: ["get_location"],
+          unavailableTools: [
+            { name: "web_search", reason: "api-key-missing" },
+            { name: "read_page", reason: "page-reader-not-ready" }
+          ]
+        },
+        undefined
+      )
     ).toBe(
       [
         "You are Lys.",
@@ -612,8 +620,30 @@ describe("formatSystemPrompt", () => {
   })
 
   it("adds one note saying tool calls are off when they are", () => {
-    expect(formatSystemPrompt("You are Lys.", TOOL_CALLS_OFF)).toBe(
+    expect(formatSystemPrompt("You are Lys.", TOOL_CALLS_OFF, undefined)).toBe(
       "You are Lys.\n\nTool calls are turned off in Settings → Tools. If a request needs a tool you are not offered, say that tool calls are turned off and can be turned on in Settings → Tools; do not guess what a tool would return or claim to have used one."
+    )
+  })
+
+  it("adds the job note after the instructions when there is nothing to say about tools", () => {
+    expect(
+      formatSystemPrompt(
+        "You are Lys.",
+        NO_UNOFFERED_TOOLS,
+        "You are working on job 3."
+      )
+    ).toBe("You are Lys.\n\nYou are working on job 3.")
+  })
+
+  it("adds the job note as the last paragraph, after the notes about tools", () => {
+    expect(
+      formatSystemPrompt(
+        "You are Lys.",
+        TOOL_CALLS_OFF,
+        "You are working on job 3."
+      )
+    ).toBe(
+      "You are Lys.\n\nTool calls are turned off in Settings → Tools. If a request needs a tool you are not offered, say that tool calls are turned off and can be turned on in Settings → Tools; do not guess what a tool would return or claim to have used one.\n\nYou are working on job 3."
     )
   })
 })

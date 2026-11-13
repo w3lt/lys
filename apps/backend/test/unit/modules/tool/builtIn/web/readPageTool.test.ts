@@ -14,6 +14,7 @@ import {
   registerBuiltInToolContractSuite,
   type BuiltInToolHarness
 } from "../../../../support/builtInToolContract"
+import { createFixtureUuidV7 } from "../../../../support/conversationFixtures"
 import {
   answerWithBody,
   answerWithPage,
@@ -268,6 +269,7 @@ describe("ReadPageTool", () => {
       const recordedCandidates: unknown[] = []
 
       const result = await readable.runToolCall({
+        toolCallId: createFixtureUuidV7(1),
         abortSignal: new AbortController().signal,
         addWebSources: (candidates) => {
           recordedCandidates.push(...candidates)

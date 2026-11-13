@@ -26,6 +26,7 @@ import {
   type Mock
 } from "vitest"
 import Agent, {
+  type AgentContextInput,
   type AgentProfile,
   type AgentTurn,
   type AssistantMessageCompletion
@@ -39,7 +40,16 @@ import {
   formatSystemPrompt,
   type GetAttachmentImageFileStatus
 } from "../../../../src/modules/agent/agentContext"
+import type { AgentRole } from "../../../../src/modules/agent/agentRoles"
 import type { AgentStateReader } from "../../../../src/modules/agent/agentStateTools"
+import {
+  NO_TURN_DELEGATION,
+  type DelegationOffer,
+  type JobMessageDraft,
+  type JobMessageOutcome,
+  type JobTurn,
+  type TurnDelegation
+} from "../../../../src/modules/agent/turnDelegation"
 import {
   NO_UNOFFERED_TOOLS,
   TOOL_CALLS_OFF,
@@ -87,6 +97,7 @@ import {
   ROOMY_CONTEXT_LENGTH
 } from "../../support/replyContextMeterFakes"
 import {
+  answerWithWordDefinition,
   runLookUpWordWithSource,
   LOOK_UP_WORD_FORMAT,
   LOOK_UP_WORD_TOOL,
@@ -98,6 +109,7 @@ import {
   READ_TEXT_FILE_FORMAT,
   READ_TEXT_FILE_TOOL
 } from "../../support/toolFixtures"
+import { buildTurnDelegation } from "../../support/turnDelegationFakes"
 
 /** Opens one reply stream for the agent under test. */
 type OpenReplyStream = ReplyModel["openReplyStream"]
@@ -196,6 +208,31 @@ type ReplyStorage = Pick<
   | "findReplyStatus"
 >
 
+/** What one turn is given about its tools and the answers to their calls. */
+type TurnToolAccess = Pick<
+  AgentTurn,
+  | "clientTools"
+  | "builtInTools"
+  | "mcpTools"
+  | "unofferedTools"
+  | "delegation"
+  | "sendClientToolCall"
+  | "createToolCallGate"
+>
+
+/**
+ * What one turn is asked and given: all of it except its reply storage, its
+ * event sender, and its reporters.
+ */
+type TurnInput = Omit<
+  AgentTurn,
+  | keyof ReplyStorage
+  | "sendEvent"
+  | "reportReplyCancellation"
+  | "reportReplyRefusal"
+  | "reportReplyFailure"
+>
+
 /**
  * Replaces one storage capability of a case's turn, given the stored one.
  *
@@ -276,6 +313,8 @@ type AgentTurnScenario = Readonly<{
   createToolCallGate?: AgentTurn["createToolCallGate"]
   /** Whether the model is trained for tool use; false by default. */
   trainedForToolUse?: boolean
+  /** The turn's part in delegation; it takes no part by default. */
+  delegation?: TurnDelegation
 }>
 
 /**
@@ -625,6 +664,187 @@ const FINISH_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
   { type: "finish", finishReason: "stop" }
 ])
 
+/** The job a case's job turn works on. */
+const JOB_TURN: JobTurn = Object.freeze({
+  delegatorName: "Caliginia",
+  jobNumber: 2
+})
+
+/** Offer of a main conversation's turn that may delegate and has no job yet. */
+const DELEGATING_OFFER: DelegationOffer = Object.freeze({
+  mayDelegate: true,
+  hasJobs: false,
+  job: undefined
+})
+
+/** Offer of a main conversation's turn that may delegate and has jobs. */
+const DELEGATING_OFFER_WITH_JOBS: DelegationOffer = Object.freeze({
+  mayDelegate: true,
+  hasJobs: true,
+  job: undefined
+})
+
+/**
+ * Offer of a turn whose conversation has jobs and whose tool offer leaves
+ * `delegate_work` out, as it does while tool calls are off.
+ */
+const JOBS_ONLY_OFFER: DelegationOffer = Object.freeze({
+  mayDelegate: false,
+  hasJobs: true,
+  job: undefined
+})
+
+/** Offer of a turn of {@link JOB_TURN}'s job. */
+const JOB_OFFER: DelegationOffer = Object.freeze({
+  mayDelegate: false,
+  hasJobs: false,
+  job: JOB_TURN
+})
+
+/**
+ * Offer that allows every delegation tool at once, which no conversation
+ * does; a case uses it to show that a turn offers none of them.
+ */
+const EVERY_TOOL_OFFER: DelegationOffer = Object.freeze({
+  mayDelegate: true,
+  hasJobs: true,
+  job: JOB_TURN
+})
+
+/**
+ * Instructions of a turn of {@link JOB_TURN}'s job that offers
+ * `report_progress`: the agent's own, then the note about the job.
+ */
+const JOB_SYSTEM_PROMPT =
+  "You are Lys.\n\nYou are working on job 2 for Caliginia, another agent in Lys. The message you answer holds Caliginia's instructions, not a person's. Your final reply goes back to Caliginia as the result, so put everything it needs into that reply. While you work, you can send a short note on where the job stands with report_progress. You cannot ask the person anything here: when you need something to finish, say what you need in your reply."
+
+/**
+ * Instructions of a turn of {@link JOB_TURN}'s job that does not offer
+ * `report_progress`: the agent's own, then the note about the job.
+ */
+const JOB_SYSTEM_PROMPT_WITHOUT_PROGRESS_TOOL =
+  "You are Lys.\n\nYou are working on job 2 for Caliginia, another agent in Lys. The message you answer holds Caliginia's instructions, not a person's. Your final reply goes back to Caliginia as the result, so put everything it needs into that reply. You cannot ask the person anything here: when you need something to finish, say what you need in your reply."
+
+/** Round in which the model gives the researcher work about holograms. */
+const DELEGATE_WORK_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
+  {
+    type: "tool-calls",
+    toolCalls: [
+      {
+        toolName: "delegate_work",
+        argumentText:
+          '{"agent":"researcher","title":"Hologram news","instructions":"Collect this week\'s news about holograms."}'
+      }
+    ]
+  }
+])
+
+/**
+ * Round in which the model gives the researcher work under a title that
+ * holds a zero-width space, written as its JSON escape.
+ */
+const DELEGATE_ZERO_WIDTH_TITLE_ROUND: readonly ReplyStreamEvent[] =
+  Object.freeze([
+    {
+      type: "tool-calls",
+      toolCalls: [
+        {
+          toolName: "delegate_work",
+          argumentText:
+            '{"agent":"researcher","title":"Hologram\\u200B news","instructions":"Collect this week\'s news about holograms."}'
+        }
+      ]
+    }
+  ])
+
+/** Round in which the model reports where its job stands. */
+const REPORT_PROGRESS_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
+  {
+    type: "tool-calls",
+    toolCalls: [
+      {
+        toolName: "report_progress",
+        argumentText: '{"note":"Two of five sources are read."}'
+      }
+    ]
+  }
+])
+
+/** Round in which the model stops job 2. */
+const STOP_JOB_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
+  {
+    type: "tool-calls",
+    toolCalls: [{ toolName: "stop_job", argumentText: '{"job":2}' }]
+  }
+])
+
+/** Round in which the model looks up the words `moth` and `owl`. */
+const LOOK_UP_TWO_WORDS_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
+  {
+    type: "tool-calls",
+    toolCalls: [
+      { toolName: "look_up_word", argumentText: '{"word":"moth"}' },
+      { toolName: "look_up_word", argumentText: '{"word":"owl"}' }
+    ]
+  }
+])
+
+/**
+ * What the model reads once the researcher started job 1 under the title
+ * `Hologram news`.
+ */
+const STARTED_JOB_RESULT =
+  'Job 1 started: Researcher is working on "Hologram news". Its result arrives later in a message that starts with reports. End your reply when you have nothing else to do.'
+
+/** One role and offer with the delegation tools a measurement counts for them. */
+type MeasuredDelegationCase = [
+  label: string,
+  role: AgentRole,
+  delegation: DelegationOffer,
+  toolNames: string[]
+]
+
+/**
+ * Answers a job message as the researcher's start of job 1, under the title
+ * the message asks for.
+ *
+ * @param draft - The job message.
+ * @returns The sent outcome.
+ */
+function startResearcherJob(draft: JobMessageDraft): JobMessageOutcome {
+  return {
+    status: "sent",
+    jobNumber: 1,
+    agentName: "Researcher",
+    title: draft.title,
+    isNewJob: true
+  }
+}
+
+/**
+ * Builds the input of a context measurement of a new conversation that
+ * offers `look_up_word`.
+ *
+ * @param delegation - What the conversation allows of delegation.
+ * @param trainedForToolUse - Whether the model is trained for tool use.
+ * @returns The input; any image file lookup fails the case.
+ */
+function buildDelegationMeasurementInput(
+  delegation: DelegationOffer,
+  trainedForToolUse: boolean
+): AgentContextInput {
+  return {
+    history: [],
+    model: TURN_REQUEST.model,
+    canSeeImages: false,
+    getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
+    tools: [LOOK_UP_WORD_TOOL],
+    trainedForToolUse,
+    unofferedTools: NO_UNOFFERED_TOOLS,
+    delegation
+  }
+}
+
 /**
  * Builds the backend look-up tool offered for one case.
  *
@@ -749,6 +969,27 @@ function createTestAgent(
 }
 
 /**
+ * Creates an agent with {@link AGENT_PROFILE} and a role of the case.
+ *
+ * @param role - Role of the agent.
+ * @param replyModel - Model access of the case.
+ * @param replyContextMeter - Context meter of the same model.
+ * @returns The ready agent; any state read fails the case.
+ */
+function createAgentOfRole(
+  role: AgentRole,
+  replyModel: ReplyModel,
+  replyContextMeter: ReplyContextMeter
+): Agent {
+  const profile: AgentProfile = { ...AGENT_PROFILE, role }
+  return new Agent(profile, {
+    replyModel,
+    replyContextMeter,
+    stateReader: UNEXPECTED_STATE_READER
+  })
+}
+
+/**
  * Finds the agent that answers a case's turn.
  *
  * @param scenario - The case's own agent, or its model and meter.
@@ -760,6 +1001,59 @@ function findScenarioAgent(scenario: AgentScenario): Agent {
     { openReplyStream: scenario.openReplyStream },
     scenario.replyContextMeter ?? createRoomyReplyContextMeter()
   )
+}
+
+/**
+ * Builds the tools of one case's turn and the answers to their calls: the
+ * case's own, or the default of each one it leaves out.
+ *
+ * @param scenario - Choices of the case.
+ * @returns The offered tools, what the request names about the others, the
+ * turn's part in delegation, the sender of client tool calls, and the gate
+ * factory.
+ */
+function buildScenarioToolAccess(scenario: AgentReplyScenario): TurnToolAccess {
+  return {
+    clientTools: scenario.clientTools ?? [],
+    builtInTools: scenario.builtInTools ?? [],
+    mcpTools: scenario.mcpTools ?? [],
+    unofferedTools: scenario.unofferedTools ?? NO_UNOFFERED_TOOLS,
+    delegation: scenario.delegation ?? NO_TURN_DELEGATION,
+    sendClientToolCall: scenario.sendClientToolCall ?? handleUnexpectedToolCall,
+    createToolCallGate:
+      scenario.createToolCallGate ?? buildCreateToolCallGate(scenario)
+  }
+}
+
+/**
+ * Builds what one case's turn is asked and given: the stored turn's identity
+ * and sources, the request values every case carries, and the case's own
+ * choices, or the default of each one it leaves out.
+ *
+ * @param scenario - Choices of the case.
+ * @param store - Stored turn of the case.
+ * @returns The turn without its reply storage, event sender, and reporters.
+ */
+function buildScenarioTurnInput(
+  scenario: AgentReplyScenario,
+  store: AgentTurnStore
+): TurnInput {
+  const { signal: freshSignal } = new AbortController()
+  return {
+    ...buildScenarioToolAccess(scenario),
+    conversationId: store.conversationId,
+    requestId: store.replyId,
+    history: scenario.history ?? [],
+    sources: getStoredReply(store).sources,
+    userMessage: scenario.userMessage ?? TURN_REQUEST.userMessage,
+    canSeeImages: scenario.canSeeImages ?? false,
+    findAttachmentImage:
+      scenario.findAttachmentImage ?? handleUnexpectedImageRead,
+    model: TURN_REQUEST.model,
+    trainedForToolUse: scenario.trainedForToolUse ?? false,
+    generationOptions: TURN_REQUEST.generationOptions,
+    abortSignal: scenario.abortSignal ?? freshSignal
+  }
 }
 
 /**
@@ -783,25 +1077,15 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
   const storage = buildScenarioReplyStorage(scenario, store)
   const settlement = await findScenarioAgent(scenario)
     .createReply({
-      ...TURN_REQUEST,
-      conversationId: store.conversationId,
-      requestId: store.replyId,
-      trainedForToolUse: scenario.trainedForToolUse ?? false,
-      userMessage: scenario.userMessage ?? TURN_REQUEST.userMessage,
-      canSeeImages: scenario.canSeeImages ?? false,
-      findAttachmentImage:
-        scenario.findAttachmentImage ?? handleUnexpectedImageRead,
-      history: scenario.history ?? [],
-      sources: getStoredReply(store).sources,
-      clientTools: scenario.clientTools ?? [],
-      builtInTools: scenario.builtInTools ?? [],
-      mcpTools: scenario.mcpTools ?? [],
-      unofferedTools: scenario.unofferedTools ?? NO_UNOFFERED_TOOLS,
-      sendClientToolCall:
-        scenario.sendClientToolCall ?? handleUnexpectedToolCall,
-      createToolCallGate:
-        scenario.createToolCallGate ?? buildCreateToolCallGate(scenario),
-      abortSignal: scenario.abortSignal ?? new AbortController().signal,
+      ...buildScenarioTurnInput(scenario, store),
+      createReplyPart: storage.createReplyPart,
+      updateReplyPartContent: storage.updateReplyPartContent,
+      updateReplyToolCall: storage.updateReplyToolCall,
+      updateAssistantMessageState: (completion) => {
+        persistedStates.push(completion)
+        return storage.updateAssistantMessageState(completion)
+      },
+      findReplyStatus: storage.findReplyStatus,
       sendEvent: (event) => {
         events.push(event)
         storedPartsAtEvents.push(getStoredReply(store).reply.parts)
@@ -814,15 +1098,7 @@ async function getAgentReplyOutcome(scenario: AgentReplyScenario) {
       },
       reportReplyFailure: (failure) => {
         reportedFailures.push(failure)
-      },
-      createReplyPart: storage.createReplyPart,
-      updateReplyPartContent: storage.updateReplyPartContent,
-      updateReplyToolCall: storage.updateReplyToolCall,
-      updateAssistantMessageState: (completion) => {
-        persistedStates.push(completion)
-        return storage.updateAssistantMessageState(completion)
-      },
-      findReplyStatus: storage.findReplyStatus
+      }
     })
     .then(
       () => ({ status: "resolved" as const }),
@@ -875,6 +1151,24 @@ function buildStoredFragmentPartMatcher(
     updatedAt: NOW,
     content
   }
+}
+
+/**
+ * Lists the names of the tools one model request offered.
+ *
+ * @param openReplyStream - The model's stream opener.
+ * @param call - Zero-based request.
+ * @returns The offered function names, in offer order.
+ */
+function listOfferedToolNames(
+  openReplyStream: Mock<OpenReplyStream>,
+  call = 0
+): readonly string[] {
+  return (
+    openReplyStream.mock.calls[call]?.[0].tools.map(
+      (tool) => tool.function.name
+    ) ?? []
+  )
 }
 
 describe("Agent", () => {
@@ -1465,6 +1759,7 @@ describe("Agent", () => {
       builtInTools: [],
       mcpTools: [],
       unofferedTools: NO_UNOFFERED_TOOLS,
+      delegation: NO_TURN_DELEGATION,
       sendClientToolCall: handleUnexpectedToolCall,
       createToolCallGate: handleUnexpectedToolCall,
       userMessage: createUserMessage(101, userMessageContent),
@@ -1749,7 +2044,8 @@ describe("Agent", () => {
         canSeeImages: false,
         getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
         tools: [READ_TEXT_FILE_TOOL, LOOK_UP_WORD_TOOL],
-        unofferedTools: NO_UNOFFERED_TOOLS
+        unofferedTools: NO_UNOFFERED_TOOLS,
+        delegation: NO_TURN_DELEGATION.offer
       })
 
       expect(measurement).toEqual({
@@ -1797,7 +2093,8 @@ describe("Agent", () => {
           status: "tool-calls-on",
           switchedOffToolNames: ["web_search"],
           unavailableTools: []
-        }
+        },
+        delegation: NO_TURN_DELEGATION.offer
       })
 
       expect(measurement).toMatchObject({ systemPromptTokens: 2310 })
@@ -1807,11 +2104,15 @@ describe("Agent", () => {
         messages: [
           {
             role: "system",
-            content: formatSystemPrompt(AGENT_PROFILE.systemPrompt, {
-              status: "tool-calls-on",
-              switchedOffToolNames: ["web_search"],
-              unavailableTools: []
-            })
+            content: formatSystemPrompt(
+              AGENT_PROFILE.systemPrompt,
+              {
+                status: "tool-calls-on",
+                switchedOffToolNames: ["web_search"],
+                unavailableTools: []
+              },
+              undefined
+            )
           },
           { role: "user", content: "", images: [] }
         ],
@@ -1840,30 +2141,28 @@ describe("Agent", () => {
         },
         { status: "succeeded", result: "Buy milk", sourceNumbers: [] }
       )
+      const history = [
+        createUserMessage(1, "What does /a say?"),
+        createAssistantMessage(
+          2,
+          [
+            createTextPart({ sequence: 12, round: 0, content: "Let me look." }),
+            readCall,
+            createTextPart({ sequence: 14, round: 1, content: "Buy milk." })
+          ],
+          { status: "completed", finishReason: "stop" }
+        )
+      ]
 
       const measurement = await agent.findContextMeasurement({
         trainedForToolUse: false,
-        history: [
-          createUserMessage(1, "What does /a say?"),
-          createAssistantMessage(
-            2,
-            [
-              createTextPart({
-                sequence: 12,
-                round: 0,
-                content: "Let me look."
-              }),
-              readCall,
-              createTextPart({ sequence: 14, round: 1, content: "Buy milk." })
-            ],
-            { status: "completed", finishReason: "stop" }
-          )
-        ],
+        history,
         model: TURN_REQUEST.model,
         canSeeImages: false,
         getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
         tools: [],
-        unofferedTools: NO_UNOFFERED_TOOLS
+        unofferedTools: NO_UNOFFERED_TOOLS,
+        delegation: NO_TURN_DELEGATION.offer
       })
 
       expect(measurement).toMatchObject({
@@ -1891,7 +2190,8 @@ describe("Agent", () => {
           canSeeImages: false,
           getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
           tools: [],
-          unofferedTools: NO_UNOFFERED_TOOLS
+          unofferedTools: NO_UNOFFERED_TOOLS,
+          delegation: NO_TURN_DELEGATION.offer
         })
       ).resolves.toBeUndefined()
     })
@@ -1936,7 +2236,8 @@ describe("Agent", () => {
           canSeeImages: true,
           getAttachmentImageFileStatus,
           tools: [],
-          unofferedTools: NO_UNOFFERED_TOOLS
+          unofferedTools: NO_UNOFFERED_TOOLS,
+          delegation: NO_TURN_DELEGATION.offer
         })
 
         expect(getAttachmentImageFileStatus.mock.calls).toEqual([
@@ -1970,7 +2271,8 @@ describe("Agent", () => {
           canSeeImages: true,
           getAttachmentImageFileStatus: getPhotoFileStatus,
           tools: [],
-          unofferedTools: NO_UNOFFERED_TOOLS
+          unofferedTools: NO_UNOFFERED_TOOLS,
+          delegation: NO_TURN_DELEGATION.offer
         })
         await getAgentReplyOutcome({
           openReplyStream: createEventStream({
@@ -2254,7 +2556,8 @@ describe("Agent", () => {
           role: "system",
           content: formatSystemPrompt(
             AGENT_PROFILE.systemPrompt,
-            SWITCHED_OFF_SEARCH_TOOLS
+            SWITCHED_OFF_SEARCH_TOOLS,
+            undefined
           )
         })
       }
@@ -2305,7 +2608,8 @@ describe("Agent", () => {
           role: "system",
           content: formatSystemPrompt(
             AGENT_PROFILE.systemPrompt,
-            unofferedTools
+            unofferedTools,
+            undefined
           )
         })
       }
@@ -2343,7 +2647,8 @@ describe("Agent", () => {
           role: "system",
           content: formatSystemPrompt(
             AGENT_PROFILE.systemPrompt,
-            TOOL_CALLS_OFF
+            TOOL_CALLS_OFF,
+            undefined
           )
         })
       }
@@ -2978,6 +3283,29 @@ describe("Agent", () => {
       expect(run.parts).toEqual([
         expect.objectContaining({ status: "interrupted" })
       ])
+    })
+
+    it("gives each run of a backend tool the id of its own call", async () => {
+      const runCallIds: string[] = []
+      const { entry } = createLookUpWordTool((word, context) => {
+        runCallIds.push(context.toolCallId)
+        return answerWithWordDefinition(word)
+      })
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          LOOK_UP_TWO_WORDS_ROUND,
+          FINISH_ROUND
+        ),
+        builtInTools: [entry]
+      })
+
+      expect(runCallIds).toEqual([
+        expect.stringMatching(UUID_V7_PATTERN),
+        expect.stringMatching(UUID_V7_PATTERN)
+      ])
+      expect(runCallIds).toEqual(run.parts.map((part) => part.id))
+      expect(runCallIds[0]).not.toBe(runCallIds[1])
     })
   })
 
@@ -4083,7 +4411,8 @@ describe("Agent", () => {
         canSeeImages: false,
         getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
         tools: [],
-        unofferedTools: NO_UNOFFERED_TOOLS
+        unofferedTools: NO_UNOFFERED_TOOLS,
+        delegation: NO_TURN_DELEGATION.offer
       })
       const listedCount = agent.listRequests().length
       releaseRounds()
@@ -4098,24 +4427,6 @@ describe("Agent", () => {
   })
 
   describe("state tools", () => {
-    /**
-     * Lists the names of the tools one model request offered.
-     *
-     * @param openReplyStream - The model's stream opener.
-     * @param call - Zero-based request.
-     * @returns The offered function names, in offer order.
-     */
-    function listOfferedToolNames(
-      openReplyStream: Mock<OpenReplyStream>,
-      call = 0
-    ): readonly string[] {
-      return (
-        openReplyStream.mock.calls[call]?.[0].tools.map(
-          (tool) => tool.function.name
-        ) ?? []
-      )
-    }
-
     it("offers a leader's state tools after the turn's tools, MCP tools included, when the model is trained for tool use", async () => {
       const openReplyStream = createRoundStreams(FINISH_ROUND)
 
@@ -4262,7 +4573,8 @@ describe("Agent", () => {
         canSeeImages: false,
         getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
         tools: [LOOK_UP_WORD_TOOL],
-        unofferedTools: NO_UNOFFERED_TOOLS
+        unofferedTools: NO_UNOFFERED_TOOLS,
+        delegation: NO_TURN_DELEGATION.offer
       }
 
       await createTestAgent(
@@ -4302,7 +4614,8 @@ describe("Agent", () => {
         canSeeImages: false,
         getAttachmentImageFileStatus: handleUnexpectedImageFileLookup,
         tools: [LOOK_UP_WORD_TOOL],
-        unofferedTools: NO_UNOFFERED_TOOLS
+        unofferedTools: NO_UNOFFERED_TOOLS,
+        delegation: NO_TURN_DELEGATION.offer
       })
 
       expect(
@@ -4310,6 +4623,324 @@ describe("Agent", () => {
           (tool) => tool.function.name
         )
       ).toEqual(["look_up_word", "read_my_state"])
+    })
+  })
+
+  describe("delegation tools", () => {
+    it("offers delegate_work to a leader whose turn may delegate, after its state tools", async () => {
+      const openReplyStream = createRoundStreams(FINISH_ROUND)
+
+      await getAgentReplyOutcome({
+        openReplyStream,
+        trainedForToolUse: true,
+        delegation: buildTurnDelegation(DELEGATING_OFFER)
+      })
+
+      expect(listOfferedToolNames(openReplyStream)).toEqual([
+        ...LEADER_STATE_TOOL_NAMES,
+        "delegate_work"
+      ])
+    })
+
+    it("offers a member no delegate_work, although its turn may delegate", async () => {
+      const openReplyStream = createRoundStreams(FINISH_ROUND)
+      const agent = createAgentOfRole(
+        "member",
+        { openReplyStream },
+        createRoomyReplyContextMeter()
+      )
+
+      await getAgentReplyOutcome({
+        agent,
+        trainedForToolUse: true,
+        delegation: buildTurnDelegation(DELEGATING_OFFER)
+      })
+
+      expect(listOfferedToolNames(openReplyStream)).toEqual(["read_my_state"])
+    })
+
+    it("asks the person before a delegate_work call runs, then sends its job message with the id of the call", async () => {
+      const createJobMessage =
+        vi.fn<TurnDelegation["createJobMessage"]>(startResearcherJob)
+      const delegation = buildTurnDelegation(DELEGATING_OFFER, {
+        createJobMessage
+      })
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(DELEGATE_WORK_ROUND, FINISH_ROUND),
+        trainedForToolUse: true,
+        delegation,
+        justRunToolNames: [],
+        sendToolApprovalPrompt
+      })
+
+      const callId = run.parts[0]?.id
+      expect(sendToolApprovalPrompt.mock.calls).toEqual([
+        [
+          {
+            id: callId,
+            toolName: "delegate_work",
+            arguments: {
+              agent: "researcher",
+              title: "Hologram news",
+              instructions: "Collect this week's news about holograms."
+            }
+          }
+        ]
+      ])
+      expect(createJobMessage.mock.calls).toEqual([
+        [
+          {
+            agentCode: "researcher",
+            title: "Hologram news",
+            instructions: "Collect this week's news about holograms.",
+            jobNumber: undefined,
+            toolCallId: callId
+          }
+        ]
+      ])
+      expect(run.parts[0]).toMatchObject({
+        toolName: "delegate_work",
+        status: "succeeded",
+        result: STARTED_JOB_RESULT
+      })
+    })
+
+    it("sends no job message when the person rejects a delegate_work call", async () => {
+      const createJobMessage =
+        vi.fn<TurnDelegation["createJobMessage"]>(startResearcherJob)
+      const delegation = buildTurnDelegation(DELEGATING_OFFER, {
+        createJobMessage
+      })
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(DELEGATE_WORK_ROUND, FINISH_ROUND),
+        trainedForToolUse: true,
+        delegation,
+        justRunToolNames: [],
+        sendToolApprovalPrompt: async () => DECLINED_APPROVAL
+      })
+
+      expect(createJobMessage).not.toHaveBeenCalled()
+      expect(run.parts).toEqual([
+        expect.objectContaining({
+          toolName: "delegate_work",
+          status: "rejected",
+          result: DECLINED_APPROVAL.content
+        })
+      ])
+    })
+
+    it("offers no delegation tool to a model that is not trained for tool use", async () => {
+      const openReplyStream = createRoundStreams(FINISH_ROUND)
+
+      await getAgentReplyOutcome({
+        openReplyStream,
+        delegation: buildTurnDelegation(EVERY_TOOL_OFFER)
+      })
+
+      expect(listOfferedToolNames(openReplyStream)).toEqual([])
+    })
+
+    it("offers report_progress in a job's turn, runs a call at once, and ends every round's instructions with the note about the job", async () => {
+      const createProgressNote = vi.fn<TurnDelegation["createProgressNote"]>(
+        () => "stored"
+      )
+      const delegation = buildTurnDelegation(JOB_OFFER, { createProgressNote })
+      const openReplyStream = createRoundStreams(
+        REPORT_PROGRESS_ROUND,
+        FINISH_ROUND
+      )
+      const agent = createAgentOfRole(
+        "member",
+        { openReplyStream },
+        createRoomyReplyContextMeter()
+      )
+      const createToolCallGate = vi.fn(handleUnexpectedToolCall)
+
+      const run = await getAgentReplyOutcome({
+        agent,
+        trainedForToolUse: true,
+        delegation,
+        createToolCallGate
+      })
+
+      expect(listOfferedToolNames(openReplyStream)).toEqual([
+        "read_my_state",
+        "report_progress"
+      ])
+      expect(createToolCallGate).not.toHaveBeenCalled()
+      expect(createProgressNote.mock.calls).toEqual([
+        ["Two of five sources are read."]
+      ])
+      expect(run.parts[0]).toMatchObject({
+        toolName: "report_progress",
+        status: "succeeded",
+        result: "Noted."
+      })
+      expect(
+        openReplyStream.mock.calls.map(([request]) => request.messages[0])
+      ).toEqual([
+        { role: "system", content: JOB_SYSTEM_PROMPT },
+        { role: "system", content: JOB_SYSTEM_PROMPT }
+      ])
+    })
+
+    it("ends the instructions of a job's turn with the note that leaves report_progress out when the model is not trained for tool use", async () => {
+      const openReplyStream = createRoundStreams(FINISH_ROUND)
+
+      await getAgentReplyOutcome({
+        openReplyStream,
+        delegation: buildTurnDelegation(JOB_OFFER)
+      })
+
+      expect(listOfferedToolNames(openReplyStream)).toEqual([])
+      expect(openReplyStream.mock.calls[0]?.[0].messages[0]).toEqual({
+        role: "system",
+        content: JOB_SYSTEM_PROMPT_WITHOUT_PROGRESS_TOOL
+      })
+    })
+
+    it("offers stop_job when the conversation has jobs, also while tool calls are off, and runs a call at once under the turn's signal", async () => {
+      const cancellation = new AbortController()
+      const stopJob = vi.fn<TurnDelegation["stopJob"]>((jobNumber) =>
+        Promise.resolve({ status: "stopped", jobNumber })
+      )
+      const delegation = buildTurnDelegation(JOBS_ONLY_OFFER, { stopJob })
+      const openReplyStream = createRoundStreams(STOP_JOB_ROUND, FINISH_ROUND)
+      const createToolCallGate = vi.fn(handleUnexpectedToolCall)
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        abortSignal: cancellation.signal,
+        trainedForToolUse: true,
+        unofferedTools: TOOL_CALLS_OFF,
+        delegation,
+        createToolCallGate
+      })
+
+      expect(listOfferedToolNames(openReplyStream)).toEqual([
+        ...LEADER_STATE_TOOL_NAMES,
+        "stop_job"
+      ])
+      expect(createToolCallGate).not.toHaveBeenCalled()
+      expect(stopJob.mock.calls.map(([jobNumber]) => jobNumber)).toEqual([2])
+      expect(stopJob.mock.calls[0]?.[1]).toBe(cancellation.signal)
+      expect(run.parts[0]).toMatchObject({
+        toolName: "stop_job",
+        status: "succeeded",
+        result: "Job 2 was stopped. No result comes back for it."
+      })
+    })
+
+    it("removes invisible characters from a delegation tool's result and says how many", async () => {
+      const delegation = buildTurnDelegation(DELEGATING_OFFER, {
+        createJobMessage: startResearcherJob
+      })
+      const openReplyStream = createRoundStreams(
+        DELEGATE_ZERO_WIDTH_TITLE_ROUND,
+        FINISH_ROUND
+      )
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream,
+        trainedForToolUse: true,
+        delegation,
+        justRunToolNames: ["delegate_work"]
+      })
+
+      const cleaned = `${STARTED_JOB_RESULT}\n\nLys removed 1 invisible character from this result.`
+      expect(openReplyStream.mock.calls[1]?.[0].messages.at(-1)).toMatchObject({
+        role: "tool",
+        content: cleaned
+      })
+      expect(run.parts).toEqual([
+        expect.objectContaining({ status: "succeeded", result: cleaned })
+      ])
+    })
+
+    it.each<MeasuredDelegationCase>([
+      [
+        "a leader whose conversation may delegate and has jobs",
+        "leader",
+        DELEGATING_OFFER_WITH_JOBS,
+        [...LEADER_STATE_TOOL_NAMES, "delegate_work", "stop_job"]
+      ],
+      [
+        "a member whose conversation may delegate and has jobs",
+        "member",
+        DELEGATING_OFFER_WITH_JOBS,
+        ["read_my_state", "stop_job"]
+      ],
+      [
+        "a member in a job",
+        "member",
+        JOB_OFFER,
+        ["read_my_state", "report_progress"]
+      ]
+    ])(
+      "measures the delegation tool definitions of %s after its state tools",
+      async (_label, role, delegation, toolNames) => {
+        const replyContextMeter = createCharacterReplyContextMeter(8192)
+        const agent = createAgentOfRole(
+          role,
+          { openReplyStream: createEventStream() },
+          replyContextMeter
+        )
+
+        await agent.findContextMeasurement(
+          buildDelegationMeasurementInput(delegation, true)
+        )
+
+        expect(
+          replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0].tools.map(
+            (tool) => tool.function.name
+          )
+        ).toEqual(["look_up_word", ...toolNames])
+      }
+    )
+
+    it("measures the note about the job as part of the system prompt of a job's conversation", async () => {
+      const replyContextMeter = createCharacterReplyContextMeter(8192)
+      const agent = createAgentOfRole(
+        "member",
+        { openReplyStream: createEventStream() },
+        replyContextMeter
+      )
+
+      const measurement = await agent.findContextMeasurement(
+        buildDelegationMeasurementInput(JOB_OFFER, true)
+      )
+
+      expect(
+        replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
+          .messages[0]
+      ).toEqual({ role: "system", content: JOB_SYSTEM_PROMPT })
+      expect(measurement).toMatchObject({
+        systemPromptTokens: JOB_SYSTEM_PROMPT.length
+      })
+    })
+
+    it("measures no delegation tool definition, and the note that leaves report_progress out, when the model is not trained for tool use", async () => {
+      const replyContextMeter = createCharacterReplyContextMeter(8192)
+      const agent = createAgentOfRole(
+        "member",
+        { openReplyStream: createEventStream() },
+        replyContextMeter
+      )
+
+      await agent.findContextMeasurement(
+        buildDelegationMeasurementInput(JOB_OFFER, false)
+      )
+
+      const request =
+        replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
+      expect(request?.tools).toEqual([LOOK_UP_WORD_FORMAT])
+      expect(request?.messages[0]).toEqual({
+        role: "system",
+        content: JOB_SYSTEM_PROMPT_WITHOUT_PROGRESS_TOOL
+      })
     })
   })
 
@@ -4340,7 +4971,8 @@ describe("Agent", () => {
           return "stored"
         },
         tools: [],
-        unofferedTools: NO_UNOFFERED_TOOLS
+        unofferedTools: NO_UNOFFERED_TOOLS,
+        delegation: NO_TURN_DELEGATION.offer
       })
 
       expect(
@@ -4348,13 +4980,17 @@ describe("Agent", () => {
           ([request]) => request.messages[0]?.content
         )
       ).toEqual([
-        formatSystemPrompt(AGENT_PROFILE.systemPrompt, NO_UNOFFERED_TOOLS),
-        formatSystemPrompt(renamedPrompt, NO_UNOFFERED_TOOLS)
+        formatSystemPrompt(
+          AGENT_PROFILE.systemPrompt,
+          NO_UNOFFERED_TOOLS,
+          undefined
+        ),
+        formatSystemPrompt(renamedPrompt, NO_UNOFFERED_TOOLS, undefined)
       ])
       expect(
         replyContextMeter.findReplyContextMeasurement.mock.calls.at(-1)?.[0]
           .messages[0]?.content
-      ).toBe(formatSystemPrompt(renamedPrompt, NO_UNOFFERED_TOOLS))
+      ).toBe(formatSystemPrompt(renamedPrompt, NO_UNOFFERED_TOOLS, undefined))
     })
   })
 })

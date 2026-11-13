@@ -16,6 +16,7 @@ import type {
   ReplyModel,
   ReplyStreamEvent
 } from "../../../../src/modules/agent/replyModel"
+import { NO_TURN_DELEGATION } from "../../../../src/modules/agent/turnDelegation"
 import { NO_UNOFFERED_TOOLS } from "../../../../src/modules/agent/unofferedTools"
 import {
   registerAgentStateReaderContractSuite,
@@ -186,6 +187,7 @@ async function createHelloReply(
     builtInTools: [],
     mcpTools: [],
     unofferedTools: NO_UNOFFERED_TOOLS,
+    delegation: NO_TURN_DELEGATION,
     abortSignal: new AbortController().signal,
     updateAssistantMessageState: () => true,
     findReplyStatus: () => "streaming",

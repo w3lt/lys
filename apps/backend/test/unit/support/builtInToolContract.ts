@@ -6,6 +6,10 @@ import type {
   BuiltInToolCallArguments,
   BuiltInToolRunContext
 } from "../../../src/modules/tool/builtIn/builtInTool"
+import { createFixtureUuidV7 } from "./conversationFixtures"
+
+/** Call identity every recorded run context carries. */
+const RECORDED_TOOL_CALL_ID = createFixtureUuidV7(1)
 
 /** One ready built-in tool with arguments it can run. */
 export type RunnableBuiltInToolHarness = Readonly<{
@@ -53,23 +57,23 @@ type RecordedRunContext = Readonly<{
  * @returns The context and the live record of numbered sources.
  * @remarks Numbering starts at 1, gives each new URL the next number, and
  * keeps a known URL's number, through the production {@link SourceCatalog}.
+ * Every context carries the same fixed call identity.
  */
 export function createRecordedRunContext(
   abortSignal: AbortSignal
 ): RecordedRunContext {
   const numberedSources: ConversationSource[] = []
   const sourceCatalog = new SourceCatalog([])
-  return {
-    context: {
-      abortSignal,
-      addWebSources: (candidates) => {
-        const sources = sourceCatalog.addWebSources(candidates)
-        numberedSources.push(...sources)
-        return sources
-      }
-    },
-    numberedSources
+  const context: BuiltInToolRunContext = {
+    toolCallId: RECORDED_TOOL_CALL_ID,
+    abortSignal,
+    addWebSources: (candidates) => {
+      const sources = sourceCatalog.addWebSources(candidates)
+      numberedSources.push(...sources)
+      return sources
+    }
   }
+  return { context, numberedSources }
 }
 
 /**

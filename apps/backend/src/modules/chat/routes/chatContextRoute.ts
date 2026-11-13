@@ -11,6 +11,7 @@ import type {
 } from "@lys/share"
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import type { GetAttachmentImageFileStatus } from "../../agent/agentContext"
+import { NO_TURN_DELEGATION } from "../../agent/turnDelegation"
 import type AttachmentFileStore from "../../attachment/attachmentFileStore"
 import type { AttachmentFileStatus } from "../../attachment/attachmentFileStore"
 import { buildAttachmentImageFileStatusLookup } from "../../attachment/attachmentImageReader"
@@ -166,7 +167,9 @@ export default function registerChatContextRoute(
  * inventory does not list sees no image and is offered no reader. Image
  * files are looked up, never read: an image counts from its stored sides.
  * An offered MCP tool whose server is not connected is left out, because
- * its definition is known only while the server is connected.
+ * its definition is known only while the server is connected. The
+ * measurement takes no part in delegation: it counts no delegation tool and
+ * no note about a job.
  */
 async function handleChatContextRequest(
   request: FastifyRequest<ChatContextApiRoute>,
@@ -212,7 +215,8 @@ async function handleChatContextRequest(
       capabilities.trainedForToolUse &&
         hasReadableTextAttachment(measured.attachments)
     ),
-    unofferedTools
+    unofferedTools,
+    delegation: NO_TURN_DELEGATION.offer
   })
   if (measurement === undefined) {
     sendModelNotLoadedProblem(reply, request.url)

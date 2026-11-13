@@ -9,6 +9,7 @@ import ActivityHub from "../../../src/modules/activity/activityHub"
 import type { AgentTurn } from "../../../src/modules/agent/agent"
 import AgentRuntimeService from "../../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../../src/modules/agent/agentService"
+import { NO_TURN_DELEGATION } from "../../../src/modules/agent/turnDelegation"
 import { NO_UNOFFERED_TOOLS } from "../../../src/modules/agent/unofferedTools"
 import ChatService from "../../../src/modules/chat/chatService"
 import type { ConversationTurn } from "../../../src/modules/chat/persistence"
@@ -219,6 +220,7 @@ function buildHelloAgentTurn(
     builtInTools: [],
     mcpTools: [],
     unofferedTools: NO_UNOFFERED_TOOLS,
+    delegation: NO_TURN_DELEGATION,
     abortSignal: new AbortController().signal,
     updateAssistantMessageState: () => true,
     findReplyStatus: () => "streaming",

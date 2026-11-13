@@ -34,6 +34,9 @@ const NOW = "2026-10-24T10:05:30.000Z"
 /** Reply of the turn whose model calls the tools. */
 const OWN_REQUEST_ID = createFixtureUuidV7(101)
 
+/** Call every run of a state tool answers. */
+const TOOL_CALL_ID = createFixtureUuidV7(102)
+
 /** The leader that calls the tools in most cases. */
 const LEADER: AgentIdentity = Object.freeze({
   code: "caliginia",
@@ -166,6 +169,7 @@ async function runStateTool(
   const parsed = findStateTool(tools, name).parseToolCall(callArguments)
   if (parsed.status === "invalid") return parsed
   return await parsed.runToolCall({
+    toolCallId: TOOL_CALL_ID,
     abortSignal: new AbortController().signal,
     addWebSources: () => []
   })
@@ -422,6 +426,7 @@ describe("buildAgentStateTools", () => {
       if (parsed?.status !== "parsed") throw new Error("Not parsed")
       vi.setSystemTime(new Date("2026-10-24T10:07:00.000Z"))
       const result = await parsed.runToolCall({
+        toolCallId: TOOL_CALL_ID,
         abortSignal: new AbortController().signal,
         addWebSources: () => []
       })

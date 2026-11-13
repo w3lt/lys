@@ -25,6 +25,7 @@ import {
   type AgentRole
 } from "./agentRoles"
 import { MAXIMUM_AGENT_SEARCH_MATCHES } from "./capabilities"
+import { formatOneLine } from "./oneLineText"
 
 /** Inclusive maximum length of a trimmed agent query, in UTF-16 code units. */
 const MAXIMUM_AGENT_QUERY_LENGTH = 100
@@ -211,9 +212,6 @@ const TOOL_CALL_STATUS_TEXT: Readonly<Record<AgentToolCallStatus, string>> =
 /** Milliseconds in one minute. */
 const MILLISECONDS_PER_MINUTE = 60_000
 
-/** Matches one run of whitespace, line breaks included. */
-const WHITESPACE_RUN_PATTERN = /\s+/g
-
 /** Sources a state tool's result shows: none. */
 const NO_SOURCES = Object.freeze([])
 
@@ -269,17 +267,6 @@ const READ_AGENT_STATE_DEFINITION = toolDefinitionSchema.parse({
     }
   ]
 })
-
-/**
- * Formats text a person or a model wrote onto one line.
- *
- * @param text - Name, description, or title.
- * @returns The text with each whitespace run, line breaks included, as one
- * space.
- */
-function formatOneLine(text: string): string {
-  return text.replaceAll(WHITESPACE_RUN_PATTERN, " ")
-}
 
 /**
  * Builds a parsed call whose run reads the clock once.

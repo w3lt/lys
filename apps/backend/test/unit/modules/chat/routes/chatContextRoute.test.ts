@@ -445,11 +445,15 @@ describe("registerChatContextRoute", () => {
       messages: [
         {
           role: "system",
-          content: formatSystemPrompt(CALIGINIA.systemPrompt, {
-            status: "tool-calls-on",
-            switchedOffToolNames: ["web_search", "search_files"],
-            unavailableTools: []
-          })
+          content: formatSystemPrompt(
+            CALIGINIA.systemPrompt,
+            {
+              status: "tool-calls-on",
+              switchedOffToolNames: ["web_search", "search_files"],
+              unavailableTools: []
+            },
+            undefined
+          )
         },
         { role: "user", content: "", images: [] }
       ],
@@ -480,13 +484,17 @@ describe("registerChatContextRoute", () => {
       messages: [
         {
           role: "system",
-          content: formatSystemPrompt(CALIGINIA.systemPrompt, {
-            status: "tool-calls-on",
-            switchedOffToolNames: [],
-            unavailableTools: [
-              { name: "check_spelling", reason: "api-key-missing" }
-            ]
-          })
+          content: formatSystemPrompt(
+            CALIGINIA.systemPrompt,
+            {
+              status: "tool-calls-on",
+              switchedOffToolNames: [],
+              unavailableTools: [
+                { name: "check_spelling", reason: "api-key-missing" }
+              ]
+            },
+            undefined
+          )
         },
         { role: "user", content: "", images: [] }
       ],
@@ -516,7 +524,11 @@ describe("registerChatContextRoute", () => {
       messages: [
         {
           role: "system",
-          content: formatSystemPrompt(CALIGINIA.systemPrompt, TOOL_CALLS_OFF)
+          content: formatSystemPrompt(
+            CALIGINIA.systemPrompt,
+            TOOL_CALLS_OFF,
+            undefined
+          )
         },
         { role: "user", content: "", images: [] }
       ],

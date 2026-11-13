@@ -13,6 +13,7 @@ import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
 import type {
   BuiltInTool,
   BuiltInToolCallRun,
+  BuiltInToolRunContext,
   TurnBuiltInTool
 } from "../tool/builtIn/builtInTool"
 import { formatNetworkToolResult } from "../tool/networkToolResult"
@@ -80,6 +81,11 @@ export type AgentToolsetInput = Readonly<{
    * turn offers none.
    */
   agentStateTools: readonly TurnBuiltInTool[]
+  /**
+   * The delegation tools for the turn, in offer order; empty when the turn
+   * offers none.
+   */
+  delegationTools: readonly TurnBuiltInTool[]
 }>
 
 /** A round that ended with tool calls: the text it wrote and the calls it made. */
@@ -270,9 +276,11 @@ const ALLOWED_TOOL_CALL_APPROVAL: ToolCallApproval = Object.freeze({
 /**
  * Builds the tools of one turn from the offered tools.
  *
- * @param input - The turn's client, built-in, MCP, and agent state tools.
+ * @param input - The turn's client, built-in, MCP, agent state, and
+ * delegation tools.
  * @returns The tools by name: client tools, then built-in tools, then MCP
- * tools, then the agent's state tools, each in offer order.
+ * tools, then the agent's state tools, then the delegation tools, each in
+ * offer order.
  * @throws If two tools share a name; the chat request contract and the
  * `mcp__` names of MCP tools prevent that.
  */
@@ -288,6 +296,7 @@ export function buildAgentToolset(input: AgentToolsetInput): AgentToolset {
       mcpTool
     }))
   addBuiltInTools(tools, input.agentStateTools)
+  addBuiltInTools(tools, input.delegationTools)
   return tools
 }
 
@@ -391,10 +400,11 @@ export function buildDefinedToolOffer(
  * part of the call it asks about, and the run requests of calls allowed at
  * once are sent before the first wait, in the model's order, because each
  * call's handling runs synchronously up to its first send. Nothing runs
- * before its call is allowed. Every result the model reads is stored with
- * its call first; the result of a tool that does more than read this
- * machine, a network or MCP tool, is cleaned of invisible characters before
- * that, whichever side answered and however the call ended.
+ * before its call is allowed. A backend tool's run is given the identity of
+ * its call. Every result the model reads is stored with its call first; the
+ * result of a tool that does more than read this machine, a network,
+ * delegation, or MCP tool, is cleaned of invisible characters before that,
+ * whichever side answered and however the call ended.
  */
 export async function handleToolCallRound(
   round: ToolCallRound,
@@ -592,7 +602,11 @@ async function handleBuiltInToolCall(
     startedCall.status === "waiting" ? await startedCall.approval : startedCall
   if (approval.status === "ended") return undefined
   if (approval.status === "rejected") return approval.message
-  const outcome = await runBuiltInToolCall(parsedCall.runToolCall, handling)
+  const outcome = await runBuiltInToolCall(
+    parsedCall.runToolCall,
+    toolCall.call.id,
+    handling
+  )
   if (outcome === undefined) return undefined
   return updateFinishedToolCall(toolCall, outcome, handling.replyParts)
 }
@@ -643,6 +657,7 @@ async function handleMcpToolCall(
  * Runs one allowed call of a backend tool under the reply's cancellation.
  *
  * @param runToolCall - The parsed call's run.
+ * @param toolCallId - UUIDv7 of the call, the identity of its stored part.
  * @param handling - The reply's cancellation and the source catalog.
  * @returns The run's outcome, or undefined when the reply was stopped while
  * it ran.
@@ -650,14 +665,17 @@ async function handleMcpToolCall(
  */
 async function runBuiltInToolCall(
   runToolCall: BuiltInToolCallRun,
+  toolCallId: string,
   handling: BuiltInToolRunHandling
 ): Promise<ToolCallRunOutcome | undefined> {
   const { sourceCatalog } = handling
+  const context: BuiltInToolRunContext = Object.freeze({
+    toolCallId,
+    abortSignal: handling.abortSignal,
+    addWebSources: (candidates) => sourceCatalog.addWebSources(candidates)
+  })
   try {
-    return await runToolCall({
-      abortSignal: handling.abortSignal,
-      addWebSources: (candidates) => sourceCatalog.addWebSources(candidates)
-    })
+    return await runToolCall(context)
   } catch (error) {
     if (handling.abortSignal.aborted) return undefined
     throw error
@@ -800,7 +818,8 @@ function updateAllowedToolCall(
  * @param content - Rejection the model reads, as the client sent it.
  * @param replyParts - The reply's part sequence.
  * @returns `rejected` with the message once stored; `ended` when the reply
- * refused it. A network or MCP tool's rejection is cleaned first.
+ * refused it. A network, delegation, or MCP tool's rejection is cleaned
+ * first.
  */
 function updateRejectedToolCall(
   toolCall: CheckedToolCall,
@@ -826,8 +845,8 @@ function updateRejectedToolCall(
  * @param outcome - How the run ended.
  * @param replyParts - The reply's part sequence.
  * @returns The message carrying the text the model reads, once stored; or
- * undefined when the reply refused it. A network or MCP tool's result is
- * cleaned first.
+ * undefined when the reply refused it. A network, delegation, or MCP tool's
+ * result is cleaned first.
  */
 function updateFinishedToolCall(
   toolCall: CheckedToolCall,
@@ -851,8 +870,8 @@ function updateFinishedToolCall(
  * @param message - Why the call cannot run.
  * @param handling - The round's index and the reply's part sequence.
  * @returns The message carrying the explanation, once stored; or undefined
- * when the reply refused it. A network or MCP tool's explanation is cleaned
- * first.
+ * when the reply refused it. A network, delegation, or MCP tool's
+ * explanation is cleaned first.
  */
 function createFailedToolCall(
   toolCall: HandledToolCall,
@@ -878,8 +897,10 @@ function createFailedToolCall(
  * @param tool - Offered tool the call names, or undefined.
  * @param content - Text the tool, the client, or Lys gave.
  * @returns The text cleaned of invisible characters when the tool does more
- * than read this machine: it reaches the network, or it is an MCP tool,
- * whose server decides what it reaches. Otherwise the text unchanged.
+ * than read this machine: it reaches the network; it is a delegation tool,
+ * whose `agents` access marks a result that repeats text the model wrote,
+ * such as a job's title; or it is an MCP tool, whose server decides what it
+ * reaches. Otherwise the text unchanged.
  */
 function formatToolCallResult(
   tool: OfferedTool | undefined,

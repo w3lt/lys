@@ -1,16 +1,22 @@
 /**
- * Role of an agent: `leader` for the built-in agents, which see every agent,
- * and `member` for the stored agents, which see only themselves.
+ * Role of an agent: `leader` for the built-in agents, which see every agent
+ * and give work to other agents, and `member` for the stored agents, which
+ * see only themselves and take that work.
  */
 export type AgentRole = "leader" | "member"
 
 /**
- * What an agent may learn about agents: `read-own-state` its own state,
- * `find-agents` which agents exist, and `read-any-state` another agent's
- * state.
+ * What an agent may learn about agents and do with them: `read-own-state`
+ * read its own state, `find-agents` learn which agents exist,
+ * `read-any-state` read another agent's state, `delegate-work` give work to
+ * another agent, and `take-work` be given work by one.
  */
 export type AgentPermission =
-  "read-own-state" | "find-agents" | "read-any-state"
+  | "read-own-state"
+  | "find-agents"
+  | "read-any-state"
+  | "delegate-work"
+  | "take-work"
 
 /** Who an agent is when it asks about agents: its code and its role. */
 export type AgentIdentity = Readonly<{
@@ -30,9 +36,10 @@ const AGENT_ROLE_PERMISSIONS: Readonly<
   leader: Object.freeze<AgentPermission[]>([
     "read-own-state",
     "find-agents",
-    "read-any-state"
+    "read-any-state",
+    "delegate-work"
   ]),
-  member: Object.freeze<AgentPermission[]>(["read-own-state"])
+  member: Object.freeze<AgentPermission[]>(["read-own-state", "take-work"])
 })
 
 /**

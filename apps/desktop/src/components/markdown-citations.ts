@@ -1,7 +1,6 @@
-import type { ConversationSource } from "@lys/share"
+import { CITATION_MARKER_PATTERN, type ConversationSource } from "@lys/share"
 
 import {
-  CITATION_MARKER_PATTERN,
   isCitableParentNode,
   isMarkdownParentNode,
   isMarkdownTextNode,

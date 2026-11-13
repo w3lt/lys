@@ -1,3 +1,4 @@
+import { CITATION_MARKER_PATTERN } from "@lys/share"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 import remarkParse from "remark-parse"
@@ -21,13 +22,6 @@ export type MarkdownParentNode = {
 
 /** Parent nodes whose text is already a link, so it cites nothing. */
 const LINK_NODE_TYPES: ReadonlySet<string> = new Set(["link", "linkReference"])
-
-/**
- * Finds each `[n]` citation marker in text; its group is the number, written
- * without leading zeros, since Lys numbers sources from 1. Use it with
- * `matchAll`, which copies it, so its `lastIndex` never changes.
- */
-export const CITATION_MARKER_PATTERN = /\[([1-9]\d*)\]/g
 
 /**
  * Parser of a reply's Markdown with the syntax extensions the reply renderer

@@ -1,11 +1,4 @@
-/**
- * Finds each `[n]` citation marker in text; its group is the number, written
- * without leading zeros, since Lys numbers sources from 1. The same pattern
- * as the desktop's `CITATION_MARKER_PATTERN`, which links the markers a
- * reply shows. Use it with `matchAll`, which copies it, so its `lastIndex`
- * never changes.
- */
-const CITATION_MARKER_PATTERN = /\[([1-9]\d*)\]/g
+import { CITATION_MARKER_PATTERN } from "@lys/share"
 
 /** A text whose citation markers carry new numbers, and the numbers it got. */
 export type RenumberedCitations = Readonly<{

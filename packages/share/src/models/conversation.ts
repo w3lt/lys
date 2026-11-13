@@ -163,6 +163,15 @@ export const conversationSourceSchema = z.strictObject({
   title: z.string().min(1)
 })
 
+/**
+ * Finds each `[n]` citation marker in a text; its group is the number of the
+ * cited source, written without leading zeros, since a conversation numbers
+ * its sources from 1. The backend renumbers the markers of a delivered
+ * report with it, and the desktop links the markers a reply shows. Use it
+ * with `matchAll`, which copies it, so its `lastIndex` never changes.
+ */
+export const CITATION_MARKER_PATTERN = /\[([1-9]\d*)\]/g
+
 /** Fields every part of a reply has. */
 const replyPartBase = {
   /** UUIDv7 identity of the part; a tool call's is the call's identifier. */

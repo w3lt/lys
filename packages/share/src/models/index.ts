@@ -49,6 +49,7 @@ export {
   type SupportedAttachmentContent
 } from "./attachment"
 export {
+  CITATION_MARKER_PATTERN,
   conversationAssistantMessageSchema,
   conversationMessageOriginSchema,
   conversationMessageSchema,

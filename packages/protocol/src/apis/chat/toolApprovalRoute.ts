@@ -89,14 +89,15 @@ const sendChatToolApprovalApiResponseSchemas = Object.freeze({
  *
  * @remarks Success is a bodyless 204 sent once the answer is accepted; the
  * reply's loop then continues with the call. A call that is unknown, already
- * answered, not waiting for approval, or whose reply ended, and an answer whose
- * token is not the prompt's, return the tool-call-not-pending problem with HTTP
- * 409 and change nothing, so a repeated request is harmless and a wrong token
- * tells the caller nothing about which calls wait. The backend sets no time
- * limit on a prompt: it waits until this request, Stop, or backend shutdown. A
- * newer turn in the conversation or deleting the conversation does not end the
- * wait yet. Changing the method, path, or schemas requires coordinated
- * consumers.
+ * answered, expired, not waiting for approval, or whose reply ended, and an
+ * answer whose token is not the prompt's, return the tool-call-not-pending
+ * problem with HTTP 409 and change nothing, so a repeated request is harmless
+ * and a wrong token tells the caller nothing about which calls wait. A prompt
+ * waits for this request until `TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES`
+ * minutes after it was sent, Stop, or backend shutdown; at the limit the
+ * backend stores the call as failed without running it. A newer turn in the
+ * conversation or deleting the conversation does not end the wait yet.
+ * Changing the method, path, or schemas requires coordinated consumers.
  */
 export const sendChatToolApprovalApi = Object.freeze({
   method: "POST",

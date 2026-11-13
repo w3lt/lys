@@ -552,7 +552,8 @@ The backend decides which tool calls need the person: every call the
 that is not saved as Just run, client, backend, and MCP tools alike, except
 `read_attachment`, the agent state tools, and `find_tools`, which run without
 approval, and every call the policy requires approval of, of an MCP tool its
-server marks as destructive, even on Just run. A tool `find_tools` found is
+server marks as destructive or as an open-world write, and of `web_search`
+from a reply's sixth call on, even on Just run. A tool `find_tools` found is
 asked about like any other. It shows such a call with a `tool-approval`
 event, and the client answers it with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`,
@@ -590,15 +591,20 @@ arguments it cannot describe.
 The route answers a bodyless `204` once the answer is accepted, and the
 reply's loop continues; the token then stops working. A body without
 `approvalToken`, or with one that is not 43 base64url characters, fails
-validation with `400`. A prompt that is unknown, already answered, or whose
-reply ended, an answer whose token is not the prompt's, and a call that waits
-for its result instead, return `409` with
+validation with `400`. A prompt that is unknown, already answered, expired,
+or whose reply ended, an answer whose token is not the prompt's, and a call
+that waits for its result instead, return `409` with
 `urn:lys:problem:chat:tool-call-not-pending` and change nothing, so repeating
 a request whose response was lost is harmless, a token sent again finds
 nothing, and a wrong token does not tell the caller whether a prompt waits.
 The prompt keeps waiting after a wrong token, and the backend logs the refusal
-at warn level without the token. The backend sets no time limit on a prompt;
-it waits as for a [tool result](#tool-results).
+at warn level without the token. A prompt waits at most five minutes
+(`TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES` in `@lys/protocol`); an answer
+must arrive before then. At the limit the backend ends the prompt, stores the
+call as `failed` with a sentence the model reads that names the limit, and
+continues the reply as after a rejection; the client sees the call's change in
+a `reply-part` event. Stop, the end of the reply, or shutdown ends a prompt
+earlier, as it ends the wait for a [tool result](#tool-results).
 
 ## Tool results
 
@@ -817,7 +823,8 @@ Before it asks the person, the backend checks the shape of a call's arguments,
 a JSON object of at most 256 KiB, nesting at most 32 levels, whose keys follow
 the argument name rule and include every name the schema requires, and the
 [tool call policy](/architecture/backend/#tool-call-policy) denies a call that
-names a credential file or a blocked address. The server checks the values.
+names a credential file, a path outside the approved folders, or a blocked
+address. The server checks the values.
 
 ### The email server's tools
 

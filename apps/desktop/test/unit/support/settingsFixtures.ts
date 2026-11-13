@@ -165,6 +165,7 @@ export const STORED_PROVIDERS_SETTINGS: ProvidersSettings =
  * switched off.
  */
 const STORED_TOOL_SETTINGS: ToolSettings = Object.freeze({
+  approvedFolderPaths: [],
   justRunToolNames: new Set(["read_page"]),
   switches: new Map([["search_files", false]])
 })

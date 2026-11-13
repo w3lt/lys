@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react"
+import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
@@ -108,6 +108,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        onDismissToolCall={vi.fn()}
         onRejectToolCall={vi.fn()}
       />
     )
@@ -124,7 +125,11 @@ describe("ComposerToolCallPrompt", () => {
     ])
 
     render(
-      <ComposerToolCallPrompt agentName="Poet" onRejectToolCall={vi.fn()} />
+      <ComposerToolCallPrompt
+        agentName="Poet"
+        onDismissToolCall={vi.fn()}
+        onRejectToolCall={vi.fn()}
+      />
     )
 
     expect(
@@ -143,6 +148,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        onDismissToolCall={vi.fn()}
         onRejectToolCall={vi.fn()}
       />
     )
@@ -164,6 +170,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        onDismissToolCall={vi.fn()}
         onRejectToolCall={vi.fn()}
       />
     )
@@ -192,6 +199,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        onDismissToolCall={vi.fn()}
         onRejectToolCall={onRejectToolCall}
       />
     )
@@ -211,6 +219,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        onDismissToolCall={vi.fn()}
         onRejectToolCall={vi.fn()}
       />
     )
@@ -248,6 +257,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        onDismissToolCall={vi.fn()}
         onRejectToolCall={vi.fn()}
       />
     )
@@ -263,6 +273,35 @@ describe("ComposerToolCallPrompt", () => {
     expect(screen.queryByRole("group")).not.toBeInTheDocument()
   })
 
+  it("shows and announces a prompt that expired once no call waits, and leaves Dismiss to the parent", async () => {
+    const user = userEvent.setup()
+    const expiredRead: HeldToolCall = {
+      ...buildWaitingRead(FIRST_CALL),
+      step: "approval",
+      approvalToken: createFixtureApprovalToken(1),
+      answer: { status: "expired" }
+    }
+    const { useToolCallStore, ComposerToolCallPrompt } =
+      await loadFreshToolCallPrompt([expiredRead])
+    const onDismissToolCall = vi.fn()
+
+    render(
+      <ComposerToolCallPrompt
+        agentName="Poet"
+        onDismissToolCall={onDismissToolCall}
+        onRejectToolCall={vi.fn()}
+      />
+    )
+    const card = screen.getByRole("group", { name: "Tool call prompt expired" })
+    await user.click(within(card).getByRole("button", { name: "Dismiss" }))
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Poet’s request to use read_text_file expired."
+    )
+    expect(onDismissToolCall.mock.calls).toEqual([[FIRST_CALL.id]])
+    expect(useToolCallStore.getState().heldCalls).toEqual([expiredRead])
+  })
+
   it("starts each call's card with its arguments hidden", async () => {
     const { useToolCallStore, ComposerToolCallPrompt } =
       await loadFreshToolCallPrompt([buildWaitingRead(FIRST_CALL)])
@@ -270,6 +309,7 @@ describe("ComposerToolCallPrompt", () => {
     render(
       <ComposerToolCallPrompt
         agentName="Caliginia"
+        onDismissToolCall={vi.fn()}
         onRejectToolCall={vi.fn()}
       />
     )

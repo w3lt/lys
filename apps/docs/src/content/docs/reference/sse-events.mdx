@@ -161,7 +161,8 @@ single-use token of 43 base64url characters that the answer must return. The
 backend's tool approval service sends it for every call the
 [tool call policy](/architecture/backend/#tool-call-policy) allows of a tool
 that is not saved as Just run, and for every call it requires approval of, of
-an MCP tool its server marks as destructive, even on Just run; client,
+an MCP tool its server marks as destructive or as an open-world write, and
+of `web_search` from a reply's sixth call on, even on Just run; client,
 backend, and MCP tools alike except `read_attachment`, the agent state tools
 (`read_my_state`, `find_agents`, `read_agent_state`), and `find_tools`, which
 run without approval, right after the call's `reply-part` stored it as
@@ -173,7 +174,10 @@ the backend accepts one answer with that token and refuses any other. After
 [MCP server](/reference/api/#mcp-servers), and a client tool's call comes back
 as a `tool-call` event under the same `id`. The event is live only: a client
 that was not following when it was sent finds the call in the next
-`reply-snapshot`'s `pendingToolApprovals`.
+`reply-snapshot`'s `pendingToolApprovals`. A prompt nobody answers within five
+minutes expires: it leaves `pendingToolApprovals`, its token is refused, and a
+`reply-part` event carries the call stored as `failed`, straight from
+`awaiting-approval`, with the sentence the model reads.
 
 ### `tool-call`
 

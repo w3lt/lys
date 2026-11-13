@@ -86,19 +86,47 @@ written in the same transaction as the call's row and holds no argument
 value; the call's row keeps the arguments. Nothing reads the table yet. The
 table is `STRICT`.
 
-| Column            | Type            | Notes                                                                                                                                                                                                      |
-| ----------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `call_id`         | `TEXT`          | Primary key; foreign key to the call's `conversation_messages(id)` with `ON DELETE CASCADE`                                                                                                                |
-| `conversation_id` | `TEXT NOT NULL` | Foreign key to `conversations(id)` with `ON DELETE CASCADE`                                                                                                                                                |
-| `agent_code`      | `TEXT NOT NULL` | Non-empty code of the conversation's agent when the call was stored                                                                                                                                        |
-| `tool_name`       | `TEXT NOT NULL` | The called tool, as the model named it                                                                                                                                                                     |
-| `policy_effect`   | `TEXT`          | The tool call policy's answer: `allow`, `require-approval`, or `deny`; null when Lys's own checks failed the call first, because it names a tool the round did not offer or arguments the tool cannot take |
-| `policy_reason`   | `TEXT`          | `credential-file` or `blocked-address` for `deny`, `destructive-tool` for `require-approval`; null otherwise                                                                                               |
-| `approval_mode`   | `TEXT`          | Mode the approval gate applied: `just-run` when the tool was saved as Just run, `ask-me` otherwise; null when the call never reached the gate                                                              |
-| `answer`          | `TEXT`          | Answer that moved a waiting call on: `allowed`, or the rejection's reason, `declined` or `showFailed`; null while none came or none was asked for                                                          |
-| `outcome`         | `TEXT NOT NULL` | The call's `status`, which a trigger copies on every change                                                                                                                                                |
-| `created_at`      | `TEXT NOT NULL` | The call's creation time                                                                                                                                                                                   |
-| `updated_at`      | `TEXT NOT NULL` | The call's latest update time, copied with its status                                                                                                                                                      |
+| Column            | Type            | Notes                                                                                                                                                                                                                                                                                                                                                                            |
+| ----------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `call_id`         | `TEXT`          | Primary key; foreign key to the call's `conversation_messages(id)` with `ON DELETE CASCADE`                                                                                                                                                                                                                                                                                      |
+| `conversation_id` | `TEXT NOT NULL` | Foreign key to `conversations(id)` with `ON DELETE CASCADE`                                                                                                                                                                                                                                                                                                                      |
+| `agent_code`      | `TEXT NOT NULL` | Non-empty code of the conversation's agent when the call was stored                                                                                                                                                                                                                                                                                                              |
+| `tool_name`       | `TEXT NOT NULL` | The called tool, as the model named it                                                                                                                                                                                                                                                                                                                                           |
+| `policy_effect`   | `TEXT`          | The tool call policy's answer when the call arrived: `allow`, `require-approval`, or `deny`; null when Lys's own checks failed the call first, because it names a tool the round did not offer or arguments the tool cannot take. A call the person allowed and the policy then denied, when it was decided again before running, keeps this answer; its result holds the denial |
+| `policy_reason`   | `TEXT`          | `credential-file`, `outside-approved-folders`, `settings-unreadable`, `blocked-address`, `usage-limit`, or `paid-tool-budget` for `deny`; `destructive-tool`, `open-world-write`, or `paid-tool` for `require-approval`; null otherwise                                                                                                                                          |
+| `policy_id`       | `TEXT`          | Identity of the rule set that decided the call, `lys-policy-v1` today; null when `policy_effect` is, and in every record stored before version 17                                                                                                                                                                                                                                |
+| `approval_mode`   | `TEXT`          | Mode the approval gate applied: `just-run` when the tool was saved as Just run, `ask-me` otherwise; null when the call never reached the gate                                                                                                                                                                                                                                    |
+| `answer`          | `TEXT`          | Answer that moved a waiting call on: `allowed`, the rejection's reason, `declined` or `showFailed`, or `expired` when nobody answered in time; null while none came or none was asked for                                                                                                                                                                                        |
+| `outcome`         | `TEXT NOT NULL` | The call's `status`, which a trigger copies on every change                                                                                                                                                                                                                                                                                                                      |
+| `created_at`      | `TEXT NOT NULL` | The call's creation time                                                                                                                                                                                                                                                                                                                                                         |
+| `updated_at`      | `TEXT NOT NULL` | The call's latest update time, copied with its status                                                                                                                                                                                                                                                                                                                            |
+
+### `tool_search_call_decisions`
+
+One row per tool call of a tool search's reply stored since version 16, such
+as Armitage's `search_tools` and `recommend_tool` calls for a `find_tools`
+call: how the backend decided the call and how it ended. That reply is never
+stored, so the row is the call's only trace and keeps its argument text. The
+row is written when the search's reply keeps the call, before it can run,
+and only while the `find_tools` call is stored as running; a call that
+cannot be recorded never runs. A search's call never reaches the approval
+gate, so no mode or answer is kept. Nothing reads the table yet. The table
+is `STRICT`.
+
+| Column            | Type            | Notes                                                                                                                                                                                                  |
+| ----------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `call_id`         | `TEXT`          | Primary key; the identity the search's reply gave the call                                                                                                                                             |
+| `search_call_id`  | `TEXT NOT NULL` | Foreign key to the `find_tools` call's `conversation_messages(id)` with `ON DELETE CASCADE`                                                                                                            |
+| `conversation_id` | `TEXT NOT NULL` | The `find_tools` call's conversation; foreign key to `conversations(id)` with `ON DELETE CASCADE`                                                                                                      |
+| `agent_code`      | `TEXT NOT NULL` | Non-empty code of the agent that answered the search                                                                                                                                                   |
+| `tool_name`       | `TEXT NOT NULL` | The called tool, as the model named it                                                                                                                                                                 |
+| `argument_text`   | `TEXT NOT NULL` | The call's arguments, as the model wrote them                                                                                                                                                          |
+| `policy_effect`   | `TEXT`          | The tool call policy's answer: `allow` or `deny`; null when Lys's own checks failed the call first. `require-approval` cannot be stored: a search asks nobody, so such a call fails the search instead |
+| `policy_reason`   | `TEXT`          | `credential-file`, `outside-approved-folders`, `settings-unreadable`, `blocked-address`, `usage-limit`, or `paid-tool-budget` for `deny`; null otherwise                                               |
+| `policy_id`       | `TEXT`          | Identity of the rule set that decided the call, `lys-policy-v1` today; null when `policy_effect` is, and in every record stored before version 17                                                      |
+| `outcome`         | `TEXT NOT NULL` | `running` or `failed` when kept, then `succeeded` or `failed` when the run ends, or `interrupted` when the `find_tools` call stops running first                                                       |
+| `created_at`      | `TEXT NOT NULL` | The call's creation time                                                                                                                                                                               |
+| `updated_at`      | `TEXT NOT NULL` | The call's latest update time; when interrupted, the later of it and the `find_tools` call's update time                                                                                               |
 
 ### `agents`
 
@@ -158,13 +186,18 @@ table is `STRICT`.
   UTF-16 surrogate; and millisecond ISO timestamps. A row that breaks them
   fails to read.
 - Decision records must have a non-empty `agent_code` and an `outcome` that
-  is a tool call status. A null `policy_effect` has no reason and no mode;
-  `deny` has the reason `credential-file` or `blocked-address` and no mode;
-  `require-approval` has the reason `destructive-tool` and a mode; `allow`
-  has no reason and may have a mode. A mode is `ask-me` or `just-run`, and an
-  answer, `allowed`, `declined`, or `showFailed`, needs a mode. A comparison
-  with `NULL` makes a check pass in SQLite, so every comparison on a nullable
-  column is guarded with `IS NOT NULL`. SQLite does not check that a record's
+  is a tool call status. A null `policy_effect` has no reason, no mode, and
+  no `policy_id`; `deny` has the reason `credential-file`,
+  `outside-approved-folders`, `settings-unreadable`, `blocked-address`,
+  `usage-limit`, or `paid-tool-budget` and no mode; `require-approval` has
+  the reason `destructive-tool`, `open-world-write`, or `paid-tool` and a
+  mode; `allow` has no reason and may have a mode. A `policy_id` is not
+  empty. A mode is `ask-me` or `just-run`, and an answer, `allowed`,
+  `declined`, `showFailed`, or `expired`, needs a mode. A search call's
+  record follows the same rules for its effect, reason, and `policy_id`,
+  but refuses `require-approval`. A
+  comparison with `NULL` makes a check pass in SQLite, so every comparison on
+  a nullable column is guarded with `IS NOT NULL`. SQLite does not check that a record's
   conversation, agent, and tool match its call's; the backend copies them
   from the call's row in the statement that stores the record.
 
@@ -193,20 +226,23 @@ its source rows in `number` order.
 
 ## Indexes and triggers
 
-| Name                                               | Kind    | Purpose                                                                                    |
-| -------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------ |
-| `conversation_messages_conversation_idx`           | index   | Orders messages by conversation, creation time, and id                                     |
-| `conversation_messages_reply_part_idx`             | index   | Unique: one part per position of a reply                                                   |
-| `update_conversation_after_message_insert`         | trigger | Updates `conversations.updated_at` after inserts, parts included                           |
-| `update_conversation_updated_at`                   | trigger | Keeps explicit activity updates monotonic; title-only updates do not fire it               |
-| `update_conversation_after_message_update`         | trigger | Updates `conversations.updated_at` after a row's `content` changes                         |
-| `tool_call_decisions_conversation_idx`             | index   | Finds a conversation's decision records                                                    |
-| `update_tool_call_decision_after_tool_call_update` | trigger | Copies a tool call's new `status` and `updated_at` into its decision record as its outcome |
+| Name                                                 | Kind    | Purpose                                                                                                              |
+| ---------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `conversation_messages_conversation_idx`             | index   | Orders messages by conversation, creation time, and id                                                               |
+| `conversation_messages_reply_part_idx`               | index   | Unique: one part per position of a reply                                                                             |
+| `update_conversation_after_message_insert`           | trigger | Updates `conversations.updated_at` after inserts, parts included                                                     |
+| `update_conversation_updated_at`                     | trigger | Keeps explicit activity updates monotonic; title-only updates do not fire it                                         |
+| `update_conversation_after_message_update`           | trigger | Updates `conversations.updated_at` after a row's `content` changes                                                   |
+| `tool_call_decisions_conversation_idx`               | index   | Finds a conversation's decision records                                                                              |
+| `update_tool_call_decision_after_tool_call_update`   | trigger | Copies a tool call's new `status` and `updated_at` into its decision record as its outcome                           |
+| `tool_search_call_decisions_search_call_idx`         | index   | Finds the records of a `find_tools` call's search                                                                    |
+| `tool_search_call_decisions_conversation_idx`        | index   | Finds a conversation's search call records                                                                           |
+| `interrupt_tool_search_calls_after_tool_call_update` | trigger | Marks a search's calls still `running` as `interrupted` when its `find_tools` call's `status` changes from `running` |
 
 `conversation_attachments` has no named index: SQLite builds the indexes of
 its primary key on `(message_id, name)` and of its unique
-`(conversation_id, number)` constraint. SQLite also builds the index of the
-`tool_call_decisions` primary key.
+`(conversation_id, number)` constraint. SQLite also builds the indexes of the
+`tool_call_decisions` and `tool_search_call_decisions` primary keys.
 
 ## Migration strategy
 
@@ -251,7 +287,24 @@ left as it was. Builds that support only version 11 refuse a version-12
 database. Version 13 adds `tool_call_decisions`, its index, and its trigger,
 and changes no existing row: a call stored before it has no decision record,
 because its decision was never stored. Builds that support only version 12
-refuse a version-13 database.
+refuse a version-13 database. Version 14 creates `tool_call_decisions` again
+so that `answer` may also be `expired`, copying every row unchanged, and
+creates its index and trigger again; every other rule stays. Builds that
+support only version 13 refuse a version-14 database. Version 15 does the
+same so that `policy_reason` may also be `outside-approved-folders`, for a
+call denied because it names a path outside the folders the person lets
+tools use, or `settings-unreadable`, for one denied because it names a path
+while those folders cannot be read from the settings file. Builds that
+support only version 14 refuse a version-15 database. Version 16 adds
+`tool_search_call_decisions`, its two indexes, and its trigger, and changes
+no existing row: a search that ran before it has no record of its calls.
+Builds that support only version 15 refuse a version-16 database. Version 17
+creates `tool_call_decisions` and `tool_search_call_decisions` again, each
+with a `policy_id` column, so that `policy_reason` may also be `usage-limit`
+or `paid-tool-budget` in both and, in `tool_call_decisions`,
+`open-world-write` or `paid-tool`, copying every row with a null
+`policy_id`, and creates their indexes and triggers again; every other rule
+stays. Builds that support only version 16 refuse a version-17 database.
 Versions 1–3 are unchanged. Missing migrations
 and the version marker commit together. At startup, streaming replies
 become interrupted with a refreshed `updated_at`; their waiting and running

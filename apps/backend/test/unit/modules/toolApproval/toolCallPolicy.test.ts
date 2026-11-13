@@ -499,7 +499,7 @@ describe("decideToolCall", () => {
         },
         "paid-tool"
       ],
-      "a paid tool's last call": [
+      "a paid tool's twentieth call": [
         { isPaid: true, usageInTask: MAXIMUM_PAID_TOOL_CALLS_PER_TASK - 1 },
         "paid-tool"
       ]
@@ -529,7 +529,7 @@ describe("decideToolCall", () => {
         isPaid: true,
         usageInTask: PAID_TOOL_CALLS_PER_TASK_WITHOUT_APPROVAL - 1
       },
-      "an unmarked tool's last call": {
+      "an unmarked tool's hundredth call": {
         usageInTask: MAXIMUM_TOOL_CALLS_PER_TASK - 1
       }
     })

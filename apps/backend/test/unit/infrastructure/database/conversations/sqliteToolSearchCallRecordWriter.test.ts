@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { ToolCallReplyPart } from "@lys/share"
 import SqliteToolSearchCallRecordWriter from "../../../../../src/infrastructure/database/conversations/sqliteToolSearchCallRecordWriter"
 import type { ToolCallDecisionRecord } from "../../../../../src/modules/toolApproval/toolCallDecisionRecord"
+import { TOOL_CALL_POLICY_ID } from "../../../../../src/modules/toolApproval/toolCallPolicy"
 import { openSqliteConversationRecords } from "../../../support/conversationDatabase"
 import {
   createFixtureUuidV7,
@@ -85,7 +86,7 @@ function openWriter(findToolsCall: ToolCallReplyPart = FIND_TOOLS_CALL) {
           conversation_id AS conversationId, agent_code AS agentCode,
           tool_name AS toolName, argument_text AS argumentText,
           policy_effect AS policyEffect, policy_reason AS policyReason,
-          outcome, created_at AS createdAt, updated_at AS updatedAt
+          policy_id AS policyId, outcome, created_at AS createdAt, updated_at AS updatedAt
           FROM tool_search_call_decisions ORDER BY call_id`
         )
         .all()
@@ -157,6 +158,7 @@ describe("SqliteToolSearchCallRecordWriter", () => {
         argumentText: '{"query":"web page"}',
         policyEffect: "allow",
         policyReason: null,
+        policyId: TOOL_CALL_POLICY_ID,
         outcome: "running",
         createdAt: SEARCH_CALL.createdAt,
         updatedAt: SEARCH_CALL.updatedAt
@@ -166,12 +168,14 @@ describe("SqliteToolSearchCallRecordWriter", () => {
         toolName: "recommend_tool",
         policyEffect: "deny",
         policyReason: "credential-file",
+        policyId: TOOL_CALL_POLICY_ID,
         outcome: "failed"
       }),
       expect.objectContaining({
         callId: unchecked.id,
         policyEffect: null,
         policyReason: null,
+        policyId: null,
         outcome: "failed"
       })
     ])

@@ -52,6 +52,11 @@ export type McpSessionToolLookup =
       definition: McpToolDefinition
       /** Whether the server marks the tool as destructive. */
       isDestructive: boolean
+      /**
+       * Whether the server marks the tool as reaching beyond Lys and this
+       * machine without marking it read-only.
+       */
+      isOpenWorldWrite: boolean
     }>
   | Readonly<{
       /** The server is connecting or failed. */
@@ -252,7 +257,9 @@ export default class McpServerSession {
       : Object.freeze({
           status: "found",
           definition,
-          isDestructive: this.#state.catalog.destructiveToolNames.has(toolName)
+          isDestructive: this.#state.catalog.destructiveToolNames.has(toolName),
+          isOpenWorldWrite:
+            this.#state.catalog.openWorldWriteToolNames.has(toolName)
         })
   }
 

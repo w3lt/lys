@@ -47,6 +47,7 @@ const ECHO_TOOL: TurnMcpTool = Object.freeze({
     inputSchema: { type: "object" }
   }),
   isDestructive: false,
+  isOpenWorldWrite: false,
   sendToolCall: () => Promise.reject(new Error("Unexpected MCP call"))
 })
 

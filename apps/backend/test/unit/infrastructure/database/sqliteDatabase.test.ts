@@ -16,7 +16,7 @@ import {
 } from "../../support/databaseTransactionsContract"
 
 /** Schema version produced by the current migration list. */
-const CURRENT_SCHEMA_VERSION = 16
+const CURRENT_SCHEMA_VERSION = 17
 
 /**
  * Creates a database file location in a directory owned by the current test.

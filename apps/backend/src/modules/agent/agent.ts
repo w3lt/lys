@@ -15,6 +15,7 @@ import type {
 import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
 import type { ToolCallPolicy } from "../toolApproval/toolCallPolicy"
+import ToolCallUsage from "../toolApproval/toolCallUsage"
 import { waitForSettlementOrAbort } from "../../utils/abort"
 import { ChatCompletionCancelledError } from "../../utils/errors"
 import AgentActivity, {
@@ -423,6 +424,11 @@ type ReplyRoundState = Readonly<{
   replyParts: ReplyPartSequence
   /** Numbers the web sources the reply's tool results show. */
   sourceCatalog: SourceCatalog
+  /**
+   * Calls of each tool the tool call policy did not deny in the reply, its
+   * task, across its rounds.
+   */
+  toolCallUsage: ToolCallUsage
 }>
 
 /**
@@ -728,7 +734,8 @@ export default class Agent {
       unofferedTools: turn.unofferedTools,
       replyTools,
       replyParts,
-      sourceCatalog
+      sourceCatalog,
+      toolCallUsage: new ToolCallUsage()
     })
     const images: AgentContextImages = turn.canSeeImages
       ? await readAgentContextImages(
@@ -777,6 +784,7 @@ export default class Agent {
       unofferedTools: state.unofferedTools,
       sendClientToolCall: turn.sendClientToolCall,
       toolCallPolicy: turn.toolCallPolicy,
+      toolCallUsage: state.toolCallUsage,
       createToolCallGate: turn.createToolCallGate,
       abortSignal: turn.abortSignal,
       replyParts: state.replyParts,

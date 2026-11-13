@@ -144,6 +144,33 @@ describe("readActivityEvents", () => {
     }
   )
 
+  it("cancels the body of an answer it cannot read as the stream", async () => {
+    let isBodyCancelled = false
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        isBodyCancelled = true
+      }
+    })
+    startBackendFake({
+      [ACTIVITY_ROUTE]: () =>
+        new Response(body, {
+          status: 503,
+          headers: { "Content-Type": "application/json" }
+        })
+    })
+
+    const events = readActivityEvents({
+      backendUrl: FIXTURE_BACKEND_URL,
+      signal: new AbortController().signal
+    })
+
+    await expect(events.next()).rejects.toThrow(
+      "The backend could not open the activity stream (HTTP 503)."
+    )
+    await waitForMicrotasks()
+    expect(isBodyCancelled).toBe(true)
+  })
+
   it("cancels the stream when the consumer stops reading early", async () => {
     const stream = startBackendEventStream()
     startBackendFake({ [ACTIVITY_ROUTE]: () => stream.response })

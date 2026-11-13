@@ -27,8 +27,8 @@ export type ActivityConnection = {
  * @throws If the request fails or the signal aborts; with
  * `The backend could not open the activity stream (HTTP <status>).` when the
  * backend answers with a failed status, without a body, or with a body that
- * is not an event stream; and if reading, JSON parsing, or event validation
- * fails.
+ * is not an event stream, after cancelling that body; and if reading, JSON
+ * parsing, or event validation fails.
  * @remarks Ending iteration or aborting the signal cancels the stream and
  * stops nothing on the backend. Nothing is replayed: a new read starts with a
  * new snapshot.
@@ -53,6 +53,7 @@ export async function* readActivityEvents(
     !response.body ||
     mediaType !== activityEventsApi.response.contentType
   ) {
+    await response.body?.cancel()
     throw new Error(
       `The backend could not open the activity stream (HTTP ${response.status}).`
     )

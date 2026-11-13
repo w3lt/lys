@@ -1,16 +1,28 @@
-//! The MCP server: the tools, their descriptions, and the limits every
-//! call runs under.
+//! The MCP server: each served mailbox's copy of the tools, their
+//! descriptions, and the limits every call runs under.
+//!
+//! [`MailboxServer`] defines the ten tools once, over one mailbox's
+//! context. [`EmailServer`] serves one copy of them per mailbox, named and
+//! described for that mailbox, and sends each call to the copy its name
+//! belongs to.
 
 use std::future::Future;
 use std::time::Duration;
 
 use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig};
-use rmcp::{ServerHandler, tool, tool_handler, tool_router};
+use rmcp::model::{
+    CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
+    Implementation, ListToolsResult, PaginatedRequestParams, ProtocolVersion, ResultType,
+    ServerCapabilities, ServerConfig, Tool,
+};
+use rmcp::service::RequestContext;
+use rmcp::{ErrorData, RoleServer, ServerHandler, tool, tool_router};
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
+use crate::descriptions::{build_instructions, build_mailbox_tool};
 use crate::failure::{SentKind, Stop, ToolFailure};
 use crate::log::send_log_line;
 use crate::smtp::{SendProgress, SendStage};
@@ -28,33 +40,28 @@ use crate::tools::{
 /// Longest one tool call may take as a whole.
 const CALL_LIMIT: Duration = Duration::from_secs(240);
 
-/// The MCP server over the account's mail servers.
+/// The tools of one mailbox, over its account's mail servers.
 ///
 /// Concurrency model: concurrent; the MCP service may run several calls at
 /// once, each through a shared reference, and the only state they change
-/// is the context's atomic sequence counter. Resource ownership: owns the
-/// context and the tool list; it keeps no connection, as each call opens
-/// and closes its own.
+/// is the shared atomic sequence of message identifiers. Resource
+/// ownership: owns the mailbox's context; it keeps no connection, as each
+/// call opens and closes its own.
 #[derive(Debug)]
-pub struct EmailServer {
-    /// The account and trust every call works with.
+pub struct MailboxServer {
+    /// The mailbox, its account, and what the calls of the process share.
     context: ToolContext,
-    /// The tools, found by name.
-    tool_router: ToolRouter<Self>,
 }
 
 #[tool_router]
-impl EmailServer {
-    /// Creates the server.
+impl MailboxServer {
+    /// Creates the tools of a mailbox.
     ///
     /// # Arguments
     ///
-    /// * `context` - The account and trust.
+    /// * `context` - The mailbox, its account, and what the calls share.
     pub fn new(context: ToolContext) -> Self {
-        Self {
-            context,
-            tool_router: Self::tool_router(),
-        }
+        Self { context }
     }
 
     /// Runs a `search_emails` call under the client's cancellation and
@@ -80,7 +87,7 @@ impl EmailServer {
         token: CancellationToken,
     ) -> CallToolResult {
         run_tool_call(
-            "search_emails",
+            &self.name_tool("search_emails"),
             token,
             search::run_search_emails(&self.context, arguments),
         )
@@ -110,7 +117,7 @@ impl EmailServer {
         token: CancellationToken,
     ) -> CallToolResult {
         run_tool_call(
-            "read_email",
+            &self.name_tool("read_email"),
             token,
             read::run_read_email(&self.context, arguments),
         )
@@ -142,7 +149,7 @@ impl EmailServer {
         token: CancellationToken,
     ) -> CallToolResult {
         run_tool_call(
-            "read_conversation",
+            &self.name_tool("read_conversation"),
             token,
             read::run_read_conversation(&self.context, arguments),
         )
@@ -171,7 +178,7 @@ impl EmailServer {
         token: CancellationToken,
     ) -> CallToolResult {
         run_tool_call(
-            "read_attachment",
+            &self.name_tool("read_attachment"),
             token,
             read::run_read_attachment(&self.context, arguments),
         )
@@ -196,7 +203,7 @@ impl EmailServer {
     )]
     async fn run_list_folders(&self, token: CancellationToken) -> CallToolResult {
         run_tool_call(
-            "list_folders",
+            &self.name_tool("list_folders"),
             token,
             folders::run_list_folders(&self.context),
         )
@@ -230,7 +237,7 @@ impl EmailServer {
         token: CancellationToken,
     ) -> CallToolResult {
         run_tool_call(
-            "manage_folder",
+            &self.name_tool("manage_folder"),
             token,
             folders::run_manage_folder(&self.context, arguments),
         )
@@ -252,7 +259,7 @@ impl EmailServer {
     /// * `token` - Cancelled when the client cancels the request.
     #[tool(
         name = "send_email",
-        description = "Sends a message from the person's account. With reply_to_id it is a reply in that conversation; with forward_id it forwards that message, quoting its text and attaching its attachments. The recipients and the subject are always this call's own, a reply's and a forward's too. A copy is kept in Sent. Sending is permanent.",
+        description = "Sends a message from this mailbox: from must be its own address. With reply_to_id it is a reply in that conversation; with forward_id it forwards that message, quoting its text and attaching its attachments. The recipients and the subject are always this call's own, a reply's and a forward's too. A copy is kept in Sent. Sending is permanent.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -269,7 +276,7 @@ impl EmailServer {
         let call = send::run_send_email(&self.context, arguments, &progress);
         let outcome = run_tool_call_within(token, CALL_LIMIT, call).await;
         let reported = calculate_send_outcome(outcome, progress.stage(), SentKind::Message);
-        handle_tool_call_outcome("send_email", reported)
+        handle_tool_call_outcome(&self.name_tool("send_email"), reported)
     }
 
     /// Runs a `save_draft` call under the client's cancellation and
@@ -291,7 +298,7 @@ impl EmailServer {
     /// * `token` - Cancelled when the client cancels the request.
     #[tool(
         name = "save_draft",
-        description = "Saves a message in the Drafts folder without sending it, with the same fields as send_email. With draft_id, replaces that draft. Answers the draft's id for send_draft, save_draft, and delete_draft.",
+        description = "Saves a message in the Drafts folder without sending it, with the fields of send_email but from. With draft_id, replaces that draft. Answers the draft's id for send_draft, save_draft, and delete_draft.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -308,7 +315,7 @@ impl EmailServer {
         let call = drafts::run_save_draft(&self.context, arguments, &progress);
         let outcome = run_tool_call_within(token, CALL_LIMIT, call).await;
         let reported = calculate_save_outcome(outcome, progress.stage());
-        handle_tool_call_outcome("save_draft", reported)
+        handle_tool_call_outcome(&self.name_tool("save_draft"), reported)
     }
 
     /// Runs a `send_draft` call under the client's cancellation and
@@ -327,7 +334,7 @@ impl EmailServer {
     /// * `token` - Cancelled when the client cancels the request.
     #[tool(
         name = "send_draft",
-        description = "Sends a message of the Drafts folder as it is stored, keeps a copy in Sent, and deletes the draft, or only marks it as deleted on a server that cannot remove one message on its own. Give the draft's to, cc, bcc, subject, and body: it is sent only when each recipient field names the same addresses as the draft's, in any order, and the subject and the text equal its own; otherwise the answer names the draft's fields and nothing is sent. Sending is permanent.",
+        description = "Sends a message of the Drafts folder as it is stored, from this mailbox: from must be its own address. It keeps a copy in Sent, and deletes the draft, or only marks it as deleted on a server that cannot remove one message on its own. Give the draft's to, cc, bcc, subject, and body: it is sent only when each recipient field names the same addresses as the draft's, in any order, and the subject and the text equal its own; otherwise the answer names the draft's fields and nothing is sent. Sending is permanent.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -344,7 +351,7 @@ impl EmailServer {
         let call = drafts::run_send_draft(&self.context, arguments, &progress);
         let outcome = run_tool_call_within(token, CALL_LIMIT, call).await;
         let reported = calculate_send_outcome(outcome, progress.stage(), SentKind::Draft);
-        handle_tool_call_outcome("send_draft", reported)
+        handle_tool_call_outcome(&self.name_tool("send_draft"), reported)
     }
 
     /// Runs a `delete_draft` call under the client's cancellation and
@@ -375,7 +382,7 @@ impl EmailServer {
         token: CancellationToken,
     ) -> CallToolResult {
         run_tool_call(
-            "delete_draft",
+            &self.name_tool("delete_draft"),
             token,
             drafts::run_delete_draft(&self.context, arguments),
         )
@@ -383,21 +390,154 @@ impl EmailServer {
     }
 }
 
-#[tool_handler(router = self.tool_router)]
+impl MailboxServer {
+    /// Names one of the mailbox's tools as the client calls it and the log
+    /// names it: with the mailbox's tool prefix, so that a log line tells
+    /// the mailbox without its address.
+    ///
+    /// # Arguments
+    ///
+    /// * `tool` - The tool's name in its definition.
+    fn name_tool(&self, tool: &str) -> String {
+        format!("{}{tool}", self.context.mailbox.tool_prefix())
+    }
+}
+
+/// The MCP server over the mailboxes the process serves: one copy of the
+/// tools per mailbox.
+///
+/// Concurrency model: concurrent; the MCP service may run several calls at
+/// once, of either mailbox, each through a shared reference. Resource
+/// ownership: owns each mailbox's tools and router; it keeps no
+/// connection, as each call opens and closes its own. Invariant: the
+/// mailboxes are distinct, so no two copies share a name.
+#[derive(Debug)]
+pub struct EmailServer {
+    /// The mailboxes served, in the order their tools are listed.
+    mailboxes: Vec<ServedMailbox>,
+}
+
+/// One mailbox the server serves: its tools, and its copy of them by the
+/// names the client calls.
+#[derive(Debug)]
+struct ServedMailbox {
+    /// The mailbox's tools.
+    server: MailboxServer,
+    /// Its copies of the tools, found by name.
+    router: ToolRouter<MailboxServer>,
+}
+
+impl ServedMailbox {
+    /// Creates a served mailbox: each tool named and described for it, as
+    /// [`build_mailbox_tool`] does.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - The mailbox, its account, and what the calls share.
+    fn new(context: ToolContext) -> Self {
+        let address = context.account.address.to_string();
+        let mut router = ToolRouter::new();
+        for mut route in MailboxServer::tool_router() {
+            route.attr = build_mailbox_tool(route.attr.clone(), context.mailbox, &address);
+            router.add_route(route);
+        }
+        Self {
+            server: MailboxServer::new(context),
+            router,
+        }
+    }
+}
+
+impl EmailServer {
+    /// Creates the server over the mailboxes.
+    ///
+    /// # Arguments
+    ///
+    /// * `contexts` - One context per mailbox served, each of another
+    ///   mailbox, in the order their tools are listed.
+    pub fn new(contexts: Vec<ToolContext>) -> Self {
+        Self {
+            mailboxes: contexts.into_iter().map(ServedMailbox::new).collect(),
+        }
+    }
+
+    /// Finds the mailbox whose copy of the tools has the name.
+    ///
+    /// # Arguments
+    ///
+    /// * `tool` - The name the client calls.
+    fn find_mailbox(&self, tool: &str) -> Option<&ServedMailbox> {
+        self.mailboxes
+            .iter()
+            .find(|served| served.router.has_route(tool))
+    }
+}
+
 impl ServerHandler for EmailServer {
     /// Describes the server to the client: its name, `lys-email`, and the
     /// crate's version; tools, its only capability; and the instructions
-    /// the model reads about the server.
+    /// the model reads about the mailboxes served.
     fn get_info(&self) -> ServerConfig {
         /// The name the server reports to the client.
         const SERVER_NAME: &str = "lys-email";
 
-        /// What the server tells the model about itself.
-        const INSTRUCTIONS: &str = "Reads, searches, sends, and files the person's email over their own account. Message ids come from search_emails and read_email and look like 12.345.INBOX; an id is valid until the folder changes, then search again. Reading never marks a message as read. Sending and deleting are permanent.";
-
+        let mailboxes: Vec<_> = self
+            .mailboxes
+            .iter()
+            .map(|served| served.server.context.mailbox)
+            .collect();
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new(SERVER_NAME, env!("CARGO_PKG_VERSION")))
-            .with_instructions(INSTRUCTIONS)
+            .with_instructions(build_instructions(&mailboxes))
+    }
+
+    /// Lists every served mailbox's copy of the tools, mailbox by mailbox,
+    /// each mailbox's by name; the list is complete, with no next page,
+    /// and fresh for no time where the protocol can say so.
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        let supports_cache_hints = context
+            .protocol_version()
+            .is_some_and(|version| version >= ProtocolVersion::V_2026_07_28);
+        Ok(ListToolsResult {
+            result_type: Some(ResultType::COMPLETE),
+            tools: self
+                .mailboxes
+                .iter()
+                .flat_map(|served| served.router.list_all())
+                .collect(),
+            meta: None,
+            next_cursor: None,
+            ttl_ms: supports_cache_hints.then_some(0),
+            cache_scope: supports_cache_hints.then_some(CacheScope::Public),
+        })
+    }
+
+    /// Runs a call on the mailbox whose copy of the tools has its name, or
+    /// refuses a name no copy has as an invalid parameter, as rmcp's own
+    /// router does.
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let Some(served) = self.find_mailbox(&request.name) else {
+            return Err(ErrorData::invalid_params("tool not found", None));
+        };
+        served
+            .router
+            .call(ToolCallContext::new(&served.server, request, context))
+            .await
+    }
+
+    /// Gets the copy of a tool with the name, from the mailbox it belongs
+    /// to.
+    fn get_tool(&self, name: &str) -> Option<Tool> {
+        self.find_mailbox(name)
+            .and_then(|served| served.router.get(name).cloned())
     }
 }
 
@@ -544,8 +684,11 @@ mod tests {
     use std::future::pending;
 
     use super::*;
+    use crate::account::parse_account_variable;
     use crate::email_id::EmailId;
-    use crate::tools::ToolReport;
+    use crate::mailbox::Mailbox;
+    use crate::tools::{SharedCalls, ToolReport};
+    use crate::trust::Trust;
 
     /// The text of a result's first content block.
     fn get_first_text(result: &CallToolResult) -> String {
@@ -663,6 +806,7 @@ mod tests {
     /// `1.1003.Drafts`.
     fn build_replaced_draft_id() -> EmailId {
         EmailId {
+            mailbox: Mailbox::Person,
             uid: 1,
             uid_validity: 1003,
             folder: "Drafts".to_owned(),
@@ -757,7 +901,46 @@ mod tests {
         );
     }
 
-    /// Checks that the server lists exactly its ten tools, each with a
+    /// Builds the context of a mailbox whose account has the address.
+    fn build_context(mailbox: Mailbox, address: &str, shared: &SharedCalls) -> ToolContext {
+        let variable = format!(
+            r#"{{"address":"{address}","displayName":"A Person","userName":"{address}","password":"correct horse","imap":{{"host":"imap.example.com","port":993,"security":"tls"}},"smtp":{{"host":"smtp.example.com","port":587,"security":"starttls"}},"serverKeepsSentCopy":false}}"#
+        );
+        let account = parse_account_variable(&variable).expect("account");
+        ToolContext::new(mailbox, account, shared.clone())
+    }
+
+    /// Checks that the server finds each mailbox's copy of a tool by the
+    /// name the client calls, the send tools described with their own
+    /// mailbox's address, and no tool by a name neither mailbox has.
+    #[test]
+    fn finds_each_mailbox_s_copy_of_a_tool_by_its_name() {
+        let shared = SharedCalls::new(Trust::create_with_extra_roots(Vec::new()));
+        let server = EmailServer::new(vec![
+            build_context(Mailbox::Person, "person@example.com", &shared),
+            build_context(Mailbox::Lys, "lys@example.net", &shared),
+        ]);
+        let found_in = |name: &str| {
+            server
+                .find_mailbox(name)
+                .map(|served| served.server.context.mailbox)
+        };
+        let sends_from = |name: &str, address: &str| {
+            let ending = format!("This mailbox's address is {address}.");
+            let described = server.get_tool(name).and_then(|tool| tool.description);
+            described.is_some_and(|text| text.ends_with(&ending))
+        };
+
+        assert_eq!(found_in("read_email"), Some(Mailbox::Person));
+        assert_eq!(found_in("lys_read_email"), Some(Mailbox::Lys));
+        assert_eq!(found_in("lys_nothing"), None);
+        assert!(sends_from("send_email", "person@example.com"));
+        assert!(sends_from("lys_send_email", "lys@example.net"));
+        assert!(sends_from("lys_send_draft", "lys@example.net"));
+        assert_eq!(server.get_tool("lys_nothing"), None);
+    }
+
+    /// Checks that one mailbox's tools are exactly ten, each with a
     /// description and an object input schema, and that `search_emails`
     /// takes a page and is marked read-only.
     #[test]
@@ -776,7 +959,7 @@ mod tests {
             "manage_folder",
         ];
 
-        let router = EmailServer::tool_router();
+        let router = MailboxServer::tool_router();
         let tools = router.list_all();
 
         let mut names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();

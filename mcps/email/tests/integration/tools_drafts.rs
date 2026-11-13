@@ -40,6 +40,7 @@ fn build_draft(subject: &str) -> SaveDraftArguments {
 fn build_send(draft_id: &str, draft: &SaveDraftArguments) -> SendDraftArguments {
     SendDraftArguments {
         draft_id: draft_id.to_owned(),
+        from: crate::support::ADDRESS.to_owned(),
         to: draft.to.clone(),
         cc: draft.cc.clone(),
         bcc: draft.bcc.clone(),
@@ -53,6 +54,7 @@ fn build_send(draft_id: &str, draft: &SaveDraftArguments) -> SendDraftArguments 
 fn build_unnamed_send(draft_id: &str) -> SendDraftArguments {
     SendDraftArguments {
         draft_id: draft_id.to_owned(),
+        from: crate::support::ADDRESS.to_owned(),
         to: Vec::new(),
         cc: Vec::new(),
         bcc: Vec::new(),
@@ -956,6 +958,7 @@ async fn answers_a_replacing_draft_whose_answer_was_lost_with_the_draft_it_repla
     assert_eq!(drafts.len(), 2);
     assert!(drafts.iter().all(|draft| !draft.has_flag("\\Deleted")));
     let replaced = EmailId {
+        mailbox: email::mailbox::Mailbox::Person,
         uid: 1,
         uid_validity: 1003,
         folder: "Drafts".to_owned(),

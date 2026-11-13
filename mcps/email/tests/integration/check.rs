@@ -10,12 +10,14 @@ use email::check::{CheckOutcome, offer_account_sign_ins};
 use email::failure::SignInFailure;
 use email::trust::Trust;
 
-use crate::support::binary::{BinaryProcess, read_to_end_in_thread, wait_for_stream_end};
+use crate::support::binary::{
+    AccountVariables, BinaryProcess, read_to_end_in_thread, wait_for_stream_end,
+};
 use crate::support::imap::{FakeImapServer, FakeMailbox, ImapFault, ImapMode};
 use crate::support::smtp::{FakeSmtpServer, SmtpFault, SmtpMode};
 use crate::support::tls::TestAuthority;
 use crate::support::{
-    SecurityName, TestServers, assert_about, build_account, build_account_json,
+    ADDRESS, SecurityName, TestServers, assert_about, build_account, build_account_json,
     build_account_json_for,
 };
 
@@ -29,7 +31,30 @@ use crate::support::{
 /// [`STEP_WAIT_LIMIT`](crate::support::binary::STEP_WAIT_LIMIT), or its output does not
 /// end in time once it exited.
 async fn read_binary_output(arguments: &[&str], variable: Option<&OsStr>) -> Output {
-    let (mut binary, streams) = BinaryProcess::start(arguments, variable);
+    read_binary_output_with_accounts(
+        arguments,
+        AccountVariables {
+            person: variable,
+            lys: None,
+        },
+    )
+    .await
+}
+
+/// Runs the binary with the arguments and the account variables of both
+/// mailboxes, its input ended at once, and gives its output once it exited,
+/// waiting off the runtime's threads.
+///
+/// # Panics
+///
+/// When the binary does not exit within
+/// [`STEP_WAIT_LIMIT`](crate::support::binary::STEP_WAIT_LIMIT), or its output does not
+/// end in time once it exited.
+async fn read_binary_output_with_accounts(
+    arguments: &[&str],
+    accounts: AccountVariables<'_>,
+) -> Output {
+    let (mut binary, streams) = BinaryProcess::start_with_accounts(arguments, accounts);
     drop(streams.input);
     let stdout = read_to_end_in_thread(streams.output);
     let stderr = read_to_end_in_thread(streams.log);
@@ -571,6 +596,71 @@ async fn refuses_to_start_without_a_usable_account_and_names_the_rule_only() {
         String::from_utf8_lossy(&bad_arguments.stderr),
         "usage: email [check]\n"
     );
+}
+
+/// Checks that the binary, started to serve, exits 2 when neither account
+/// variable is set, when Lys's gives no account, or when Lys's account is
+/// the person's mailbox in another letter case, naming the variables
+/// without any part of their values; and that `check` reads the account
+/// to check only from `LYS_EMAIL_ACCOUNT`.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_to_serve_without_a_mailbox_or_with_one_mailbox_twice() {
+    let person = build_account_json(
+        TestServers {
+            imap_port: 993,
+            imap_security: SecurityName::Tls,
+            smtp_port: 465,
+            smtp_security: SecurityName::Tls,
+        },
+        false,
+    );
+    let same_mailbox = person.replace(ADDRESS, &ADDRESS.to_ascii_uppercase());
+    let neither = read_binary_output(&[], None).await;
+    let lys_not_json = read_binary_output_with_accounts(
+        &[],
+        AccountVariables {
+            person: Some(person.as_ref()),
+            lys: Some("{not json".as_ref()),
+        },
+    )
+    .await;
+    let same = read_binary_output_with_accounts(
+        &[],
+        AccountVariables {
+            person: Some(person.as_ref()),
+            lys: Some(same_mailbox.as_ref()),
+        },
+    )
+    .await;
+    let check_lys_only = read_binary_output_with_accounts(
+        &["check"],
+        AccountVariables {
+            person: None,
+            lys: Some(person.as_ref()),
+        },
+    )
+    .await;
+
+    let refusals = [
+        (
+            &neither,
+            "LYS_EMAIL_ACCOUNT and LYS_EMAIL_LYS_ACCOUNT: neither is set\n",
+        ),
+        (
+            &lys_not_json,
+            "LYS_EMAIL_LYS_ACCOUNT: is not JSON the email server can read\n",
+        ),
+        (
+            &same,
+            "LYS_EMAIL_LYS_ACCOUNT: names the person's mailbox, while Lys's account must be a mailbox of its own: an address other than the person's, and not the person's user name on the same IMAP host and port\n",
+        ),
+        (&check_lys_only, "LYS_EMAIL_ACCOUNT: is not set\n"),
+    ];
+    for (output, log) in refusals {
+        assert_eq!(output.status.code(), Some(2), "{log}");
+        assert_eq!(String::from_utf8_lossy(&output.stderr), log);
+        assert!(output.stdout.is_empty(), "{log}");
+    }
 }
 
 /// Checks that the binary exits 2 and says that the variable is not Unicode

@@ -281,8 +281,11 @@ pub async fn start_stack(mailbox: FakeMailbox, server_keeps_sent_copy: bool) -> 
         server_keeps_sent_copy,
     );
     let context = ToolContext::new(
+        email::mailbox::Mailbox::Person,
         account,
-        Trust::create_with_extra_roots(vec![authority.root.clone()]),
+        email::tools::SharedCalls::new(Trust::create_with_extra_roots(vec![
+            authority.root.clone(),
+        ])),
     );
     Stack {
         authority,

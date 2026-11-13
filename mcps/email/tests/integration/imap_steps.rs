@@ -30,8 +30,11 @@ fn build_imap_context(
         smtp_security: SecurityName::Plain,
     };
     ToolContext::new(
+        email::mailbox::Mailbox::Person,
         build_account(servers, false),
-        Trust::create_with_extra_roots(vec![authority.root.clone()]),
+        email::tools::SharedCalls::new(Trust::create_with_extra_roots(vec![
+            authority.root.clone(),
+        ])),
     )
 }
 

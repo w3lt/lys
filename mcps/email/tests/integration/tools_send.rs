@@ -97,6 +97,7 @@ fn assert_one_read_copy_in_sent(imap: &FakeImapServer, mail: &SentMail) {
 /// the mailboxes its Reply-To names in Cc.
 fn build_reply_to_plans() -> MessageArguments {
     MessageArguments {
+        from: crate::support::ADDRESS.to_owned(),
         to: vec!["\"Doe, Jane\" <jane@example.com>".to_owned()],
         cc: vec![
             "a@example.com".to_owned(),
@@ -112,6 +113,7 @@ fn build_reply_to_plans() -> MessageArguments {
 /// A message to Jane with the subject and body.
 fn build_message_to_jane(subject: &str, body: &str) -> MessageArguments {
     MessageArguments {
+        from: crate::support::ADDRESS.to_owned(),
         to: vec!["Jane Doe <jane@example.com>".to_owned()],
         subject: subject.to_owned(),
         body: body.to_owned(),
@@ -129,6 +131,7 @@ async fn sends_a_message_and_keeps_one_read_copy_in_sent_without_the_bcc_field()
     let report = send_message(
         &stack.context,
         MessageArguments {
+            from: crate::support::ADDRESS.to_owned(),
             cc: vec!["cc@example.com".to_owned()],
             bcc: vec!["hidden@example.com".to_owned()],
             ..build_message_to_jane("Grüße", "Hello Jane,\n\nBye.")
@@ -215,6 +218,7 @@ async fn refuses_a_reply_that_leaves_out_its_recipients_or_subject() {
     let to_jane = run_send_email(
         &stack.context,
         MessageArguments {
+            from: crate::support::ADDRESS.to_owned(),
             body: "Thanks!".to_owned(),
             reply_to_id: Some("1.1001.INBOX".to_owned()),
             ..MessageArguments::default()
@@ -225,6 +229,7 @@ async fn refuses_a_reply_that_leaves_out_its_recipients_or_subject() {
     let redirected = run_send_email(
         &stack.context,
         MessageArguments {
+            from: crate::support::ADDRESS.to_owned(),
             subject: "Re: Plans".to_owned(),
             body: "Sounds good.".to_owned(),
             reply_to_id: Some("3.1001.INBOX".to_owned()),
@@ -236,6 +241,7 @@ async fn refuses_a_reply_that_leaves_out_its_recipients_or_subject() {
     let untitled = run_send_email(
         &stack.context,
         MessageArguments {
+            from: crate::support::ADDRESS.to_owned(),
             subject: " ".to_owned(),
             reply_to_id: Some("3.1001.INBOX".to_owned()),
             ..build_message_to_jane("", "Sounds good.")
@@ -288,6 +294,7 @@ async fn tells_a_reply_without_recipients_only_where_replies_go_when_no_sender_i
     let refused = send_message(
         &stack.context,
         MessageArguments {
+            from: crate::support::ADDRESS.to_owned(),
             subject: "Re: Notice".to_owned(),
             body: "Done.".to_owned(),
             reply_to_id: Some("1.1001.INBOX".to_owned()),
@@ -362,6 +369,7 @@ async fn refuses_a_forward_that_leaves_out_its_recipients_or_subject() {
     let forwarded = run_send_email(
         &stack.context,
         MessageArguments {
+            from: crate::support::ADDRESS.to_owned(),
             body: "FYI".to_owned(),
             forward_id: Some("2.1001.INBOX".to_owned()),
             ..MessageArguments::default()
@@ -389,6 +397,7 @@ async fn forwards_the_original_text_and_attachments() {
     let report = run_send_email(
         &stack.context,
         MessageArguments {
+            from: crate::support::ADDRESS.to_owned(),
             to: vec!["colleague@example.com".to_owned()],
             subject: "Fwd: Report".to_owned(),
             body: "FYI".to_owned(),
@@ -431,6 +440,7 @@ async fn reports_a_refused_recipient_and_a_refused_sign_in_without_a_sent_copy()
     let stack = start_with_originals(false).await;
     stack.smtp.add_refused_recipient("nobody@example.com");
     let wrong_password = ToolContext::new(
+        email::mailbox::Mailbox::Person,
         email::account::parse_account_variable(
             &crate::support::build_account_json(
                 crate::support::TestServers {
@@ -444,12 +454,15 @@ async fn reports_a_refused_recipient_and_a_refused_sign_in_without_a_sent_copy()
             .replace(crate::support::PASSWORD, "another-synthetic-value"),
         )
         .expect("account"),
-        Trust::create_with_extra_roots(vec![stack.authority.root.clone()]),
+        email::tools::SharedCalls::new(Trust::create_with_extra_roots(vec![
+            stack.authority.root.clone(),
+        ])),
     );
 
     let refused = run_send_email(
         &stack.context,
         MessageArguments {
+            from: crate::support::ADDRESS.to_owned(),
             to: vec!["nobody@example.com".to_owned()],
             ..build_message_to_jane("Hi", "Hello")
         },
@@ -491,6 +504,7 @@ async fn refuses_arguments_that_break_a_rule_before_connecting() {
     let both = run_send_email(
         &stack.context,
         MessageArguments {
+            from: crate::support::ADDRESS.to_owned(),
             reply_to_id: Some("1.1001.INBOX".to_owned()),
             forward_id: Some("1.1001.INBOX".to_owned()),
             ..build_message_to_jane("Hi", "Hello")
@@ -501,6 +515,7 @@ async fn refuses_arguments_that_break_a_rule_before_connecting() {
     let nobody = run_send_email(
         &stack.context,
         MessageArguments {
+            from: crate::support::ADDRESS.to_owned(),
             subject: "Hi".to_owned(),
             body: "Hello".to_owned(),
             ..MessageArguments::default()
@@ -511,6 +526,7 @@ async fn refuses_arguments_that_break_a_rule_before_connecting() {
     let not_an_address = run_send_email(
         &stack.context,
         MessageArguments {
+            from: crate::support::ADDRESS.to_owned(),
             to: vec!["not an address".to_owned()],
             ..build_message_to_jane("Hi", "Hello")
         },

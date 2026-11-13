@@ -11,13 +11,15 @@ pub mod read;
 pub mod search;
 pub mod send;
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use crate::account::Account;
+use crate::compose::MessageSequence;
 use crate::email_id::EmailId;
 use crate::failure::{Protocol, ToolFailure};
 use crate::folders::{Folder, FolderRole, build_folders, find_folder, find_role_folder};
 use crate::imap::{FolderAccess, ImapFailure, ImapSession, open_imap_session};
+use crate::mailbox::Mailbox;
 use crate::trust::Trust;
 
 /// Longest text a tool answers, in UTF-16 code units as the backend
@@ -35,40 +37,75 @@ pub const MAXIMUM_TEXT_ARGUMENT_LENGTH: usize = 998;
 /// Longest folder name argument, in characters.
 pub const MAXIMUM_FOLDER_NAME_LENGTH: usize = 255;
 
-/// What every tool call works with.
+/// What the calls of every mailbox one process serves share: which server
+/// certificates are accepted, and the sequence of message identifiers.
 ///
-/// Concurrency model: concurrent; calls share it and every operation may
-/// overlap, as the sequence counter is atomic and [`Self::open_imap`]
-/// opens a session of its own each time. Resource ownership: owns the
-/// account and the trust; the sessions it opens belong to their callers.
-#[derive(Debug)]
-pub struct ToolContext {
-    /// The account the tools act for.
-    pub account: Account,
+/// Concurrency model: concurrent; clones share one sequence, whose numbers
+/// are taken atomically. Resource ownership: shares the sequence with its
+/// clones and owns its copy of the trust.
+#[derive(Clone, Debug)]
+pub struct SharedCalls {
     /// Which server certificates are accepted.
-    pub trust: Trust,
-    /// The number of the next message composed, for its identifier.
-    sequence: AtomicU64,
+    trust: Trust,
+    /// The numbers of the messages composed, for their identifiers.
+    sequence: Arc<MessageSequence>,
 }
 
-impl ToolContext {
-    /// Creates the context of the server's tools.
+impl SharedCalls {
+    /// Creates what the calls of the process share, with a new sequence.
     ///
     /// # Arguments
     ///
-    /// * `account` - The account.
     /// * `trust` - Which server certificates are accepted.
-    pub fn new(account: Account, trust: Trust) -> Self {
+    pub fn new(trust: Trust) -> Self {
         Self {
-            account,
             trust,
-            sequence: AtomicU64::new(1),
+            sequence: Arc::new(MessageSequence::new()),
+        }
+    }
+}
+
+/// What every tool call of one mailbox works with.
+///
+/// Concurrency model: concurrent; calls share it and every operation may
+/// overlap, as the shared sequence is atomic and [`Self::open_imap`]
+/// opens a session of its own each time. Resource ownership: owns the
+/// account and its copy of the trust, and shares the sequence of message
+/// identifiers with the other mailbox's context; the sessions it opens
+/// belong to their callers.
+#[derive(Debug)]
+pub struct ToolContext {
+    /// The mailbox the tools act on, which their ids name.
+    pub mailbox: Mailbox,
+    /// The account of that mailbox.
+    pub account: Account,
+    /// Which server certificates are accepted.
+    pub trust: Trust,
+    /// The numbers of the messages composed in the process.
+    sequence: Arc<MessageSequence>,
+}
+
+impl ToolContext {
+    /// Creates the context of one mailbox's tools.
+    ///
+    /// # Arguments
+    ///
+    /// * `mailbox` - The mailbox.
+    /// * `account` - Its account.
+    /// * `shared` - What the calls of every mailbox of the process share.
+    pub fn new(mailbox: Mailbox, account: Account, shared: SharedCalls) -> Self {
+        Self {
+            mailbox,
+            account,
+            trust: shared.trust,
+            sequence: shared.sequence,
         }
     }
 
-    /// Takes the next sequence number for a message identifier.
+    /// Takes the next sequence number for a message identifier, from the
+    /// sequence every mailbox of the process shares.
     pub fn create_message_sequence(&self) -> u64 {
-        self.sequence.fetch_add(1, Ordering::Relaxed)
+        self.sequence.take_next()
     }
 
     /// Connects to the IMAP server and signs in.
@@ -83,6 +120,24 @@ impl ToolContext {
                 protocol: Protocol::Imap,
                 failure,
             })
+    }
+
+    /// Checks that a send goes out from the mailbox's own address, compared
+    /// without regard to ASCII case.
+    ///
+    /// # Arguments
+    ///
+    /// * `from` - The address the call asked to send from.
+    ///
+    /// # Returns
+    ///
+    /// Nothing for the mailbox's address, or `SenderNotMailbox` naming it.
+    pub fn check_sender(&self, from: &str) -> Result<(), ToolFailure> {
+        let address: &str = self.account.address.as_ref();
+        if from.eq_ignore_ascii_case(address) {
+            return Ok(());
+        }
+        Err(ToolFailure::SenderNotMailbox(address.to_owned()))
     }
 }
 
@@ -354,6 +409,48 @@ pub(crate) fn format_list_argument(texts: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::account::parse_account_variable;
+
+    /// Builds the context of a mailbox whose account has the address.
+    fn build_context(mailbox: Mailbox, address: &str, shared: &SharedCalls) -> ToolContext {
+        let variable = format!(
+            r#"{{"address":"{address}","displayName":"A Person","userName":"{address}","password":"correct horse","imap":{{"host":"imap.example.com","port":993,"security":"tls"}},"smtp":{{"host":"smtp.example.com","port":587,"security":"starttls"}},"serverKeepsSentCopy":false}}"#
+        );
+        let account = parse_account_variable(&variable).expect("account");
+        ToolContext::new(mailbox, account, shared.clone())
+    }
+
+    /// Checks that the contexts of two mailboxes made from one
+    /// `SharedCalls` take their message numbers from one sequence, so that
+    /// no two messages of the process share a number.
+    #[test]
+    fn numbers_the_messages_of_both_mailboxes_from_one_sequence() {
+        let shared = SharedCalls::new(Trust::create_with_extra_roots(Vec::new()));
+        let person = build_context(Mailbox::Person, "person@example.com", &shared);
+        let lys = build_context(Mailbox::Lys, "lys@example.net", &shared);
+
+        let numbers = [
+            person.create_message_sequence(),
+            lys.create_message_sequence(),
+            person.create_message_sequence(),
+        ];
+
+        assert_eq!(numbers, [1, 2, 3]);
+    }
+
+    /// Checks that a mailbox sends from its own address in any ASCII
+    /// letter case, and refuses any other address, naming its own.
+    #[test]
+    fn sends_only_from_the_mailbox_s_own_address() {
+        let shared = SharedCalls::new(Trust::create_with_extra_roots(Vec::new()));
+        let lys = build_context(Mailbox::Lys, "lys@example.net", &shared);
+        let refused = Err(ToolFailure::SenderNotMailbox("lys@example.net".to_owned()));
+
+        assert_eq!(lys.check_sender("lys@example.net"), Ok(()));
+        assert_eq!(lys.check_sender("LYS@Example.NET"), Ok(()));
+        assert_eq!(lys.check_sender("person@example.com"), refused);
+        assert_eq!(lys.check_sender("lys@example.net "), refused);
+    }
 
     /// Checks that a result of `RESULT_LIMIT` UTF-16 units stays whole and
     /// a longer one is cut to end with `CUT_NOTE` within the limit, never

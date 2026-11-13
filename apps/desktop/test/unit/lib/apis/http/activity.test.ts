@@ -118,7 +118,16 @@ describe("readActivityEvents", () => {
 
   it.each([
     ["a refusal", 503, () => buildJsonResponse(503, {})],
-    ["an answer without a body", 204, () => new Response(null, { status: 204 })]
+    [
+      "an answer without a body",
+      204,
+      () => new Response(null, { status: 204 })
+    ],
+    [
+      "an answer that is not an event stream",
+      200,
+      () => buildJsonResponse(200, { type: "activity-snapshot", replies: [] })
+    ]
   ])(
     "names the status of %s when the stream cannot be opened",
     async (_label, status, route) => {

@@ -138,6 +138,7 @@ function createRepository(context: TestContext, keptSource: string): string {
  *
  * @param context - Test that owns the repository.
  * @returns The repository directory.
+ * @throws If the merge did not stop with the conflict.
  */
 function createConflictedMerge(context: TestContext): string {
   const root = createRepository(context, compliantFunction)
@@ -153,6 +154,7 @@ function createConflictedMerge(context: TestContext): string {
     cwd: root,
     env: isolatedEnvironment
   })
+  git(root, "rev-parse", "--quiet", "--verify", "MERGE_HEAD")
   return root
 }
 

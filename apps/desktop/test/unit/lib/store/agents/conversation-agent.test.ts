@@ -1,8 +1,4 @@
-import {
-  ARMITAGE_AGENT_CODE,
-  CALIGINIA_AGENT_CODE,
-  LYSIPTERA_AGENT_CODE
-} from "@lys/share"
+import { CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import type { AgentListState } from "@/lib/store/agents"
 import {
@@ -27,10 +23,7 @@ const UNREAD_AGENT_LISTS: readonly AgentListState[] = Object.freeze([
   Object.freeze({ status: "failed", error: "Lys couldn't read its agents." })
 ])
 
-/**
- * Displayed list: the three built-in agents, Armitage, the tool keeper,
- * last, then two of the user's own.
- */
+/** Displayed list: both built-in agents, then two of the user's own. */
 const LOADED_AGENT_LIST: AgentListState = Object.freeze({
   status: "loaded",
   builtInAgents: [
@@ -44,12 +37,6 @@ const LOADED_AGENT_LIST: AgentListState = Object.freeze({
       buildBuiltInAgent(LYSIPTERA_AGENT_CODE, {
         name: "Lysiptera",
         bio: "Long-form writing."
-      })
-    ),
-    buildBuiltInAgentSummary(
-      buildBuiltInAgent(ARMITAGE_AGENT_CODE, {
-        name: "Armitage",
-        bio: "Finds tools for the other agents."
       })
     )
   ],
@@ -73,7 +60,7 @@ const POET_CHOICE = Object.freeze({
 })
 
 describe("buildAgentChoices", () => {
-  it("lists the built-in agents that answer chats, leaving out Armitage, then the user's own, in listed order", () => {
+  it("lists the built-in agents, then the user's own, in listed order", () => {
     expect(buildAgentChoices(LOADED_AGENT_LIST)).toEqual([
       {
         code: CALIGINIA_AGENT_CODE,
@@ -118,12 +105,6 @@ describe("calculateNewConversationAgentCode", () => {
   it("starts with Caliginia once the list no longer holds the selected agent", () => {
     expect(
       calculateNewConversationAgentCode("historian", LOADED_AGENT_LIST)
-    ).toBe(CALIGINIA_AGENT_CODE)
-  })
-
-  it("starts with Caliginia when Armitage, who answers no chat, is selected", () => {
-    expect(
-      calculateNewConversationAgentCode(ARMITAGE_AGENT_CODE, LOADED_AGENT_LIST)
     ).toBe(CALIGINIA_AGENT_CODE)
   })
 

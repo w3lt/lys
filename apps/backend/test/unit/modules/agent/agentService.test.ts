@@ -38,8 +38,7 @@ const LATER = "2026-05-07T00:00:00.000Z"
 /** Built-in agents of every service a case creates. */
 const BUILT_IN_AGENTS = buildBuiltInAgents({
   caliginia: "You are Caliginia.",
-  lysiptera: "You are Lysiptera.",
-  armitage: "You are Armitage."
+  lysiptera: "You are Lysiptera."
 })
 
 /** Definition of the agent most cases store. */

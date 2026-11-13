@@ -1,4 +1,4 @@
-import { ARMITAGE_AGENT_CODE, CALIGINIA_AGENT_CODE } from "@lys/share"
+import { CALIGINIA_AGENT_CODE } from "@lys/share"
 
 import type { AgentListState } from "./index"
 
@@ -39,9 +39,8 @@ export type ConversationAgent =
  * Builds the agents a conversation can be started with.
  *
  * @param list - Agent list as last read.
- * @returns The built-in agents that answer chats, which leaves out Armitage,
- * the tool keeper, who answers only other agents, then the user's own, in
- * listed order; nothing while no list is displayed.
+ * @returns The built-in agents, then the user's own, in listed order; nothing
+ * while no list is displayed.
  */
 export function buildAgentChoices(
   list: AgentListState
@@ -49,14 +48,12 @@ export function buildAgentChoices(
   if (list.status !== "loaded") return []
 
   return [
-    ...list.builtInAgents
-      .filter(({ code }) => code !== ARMITAGE_AGENT_CODE)
-      .map(({ code, name, bio }): AgentChoice => ({
-        code,
-        name,
-        bio,
-        kind: "built-in"
-      })),
+    ...list.builtInAgents.map(({ code, name, bio }): AgentChoice => ({
+      code,
+      name,
+      bio,
+      kind: "built-in"
+    })),
     ...list.agents.map(({ code, name, bio }): AgentChoice => ({
       code,
       name,

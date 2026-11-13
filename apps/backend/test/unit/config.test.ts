@@ -14,7 +14,6 @@ vi.mock("../../src/utils/prompts", () => ({ readPrompt: vi.fn() }))
 const FIXTURE_PROMPTS = Object.freeze({
   "caliginia-system": "Fixture Caliginia prompt",
   "lysiptera-system": "Fixture Lysiptera prompt",
-  "armitage-system": "Fixture Armitage prompt",
   "title-generation": "Fixture title prompt"
 } satisfies Record<PromptType, string>)
 
@@ -34,7 +33,6 @@ const VALID_RAW_CONFIG = Object.freeze({
   vmoPort: 8080,
   caliginiaSystemPrompt: "Fixture Caliginia prompt",
   lysipteraSystemPrompt: "Fixture Lysiptera prompt",
-  armitageSystemPrompt: "Fixture Armitage prompt",
   titleGenerationPrompt: "Fixture title prompt",
   titleGenerationMaxAttempts: 3,
   generatedTitleMaxLength: 100,
@@ -126,7 +124,6 @@ describe("loadBackendConfig", () => {
       vmoPort: 8080,
       caliginiaSystemPrompt: "Fixture Caliginia prompt",
       lysipteraSystemPrompt: "Fixture Lysiptera prompt",
-      armitageSystemPrompt: "Fixture Armitage prompt",
       titleGenerationPrompt: "Fixture title prompt",
       titleGenerationMaxAttempts: 3,
       generatedTitleMaxLength: 100,
@@ -187,7 +184,6 @@ describe("loadBackendConfig", () => {
       new Set([
         "caliginiaSystemPrompt",
         "lysipteraSystemPrompt",
-        "armitageSystemPrompt",
         "titleGenerationPrompt"
       ])
     )
@@ -399,11 +395,6 @@ describe("backendConfigSchema", () => {
       "an empty Lysiptera prompt",
       { ...VALID_RAW_CONFIG, lysipteraSystemPrompt: "" },
       "lysipteraSystemPrompt"
-    ],
-    [
-      "an empty Armitage prompt",
-      { ...VALID_RAW_CONFIG, armitageSystemPrompt: "" },
-      "armitageSystemPrompt"
     ],
     [
       "a title prompt with trailing whitespace",

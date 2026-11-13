@@ -1,8 +1,4 @@
-import {
-  ARMITAGE_AGENT_CODE,
-  CALIGINIA_AGENT_CODE,
-  type AgentDefinition
-} from "@lys/share"
+import { CALIGINIA_AGENT_CODE, type AgentDefinition } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import type { AgentIdentity } from "../../../src/modules/agent/agentRoles"
 import { MAXIMUM_AGENT_SEARCH_MATCHES } from "../../../src/modules/agent/capabilities"
@@ -71,7 +67,7 @@ export function registerAgentStateReaderContractSuite(
   createHarness: AgentStateReaderHarnessFactory
 ): void {
   describe("AgentStateReader contract", () => {
-    it("lets a leader find agents, deleted ones included, each with the role its code and kind give", () => {
+    it("lets a leader find agents, deleted ones included, each with the role its kind gives", () => {
       const harness = createHarness()
 
       const outcome = harness.reader.listAgentMatches(LEADER, "ar")
@@ -84,13 +80,6 @@ export function registerAgentStateReaderContractSuite(
             name: "Caliginia",
             bio: "Lys's dark side.",
             role: "leader",
-            deletedAt: null
-          },
-          {
-            code: ARMITAGE_AGENT_CODE,
-            name: "Armitage",
-            bio: "Lys's tool keeper. It finds the tools the other agents need and answers agents, not chats.",
-            role: "tool-keeper",
             deletedAt: null
           },
           {
@@ -108,9 +97,9 @@ export function registerAgentStateReaderContractSuite(
             deletedAt: STATE_READER_DELETED_AT
           }
         ]),
-        matchCount: 4
+        matchCount: 3
       })
-      expect(outcome.status === "found" && outcome.matches).toHaveLength(4)
+      expect(outcome.status === "found" && outcome.matches).toHaveLength(3)
       expect(Object.isFrozen(outcome)).toBe(true)
       expect(
         outcome.status === "found" && Object.isFrozen(outcome.matches)

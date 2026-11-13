@@ -12,9 +12,7 @@ import {
 /**
  * Creates the caller-safe missing-agent response.
  *
- * @param agentCode - Validated code that no agent available to the request
- * has: no built-in or stored agent has it, its agent is deleted, or, for a
- * chat, it is Armitage's, which answers no chat.
+ * @param agentCode - Validated code that no built-in or stored agent has.
  * @param instance - Request path identifying this occurrence.
  * @returns The strict problem accepted by agent and chat endpoint consumers.
  */

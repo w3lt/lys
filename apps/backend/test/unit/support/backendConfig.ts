@@ -29,7 +29,6 @@ export const TEST_BACKEND_CONFIG = backendConfigSchema.parse({
   vmoPort: 18_080,
   caliginiaSystemPrompt: "Configured Caliginia prompt",
   lysipteraSystemPrompt: "Configured Lysiptera prompt",
-  armitageSystemPrompt: "Configured Armitage prompt",
   titleGenerationPrompt: "Configured title prompt",
   titleGenerationMaxAttempts: 2,
   generatedTitleMaxLength: 40,

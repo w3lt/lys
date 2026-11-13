@@ -25,10 +25,6 @@ export function createFixtureUuidV7(sequence: number): string {
   return `01900000-0000-7000-8000-${sequence.toString(16).padStart(12, "0")}`
 }
 
-/** Matches a lowercase UUIDv7, as the backend gives a part or a call. */
-export const UUID_V7_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-
 /** Conversation identity used by turn fixtures. */
 export const FIXTURE_CONVERSATION_ID = createFixtureUuidV7(1)
 

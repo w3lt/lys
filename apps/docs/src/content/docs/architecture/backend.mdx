@@ -24,7 +24,7 @@ the services together.
 | Singleton services    | `src/di/singleton.ts`             | Opens the shared database and creates the chat service, conversation services, the agent service over SQLite records and the agent runtime service over it, LLM services without contacting the model provider, the built-in tools, the tool approval service, the MCP server registry, whose only built-in server is the email server Lys ships, and the email account checker, which runs the same email server, without reading the settings or starting anything. |
 | Conversation services | `src/modules/conversation`        | Keep the conversation decisions (identities, timestamps, validation, superseding, cursors) over records declared in `records.ts`; contain no SQL.                                                                                                                                                                                                                                                                                                                     |
 | Agent service         | `src/modules/agent`               | Owns the built-in agents, lists them with each page of stored agents, validates agent definitions and changes, derives a code from the name when none is given, stamps each change with the current time over records declared in `records.ts`, marks a deleted agent deleted, and searches every agent; contains no SQL.                                                                                                                                             |
-| Agent runtime service | `src/modules/agent`               | Keeps one live agent per agent a chat or a context measurement has loaded, each with its own request slots, finds the one that answers a chat, tells agents about themselves and each other as their roles allow, and has Armitage, the tool keeper, find the tools a routed turn needs; see [live agents](#live-agents) and [tool routing](#tool-routing).                                                                                                           |
+| Agent runtime service | `src/modules/agent`               | Keeps one live agent per agent a chat, a context measurement, or a tool search has loaded, each with its own request slots, finds the one that answers a chat, tells agents about themselves and each other as their roles allow, and has Armitage, the tool keeper, find the tools a routed turn needs; see [live agents](#live-agents) and [tool routing](#tool-routing).                                                                                           |
 | Database              | `src/infrastructure/database`     | Owns the shared SQLite connection and its migrations, holds the contracts through which stores borrow its transactions, and runs every conversation query in `conversations/` and every agent query in `agents/`.                                                                                                                                                                                                                                                     |
 | Chat routes           | `src/modules/chat/routes`         | Accepts chat requests, persists turn data, streams SSE responses, and updates conversation titles.                                                                                                                                                                                                                                                                                                                                                                    |
 | Conversation routes   | `src/modules/conversation/routes` | Lists, searches, retrieves, renames, and deletes stored conversations.                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -465,7 +465,8 @@ tools alike, except a call of a backend tool that runs without approval:
 the [agent state tools](#agent-state-tools) only read what agents are
 doing, and [`find_tools`](#tool-routing) and Armitage's search tools only
 read the turn's tool definitions and name tools, running none, so their
-calls are stored as `running` at once and never pass the gate. A call of a
+calls start as `running` at once and never pass the gate; Armitage's are
+kept only in its in-memory reply. A call of a
 tool its round did not offer, such as a routed turn's tool Armitage has not
 found, is stored as failed with a result the model reads and never reaches
 the gate. When a
@@ -772,11 +773,11 @@ other tool of the turn. Their definitions have group `agents`, access
 choice, and their calls run without approval. Which ones an agent gets
 follows its role (see [roles](#roles)):
 
-| Tool               | Offered to               | Arguments                    | Result                                                                                                                                                                    |
-| ------------------ | ------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `read_my_state`    | every agent but Armitage | none                         | Who the agent is, its role, how many of its request slots are in use, and each request it is working on or that waits for a slot, the reply that calls the tool included. |
-| `find_agents`      | the built-in agents      | `query`, 1 to 100 characters | Up to 20 agents whose code, name, or bio contains the query, deleted ones included, and how many match.                                                                   |
-| `read_agent_state` | the built-in agents      | `code`, an agent code        | Another agent's name, role, when it was deleted if it was, how many of its request slots are in use, and the requests it is working on or that wait for a slot.           |
+| Tool               | Offered to                       | Arguments                    | Result                                                                                                                                                                    |
+| ------------------ | -------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `read_my_state`    | every agent but Armitage         | none                         | Who the agent is, its role, how many of its request slots are in use, and each request it is working on or that waits for a slot, the reply that calls the tool included. |
+| `find_agents`      | the built-in agents but Armitage | `query`, 1 to 100 characters | Up to 20 agents whose code, name, or bio contains the query, deleted ones included, and how many match.                                                                   |
+| `read_agent_state` | the built-in agents but Armitage | `code`, an agent code        | Another agent's name, role, when it was deleted if it was, how many of its request slots are in use, and the requests it is working on or that wait for a slot.           |
 
 A state names each request's conversation by its title, read when the tool
 runs (`This reply, in this conversation` for the calling reply, otherwise
@@ -802,7 +803,8 @@ stored with the reply like every tool result.
 live `Agent` per agent that a turn or a context measurement has loaded
 (`loadChatAgent`), created on that first load and kept until the backend
 stops, so every turn of an agent, overlapping or not, runs on one instance
-that knows all of them. Each load gives the live agent the system prompt the
+that knows all of them. Armitage, which answers no chat, becomes live on the
+first tool search (`findTools`) instead; see [tool routing](#tool-routing). Each load gives the live agent the system prompt the
 built-in or
 stored agent has then; a reply already running keeps the prompt it started
 with. A deleted agent answers no new turn, but its live instance stays, so
@@ -894,10 +896,14 @@ asks the `ToolKeeper` for the turn's tools that fit the task and answers
 with their names, and each one is offered from the reply's next round to its
 end. Discovery is not authorization: each call of a found tool passes the
 argument check, the [tool call policy](#tool-call-policy), and the
-[approval gate](#tool-approval) as any other, and a
-call of a tool its round did not offer is stored as failed and never runs,
-with a result that lists the tools the model can call and points to
-`find_tools`, without saying whether the turn has that tool. When Armitage
+[approval gate](#tool-approval) as any other, and a call of a tool its round
+did not offer is stored as failed and never runs. A call of a tool the
+request names as switched off or unavailable, or any call while tool calls
+are off, gets the result that
+[tools the turn does not offer](/reference/api/#tools-the-turn-does-not-offer)
+gives for it; any other such call gets a result that lists the tools the
+model can call and points to `find_tools`, without saying whether the turn
+has that tool. When Armitage
 cannot search, the call fails with a result saying so, no tool is offered
 for it, the reply goes on, and the chat route logs a warning with the
 request's logger.
@@ -915,6 +921,15 @@ which run at once without approval:
 | ---------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `search_tools`   | `query`, 1 to 200 characters, with a word                                                                         | Up to 8 of the asking turn's tools whose name, group, and description best match the query, ranked with BM25 (`ToolCatalog`, `toolCatalog.ts`), each with its description on one line cut to 200 characters, and how many more match. |
 | `recommend_tool` | `name`, the exact name of one of the asking turn's tools, as `search_tools` lists them; any other name is refused | Records the tool as fitting the task, at most 5 per search.                                                                                                                                                                           |
+
+A search reads a tool's name whole and by its words. A name splits at each
+run of `_` or `-`, before each capital that follows a lowercase letter or a
+digit, and before the last capital of a run of capitals that a lowercase
+letter follows. So `email` and `send_email` both find `send_email`, `issue`
+and `createIssue` both find `createIssue`, and `pdf` finds
+`exportPDFAsImage`. A plural acronym splits the same way: `getURLs` splits
+into `get`, `UR`, and `Ls`. Each word of the query is searched as written,
+ignoring case.
 
 Armitage reads only the asking turn's definitions and runs none of its
 tools. `MemoryReply` (`memoryReply.ts`) keeps Armitage's reply in memory;
@@ -1404,7 +1419,8 @@ finish reasons other than `stop` and `length`. The chat route passes the agent
 the turn's history, its reply writes, its event sender, its Stop signal, and
 four reporters that log with the request's logger: a cancelled reply and a
 round that was not sent, because it did not fit or its model was not loaded,
-at debug level, a tool search Armitage could not finish at warning level,
+at debug level; a reply refused because its agent's request slots and line
+were full, and a tool search Armitage could not finish, at warning level;
 and any other failed reply at error level. A new
 conversation must name a built-in or stored agent other than Armitage, or
 the chat route answers `404` before storing anything. When a stored

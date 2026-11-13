@@ -24,20 +24,18 @@ function buildClientDefinition(name: string): ToolDefinition {
   })
 }
 
-/** Client tools of every case's turn, in offer order. */
-const CLIENT_DEFINITIONS = Object.freeze(
-  ["first_tool", "second_tool", "third_tool"].map(buildClientDefinition)
-)
-
 /**
  * Builds the toolset of every case's turn.
  *
- * @returns The three client tools, in offer order.
+ * @returns The client tools `first_tool`, `second_tool`, and `third_tool`,
+ * in offer order.
  */
 function buildTurnToolset(): AgentToolset {
   return buildAgentToolset({
     directTools: [],
-    clientTools: CLIENT_DEFINITIONS,
+    clientTools: ["first_tool", "second_tool", "third_tool"].map(
+      buildClientDefinition
+    ),
     builtInTools: [],
     mcpTools: [],
     agentStateTools: []

@@ -79,10 +79,14 @@ export const chatContextApiResponseSchema = z
     /**
      * Tokens of the answering agent's system prompt, with the note about the
      * tools the request does not offer when it names any or switches tool
-     * calls off.
+     * calls off, and the note that tells the model to call `find_tools` when
+     * the turn would route its tools.
      */
     systemPromptTokens: tokenCountSchema,
-    /** Tokens of the offered tool definitions; 0 when none are offered. */
+    /**
+     * Tokens of the tool definitions a turn's first round would offer; 0
+     * when none are offered.
+     */
     toolTokens: tokenCountSchema,
     /** Tokens of the stored messages the next turn would include. */
     historyTokens: tokenCountSchema,
@@ -100,7 +104,8 @@ export const chatContextApiResponseSchema = z
  * Selects the validator of a chat-context failure by HTTP status.
  *
  * @remarks A 404 is the agent-not-found problem when a new conversation names
- * a code no agent has, and the conversation-not-found problem when a
+ * a code no agent has, a deleted agent's, or Armitage's, which answers no
+ * chat, and the conversation-not-found problem when a
  * continued conversation is not stored. A 409 is the conversation agent
  * missing problem. A 503 is the LLM service busy problem, the LLM runtime
  * unavailable problem, or the model-not-loaded problem when no loaded
@@ -123,15 +128,19 @@ const chatContextApiResponseSchemas = Object.freeze({
  *
  * @remarks The backend builds the context as a turn's first round would, with
  * the agent's current system prompt, the stored messages a turn includes, an
- * empty new message, and the offered tools, then counts it with the loaded
- * model's tokenizer and reports the context length the model is loaded with.
- * Nothing is stored and the model is never loaded or asked to generate. The
- * measurement shares the model-operation queue, so it waits behind a load in
- * progress. An offered built-in backend tool is measured whether or not it
- * can run now; an offered MCP tool is measured only while its server is
- * connected, because its definition is known only then. The descriptor is
- * imported by backend and desktop transport code; changing its method, path,
- * or schemas is a compatibility change requiring coordinated consumers.
+ * empty new message, and the tools that round would offer, then counts it
+ * with the loaded model's tokenizer and reports the context length the model
+ * is loaded with. For a model trained for tool use, the offered client,
+ * built-in, and MCP tools are routed: `find_tools` is measured in their
+ * place, and the note that tells the model to call it ends the system
+ * prompt. Nothing is stored and the model is never loaded or asked to
+ * generate. The measurement shares the model-operation queue, so it waits
+ * behind a load in progress. An offered built-in backend tool is measured
+ * whether or not it can run now; an offered MCP tool is measured only while
+ * its server is connected, because its definition is known only then. The
+ * descriptor is imported by backend and desktop transport code; changing its
+ * method, path, or schemas is a compatibility change requiring coordinated
+ * consumers.
  */
 export const chatContextApi = Object.freeze({
   method: "POST",

@@ -41,22 +41,17 @@ describe("calculateRankingScores", () => {
     expect(scores[2]).toBe(0)
   })
 
-  it("ranks a text holding a rarer query word above one holding a common one", () => {
+  it("ranks a text holding a rarer query word above equally long ones holding a common one", () => {
     const scores = calculateRankingScores(
-      [
-        "read a file on this machine",
-        "read a web page",
-        "read the clock",
-        "read the calendar"
-      ],
-      ["read", "web"]
+      ["read the file", "read the clock", "read the calendar", "open the page"],
+      ["read", "page"]
     )
 
-    const [file = 0, web = 0, clock = 0, calendar = 0] = scores
-    expect(web).toBeGreaterThan(file)
+    const [file = 0, clock = 0, calendar = 0, page = 0] = scores
+    expect(page).toBeGreaterThan(file)
     expect(file).toBeGreaterThan(0)
-    expect(clock).toBeGreaterThan(0)
-    expect(calendar).toBeGreaterThan(0)
+    expect(clock).toBe(file)
+    expect(calendar).toBe(file)
   })
 
   it("ranks a short text above a long one with the same query word once", () => {

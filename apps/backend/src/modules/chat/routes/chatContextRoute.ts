@@ -36,17 +36,6 @@ import {
   type TurnAgentLookups
 } from "./turnRequest"
 
-/** Direct tools a measurement counts when the turn would offer none. */
-const NO_DIRECT_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([])
-
-/**
- * Direct tools a measurement counts when the turn would offer the
- * attachment reader: the reader alone.
- */
-const READER_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([
-  buildReadAttachmentDefinition()
-])
-
 /** Lookups the chat-context route borrows for its lifetime. */
 type ChatContextRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
   Readonly<{
@@ -211,11 +200,10 @@ async function handleChatContextRequest(
     body.model,
     dependencies.findModelCapabilities
   )
-  const directTools =
-    capabilities.trainedForToolUse &&
-    hasReadableTextAttachment(measured.attachments)
-      ? READER_DEFINITIONS
-      : NO_DIRECT_DEFINITIONS
+  const directTools = listDirectDefinitions(
+    capabilities.trainedForToolUse,
+    measured.attachments
+  )
   const tools = buildOfferedDefinitions(body, requestedTools)
   const measurement = await requestedAgent.agent.findContextMeasurement({
     history: measured.history,
@@ -250,6 +238,26 @@ function sendModelNotLoadedProblem(
     instance
   })
   reply.type("application/problem+json").code(problem.status).send(problem)
+}
+
+/**
+ * Lists the direct tools a measurement counts.
+ *
+ * @param trainedForToolUse - Whether the measured model is trained for tool
+ * use.
+ * @param attachments - Attachments of the stored messages a turn would
+ * include.
+ * @returns The attachment reader alone when the model is trained for tool
+ * use and a stored message holds a text file, as a turn would offer it;
+ * nothing otherwise. The list is frozen.
+ */
+function listDirectDefinitions(
+  trainedForToolUse: boolean,
+  attachments: readonly ReadableAttachment[]
+): readonly ToolDefinition[] {
+  if (!trainedForToolUse || !hasReadableTextAttachment(attachments))
+    return Object.freeze([])
+  return Object.freeze([buildReadAttachmentDefinition()])
 }
 
 /**

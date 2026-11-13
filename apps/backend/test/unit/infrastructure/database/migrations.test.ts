@@ -382,6 +382,8 @@ function listToolCallDecisionOutcomes(
  * @param database - Connection at `user_version` 11.
  * @param records - Codes of the stored agents, each deleted when its flag is
  * true, and agent codes of the stored conversations, one conversation each.
+ * @remarks Each agent's name, bio, and prompt hold its code, so a case can
+ * tell one agent's values from another's.
  */
 function saveVersion11Records(
   database: DatabaseSync,
@@ -392,7 +394,7 @@ function saveVersion11Records(
 ): void {
   const saveAgent = database.prepare(
     `INSERT INTO agents (code, name, bio, system_prompt, created_at, updated_at, deleted_at)
-    VALUES (?, 'Stored', 'Stored agent.', 'You are stored.', '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z', ?)`
+    VALUES (?1, 'Name of ' || ?1, 'Bio of ' || ?1 || '.', 'You are ' || ?1 || '.', '2026-01-01T00:00:00.000Z', '2026-01-02T00:00:00.000Z', ?2)`
   )
   for (const [code, isDeleted] of records.agents)
     saveAgent.run(code, isDeleted ? "2026-01-03T00:00:00.000Z" : null)
@@ -408,12 +410,13 @@ function saveVersion11Records(
  * Lists the stored agents.
  *
  * @param database - Open connection.
- * @returns Each agent's code, times, and deletion, by code.
+ * @returns Every column of each agent, by code.
  */
 function listStoredAgents(database: DatabaseSync): unknown[] {
   return database
     .prepare(
-      "SELECT code, created_at, updated_at, deleted_at FROM agents ORDER BY code"
+      `SELECT code, name, bio, system_prompt, created_at, updated_at, deleted_at
+      FROM agents ORDER BY code`
     )
     .all()
 }
@@ -1354,7 +1357,7 @@ describe("migrateDatabase", () => {
     ])
   })
 
-  it("upgrades a version-11 database by moving a stored agent coded armitage and its conversations to armitage-2, changing nothing else", () => {
+  it("upgrades a version-11 database by moving a stored agent coded armitage and its conversations to armitage-2, keeping its name, bio, and prompt, and changing nothing else", () => {
     const database = createVersion11Database()
     saveVersion11Records(database, {
       agents: [
@@ -1370,12 +1373,18 @@ describe("migrateDatabase", () => {
     expect(listStoredAgents(database)).toEqual([
       {
         code: "armitage-2",
+        name: "Name of armitage",
+        bio: "Bio of armitage.",
+        system_prompt: "You are armitage.",
         created_at: "2026-01-01T00:00:00.000Z",
         updated_at: "2026-01-02T00:00:00.000Z",
         deleted_at: null
       },
       {
         code: "researcher",
+        name: "Name of researcher",
+        bio: "Bio of researcher.",
+        system_prompt: "You are researcher.",
         created_at: "2026-01-01T00:00:00.000Z",
         updated_at: "2026-01-02T00:00:00.000Z",
         deleted_at: null
@@ -1408,10 +1417,38 @@ describe("migrateDatabase", () => {
     expect(listStoredAgents(database)).toEqual([
       {
         code: "armitage-2",
+        name: "Name of armitage",
+        bio: "Bio of armitage.",
+        system_prompt: "You are armitage.",
         created_at: "2026-01-01T00:00:00.000Z",
         updated_at: "2026-01-02T00:00:00.000Z",
         deleted_at: "2026-01-03T00:00:00.000Z"
       }
+    ])
+  })
+
+  it("upgrades a version-11 database by moving armitage's records to armitage-3 when another agent and its conversation hold armitage-2", () => {
+    const database = createVersion11Database()
+    saveVersion11Records(database, {
+      agents: [
+        ["armitage", false],
+        ["armitage-2", false]
+      ],
+      conversationAgentCodes: ["armitage", "armitage-2"]
+    })
+
+    migrateDatabase(database)
+
+    expect(listStoredAgents(database)).toEqual([
+      expect.objectContaining({
+        code: "armitage-2",
+        name: "Name of armitage-2"
+      }),
+      expect.objectContaining({ code: "armitage-3", name: "Name of armitage" })
+    ])
+    expect(listConversationAgentCodes(database)).toEqual([
+      "armitage-3",
+      "armitage-2"
     ])
   })
 

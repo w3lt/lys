@@ -1,5 +1,6 @@
 import {
   TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES,
+  WEB_SEARCH_TOOL_NAME,
   type ChatToolApprovalAnswer,
   type ChatToolCall,
   type ChatToolResult
@@ -31,6 +32,7 @@ import {
   type ToolCallRequest,
   type ToolCallRules
 } from "../toolApproval/toolCallPolicy"
+import type ToolCallUsage from "../toolApproval/toolCallUsage"
 import type ReplyPartSequence from "./replyPartSequence"
 import type {
   ContextToolCall,
@@ -152,6 +154,12 @@ export type ToolCallRoundContext = Readonly<{
    */
   toolCallPolicy: ToolCallPolicy
   /**
+   * Calls of each tool the policy did not deny in the reply so far, which
+   * the policy reads as each call's usage in its task; lent for the reply,
+   * and each call the policy does not deny is added in the model's order.
+   */
+  toolCallUsage: ToolCallUsage
+  /**
    * Creates the approval gate every checked call the policy does not deny
    * passes, except an allowed call of a backend tool that runs without
    * approval; called once for a round that has a call of a tool that may need
@@ -179,6 +187,8 @@ type ToolCallHandling = Readonly<{
   toolCallPolicy: ToolCallPolicy
   /** What the rules decide the round's calls by, read for the round. */
   toolCallRules: ToolCallRules
+  /** Calls of each tool the policy did not deny in the reply so far. */
+  toolCallUsage: ToolCallUsage
   /**
    * Approval gate of the round; undefined when no call of the round passes
    * one, because every call names a tool that runs without approval or no
@@ -208,6 +218,7 @@ type ToolCallStartHandling = Pick<
   ToolCallHandling,
   | "toolCallPolicy"
   | "toolCallRules"
+  | "toolCallUsage"
   | "abortSignal"
   | "gate"
   | "round"
@@ -260,6 +271,14 @@ type CheckedToolCall = Readonly<{
   tool: OfferedTool
   /** The call with its checked arguments. */
   checkedCall: ChatToolCall
+  /**
+   * Calls of the same tool the policy did not deny earlier in the reply,
+   * counted when the call was checked; its first decision and the re-check
+   * after the person allows it both read this number. The count is read,
+   * and raised by {@link startToolCall}, with no `await` between them, so
+   * the calls of a round count in the model's order.
+   */
+  usageInTask: number
 }>
 
 /** How a call that ran ended, before it is cleaned and stored. */
@@ -523,6 +542,7 @@ export async function handleToolCallRound(
     unofferedTools: context.unofferedTools,
     toolCallPolicy: context.toolCallPolicy,
     toolCallRules,
+    toolCallUsage: context.toolCallUsage,
     gate,
     round: round.round,
     sendClientToolCall: context.sendClientToolCall,
@@ -634,7 +654,8 @@ async function handleToolCall(
   const checkedToolCall: CheckedToolCall = Object.freeze({
     call: toolCall,
     tool,
-    checkedCall
+    checkedCall,
+    usageInTask: handling.toolCallUsage.countToolCalls(toolCall.toolName)
   })
   switch (tool.runner) {
     case "client":
@@ -860,8 +881,10 @@ function startUnpromptedToolCall(
  * @throws As {@link startGatedToolCall} throws.
  * @remarks A denied call never reaches the gate, so it never prompts the
  * person, even for a tool they saved as Just run. Only an MCP tool can be
- * marked destructive, so a call the policy requires approval of always names
- * a tool that passes the gate, and its round has one.
+ * marked destructive or an open-world write, and only `web_search` is paid;
+ * each passes the gate, so a call the policy requires approval of always
+ * names a tool that passes the gate, and its round has one. A call the
+ * policy does not deny is added to the reply's usage before it starts.
  */
 function startToolCall(
   toolCall: CheckedToolCall,
@@ -871,6 +894,8 @@ function startToolCall(
     buildToolCallRequest(toolCall),
     handling.toolCallRules
   )
+  if (decision.effect !== "deny")
+    handling.toolCallUsage.addToolCall(toolCall.call.toolName)
   switch (decision.effect) {
     case "deny":
       return denyToolCall(toolCall, decision, handling)
@@ -888,16 +913,23 @@ function startToolCall(
  * trusts: the offered tool and the checked arguments.
  *
  * @param toolCall - Checked call.
- * @returns The request: destructive only for an MCP tool its server marks
- * so.
+ * @returns The request: destructive or an open-world write only for an
+ * MCP tool its server marks so, paid only for the backend's `web_search`,
+ * and the usage counted when the call was checked.
  */
 function buildToolCallRequest(toolCall: CheckedToolCall): ToolCallRequest {
   const { tool } = toolCall
+  const isMcpTool = tool.runner === "mcp"
   return Object.freeze({
     action: Object.freeze({
-      isDestructive: tool.runner === "mcp" && tool.mcpTool.isDestructive
+      isDestructive: isMcpTool && tool.mcpTool.isDestructive,
+      isOpenWorldWrite: isMcpTool && tool.mcpTool.isOpenWorldWrite,
+      isPaid:
+        tool.runner === "backend" &&
+        toolCall.checkedCall.toolName === WEB_SEARCH_TOOL_NAME
     }),
-    resource: Object.freeze({ arguments: toolCall.checkedCall.arguments })
+    resource: Object.freeze({ arguments: toolCall.checkedCall.arguments }),
+    environment: Object.freeze({ usageInTask: toolCall.usageInTask })
   })
 }
 

@@ -391,7 +391,8 @@ For each call, in order:
    approval starts at once; every other allowed call passes the gate, where
    the person's approval mode decides.
 5. A call the person allows is stored as running, then decided again with
-   the approved folders read at that moment (spec §4): one the rules now deny
+   the approved folders read at that moment and the usage counted when it
+   arrived (spec §4): one the rules now deny
    is stored as failed with the denial and never runs. Its decision record
    keeps the decision made when the call arrived, with the answer `allowed`
    and the outcome `failed`; the denial is in the call's result.
@@ -399,7 +400,14 @@ For each call, in order:
 The policy reads a `ToolCallRequest` that the gateway builds from what the
 backend trusts, never from what the model claims, in the attribute groups of
 #330's tool authorization spec that its rules read: `action`, the tool's
-attributes, and `resource`, the checked arguments. It does no I/O and throws
+attributes; `resource`, the checked arguments; and `environment`, the call's
+`usageInTask`. A reply is the task: each reply counts, in a `ToolCallUsage`
+it creates and keeps across its rounds, the calls of each tool the policy
+did not deny, and each call reads the count of the calls before it in the
+model's order, which a call the policy does not deny then raises. A call Lys's
+own checks fail never reaches the policy and is not counted; a call the
+person rejects is. Armitage's search turn is a reply of its own, with its own
+count. It does no I/O and throws
 nothing; a defect that made it throw would end the reply as failed before
 the call ran. A deny always wins: the person cannot allow a denied call, and
 approval is never asked of it.
@@ -471,6 +479,14 @@ asked over every text before the next:
   with `@`, and anything after a `:`, `/`, or `\` that follows it is left
   aside, so `10.0.0.1:22`, `admin@192.168.1.10`, `git@10.0.0.2:repo.git`,
   and `\\10.0.0.5\share` are all denied.
+- **Usage limit.** A call is denied with the reason `usage-limit` when its
+  reply already made `MAXIMUM_TOOL_CALLS_PER_TASK`, 100, calls of the tool
+  that were not denied, so a model that calls one tool in a loop stops. A
+  main reply has no other limit on its rounds or on the calls of a round.
+- **Paid tool budget.** `web_search` is paid: Tavily bills the person for
+  each search. Its call is denied with the reason `paid-tool-budget` when
+  the reply already made `MAXIMUM_PAID_TOOL_CALLS_PER_TASK`, 20, of them,
+  even one the person would allow.
 - **Destructive tool.** A call that no deny rule matches requires approval
   when its tool is an MCP tool whose server marks it as destructive: its
   annotations say `destructiveHint: true` and not `readOnlyHint: true`
@@ -478,6 +494,18 @@ asked over every text before the next:
   as destructive, but only an explicit mark counts, so a server that sends no
   annotations keeps the person's Just run choice. A server's annotations can
   only make Lys ask more, never less. Lys's own tools are never marked.
+- **Open-world write.** Otherwise, a call requires approval with the reason
+  `open-world-write` when its tool is an MCP tool whose server marks it as
+  reaching beyond Lys and this machine without marking it read-only: its
+  annotations say `openWorldHint: true` and not `readOnlyHint: true`
+  (`McpToolCatalog.openWorldWriteToolNames`). The built-in email server marks
+  `send_email`, `send_draft`, and `save_draft` so, which its server does not
+  mark destructive, so sending an email asks even on Just run. As with the
+  destructive mark, only an explicit mark counts.
+- **Paid tool.** Otherwise, a `web_search` call requires approval with the
+  reason `paid-tool` when the reply already made
+  `PAID_TOOL_CALLS_PER_TASK_WITHOUT_APPROVAL`, 5, of them, so from the sixth
+  search on, each asks the person even on Just run.
 
 The rules read text only. They resolve no host name: an MCP server resolves
 the names it reaches, and `read_page` checks every resolved address when it
@@ -495,7 +523,9 @@ like a path.
 Every call the gateway stores gets a decision record, a row of
 [`tool_call_decisions`](/reference/schema/#tool_call_decisions) written in
 the transaction that stores the call. It names the conversation, its agent,
-and the tool, and holds the policy's effect and reason when the call arrived,
+and the tool, and holds the policy's effect and reason when the call arrived, with the
+identity of the rule set that decided it (`TOOL_CALL_POLICY_ID`,
+`lys-policy-v1`, which changes whenever a rule or a limit changes),
 none when step 1 or 2 failed the call, and for a call step 5 denies, still
 the decision made when it arrived; the approval mode the gate applied,
 `just-run` or `ask-me`, none when the call never reached the gate; the answer that moved a
@@ -510,8 +540,8 @@ stored, so each gets a row of
 [`tool_search_call_decisions`](/reference/schema/#tool_search_call_decisions)
 instead, under the `find_tools` call that started the search. The search's
 reply writes it when it keeps the call, before the call can run, with the
-call's argument text, which no other row keeps, and the policy's effect and
-reason, and writes the outcome when the run ends. A call the search cannot
+call's argument text, which no other row keeps, and the policy's effect,
+reason, and rule set identity, and writes the outcome when the run ends. A call the search cannot
 record because the `find_tools` call no longer runs is refused and never
 runs, and a record that cannot be written fails the search. When the
 `find_tools` call stops running, by its end, Stop, or the interrupted
@@ -1518,7 +1548,9 @@ to the first `armitage-<n>` code no agent or conversation holds, so the code
 is Armitage's, version 13 adds the tool call decision records, version 14
 lets a record store the answer `expired`, version 15 lets it store the
 denials `outside-approved-folders` and `settings-unreadable`, version 16 adds
-the records of tool searches' own calls, and
+the records of tool searches' own calls, version 17 lets both kinds of
+record store the policy's rule set identity and its usage, budget,
+open-world, and paid-tool reasons, and
 turn persistence's startup recovers streaming assistants and their open tool
 calls without reordering history.
 Two triggers keep `conversations.updated_at` in sync with message and part

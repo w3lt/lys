@@ -29,6 +29,7 @@ import type { DownloadedLlmModel } from "../../../../../src/modules/llm/llmRunti
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
 import {
+  TOOL_CALL_POLICY_ID,
   formatToolCallDenial,
   type ToolCallPolicy
 } from "../../../../../src/modules/toolApproval/toolCallPolicy"
@@ -2951,7 +2952,7 @@ describe("updateFastifyWithChatRoute", () => {
               conversation_id AS conversationId, agent_code AS agentCode,
               tool_name AS toolName, argument_text AS argumentText,
               policy_effect AS policyEffect, policy_reason AS policyReason,
-              outcome FROM tool_search_call_decisions`
+              policy_id AS policyId, outcome FROM tool_search_call_decisions`
             )
             .all()
         )
@@ -2964,6 +2965,7 @@ describe("updateFastifyWithChatRoute", () => {
           argumentText: '{"name":"look_up_word"}',
           policyEffect: "allow",
           policyReason: null,
+          policyId: TOOL_CALL_POLICY_ID,
           outcome: "succeeded"
         }
       ])

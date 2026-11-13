@@ -4,20 +4,21 @@ import type {
   ToolSearchCallRecordWriter
 } from "../../../modules/conversation/records"
 import type { ToolCallDecisionRecord } from "../../../modules/toolApproval/toolCallDecisionRecord"
+import { TOOL_CALL_POLICY_ID } from "../../../modules/toolApproval/toolCallPolicy"
 import type { DatabaseWriter } from "../databaseTransactions"
 
 /**
  * Stores the decision record of one call of a tool search's reply, taking
  * its conversation from the search's `find_tools` call, which must be a
  * stored tool call that is running; bound to the call's identity, the
- * agent, the tool, the argument text, the policy's effect and reason, the
- * outcome, and the times, then the `find_tools` call.
+ * agent, the tool, the argument text, the policy's effect, reason, and
+ * identity, the outcome, and the times, then the `find_tools` call.
  */
 const CREATE_TOOL_SEARCH_CALL_RECORD_SQL = `INSERT INTO tool_search_call_decisions
   (call_id, search_call_id, conversation_id, agent_code, tool_name,
-    argument_text, policy_effect, policy_reason, outcome, created_at,
-    updated_at)
-  SELECT ?, s.id, s.conversation_id, ?, ?, ?, ?, ?, ?, ?, ?
+    argument_text, policy_effect, policy_reason, policy_id, outcome,
+    created_at, updated_at)
+  SELECT ?, s.id, s.conversation_id, ?, ?, ?, ?, ?, ?, ?, ?, ?
   FROM conversation_messages s
   WHERE s.id = ? AND s.role = 'tool_call' AND s.status = 'running'`
 
@@ -35,14 +36,16 @@ type ToolSearchCallPolicyColumns = Readonly<{
   policyEffect: string | null
   /** The rule behind a denial; null otherwise. */
   policyReason: string | null
+  /** Identity of the rule set that decided the call; null with the effect. */
+  policyId: string | null
 }>
 
 /**
  * Builds the policy columns of one search call's record.
  *
  * @param decision - How the call was decided.
- * @returns The policy's effect and the rule behind it, null where the
- * decision has none.
+ * @returns The policy's effect, the rule behind it, and the identity of the
+ * rule set, which is this build's; null where the decision has none.
  * @throws If the decision has an approval mode: a search's call never
  * reaches the approval gate.
  */
@@ -57,7 +60,8 @@ function buildPolicyColumns(
     policyReason:
       policyDecision === undefined || policyDecision.effect === "allow"
         ? null
-        : policyDecision.reason
+        : policyDecision.reason,
+    policyId: policyDecision === undefined ? null : TOOL_CALL_POLICY_ID
   }
 }
 
@@ -122,7 +126,9 @@ export default class SqliteToolSearchCallRecordWriter implements ToolSearchCallR
   ): boolean {
     const { call } = input
     const outcome = readKeptOutcome(call)
-    const { policyEffect, policyReason } = buildPolicyColumns(input.decision)
+    const { policyEffect, policyReason, policyId } = buildPolicyColumns(
+      input.decision
+    )
     return this.#databaseWriter.handleDatabaseWriteRequest(
       (statements) =>
         statements
@@ -134,6 +140,7 @@ export default class SqliteToolSearchCallRecordWriter implements ToolSearchCallR
             call.argumentText,
             policyEffect,
             policyReason,
+            policyId,
             outcome,
             call.createdAt,
             call.updatedAt,

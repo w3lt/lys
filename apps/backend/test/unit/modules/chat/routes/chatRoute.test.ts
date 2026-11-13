@@ -14,12 +14,13 @@ import {
   MAXIMUM_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
   mcpSettingsSchema,
-  type McpServerSettings
+  type McpServerSettings,
+  type ReplyPart
 } from "@lys/share"
 import type { LightMyRequestResponse } from "fastify"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi, type MockResult } from "vitest"
 import type ReplyGeneration from "../../../../../src/modules/chat/replyGeneration"
 import updateFastifyWithChatRoute, {
   type ChatRouteOptions
@@ -2736,6 +2737,98 @@ describe("updateFastifyWithChatRoute", () => {
       return testApp
     }
 
+    /**
+     * Builds a model round that calls one tool.
+     *
+     * @param name - Name of the tool.
+     * @param argumentText - Arguments as the model writes them.
+     * @returns The round's chunks.
+     */
+    function buildCallRound(name: string, argumentText: string) {
+      const toolCall = {
+        index: 0,
+        id: "call_0",
+        type: "function" as const,
+        function: { name, arguments: argumentText }
+      }
+      return createChunkStream(
+        createChatCompletionChunk({ toolCalls: [toolCall] }),
+        createChatCompletionChunk({ finishReason: "tool_calls" })
+      )
+    }
+
+    /**
+     * Adds the model streams of a routed turn that finds a tool and calls
+     * it: the reply asks for a tool that defines words, Armitage recommends
+     * `look_up_word` and ends its search with a sentence, and the reply
+     * looks up `moth`. The reply's last round answers `Hi`, as the test
+     * model does by default.
+     *
+     * @param testApp - Test application whose model the turn uses.
+     */
+    function addFoundToolTurnStreams(testApp: ChatRouteTestApp): void {
+      testApp.completeChatStream
+        .mockImplementationOnce(async () =>
+          buildCallRound("find_tools", '{"task":"define a word"}')
+        )
+        .mockImplementationOnce(async () =>
+          buildCallRound("recommend_tool", '{"name":"look_up_word"}')
+        )
+        .mockImplementationOnce(async () =>
+          createChunkStream(
+            createChatCompletionChunk({
+              content: "look_up_word defines words."
+            }),
+            createChatCompletionChunk({ finishReason: "stop" })
+          )
+        )
+        .mockImplementationOnce(async () =>
+          buildCallRound("look_up_word", '{"word":"moth"}')
+        )
+    }
+
+    /**
+     * Declines the one call a started reply waits on the person for.
+     *
+     * @param generationResults - Results the spy on the registry's
+     * `startReplyGeneration` recorded.
+     * @returns The prompt the person declined.
+     * @throws If the route started no generation, or no prompt waits.
+     */
+    function rejectPendingToolCall(
+      generationResults: readonly MockResult<ReplyGeneration>[]
+    ) {
+      const [result] = generationResults
+      if (result?.type !== "return") throw new Error("No generation started.")
+      const [prompt] = result.value.pendingToolCalls.toolApprovals
+      if (prompt === undefined) throw new Error("No prompt was sent.")
+      result.value.resolveToolCall(prompt.call.id, {
+        approvalToken: prompt.approvalToken,
+        status: "rejected",
+        reason: "declined",
+        content: "The person declined this call."
+      })
+      return prompt
+    }
+
+    /**
+     * Lists the parts of the reply a chat response stored.
+     *
+     * @param testApp - Test application that answered.
+     * @param response - Completed response that started a new conversation.
+     * @returns The stored reply's parts, in order.
+     * @throws If the response did not start a new conversation.
+     */
+    function listStoredReplyParts(
+      testApp: ChatRouteTestApp,
+      response: LightMyRequestResponse
+    ): readonly ReplyPart[] {
+      const reply = testApp.app.conversationHistoryReader.getConversation(
+        findStartedConversationId(response.body)
+      )?.messages[1]
+      return reply?.role === "assistant" ? reply.parts : []
+    }
+
     it("offers a built-in agent's model, trained for tool use, find_tools in place of the turn's tools, then the leader's state tools", async () => {
       const testApp = await createStateToolApp()
 
@@ -2751,49 +2844,13 @@ describe("updateFastifyWithChatRoute", () => {
       ])
     })
 
-    it("has Armitage find a tool on the same model, unseen by the person, and offers the found tool from the reply's next round", async () => {
+    it("has Armitage find a tool on the asking reply's model, with its own prompt, the task, and only its search tools", async () => {
       const testApp = await createStateToolApp()
       testApp.readJustRunToolNames.mockResolvedValue({
         status: "read",
         toolNames: new Set(["look_up_word"])
       })
-      /**
-       * Builds a model round that calls one tool.
-       *
-       * @param name - Name of the tool.
-       * @param argumentText - Arguments as the model writes them.
-       * @returns The round's chunks.
-       */
-      const callTool = (name: string, argumentText: string) => {
-        const toolCall = {
-          index: 0,
-          id: "call_0",
-          type: "function" as const,
-          function: { name, arguments: argumentText }
-        }
-        return createChunkStream(
-          createChatCompletionChunk({ toolCalls: [toolCall] }),
-          createChatCompletionChunk({ finishReason: "tool_calls" })
-        )
-      }
-      testApp.completeChatStream
-        .mockImplementationOnce(async () =>
-          callTool("find_tools", '{"task":"define a word"}')
-        )
-        .mockImplementationOnce(async () =>
-          callTool("recommend_tool", '{"name":"look_up_word"}')
-        )
-        .mockImplementationOnce(async () =>
-          createChunkStream(
-            createChatCompletionChunk({
-              content: "look_up_word defines words."
-            }),
-            createChatCompletionChunk({ finishReason: "stop" })
-          )
-        )
-        .mockImplementationOnce(async () =>
-          callTool("look_up_word", '{"word":"moth"}')
-        )
+      addFoundToolTurnStreams(testApp)
 
       const response = await sendChatRequest(testApp.app, {
         ...NEW_CONVERSATION_REQUEST,
@@ -2802,6 +2859,7 @@ describe("updateFastifyWithChatRoute", () => {
 
       expect(response.statusCode).toBe(200)
       const armitageRequest = testApp.completeChatStream.mock.calls[1]?.[0]
+      expect(armitageRequest?.model).toBe(NEW_CONVERSATION_REQUEST.model)
       expect(armitageRequest?.messages.slice(0, 2)).toEqual([
         { role: "system", content: TEST_BUILT_IN_AGENT_PROMPTS.armitage },
         { role: "user", content: "define a word" }
@@ -2810,6 +2868,21 @@ describe("updateFastifyWithChatRoute", () => {
         "search_tools",
         "recommend_tool"
       ])
+    })
+
+    it("offers the found tool from the reply's next round, runs its call saved as Just run without asking, and stores the search as the find_tools call alone", async () => {
+      const testApp = await createStateToolApp()
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set(["look_up_word"])
+      })
+      addFoundToolTurnStreams(testApp)
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: { definitions: [], backendToolNames: ["look_up_word"] }
+      })
+
       expect(listOfferedToolNames(testApp, 3)).toEqual([
         "find_tools",
         "look_up_word",
@@ -2818,13 +2891,7 @@ describe("updateFastifyWithChatRoute", () => {
       const events = parseSseEvents(response.body)
       expect(events.map((event) => event.event)).not.toContain("tool-approval")
       expect(events.at(-1)?.event).toBe("done")
-      const start = chatApiStreamEventSchema.parse(events[0]?.data)
-      if (start.type !== "start-new-conversation-turn")
-        throw new Error("The chat route did not start a new conversation")
-      const reply = testApp.app.conversationHistoryReader.getConversation(
-        start.conversation.id
-      )?.messages[1]
-      expect(reply?.role === "assistant" ? reply.parts : []).toEqual([
+      expect(listStoredReplyParts(testApp, response)).toEqual([
         expect.objectContaining({
           kind: "tool-call",
           toolName: "find_tools",
@@ -2839,6 +2906,80 @@ describe("updateFastifyWithChatRoute", () => {
         }),
         expect.objectContaining({ kind: "text", content: "Hi" })
       ])
+    })
+
+    it("asks the person before a found tool that is not saved as Just run runs, and does not run a call the person declines", async () => {
+      const testApp = await createStateToolApp()
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set()
+      })
+      addFoundToolTurnStreams(testApp)
+      const startReplyGeneration = vi.spyOn(
+        testApp.generations,
+        "startReplyGeneration"
+      )
+
+      const responsePromise = sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: { definitions: [], backendToolNames: ["look_up_word"] }
+      })
+      await vi.waitFor(() => {
+        expect(
+          startReplyGeneration.mock.results[0]?.value.pendingToolCalls
+            .toolApprovals
+        ).toHaveLength(1)
+      })
+      const prompt = rejectPendingToolCall(startReplyGeneration.mock.results)
+      const response = await responsePromise
+
+      expect(prompt.call).toMatchObject({
+        toolName: "look_up_word",
+        arguments: { word: "moth" }
+      })
+      expect(parseSseEvents(response.body)).toContainEqual({
+        event: "tool-approval",
+        data: { type: "tool-approval", ...prompt }
+      })
+      expect(listStoredReplyParts(testApp, response)[1]).toMatchObject({
+        toolName: "look_up_word",
+        status: "rejected",
+        result: "The person declined this call."
+      })
+    })
+
+    it("logs a warning with the request's logger when Armitage cannot finish a search, and the reply goes on without a new tool", async () => {
+      const testApp = await createStateToolApp()
+      testApp.completeChatStream
+        .mockImplementationOnce(async () =>
+          buildCallRound("find_tools", '{"task":"define a word"}')
+        )
+        .mockRejectedValueOnce(new Error("Armitage's model failed"))
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        tools: { definitions: [], backendToolNames: ["look_up_word"] }
+      })
+
+      expect(testApp.log.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          msg: "Armitage could not finish a tool search, so the reply went on without its tools",
+          reqId: expect.any(String),
+          err: expect.objectContaining({ message: "Armitage's model failed" })
+        })
+      )
+      expect(listOfferedToolNames(testApp, 2)).toEqual([
+        "find_tools",
+        ...LEADER_STATE_TOOL_NAMES
+      ])
+      expect(listStoredReplyParts(testApp, response)[0]).toMatchObject({
+        toolName: "find_tools",
+        status: "failed",
+        result:
+          "Armitage could not search the tools now. Try again, or go on without a tool."
+      })
+      expect(parseSseEvents(response.body).at(-1)?.event).toBe("done")
     })
 
     it("offers the state tools while tool calls are switched off", async () => {
@@ -2871,22 +3012,7 @@ describe("updateFastifyWithChatRoute", () => {
         toolNames: new Set()
       })
       testApp.completeChatStream.mockImplementationOnce(async () =>
-        createChunkStream(
-          createChatCompletionChunk({
-            toolCalls: [
-              {
-                index: 0,
-                id: "call_0",
-                type: "function",
-                function: {
-                  name: "look_up_word",
-                  arguments: '{"word":"moth"}'
-                }
-              }
-            ]
-          }),
-          createChatCompletionChunk({ finishReason: "tool_calls" })
-        )
+        buildCallRound("look_up_word", '{"word":"moth"}')
       )
       const startReplyGeneration = vi.spyOn(
         testApp.generations,
@@ -2928,17 +3054,7 @@ describe("updateFastifyWithChatRoute", () => {
         leader,
         CALIGINIA_AGENT_CODE
       )
-      const generation = startReplyGeneration.mock.results[0]
-      if (generation?.type !== "return")
-        throw new Error("No generation started.")
-      const [prompt] = generation.value.pendingToolCalls.toolApprovals
-      if (prompt === undefined) throw new Error("No prompt was sent.")
-      generation.value.resolveToolCall(prompt.call.id, {
-        approvalToken: prompt.approvalToken,
-        status: "rejected",
-        reason: "declined",
-        content: "The person declined this call."
-      })
+      rejectPendingToolCall(startReplyGeneration.mock.results)
       const response = await responsePromise
 
       const start = chatApiStreamEventSchema.parse(

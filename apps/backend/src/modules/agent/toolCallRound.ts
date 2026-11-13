@@ -424,10 +424,11 @@ function addOfferedTool(
 /**
  * Builds the function tools a model would be offered for tool definitions.
  *
- * @param definitions - Offered tool definitions in offer order: client tools
- * first, then backend tools, as {@link buildAgentToolset} orders them.
- * @returns A frozen list in the same order and format as a reply offers a
- * turn with these tools in every round; empty for no definition.
+ * @param definitions - Offered tool definitions in offer order: direct
+ * tools first, then client, built-in, MCP, and agent state tools, as
+ * {@link buildAgentToolset} orders them.
+ * @returns A frozen list in the same order and format as a reply's round
+ * offers these tools; empty for no definition.
  * @throws A Zod error when a definition does not match `toolDefinitionSchema`.
  */
 export function buildDefinedToolOffer(
@@ -451,32 +452,34 @@ export function buildDefinedToolOffer(
  * result message per call in the model's order; or undefined when the reply
  * was stopped while the gate was created, a call waited, or a backend tool
  * ran, or the reply refused to store a call because it ended.
- * @throws If the turn offered no tools and tells the model nothing about the
- * tools it does not offer: the model called a tool it was not offered, which
- * ends the reply as failed, as before tools existed. Also throws when the
- * gate cannot be created, or a backend tool's run fails for a reason other
- * than Stop.
+ * @throws If the round offered no tools and the turn tells the model nothing
+ * about the tools it does not offer: the model called a tool it was not
+ * offered, which ends the reply as failed, as before tools existed. Also
+ * throws when the gate cannot be created, or a backend tool's run fails for
+ * a reason other than Stop.
  * @remarks Each call gets a new UUIDv7, which is its part's identity. Calls
- * of tools the turn does not offer, named or not, and calls whose arguments
- * do not match are stored as failed with the message the model reads; nobody
- * is asked about them, and none of them runs. Every other call is decided by
- * the fixed tool call policy first: a denied call is stored as failed with
- * the denial the model reads, never runs, and nobody is asked about it,
- * whatever the person saved for the tool. A call the policy requires approval
- * of passes the round's gate, which asks the person even when they saved its
- * tool as Just run. Of the allowed calls, a call of a backend tool that runs
- * without approval is stored as running at once. Every other call passes the
- * round's gate, created once for a round that has a call of a tool that may
- * need it, so the saved choices are read at most once per round and not at
- * all for a round whose calls all run without approval or name no offered
- * tool. The calls' parts, the gate's prompts, each after the part of the call
- * it asks about, and the run requests of calls allowed at once are sent
- * before the first wait, in the model's order, because each call's handling
- * runs synchronously up to its first send. Nothing runs before its call is
- * allowed. Every result the model reads is stored with its call first; the
- * result of a tool that does more than read this machine, a network or MCP
- * tool, is cleaned of invisible characters before that, whichever side
- * answered and however the call ended.
+ * of tools the round did not offer, whether the request names them or not,
+ * a tool of a routed turn that `find_tools` has not found yet included, and
+ * calls whose arguments do not match are stored as failed with the message
+ * the model reads; nobody is asked about them, and none of them runs. Every
+ * other call is decided by the fixed tool call policy first: a denied call
+ * is stored as failed with the denial the model reads, never runs, and
+ * nobody is asked about it, whatever the person saved for the tool. A call
+ * the policy requires approval of passes the round's gate, which asks the
+ * person even when they saved its tool as Just run. Of the allowed calls, a
+ * call of a backend tool that runs without approval is stored as running at
+ * once. Every other call passes the round's gate, created once for a round
+ * that has a call of a tool that may need it, so the saved choices are read
+ * at most once per round and not at all for a round whose calls all run
+ * without approval or name no offered tool. The calls' parts, the gate's
+ * prompts, each after the part of the call it asks about, and the run
+ * requests of calls allowed at once are sent before the first wait, in the
+ * model's order, because each call's handling runs synchronously up to its
+ * first send. Nothing runs before its call is allowed. Every result the model
+ * reads is stored with its call first; the result of a tool that does more
+ * than read this machine, a network or MCP tool, is cleaned of invisible
+ * characters before that, whichever side answered and however the call
+ * ended.
  */
 export async function handleToolCallRound(
   round: ToolCallRound,

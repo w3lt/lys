@@ -311,8 +311,8 @@ function isAgentCodeStored(database: DatabaseSync, code: string): boolean {
 }
 
 /**
- * Moves the stored agent and the conversations recorded under `armitage` to
- * the first free code `armitage-<n>`, n from 2 up.
+ * Migrates the stored agent and the conversations recorded under `armitage`
+ * to the first free code `armitage-<n>`, n from 2 up.
  *
  * @param database - Open SQLite database inside the migration transaction.
  * @remarks Version 12 ships Armitage, the built-in tool keeper, under
@@ -324,7 +324,7 @@ function isAgentCodeStored(database: DatabaseSync, code: string): boolean {
  * records never join another agent's. Codes are written as they were when
  * this version shipped. Nothing changes when no record is under `armitage`.
  */
-function moveArmitageRecords(database: DatabaseSync): void {
+function migrateArmitageRecords(database: DatabaseSync): void {
   if (!isAgentCodeStored(database, "armitage")) return
   let attempt = 2
   while (isAgentCodeStored(database, `armitage-${attempt}`)) attempt += 1
@@ -572,7 +572,7 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
     ALTER TABLE agents ADD COLUMN deleted_at TEXT
       CHECK (deleted_at IS NULL OR deleted_at <> '')
   `,
-  moveArmitageRecords,
+  migrateArmitageRecords,
   // Records how each tool call was decided, one row per stored call, written
   // with the call's row: the tool call policy's effect and its reason, the
   // approval mode the gate applied, and the person's answer, with the call's

@@ -69,7 +69,7 @@ agent records are just two interfaces, `AgentRecordStore` for listing,
 lookup, and changes and `AgentRecordSearcher` for search: the service is
 their only consumer and uses every operation of both, while the routes
 receive narrow capabilities of the service instead. Deleting an agent only sets its `deleted_at`, so its code is
-never free again and the built-in agents can still look it up; listings,
+never free again and the built-in agents but Armitage can still look it up; listings,
 counts, and changes skip it. The service is not a database service: it also owns the
 built-in agents Caliginia, Lysiptera, and Armitage, which are never stored,
 and refuses to store another agent under their codes `caliginia`,

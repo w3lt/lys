@@ -5,6 +5,7 @@ import PackageDescription
 
 let package = Package(
     name: "voice",
+    platforms: [.macOS("15.0")],
     dependencies: [
         .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.18.3")
     ],

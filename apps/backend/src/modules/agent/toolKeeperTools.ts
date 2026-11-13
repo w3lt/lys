@@ -23,64 +23,6 @@ export const RECOMMEND_TOOL_TOOL_NAME = "recommend_tool"
 /** Inclusive maximum length of a trimmed tool query, in UTF-16 code units. */
 const MAXIMUM_TOOL_QUERY_LENGTH = 200
 
-/** Most UTF-16 code units of a description a search shows, inclusive. */
-const MAXIMUM_LISTED_DESCRIPTION_LENGTH = 200
-
-/** Marks a description cut to fit a search's listing. */
-const CUT_MARK = "…"
-
-/** Matches one run of whitespace, line breaks included. */
-const WHITESPACE_RUN_PATTERN = /\s+/g
-
-/** Matches a high surrogate left alone at the end of a cut text. */
-const TRAILING_HIGH_SURROGATE_PATTERN = /[\uD800-\uDBFF]$/
-
-/** Sources a tool keeper tool's result shows: none. */
-const NO_SOURCES = Object.freeze([])
-
-/** Copy shown for a query that is blank, too long, or without words. */
-const INVALID_QUERY_MESSAGE = `The query must be 1 to ${MAXIMUM_TOOL_QUERY_LENGTH} characters long after trimming and hold at least one word.`
-
-/** The query argument of `search_tools`. */
-const QUERY_ARGUMENT = Object.freeze({
-  type: "string",
-  name: "query",
-  description: `A few words that describe what the tool must do, such as "read web page"; 1 to ${MAXIMUM_TOOL_QUERY_LENGTH} characters.`
-})
-
-/** Arguments of `search_tools`. */
-const SEARCH_TOOLS_ARGUMENTS = Object.freeze([QUERY_ARGUMENT])
-
-/** The name argument of `recommend_tool`. */
-const NAME_ARGUMENT = Object.freeze({
-  type: "string",
-  name: "name",
-  description: `Exact name of the tool, as ${SEARCH_TOOLS_TOOL_NAME} listed it.`
-})
-
-/** Arguments of `recommend_tool`. */
-const RECOMMEND_TOOL_ARGUMENTS = Object.freeze([NAME_ARGUMENT])
-
-/** Definition of the tool that searches the asking turn's tools. */
-const SEARCH_TOOLS_DEFINITION = toolDefinitionSchema.parse({
-  name: SEARCH_TOOLS_TOOL_NAME,
-  description: `Search the tools of the asking agent's turn by what they do. Lists up to ${MAXIMUM_LISTED_TOOL_COUNT} tools that best match the words, each with its name and description, and says how many more match.`,
-  group: "agents",
-  access: "reads",
-  runner: "backend",
-  arguments: SEARCH_TOOLS_ARGUMENTS
-})
-
-/** Definition of the tool that recommends one tool. */
-const RECOMMEND_TOOL_DEFINITION = toolDefinitionSchema.parse({
-  name: RECOMMEND_TOOL_TOOL_NAME,
-  description: `Recommend one tool that ${SEARCH_TOOLS_TOOL_NAME} listed and that fits the asking agent's need. Recommend each fitting tool once, at most ${MAXIMUM_RECOMMENDED_TOOL_COUNT} tools.`,
-  group: "agents",
-  access: "reads",
-  runner: "backend",
-  arguments: RECOMMEND_TOOL_ARGUMENTS
-})
-
 /**
  * Builds a parsed call that runs synchronously once it starts.
  *
@@ -107,7 +49,10 @@ function buildParsedCall(run: () => BuiltInToolResult): ParsedBuiltInToolCall {
  * @returns The frozen result, showing no sources.
  */
 function buildSucceededResult(content: string): BuiltInToolResult {
-  return Object.freeze({ status: "succeeded", content, sources: NO_SOURCES })
+  /** Sources a tool keeper tool's result shows: none. */
+  const noSources = Object.freeze([])
+
+  return Object.freeze({ status: "succeeded", content, sources: noSources })
 }
 
 /**
@@ -115,16 +60,25 @@ function buildSucceededResult(content: string): BuiltInToolResult {
  *
  * @param description - Description of the tool.
  * @returns The description on one line, each whitespace run as one space,
- * trimmed, and cut to {@link MAXIMUM_LISTED_DESCRIPTION_LENGTH} code units
- * with {@link CUT_MARK} when longer, never splitting a surrogate pair.
+ * trimmed, and, when longer than 200 UTF-16 code units, cut to 200 with an
+ * ellipsis as the last one, never splitting a surrogate pair.
  */
 function formatListedDescription(description: string): string {
-  const oneLine = description.replaceAll(WHITESPACE_RUN_PATTERN, " ").trim()
-  if (oneLine.length <= MAXIMUM_LISTED_DESCRIPTION_LENGTH) return oneLine
+  /** Most UTF-16 code units of a description a search shows, inclusive. */
+  const maximumListedDescriptionLength = 200
+  /** Marks a description cut to fit a search's listing. */
+  const cutMark = "…"
+  /** Matches one run of whitespace, line breaks included. */
+  const whitespaceRunPattern = /\s+/g
+  /** Matches a high surrogate left alone at the end of a cut text. */
+  const trailingHighSurrogatePattern = /[\uD800-\uDBFF]$/
+
+  const oneLine = description.replaceAll(whitespaceRunPattern, " ").trim()
+  if (oneLine.length <= maximumListedDescriptionLength) return oneLine
   const cut = oneLine
-    .slice(0, MAXIMUM_LISTED_DESCRIPTION_LENGTH - CUT_MARK.length)
-    .replace(TRAILING_HIGH_SURROGATE_PATTERN, "")
-  return `${cut}${CUT_MARK}`
+    .slice(0, maximumListedDescriptionLength - cutMark.length)
+    .replace(trailingHighSurrogatePattern, "")
+  return `${cut}${cutMark}`
 }
 
 /**
@@ -153,16 +107,19 @@ function formatToolMatches(query: string, result: ToolMatchList): string {
 }
 
 /**
- * Formats the outcome of one recommendation.
+ * Runs one `recommend_tool` call.
  *
  * @param name - Name of the tool.
- * @param catalog - Catalog of the search; recommends the tool.
+ * @param catalog - Catalog of the search, which gains the recommendation.
  * @returns The result the model reads: a success that counts the
- * recommendations, or says the tool was recommended before; a failure once
- * the most tools are recommended.
+ * recommendations, or says the tool was recommended before; a failure for a
+ * name no tool of the turn has, or once the most tools are recommended.
  */
-function recommendTool(name: string, catalog: ToolCatalog): BuiltInToolResult {
-  const outcome = catalog.recommendTool(name)
+function runRecommendTool(
+  name: string,
+  catalog: ToolCatalog
+): BuiltInToolResult {
+  const outcome = catalog.addRecommendedTool(name)
   switch (outcome.status) {
     case "recommended":
       return buildSucceededResult(
@@ -194,11 +151,28 @@ function formatUnknownToolMessage(name: string): string {
 }
 
 /**
+ * Answers whether a search query can be searched for.
+ *
+ * @param query - Trimmed query of a `search_tools` call.
+ * @returns True when the query holds 1 to {@link MAXIMUM_TOOL_QUERY_LENGTH}
+ * UTF-16 code units and at least one word.
+ */
+function isSearchableQuery(query: string): boolean {
+  return (
+    query.length > 0 &&
+    query.length <= MAXIMUM_TOOL_QUERY_LENGTH &&
+    listRankingWords(query).length > 0
+  )
+}
+
+/**
  * Searches the asking turn's tools for the tool keeper.
  *
  * @remarks Each parsed call searches its catalog once, when it runs, and
  * changes nothing. Owns no resource; the catalog is lent for the search.
- * Concurrency model: reentrant, and parsed calls run independently.
+ * Concurrency model: single-owner, as its catalog is: used by one search on
+ * the backend's event loop, each parsed call running in one synchronous
+ * step.
  */
 class SearchToolsTool implements BuiltInTool {
   /** Tools of the asking turn; lent for the search. */
@@ -223,18 +197,13 @@ class SearchToolsTool implements BuiltInTool {
   public parseToolCall(
     callArguments: BuiltInToolCallArguments
   ): ParsedBuiltInToolCall {
+    /** Copy shown for a query that is blank, too long, or without words. */
+    const invalidQueryMessage = `The query must be 1 to ${MAXIMUM_TOOL_QUERY_LENGTH} characters long after trimming and hold at least one word.`
+
     const value = callArguments["query"]
-    const query = typeof value === "string" ? value.trim() : undefined
-    if (
-      query === undefined ||
-      query.length === 0 ||
-      query.length > MAXIMUM_TOOL_QUERY_LENGTH ||
-      listRankingWords(query).length === 0
-    )
-      return Object.freeze({
-        status: "invalid",
-        message: INVALID_QUERY_MESSAGE
-      })
+    const query = typeof value === "string" ? value.trim() : ""
+    if (!isSearchableQuery(query))
+      return Object.freeze({ status: "invalid", message: invalidQueryMessage })
     return buildParsedCall(() =>
       buildSucceededResult(
         formatToolMatches(query, this.#catalog.listToolMatches(query))
@@ -248,8 +217,8 @@ class SearchToolsTool implements BuiltInTool {
  *
  * @remarks Each parsed call recommends once, when it runs. Owns no
  * resource; the catalog is lent for the search. Concurrency model:
- * reentrant, and parsed calls run independently, each in one synchronous
- * step.
+ * single-owner, as its catalog is: used by one search on the backend's
+ * event loop, each parsed call running in one synchronous step.
  */
 class RecommendToolTool implements BuiltInTool {
   /** Tools of the asking turn and the recommendations; lent for the search. */
@@ -280,7 +249,7 @@ class RecommendToolTool implements BuiltInTool {
         status: "invalid",
         message: formatUnknownToolMessage(name)
       })
-    return buildParsedCall(() => recommendTool(name, this.#catalog))
+    return buildParsedCall(() => runRecommendTool(name, this.#catalog))
   }
 }
 
@@ -297,17 +266,68 @@ class RecommendToolTool implements BuiltInTool {
 export function buildToolKeeperTools(
   catalog: ToolCatalog
 ): readonly TurnBuiltInTool[] {
-  const searcher = new SearchToolsTool(catalog)
-  const recommender = new RecommendToolTool(catalog)
-  const searchEntry: TurnBuiltInTool = Object.freeze({
-    definition: SEARCH_TOOLS_DEFINITION,
-    tool: searcher,
-    runsWithoutApproval: true
+  return Object.freeze([
+    buildSearchToolsEntry(catalog),
+    buildRecommendToolEntry(catalog)
+  ])
+}
+
+/**
+ * Builds the toolset entry of `search_tools`.
+ *
+ * @param catalog - Catalog of the search, lent for it.
+ * @returns The frozen entry, whose tool searches the catalog and runs
+ * without approval.
+ */
+function buildSearchToolsEntry(catalog: ToolCatalog): TurnBuiltInTool {
+  /** The query argument of `search_tools`. */
+  const queryArgument = Object.freeze({
+    type: "string",
+    name: "query",
+    description: `A few words that describe what the tool must do, such as "read web page"; 1 to ${MAXIMUM_TOOL_QUERY_LENGTH} characters.`
   })
-  const recommendEntry: TurnBuiltInTool = Object.freeze({
-    definition: RECOMMEND_TOOL_DEFINITION,
-    tool: recommender,
-    runsWithoutApproval: true
+  /** Arguments of `search_tools`. */
+  const searchToolsArguments = Object.freeze([queryArgument])
+  /** Definition of the tool that searches the asking turn's tools. */
+  const definition = toolDefinitionSchema.parse({
+    name: SEARCH_TOOLS_TOOL_NAME,
+    description: `Search the tools of the asking agent's turn by what they do. Lists up to ${MAXIMUM_LISTED_TOOL_COUNT} tools that best match the words, each with its name and description, and says how many more match.`,
+    group: "agents",
+    access: "reads",
+    runner: "backend",
+    arguments: searchToolsArguments
   })
-  return Object.freeze([searchEntry, recommendEntry])
+
+  const tool = new SearchToolsTool(catalog)
+  return Object.freeze({ definition, tool, runsWithoutApproval: true })
+}
+
+/**
+ * Builds the toolset entry of `recommend_tool`.
+ *
+ * @param catalog - Catalog of the search, lent for it.
+ * @returns The frozen entry, whose tool recommends the catalog's tools and
+ * runs without approval.
+ */
+function buildRecommendToolEntry(catalog: ToolCatalog): TurnBuiltInTool {
+  /** The name argument of `recommend_tool`. */
+  const nameArgument = Object.freeze({
+    type: "string",
+    name: "name",
+    description: `Exact name of the tool, as ${SEARCH_TOOLS_TOOL_NAME} listed it.`
+  })
+  /** Arguments of `recommend_tool`. */
+  const recommendToolArguments = Object.freeze([nameArgument])
+  /** Definition of the tool that recommends one tool. */
+  const definition = toolDefinitionSchema.parse({
+    name: RECOMMEND_TOOL_TOOL_NAME,
+    description: `Recommend one tool that ${SEARCH_TOOLS_TOOL_NAME} listed and that fits the asking agent's need. Recommend each fitting tool once, at most ${MAXIMUM_RECOMMENDED_TOOL_COUNT} tools.`,
+    group: "agents",
+    access: "reads",
+    runner: "backend",
+    arguments: recommendToolArguments
+  })
+
+  const tool = new RecommendToolTool(catalog)
+  return Object.freeze({ definition, tool, runsWithoutApproval: true })
 }

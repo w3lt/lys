@@ -506,8 +506,17 @@ which a trigger copies on every change, `interrupted` included. It holds no
 argument value; the call's row keeps them. The record goes with its call and
 its conversation, and nothing reads it yet. Armitage's own `search_tools` and
 `recommend_tool` calls belong to a search turn kept in memory and never
-stored, so they get no record; the `find_tools` call that started the search
-does.
+stored, so each gets a row of
+[`tool_search_call_decisions`](/reference/schema/#tool_search_call_decisions)
+instead, under the `find_tools` call that started the search. The search's
+reply writes it when it keeps the call, before the call can run, with the
+call's argument text, which no other row keeps, and the policy's effect and
+reason, and writes the outcome when the run ends. A call the search cannot
+record because the `find_tools` call no longer runs is refused and never
+runs, and a record that cannot be written fails the search. When the
+`find_tools` call stops running, by its end, Stop, or the interrupted
+marking at startup, a trigger marks its search's calls still running as
+interrupted. The rows go with the `find_tools` call and its conversation.
 
 ## Tool approval
 
@@ -1491,7 +1500,9 @@ deleting an agent only marks it, version 12 moves a stored agent coded
 `armitage`, deleted or not, and every conversation stored under `armitage`
 to the first `armitage-<n>` code no agent or conversation holds, so the code
 is Armitage's, version 13 adds the tool call decision records, version 14
-lets a record store the answer `expired`, and
+lets a record store the answer `expired`, version 15 lets it store the
+denials `outside-approved-folders` and `settings-unreadable`, version 16 adds
+the records of tool searches' own calls, and
 turn persistence's startup recovers streaming assistants and their open tool
 calls without reordering history.
 Two triggers keep `conversations.updated_at` in sync with message and part

@@ -98,11 +98,17 @@ The checked-in schema currently creates:
 - `tool_call_decisions`, one record per stored tool call of how it was
   decided, the answer that moved it on, and its outcome, without its
   arguments; it is deleted with its conversation
+- `tool_search_call_decisions`, one record per tool call Armitage made for a
+  `find_tools` search, with its argument text, how it was decided, and its
+  outcome; it is deleted with the `find_tools` call and its conversation
 - one index on `(conversation_id, created_at, id)`, one unique index on
-  each reply's part positions, and one index on each decision record's
+  each reply's part positions, one index on each decision record's
+  conversation, and two on each search call record's `find_tools` call and
   conversation
-- triggers that keep `conversations.updated_at` in sync, and one that copies
-  each tool call's status into its decision record
+- triggers that keep `conversations.updated_at` in sync, one that copies
+  each tool call's status into its decision record, and one that marks a
+  search's calls still running as interrupted when its `find_tools` call
+  stops running
 
 SQLite `PRAGMA user_version` tracks the applied migration level. On startup the
 backend applies any missing forward migrations and refuses to open a database

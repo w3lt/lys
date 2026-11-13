@@ -41,9 +41,9 @@ export type DelegationDependencies = DelegationAgentLookups &
     jobActivity: JobActivityReader
     /** Stores the reports jobs send to their delegators. */
     reports: JobReportWriter
-    /** Stores each job turn. */
+    /** Stores each job turn and each wake-up turn. */
     turns: Pick<ConversationTurnWriter, "createConversationTurn">
-    /** Starts the generation of each stored job turn. */
+    /** Starts the generation of each stored job turn and wake-up turn. */
     startTurn: StartTurn
     /** Finds the running generation of a reply, to stop it. */
     generations: Pick<ReplyGenerationRegistry, "findReplyGeneration">

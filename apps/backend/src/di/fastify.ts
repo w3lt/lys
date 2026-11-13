@@ -27,12 +27,12 @@ type SingletonServicePluginOptions = {
  * @returns A promise that resolves after the services are open and the shutdown hook is registered.
  * @throws If service construction or Fastify decoration and hook registration fails.
  * @remarks The services are exposed as Fastify decorations and disposed when
- * Fastify closes. The activity hub is closed first, then the reply
- * generation registry is disposed, both in `preClose`, while SSE streams
- * are still open: every activity stream ends, then every generation stores
- * its final state and its followers end, before the server waits for
- * requests and before the services close SQLite. After the HTTP listener
- * opens, an `onListen` hook performs
+ * Fastify closes. In `preClose`, while SSE streams are still open, the
+ * turns' activity is closed as {@link closeTurnActivity} closes it: no
+ * wake-up turn starts any more, every activity stream ends, then every
+ * generation stores its final state and its followers end, before the
+ * server waits for requests and before the services close SQLite. After
+ * the HTTP listener opens, an `onListen` hook performs
  * the first LLM runtime connection attempt. Fastify resolves `listen()` before
  * running the hook and logs a hook rejection, so the provider never delays or
  * prevents listening. `inject()` and `ready()` do not run the hook. An
@@ -94,8 +94,7 @@ const openSingletonServices: FastifyPluginAsync<
   })
 
   app.addHook("preClose", async () => {
-    singletonServices.activityHub.close()
-    await singletonServices.replyGenerations[Symbol.asyncDispose]()
+    await closeTurnActivity(singletonServices)
   })
   app.addHook("onClose", async () => {
     await closeSingletonServices(singletonServices)
@@ -108,6 +107,32 @@ const openSingletonServices: FastifyPluginAsync<
   })
 
   registerSingletonServices(app, singletonServices)
+}
+
+/**
+ * Closes what the running turns do while the backend shuts down, in the
+ * order that keeps a reply that ends during the shutdown from starting a
+ * wake-up turn.
+ *
+ * @param services - The wake settings, the activity hub, and the reply
+ * generation registry the plugin created; the bundle's cleanup releases
+ * them again later, which changes nothing.
+ * @returns A promise that resolves once every running generation stored its
+ * final state; it never rejects.
+ * @remarks Closes the wake settings first, so a reply that ends while the
+ * generations end starts no wake-up turn; then the activity hub, which ends
+ * every activity stream; then disposes the registry, which ends every
+ * generation.
+ */
+async function closeTurnActivity(
+  services: Pick<
+    SingletonServices,
+    "conversationWakeSettings" | "activityHub" | "replyGenerations"
+  >
+): Promise<void> {
+  services.conversationWakeSettings.close()
+  services.activityHub.close()
+  await services.replyGenerations[Symbol.asyncDispose]()
 }
 
 /**

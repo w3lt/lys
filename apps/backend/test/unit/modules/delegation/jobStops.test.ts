@@ -1,8 +1,6 @@
 import type { Job, JobState } from "@lys/share"
-import { v7 as uuidv7 } from "uuid"
 import { describe, expect, it, vi } from "vitest"
 import { stopJob } from "../../../../src/modules/delegation/jobStops"
-import type { NewEndReport } from "../../../../src/modules/delegation/records"
 import {
   createPersonTurn,
   MOTHS_REQUEST,
@@ -83,32 +81,19 @@ async function stopJobFirst(
 }
 
 /**
- * Ends a job's reply as interrupted with an end report that says so, as
- * the backend records a reply its shutdown cut off.
+ * Ends a job's reply as interrupted without anyone asking it to stop, as
+ * the backend's shutdown cuts a reply off; its end stores an interrupted
+ * report.
  *
- * @param services - The case's controls and report store.
+ * @param services - The case's controls.
  * @param job - The working job.
- * @returns A promise that resolves once the reply's end was handled and
- * the report was stored.
- * @throws If the report is not stored.
+ * @returns A promise that resolves once the reply's end was handled.
  */
 async function interruptJob(
   services: DelegationTestServices,
   job: Job
 ): Promise<void> {
   await services.resolveReply(job.replyId, "interrupted")
-  const createdAt = new Date().toISOString()
-  const report: NewEndReport = {
-    id: uuidv7(),
-    jobId: job.id,
-    replyId: job.replyId,
-    kind: "interrupted",
-    title: job.title,
-    content: "",
-    createdAt
-  }
-  if (!services.runtime.reports.createEndReport(report))
-    throw new Error("The end report was not stored")
 }
 
 describe("stopJob", () => {
@@ -208,7 +193,7 @@ describe("stopJob", () => {
       job.replyId,
       "completed"
     )
-    expect(services.reportEvent).toHaveBeenLastCalledWith({
+    expect(services.reportEvent).toHaveBeenCalledWith({
       kind: "stop-requested",
       conversationId: job.id,
       requester: "delegator",

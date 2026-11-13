@@ -240,14 +240,15 @@ export type SingletonServices = Readonly<{
   startTurn: StartTurn
   /**
    * The open activity streams and the backend-started replies they follow;
-   * the bundle's cleanup closes it first, which ends every activity stream
-   * before the generations end.
+   * the bundle's cleanup closes it right after the wake settings, which
+   * ends every activity stream before the generations end.
    */
   activityHub: ActivityHub
   /**
    * The settings each main conversation's wake-up turns start with, which
    * delegation remembers while a job of the conversation works; it owns
-   * nothing to release.
+   * nothing to release. The bundle's cleanup closes it first, so a reply
+   * that ends while the generations end starts no wake-up turn.
    */
   conversationWakeSettings: ConversationWakeSettings
   /**
@@ -309,7 +310,8 @@ type SingletonBundleContext = Readonly<{
   /**
    * Owner of every service the bundle acquired; it takes over the disposal
    * of the reply generation registry, then the close of the activity hub,
-   * so it closes the hub first, then disposes the registry, before
+   * then the close of delegation's wake settings, so it closes the wake
+   * settings first, then the hub, then disposes the registry, before
    * everything it took over earlier.
    */
   serviceLifetime: AsyncDisposableStack
@@ -392,7 +394,8 @@ type DatabaseServices = Pick<
  * registry, and the activity hub own resources: the connections and the
  * check process the first two open later, the generations the turn start
  * starts later, and the activity streams clients open later. The bundle's
- * cleanup closes the activity hub first, which ends every activity stream,
+ * cleanup closes delegation's wake settings first, so no wake-up turn
+ * starts any more, then the activity hub, which ends every activity stream,
  * then disposes the reply generation registry, which ends every generation,
  * then closes the email account checker, then the MCP server registry.
  * Creation stops at the first failure. The database is not part of the
@@ -487,6 +490,9 @@ function createSingletonServiceBundle(
     ...coreServices,
     ...turnStartServices,
     activityHub
+  })
+  serviceLifetime.defer(() => {
+    delegationServices.conversationWakeSettings.close()
   })
   return Object.freeze({
     ...coreServices,

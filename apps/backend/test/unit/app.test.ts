@@ -8,6 +8,7 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import type { FastifyInstance } from "fastify"
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import { buildApp } from "../../src/app"
@@ -137,6 +138,28 @@ const REQUEST_BODY_LIMIT = 1_048_576
  */
 async function* createHiReplyStream() {
   yield createChatCompletionChunk({ content: "Hi", finishReason: "stop" })
+}
+
+/**
+ * Creates spies in place of the model calls of an application that no
+ * provider is connected to.
+ *
+ * @param app - Ready application whose LLM service and chat service are
+ * spied on.
+ * @returns The spies. Every model is loaded with a context of 1,000,000
+ * tokens, in which each text counts one token, and every reply is `Hi`.
+ */
+function createModelSpies(app: FastifyInstance) {
+  const findLlmContextMeasurement = vi
+    .spyOn(app.llmService, "findLlmContextMeasurement")
+    .mockImplementation(async (_model, texts) => ({
+      contextLength: 1_000_000,
+      textTokenCounts: texts.map(() => 1)
+    }))
+  const completeChatStream = vi
+    .spyOn(app.chatService, "completeChatStream")
+    .mockImplementation(async () => createHiReplyStream())
+  return { findLlmContextMeasurement, completeChatStream }
 }
 
 /**
@@ -316,16 +339,7 @@ describe("buildApp", () => {
     })
     onTestFinished(async () => await app.close())
     await app.ready()
-    // No provider is connected: the model calls are answered here instead.
-    vi.spyOn(app.llmService, "findLlmContextMeasurement").mockImplementation(
-      async (_model, texts) => ({
-        contextLength: 1_000_000,
-        textTokenCounts: texts.map(() => 1)
-      })
-    )
-    vi.spyOn(app.chatService, "completeChatStream").mockImplementation(
-      async () => createHiReplyStream()
-    )
+    createModelSpies(app)
     app.agentService.createAgent(FIRST_MEMBER_DEFINITION)
     const delegating = createPersonTurn(app.conversationTurns)
     const conversationId = delegating.turn.conversation.id
@@ -393,6 +407,72 @@ describe("buildApp", () => {
 
     expect(serverCloseCountWhileGenerating).toBe(0)
     expect(closeServer).toHaveBeenCalledOnce()
+  })
+
+  it("closes the wake settings before it ends the running reply generations, so a lead's reply that completes while it closes starts no wake-up turn", async () => {
+    const log = new CapturedLogDestination()
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(log)
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    createModelSpies(app)
+    app.agentService.createAgent(FIRST_MEMBER_DEFINITION)
+    const delegating = createPersonTurn(app.conversationTurns)
+    const conversationId = delegating.turn.conversation.id
+    const leadReplyId = delegating.turn.assistantMessage.id
+    const draft = createJobMessageDraft(
+      app.replyParts,
+      delegating,
+      MOTHS_REQUEST
+    )
+    app.turnDelegations.createTurnDelegation(delegating).createJobMessage(draft)
+    // The job's result now waits for the lead's reply, which still streams.
+    await waitForFirstJobReplyEnd(app, conversationId)
+    const replyTask = new ControlledReplyTask()
+    app.replyGenerations.startReplyGeneration(
+      {
+        conversationId: createFixtureUuidV7(1),
+        assistantMessageId: createFixtureUuidV7(2)
+      },
+      {
+        startReplyTask: (context) => replyTask.start(context),
+        startTitleTask: undefined,
+        reportTaskFailure: vi.fn()
+      }
+    )
+    onTestFinished(() => {
+      replyTask.resolve()
+    })
+
+    const closing = app.close()
+    await vi.waitFor(() => {
+      expect(replyTask.context.abortSignal.aborted).toBe(true)
+    })
+    app.conversationTurns.updateAssistantMessageState(leadReplyId, {
+      status: "completed",
+      finishReason: "stop"
+    })
+    app.turnDelegations.handleReplyEnded({
+      conversationId,
+      assistantMessageId: leadReplyId,
+      errorMessage: undefined
+    })
+    replyTask.resolve()
+    await closing
+
+    expect(log.records).toContainEqual(
+      expect.objectContaining({
+        level: "info",
+        msg: "A wake-up turn did not start",
+        conversationId,
+        reason: "shutting-down"
+      })
+    )
+    expect(log.records).not.toContainEqual(
+      expect.objectContaining({ msg: "A wake-up turn started" })
+    )
   })
 
   it("ends an open activity stream when it closes, while a reply generation still runs and before it closes its HTTP server", async () => {

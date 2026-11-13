@@ -125,12 +125,13 @@ type StartedTurn = Readonly<{
 
 /**
  * Name of each service whose close the cleanup log records: the
- * acquisitions, the two tool services that own resources, and the activity
- * hub.
+ * acquisitions, the two tool services that own resources, the activity
+ * hub, and delegation's wake settings.
  */
 type ClosedServiceName =
   | AcquisitionName
   | "activity-hub"
+  | "wake-settings"
   | "email-account-checker"
   | "mcp-server-registry"
 
@@ -575,7 +576,7 @@ describe("createSingletonServices", () => {
     })
   })
 
-  it("gives a member work through the bundle's delegation hooks: the job's turn is stored, answered by the member, and reported", async () => {
+  it("gives a member work through the bundle's delegation hooks: the job's turn is stored and answered by the member, and its result waits while the lead's reply streams", async () => {
     const { factories } = createRecordedFactories()
     const reporters = createLogReporters()
     const services = await createSingletonServices(
@@ -615,14 +616,28 @@ describe("createSingletonServices", () => {
         { id: job.replyId, status: "completed", parts: [{ content: "Hi" }] }
       ]
     })
-    expect(reporters.reportDelegationEvent).toHaveBeenCalledExactlyOnceWith({
-      kind: "job-message-sent",
-      conversationId,
-      jobId: job.id,
-      jobNumber: 1,
-      agentCode: "researcher",
-      isNewJob: true
-    })
+    expect(reporters.reportDelegationEvent.mock.calls).toEqual([
+      [
+        {
+          kind: "job-message-sent",
+          conversationId,
+          jobId: job.id,
+          jobNumber: 1,
+          agentCode: "researcher",
+          isNewJob: true
+        }
+      ],
+      [
+        {
+          kind: "report-stored",
+          conversationId,
+          jobId: job.id,
+          jobNumber: 1,
+          reportKind: "result"
+        }
+      ],
+      [{ kind: "wake-up-skipped", conversationId, reason: "reply-streaming" }]
+    ])
   })
 
   it("starts a person's turn in the bundle's reply generation registry and stores its reply and generated title on the acquired database", async () => {
@@ -1173,8 +1188,13 @@ describe("closeSingletonServices", () => {
     expect(closeLog).toEqual(["chat", "llm-runtime", "database"])
   })
 
-  it("closes the activity hub, then ends every running reply generation, before it closes the MCP server registry or releases an acquisition, and leaves the reply generation registry closed", async () => {
+  it("closes the wake settings, then the activity hub, then ends every running reply generation, before it closes the MCP server registry or releases an acquisition, and leaves the reply generation registry closed", async () => {
     const { services, closeLog } = await createRecordedServices()
+    updateServiceClose(
+      services.conversationWakeSettings,
+      "wake-settings",
+      closeLog
+    )
     updateServiceClose(services.activityHub, "activity-hub", closeLog)
     const closeMcpServerRegistry = vi.spyOn(services.mcpServerRegistry, "close")
     const replyTask = new ControlledReplyTask()
@@ -1209,14 +1229,15 @@ describe("closeSingletonServices", () => {
     replyTask.resolve()
     await closing
 
-    expect(closedBeforeCancellation).toEqual(["activity-hub"])
+    expect(closedBeforeCancellation).toEqual(["wake-settings", "activity-hub"])
     expect(closedWhileGenerating).toEqual({
       isReplyCancelled: true,
       mcpServerRegistryCloseCount: 0,
-      closedServices: ["activity-hub"]
+      closedServices: ["wake-settings", "activity-hub"]
     })
     expect(closeMcpServerRegistry).toHaveBeenCalledOnce()
     expect(closeLog).toEqual([
+      "wake-settings",
       "activity-hub",
       "chat",
       "llm-runtime",

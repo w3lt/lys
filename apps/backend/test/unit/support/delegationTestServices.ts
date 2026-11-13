@@ -714,6 +714,46 @@ export function createPersonTurn(
 }
 
 /**
+ * Stores a turn of the person's and starts it as the chat route starts one:
+ * with the runtime's hooks, so the turn takes part in delegation, and with
+ * a reply the case ends with {@link DelegationTestServices.resolveReply}.
+ *
+ * @param services - The case's runtime and conversation services.
+ * @param target - Conversation the turn starts or continues; a new one
+ * that Caliginia answers by default.
+ * @param settings - Settings the turn is stored and started with;
+ * {@link DELEGATING_TURN_SETTINGS} by default.
+ * @returns The context of the started turn, as {@link createPersonTurn}
+ * builds it; its reply streams until the case ends it.
+ * @throws If the turn cannot be stored, the agent of its conversation
+ * cannot be loaded, or the turn start throws.
+ */
+export function startPersonTurn(
+  services: Pick<DelegationTestServices, "runtime" | "conversation">,
+  target?: ConversationTurnTarget,
+  settings: TurnSettings = DELEGATING_TURN_SETTINGS
+): TurnDelegationContext {
+  const { runtime } = services
+  const context = createPersonTurn(
+    services.conversation.turns,
+    target,
+    settings
+  )
+  const agent = runtime.loadChatAgent(context.turn.conversation.agentCode)
+  if (agent === undefined)
+    throw new Error("The agent of the person's conversation cannot be loaded")
+  runtime.startTurn({
+    turn: context.turn,
+    agent,
+    settings,
+    startedBy: "person",
+    delegation: runtime.hooks,
+    logger: runtime.logger
+  })
+  return context
+}
+
+/**
  * Stores a wake-up turn in a main conversation and builds the context its
  * starter's hooks are handed.
  *

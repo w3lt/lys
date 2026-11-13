@@ -53,21 +53,33 @@ const diffOptions = Object.freeze([
   "--diff-filter=d"
 ])
 
+/**
+ * Directories git is resolved from. Only an administrator can write them, so
+ * a writable entry earlier in the caller's `PATH` cannot stand in for git.
+ * Git is installed there on macOS with the Command Line Tools, which the
+ * repository's setup requires, and on the Linux CI runners.
+ */
+const gitSearchPath = "/usr/bin:/bin"
+
 /** Largest git output read, in bytes. */
 const gitOutputLimit = 256 * 1024 * 1024
 
 /**
  * Runs git in the repository and returns its standard output.
  *
+ * @remarks Git runs with the caller's environment, which carries the index
+ * a pre-commit hook uses, except that `PATH` lists only `gitSearchPath`.
  * @param root - Directory git runs in.
  * @param args - Arguments after `git`.
  * @returns Standard output.
  * @throws If git cannot run or exits with a failure status.
  */
 function runGit(root: string, args: readonly string[]): string {
+  const env = { ...process.env, PATH: gitSearchPath }
   return execFileSync("git", args, {
     cwd: root,
     encoding: "utf8",
+    env,
     maxBuffer: gitOutputLimit
   })
 }
@@ -196,10 +208,12 @@ async function checkChange(checkout: Checkout): Promise<boolean> {
     cwd: checkout.root,
     ruleFilter: ({ ruleId }) => ruleId.startsWith(rulePrefix)
   })
-  const violations: Violation[] = []
-  for (const file of listChangedFiles(checkout)) {
-    violations.push(...(await lintChangedFile(eslint, checkout, file)))
-  }
+  const violationsByFile = await Promise.all(
+    listChangedFiles(checkout).map((file) =>
+      lintChangedFile(eslint, checkout, file)
+    )
+  )
+  const violations = violationsByFile.flat()
   for (const violation of violations) {
     console.error(formatViolation(violation))
   }

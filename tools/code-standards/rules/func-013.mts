@@ -120,9 +120,11 @@ function rootIdentifierName(node: TSESTree.Node): string | null {
  * function as an argument.
  */
 function isArgumentOf(node: FunctionNode, parent: TSESTree.Node): boolean {
-  const isCall =
-    parent.type === "CallExpression" || parent.type === "NewExpression"
-  return isCall && parent.arguments.some((argument) => argument === node)
+  if (parent.type !== "CallExpression" && parent.type !== "NewExpression") {
+    return false
+  }
+  const callArguments: readonly TSESTree.Node[] = parent.arguments
+  return callArguments.includes(node)
 }
 
 /**

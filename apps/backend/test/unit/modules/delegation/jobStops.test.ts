@@ -554,4 +554,81 @@ describe("the person's stops", () => {
       }
     ])
   })
+
+  it("starts no wake-up for a job's result that lands as the person stops every job, and delivers it with the person's next message", async () => {
+    const services = openDelegationTestServices()
+    const lead = startPersonTurn(services)
+    const conversationId = lead.turn.conversation.id
+    const job = sendJobMessage(services, lead, MOTHS_REQUEST)
+    await services.resolveReply(lead.turn.assistantMessage.id, "completed")
+    // The member's model has already answered when the stop reaches its
+    // reply, so the reply completes by itself.
+    const jobReplyEnded = services.resolveReply(job.replyId, "completed")
+
+    await stopConversationJobs(services.runtime, conversationId)
+    await jobReplyEnded
+
+    expect(listJobStates(services, conversationId)).toEqual(["replied"])
+    expect(services.reportEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "wake-up-started" })
+    )
+    expect(services.reportEvent).toHaveBeenCalledWith({
+      kind: "wake-up-skipped",
+      conversationId,
+      reason: "no-wake-settings"
+    })
+    const next = createPersonTurn(services.conversation.turns, {
+      kind: "existing",
+      id: conversationId
+    })
+    expect(next.turn.userMessage.reports).toEqual([
+      expect.objectContaining({ jobId: job.id, kind: "result" })
+    ])
+  })
+
+  it("forgets the conversation's wake settings when the person stops the lead's reply, so a result that arrived during it waits for the person's next message", async () => {
+    const services = openDelegationTestServices()
+    const lead = startPersonTurn(services)
+    const conversationId = lead.turn.conversation.id
+    const finishedJob = sendJobMessage(services, lead, MOTHS_REQUEST)
+    const workingJob = sendJobMessage(services, lead, ARCHIVE_REQUEST)
+    await services.resolveReply(finishedJob.replyId, "completed")
+
+    await stopReplyForPerson(services.runtime, buildReplyTarget(lead))
+
+    expect(
+      services.runtime.wakeSettings.findWakeSettings(conversationId)
+    ).toEqual({ status: "none" })
+    expect(services.reportEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "wake-up-started" })
+    )
+    const next = createPersonTurn(services.conversation.turns, {
+      kind: "existing",
+      id: conversationId
+    })
+    expect(next.turn.userMessage.reports).toHaveLength(2)
+    expect(next.turn.userMessage.reports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ jobId: finishedJob.id, kind: "result" }),
+        expect.objectContaining({ jobId: workingJob.id, kind: "stopped" })
+      ])
+    )
+  })
+
+  it("keeps the wake settings when the person stops one job in the job view, so the other jobs still wake the lead", async () => {
+    const services = openDelegationTestServices()
+    const lead = startPersonTurn(services)
+    const conversationId = lead.turn.conversation.id
+    const stoppedJob = sendJobMessage(services, lead, MOTHS_REQUEST)
+    sendJobMessage(services, lead, ARCHIVE_REQUEST)
+
+    await stopReplyForPerson(services.runtime, {
+      conversationId: stoppedJob.id,
+      assistantMessageId: stoppedJob.replyId
+    })
+
+    expect(
+      services.runtime.wakeSettings.findWakeSettings(conversationId)
+    ).toMatchObject({ status: "found" })
+  })
 })

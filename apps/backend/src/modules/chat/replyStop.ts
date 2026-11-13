@@ -18,5 +18,8 @@ export type ReplyStopOutcome = "stopped" | "not-generating"
  * generation registry's disposal began, which ends every generation.
  * @throws If the conversation store is closed or a stored identity violates
  * the conversation contract; nothing is stopped then.
+ * @remarks A stop never wakes the agent of the stopped reply's conversation:
+ * no wake-up turn starts there until the person writes again, also for a
+ * job's reply that completes by itself as it is asked to stop.
  */
 export type StopReply = (target: ReplyTarget) => Promise<ReplyStopOutcome>

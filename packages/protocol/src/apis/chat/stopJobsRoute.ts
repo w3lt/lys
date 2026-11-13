@@ -19,7 +19,9 @@ const stopConversationJobsApiResponseSchemas = Object.freeze({
  *
  * @remarks The request has no body. Success is a bodyless 204 sent after
  * each stopped reply reached its stored final state, and also when no job of
- * the conversation was working. A missing conversation returns the
+ * the conversation was working. No wake-up turn starts in the conversation
+ * afterwards until the person writes again, also for a job that completed
+ * by itself as it was asked to stop. A missing conversation returns the
  * conversation-not-found problem with HTTP 404 and stops nothing. Changing
  * the method, path, or schemas requires coordinated consumers.
  */

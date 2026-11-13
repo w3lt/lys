@@ -35,7 +35,11 @@ export type JobStopRuntime = Pick<
  */
 export type PersonStopRuntime = Pick<
   DelegationRuntime,
-  "jobActivity" | "generations" | "stopRequests" | "reportEvent"
+  | "jobActivity"
+  | "generations"
+  | "stopRequests"
+  | "wakeSettings"
+  | "reportEvent"
 >
 
 /** A streaming reply whose generation runs, which the person may stop. */
@@ -100,18 +104,20 @@ export async function stopJob(
  * state.
  *
  * @param runtime - The reply reader, the generation registry, the stop
- * requests, and the event reporter.
+ * requests, the wake settings, and the event reporter.
  * @param target - The reply and the conversation expected to hold it.
  * @returns `not-generating` when no generation runs for the reply in that
- * conversation, and nothing is stopped or reported; otherwise `stopped`,
- * once the reply task of the reply and of each stopped job reply settled.
+ * conversation, and nothing is stopped, forgotten, or reported; otherwise
+ * `stopped`, once the reply task of the reply and of each stopped job reply
+ * settled.
  * @throws If the conversation store is closed or a stored identity violates
  * the conversation contract; nothing is stopped then.
  * @remarks The stop is one synchronous step. The reply's generation is
  * found, then the streaming replies whose generations run: the reply itself
  * and those of the jobs below its conversation, at any depth. They are
- * stopped for the person as {@link stopRepliesForPerson} stops them, and
- * one `stop-requested` is reported for the reply's conversation. When the
+ * stopped for the person as {@link stopRepliesForPerson} stops them, which
+ * forgets the wake settings of the reply's conversation, and one
+ * `stop-requested` is reported for that conversation. When the
  * reply already ended while its turn's title task runs, its generation is
  * asked to stop all the same, which leaves the title task running, and the
  * jobs below are stopped; the event does not count the reply then. Another
@@ -141,7 +147,7 @@ export async function stopReplyForPerson(
  * until each stopped reply reached its stored final state.
  *
  * @param runtime - The reply reader, the generation registry, the stop
- * requests, and the event reporter.
+ * requests, the wake settings, and the event reporter.
  * @param conversationId - UUIDv7 of the conversation.
  * @returns A promise that resolves once the reply task of each stopped job
  * reply settled, right away when no job below the conversation works.
@@ -150,9 +156,10 @@ export async function stopReplyForPerson(
  * @remarks The stop is one synchronous step. The streaming replies of the
  * jobs below the conversation, at any depth, whose generations run are
  * found and stopped for the person as {@link stopRepliesForPerson} stops
- * them, and one `stop-requested` is reported for the conversation, also
- * when no job works. The conversation's own replies are left alone. A
- * registry whose disposal began has no running generation.
+ * them, which forgets the conversation's wake settings, and one
+ * `stop-requested` is reported for the conversation, also when no job
+ * works. The conversation's own replies are left alone. A registry whose
+ * disposal began has no running generation.
  */
 export async function stopConversationJobs(
   runtime: PersonStopRuntime,
@@ -236,23 +243,33 @@ function findRunningReplies(
  * Stops running replies for the person and waits until the reply task of
  * each settled.
  *
- * @param runtime - The stop requests and the event reporter.
+ * @param runtime - The stop requests, the wake settings, and the event
+ * reporter.
  * @param conversationId - UUIDv7 of the conversation the person's stop
  * names.
  * @param replies - The running replies to stop.
  * @returns A promise that resolves once the reply task of each reply
  * settled, so its final state is stored.
- * @remarks In one synchronous step, `person` is remembered as the stop
+ * @remarks In one synchronous step, the wake settings of the conversation
+ * are forgotten first, so no wake-up turn starts there until the person
+ * writes again: a stop never wakes the delegator, also when a job's reply
+ * completes by itself as it is asked to stop. Only a main conversation has
+ * wake settings, so a stop that names a job leaves those of its delegator,
+ * whose other jobs still wake it. Then `person` is remembered as the stop
  * requester of each reply, which keeps an earlier request of the delegator
  * and which the reply's end removes, and the reply is asked to stop; then
  * one `stop-requested` is reported for the conversation with the number of
  * replies, also when there are none.
  */
 async function stopRepliesForPerson(
-  runtime: Pick<PersonStopRuntime, "stopRequests" | "reportEvent">,
+  runtime: Pick<
+    PersonStopRuntime,
+    "stopRequests" | "wakeSettings" | "reportEvent"
+  >,
   conversationId: string,
   replies: readonly RunningReply[]
 ): Promise<void> {
+  runtime.wakeSettings.removeWakeSettings(conversationId)
   const replyEnds = replies.map(({ address, generation }) => {
     runtime.stopRequests.addStopRequest(address.assistantMessageId, "person")
     return generation.stopReply()

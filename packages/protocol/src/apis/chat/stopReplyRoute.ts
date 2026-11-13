@@ -18,7 +18,8 @@ const stopChatReplyApiResponseSchemas = Object.freeze({
  * its model request, or `completed` or `failed` when the reply ended before
  * the stop. Followers of the reply receive the `interrupted` event, or have
  * already received the `done` or `error` event that ended it. Stopping a
- * reply also stops every working job of that reply's conversation.
+ * reply also stops every working job of that reply's conversation, and no
+ * wake-up turn starts in that conversation until the person writes again.
  * Title generation for the turn is not cancelled, and a repeated request
  * while that title task runs also returns 204. When no generation is running
  * for the addressed reply, the endpoint returns the reply-not-generating

@@ -10,9 +10,6 @@ export const MAXIMUM_LISTED_TOOL_COUNT = 8
 /** Most tools the tool keeper recommends in one search, inclusive. */
 export const MAXIMUM_RECOMMENDED_TOOL_COUNT = 5
 
-/** Matches the punctuation that joins the words of a tool name. */
-const TOOL_NAME_JOINER_PATTERN = /[_.-]+/g
-
 /** The tools one search of the catalog found. */
 export type ToolMatchList = Readonly<{
   /**
@@ -48,25 +45,43 @@ export type ToolRecommendation =
       status: "full"
     }>
 
-/** Tools of a search that found nothing. */
-const NO_MATCHED_TOOLS: readonly ToolDefinition[] = Object.freeze([])
-
-/** Shared list of a search that found nothing. */
-const NO_TOOL_MATCHES: ToolMatchList = Object.freeze({
-  matches: NO_MATCHED_TOOLS,
-  matchCount: 0
-})
-
 /**
  * Builds the text a tool is ranked by.
  *
  * @param definition - Definition of the tool.
- * @returns Its name with the words split, its group, and its description,
- * so a query finds `send_email` by `email`.
+ * @returns Its name as one word, with each `-` written as `_`, the words of
+ * its name when the name holds more than one, its group, and its
+ * description, so a query finds `send_email` by `email` and by
+ * `send_email`, `createIssue` by `issue` and by `createIssue`, and
+ * `send-email` as it finds `send_email`.
  */
 function buildRankedToolText(definition: ToolDefinition): string {
-  const nameWords = definition.name.replaceAll(TOOL_NAME_JOINER_PATTERN, " ")
-  return `${nameWords} ${definition.group} ${definition.description}`
+  /** Matches a run of `_` or `-`, which splits `send_email`. */
+  const separatorPattern = /[_-]+/g
+  /**
+   * Matches the place between a lowercase letter or digit and an uppercase
+   * letter, which splits `createIssue`.
+   */
+  const wordStartPattern = /(?<=[a-z0-9])(?=[A-Z])/g
+  /**
+   * Matches the place before the last uppercase letter of a run that a
+   * lowercase letter follows, whatever that letter is, which splits
+   * `XMLHttp` before `H`, `exportPDFAsImage` before `A`, and `getURLs`
+   * before `L`.
+   */
+  const acronymEndPattern = /(?<=[A-Z])(?=[A-Z][a-z])/g
+
+  const { name } = definition
+  // The word segmenter splits a name at `-` but keeps `_`, so the whole
+  // name is ranked with `_` to stay one word.
+  const wholeName = name.replaceAll("-", "_")
+  const nameWords = name
+    .replaceAll(separatorPattern, " ")
+    .replaceAll(wordStartPattern, " ")
+    .replaceAll(acronymEndPattern, " ")
+  const rankedName =
+    nameWords === name ? wholeName : `${wholeName} ${nameWords}`
+  return `${rankedName} ${definition.group} ${definition.description}`
 }
 
 /**
@@ -115,24 +130,31 @@ export default class ToolCatalog {
   /**
    * Lists the tools that best match a query.
    *
-   * @param query - Words that describe what a tool must do.
+   * @param query - Words that describe what a tool must do, or a tool's
+   * name; each word is searched as written, ignoring case.
    * @returns The frozen first matches and the number of all matches, ranked
-   * with BM25 over each tool's name words, group, and description, ignoring
-   * case; nothing when the query holds no word or no tool holds one of its
-   * words.
+   * with BM25 over each tool's name, the words of its name, its group, and
+   * its description, ignoring case; nothing when the query holds no word or
+   * no tool holds one of its words.
    */
   public listToolMatches(query: string): ToolMatchList {
+    /** Tools of a search that found nothing. */
+    const noMatchedTools: readonly ToolDefinition[] = Object.freeze([])
+    /** List of a search that found nothing. */
+    const noToolMatches: ToolMatchList = Object.freeze({
+      matches: noMatchedTools,
+      matchCount: 0
+    })
+
     const queryWords = [...new Set(listRankingWords(query))]
     if (queryWords.length === 0 || this.#tools.length === 0)
-      return NO_TOOL_MATCHES
+      return noToolMatches
     const scores = calculateRankingScores(this.#rankedTexts, queryWords)
+    // The sort is stable, so tools with equal scores stay in offer order.
     const ranked = this.#tools
-      .map((tool, index) => ({ tool, index, score: scores[index] ?? 0 }))
+      .map((tool, index) => ({ tool, score: scores[index] ?? 0 }))
       .filter((match) => match.score > 0)
-      .toSorted(
-        (first, second) =>
-          second.score - first.score || first.index - second.index
-      )
+      .toSorted((first, second) => second.score - first.score)
     const matches = Object.freeze(
       ranked.slice(0, MAXIMUM_LISTED_TOOL_COUNT).map((match) => match.tool)
     )
@@ -140,13 +162,13 @@ export default class ToolCatalog {
   }
 
   /**
-   * Recommends one of the asking turn's tools.
+   * Adds one of the asking turn's tools to the recommended ones.
    *
    * @param name - Tool name, compared exactly.
    * @returns `recommended` with the count so far; `already-recommended`,
    * `unknown`, or `full` when nothing changed, checked in that order.
    */
-  public recommendTool(name: string): ToolRecommendation {
+  public addRecommendedTool(name: string): ToolRecommendation {
     if (this.#recommendedNames.has(name))
       return Object.freeze({ status: "already-recommended" })
     if (!this.hasTool(name)) return Object.freeze({ status: "unknown" })

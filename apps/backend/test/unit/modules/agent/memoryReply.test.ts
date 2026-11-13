@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest"
 import MemoryReply from "../../../../src/modules/agent/memoryReply"
 import type { ReplyPartDraft } from "../../../../src/modules/agent/replyPartSequence"
-
-/** Matches a UUIDv7 the reply gave a part. */
-const UUID_V7_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+import { UUID_V7_PATTERN } from "../../support/conversationFixtures"
 
 /** Identifier of the tool call most cases store. */
 const TOOL_CALL_ID = "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f"
@@ -124,6 +121,45 @@ describe("MemoryReply", () => {
       expect(reply.updateReplyToolCall(TOOL_CALL_ID, change)).toBeUndefined()
     }
   )
+
+  it("returns each part frozen, a succeeded call's source numbers included", () => {
+    const reply = new MemoryReply(2)
+
+    const text = reply.createReplyPart({
+      kind: "text",
+      round: 0,
+      content: "Found"
+    })
+    const call = reply.createReplyPart(buildToolCallDraft("running"))
+    const changed = reply.updateReplyToolCall(TOOL_CALL_ID, {
+      status: "succeeded",
+      result: "Listed.",
+      sources: []
+    })
+
+    expect(Object.isFrozen(text)).toBe(true)
+    expect(Object.isFrozen(call)).toBe(true)
+    expect(Object.isFrozen(changed)).toBe(true)
+    expect(
+      changed?.status === "succeeded" && Object.isFrozen(changed.sourceNumbers)
+    ).toBe(true)
+  })
+
+  it("keeps a tool call as it was when a caller tries to change the part it was given", () => {
+    const reply = new MemoryReply(2)
+    const call = reply.createReplyPart(buildToolCallDraft("running"))
+
+    const wasChanged =
+      call !== undefined && Reflect.set(call, "status", "succeeded")
+
+    expect(wasChanged).toBe(false)
+    expect(
+      reply.updateReplyToolCall(TOOL_CALL_ID, {
+        status: "failed",
+        result: "Broke."
+      })
+    ).toMatchObject({ status: "failed", result: "Broke." })
+  })
 
   it("refuses a change of a tool call it does not keep", () => {
     expect(

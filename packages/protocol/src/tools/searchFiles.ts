@@ -172,6 +172,20 @@ export const searchFilesErrorSchema = z.discriminatedUnion("code", [
     code: z.literal("rootInCredentialFolder")
   }),
   buildCodeOnlyFailureSchema({
+    /**
+     * The root's real path is outside every folder the person lets tools
+     * use, so nothing under it was searched.
+     */
+    code: z.literal("rootOutsideApprovedFolders")
+  }),
+  buildCodeOnlyFailureSchema({
+    /**
+     * The folders the person lets tools use cannot be read from Lys's
+     * settings file, so nothing is searched until the file is fixed.
+     */
+    code: z.literal("settingsUnreadable")
+  }),
+  buildCodeOnlyFailureSchema({
     /** The operating system denied access to the root directory. */
     code: z.literal("permissionDenied")
   }),

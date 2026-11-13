@@ -3,7 +3,7 @@ import { describe, expect, it, onTestFinished } from "vitest"
 import { migrateDatabase } from "../../../../src/infrastructure/database/migrations"
 
 /** Schema version produced by the current migration list. */
-const CURRENT_SCHEMA_VERSION = 14
+const CURRENT_SCHEMA_VERSION = 17
 
 /**
  * Opens an empty in-memory database owned by the current test.
@@ -206,17 +206,29 @@ function createVersion11Database(): DatabaseSync {
 }
 
 /**
- * Creates a database at version 12: the current schema without the tool call
- * decision records.
+ * Removes the tool search call records, their indexes, and their trigger,
+ * which version 16 adds.
+ *
+ * @param database - Connection at version 16 or later.
+ */
+function dropToolSearchCallRecords(database: DatabaseSync): void {
+  database.exec(`
+    DROP TRIGGER interrupt_tool_search_calls_after_tool_call_update;
+    DROP TABLE tool_search_call_decisions;
+  `)
+}
+
+/**
+ * Creates a database at version 12: the version-15 schema without the tool
+ * call decision records.
  *
  * @returns A connection at `user_version` 12, closed when the test finishes.
  * @remarks Migration 13 only adds the decision table, its index, and its
- * trigger, and migration 14 only creates them again, so dropping them from a
- * current database leaves exactly the version-12 schema.
+ * trigger, and migrations 14 and 15 only create them again, so dropping
+ * them from a version-15 database leaves exactly the version-12 schema.
  */
 function createVersion12Database(): DatabaseSync {
-  const database = openEmptyDatabase()
-  migrateDatabase(database)
+  const database = createVersion15Database()
   database.exec(`
     DROP TRIGGER update_tool_call_decision_after_tool_call_update;
     DROP TABLE tool_call_decisions;
@@ -225,21 +237,88 @@ function createVersion12Database(): DatabaseSync {
   return database
 }
 
+/** Denial reasons of the current decision tables, in their SQL's words. */
+const CURRENT_DENIAL_REASONS_SQL =
+  "'credential-file', 'outside-approved-folders', 'settings-unreadable', 'blocked-address', 'usage-limit', 'paid-tool-budget'"
+
+/** Denial reasons of the version-16 decision tables, in their SQL's words. */
+const VERSION_16_DENIAL_REASONS_SQL =
+  "'credential-file', 'outside-approved-folders', 'settings-unreadable', 'blocked-address'"
+
+/** Denial reasons of the version-14 decision table, in its SQL's words. */
+const VERSION_14_DENIAL_REASONS_SQL = "'credential-file', 'blocked-address'"
+
+/** Approval reasons of the current decision table, in its SQL's words. */
+const CURRENT_APPROVAL_REASONS_SQL =
+  "policy_reason IN ('destructive-tool', 'open-world-write', 'paid-tool')"
+
+/** Approval reasons of the version-16 decision table, in its SQL's words. */
+const VERSION_16_APPROVAL_REASONS_SQL = "policy_reason = 'destructive-tool'"
+
+/** The policy identity column version 17 adds to both decision tables. */
+const POLICY_ID_COLUMN_PATTERN =
+  /policy_id TEXT CHECK \(\s*policy_id IS NULL OR \(policy_id <> '' AND policy_effect IS NOT NULL\)\s*\),\s*/u
+
 /**
- * Creates a database at version 13: the current schema whose decision
- * records cannot store the answer `expired`.
+ * Replaces one text of an SQL definition, which must hold it.
  *
- * @returns A connection at `user_version` 13, closed when the test finishes.
- * @remarks Migration 14 only creates the decision table again with
- * `expired` added to its answer rule, and its index and trigger again
- * unchanged, so the current table's own SQL without `expired` is the
- * version-13 table.
- * @throws If the current table's SQL no longer lists `expired` after
- * `showFailed`, which this derivation relies on.
+ * @param sql - Definition.
+ * @param text - Text to replace, or a pattern matching it.
+ * @param replacement - Its replacement.
+ * @returns The definition with the text replaced.
+ * @throws If the definition does not hold the text, which the derivations
+ * below rely on.
  */
-function createVersion13Database(): DatabaseSync {
-  const database = openEmptyDatabase()
-  migrateDatabase(database)
+function replaceSqlText(
+  sql: string,
+  text: string | RegExp,
+  replacement: string
+): string {
+  const isHeld = typeof text === "string" ? sql.includes(text) : text.test(sql)
+  if (!isHeld) throw new Error(`The SQL no longer holds ${String(text)}`)
+  return sql.replace(text, replacement)
+}
+
+/** Schema objects of one decision table that a migration creates again. */
+type DecisionTableObjects = Readonly<{
+  /** The table. */
+  table: string
+  /** Its indexes. */
+  indexes: readonly string[]
+  /** The trigger whose body names it. */
+  trigger: string
+}>
+
+/** The tool call decision records' table, index, and trigger. */
+const TOOL_CALL_DECISION_OBJECTS = Object.freeze({
+  table: "tool_call_decisions",
+  indexes: ["tool_call_decisions_conversation_idx"],
+  trigger: "update_tool_call_decision_after_tool_call_update"
+} satisfies DecisionTableObjects)
+
+/** The tool search call records' table, indexes, and trigger. */
+const TOOL_SEARCH_CALL_DECISION_OBJECTS = Object.freeze({
+  table: "tool_search_call_decisions",
+  indexes: [
+    "tool_search_call_decisions_search_call_idx",
+    "tool_search_call_decisions_conversation_idx"
+  ],
+  trigger: "interrupt_tool_search_calls_after_tool_call_update"
+} satisfies DecisionTableObjects)
+
+/**
+ * Creates an empty decision table again with changed rules, and its indexes
+ * and trigger again unchanged.
+ *
+ * @param database - Connection holding the table, without rows in it.
+ * @param objects - The table and the objects that go with it.
+ * @param editTableSql - Changes the table's SQL into the wanted one.
+ */
+function recreateDecisionTable(
+  database: DatabaseSync,
+  objects: DecisionTableObjects,
+  editTableSql: (tableSql: string) => string
+): void {
   const readSql = (name: string): string => {
     const row = database
       .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
@@ -247,24 +326,141 @@ function createVersion13Database(): DatabaseSync {
     if (typeof row?.sql !== "string") throw new Error(`${name} has no SQL`)
     return row.sql
   }
-  const tableSql = readSql("tool_call_decisions")
-  const indexSql = readSql("tool_call_decisions_conversation_idx")
-  const triggerSql = readSql("update_tool_call_decision_after_tool_call_update")
-  const version13TableSql = tableSql.replace(
-    "'showFailed', 'expired'",
-    "'showFailed'"
-  )
-  if (version13TableSql === tableSql)
-    throw new Error("The decision table's answer rule changed")
+  const tableSql = readSql(objects.table)
+  const indexSqls = objects.indexes.map(readSql)
+  const triggerSql = readSql(objects.trigger)
   database.exec(`
-    DROP TRIGGER update_tool_call_decision_after_tool_call_update;
-    DROP TABLE tool_call_decisions;
+    DROP TRIGGER ${objects.trigger};
+    DROP TABLE ${objects.table};
   `)
-  database.exec(version13TableSql)
-  database.exec(indexSql)
+  database.exec(editTableSql(tableSql))
+  for (const indexSql of indexSqls) database.exec(indexSql)
   database.exec(triggerSql)
-  database.exec("PRAGMA user_version = 13")
+}
+
+/**
+ * Changes a current decision table's SQL into the version-16 one.
+ *
+ * @param tableSql - The current table's SQL.
+ * @returns The SQL without the policy identity column, the denials
+ * `usage-limit` and `paid-tool-budget`, and the approval reasons
+ * `open-world-write` and `paid-tool`, where the table holds them.
+ */
+function revertVersion17TableSql(tableSql: string): string {
+  const version16Sql = replaceSqlText(
+    replaceSqlText(tableSql, POLICY_ID_COLUMN_PATTERN, ""),
+    CURRENT_DENIAL_REASONS_SQL,
+    VERSION_16_DENIAL_REASONS_SQL
+  )
+  return version16Sql.includes(CURRENT_APPROVAL_REASONS_SQL)
+    ? version16Sql.replace(
+        CURRENT_APPROVAL_REASONS_SQL,
+        VERSION_16_APPROVAL_REASONS_SQL
+      )
+    : version16Sql
+}
+
+/**
+ * Creates a database at version 16: the current schema whose decision
+ * tables cannot store the policy's identity, its usage and budget denials,
+ * or its open-world and paid-tool approval reasons.
+ *
+ * @returns A connection at `user_version` 16, closed when the test finishes.
+ * @remarks Migration 17 only creates both decision tables again with the
+ * column and the values added, and their indexes and triggers again
+ * unchanged, so the current tables' own SQL without them is each
+ * version-16 table.
+ */
+function createVersion16Database(): DatabaseSync {
+  const database = openEmptyDatabase()
+  migrateDatabase(database)
+  recreateDecisionTable(
+    database,
+    TOOL_CALL_DECISION_OBJECTS,
+    revertVersion17TableSql
+  )
+  recreateDecisionTable(
+    database,
+    TOOL_SEARCH_CALL_DECISION_OBJECTS,
+    revertVersion17TableSql
+  )
+  database.exec("PRAGMA user_version = 16")
   return database
+}
+
+/**
+ * Creates a database at an earlier version whose decision table differs
+ * from the version-15 one only in its rules.
+ *
+ * @param version - The version.
+ * @param editTableSql - Changes the version-15 table's SQL into the
+ * version's.
+ * @returns A connection at `user_version` `version`, closed when the test
+ * finishes.
+ * @remarks Migrations 14 and 15 only create the decision table again with
+ * one more allowed value, and its index and trigger again unchanged, so
+ * the version-15 table's own SQL without those values is each earlier
+ * table.
+ */
+function createDecisionTableVersionDatabase(
+  version: number,
+  editTableSql: (tableSql: string) => string
+): DatabaseSync {
+  const database = createVersion15Database()
+  recreateDecisionTable(database, TOOL_CALL_DECISION_OBJECTS, editTableSql)
+  database.exec(`PRAGMA user_version = ${version}`)
+  return database
+}
+
+/**
+ * Creates a database at version 15: the version-16 schema without the tool
+ * search call records.
+ *
+ * @returns A connection at `user_version` 15, closed when the test finishes.
+ * @remarks Migration 16 only adds the tool search call records.
+ */
+function createVersion15Database(): DatabaseSync {
+  const database = createVersion16Database()
+  dropToolSearchCallRecords(database)
+  database.exec("PRAGMA user_version = 15")
+  return database
+}
+
+/**
+ * Creates a database at version 14: the version-15 schema whose decision
+ * records cannot store the denial reasons `outside-approved-folders` and
+ * `settings-unreadable`.
+ *
+ * @returns A connection at `user_version` 14, closed when the test finishes.
+ */
+function createVersion14Database(): DatabaseSync {
+  return createDecisionTableVersionDatabase(14, (tableSql) =>
+    replaceSqlText(
+      tableSql,
+      VERSION_16_DENIAL_REASONS_SQL,
+      VERSION_14_DENIAL_REASONS_SQL
+    )
+  )
+}
+
+/**
+ * Creates a database at version 13: the version-14 schema whose decision
+ * records cannot store the answer `expired` either.
+ *
+ * @returns A connection at `user_version` 13, closed when the test finishes.
+ */
+function createVersion13Database(): DatabaseSync {
+  return createDecisionTableVersionDatabase(13, (tableSql) =>
+    replaceSqlText(
+      replaceSqlText(
+        tableSql,
+        VERSION_16_DENIAL_REASONS_SQL,
+        VERSION_14_DENIAL_REASONS_SQL
+      ),
+      "'showFailed', 'expired'",
+      "'showFailed'"
+    )
+  )
 }
 
 /**
@@ -296,6 +492,74 @@ function saveToolCallDecision(database: DatabaseSync, values: string): void {
     INSERT INTO tool_call_decisions (call_id, conversation_id, agent_code, tool_name, policy_effect, policy_reason, approval_mode, answer, outcome, created_at, updated_at)
     VALUES ('p1', 'c1', 'caliginia', 'web_search', ${values}, 'awaiting-approval', '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z')
   `)
+}
+
+/**
+ * Stores, in a migrated database, conversation `c1` under `caliginia` with
+ * one streaming reply `a1` and its running `find_tools` call `f1`, which
+ * started a tool search.
+ *
+ * @param database - Connection at version 16 or later.
+ */
+function saveRunningSearchCall(database: DatabaseSync): void {
+  database.exec(`
+    INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
+    VALUES ('c1', NULL, 'caliginia', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    INSERT INTO conversation_messages (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
+    VALUES ('a1', 'c1', 'assistant', 'model', '', 'streaming', NULL, '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z');
+    INSERT INTO conversation_messages (id, conversation_id, role, reply_id, position, round, content, status, tool_name, tool_arguments, created_at, updated_at)
+    VALUES ('f1', 'c1', 'tool_call', 'a1', 0, 0, '', 'running', 'find_tools', '{}', '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z')
+  `)
+}
+
+/**
+ * Stores the record of one call of the search {@link saveRunningSearchCall}
+ * started.
+ *
+ * @param database - Connection holding {@link saveRunningSearchCall}'s rows.
+ * @param callId - Identity of the search's call.
+ * @param values - SQL values of `policy_effect`, `policy_reason`,
+ * `outcome`, and `updated_at`, in that order.
+ */
+function saveToolSearchCallRecord(
+  database: DatabaseSync,
+  callId: string,
+  values: string
+): void {
+  database.exec(`
+    INSERT INTO tool_search_call_decisions (call_id, search_call_id, conversation_id, agent_code, tool_name, argument_text, created_at, policy_effect, policy_reason, outcome, updated_at)
+    VALUES ('${callId}', 'f1', 'c1', 'armitage', 'search_tools', '{"query":"web"}', '2026-01-04T00:00:00.000Z', ${values})
+  `)
+}
+
+/**
+ * Adds the policy identity that migration 17 gives every record stored
+ * before it.
+ *
+ * @param records - Records read before the migration.
+ * @returns The records with a null `policy_id`.
+ */
+function addNullPolicyId(
+  records: readonly Record<string, unknown>[]
+): Record<string, unknown>[] {
+  return records.map((record) => ({ ...record, policy_id: null }))
+}
+
+/**
+ * Lists the stored tool search call records.
+ *
+ * @param database - Open connection.
+ * @returns Each record's call, outcome, and update time, by call.
+ */
+function listToolSearchCallOutcomes(
+  database: DatabaseSync
+): Record<string, unknown>[] {
+  return database
+    .prepare(
+      `SELECT call_id AS callId, outcome, updated_at AS updatedAt
+      FROM tool_search_call_decisions ORDER BY call_id`
+    )
+    .all()
 }
 
 /**
@@ -516,9 +780,11 @@ describe("migrateDatabase", () => {
       "conversation_messages",
       "conversation_sources",
       "conversations",
-      "tool_call_decisions"
+      "tool_call_decisions",
+      "tool_search_call_decisions"
     ])
     expect(listSchemaObjects(database, "trigger")).toEqual([
+      "interrupt_tool_search_calls_after_tool_call_update",
       "update_conversation_after_message_insert",
       "update_conversation_after_message_update",
       "update_conversation_updated_at",
@@ -527,7 +793,9 @@ describe("migrateDatabase", () => {
     expect(listSchemaObjects(database, "index")).toEqual([
       "conversation_messages_conversation_idx",
       "conversation_messages_reply_part_idx",
-      "tool_call_decisions_conversation_idx"
+      "tool_call_decisions_conversation_idx",
+      "tool_search_call_decisions_conversation_idx",
+      "tool_search_call_decisions_search_call_idx"
     ])
     expect(database.isTransaction).toBe(false)
   })
@@ -699,6 +967,7 @@ describe("migrateDatabase", () => {
         .get()
     ).toEqual(activityTimeBefore)
     expect(listSchemaObjects(database, "trigger")).toEqual([
+      "interrupt_tool_search_calls_after_tool_call_update",
       "update_conversation_after_message_insert",
       "update_conversation_after_message_update",
       "update_conversation_updated_at",
@@ -1591,6 +1860,7 @@ describe("migrateDatabase", () => {
       "tool_name",
       "policy_effect",
       "policy_reason",
+      "policy_id",
       "approval_mode",
       "answer",
       "outcome",
@@ -1629,7 +1899,17 @@ describe("migrateDatabase", () => {
         "'allow', NULL, 'ask-me', 'showFailed'",
       "a destructive call the person declined":
         "'require-approval', 'destructive-tool', 'just-run', 'declined'",
-      "a call whose prompt expired": "'allow', NULL, 'ask-me', 'expired'"
+      "a call whose prompt expired": "'allow', NULL, 'ask-me', 'expired'",
+      "a call naming a path outside the approved folders":
+        "'deny', 'outside-approved-folders', NULL, NULL",
+      "a call naming a path while the approved folders cannot be read":
+        "'deny', 'settings-unreadable', NULL, NULL",
+      "a call past the usage limit": "'deny', 'usage-limit', NULL, NULL",
+      "a paid call past the budget": "'deny', 'paid-tool-budget', NULL, NULL",
+      "an open-world write the person allowed":
+        "'require-approval', 'open-world-write', 'just-run', 'allowed'",
+      "a paid call the person allowed":
+        "'require-approval', 'paid-tool', 'ask-me', 'allowed'"
     })
   )("stores the decision record of %s", (_label, values) => {
     const database = openEmptyDatabase()
@@ -1656,6 +1936,8 @@ describe("migrateDatabase", () => {
       "a denial without a reason": "'deny', NULL, NULL, NULL",
       "a denial with another rule's reason":
         "'deny', 'destructive-tool', NULL, NULL",
+      "a required approval with a denial's reason":
+        "'require-approval', 'paid-tool-budget', 'ask-me', NULL",
       "a denial with a mode": "'deny', 'blocked-address', 'ask-me', NULL",
       "a required approval without its reason":
         "'require-approval', NULL, 'ask-me', NULL",
@@ -1711,7 +1993,7 @@ describe("migrateDatabase", () => {
     migrateDatabase(database)
 
     expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
-    expect(readRecords()).toEqual(version13Records)
+    expect(readRecords()).toEqual(addNullPolicyId(version13Records))
     expect(listSchemaObjects(database, "index")).toContain(
       "tool_call_decisions_conversation_idx"
     )
@@ -1727,6 +2009,71 @@ describe("migrateDatabase", () => {
       }
     ])
   })
+
+  it("upgrades a version-14 database by letting a decision record store the denials outside-approved-folders and settings-unreadable, keeping every record, its index, and its trigger", () => {
+    const database = createVersion14Database()
+    saveWaitingToolCall(database)
+    saveToolCallDecision(database, "'allow', NULL, 'ask-me', 'expired'")
+    const readRecords = () =>
+      database.prepare("SELECT * FROM tool_call_decisions").all()
+    const version14Records = readRecords()
+    const denyOutside =
+      "UPDATE tool_call_decisions SET policy_effect = 'deny', policy_reason = 'outside-approved-folders', approval_mode = NULL, answer = NULL WHERE call_id = 'p1'"
+    const denyUnreadable = denyOutside.replace(
+      "outside-approved-folders",
+      "settings-unreadable"
+    )
+    expect(() => database.exec(denyOutside)).toThrow(/constraint failed/)
+    expect(() => database.exec(denyUnreadable)).toThrow(/constraint failed/)
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
+    expect(readRecords()).toEqual(addNullPolicyId(version14Records))
+    expect(listSchemaObjects(database, "index")).toContain(
+      "tool_call_decisions_conversation_idx"
+    )
+    database.exec(denyUnreadable)
+    database.exec(denyOutside)
+    database.exec(
+      "UPDATE conversation_messages SET status = 'failed', content = 'Denied.', updated_at = '2026-01-04T00:00:00.000Z' WHERE id = 'p1'"
+    )
+    expect(readRecords()).toMatchObject([
+      {
+        policy_reason: "outside-approved-folders",
+        outcome: "failed",
+        updated_at: "2026-01-04T00:00:00.000Z"
+      }
+    ])
+  })
+
+  it.each(
+    Object.entries({
+      "an empty policy identity": ["'allow'", "''"],
+      "a policy identity without an effect": ["NULL", "'lys-policy-v1'"]
+    })
+  )(
+    "refuses a decision record and a search call's record with %s",
+    (_label, [effect, policyId]) => {
+      const database = openEmptyDatabase()
+      migrateDatabase(database)
+      saveRunningSearchCall(database)
+      const at = "'2026-01-04T00:00:00.000Z'"
+
+      expect(() =>
+        database.exec(`
+          INSERT INTO tool_call_decisions (call_id, conversation_id, agent_code, tool_name, policy_effect, policy_id, outcome, created_at, updated_at)
+          VALUES ('f1', 'c1', 'caliginia', 'find_tools', ${effect}, ${policyId}, 'running', ${at}, ${at})
+        `)
+      ).toThrow(/constraint failed/)
+      expect(() =>
+        database.exec(`
+          INSERT INTO tool_search_call_decisions (call_id, search_call_id, conversation_id, agent_code, tool_name, argument_text, policy_effect, policy_id, outcome, created_at, updated_at)
+          VALUES ('s1', 'f1', 'c1', 'armitage', 'search_tools', '{}', ${effect}, ${policyId}, 'running', ${at}, ${at})
+        `)
+      ).toThrow(/constraint failed/)
+    }
+  )
 
   it("copies each status change of a call into its decision record with the call's update time", () => {
     const database = openEmptyDatabase()
@@ -1767,6 +2114,200 @@ describe("migrateDatabase", () => {
     saveToolCallDecision(database, "NULL, NULL, NULL, NULL")
     database.exec("DELETE FROM conversations WHERE id = 'c1'")
     expect(listToolCallDecisionOutcomes(database)).toEqual([])
+  })
+
+  it("upgrades a version-15 database by adding the tool search call records, keeping every decision record", () => {
+    const database = createVersion15Database()
+    saveWaitingToolCall(database)
+    saveToolCallDecision(database, "'allow', NULL, 'ask-me', NULL")
+    const readRecords = () =>
+      database.prepare("SELECT * FROM tool_call_decisions").all()
+    const version15Records = readRecords()
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
+    expect(readRecords()).toEqual(addNullPolicyId(version15Records))
+    expect(listSchemaObjects(database, "table")).toContain(
+      "tool_search_call_decisions"
+    )
+    expect(listToolSearchCallOutcomes(database)).toEqual([])
+  })
+
+  it("stores a search call's record for each decision a search's call can have, and refuses one that asks the person or waits for them", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    saveRunningSearchCall(database)
+    const at = "'2026-01-04T00:00:00.000Z'"
+
+    saveToolSearchCallRecord(database, "s1", `'allow', NULL, 'running', ${at}`)
+    saveToolSearchCallRecord(
+      database,
+      "s2",
+      `'deny', 'credential-file', 'failed', ${at}`
+    )
+    saveToolSearchCallRecord(database, "s3", `NULL, NULL, 'failed', ${at}`)
+    const refused = {
+      approval: `'require-approval', 'destructive-tool', 'running', ${at}`,
+      waiting: `'allow', NULL, 'awaiting-approval', ${at}`,
+      reasonlessDenial: `'deny', NULL, 'failed', ${at}`,
+      allowedWithReason: `'allow', 'credential-file', 'running', ${at}`
+    }
+    for (const values of Object.values(refused))
+      expect(() => saveToolSearchCallRecord(database, "s4", values)).toThrow(
+        /constraint failed/
+      )
+    expect(listToolSearchCallOutcomes(database)).toMatchObject([
+      { callId: "s1", outcome: "running" },
+      { callId: "s2", outcome: "failed" },
+      { callId: "s3", outcome: "failed" }
+    ])
+  })
+
+  it("marks a search's calls still running as interrupted when its find_tools call stops running, keeping the later update time", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    saveRunningSearchCall(database)
+    saveToolSearchCallRecord(
+      database,
+      "s1",
+      "'allow', NULL, 'running', '2026-01-05T00:00:00.000Z'"
+    )
+    saveToolSearchCallRecord(
+      database,
+      "s2",
+      "'allow', NULL, 'succeeded', '2026-01-05T00:00:00.000Z'"
+    )
+    saveToolSearchCallRecord(
+      database,
+      "s3",
+      "'allow', NULL, 'running', '2026-01-07T00:00:00.000Z'"
+    )
+
+    database.exec(
+      "UPDATE conversation_messages SET updated_at = '2026-01-06T00:00:00.000Z' WHERE id = 'f1'"
+    )
+    expect(listToolSearchCallOutcomes(database)).toMatchObject([
+      { outcome: "running" },
+      { outcome: "succeeded" },
+      { outcome: "running" }
+    ])
+    database.exec(
+      "UPDATE conversation_messages SET status = 'interrupted' WHERE id = 'f1'"
+    )
+
+    expect(listToolSearchCallOutcomes(database)).toEqual([
+      {
+        callId: "s1",
+        outcome: "interrupted",
+        updatedAt: "2026-01-06T00:00:00.000Z"
+      },
+      {
+        callId: "s2",
+        outcome: "succeeded",
+        updatedAt: "2026-01-05T00:00:00.000Z"
+      },
+      {
+        callId: "s3",
+        outcome: "interrupted",
+        updatedAt: "2026-01-07T00:00:00.000Z"
+      }
+    ])
+  })
+
+  it("deletes a search call's record with its find_tools call, and with its conversation", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    saveRunningSearchCall(database)
+    const saveRecord = () =>
+      saveToolSearchCallRecord(
+        database,
+        "s1",
+        "'allow', NULL, 'running', '2026-01-04T00:00:00.000Z'"
+      )
+    saveRecord()
+
+    database.exec("DELETE FROM conversation_messages WHERE id = 'f1'")
+    expect(listToolSearchCallOutcomes(database)).toEqual([])
+
+    database.exec(`
+      INSERT INTO conversation_messages (id, conversation_id, role, reply_id, position, round, content, status, tool_name, tool_arguments, created_at, updated_at)
+      VALUES ('f1', 'c1', 'tool_call', 'a1', 0, 0, '', 'running', 'find_tools', '{}', '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z')
+    `)
+    saveRecord()
+    database.exec("DELETE FROM conversations WHERE id = 'c1'")
+    expect(listToolSearchCallOutcomes(database)).toEqual([])
+  })
+
+  it("upgrades a version-16 database by letting both decision tables store the policy's identity and its usage, budget, open-world, and paid-tool rules, keeping every record, its indexes, and its trigger", () => {
+    const database = createVersion16Database()
+    saveRunningSearchCall(database)
+    saveToolSearchCallRecord(
+      database,
+      "s1",
+      "'allow', NULL, 'running', '2026-01-04T00:00:00.000Z'"
+    )
+    database.exec(`
+      INSERT INTO conversation_messages (id, conversation_id, role, reply_id, position, round, content, status, tool_name, tool_arguments, created_at, updated_at)
+      VALUES ('p1', 'c1', 'tool_call', 'a1', 1, 0, '', 'awaiting-approval', 'web_search', '{}', '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z')
+    `)
+    saveToolCallDecision(database, "'allow', NULL, 'ask-me', NULL")
+    const readRecords = (table: string) =>
+      database.prepare(`SELECT * FROM ${table} ORDER BY call_id`).all()
+    const version16DecisionRecords = readRecords("tool_call_decisions")
+    const version16SearchRecords = readRecords("tool_search_call_decisions")
+    const askPaid =
+      "UPDATE tool_call_decisions SET policy_effect = 'require-approval', policy_reason = 'paid-tool', policy_id = 'lys-policy-v1' WHERE call_id = 'p1'"
+    const denyUsage =
+      "UPDATE tool_search_call_decisions SET policy_effect = 'deny', policy_reason = 'usage-limit', policy_id = 'lys-policy-v1' WHERE call_id = 's1'"
+    expect(() => database.exec(askPaid)).toThrow(/no such column: policy_id/)
+    expect(() =>
+      database.exec(askPaid.replace(", policy_id = 'lys-policy-v1'", ""))
+    ).toThrow(/constraint failed/)
+    expect(() =>
+      database.exec(denyUsage.replace(", policy_id = 'lys-policy-v1'", ""))
+    ).toThrow(/constraint failed/)
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
+    expect(readRecords("tool_call_decisions")).toEqual(
+      addNullPolicyId(version16DecisionRecords)
+    )
+    expect(readRecords("tool_search_call_decisions")).toEqual(
+      addNullPolicyId(version16SearchRecords)
+    )
+    expect(listSchemaObjects(database, "index")).toEqual(
+      expect.arrayContaining([
+        "tool_call_decisions_conversation_idx",
+        "tool_search_call_decisions_conversation_idx",
+        "tool_search_call_decisions_search_call_idx"
+      ])
+    )
+    database.exec(askPaid)
+    database.exec(denyUsage)
+    database.exec(
+      "UPDATE conversation_messages SET status = 'running', updated_at = '2026-01-05T00:00:00.000Z' WHERE id = 'p1'"
+    )
+    database.exec(
+      "UPDATE conversation_messages SET status = 'succeeded', updated_at = '2026-01-06T00:00:00.000Z' WHERE id = 'f1'"
+    )
+    expect(readRecords("tool_call_decisions")).toMatchObject([
+      {
+        policy_reason: "paid-tool",
+        policy_id: "lys-policy-v1",
+        outcome: "running",
+        updated_at: "2026-01-05T00:00:00.000Z"
+      }
+    ])
+    expect(readRecords("tool_search_call_decisions")).toMatchObject([
+      {
+        policy_reason: "usage-limit",
+        policy_id: "lys-policy-v1",
+        outcome: "interrupted",
+        updated_at: "2026-01-06T00:00:00.000Z"
+      }
+    ])
   })
 
   it("rejects a database created by a newer version without changing it", () => {

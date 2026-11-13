@@ -552,7 +552,8 @@ The backend decides which tool calls need the person: every call the
 that is not saved as Just run, client, backend, and MCP tools alike, except
 `read_attachment`, the agent state tools, and `find_tools`, which run without
 approval, and every call the policy requires approval of, of an MCP tool its
-server marks as destructive, even on Just run. A tool `find_tools` found is
+server marks as destructive or as an open-world write, and of `web_search`
+from a reply's sixth call on, even on Just run. A tool `find_tools` found is
 asked about like any other. It shows such a call with a `tool-approval`
 event, and the client answers it with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`,
@@ -822,7 +823,8 @@ Before it asks the person, the backend checks the shape of a call's arguments,
 a JSON object of at most 256 KiB, nesting at most 32 levels, whose keys follow
 the argument name rule and include every name the schema requires, and the
 [tool call policy](/architecture/backend/#tool-call-policy) denies a call that
-names a credential file or a blocked address. The server checks the values.
+names a credential file, a path outside the approved folders, or a blocked
+address. The server checks the values.
 
 ### The email server's tools
 

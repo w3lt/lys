@@ -64,6 +64,7 @@ function buildToolChoices(
 ): ToolSettings {
   return {
     switches: new Map(Object.entries(switches)),
+    approvedFolderPaths: [],
     justRunToolNames: new Set(justRunToolNames)
   }
 }

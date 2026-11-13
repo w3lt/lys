@@ -646,7 +646,24 @@ or switched off has no rows, and its tools come back once it connects; see
 [MCP servers](#mcp-servers). A switch or approval saved for a tool its server
 no longer lists is kept and has no effect.
 
-Below the tools, a "your location" section holds the location `get_location`
+Below the tools and the save status, a "folders tools may use" section lists
+the folders the person lets tool calls name paths in
+(`ApprovedFoldersCard.tsx`), each with Remove, named for its path, and a
+Folder field with Add folder. With none listed, it says tools may use any
+file Lys can read. Enter or Add folder adds the trimmed path when it passes
+`approvedFolderPathSchema` from `@lys/share` (it starts with `/`, has at most
+1024 characters, and no tab or other control character) and is not listed yet; otherwise the field
+is marked invalid and described by what to change, until the person types
+again. Remove moves focus to the field. Whether the folder exists is not
+checked. The section stays shown while the tools are read or cannot be read,
+and the tool lock does not apply to it. A change applies to the store at once
+and saves the `tools` group like a switch, reported by the same save status;
+the store writes the list as `tools.approvedFolders`, left out when empty. The
+backend and the desktop's [file tools](/architecture/host/#file-tools) read
+it from the file at each round of tool calls; see
+[Tool call policy](/architecture/backend/#tool-call-policy).
+
+Below them, a "your location" section holds the location `get_location`
 returns: City, Region, and Country fields, each labelled, described by the
 hint "Each field is optional and holds up to 100 characters.", and filled
 with the saved location. The section stays shown while the tools are read or
@@ -1057,7 +1074,8 @@ call the [tool call policy](/architecture/backend/#tool-call-policy) allows of
 a tool that is not saved as Just run, client, backend, and MCP tools alike,
 except `read_attachment`, the agent state tools, and `find_tools`, which run
 without approval, and every call of an MCP tool its server marks as
-destructive, even on Just run (see the
+destructive or as an open-world write, and of `web_search` from a reply's
+sixth call on, even on Just run (see the
 [backend's tool approval](/architecture/backend/#tool-approval)). The desktop
 does not decide; it reads neither the switches nor the saved Just run list
 when a call arrives.

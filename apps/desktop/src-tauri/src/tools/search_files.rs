@@ -5,8 +5,10 @@
 //! directory tree breadth-first without following symbolic links, compares
 //! names and lines case-insensitively, and stops at fixed result and scan
 //! budgets so that one request cannot read an unbounded amount of the disk.
-//! It never starts inside a credential folder, and it leaves credential files
-//! and folders and Lys's settings file out of its walk.
+//! It never starts inside a credential folder or outside the folders the
+//! person lets tools use, and it leaves credential files and folders, Lys's
+//! settings file, and the copies of it that stopped saves left out of its
+//! walk.
 
 use std::{
     collections::VecDeque,
@@ -19,7 +21,10 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use crate::utils::lys_home::LysHome;
+
 use super::{
+    approved_folders::{ApprovedFolderRefusal, ApprovedFolders},
     credential_files::{CredentialFiles, FileIdentity},
     definition::{
         ToolAccess, ToolArgumentDefinition, ToolArgumentType, ToolDefinition, ToolGroup, ToolRunner,
@@ -137,6 +142,12 @@ pub enum SearchFilesError {
     /// The root's real path has a private key or credential file or folder
     /// name as a part, so nothing under it is searched.
     RootInCredentialFolder,
+    /// The root's real path is outside every folder the person lets tools
+    /// use, so nothing under it is searched.
+    RootOutsideApprovedFolders,
+    /// The folders the person lets tools use cannot be read from Lys's
+    /// settings file, so nothing is searched until the file is fixed.
+    SettingsUnreadable,
     /// The operating system denied access to the root directory.
     PermissionDenied,
     /// The query is empty or contains only whitespace.
@@ -265,15 +276,22 @@ struct FileSearch {
     max_snippets_per_file: usize,
     /// Names the walk leaves out, and the check of every file it reads.
     credential_files: CredentialFiles,
+    /// Folders every file the walk reads must be inside, as when the search
+    /// was parsed.
+    approved_folders: ApprovedFolders,
     /// Identity of Lys's settings file when the search was parsed, or `None`
     /// when there was none; the walk leaves the file out.
     settings_file: Option<FileIdentity>,
+    /// Identity of the folder that holds Lys's settings file when the search
+    /// was parsed, or `None` when there was none; the walk leaves out the
+    /// copies of the settings file that stopped saves left in it.
+    settings_folder: Option<FileIdentity>,
 }
 
 /// One directory entry, classified without following symbolic links.
 ///
-/// A credential file or folder, or Lys's settings file, is
-/// [`ListedEntry::Ignored`] whatever its type.
+/// A credential file or folder, Lys's settings file, or a copy of it that a
+/// stopped save left, is [`ListedEntry::Ignored`] whatever its type.
 enum ListedEntry {
     /// A subdirectory, searched after the current directory level.
     Directory(PathBuf),
@@ -282,8 +300,8 @@ enum ListedEntry {
     /// An entry whose type could not be read or whose path is not valid UTF-8.
     Unexaminable,
     /// A symbolic link, FIFO, socket, or device, or a credential file or
-    /// folder, or Lys's settings file, which is never followed, read, or
-    /// reported.
+    /// folder, Lys's settings file, or a copy of it that a stopped save left,
+    /// which is never followed, read, or reported.
     Ignored,
 }
 
@@ -351,8 +369,10 @@ struct SearchTally {
 ///
 /// The renderer invokes this command as `find_files` with the argument object
 /// `{ filter }`. Any absolute root that the desktop process can list is
-/// accepted, except one whose real path `credential_files` refuses: whether
-/// Lys may search any other directory is decided by the caller that runs tool
+/// accepted, except one whose real path `credential_files` refuses, and one
+/// whose real path is outside the folders the person lets tools use, which
+/// are read from the settings file of `lys_home` for every call: whether Lys
+/// may search any other directory is decided by the caller that runs tool
 /// requests. Nothing is modified. The search runs on Tauri's blocking-task
 /// pool so the window stays responsive; it cannot be cancelled and is bounded
 /// by the result, entry, and content-byte budgets reported through
@@ -364,8 +384,14 @@ struct SearchTally {
 pub async fn find_files(
     filter: SearchFilesFilter,
     credential_files: State<'_, CredentialFiles>,
+    lys_home: State<'_, LysHome>,
 ) -> Result<SearchFilesReport, SearchFilesError> {
-    find_files_in_background(filter, credential_files.inner().clone()).await
+    find_files_in_background(
+        filter,
+        credential_files.inner().clone(),
+        lys_home.settings_path(),
+    )
+    .await
 }
 
 /// Searches with `filter` on Tauri's blocking-task pool.
@@ -373,14 +399,17 @@ pub async fn find_files(
 /// # Errors
 ///
 /// Rejects with a [`SearchFilesError`] when the filter is invalid, the root is
-/// missing, not a directory, inside a credential folder, or cannot be listed,
-/// or the search task fails.
+/// missing, not a directory, inside a credential folder, outside the folders
+/// saved in the settings file at `settings_path`, or cannot be listed, or the
+/// search task fails.
 async fn find_files_in_background(
     filter: SearchFilesFilter,
     credential_files: CredentialFiles,
+    settings_path: PathBuf,
 ) -> Result<SearchFilesReport, SearchFilesError> {
     let search_task = tauri::async_runtime::spawn_blocking(move || {
-        find_files_under_root(filter, credential_files)
+        let approved_folders = ApprovedFolders::read(&settings_path);
+        find_files_under_root(filter, credential_files, approved_folders)
     });
 
     match search_task.await {
@@ -399,17 +428,19 @@ async fn find_files_in_background(
 fn find_files_under_root(
     filter: SearchFilesFilter,
     credential_files: CredentialFiles,
+    approved_folders: ApprovedFolders,
 ) -> Result<SearchFilesReport, SearchFilesError> {
-    let search = parse_search_files_filter(filter, credential_files)?;
+    let search = parse_search_files_filter(filter, credential_files, approved_folders)?;
 
     Ok(find_matching_files(&search))
 }
 
-/// Parses a raw filter into a search that `credential_files` limits, applying
-/// the documented defaults.
+/// Parses a raw filter into a search that `credential_files` and
+/// `approved_folders` limit, applying the documented defaults.
 ///
 /// The query and limits are checked before the root is inspected on disk.
-/// The identity of Lys's settings file is looked up once, after the root.
+/// The identities of Lys's settings file and of the folder that holds it are
+/// looked up once, after the root.
 ///
 /// # Errors
 ///
@@ -418,6 +449,7 @@ fn find_files_under_root(
 fn parse_search_files_filter(
     filter: SearchFilesFilter,
     credential_files: CredentialFiles,
+    approved_folders: ApprovedFolders,
 ) -> Result<FileSearch, SearchFilesError> {
     let folded_query = parse_search_query(&filter.query)?;
     let max_results = filter.max_results.unwrap_or(DEFAULT_MAX_RESULTS);
@@ -438,8 +470,9 @@ fn parse_search_files_filter(
         });
     }
 
-    let root = parse_search_root(filter.root, &credential_files)?;
+    let root = parse_search_root(filter.root, &credential_files, &approved_folders)?;
     let settings_file = credential_files.find_settings_file();
+    let settings_folder = credential_files.find_settings_folder();
 
     Ok(FileSearch {
         root,
@@ -448,7 +481,9 @@ fn parse_search_files_filter(
         max_results,
         max_snippets_per_file,
         credential_files,
+        approved_folders,
         settings_file,
+        settings_folder,
     })
 }
 
@@ -478,11 +513,13 @@ fn parse_search_query(query: &str) -> Result<String, SearchFilesError> {
 }
 
 /// Validates that `root` is an absolute path to a directory that the desktop
-/// process can list and that is not inside a credential folder.
+/// process can list, that is not inside a credential folder, and that is
+/// inside an approved folder.
 ///
 /// Symbolic links in the root path are followed. The root's real path, with
 /// every link resolved, must have no part that `credential_files` names a
-/// credential. The directory is then listed once to prove access and closed.
+/// credential, and `approved_folders` must hold it. The directory is then
+/// listed once to prove access and closed.
 /// The root keeps the form it was given in, so reported paths start with it.
 ///
 /// # Errors
@@ -491,11 +528,14 @@ fn parse_search_query(query: &str) -> Result<String, SearchFilesError> {
 /// [`SearchFilesError::RootNotFound`],
 /// [`SearchFilesError::RootNotADirectory`],
 /// [`SearchFilesError::RootInCredentialFolder`],
+/// [`SearchFilesError::RootOutsideApprovedFolders`],
+/// [`SearchFilesError::SettingsUnreadable`],
 /// [`SearchFilesError::PermissionDenied`], or
 /// [`SearchFilesError::SearchFailed`] for any other operating-system failure.
 fn parse_search_root(
     root: PathBuf,
     credential_files: &CredentialFiles,
+    approved_folders: &ApprovedFolders,
 ) -> Result<PathBuf, SearchFilesError> {
     if !root.is_absolute() {
         return Err(SearchFilesError::RootNotAbsolute);
@@ -512,6 +552,13 @@ fn parse_search_root(
     if credential_files.holds_credential_part(&real_root) {
         return Err(SearchFilesError::RootInCredentialFolder);
     }
+
+    approved_folders
+        .check_real_path(&real_root)
+        .map_err(|refusal| match refusal {
+            ApprovedFolderRefusal::Outside => SearchFilesError::RootOutsideApprovedFolders,
+            ApprovedFolderRefusal::SettingsUnreadable => SearchFilesError::SettingsUnreadable,
+        })?;
 
     fs::read_dir(&root).map_err(build_root_error)?;
 
@@ -618,7 +665,8 @@ fn list_directory_entries(directory: &Path, search: &FileSearch) -> io::Result<V
 /// Classifies one directory entry without following symbolic links.
 ///
 /// An entry with a credential name is ignored before its type is read, and a
-/// regular file that is Lys's settings file is ignored too.
+/// regular file that is Lys's settings file, or a copy of it that a stopped
+/// save left, is ignored too.
 fn build_listed_entry(entry: &DirEntry, search: &FileSearch) -> ListedEntry {
     if search
         .credential_files
@@ -639,7 +687,11 @@ fn build_listed_entry(entry: &DirEntry, search: &FileSearch) -> ListedEntry {
         return ListedEntry::Ignored;
     }
 
-    if is_settings_file_entry(entry, search.settings_file) {
+    if is_settings_file_entry(entry, search.settings_file)
+        || search
+            .credential_files
+            .is_settings_file_copy(&entry.path(), search.settings_folder)
+    {
         return ListedEntry::Ignored;
     }
 
@@ -734,6 +786,7 @@ fn read_content_snippets(path: &str, search: &FileSearch) -> ContentScan {
         Path::new(path),
         MAX_SEARCHED_FILE_SIZE_BYTES,
         &search.credential_files,
+        &search.approved_folders,
     ) {
         Ok(content) => ContentScan {
             outcome: ContentScanOutcome::Read {
@@ -751,8 +804,9 @@ fn read_content_snippets(path: &str, search: &FileSearch) -> ContentScan {
 /// Builds the totals outcome of a file whose content could not be searched.
 ///
 /// Content that is not UTF-8 was still read, so its bytes count toward the
-/// content budget. A credential file reaches a read only when the tree
-/// changed after it was listed, and counts as unreadable.
+/// content budget. A credential file, or a file outside the approved
+/// folders, reaches a read only when the tree changed after it was listed,
+/// and counts as unreadable.
 fn build_unsearched_content_outcome(error: TextFileReadError) -> ContentScanOutcome {
     match error {
         TextFileReadError::NotUtf8 { size_bytes } => ContentScanOutcome::Read { size_bytes },
@@ -761,6 +815,8 @@ fn build_unsearched_content_outcome(error: TextFileReadError) -> ContentScanOutc
         | TextFileReadError::PermissionDenied
         | TextFileReadError::NotARegularFile
         | TextFileReadError::CredentialFile
+        | TextFileReadError::OutsideApprovedFolders
+        | TextFileReadError::SettingsUnreadable
         | TextFileReadError::Io(_) => ContentScanOutcome::Unreadable,
     }
 }
@@ -885,7 +941,7 @@ pub(super) fn build_search_files_definition() -> ToolDefinition {
     ToolDefinition {
         name: "search_files",
         description: String::from(
-            "Find files under a directory whose name or content contains the query, ignoring case. Returns each matching file's absolute path and, for content matches, its first matching lines with their line numbers. Private key and credential files and folders, and Lys's settings file, are never searched or returned.",
+            "Find files under a directory whose name or content contains the query, ignoring case. Returns each matching file's absolute path and, for content matches, its first matching lines with their line numbers. Private key and credential files and folders, and Lys's settings file and its leftover copies, are never searched or returned. When the person listed the folders tools may use, a directory outside them is refused.",
         ),
         group: ToolGroup::Files,
         access: ToolAccess::Reads,
@@ -969,7 +1025,10 @@ mod tests {
         MAX_SEARCHED_FILE_SIZE_BYTES, MAX_SNIPPETS_PER_FILE_LIMIT, MAX_SNIPPET_CHARS,
         SEARCH_FILES_TARGET_VALUES,
     };
-    use crate::tools::{credential_files::CredentialFiles, test_directory::TestDirectory};
+    use crate::tools::{
+        approved_folders::ApprovedFolders, credential_files::CredentialFiles,
+        test_directory::TestDirectory,
+    };
 
     /// Deserializes `filter` as Tauri does for the `filter` argument and finds
     /// files as the `find_files` command does, for a Lys home without a
@@ -982,16 +1041,35 @@ mod tests {
     }
 
     /// Deserializes `filter` and finds files as the `find_files` command does,
-    /// with `credential_files`, blocking until the search completes.
+    /// with `credential_files` and no settings file, so no folder is listed,
+    /// blocking until the search completes.
     fn find_files_with(
         filter: Value,
         credential_files: CredentialFiles,
     ) -> Result<SearchFilesReport, SearchFilesError> {
+        find_files_in_folders(filter, credential_files, Path::new(MISSING_SETTINGS_PATH))
+    }
+
+    /// Deserializes `filter` and finds files as the `find_files` command does,
+    /// with `credential_files` and the folders listed in the settings file at
+    /// `settings_path`, blocking until the search completes.
+    fn find_files_in_folders(
+        filter: Value,
+        credential_files: CredentialFiles,
+        settings_path: &Path,
+    ) -> Result<SearchFilesReport, SearchFilesError> {
         let filter: SearchFilesFilter =
             serde_json::from_value(filter).expect("a filter that deserializes");
 
-        tauri::async_runtime::block_on(find_files_in_background(filter, credential_files))
+        tauri::async_runtime::block_on(find_files_in_background(
+            filter,
+            credential_files,
+            settings_path.to_path_buf(),
+        ))
     }
+
+    /// Settings path of a Lys home without a settings file.
+    const MISSING_SETTINGS_PATH: &str = "/nonexistent/lys-test/settings.json";
 
     /// Deserializes and parses `filter` without searching.
     fn parse_filter(filter: Value) -> Result<FileSearch, SearchFilesError> {
@@ -1001,6 +1079,7 @@ mod tests {
         parse_search_files_filter(
             filter,
             CredentialFiles::load_for_test_without_settings_file(),
+            ApprovedFolders::Any,
         )
     }
 
@@ -1137,6 +1216,61 @@ mod tests {
                 root.display()
             );
         }
+    }
+
+    #[test]
+    fn searches_under_an_approved_folder_and_refuses_a_root_beside_it_or_linked_out() {
+        let directory = TestDirectory::create("search-approved-folders");
+        let app = directory.create_subdirectory("work/app");
+        directory.create_file("work/app/notes.txt", "todo\n");
+        let beside = directory.create_subdirectory("work/app-old");
+        let outside = directory.create_subdirectory("other");
+        let link_out = app.join("other");
+        symlink(&outside, &link_out).expect("link a folder outside");
+        let settings_path = directory.create_file(
+            "lys/settings.json",
+            json!({ "tools": { "approvedFolders": [get_path_text(&app)] } }).to_string(),
+        );
+        let search = |root: &Path| {
+            find_files_in_folders(
+                json!({ "root": get_path_text(root), "query": "todo", "target": "content" }),
+                CredentialFiles::load_for_test(settings_path.clone()),
+                &settings_path,
+            )
+        };
+
+        let report = search(&app).expect("a search inside the approved folder");
+        assert_eq!(
+            list_match_paths(&report),
+            [get_path_text(&app.join("notes.txt"))]
+        );
+        for root in [&beside, &outside, &link_out, &directory.path().join("work")] {
+            assert_eq!(
+                search(root).err(),
+                Some(SearchFilesError::RootOutsideApprovedFolders),
+                "{} is outside the approved folder",
+                root.display()
+            );
+        }
+    }
+
+    #[test]
+    fn searches_nothing_when_the_settings_file_cannot_be_parsed() {
+        let directory = TestDirectory::create("search-unparsed-settings");
+        let work = directory.create_subdirectory("work");
+        directory.create_file("work/notes.txt", "todo\n");
+        let settings_path = directory.create_file("lys/settings.json", "{ not json");
+
+        let search_result = find_files_in_folders(
+            json!({ "root": get_path_text(&work), "query": "todo", "target": "content" }),
+            CredentialFiles::load_for_test_without_settings_file(),
+            &settings_path,
+        );
+
+        assert_eq!(
+            search_result.err(),
+            Some(SearchFilesError::SettingsUnreadable)
+        );
     }
 
     #[test]
@@ -1504,6 +1638,37 @@ mod tests {
     }
 
     #[test]
+    fn leaves_a_leftover_copy_of_the_settings_file_out_but_not_its_name_elsewhere() {
+        let directory = TestDirectory::create("search-settings-copy");
+        let settings_path = directory.create_file("lys/settings.json", "todo");
+        directory.create_file("lys/settings.json.4242.0.tmp", "todo");
+        directory.create_file("lys/todo.txt", "todo");
+        let same_name_elsewhere = directory.create_file("notes/settings.json.4242.0.tmp", "todo");
+        let todo_path = directory.path().join("lys/todo.txt");
+        let elsewhere = get_path_text(&same_name_elsewhere);
+        let content_matches = vec![get_path_text(&todo_path), elsewhere.clone()];
+
+        for (target, query, expected) in [
+            ("name", "settings", vec![elsewhere]),
+            ("content", "todo", content_matches.clone()),
+            ("nameAndContent", "todo", content_matches),
+        ] {
+            let report = find_files_with(
+                json!({
+                    "root": get_path_text(directory.path()),
+                    "query": query,
+                    "target": target
+                }),
+                CredentialFiles::load_for_test(settings_path.clone()),
+            )
+            .expect("a completed search");
+
+            assert_eq!(list_match_paths(&report), expected, "target {target}");
+            assert_eq!(report.skipped_path_count, 0);
+        }
+    }
+
+    #[test]
     fn leaves_credential_files_out_of_a_root_reached_through_a_link() {
         let directory = TestDirectory::create("search-linked-root");
         let real_root = directory.create_subdirectory("real");
@@ -1707,7 +1872,9 @@ mod tests {
             max_results: 10,
             max_snippets_per_file: 3,
             credential_files: CredentialFiles::load_for_test_without_settings_file(),
+            approved_folders: ApprovedFolders::Any,
             settings_file: None,
+            settings_folder: None,
         };
         let find_stop = |scanned_entry_count: usize, scanned_content_bytes: u64| {
             let tally = SearchTally {

@@ -93,7 +93,7 @@ On startup the database owner:
 1. Opens the SQLite file with foreign keys enabled.
 2. Acquires a write transaction and reads `PRAGMA user_version`.
 3. Rejects unsupported future versions or applies each missing migration in order.
-4. Records the latest version, 13, and commits; a migration failure rolls back
+4. Records the latest version, 17, and commits; a migration failure rolls back
    all pending work.
 5. Switches to write-ahead logging with `synchronous = NORMAL`. A database from
    a newer version was refused in step 3, before anything changed its file.
@@ -125,7 +125,14 @@ free. Version 13 adds `tool_call_decisions`, one record per tool call of how
 the backend decided it, with a trigger that copies each status change of the
 call into its record; a call stored before it has no record. Version 14
 creates that table again, copying every row, so a record may also store the
-answer `expired`.
+answer `expired`, and version 15 does the same so it may store the denials
+`outside-approved-folders` and `settings-unreadable`. Version 16 adds
+`tool_search_call_decisions`, one record per tool call of a tool search's
+reply, such as Armitage's, under the `find_tools` call that ran the search,
+with a trigger that marks the search's calls still running as interrupted
+when that call stops running. Version 17 creates both decision tables again,
+copying every row, so a record may store the identity of the policy's rule
+set and the policy's usage, budget, open-world, and paid-tool reasons.
 Turn creation is atomic and first interrupts a reply still streaming in the same
 conversation: the turn service runs it as one callback inside one write
 transaction of the turn records, which refuse every call once the callback
@@ -138,7 +145,10 @@ rename back. Every reply part, fragment, tool call change, and source is
 committed before it is sent to any stream following the reply. A tool call's
 decision record is written in the transaction that stores the call, and the
 answer that moves a waiting call on in the transaction that changes it; see
-[Database schemas](/reference/schema/#tool_call_decisions). The fragment
+[Database schemas](/reference/schema/#tool_call_decisions). A tool search's
+reply is kept in memory, so each of its calls is recorded in a transaction of
+its own when the reply keeps it, before it can run, and its end in another;
+see [`tool_search_call_decisions`](/reference/schema/#tool_search_call_decisions). The fragment
 `UPDATE`, like every statement, is compiled on its first use and reused; each
 write runs in one write transaction, guarded by the reply still streaming.
 Finalizing a reply marks its waiting and running tool calls interrupted in
@@ -147,8 +157,8 @@ the same transaction.
 ## Settings ownership
 
 The settings JSON is a separate host-managed artifact. The backend reads only
-the Tavily API key, the Just run list (`tools.justRun`), and the `mcp` group
-from it, and never writes it. The desktop reaches it through Tauri commands.
+the Tavily API key, the Just run list (`tools.justRun`), the approved folders
+(`tools.approvedFolders`), and the `mcp` group from it, and never writes it. The desktop reaches it through Tauri commands.
 
 Generation, load configuration, tool approval, and runtime startup switch
 edits are saved automatically. Each save reads the document already on disk

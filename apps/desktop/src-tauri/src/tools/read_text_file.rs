@@ -1,11 +1,14 @@
 //! The `read_text_file` tool, which reads one complete UTF-8 text file for Lys.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::State;
 
+use crate::utils::lys_home::LysHome;
+
 use super::{
+    approved_folders::ApprovedFolders,
     credential_files::CredentialFiles,
     definition::{
         ToolAccess, ToolArgumentDefinition, ToolArgumentType, ToolDefinition, ToolGroup, ToolRunner,
@@ -48,9 +51,15 @@ pub enum ReadTextFileError {
     /// regular file.
     NotAFile,
     /// The file's real path has a private key or credential file or folder
-    /// name as a part, or the file is Lys's settings file, so none of it is
-    /// read.
+    /// name as a part, or the file is Lys's settings file or a copy of it
+    /// that a stopped save left, so none of it is read.
     CredentialFile,
+    /// The file's real path is outside every folder the person lets tools
+    /// use, so none of it is read.
+    OutsideApprovedFolders,
+    /// The folders the person lets tools use cannot be read from Lys's
+    /// settings file, so no file is read until the file is fixed.
+    SettingsUnreadable,
     /// The file is larger than the read limit, so none of it is returned.
     FileTooLarge {
         /// Smallest size in bytes the file was observed to have.
@@ -74,7 +83,9 @@ pub enum ReadTextFileError {
 ///
 /// The renderer invokes this command as `read_text_file` with the argument
 /// object `{ path }`. Any absolute path that the desktop process can read is
-/// accepted, except a file that `credential_files` refuses by its real path:
+/// accepted, except a file that `credential_files` refuses by its real path,
+/// and a file whose real path is outside the folders the person lets tools
+/// use, which are read from the settings file of `lys_home` for every call:
 /// whether Lys may read any other path is decided by the caller that runs
 /// tool requests. Symbolic links are followed and the file is never
 /// modified. The read runs on Tauri's blocking-task pool so the window stays
@@ -86,8 +97,14 @@ pub enum ReadTextFileError {
 pub async fn read_text_file(
     path: String,
     credential_files: State<'_, CredentialFiles>,
+    lys_home: State<'_, LysHome>,
 ) -> Result<String, ReadTextFileError> {
-    read_text_file_in_background(path, credential_files.inner().clone()).await
+    read_text_file_in_background(
+        path,
+        credential_files.inner().clone(),
+        lys_home.settings_path(),
+    )
+    .await
 }
 
 /// Reads the text file at `path` on Tauri's blocking-task pool.
@@ -96,14 +113,18 @@ pub async fn read_text_file(
 ///
 /// Rejects with a [`ReadTextFileError`] when the path is relative, nothing
 /// exists there, access is denied, it is not a regular file, it is a
-/// credential file or Lys's settings file, the file exceeds the read limit or
-/// is not UTF-8, or the read fails.
+/// credential file, Lys's settings file, or a copy of it that a stopped save
+/// left, it is outside the folders saved in the settings file at
+/// `settings_path`, the file exceeds the read limit or is not UTF-8, or the
+/// read fails.
 async fn read_text_file_in_background(
     path: String,
     credential_files: CredentialFiles,
+    settings_path: PathBuf,
 ) -> Result<String, ReadTextFileError> {
     let read_task = tauri::async_runtime::spawn_blocking(move || {
-        read_text_file_at(Path::new(&path), &credential_files)
+        let approved_folders = ApprovedFolders::read(&settings_path);
+        read_text_file_at(Path::new(&path), &credential_files, &approved_folders)
     });
 
     match read_task.await {
@@ -123,13 +144,19 @@ async fn read_text_file_in_background(
 fn read_text_file_at(
     path: &Path,
     credential_files: &CredentialFiles,
+    approved_folders: &ApprovedFolders,
 ) -> Result<String, ReadTextFileError> {
     if !path.is_absolute() {
         return Err(ReadTextFileError::PathNotAbsolute);
     }
 
-    read_regular_text_file(path, MAX_TEXT_FILE_SIZE_BYTES, credential_files)
-        .map_err(build_read_text_file_error)
+    read_regular_text_file(
+        path,
+        MAX_TEXT_FILE_SIZE_BYTES,
+        credential_files,
+        approved_folders,
+    )
+    .map_err(build_read_text_file_error)
 }
 
 /// Builds the command failure that reports a failed text-file read.
@@ -139,6 +166,8 @@ fn build_read_text_file_error(error: TextFileReadError) -> ReadTextFileError {
         TextFileReadError::PermissionDenied => ReadTextFileError::PermissionDenied,
         TextFileReadError::NotARegularFile => ReadTextFileError::NotAFile,
         TextFileReadError::CredentialFile => ReadTextFileError::CredentialFile,
+        TextFileReadError::OutsideApprovedFolders => ReadTextFileError::OutsideApprovedFolders,
+        TextFileReadError::SettingsUnreadable => ReadTextFileError::SettingsUnreadable,
         TextFileReadError::TooLarge { size_bytes } => ReadTextFileError::FileTooLarge {
             size_bytes,
             max_size_bytes: MAX_TEXT_FILE_SIZE_BYTES,
@@ -167,7 +196,7 @@ pub(super) fn build_read_text_file_definition() -> ToolDefinition {
     ToolDefinition {
         name: "read_text_file",
         description: format!(
-            "Read one UTF-8 text file and return its complete text. A file over {max_size_mebibytes} MiB or one that is not UTF-8 text is refused, never truncated. Private key and credential files, and Lys's settings file, are refused, wherever a link leads."
+            "Read one UTF-8 text file and return its complete text. A file over {max_size_mebibytes} MiB or one that is not UTF-8 text is refused, never truncated. Private key and credential files, and Lys's settings file and its leftover copies, are refused, wherever a link leads, and so is a file outside the folders the person lets tools use, when they listed any."
         ),
         group: ToolGroup::Files,
         access: ToolAccess::Reads,
@@ -198,16 +227,32 @@ mod tests {
     }
 
     /// Reads the file at `path` as the `read_text_file` command does, with
-    /// `credential_files`, blocking until the read completes.
+    /// `credential_files` and no settings file, so no folder is listed,
+    /// blocking until the read completes.
     fn read_text_file_with(
         path: &str,
         credential_files: CredentialFiles,
     ) -> Result<String, ReadTextFileError> {
+        read_text_file_in_folders(path, credential_files, Path::new(MISSING_SETTINGS_PATH))
+    }
+
+    /// Reads the file at `path` as the `read_text_file` command does, with
+    /// `credential_files` and the folders listed in the settings file at
+    /// `settings_path`, blocking until the read completes.
+    fn read_text_file_in_folders(
+        path: &str,
+        credential_files: CredentialFiles,
+        settings_path: &Path,
+    ) -> Result<String, ReadTextFileError> {
         tauri::async_runtime::block_on(read_text_file_in_background(
             path.to_owned(),
             credential_files,
+            settings_path.to_path_buf(),
         ))
     }
+
+    /// Settings path of a Lys home without a settings file.
+    const MISSING_SETTINGS_PATH: &str = "/nonexistent/lys-test/settings.json";
 
     /// Returns the UTF-8 form of a test path.
     fn get_path_text(path: &Path) -> &str {
@@ -276,6 +321,58 @@ mod tests {
     }
 
     #[test]
+    fn reads_inside_an_approved_folder_and_refuses_beside_it_or_through_a_link_out() {
+        let directory = TestDirectory::create("read-approved-folders");
+        let app = directory.create_subdirectory("work/app");
+        let inside = directory.create_file("work/app/notes.txt", "inside\n");
+        let beside = directory.create_file("work/app-old/notes.txt", "beside\n");
+        let outside = directory.create_file("other/notes.txt", "outside\n");
+        let link_out = app.join("other.txt");
+        symlink(&outside, &link_out).expect("create the test symlink");
+        let settings_path = directory.create_file(
+            "lys/settings.json",
+            serde_json::json!({ "tools": { "approvedFolders": [get_path_text(&app)] } })
+                .to_string(),
+        );
+        let read = |path: &Path| {
+            read_text_file_in_folders(
+                get_path_text(path),
+                CredentialFiles::load_for_test(settings_path.clone()),
+                &settings_path,
+            )
+        };
+
+        assert_eq!(read(&inside), Ok(String::from("inside\n")));
+        assert_eq!(
+            read(&app.join("../app/notes.txt")),
+            Ok(String::from("inside\n"))
+        );
+        for path in [&beside, &outside, &link_out] {
+            assert_eq!(
+                read(path),
+                Err(ReadTextFileError::OutsideApprovedFolders),
+                "{path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_every_file_as_unreadable_settings_when_the_settings_file_cannot_be_parsed() {
+        let directory = TestDirectory::create("read-unparsed-settings");
+        let file = directory.create_file("notes.txt", "notes\n");
+        let settings_path = directory.create_file("lys/settings.json", "{ not json");
+
+        assert_eq!(
+            read_text_file_in_folders(
+                get_path_text(&file),
+                CredentialFiles::load_for_test_without_settings_file(),
+                &settings_path,
+            ),
+            Err(ReadTextFileError::SettingsUnreadable)
+        );
+    }
+
+    #[test]
     fn refuses_the_settings_file_and_a_link_to_it() {
         let directory = TestDirectory::create("read-settings-file");
         let settings_path = directory.create_file("lys/settings.json", "{}\n");
@@ -291,6 +388,40 @@ mod tests {
                 Err(ReadTextFileError::CredentialFile)
             );
         }
+    }
+
+    #[test]
+    fn refuses_a_leftover_copy_of_the_settings_file_and_a_link_to_it() {
+        let directory = TestDirectory::create("read-settings-copy");
+        let settings_path = directory.create_file("lys/settings.json", "{}\n");
+        let copy = directory.create_file("lys/settings.json.4242.0.tmp", "{}\n");
+        let link = directory.path().join("notes.json");
+        symlink(&copy, &link).expect("create the test symlink");
+
+        for path in [&copy, &link] {
+            assert_eq!(
+                read_text_file_with(
+                    get_path_text(path),
+                    CredentialFiles::load_for_test(settings_path.clone())
+                ),
+                Err(ReadTextFileError::CredentialFile)
+            );
+        }
+    }
+
+    #[test]
+    fn reads_a_file_named_like_a_leftover_copy_in_another_folder() {
+        let directory = TestDirectory::create("read-settings-copy-name");
+        let settings_path = directory.path().join("lys/settings.json");
+        let file = directory.create_file("notes/settings.json.4242.0.tmp", "notes\n");
+
+        assert_eq!(
+            read_text_file_with(
+                get_path_text(&file),
+                CredentialFiles::load_for_test(settings_path)
+            ),
+            Ok(String::from("notes\n"))
+        );
     }
 
     #[test]

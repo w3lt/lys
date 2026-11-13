@@ -53,6 +53,7 @@ import {
 import { ROOMY_CONTEXT_LENGTH } from "./replyContextMeterFakes"
 import { ScriptedBuiltInToolProvider } from "./scriptedBuiltInToolProvider"
 import { createOwnedMcpServerProcessGroups } from "./mcpServerProcessGroups"
+import SqliteToolSearchCallRecordWriter from "../../../src/infrastructure/database/conversations/sqliteToolSearchCallRecordWriter"
 
 /** Published path of the chat route. */
 const CHAT_PATH = "/api/v1/chat"
@@ -134,6 +135,11 @@ export type ChatRouteTestApp = TestFastify &
      * case configures it and applies the settings.
      */
     readMcpSettings: Mock<() => Promise<McpSettingsRead>>
+    /**
+     * Read access to the in-memory conversation database the services store
+     * on, for records no service reads, such as the tool call decisions.
+     */
+    database: DatabaseReader
   }>
 
 /**
@@ -177,6 +183,8 @@ type SpiedChatRouteTestServices = Readonly<{
   services: ChatRouteTestServices
   /** Spies inside the services, which a case configures or inspects. */
   spies: ChatRouteTestSpies
+  /** Read access to the conversation database the services store on. */
+  database: DatabaseReader
 }>
 
 /** A chat service and the spies that replace its model calls. */
@@ -288,7 +296,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
     rmSync(attachmentsDirectoryPath, { recursive: true, force: true })
   })
   const testFastify = await createChatSseTestApp()
-  const { services, spies } = await createChatRouteTestServices(
+  const { services, spies, database } = await createChatRouteTestServices(
     attachmentsDirectoryPath
   )
   const generations = new ReplyGenerationRegistry()
@@ -305,7 +313,8 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
       () => services.llmRuntimeService.connectedLlmProviderAccess
     ),
     attachmentsDirectoryPath,
-    generations
+    generations,
+    database
   })
 }
 
@@ -316,7 +325,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
  *
  * @param attachmentsDirectoryPath - Directory the attachment file store
  * keeps its files under; the caller owns it.
- * @returns The services and their spies.
+ * @returns The services, their spies, and read access to their database.
  * @throws If the LLM runtime service cannot connect.
  * @remarks When the test finishes, the MCP server registry closes first,
  * then the LLM runtime service is disposed, and the database closes last.
@@ -365,7 +374,8 @@ async function createChatRouteTestServices(
       listDownloadedLlmModels: llm.listDownloadedLlmModels,
       readJustRunToolNames,
       readMcpSettings: mcp.readMcpSettings
-    })
+    }),
+    database: conversation.database
   })
 }
 
@@ -488,7 +498,10 @@ function createTestAgentServices(
       buildConversationTitleLookup(
         conversation.history.getConversation(conversationId)
       ),
-    requestLimits: TEST_AGENT_REQUEST_LIMITS
+    requestLimits: TEST_AGENT_REQUEST_LIMITS,
+    toolSearchCallRecords: new SqliteToolSearchCallRecordWriter(
+      conversation.database
+    )
   })
   return Object.freeze({ agentService, agentRuntimeService })
 }

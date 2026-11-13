@@ -4,7 +4,9 @@
 //! The names come from `packages/protocol/src/tools/credentialFiles.json`,
 //! which the backend's tool call policy reads too, so both sides refuse the
 //! same names. Lys's own settings file, which holds its API keys and
-//! passwords, is recognized by its identity on disk instead of its name.
+//! passwords, is recognized by its identity on disk instead of its name, and
+//! a temporary copy of it that a stopped save left by its name and the
+//! identity of the folder that holds it.
 
 use std::{
     ffi::OsStr,
@@ -15,6 +17,8 @@ use std::{
 };
 
 use serde::Deserialize;
+
+use crate::settings::is_temporary_file_name;
 
 /// The shared credential file list, embedded when the host is built.
 const CREDENTIAL_FILE_LIST_JSON: &str =
@@ -67,7 +71,7 @@ impl FileIdentity {
 }
 
 /// The files the file tools refuse: every path that has a credential name as
-/// a part, and Lys's settings file.
+/// a part, Lys's settings file, and the copies of it that stopped saves left.
 ///
 /// Built once at startup and managed by Tauri. Cloning shares the parsed
 /// list.
@@ -148,13 +152,61 @@ impl CredentialFiles {
             .map(|metadata| FileIdentity::of(&metadata))
     }
 
+    /// Finds the identity of the folder that holds Lys's settings file,
+    /// following symbolic links.
+    ///
+    /// Returns `None` when the folder does not exist or cannot be looked up;
+    /// no save can then have left a copy in it.
+    pub fn find_settings_folder(&self) -> Option<FileIdentity> {
+        let settings_folder = self.settings_path.parent()?;
+
+        fs::metadata(settings_folder)
+            .ok()
+            .map(|metadata| FileIdentity::of(&metadata))
+    }
+
+    /// Answers whether the file at `path` is a temporary copy of Lys's
+    /// settings file that a stopped save left: its name has the form
+    /// [`is_temporary_file_name`] gives for the settings file's name, and the
+    /// folder that holds it is the settings file's folder, whose identity is
+    /// `settings_folder`.
+    ///
+    /// The folder is looked up only for a name of that form, following
+    /// symbolic links; a folder that cannot be looked up counts as the
+    /// settings file's. Without a settings folder, no file is a copy.
+    pub fn is_settings_file_copy(
+        &self,
+        path: &Path,
+        settings_folder: Option<FileIdentity>,
+    ) -> bool {
+        let (Some(settings_folder), Some(name), Some(settings_file_name)) = (
+            settings_folder,
+            path.file_name(),
+            self.settings_path.file_name(),
+        ) else {
+            return false;
+        };
+
+        if !is_temporary_file_name(name, settings_file_name) {
+            return false;
+        }
+
+        path.parent()
+            .and_then(|folder| fs::metadata(folder).ok())
+            .is_none_or(|metadata| FileIdentity::of(&metadata) == settings_folder)
+    }
+
     /// Answers whether the file at the real path `real_path`, whose identity
-    /// is `identity`, is a credential file or Lys's settings file.
+    /// is `identity`, is a credential file, Lys's settings file, or a copy of
+    /// it that a stopped save left.
     ///
     /// `real_path` must have no symbolic link left in it, as
-    /// [`fs::canonicalize`] returns it.
+    /// [`fs::canonicalize`] returns it, so a link to a copy is judged by the
+    /// copy's own name and folder.
     pub fn refuses_real_file(&self, real_path: &Path, identity: FileIdentity) -> bool {
-        self.holds_credential_part(real_path) || self.find_settings_file() == Some(identity)
+        self.holds_credential_part(real_path)
+            || self.find_settings_file() == Some(identity)
+            || self.is_settings_file_copy(real_path, self.find_settings_folder())
     }
 }
 
@@ -184,7 +236,7 @@ mod tests {
     use std::{
         ffi::OsStr,
         fs,
-        os::unix::ffi::OsStrExt,
+        os::unix::{ffi::OsStrExt, fs::symlink},
         path::{Path, PathBuf},
     };
 
@@ -287,6 +339,50 @@ mod tests {
         assert!(credential_files.refuses_real_file(&settings_path, identity_of(&settings_path)));
         assert!(credential_files.refuses_real_file(&hard_link, identity_of(&hard_link)));
         assert!(!credential_files.refuses_real_file(&other_path, identity_of(&other_path)));
+    }
+
+    #[test]
+    fn refuses_a_leftover_copy_of_the_settings_file_in_its_folder_only() {
+        let directory = TestDirectory::create("credential-settings-copy");
+        let settings_path = directory.create_file("lys/settings.json", "{}");
+        let copy = directory.create_file("lys/settings.json.4242.0.tmp", "{}");
+        let backup = directory.create_file("lys/settings.json.bak", "{}");
+        let same_name_elsewhere = directory.create_file("notes/settings.json.4242.0.tmp", "{}");
+        let credential_files = CredentialFiles::load_for_test(settings_path);
+        let identity_of = |path: &Path| FileIdentity::of(&fs::metadata(path).expect("metadata"));
+
+        assert!(credential_files.refuses_real_file(&copy, identity_of(&copy)));
+        assert!(!credential_files.refuses_real_file(&backup, identity_of(&backup)));
+        assert!(!credential_files
+            .refuses_real_file(&same_name_elsewhere, identity_of(&same_name_elsewhere)));
+    }
+
+    #[test]
+    fn refuses_a_leftover_copy_without_a_settings_file_and_through_a_linked_home() {
+        let directory = TestDirectory::create("credential-settings-copy-home");
+        let copy = directory.create_file("lys/settings.json.4242.0.tmp", "{}");
+        let linked_home = directory.path().join("linked-lys");
+        symlink(directory.path().join("lys"), &linked_home).expect("link the Lys home");
+        let identity = FileIdentity::of(&fs::metadata(&copy).expect("metadata"));
+
+        for settings_path in [
+            directory.path().join("lys/settings.json"),
+            linked_home.join("settings.json"),
+        ] {
+            let credential_files = CredentialFiles::load_for_test(settings_path);
+
+            assert_eq!(credential_files.find_settings_file(), None);
+            assert!(credential_files.refuses_real_file(&copy, identity));
+        }
+    }
+
+    #[test]
+    fn finds_no_copy_without_a_settings_folder() {
+        let credential_files = CredentialFiles::load_for_test_without_settings_file();
+        let copy = Path::new("/nonexistent/lys/settings.json.4242.0.tmp");
+
+        assert_eq!(credential_files.find_settings_folder(), None);
+        assert!(!credential_files.is_settings_file_copy(copy, None));
     }
 
     #[test]

@@ -304,6 +304,10 @@ export async function* readChatReplyEvents(
  * `not-generating` when no generation was running for it.
  * @throws A caller-safe error when the backend cannot be reached or answers
  * with an undeclared response.
+ * @remarks When the reply was generating, the backend also stops every
+ * working job below its conversation, at any depth, and starts no wake-up
+ * reply in that conversation until the person writes again. A job is
+ * stopped through its latest reply.
  */
 export async function stopChatReply(
   target: ChatReplyPathParams,

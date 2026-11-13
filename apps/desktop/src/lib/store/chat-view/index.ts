@@ -1,4 +1,5 @@
 import type {
+  ActivityEvent,
   ChatApiRequestBody,
   ChatApiStreamEvent,
   ChatGenerationEvent,
@@ -8,7 +9,8 @@ import type {
 } from "@lys/protocol"
 import {
   CALIGINIA_AGENT_CODE,
-  type ConversationAssistantMessageStatus
+  type ConversationAssistantMessageStatus,
+  type Job
 } from "@lys/share"
 import { create, type StoreApi, type UseBoundStore } from "zustand"
 
@@ -17,8 +19,10 @@ import {
   readChatEvents,
   readChatReplyEvents,
   stopChatReply,
+  stopConversationJobs,
   type ChatApiOptions,
-  type StopChatReplyResult
+  type StopChatReplyResult,
+  type StopConversationJobsResult
 } from "@/lib/apis/http/chat"
 import {
   getConversation,
@@ -104,6 +108,8 @@ export type ChatReplyStream = (
  * @returns The stop outcome after the backend stored the reply's final state
  * or reported that it was not generating.
  * @throws If the backend cannot be reached or answers unexpectedly.
+ * @remarks When the reply was generating, the backend also stops every
+ * working job below its conversation, at any depth.
  */
 export type ChatReplyStopper = (
   target: ChatReplyPathParams
@@ -128,8 +134,8 @@ export type StoredConversationReader = (
  *
  * @remarks The store owns request and open tokens and their abort controllers;
  * these dependencies provide only transport, stored-conversation reads, reply
- * stops, timestamps, model-selection, what the loaded model can take as
- * attachments, generation-settings, and tool-offer capabilities, and hand
+ * and job stops, timestamps, model-selection, what the loaded model can take
+ * as attachments, generation-settings, and tool-offer capabilities, and hand
  * replies to the tool-call store.
  * Aborting a store-owned signal ends only the store's observation; the
  * backend keeps generating. The store does not share lifecycle state with
@@ -142,6 +148,19 @@ export type ChatViewStoreDependencies = {
   readonly streamChatReply: ChatReplyStream
   /** Stops a reply's generation on the backend; not cancellable by the store. */
   readonly stopChatReply: ChatReplyStopper
+  /**
+   * Stops every working job of a conversation on the backend; not
+   * cancellable by the store.
+   *
+   * @param conversationId - UUIDv7 of the conversation whose jobs stop.
+   * @returns `stopped` once the reply of each job that was working reached
+   * its stored final state, also when none was working, or
+   * `conversation-not-found` when the backend stores no such conversation.
+   * @throws If the backend cannot be reached or answers unexpectedly.
+   */
+  readonly stopConversationJobs: (
+    conversationId: string
+  ) => Promise<StopConversationJobsResult>
   /** Reads a stored conversation; the store supplies its owned abort signal. */
   readonly getConversation: StoredConversationReader
   /**
@@ -324,7 +343,8 @@ export type ChatViewState = {
  * that is still generating — the opened one, or the previous one after a
  * failed open — after the store stops following it. `resetConversation`
  * and opening another conversation stop following the active reply without
- * stopping it; only `stopStreaming` stops a reply on the backend.
+ * stopping it; only `stopStreaming`, `stopJob`, and `stopJobs` stop work on
+ * the backend.
  */
 export type ChatViewActions = {
   /** Replaces the composer draft with user-entered text. */
@@ -416,8 +436,56 @@ export type ChatViewActions = {
    * follows its last reply while that reply is still generating.
    */
   openConversation: (conversationId: string) => Promise<void>
-  /** Restores initial state when the view presents the identified conversation. */
+  /**
+   * Restores initial state when the view presents the identified
+   * conversation, or shows a job of it while no other conversation opens.
+   */
   closeConversation: (conversationId: string) => void
+  /**
+   * Takes one event of the activity stream, which reports the replies the
+   * backend starts itself and the jobs they belong to.
+   *
+   * @param event - Validated activity event.
+   * @remarks A snapshot, and a reply the backend starts or ends in the
+   * presented conversation, read the shown conversation again: at once, or
+   * once no conversation opens and no reply of the store's own request is
+   * awaited or streaming. The read keeps the draft, the tray, and the error.
+   * Its answer replaces the shown conversation, or records that it no longer
+   * exists; a read that fails changes nothing. An open, a reset, a close, or
+   * a newer read cancels a read under way. An answer that returns after a
+   * request started is thrown away, because it may lack that request's
+   * messages, and the conversation is read again once the request ended.
+   * When the conversation read ends with a reply that is still generating,
+   * the store follows it as an open does, and stops following a completed
+   * reply's title. A job update replaces that job in the shown conversation,
+   * or adds it in number order: the update that arrived last wins, also over
+   * a read or an open under way. Approval prompts and tool calls are left to
+   * the tool-call store.
+   */
+  handleActivityEvent: (event: ActivityEvent) => void
+  /**
+   * Stops one job by stopping its latest reply.
+   *
+   * @param job - The job's conversation and its latest reply.
+   * @returns A promise that settles after the backend answered; it never
+   * rejects.
+   * @remarks The backend also stops every working job below it. A failed
+   * stop records an inline error while the view still shows the conversation
+   * the stop was asked from. The job's new state arrives as a job update, so
+   * no conversation changes here.
+   */
+  stopJob: (job: Pick<Job, "id" | "replyId">) => Promise<void>
+  /**
+   * Stops every working job of the shown conversation.
+   *
+   * @returns A promise that settles after the backend answered, or at once
+   * when no conversation is shown; it never rejects.
+   * @remarks A failed stop records an inline error, and a conversation the
+   * backend no longer stores records that it no longer exists, while the
+   * view still shows that conversation. The jobs' new states arrive as job
+   * updates, so no conversation changes here.
+   */
+  stopJobs: () => Promise<void>
 }
 
 /** State and actions exposed by one independently owned chat-view store. */
@@ -511,12 +579,28 @@ type ChatRequestResource = {
   readonly abortController: AbortController
 }
 
-/** Store-private read resource correlated with one conversation open. */
+/**
+ * Store-private read resource correlated with one conversation open, or with
+ * one read of the shown conversation, which takes the same token.
+ */
 type ConversationOpenResource = {
-  /** Token authorizing this open to commit its outcome. */
+  /** Token authorizing this read to commit its outcome. */
   readonly token: number
   /** Controller owned exclusively by the store. */
   readonly abortController: AbortController
+}
+
+/**
+ * Job versions the activity stream reported for a conversation while a read
+ * of it was under way, kept so the read does not put an older version back.
+ */
+type JobUpdateRecord = {
+  /** Open token of the read that keeps the record. */
+  readonly token: number
+  /** UUIDv7 of the conversation being read. */
+  readonly conversationId: string
+  /** Versions of the conversation's jobs, in arrival order. */
+  readonly jobs: readonly Job[]
 }
 
 /** Stored reply the store started following, with the request that owns it. */
@@ -645,13 +729,18 @@ function formatConversationOpenErrorMessage(error: unknown): string {
 /**
  * Converts an unknown value thrown by a stop request into an error message.
  *
- * @param error - Value thrown while asking the backend to stop the reply.
+ * @param subject - What the request asked the backend to stop: a reply, one
+ * job, or every job of a conversation.
+ * @param error - Value thrown while asking the backend to stop it.
  * @returns A non-empty message naming the failed stop and its reason.
  */
-function formatReplyStopErrorMessage(error: unknown): string {
+function formatStopErrorMessage(
+  subject: "reply" | "job" | "jobs",
+  error: unknown
+): string {
   return error instanceof Error && error.message
-    ? `The reply could not be stopped: ${error.message}`
-    : "The reply could not be stopped."
+    ? `The ${subject} could not be stopped: ${error.message}`
+    : `The ${subject} could not be stopped.`
 }
 
 /**
@@ -706,6 +795,47 @@ function createAwaitingTurnRequest(
  */
 function createChatRequestResource(token: number): ChatRequestResource {
   return { token, abortController: new AbortController() }
+}
+
+/**
+ * Creates the private read resource for one open token.
+ *
+ * @param token - Monotonic open token assigned by the owning store.
+ * @returns A private cancellation controller correlated with the token.
+ */
+function createConversationOpenResource(
+  token: number
+): ConversationOpenResource {
+  return { token, abortController: new AbortController() }
+}
+
+/**
+ * Puts the versions of jobs that the activity stream reported into a
+ * conversation.
+ *
+ * @param conversation - Conversation the jobs were started from.
+ * @param jobUpdates - Versions of its jobs in arrival order. The order of
+ * arrival decides which version is newer: a job's `updatedAt` moves only
+ * when its conversation stores a message, not when its state changes.
+ * @returns The same conversation when there are none; otherwise a frozen
+ * copy whose jobs, in number order, hold the version of each job that
+ * arrived last, and the jobs it did not hold yet.
+ */
+function updateConversationJobs(
+  conversation: ChatViewConversation,
+  jobUpdates: readonly Job[]
+): ChatViewConversation {
+  if (jobUpdates.length === 0) return conversation
+
+  const jobsById = new Map(conversation.jobs.map((job) => [job.id, job]))
+  for (const job of jobUpdates) {
+    jobsById.set(job.id, Object.freeze({ ...job }))
+  }
+  const jobs = [...jobsById.values()].sort(
+    (first, second) => first.number - second.number
+  )
+
+  return Object.freeze({ ...conversation, jobs: Object.freeze(jobs) })
 }
 
 /**
@@ -805,6 +935,13 @@ export function createChatViewStore(
    * for an earlier generation is dropped instead of joining the reset tray.
    */
   let trayGeneration = 0
+  /**
+   * Whether the shown conversation is to be read again once no conversation
+   * opens and no reply of the store's own request is awaited or streaming.
+   */
+  let isShownConversationLoadWaiting = false
+  /** Job updates kept for the conversation read under way, if any. */
+  let jobUpdateRecord: JobUpdateRecord | undefined
 
   /**
    * Builds the next attachment refusal.
@@ -862,6 +999,54 @@ export function createChatViewStore(
    */
   function isOpenOwned(token: number): boolean {
     return activeOpenResource?.token === token
+  }
+
+  /**
+   * Starts keeping the job updates of a conversation while a read of it is
+   * under way.
+   *
+   * @param conversationId - Conversation being read.
+   * @param token - Open token of the read.
+   * @remarks It replaces the record of an earlier read, which no longer owns
+   * the open.
+   */
+  function startJobUpdateRecord(conversationId: string, token: number): void {
+    jobUpdateRecord = { token, conversationId, jobs: [] }
+  }
+
+  /**
+   * Adds a job update to the record of the read under way, when that read is
+   * of the job's conversation.
+   *
+   * @param conversationId - Conversation the job was started from.
+   * @param job - The whole job as it is now.
+   */
+  function addJobUpdateToRecord(conversationId: string, job: Job): void {
+    const record = jobUpdateRecord
+    if (record?.conversationId !== conversationId) return
+
+    jobUpdateRecord = { ...record, jobs: [...record.jobs, job] }
+  }
+
+  /**
+   * Lists the job updates kept for one read.
+   *
+   * @param token - Open token of the read.
+   * @returns The jobs that arrived for the read's conversation while it was
+   * under way, in arrival order; none when the record is another read's.
+   */
+  function listRecordedJobUpdates(token: number): readonly Job[] {
+    return jobUpdateRecord?.token === token ? jobUpdateRecord.jobs : []
+  }
+
+  /**
+   * Stops keeping job updates for one read.
+   *
+   * @param token - Open token of the read that ended.
+   * @remarks The record of a newer read stays.
+   */
+  function stopJobUpdateRecord(token: number): void {
+    if (jobUpdateRecord?.token === token) jobUpdateRecord = undefined
   }
 
   /**
@@ -1377,7 +1562,9 @@ export function createChatViewStore(
      * message, with the incomplete status. Stale queued events and failures are
      * ignored silently after token invalidation. The finally block releases
      * the resource and returns the request to idle only while this token still
-     * owns both representations.
+     * owns both representations. After each event and once the stream ends, a
+     * read of the shown conversation that waited for the request starts when
+     * the request no longer keeps it waiting.
      */
     async function readChatStream<TStreamEvent>(
       token: number,
@@ -1388,6 +1575,7 @@ export function createChatViewStore(
         const events = options.openEvents(resource.abortController.signal)
         for await (const event of events) {
           await options.handleEvent(event)
+          startWaitingConversationLoad()
         }
 
         if (
@@ -1412,6 +1600,7 @@ export function createChatViewStore(
           activeRequestResource = undefined
           set({ request: IDLE_CHAT_REQUEST })
         }
+        startWaitingConversationLoad()
       }
     }
 
@@ -1685,7 +1874,7 @@ export function createChatViewStore(
         await dependencies.stopChatReply(target)
       } catch (error) {
         if (isRequestOwned(token)) {
-          set({ error: formatReplyStopErrorMessage(error) })
+          set({ error: formatStopErrorMessage("reply", error) })
         }
       }
     }
@@ -1756,7 +1945,8 @@ export function createChatViewStore(
      * the local transports, clears draft, staged files and their refusal,
      * conversation, request, open, and error together, and reports no
      * error. A selection made before the reset and not staged yet is
-     * dropped: it joins no tray and records no refusal. The selected agent
+     * dropped: it joins no tray and records no refusal. A read of the shown
+     * conversation, under way or waiting, is dropped too. The selected agent
      * stays, so the next conversation starts with it. The backend keeps
      * generating a reply that was streaming.
      */
@@ -1765,6 +1955,7 @@ export function createChatViewStore(
       const openResource = activeOpenResource
       activeRequestResource = undefined
       activeOpenResource = undefined
+      isShownConversationLoadWaiting = false
       trayGeneration += 1
       set({
         ...INITIAL_CHAT_VIEW_STATE,
@@ -1823,16 +2014,20 @@ export function createChatViewStore(
      * Updates the view with the outcome of an owned conversation read.
      *
      * @param result - Stored conversation or absence outcome from the backend.
+     * @param jobUpdates - Job versions the activity stream reported while the
+     * read was under way, in arrival order; they win over the read's.
      * @throws If the stored conversation violates a transcript invariant; the
      * caller still owns the open and records that failure.
      */
     function updateViewWithStoredConversation(
-      result: GetConversationResult
+      result: GetConversationResult,
+      jobUpdates: readonly Job[]
     ): void {
       switch (result.status) {
         case "found": {
-          const conversation = createStoredChatViewConversation(
-            result.conversation
+          const conversation = updateConversationJobs(
+            createStoredChatViewConversation(result.conversation),
+            jobUpdates
           )
           const inputDraft = calculateOpenedConversationDraft()
           activeOpenResource = undefined
@@ -1851,6 +2046,10 @@ export function createChatViewStore(
             conversationOpen: IDLE_CONVERSATION_OPEN
           })
           return
+        default: {
+          const unhandledResult: never = result
+          return unhandledResult
+        }
       }
     }
 
@@ -1929,18 +2128,24 @@ export function createChatViewStore(
      * generating: the opened one, or the previous one when the open failed.
      * @remarks Superseded reads are ignored silently, including their
      * failures, because a newer open, reset, or close already owns the view.
+     * The job updates that arrive for the conversation while it is read are
+     * applied on top of what the read returns.
      */
     async function loadStoredConversation(
       conversationId: string,
       resource: ConversationOpenResource
     ): Promise<StoredReplyFollow | undefined> {
+      startJobUpdateRecord(conversationId, resource.token)
       try {
         const result = await dependencies.getConversation(
           conversationId,
           resource.abortController.signal
         )
         if (!isOpenOwned(resource.token)) return undefined
-        updateViewWithStoredConversation(result)
+        updateViewWithStoredConversation(
+          result,
+          listRecordedJobUpdates(resource.token)
+        )
       } catch (error) {
         if (!isOpenOwned(resource.token)) return undefined
         activeOpenResource = undefined
@@ -1948,6 +2153,8 @@ export function createChatViewStore(
           error: formatConversationOpenErrorMessage(error),
           conversationOpen: IDLE_CONVERSATION_OPEN
         })
+      } finally {
+        stopJobUpdateRecord(resource.token)
       }
       return startStoredReplyFollowing()
     }
@@ -1970,14 +2177,14 @@ export function createChatViewStore(
      * store follows it. A missing conversation or a failed read leaves the
      * previous conversation with an inline error, and the store follows its
      * reply again from a fresh snapshot when that reply is still generating.
+     * Job updates that arrive while the conversation is read are applied on
+     * top of what the read returns. Once the open and any followed reply
+     * ended, a read of the shown conversation that waited for them starts.
      */
     async function openConversation(conversationId: string): Promise<void> {
       if (isConversationShown(conversationId)) return
 
-      const resource: ConversationOpenResource = {
-        token: nextOpenToken,
-        abortController: new AbortController()
-      }
+      const resource = createConversationOpenResource(nextOpenToken)
       nextOpenToken += 1
       const conversationOpen: ConversationOpenState = {
         status: "opening",
@@ -1997,21 +2204,296 @@ export function createChatViewStore(
       supersededOpen?.abortController.abort()
       const follow = await loadStoredConversation(conversationId, resource)
       if (follow !== undefined) await readStoredReplyStream(follow)
+      startWaitingConversationLoad()
     }
 
     /**
-     * Restores initial state when the view presents a removed conversation.
+     * Reports whether the view shows a job of a conversation, with no other
+     * conversation opening.
+     *
+     * @param conversationId - Conversation that may have started the shown
+     * conversation.
+     * @returns Whether no conversation is opening and the shown conversation
+     * is a job of the identified one.
+     */
+    function isJobOfConversationShown(conversationId: string): boolean {
+      const { conversation, conversationOpen } = get()
+
+      return (
+        conversationOpen.status === "idle" &&
+        conversation?.parentConversationId === conversationId
+      )
+    }
+
+    /**
+     * Restores initial state when the view presents a removed conversation
+     * or shows a job of it.
      *
      * @param conversationId - Conversation that is no longer stored.
-     * @remarks When the identified conversation is shown or being opened, this
-     * behaves as {@link resetConversation}, including discarding the draft.
-     * Otherwise, including while a different conversation is opening to
-     * replace it, nothing changes.
+     * @remarks When the identified conversation is shown or being opened, or
+     * the shown conversation is a job of it while no other conversation
+     * opens, this behaves as {@link resetConversation}, including discarding
+     * the draft. Otherwise, including while a different conversation is
+     * opening to replace it, nothing changes.
      */
     function closeConversation(conversationId: string): void {
-      if (!isConversationPresented(conversationId)) return
+      if (
+        !isConversationPresented(conversationId) &&
+        !isJobOfConversationShown(conversationId)
+      ) {
+        return
+      }
 
       resetConversation()
+    }
+
+    /**
+     * Updates the view with what a read of the shown conversation returned.
+     *
+     * @param result - Stored conversation or absence outcome from the backend.
+     * @param jobUpdates - Job versions the activity stream reported while the
+     * read was under way, in arrival order; they win over the read's.
+     * @throws If the stored conversation violates a transcript invariant;
+     * nothing changed then.
+     * @remarks The draft and the tray stay. A found conversation replaces the
+     * shown one and the error stays; a conversation the backend no longer
+     * stores stays shown, with the error that it no longer exists.
+     */
+    function updateShownConversation(
+      result: GetConversationResult,
+      jobUpdates: readonly Job[]
+    ): void {
+      switch (result.status) {
+        case "found":
+          set({
+            conversation: updateConversationJobs(
+              createStoredChatViewConversation(result.conversation),
+              jobUpdates
+            )
+          })
+          return
+        case "not-found":
+          set({ error: MISSING_CONVERSATION_MESSAGE })
+          return
+        default: {
+          const unhandledResult: never = result
+          return unhandledResult
+        }
+      }
+    }
+
+    /**
+     * Follows the reply that ends the shown conversation while it is still
+     * generating, after a read of the conversation showed it.
+     *
+     * @returns Settlement after the followed reply's stream ends, fails, or
+     * is superseded, or at once when the conversation does not end with a
+     * streaming reply.
+     * @remarks The read commits only while no reply of the store's own
+     * request is awaited or streaming, so the request names no reply that is
+     * still generating. A request whose reply completed and that still waits
+     * for a title is replaced: the store stops following its stream, and the
+     * backend still saves the title.
+     */
+    async function followShownStreamingReply(): Promise<void> {
+      const supersededRequest = activeRequestResource
+      const follow = startStoredReplyFollowing()
+      if (follow === undefined) return
+
+      supersededRequest?.abortController.abort()
+      await readStoredReplyStream(follow)
+    }
+
+    /**
+     * Reads the shown conversation again and shows it as the backend stores
+     * it now, then follows its last reply while that reply is generating.
+     *
+     * @param conversationId - The shown conversation.
+     * @returns Settlement after the answer is shown or thrown away, or the
+     * read failed or was superseded, and after any reply it then follows
+     * ended; it never rejects.
+     * @remarks The read takes a new open token without opening anything, so
+     * an open, a reset, a close, or a newer read supersedes it, and a request
+     * may start meanwhile. An answer that returns after a request started is
+     * thrown away, because it may lack that request's messages, and the read
+     * starts again at once or once that request ended. A read that fails, or
+     * a stored conversation that breaks a transcript invariant, changes
+     * nothing; the next activity event reads again.
+     */
+    async function loadShownConversationAgain(
+      conversationId: string
+    ): Promise<void> {
+      const resource = createConversationOpenResource(nextOpenToken)
+      nextOpenToken += 1
+      const supersededOpen = activeOpenResource
+      activeOpenResource = resource
+      supersededOpen?.abortController.abort()
+      const requestToken = nextRequestToken
+      startJobUpdateRecord(conversationId, resource.token)
+      try {
+        const result = await dependencies.getConversation(
+          conversationId,
+          resource.abortController.signal
+        )
+        if (!isOpenOwned(resource.token)) return
+        activeOpenResource = undefined
+        if (nextRequestToken !== requestToken) {
+          startShownConversationLoad()
+          return
+        }
+        updateShownConversation(result, listRecordedJobUpdates(resource.token))
+      } catch {
+        if (isOpenOwned(resource.token)) activeOpenResource = undefined
+        return
+      } finally {
+        stopJobUpdateRecord(resource.token)
+      }
+      await followShownStreamingReply()
+    }
+
+    /**
+     * Starts reading the shown conversation again, or keeps the read waiting
+     * while the view is busy.
+     *
+     * @remarks While a conversation opens, or a reply of the store's own
+     * request is awaited or streaming, the read waits for that to end, so it
+     * neither replaces a conversation being opened nor misses the messages of
+     * the request's turn; it waits also before a first conversation is shown.
+     * Without a shown conversation there is nothing to read. The store owns
+     * the read through its open token, and the read never rejects.
+     */
+    function startShownConversationLoad(): void {
+      if (!canStartChatRequest()) {
+        isShownConversationLoadWaiting = true
+        return
+      }
+
+      isShownConversationLoadWaiting = false
+      const conversation = get().conversation
+      if (conversation !== undefined) {
+        void loadShownConversationAgain(conversation.id)
+      }
+    }
+
+    /**
+     * Starts the read of the shown conversation that waited, once the view is
+     * no longer busy.
+     */
+    function startWaitingConversationLoad(): void {
+      if (isShownConversationLoadWaiting && canStartChatRequest()) {
+        startShownConversationLoad()
+      }
+    }
+
+    /**
+     * Applies one job update of the activity stream.
+     *
+     * @param parentConversationId - Conversation the job was started from.
+     * @param job - The whole job as it is now.
+     * @remarks The shown conversation takes the job at once, and a read of
+     * the job's conversation under way keeps it to apply on top of its
+     * answer, which may be older.
+     */
+    function updateConversationJob(
+      parentConversationId: string,
+      job: Job
+    ): void {
+      addJobUpdateToRecord(parentConversationId, job)
+      const conversation = get().conversation
+      if (conversation?.id !== parentConversationId) return
+
+      set({ conversation: updateConversationJobs(conversation, [job]) })
+    }
+
+    /**
+     * Implements {@link ChatViewActions.handleActivityEvent} for this store.
+     *
+     * @param event - Validated activity event.
+     */
+    function handleActivityEvent(event: ActivityEvent): void {
+      switch (event.type) {
+        case "activity-snapshot":
+          startShownConversationLoad()
+          return
+        case "reply-started":
+        case "reply-ended":
+          if (isConversationPresented(event.conversationId)) {
+            startShownConversationLoad()
+          }
+          return
+        case "job-updated":
+          updateConversationJob(event.parentConversationId, event.job)
+          return
+        case "tool-approval":
+        case "tool-call":
+          return
+        default: {
+          const unhandledEvent: never = event
+          return unhandledEvent
+        }
+      }
+    }
+
+    /**
+     * Records the error of a stop asked from a conversation, while the view
+     * still shows that conversation.
+     *
+     * @param conversationId - Conversation shown when the stop was asked, or
+     * undefined when none was.
+     * @param error - User-presentable message.
+     */
+    function updateStopError(
+      conversationId: string | undefined,
+      error: string
+    ): void {
+      if (get().conversation?.id === conversationId) set({ error })
+    }
+
+    /**
+     * Implements {@link ChatViewActions.stopJob} for this store.
+     *
+     * @param job - The job's conversation and its latest reply.
+     * @returns The settlement defined by {@link ChatViewActions.stopJob}.
+     */
+    async function stopJob(job: Pick<Job, "id" | "replyId">): Promise<void> {
+      const conversationId = get().conversation?.id
+      try {
+        await dependencies.stopChatReply({
+          conversationId: job.id,
+          assistantMessageId: job.replyId
+        })
+      } catch (error) {
+        updateStopError(conversationId, formatStopErrorMessage("job", error))
+      }
+    }
+
+    /**
+     * Implements {@link ChatViewActions.stopJobs} for this store.
+     *
+     * @returns The settlement defined by {@link ChatViewActions.stopJobs}.
+     */
+    async function stopJobs(): Promise<void> {
+      const conversationId = get().conversation?.id
+      if (conversationId === undefined) return
+
+      let result: StopConversationJobsResult
+      try {
+        result = await dependencies.stopConversationJobs(conversationId)
+      } catch (error) {
+        updateStopError(conversationId, formatStopErrorMessage("jobs", error))
+        return
+      }
+      switch (result.status) {
+        case "stopped":
+          return
+        case "conversation-not-found":
+          updateStopError(conversationId, MISSING_CONVERSATION_MESSAGE)
+          return
+        default: {
+          const unhandledResult: never = result
+          return unhandledResult
+        }
+      }
     }
 
     return {
@@ -2024,7 +2506,10 @@ export function createChatViewStore(
       stopStreaming,
       resetConversation,
       openConversation,
-      closeConversation
+      closeConversation,
+      handleActivityEvent,
+      stopJob,
+      stopJobs
     }
   }
 
@@ -2116,8 +2601,9 @@ async function* readChatEventsRefreshingTools(
  * {@link ChatViewActions.sendMessage}. The two generation controls are named
  * explicitly because the request contract rejects unknown fields. A saved zero
  * ceiling is omitted so the backend receives no explicit completion-token limit.
- * The backend origin for following and stopping a reply is sampled when each
- * request starts. A new conversation's agent is checked against the agent
+ * The backend origin for following a reply, and for stopping a reply or a
+ * conversation's jobs, is sampled when each request starts. A new
+ * conversation's agent is checked against the agent
  * store's list when the request is sent. Tool offers read the Tools pane and
  * the loaded model when each request takes ownership, what the loaded model
  * can take as attachments is read from the inventory when each selection is
@@ -2134,6 +2620,10 @@ export const useChatViewStore: UseBoundStore<StoreApi<ChatViewStore>> =
       }),
     stopChatReply: (target) =>
       stopChatReply(target, { backendUrl: useLysStore.getState().backendUrl }),
+    stopConversationJobs: (conversationId) =>
+      stopConversationJobs(conversationId, {
+        backendUrl: useLysStore.getState().backendUrl
+      }),
     getConversation: getStoredConversation,
     createTimestamp: () => new Date().toISOString(),
     findEligibleChatModel: () => {

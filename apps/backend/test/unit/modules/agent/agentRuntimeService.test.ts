@@ -33,7 +33,9 @@ import {
 import { createRoomyReplyContextMeter } from "../../support/replyContextMeterFakes"
 import {
   LEADER_STATE_TOOL_NAMES,
-  TOOL_CALL_POLICY
+  TOOL_CALL_POLICY,
+  SEARCH_CALL_ID,
+  createToolSearchCallRecords
 } from "../../support/toolFixtures"
 import {
   registerToolKeeperContractSuite,
@@ -160,7 +162,8 @@ function createRuntime(options: RuntimeOptions = {}) {
     replyContextMeter: createRoomyReplyContextMeter(),
     findConversationTitle: (conversationId) =>
       buildConversationTitleLookup(conversations.get(conversationId)),
-    requestLimits: REQUEST_LIMITS
+    requestLimits: REQUEST_LIMITS,
+    toolSearchCallRecords: createToolSearchCallRecords().records
   })
   return {
     runtime,
@@ -563,6 +566,7 @@ describe("AgentRuntimeService", () => {
 
       const search = runtime.findTools({
         task: "read a web page",
+        searchCallId: SEARCH_CALL_ID,
         tools: TOOL_KEEPER_SEARCH_TOOLS,
         conversationId,
         model: "qwen/qwen3-8b",

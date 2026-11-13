@@ -842,6 +842,69 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
       SET outcome = NEW.status, updated_at = NEW.updated_at
       WHERE call_id = NEW.id;
     END;
+  `,
+  // Records the tool calls of a tool search's reply, such as Armitage's
+  // `search_tools` and `recommend_tool` calls, which that reply never
+  // stores: one row per call, tied to the stored `find_tools` call that
+  // started the search, written as the search keeps the call. It holds the
+  // call's tool, its argument text, which no other row keeps, the tool call
+  // policy's effect and reason, and the call's status as its outcome. A
+  // search's call never reaches the approval gate, so no mode or answer is
+  // kept, and an effect that asks the person cannot be stored. When the
+  // `find_tools` call stops running, by its end, Stop, or the interrupted
+  // marking at startup, the trigger marks its calls still running as
+  // interrupted, keeping the later of the two update times. Rows go with
+  // their `find_tools` call and their conversation.
+  `
+    CREATE TABLE tool_search_call_decisions (
+      call_id TEXT PRIMARY KEY,
+      search_call_id TEXT NOT NULL
+        REFERENCES conversation_messages(id) ON DELETE CASCADE,
+      conversation_id TEXT NOT NULL
+        REFERENCES conversations(id) ON DELETE CASCADE,
+      agent_code TEXT NOT NULL CHECK (agent_code <> ''),
+      tool_name TEXT NOT NULL,
+      argument_text TEXT NOT NULL,
+      policy_effect TEXT,
+      policy_reason TEXT,
+      outcome TEXT NOT NULL CHECK (
+        outcome IN ('running', 'succeeded', 'failed', 'interrupted')
+      ),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      CHECK (
+        (policy_effect IS NULL AND policy_reason IS NULL)
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'deny'
+          AND policy_reason IS NOT NULL
+          AND policy_reason IN ('credential-file', 'outside-approved-folders', 'settings-unreadable', 'blocked-address')
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'allow'
+          AND policy_reason IS NULL
+        )
+      )
+    ) STRICT;
+
+    CREATE INDEX tool_search_call_decisions_search_call_idx
+      ON tool_search_call_decisions (search_call_id);
+
+    CREATE INDEX tool_search_call_decisions_conversation_idx
+      ON tool_search_call_decisions (conversation_id);
+
+    CREATE TRIGGER interrupt_tool_search_calls_after_tool_call_update
+    AFTER UPDATE OF status ON conversation_messages
+    FOR EACH ROW
+    WHEN NEW.role = 'tool_call' AND NEW.status <> 'running'
+    BEGIN
+      UPDATE tool_search_call_decisions
+      SET outcome = 'interrupted', updated_at = max(updated_at, NEW.updated_at)
+      WHERE search_call_id = NEW.id AND outcome = 'running';
+    END;
   `
 ]
 

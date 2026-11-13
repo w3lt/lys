@@ -2875,6 +2875,32 @@ describe("updateFastifyWithChatRoute", () => {
         }),
         expect.objectContaining({ kind: "text", content: "Hi" })
       ])
+      const findToolsCall =
+        reply?.role === "assistant" ? reply.parts[0] : undefined
+      expect(
+        testApp.database.handleDatabaseReadRequest((statements) =>
+          statements
+            .getStatement(
+              `SELECT search_call_id AS searchCallId,
+              conversation_id AS conversationId, agent_code AS agentCode,
+              tool_name AS toolName, argument_text AS argumentText,
+              policy_effect AS policyEffect, policy_reason AS policyReason,
+              outcome FROM tool_search_call_decisions`
+            )
+            .all()
+        )
+      ).toEqual([
+        {
+          searchCallId: findToolsCall?.id,
+          conversationId: start.conversation.id,
+          agentCode: "armitage",
+          toolName: "recommend_tool",
+          argumentText: '{"name":"look_up_word"}',
+          policyEffect: "allow",
+          policyReason: null,
+          outcome: "succeeded"
+        }
+      ])
     })
 
     it("offers the state tools while tool calls are switched off", async () => {

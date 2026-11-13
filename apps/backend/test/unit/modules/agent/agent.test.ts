@@ -5163,6 +5163,7 @@ describe("Agent", () => {
 
       expect(keeper.findTools).toHaveBeenCalledExactlyOnceWith({
         task: "define a word",
+        searchCallId: run.parts[0]?.id,
         tools: [READ_TEXT_FILE_TOOL, LOOK_UP_WORD_TOOL, mcpTool.definition],
         conversationId: store.conversationId,
         model: TURN_REQUEST.model,

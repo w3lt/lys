@@ -6,6 +6,7 @@ import type {
   BuiltInToolCallArguments,
   BuiltInToolRunContext
 } from "../../../src/modules/tool/builtIn/builtInTool"
+import { RUN_TOOL_CALL_ID } from "./toolFixtures"
 
 /** One ready built-in tool with arguments it can run. */
 export type RunnableBuiltInToolHarness = Readonly<{
@@ -61,6 +62,7 @@ export function createRecordedRunContext(
   const sourceCatalog = new SourceCatalog([])
   return {
     context: {
+      toolCallId: RUN_TOOL_CALL_ID,
       abortSignal,
       addWebSources: (candidates) => {
         const sources = sourceCatalog.addWebSources(candidates)

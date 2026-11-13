@@ -1,5 +1,6 @@
 import type { GetAgentApiResponse } from "@lys/protocol"
 import { ARMITAGE_AGENT_CODE } from "@lys/share"
+import type { ToolSearchCallRecordWriter } from "../conversation/records"
 import Agent, { type AgentProfile } from "./agent"
 import type { AgentRequestLimits, AgentRequestState } from "./agentActivity"
 import {
@@ -77,6 +78,11 @@ export type AgentRuntimeServiceOptions = Readonly<{
    * own slots and line.
    */
   requestLimits: AgentRequestLimits
+  /**
+   * Store of the decision records of tool searches' own tool calls, lent
+   * for the service's lifetime.
+   */
+  toolSearchCallRecords: ToolSearchCallRecordWriter
 }>
 
 /** Shared outcome of a read or search the asking agent may not make. */
@@ -148,9 +154,9 @@ function buildAgentProfile(
  * working on no request. Owns its live agents, which own no resource; the
  * model's owner releases the model access and its meter, and the records'
  * owner closes the store. After that, a load of a stored agent's code and a
- * permitted read or search fail with `Database is closed`; a built-in
- * agent's load, a tool search, and a refused read or search touch no
- * store. Concurrency model: single-owner on the backend's event loop; loads,
+ * permitted read or search fail with `Database is closed`, and so does
+ * the record of a tool search's first tool call, which fails the search; a
+ * built-in agent's load and a refused read or search touch no store. Concurrency model: single-owner on the backend's event loop; loads,
  * reads, and searches of agents are synchronous, and tool searches run
  * asynchronously as requests of Armitage's live agent, overlapping searches
  * sharing its request slots.
@@ -173,13 +179,17 @@ export default class AgentRuntimeService
   /** Request slots and waiting limit every live agent gets. */
   readonly #requestLimits: AgentRequestLimits
 
+  /** Borrowed store of the records of tool searches' own tool calls. */
+  readonly #toolSearchCallRecords: ToolSearchCallRecordWriter
+
   /** Live agents by code, each created on its agent's first load. */
   readonly #liveAgents = new Map<string, Agent>()
 
   /**
    * Retains the borrowed lookups and model access without reading anything.
    * @param options - Agent lookup and search, model access, its meter, the
-   * conversation title lookup, and the request limits of every agent.
+   * conversation title lookup, the request limits of every agent, and the
+   * store of tool searches' call records.
    */
   public constructor(options: AgentRuntimeServiceOptions) {
     this.#agents = options.agents
@@ -187,6 +197,7 @@ export default class AgentRuntimeService
     this.#replyContextMeter = options.replyContextMeter
     this.#findConversationTitle = options.findConversationTitle
     this.#requestLimits = options.requestLimits
+    this.#toolSearchCallRecords = options.toolSearchCallRecords
   }
 
   /**
@@ -226,7 +237,11 @@ export default class AgentRuntimeService
       )
       return FAILED_TOOL_SEARCH
     }
-    return await runToolKeeperSearch(this.#loadLiveAgent(found.agent), search)
+    return await runToolKeeperSearch(
+      this.#loadLiveAgent(found.agent),
+      search,
+      this.#toolSearchCallRecords
+    )
   }
 
   /**

@@ -709,7 +709,11 @@ async function handleBuiltInToolCall(
     startedCall.status === "waiting" ? await startedCall.approval : startedCall
   if (approval.status === "ended") return undefined
   if (approval.status !== "allowed") return approval.message
-  const outcome = await runBuiltInToolCall(parsedCall.runToolCall, handling)
+  const outcome = await runBuiltInToolCall(
+    toolCall.call.id,
+    parsedCall.runToolCall,
+    handling
+  )
   if (outcome === undefined) return undefined
   return updateFinishedToolCall(toolCall, outcome, handling.replyParts)
 }
@@ -761,6 +765,7 @@ async function handleMcpToolCall(
 /**
  * Runs one allowed call of a backend tool under the reply's cancellation.
  *
+ * @param toolCallId - UUIDv7 of the stored call.
  * @param runToolCall - The parsed call's run.
  * @param handling - The reply's cancellation and the source catalog.
  * @returns The run's outcome, or undefined when the reply was stopped while
@@ -768,12 +773,14 @@ async function handleMcpToolCall(
  * @throws When the run rejects although the reply was not stopped.
  */
 async function runBuiltInToolCall(
+  toolCallId: string,
   runToolCall: BuiltInToolCallRun,
   handling: BuiltInToolRunHandling
 ): Promise<ToolCallRunOutcome | undefined> {
   const { sourceCatalog } = handling
   try {
     return await runToolCall({
+      toolCallId,
       abortSignal: handling.abortSignal,
       addWebSources: (candidates) => sourceCatalog.addWebSources(candidates)
     })

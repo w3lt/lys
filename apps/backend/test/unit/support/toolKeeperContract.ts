@@ -4,7 +4,7 @@ import type {
   ToolKeeper,
   ToolSearch
 } from "../../../src/modules/agent/findToolsTool"
-import { TOOL_CALL_POLICY } from "./toolFixtures"
+import { SEARCH_CALL_ID, TOOL_CALL_POLICY } from "./toolFixtures"
 
 /** How every search of a keeper under test ends. */
 export type ToolKeeperScript = "finds-first-tool" | "fails"
@@ -51,6 +51,7 @@ function buildSearch(abortSignal: AbortSignal = new AbortController().signal) {
   const reportFailure = vi.fn<ToolSearch["reportFailure"]>()
   const search: ToolSearch = {
     task: "read a web page",
+    searchCallId: SEARCH_CALL_ID,
     tools: TOOL_KEEPER_SEARCH_TOOLS,
     conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
     model: "qwen/qwen3-8b",

@@ -32,7 +32,11 @@ import {
   createRoomyReplyContextMeter,
   createUnloadedReplyContextMeter
 } from "../../support/replyContextMeterFakes"
-import { TOOL_CALL_POLICY } from "../../support/toolFixtures"
+import {
+  SEARCH_CALL_ID,
+  TOOL_CALL_POLICY,
+  createToolSearchCallRecords
+} from "../../support/toolFixtures"
 
 /** Opens one round's stream. */
 type OpenReplyStream = ReplyModel["openReplyStream"]
@@ -173,6 +177,7 @@ function buildSearch(
 ): ToolSearch {
   return {
     task: "read a web page",
+    searchCallId: SEARCH_CALL_ID,
     tools: TOOLS,
     conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
     model: "qwen/qwen3-8b",
@@ -194,7 +199,8 @@ describe("runToolKeeperSearch", () => {
 
     const outcome = await runToolKeeperSearch(
       createArmitage(openReplyStream),
-      buildSearch(reportFailure)
+      buildSearch(reportFailure),
+      createToolSearchCallRecords().records
     )
 
     expect(outcome).toEqual({ status: "found", toolNames: ["read_page"] })
@@ -233,7 +239,8 @@ describe("runToolKeeperSearch", () => {
 
     const outcome = await runToolKeeperSearch(
       createArmitage(openReplyStream),
-      buildSearch(vi.fn(), new AbortController().signal, toolCallPolicy)
+      buildSearch(vi.fn(), new AbortController().signal, toolCallPolicy),
+      createToolSearchCallRecords().records
     )
 
     expect(outcome).toEqual({ status: "found", toolNames: [] })
@@ -244,10 +251,111 @@ describe("runToolKeeperSearch", () => {
     })
   })
 
+  it("records each of Armitage's calls under the search's find_tools call, with how the policy decided it and how it ended", async () => {
+    const settingsFilePath = "/srv/lys/settings.json"
+    const toolCallPolicy: ToolCallPolicy = Object.freeze({
+      ...TOOL_CALL_POLICY,
+      settingsFilePath
+    })
+    const recorded = createToolSearchCallRecords()
+    const deniedArgumentText = JSON.stringify({ query: settingsFilePath })
+    const openReplyStream = createRoundStreams(
+      SEARCH_ROUND,
+      buildToolCallRound(SEARCH_TOOLS_TOOL_NAME, { query: settingsFilePath }),
+      RECOMMEND_ROUND,
+      FINISH_ROUND
+    )
+
+    const outcome = await runToolKeeperSearch(
+      createArmitage(openReplyStream),
+      buildSearch(vi.fn(), new AbortController().signal, toolCallPolicy),
+      recorded.records
+    )
+
+    expect(outcome).toEqual({ status: "found", toolNames: ["read_page"] })
+    const allowed = { policyDecision: { effect: "allow" } }
+    expect(recorded.created).toEqual([
+      {
+        searchCallId: SEARCH_CALL_ID,
+        agentCode: ARMITAGE_PROFILE.code,
+        call: expect.objectContaining({
+          toolName: SEARCH_TOOLS_TOOL_NAME,
+          argumentText: '{"query":"web page"}',
+          status: "running"
+        }),
+        decision: allowed
+      },
+      {
+        searchCallId: SEARCH_CALL_ID,
+        agentCode: ARMITAGE_PROFILE.code,
+        call: expect.objectContaining({
+          argumentText: deniedArgumentText,
+          status: "failed"
+        }),
+        decision: {
+          policyDecision: { effect: "deny", reason: "credential-file" }
+        }
+      },
+      {
+        searchCallId: SEARCH_CALL_ID,
+        agentCode: ARMITAGE_PROFILE.code,
+        call: expect.objectContaining({
+          toolName: RECOMMEND_TOOL_TOOL_NAME,
+          status: "running"
+        }),
+        decision: allowed
+      }
+    ])
+    expect(recorded.ended.map((call) => [call.id, call.status])).toEqual([
+      [recorded.created[0]?.call.id, "succeeded"],
+      [recorded.created[2]?.call.id, "succeeded"]
+    ])
+  })
+
+  it("runs no call of Armitage's it could not record because the search's find_tools call no longer runs", async () => {
+    const recorded = createToolSearchCallRecords(false)
+    const openReplyStream = createRoundStreams(RECOMMEND_ROUND, FINISH_ROUND)
+    const reportFailure = vi.fn()
+
+    const outcome = await runToolKeeperSearch(
+      createArmitage(openReplyStream),
+      buildSearch(reportFailure),
+      recorded.records
+    )
+
+    expect(outcome).toEqual({ status: "found", toolNames: [] })
+    expect(recorded.created).toHaveLength(1)
+    expect(recorded.ended).toEqual([])
+    expect(openReplyStream).toHaveBeenCalledOnce()
+    expect(reportFailure).not.toHaveBeenCalled()
+  })
+
+  it("fails and reports a search whose call cannot be recorded, running none of its calls", async () => {
+    const failure = new Error("Database is closed")
+    const records = {
+      createToolSearchCallRecord: vi.fn((): boolean => {
+        throw failure
+      }),
+      updateToolSearchCallOutcome: vi.fn(() => true)
+    }
+    const reportFailure = vi.fn()
+
+    const outcome = await runToolKeeperSearch(
+      createArmitage(createRoundStreams(RECOMMEND_ROUND, FINISH_ROUND)),
+      buildSearch(reportFailure),
+      records
+    )
+
+    expect(outcome).toEqual({ status: "failed" })
+    expect(reportFailure).toHaveBeenCalledExactlyOnceWith(failure)
+    expect(records.updateToolSearchCallOutcome).not.toHaveBeenCalled()
+  })
+
   it("finds no tool when Armitage recommends none", async () => {
     const outcome = await runToolKeeperSearch(
       createArmitage(createRoundStreams(SEARCH_ROUND, FINISH_ROUND)),
-      buildSearch(vi.fn())
+      buildSearch(vi.fn()),
+      createToolSearchCallRecords().records
     )
 
     expect(outcome).toEqual({ status: "found", toolNames: [] })
@@ -263,7 +371,11 @@ describe("runToolKeeperSearch", () => {
     )
     const armitage = createArmitage(openReplyStream)
 
-    await runToolKeeperSearch(armitage, buildSearch(vi.fn()))
+    await runToolKeeperSearch(
+      armitage,
+      buildSearch(vi.fn()),
+      createToolSearchCallRecords().records
+    )
 
     expect(requests).toEqual([
       expect.objectContaining({
@@ -284,7 +396,8 @@ describe("runToolKeeperSearch", () => {
 
     const outcome = await runToolKeeperSearch(
       createArmitage(openReplyStream),
-      buildSearch(reportFailure)
+      buildSearch(reportFailure),
+      createToolSearchCallRecords().records
     )
 
     expect(outcome).toEqual({ status: "found", toolNames: ["read_page"] })
@@ -300,7 +413,8 @@ describe("runToolKeeperSearch", () => {
 
     const outcome = await runToolKeeperSearch(
       createArmitage(vi.fn<OpenReplyStream>().mockRejectedValue(failure)),
-      buildSearch(reportFailure)
+      buildSearch(reportFailure),
+      createToolSearchCallRecords().records
     )
 
     expect(outcome).toEqual({ status: "failed" })
@@ -313,7 +427,8 @@ describe("runToolKeeperSearch", () => {
 
     const outcome = await runToolKeeperSearch(
       createArmitage(vi.fn<OpenReplyStream>().mockRejectedValue(failure)),
-      buildSearch(reportFailure)
+      buildSearch(reportFailure),
+      createToolSearchCallRecords().records
     )
 
     expect(outcome).toEqual({ status: "failed" })
@@ -326,7 +441,8 @@ describe("runToolKeeperSearch", () => {
 
     const outcome = await runToolKeeperSearch(
       createArmitage(openReplyStream, createUnloadedReplyContextMeter()),
-      buildSearch(reportFailure)
+      buildSearch(reportFailure),
+      createToolSearchCallRecords().records
     )
 
     expect(outcome).toEqual({ status: "failed" })
@@ -345,7 +461,11 @@ describe("runToolKeeperSearch", () => {
     const armitage = createArmitage(openReplyStream)
     const heldCount = REQUEST_LIMITS.slotCount + REQUEST_LIMITS.waitingLimit
     const held = Array.from({ length: heldCount }, () =>
-      runToolKeeperSearch(armitage, buildSearch(vi.fn()))
+      runToolKeeperSearch(
+        armitage,
+        buildSearch(vi.fn()),
+        createToolSearchCallRecords().records
+      )
     )
     const reportFailure = vi.fn()
 
@@ -357,7 +477,8 @@ describe("runToolKeeperSearch", () => {
 
       const outcome = await runToolKeeperSearch(
         armitage,
-        buildSearch(reportFailure)
+        buildSearch(reportFailure),
+        createToolSearchCallRecords().records
       )
 
       expect(outcome).toEqual({ status: "failed" })
@@ -389,7 +510,8 @@ describe("runToolKeeperSearch", () => {
     await expect(
       runToolKeeperSearch(
         createArmitage(openReplyStream),
-        buildSearch(reportFailure, abortController.signal)
+        buildSearch(reportFailure, abortController.signal),
+        createToolSearchCallRecords().records
       )
     ).rejects.toBe(stopReason)
     expect(reportFailure).not.toHaveBeenCalled()

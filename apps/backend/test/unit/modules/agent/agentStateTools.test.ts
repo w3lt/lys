@@ -28,6 +28,7 @@ import {
   type RunnableBuiltInToolHarness
 } from "../../support/builtInToolContract"
 import { createFixtureUuidV7 } from "../../support/conversationFixtures"
+import { RUN_TOOL_CALL_ID } from "../../support/toolFixtures"
 
 /** Time the clock reads during every run. */
 const NOW = "2026-10-24T10:05:30.000Z"
@@ -167,6 +168,7 @@ async function runStateTool(
   const parsed = findStateTool(tools, name).parseToolCall(callArguments)
   if (parsed.status === "invalid") return parsed
   return await parsed.runToolCall({
+    toolCallId: RUN_TOOL_CALL_ID,
     abortSignal: new AbortController().signal,
     addWebSources: () => []
   })
@@ -437,6 +439,7 @@ describe("buildAgentStateTools", () => {
       if (parsed?.status !== "parsed") throw new Error("Not parsed")
       vi.setSystemTime(new Date("2026-10-24T10:07:00.000Z"))
       const result = await parsed.runToolCall({
+        toolCallId: RUN_TOOL_CALL_ID,
         abortSignal: new AbortController().signal,
         addWebSources: () => []
       })

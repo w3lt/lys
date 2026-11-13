@@ -18,6 +18,7 @@ import {
   registerBuiltInToolContractSuite,
   type BuiltInToolHarness
 } from "../../support/builtInToolContract"
+import { RUN_TOOL_CALL_ID } from "../../support/toolFixtures"
 
 /**
  * Builds the definition of a backend tool that takes no argument.
@@ -76,6 +77,7 @@ async function runKeeperTool(
   const parsed = findKeeperTool(catalog, name).tool.parseToolCall(callArguments)
   if (parsed.status !== "parsed") throw new Error(parsed.message)
   return await parsed.runToolCall({
+    toolCallId: RUN_TOOL_CALL_ID,
     abortSignal: new AbortController().signal,
     addWebSources: () => []
   })

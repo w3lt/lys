@@ -3,7 +3,7 @@ import { describe, expect, it, onTestFinished } from "vitest"
 import { migrateDatabase } from "../../../../src/infrastructure/database/migrations"
 
 /** Schema version produced by the current migration list. */
-const CURRENT_SCHEMA_VERSION = 15
+const CURRENT_SCHEMA_VERSION = 16
 
 /**
  * Opens an empty in-memory database owned by the current test.
@@ -206,17 +206,32 @@ function createVersion11Database(): DatabaseSync {
 }
 
 /**
+ * Removes the tool search call records, their indexes, and their trigger,
+ * which version 16 adds.
+ *
+ * @param database - Connection at the current version.
+ */
+function dropToolSearchCallRecords(database: DatabaseSync): void {
+  database.exec(`
+    DROP TRIGGER interrupt_tool_search_calls_after_tool_call_update;
+    DROP TABLE tool_search_call_decisions;
+  `)
+}
+
+/**
  * Creates a database at version 12: the current schema without the tool call
  * decision records.
  *
  * @returns A connection at `user_version` 12, closed when the test finishes.
  * @remarks Migration 13 only adds the decision table, its index, and its
- * trigger, and migrations 14 and 15 only create them again, so dropping them
- * from a current database leaves exactly the version-12 schema.
+ * trigger, migrations 14 and 15 only create them again, and migration 16
+ * only adds the tool search call records, so dropping all of them from a
+ * current database leaves exactly the version-12 schema.
  */
 function createVersion12Database(): DatabaseSync {
   const database = openEmptyDatabase()
   migrateDatabase(database)
+  dropToolSearchCallRecords(database)
   database.exec(`
     DROP TRIGGER update_tool_call_decision_after_tool_call_update;
     DROP TABLE tool_call_decisions;
@@ -261,7 +276,8 @@ function replaceSqlText(
  * finishes.
  * @remarks Migrations 14 and 15 only create the decision table again with
  * one more allowed value, and its index and trigger again unchanged, so
- * the current table's own SQL without those values is each earlier table.
+ * the current table's own SQL without those values is each earlier table;
+ * migration 16 only adds the tool search call records, which are dropped.
  */
 function createDecisionTableVersionDatabase(
   version: number,
@@ -269,6 +285,7 @@ function createDecisionTableVersionDatabase(
 ): DatabaseSync {
   const database = openEmptyDatabase()
   migrateDatabase(database)
+  dropToolSearchCallRecords(database)
   const readSql = (name: string): string => {
     const row = database
       .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
@@ -287,6 +304,20 @@ function createDecisionTableVersionDatabase(
   database.exec(indexSql)
   database.exec(triggerSql)
   database.exec(`PRAGMA user_version = ${version}`)
+  return database
+}
+
+/**
+ * Creates a database at version 15: the current schema without the tool
+ * search call records.
+ *
+ * @returns A connection at `user_version` 15, closed when the test finishes.
+ */
+function createVersion15Database(): DatabaseSync {
+  const database = openEmptyDatabase()
+  migrateDatabase(database)
+  dropToolSearchCallRecords(database)
+  database.exec("PRAGMA user_version = 15")
   return database
 }
 
@@ -356,6 +387,61 @@ function saveToolCallDecision(database: DatabaseSync, values: string): void {
     INSERT INTO tool_call_decisions (call_id, conversation_id, agent_code, tool_name, policy_effect, policy_reason, approval_mode, answer, outcome, created_at, updated_at)
     VALUES ('p1', 'c1', 'caliginia', 'web_search', ${values}, 'awaiting-approval', '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z')
   `)
+}
+
+/**
+ * Stores, in a migrated database, conversation `c1` under `caliginia` with
+ * one streaming reply `a1` and its running `find_tools` call `f1`, which
+ * started a tool search.
+ *
+ * @param database - Connection at version 16 or later.
+ */
+function saveRunningSearchCall(database: DatabaseSync): void {
+  database.exec(`
+    INSERT INTO conversations (id, title, agent_code, created_at, updated_at)
+    VALUES ('c1', NULL, 'caliginia', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    INSERT INTO conversation_messages (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
+    VALUES ('a1', 'c1', 'assistant', 'model', '', 'streaming', NULL, '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z');
+    INSERT INTO conversation_messages (id, conversation_id, role, reply_id, position, round, content, status, tool_name, tool_arguments, created_at, updated_at)
+    VALUES ('f1', 'c1', 'tool_call', 'a1', 0, 0, '', 'running', 'find_tools', '{}', '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z')
+  `)
+}
+
+/**
+ * Stores the record of one call of the search {@link saveRunningSearchCall}
+ * started.
+ *
+ * @param database - Connection holding {@link saveRunningSearchCall}'s rows.
+ * @param callId - Identity of the search's call.
+ * @param values - SQL values of `policy_effect`, `policy_reason`,
+ * `outcome`, and `updated_at`, in that order.
+ */
+function saveToolSearchCallRecord(
+  database: DatabaseSync,
+  callId: string,
+  values: string
+): void {
+  database.exec(`
+    INSERT INTO tool_search_call_decisions (call_id, search_call_id, conversation_id, agent_code, tool_name, argument_text, created_at, policy_effect, policy_reason, outcome, updated_at)
+    VALUES ('${callId}', 'f1', 'c1', 'armitage', 'search_tools', '{"query":"web"}', '2026-01-04T00:00:00.000Z', ${values})
+  `)
+}
+
+/**
+ * Lists the stored tool search call records.
+ *
+ * @param database - Open connection.
+ * @returns Each record's call, outcome, and update time, by call.
+ */
+function listToolSearchCallOutcomes(
+  database: DatabaseSync
+): Record<string, unknown>[] {
+  return database
+    .prepare(
+      `SELECT call_id AS callId, outcome, updated_at AS updatedAt
+      FROM tool_search_call_decisions ORDER BY call_id`
+    )
+    .all()
 }
 
 /**
@@ -573,9 +659,11 @@ describe("migrateDatabase", () => {
       "conversation_messages",
       "conversation_sources",
       "conversations",
-      "tool_call_decisions"
+      "tool_call_decisions",
+      "tool_search_call_decisions"
     ])
     expect(listSchemaObjects(database, "trigger")).toEqual([
+      "interrupt_tool_search_calls_after_tool_call_update",
       "update_conversation_after_message_insert",
       "update_conversation_after_message_update",
       "update_conversation_updated_at",
@@ -584,7 +672,9 @@ describe("migrateDatabase", () => {
     expect(listSchemaObjects(database, "index")).toEqual([
       "conversation_messages_conversation_idx",
       "conversation_messages_reply_part_idx",
-      "tool_call_decisions_conversation_idx"
+      "tool_call_decisions_conversation_idx",
+      "tool_search_call_decisions_conversation_idx",
+      "tool_search_call_decisions_search_call_idx"
     ])
     expect(database.isTransaction).toBe(false)
   })
@@ -756,6 +846,7 @@ describe("migrateDatabase", () => {
         .get()
     ).toEqual(activityTimeBefore)
     expect(listSchemaObjects(database, "trigger")).toEqual([
+      "interrupt_tool_search_calls_after_tool_call_update",
       "update_conversation_after_message_insert",
       "update_conversation_after_message_update",
       "update_conversation_updated_at",
@@ -1831,6 +1922,129 @@ describe("migrateDatabase", () => {
     saveToolCallDecision(database, "NULL, NULL, NULL, NULL")
     database.exec("DELETE FROM conversations WHERE id = 'c1'")
     expect(listToolCallDecisionOutcomes(database)).toEqual([])
+  })
+
+  it("upgrades a version-15 database by adding the tool search call records, keeping every decision record", () => {
+    const database = createVersion15Database()
+    saveWaitingToolCall(database)
+    saveToolCallDecision(database, "'allow', NULL, 'ask-me', NULL")
+    const readRecords = () =>
+      database.prepare("SELECT * FROM tool_call_decisions").all()
+    const version15Records = readRecords()
+
+    migrateDatabase(database)
+
+    expect(readUserVersion(database)).toBe(CURRENT_SCHEMA_VERSION)
+    expect(readRecords()).toEqual(version15Records)
+    expect(listSchemaObjects(database, "table")).toContain(
+      "tool_search_call_decisions"
+    )
+    expect(listToolSearchCallOutcomes(database)).toEqual([])
+  })
+
+  it("stores a search call's record for each decision a search's call can have, and refuses one that asks the person or waits for them", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    saveRunningSearchCall(database)
+    const at = "'2026-01-04T00:00:00.000Z'"
+
+    saveToolSearchCallRecord(database, "s1", `'allow', NULL, 'running', ${at}`)
+    saveToolSearchCallRecord(
+      database,
+      "s2",
+      `'deny', 'credential-file', 'failed', ${at}`
+    )
+    saveToolSearchCallRecord(database, "s3", `NULL, NULL, 'failed', ${at}`)
+    const refused = {
+      approval: `'require-approval', 'destructive-tool', 'running', ${at}`,
+      waiting: `'allow', NULL, 'awaiting-approval', ${at}`,
+      reasonlessDenial: `'deny', NULL, 'failed', ${at}`,
+      allowedWithReason: `'allow', 'credential-file', 'running', ${at}`
+    }
+    for (const values of Object.values(refused))
+      expect(() => saveToolSearchCallRecord(database, "s4", values)).toThrow(
+        /constraint failed/
+      )
+    expect(listToolSearchCallOutcomes(database)).toMatchObject([
+      { callId: "s1", outcome: "running" },
+      { callId: "s2", outcome: "failed" },
+      { callId: "s3", outcome: "failed" }
+    ])
+  })
+
+  it("marks a search's calls still running as interrupted when its find_tools call stops running, keeping the later update time", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    saveRunningSearchCall(database)
+    saveToolSearchCallRecord(
+      database,
+      "s1",
+      "'allow', NULL, 'running', '2026-01-05T00:00:00.000Z'"
+    )
+    saveToolSearchCallRecord(
+      database,
+      "s2",
+      "'allow', NULL, 'succeeded', '2026-01-05T00:00:00.000Z'"
+    )
+    saveToolSearchCallRecord(
+      database,
+      "s3",
+      "'allow', NULL, 'running', '2026-01-07T00:00:00.000Z'"
+    )
+
+    database.exec(
+      "UPDATE conversation_messages SET updated_at = '2026-01-06T00:00:00.000Z' WHERE id = 'f1'"
+    )
+    expect(listToolSearchCallOutcomes(database)).toMatchObject([
+      { outcome: "running" },
+      { outcome: "succeeded" },
+      { outcome: "running" }
+    ])
+    database.exec(
+      "UPDATE conversation_messages SET status = 'interrupted' WHERE id = 'f1'"
+    )
+
+    expect(listToolSearchCallOutcomes(database)).toEqual([
+      {
+        callId: "s1",
+        outcome: "interrupted",
+        updatedAt: "2026-01-06T00:00:00.000Z"
+      },
+      {
+        callId: "s2",
+        outcome: "succeeded",
+        updatedAt: "2026-01-05T00:00:00.000Z"
+      },
+      {
+        callId: "s3",
+        outcome: "interrupted",
+        updatedAt: "2026-01-07T00:00:00.000Z"
+      }
+    ])
+  })
+
+  it("deletes a search call's record with its find_tools call, and with its conversation", () => {
+    const database = openEmptyDatabase()
+    migrateDatabase(database)
+    saveRunningSearchCall(database)
+    const saveRecord = () =>
+      saveToolSearchCallRecord(
+        database,
+        "s1",
+        "'allow', NULL, 'running', '2026-01-04T00:00:00.000Z'"
+      )
+    saveRecord()
+
+    database.exec("DELETE FROM conversation_messages WHERE id = 'f1'")
+    expect(listToolSearchCallOutcomes(database)).toEqual([])
+
+    database.exec(`
+      INSERT INTO conversation_messages (id, conversation_id, role, reply_id, position, round, content, status, tool_name, tool_arguments, created_at, updated_at)
+      VALUES ('f1', 'c1', 'tool_call', 'a1', 0, 0, '', 'running', 'find_tools', '{}', '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z')
+    `)
+    saveRecord()
+    database.exec("DELETE FROM conversations WHERE id = 'c1'")
+    expect(listToolSearchCallOutcomes(database)).toEqual([])
   })
 
   it("rejects a database created by a newer version without changing it", () => {

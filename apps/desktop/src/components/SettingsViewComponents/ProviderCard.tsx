@@ -2,6 +2,7 @@ import type { LlmProvider, ProviderAddress } from "@lys/share"
 import { useId, useRef, useState, type ReactElement } from "react"
 
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
 import type { BackendServerStatus } from "@/lib/store"
 import type { LlmProviderStatus } from "@/lib/store/model-runtime"
 import type {
@@ -14,23 +15,15 @@ import type { ProvidersSettings, SecretsSettings } from "@/lib/store/settings"
 import { ProviderAddressForm, ProviderKeyForm } from "./ProviderAccessForms"
 import {
   buildProvidersWithAddress,
-  buildProvidersWithOnlyProvider,
+  buildProvidersWithProviderOn,
   calculateProviderBadge,
   findProviderAccessKind,
-  findProviderCardProvider,
   findSavedProviderApiKey,
   formatProviderMessage,
-  formatProviderModeTag,
-  isProviderCardOn,
-  OLLAMA_PROVIDER_LABELS,
-  OLLAMA_PROVIDER_NOTES,
-  OLLAMA_PROVIDERS,
-  PROVIDER_CARD_PROVIDERS,
+  isProviderOn,
   PROVIDER_DESCRIPTIONS,
   UNEDITED_PROVIDER_DRAFT,
-  type OllamaLlmProvider,
   type ProviderAccessKind,
-  type ProviderCardKind,
   type ProviderFieldDraft
 } from "./provider-presentation"
 
@@ -50,10 +43,8 @@ export type ProviderCardRequests = {
 
 /** Properties accepted by {@link ProviderCard}. */
 type ProviderCardProps = ProviderCardRequests & {
-  /** Card to present. */
-  readonly card: ProviderCardKind
-  /** Name shared by the pane's radio buttons. */
-  readonly radioName: string
+  /** Provider the card presents. */
+  readonly provider: LlmProvider
   /** Saved providers and addresses. */
   readonly providers: ProvidersSettings
   /** Saved keys. */
@@ -82,16 +73,6 @@ type ProviderCardBodyProps = ProviderCardRequests & {
   readonly saveState: ProviderSettingsSaveState
 }
 
-/** Properties accepted by {@link OllamaProviderRow}. */
-type OllamaProviderRowProps = {
-  /** Ollama provider that is on: a local server or Ollama Cloud. */
-  readonly provider: OllamaLlmProvider
-  /** Whether a provider save runs, which blocks another. */
-  readonly isSaving: boolean
-  /** Requests that the card turn the other Ollama provider on instead. */
-  readonly onProviderChange: (provider: OllamaLlmProvider) => void
-}
-
 /** Properties accepted by {@link ProviderCardFooter}. */
 type ProviderCardFooterProps = {
   /** Identifier of the status line, which describes the form's field. */
@@ -114,52 +95,6 @@ type ProviderCardFooterProps = {
   readonly onTest: () => void
   /** Requests that the card remove the saved key. */
   readonly onRemoveKey: () => void
-}
-
-/**
- * Presents the Ollama card's Local and Cloud row: a note on what the Ollama
- * provider that is on means, and a button per Ollama provider.
- *
- * @remarks A pure projection of its props; the pressed button is the
- * provider that is on, and the buttons are disabled while a save runs.
- * @param props - Ollama provider that is on, whether a save runs, and the
- * request.
- * @returns The row.
- */
-function OllamaProviderRow({
-  provider,
-  isSaving,
-  onProviderChange
-}: OllamaProviderRowProps): ReactElement {
-  const labelId = useId()
-  return (
-    <div className="settings-view__provider-mode-row">
-      <div className="settings-view__identity-lines">
-        <h3 id={labelId}>Configure</h3>
-        <p>{OLLAMA_PROVIDER_NOTES[provider]}</p>
-      </div>
-      <fieldset
-        aria-labelledby={labelId}
-        className="settings-view__provider-modes"
-      >
-        {OLLAMA_PROVIDERS.map((candidate) => (
-          <Button
-            aria-pressed={candidate === provider}
-            disabled={isSaving}
-            key={candidate}
-            onClick={() => {
-              if (candidate !== provider) onProviderChange(candidate)
-            }}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            {OLLAMA_PROVIDER_LABELS[candidate]}
-          </Button>
-        ))}
-      </fieldset>
-    </div>
-  )
 }
 
 /**
@@ -236,15 +171,14 @@ function ProviderCardFooter({
 }
 
 /**
- * Presents a turned-on provider's settings: for an Ollama provider, the row
- * that switches between a local server and Ollama Cloud; the address or key
- * form; and the status line.
+ * Presents a turned-on provider's settings: the address or key form, and the
+ * status line.
  *
  * @remarks The application store owns the saved settings, the save, and the
  * connection; the body owns only the person's edit and whether a key is
- * shown, which reset after a save that succeeded and whenever the form
- * changes between address and key. After Remove succeeds, focus moves to the
- * key field, because Remove leaves.
+ * shown, which reset after a save that succeeded and when the provider is
+ * turned off, which unmounts the body. After Remove succeeds, focus moves to
+ * the key field, because Remove leaves.
  * @param props - Provider, saved settings, connection, save, and requests.
  * @returns The body.
  */
@@ -264,17 +198,10 @@ function ProviderCardBody({
     UNEDITED_PROVIDER_DRAFT
   )
   const [isKeyShown, setIsKeyShown] = useState(false)
-  const [editedAccessKind, setEditedAccessKind] = useState(access.kind)
   const fieldRef = useRef<HTMLInputElement>(null)
   const fieldId = useId()
   const statusId = useId()
   const isSaving = saveState.status === "saving"
-
-  if (editedAccessKind !== access.kind) {
-    setEditedAccessKind(access.kind)
-    setDraft(UNEDITED_PROVIDER_DRAFT)
-    setIsKeyShown(false)
-  }
 
   /** Resets the edit and hides the key again, discarding the typed text. */
   function resetEdit(): void {
@@ -318,17 +245,6 @@ function ProviderCardBody({
 
   return (
     <div className="settings-view__provider-body">
-      {provider === "ollama" || provider === "ollamaCloud" ? (
-        <OllamaProviderRow
-          isSaving={isSaving}
-          onProviderChange={(ollamaProvider) =>
-            void onSaveProviders(
-              buildProvidersWithOnlyProvider(providers, ollamaProvider)
-            )
-          }
-          provider={provider}
-        />
-      ) : null}
       {access.kind === "address" ? (
         <ProviderAddressForm
           draft={draft}
@@ -374,24 +290,22 @@ function ProviderCardBody({
 }
 
 /**
- * Presents one card: a radio button that turns its provider on alone, its
- * logo, name, mode, and line, its badge, and, while its provider is on, that
- * provider's settings.
+ * Presents one provider's card: its logo, name, tag, and line, its badge, a
+ * switch that turns it on or off, and, while it is on, its settings.
  *
- * @remarks Picking a card saves {@link PROVIDER_CARD_PROVIDERS}' provider as
- * the only one turned on, which makes the backend connect to it; Ollama's
- * card then turns the local server on. The radio button is checked while the
- * card's provider is on, and disabled while a save runs. Only a card whose
- * provider is on shows its settings. The logo is the provider's monochrome mark from
- * `@lobehub/icons`, drawn in the text color and hidden from assistive
- * technology, because the name beside it says the same.
- * @param props - Card, radio name, saved settings, connection, save, and
- * requests.
+ * @remarks Flipping the switch saves the enabled list with the provider
+ * added or removed, in provider order, which makes the backend connect to it
+ * or let it go; the other turned-on providers stay on. The switch is named
+ * after the provider, described by its line, checked while the saved
+ * settings turn the provider on, and disabled while a save runs. Only a card
+ * whose provider is on shows its settings. The logo is the provider's
+ * monochrome mark from `@lobehub/icons`, drawn in the text color and hidden
+ * from assistive technology, because the name beside it says the same.
+ * @param props - Provider, saved settings, connection, save, and requests.
  * @returns The card.
  */
 export default function ProviderCard({
-  card,
-  radioName,
+  provider,
   providers,
   secrets,
   status,
@@ -403,9 +317,9 @@ export default function ProviderCard({
 }: ProviderCardProps): ReactElement {
   const nameId = useId()
   const lineId = useId()
-  const description = PROVIDER_DESCRIPTIONS[card]
-  const isOn = isProviderCardOn(card, providers)
-  const badge = calculateProviderBadge(card, providers, secrets, status)
+  const description = PROVIDER_DESCRIPTIONS[provider]
+  const isOn = isProviderOn(provider, providers)
+  const badge = calculateProviderBadge(provider, providers, secrets, status)
 
   return (
     <article
@@ -413,57 +327,51 @@ export default function ProviderCard({
       className="settings-view__provider-card"
       data-active={isOn}
     >
-      <label className="settings-view__provider-header">
-        <input
-          aria-describedby={lineId}
-          aria-labelledby={nameId}
-          checked={isOn}
-          className="settings-view__provider-radio"
-          disabled={saveState.status === "saving"}
-          name={radioName}
-          onChange={() =>
-            void onSaveProviders(
-              buildProvidersWithOnlyProvider(
-                providers,
-                PROVIDER_CARD_PROVIDERS[card]
-              )
-            )
-          }
-          type="radio"
-          value={card}
-        />
+      <div className="settings-view__provider-header">
         <description.logo
           aria-hidden="true"
           className="settings-view__provider-logo"
           size={36}
         />
-        <span className="settings-view__provider-identity">
-          <span className="settings-view__provider-name-line">
-            <span className="settings-view__provider-name" id={nameId}>
+        <div className="settings-view__provider-identity">
+          <div className="settings-view__provider-name-line">
+            <h3 className="settings-view__provider-name" id={nameId}>
               {description.name}
-            </span>
+            </h3>
             <span className="settings-view__provider-tag">
-              {formatProviderModeTag(card, providers)}
+              {description.tag}
             </span>
-          </span>
-          <span className="settings-view__provider-line" id={lineId}>
+          </div>
+          <p className="settings-view__provider-line" id={lineId}>
             {description.blurb}
-          </span>
-        </span>
+          </p>
+        </div>
         <span className="settings-view__secret-state" data-tone={badge.tone}>
           {badge.label}
         </span>
-      </label>
+        <Switch
+          aria-describedby={lineId}
+          aria-labelledby={nameId}
+          checked={isOn}
+          disabled={saveState.status === "saving"}
+          onCheckedChange={(proposedIsOn) =>
+            void onSaveProviders(
+              buildProvidersWithProviderOn(providers, provider, proposedIsOn)
+            )
+          }
+          size="lg"
+        />
+      </div>
       {isOn ? (
         <ProviderCardBody
+          backendStatus={backendStatus}
           onSaveApiKey={onSaveApiKey}
           onSaveProviders={onSaveProviders}
           onTest={onTest}
-          provider={findProviderCardProvider(card, providers)}
+          provider={provider}
           providers={providers}
           saveState={saveState}
           secrets={secrets}
-          backendStatus={backendStatus}
           status={status}
         />
       ) : null}

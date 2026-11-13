@@ -19,6 +19,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
 import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
+import { updateProviderModelState } from "@/lib/store/model-runtime"
 import type { HeldToolCall } from "@/lib/store/tool-calls"
 import { buildAgentListPage, buildBuiltInAgent } from "../support/agentFixtures"
 import { buildPngFile, buildTextFile } from "../support/attachmentFixtures"
@@ -840,59 +841,36 @@ describe("Composer", () => {
     })
 
     it.each([
-      [
-        "LM Studio is not reachable",
-        buildUnreachableRuntime("running", "unreachable"),
-        "Waiting on LM Studio…",
-        "Check LM Studio",
-        "providers"
-      ],
-      [
-        "LM Studio is turned off",
-        buildUnreachableRuntime("running", "off"),
-        "Waiting on LM Studio…",
-        "Open Providers",
-        "providers"
-      ],
-      [
-        "the default model is not loaded",
-        {
+      {
+        name: "LM Studio can't be reached",
+        runtime: buildUnreachableRuntime("running", "unreachable"),
+        banner: "LM Studio can't be reached on 127.0.0.1:1234.",
+        placeholder: "Waiting on LM Studio…",
+        actionLabel: "Open Providers",
+        pane: "providers"
+      },
+      {
+        name: "LM Studio is turned off",
+        runtime: buildUnreachableRuntime("running", "off"),
+        banner: "LM Studio is turned off.",
+        placeholder: "Waiting on LM Studio…",
+        actionLabel: "Open Providers",
+        pane: "providers"
+      },
+      {
+        name: "the model state is unknown",
+        runtime: {
           ...READY_RUNTIME,
-          modelInventory: {
-            status: "ready",
-            modelLoading: "lys",
-            models: [buildLlmInfo("qwen3-8b")]
-          }
-        },
-        "Waiting on LM Studio…",
-        "Load model",
-        "model"
-      ],
-      [
-        "no model is chosen or loaded",
-        {
-          ...READY_RUNTIME,
-          defaultModel: null,
-          modelInventory: {
-            status: "ready",
-            modelLoading: "lys",
-            models: [buildLlmInfo("qwen3-8b")]
-          }
-        },
-        "Waiting on a model…",
-        "Choose model",
-        "model"
-      ],
-      [
-        "the model state is unknown",
-        { ...READY_RUNTIME, modelInventory: { status: "failed" } },
-        "Waiting on LM Studio…",
-        "Check models",
-        "model"
-      ]
+          modelInventory: { status: "failed" }
+        } satisfies RuntimeArrangement,
+        banner: "The backend is up, but model state is unavailable.",
+        placeholder: "Waiting on LM Studio…",
+        actionLabel: "Check models",
+        pane: "model"
+      }
     ] as const)(
-      "opens the settings pane that fixes it when %s",
-      async (_case, runtime, placeholder, actionLabel, pane) => {
+      "says why and opens the settings pane that fixes it when $name",
+      async ({ runtime, banner, placeholder, actionLabel, pane }) => {
         const { useLysStore, Composer } = await loadFreshComposer(runtime)
         const user = userEvent.setup()
         render(
@@ -902,6 +880,9 @@ describe("Composer", () => {
           />
         )
 
+        expect(listStatusTexts()).toContainEqual(
+          expect.stringContaining(banner)
+        )
         expect(getMessageField()).toHaveAttribute("placeholder", placeholder)
         await user.click(screen.getByRole("button", { name: actionLabel }))
 
@@ -911,6 +892,182 @@ describe("Composer", () => {
         })
       }
     )
+
+    it("says a provider is connecting and offers nothing to do meanwhile", async () => {
+      const { Composer } = await loadFreshComposer(
+        buildUnreachableRuntime("running", "connecting")
+      )
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      expect(listStatusTexts()).toContainEqual(
+        expect.stringContaining("Connecting to LM Studio…")
+      )
+      expect(screen.getByRole("button", { name: "Working" })).toBeDisabled()
+    })
+
+    it("shows a model Lys has not loaded in the Model pane, where Load is, and keeps Send off", async () => {
+      const { useLysStore, useChatViewStore, Composer } =
+        await loadFreshComposer({
+          ...READY_RUNTIME,
+          modelInventory: {
+            status: "ready",
+            modelLoading: "lys",
+            models: [buildLlmInfo("qwen3-8b")]
+          }
+        })
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+      act(() => {
+        useChatViewStore.getState().setInputDraft("Hello")
+      })
+
+      expect(listStatusTexts()).toContainEqual(
+        expect.stringContaining("qwen3-8b isn't loaded in LM Studio.")
+      )
+      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled()
+      await user.click(screen.getByRole("button", { name: "Load qwen3-8b" }))
+
+      expect(useLysStore.getState()).toMatchObject({
+        activeView: "settings",
+        settingsPane: "model",
+        modelPaneSelection: buildLmStudioModel("qwen3-8b")
+      })
+    })
+
+    it.each([
+      {
+        name: "no model is chosen or loaded",
+        runtime: {
+          ...READY_RUNTIME,
+          defaultModel: null,
+          modelInventory: {
+            status: "ready",
+            modelLoading: "lys",
+            models: [buildLlmInfo("qwen3-8b")]
+          }
+        } satisfies RuntimeArrangement,
+        banner: "The backend is up, but no model is loaded.",
+        placeholder: "Waiting on a model…"
+      },
+      {
+        name: "the provider does not list the model",
+        runtime: {
+          ...READY_RUNTIME,
+          defaultModel: "removed-model"
+        } satisfies RuntimeArrangement,
+        banner: "removed-model isn't on LM Studio.",
+        placeholder: "Waiting on LM Studio…"
+      }
+    ])(
+      "says why and opens the model menu to choose another when $name",
+      async ({ runtime, banner, placeholder }) => {
+        const { useLysStore, Composer } = await loadFreshComposer(runtime)
+        const user = userEvent.setup()
+        render(
+          <Composer
+            messageFieldRef={createRef()}
+            onStartConversation={vi.fn()}
+          />
+        )
+
+        expect(listStatusTexts()).toContainEqual(
+          expect.stringContaining(banner)
+        )
+        expect(getMessageField()).toHaveAttribute("placeholder", placeholder)
+        await user.click(screen.getByRole("button", { name: "Choose model" }))
+        await waitForRenderedWork()
+
+        expect(
+          within(screen.getByRole("menu")).getByRole("menuitemradio", {
+            name: /^qwen3-8b · LM Studio/
+          })
+        ).toBeInTheDocument()
+        expect(useLysStore.getState().activeView).not.toBe("settings")
+      }
+    )
+
+    it("says a provider that runs its own models isn't running the model, and opens the model menu", async () => {
+      const { useLysStore, Composer } = await loadFreshComposer(
+        buildUnreachableRuntime("running", "off")
+      )
+      const { settings, providerModels } = useLysStore.getState()
+      useLysStore.setState({
+        settings: {
+          ...settings,
+          providers: { ...settings.providers, enabled: ["groq"] },
+          runtime: {
+            ...settings.runtime,
+            defaultModel: { provider: "groq", modelKey: "llama-3.3-70b" }
+          }
+        },
+        providerModels: updateProviderModelState(providerModels, "groq", {
+          status: "connected",
+          inventory: {
+            status: "ready",
+            modelLoading: "provider",
+            models: [buildLlmInfo("llama-3.3-70b")]
+          }
+        })
+      })
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      expect(listStatusTexts()).toContainEqual(
+        expect.stringContaining("Groq isn't running llama-3.3-70b.")
+      )
+      await user.click(screen.getByRole("button", { name: "Choose model" }))
+      await waitForRenderedWork()
+
+      expect(screen.getByRole("group", { name: "Groq" })).toBeInTheDocument()
+    })
+
+    it("says no provider is on and opens Providers, from the banner and from the model menu", async () => {
+      const { useLysStore, Composer } = await loadFreshComposer(
+        buildUnreachableRuntime("running", "off")
+      )
+      const { settings } = useLysStore.getState()
+      useLysStore.setState({
+        settings: {
+          ...settings,
+          providers: { ...settings.providers, enabled: [] },
+          runtime: { ...settings.runtime, defaultModel: null }
+        }
+      })
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      expect(listStatusTexts()).toContainEqual(
+        expect.stringContaining("No provider is on.")
+      )
+      await openMenuWithKeyboard(
+        user,
+        screen.getByRole("button", { name: "no model selected" })
+      )
+      await user.click(screen.getByRole("menuitem", { name: "Open Providers" }))
+
+      expect(useLysStore.getState()).toMatchObject({
+        activeView: "settings",
+        settingsPane: "providers"
+      })
+
+      act(() => {
+        useLysStore.setState({ activeView: "chat", settingsPane: "runtime" })
+      })
+      await user.click(screen.getByRole("button", { name: "Open Providers" }))
+
+      expect(useLysStore.getState()).toMatchObject({
+        activeView: "settings",
+        settingsPane: "providers"
+      })
+    })
   })
 
   describe("model selection", () => {
@@ -1005,12 +1162,80 @@ describe("Composer", () => {
       ).toBeInTheDocument()
       expect(getMessageField()).toBeDisabled()
       expect(listStatusTexts()).toContainEqual(
-        expect.stringContaining("llama-4 is not loaded in LM Studio.")
+        expect.stringContaining("llama-4 isn't loaded in LM Studio.")
       )
       expect(
-        screen.getByRole("button", { name: "Load model" })
+        screen.getByRole("button", { name: "Load llama-4" })
       ).toBeInTheDocument()
       expect(listChatBodies(backend)).toEqual([])
+    })
+
+    it("groups the menu by provider, the same key once per provider, and sends to the provider picked", async () => {
+      startNativeHostFake({})
+      const { backend, streams } = startChatBackend()
+      const { useLysStore, useChatViewStore, Composer } =
+        await loadFreshComposer(TWO_LOADED)
+      const { settings, providerModels } = useLysStore.getState()
+      useLysStore.setState({
+        settings: {
+          ...settings,
+          providers: { ...settings.providers, enabled: ["lmStudio", "ollama"] }
+        },
+        providerModels: updateProviderModelState(providerModels, "ollama", {
+          status: "connected",
+          inventory: {
+            status: "ready",
+            modelLoading: "provider",
+            models: [buildLlmInfo("qwen3-8b", { loaded: true })]
+          }
+        })
+      })
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      await openMenuWithKeyboard(
+        user,
+        screen.getByRole("button", { name: "gemma-3 · LM Studio" })
+      )
+      expect(
+        within(screen.getByRole("group", { name: "LM Studio" }))
+          .getAllByRole("menuitemradio")
+          .map(
+            (option) =>
+              option.querySelector(".composer__model-option-name")?.textContent
+          )
+      ).toEqual([
+        "qwen3-8b · LM Studio",
+        "gemma-3 · LM Studio",
+        "llama-4 · LM Studio"
+      ])
+      await user.click(
+        within(screen.getByRole("group", { name: "Ollama" })).getByRole(
+          "menuitemradio",
+          { name: /^qwen3-8b · Ollama/ }
+        )
+      )
+      await user.type(getMessageField(), "Hello{Enter}")
+      await waitForRenderedWork()
+
+      expect(
+        screen.getByRole("button", { name: "qwen3-8b · Ollama" })
+      ).toBeInTheDocument()
+      expect(useChatViewStore.getState().modelPick).toEqual({
+        provider: "ollama",
+        modelKey: "qwen3-8b"
+      })
+      expect(useLysStore.getState().settings.runtime.defaultModel).toEqual(
+        buildLmStudioModel("gemma-3")
+      )
+      expect(listChatBodies(backend)).toEqual([
+        expect.objectContaining({
+          model: { provider: "ollama", modelKey: "qwen3-8b" }
+        })
+      ])
+      streams[0]?.close()
     })
   })
 

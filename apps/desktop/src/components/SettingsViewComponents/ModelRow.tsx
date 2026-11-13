@@ -1,193 +1,75 @@
 import type { ReactElement } from "react"
-import { llmTestModelApi } from "@lys/protocol"
-import type { LlmProvider } from "@lys/share"
+import type { LlmInfo } from "@lys/protocol"
 
-import { Button } from "@/components/ui/button"
-import type { LocalModelDescriptor } from "@/lib/models/inventory"
-import {
-  formatModelRowTag,
-  readModelRowTone
-} from "@/lib/models/model-residency"
-import type {
-  ModelRequestState,
-  ObservedModelLoading
-} from "@/lib/store/model-runtime"
+import { splitModelKey } from "./model-pane-presentation"
 
-/** Selection contract for one backend model row. */
-type ModelChoiceProps = {
-  /** Validated backend model with display labels. */
-  readonly model: LocalModelDescriptor
-  /** Whether the settings owner selected this default. */
+/** Properties accepted by {@link ModelRow}. */
+export type ModelRowProps = {
+  /** Model the row represents. */
+  readonly model: LlmInfo
+  /** Value of the list's right column for the model: its size or context. */
+  readonly columnValue: string
+  /** Whether the Model pane shows the model's details. */
+  readonly isSelected: boolean
+  /** Whether the model is the session's default. */
   readonly isDefault: boolean
-  /** Request in flight for the row's provider, used for a transition tag. */
-  readonly modelRequest: ModelRequestState
-  /** Proposes this key as the default, without loading it. */
-  readonly onSelect: (modelKey: string) => void
-}
-
-/**
- * Presents the default-selection button and backend model metadata.
- * @param props - Parent-owned model, selection, and selection proposal.
- * @returns The native pressed-state selection control.
- * @remarks Owns no state or effects.
- */
-function ModelChoice({
-  model,
-  isDefault,
-  modelRequest,
-  onSelect
-}: ModelChoiceProps): ReactElement {
-  return (
-    <button
-      aria-pressed={isDefault}
-      className="settings-view__model-choice"
-      onClick={() => onSelect(model.modelKey)}
-      title="Make this the default"
-      type="button"
-    >
-      <span
-        aria-hidden="true"
-        className="settings-view__status-dot settings-view__status-dot--small"
-        data-tone={readModelRowTone(modelRequest, model)}
-      />
-      <span className="settings-view__model-lines">
-        <span className="settings-view__model-name">
-          {model.modelKey}
-          {isDefault ? (
-            <span className="settings-view__model-default">default</span>
-          ) : null}
-        </span>
-        <span className="settings-view__model-detail">{model.detail}</span>
-      </span>
-      <span className="settings-view__model-tag">
-        {formatModelRowTag(modelRequest, model)}
-      </span>
-    </button>
-  )
-}
-
-/** Backend actions for one model, with application-owned completion. */
-type ModelRowActionsProps = {
-  /** Provider that lists the model, whose health route Test asks. */
-  readonly provider: LlmProvider
-  /** Canonical model metadata including observed residency. */
-  readonly model: LocalModelDescriptor
-  /** Prevents new requests while the backend is stopped or busy. */
-  readonly disabled: boolean
+  /** Whether the model is being loaded. */
+  readonly isLoading: boolean
   /**
-   * Who loads the models, as the inventory reports; Load and Unload are
-   * present only when Lys loads them.
+   * Requests that the Model pane show this model, called once per press.
+   *
+   * @param modelKey - Key of the row's model.
    */
-  readonly modelLoading: ObservedModelLoading
-  /** Loads the selected key and handles failures in shared state. */
-  readonly onLoad: (modelKey: string) => Promise<void>
-  /** Unloads the selected key and handles failures in shared state. */
-  readonly onUnload: (modelKey: string) => Promise<void>
-  /** Queries loaded-state health and handles failures in shared state. */
-  readonly onTest: (modelKey: string) => Promise<void>
+  readonly onSelectModel: (modelKey: string) => void
 }
 
 /**
- * Presents model operations supported by the backend.
- * @param props - Model, availability, and store-owned asynchronous callbacks.
- * @returns Named native controls for health and, while the inventory
- * reports that Lys loads the models, residency.
- * @remarks The store observes all failures;
- * this row does not cancel application work on unmount. Health path eligibility
- * comes from the shared parameter validator rather than a copied length limit.
- */
-function ModelRowActions({
-  provider,
-  model,
-  disabled,
-  modelLoading,
-  onLoad,
-  onUnload,
-  onTest
-}: ModelRowActionsProps): ReactElement {
-  const canTest = llmTestModelApi.params.safeParse({
-    provider,
-    modelId: model.modelKey
-  }).success
-  return (
-    <div className="settings-view__model-actions">
-      <Button
-        aria-label={`Test ${model.modelKey}`}
-        disabled={disabled || !canTest}
-        onClick={() => void onTest(model.modelKey)}
-        size="sm"
-        type="button"
-        variant="outline"
-        title={
-          canTest
-            ? "Check whether this model is loaded"
-            : "This model key exceeds the health endpoint's limit"
-        }
-      >
-        Test
-      </Button>
-      {modelLoading === "lys" ? (
-        <Button
-          aria-label={`${model.loaded ? "Unload" : "Load"} ${model.modelKey}`}
-          className="settings-view__model-act"
-          disabled={disabled}
-          onClick={() =>
-            void (model.loaded
-              ? onUnload(model.modelKey)
-              : onLoad(model.modelKey))
-          }
-          size="sm"
-          type="button"
-          variant={model.loaded ? "outline" : "default"}
-        >
-          {model.loaded ? "Unload" : "Load"}
-        </Button>
-      ) : null}
-    </div>
-  )
-}
-
-/** Complete row inputs for default selection and model operations. */
-type ModelRowProps = ModelChoiceProps & ModelRowActionsProps
-
-/**
- * Composes one model's selection control and independent backend actions.
- * @param props - Parent-owned inventory entry, state, and callbacks.
- * @returns A semantic model-list entry.
- * @remarks Selection never implies loading.
+ * Presents one model of the Model pane's list as a button that selects it.
+ *
+ * @remarks Presentational. The key's namespace and tag are quieter than its
+ * name. Default and loading are stated in words, the selected row is marked
+ * with `aria-current`, and the right column's value ends the row, so no
+ * state depends on colour alone.
+ * @param props - Model, column value, its states, and the selection request.
+ * @returns The list item holding the row's button.
  */
 export default function ModelRow({
-  provider,
   model,
+  columnValue,
+  isSelected,
   isDefault,
-  modelRequest,
-  onSelect,
-  disabled,
-  modelLoading,
-  onLoad,
-  onUnload,
-  onTest
+  isLoading,
+  onSelectModel
 }: ModelRowProps): ReactElement {
+  const { prefix, base, tag } = splitModelKey(model.modelKey)
   return (
-    <li
-      className="settings-view__model-row"
-      data-selected={isDefault ? "" : undefined}
-    >
-      <ModelChoice
-        model={model}
-        isDefault={isDefault}
-        modelRequest={modelRequest}
-        onSelect={onSelect}
-      />
-      <ModelRowActions
-        provider={provider}
-        model={model}
-        disabled={disabled}
-        modelLoading={modelLoading}
-        onLoad={onLoad}
-        onUnload={onUnload}
-        onTest={onTest}
-      />
+    <li>
+      <button
+        aria-current={isSelected ? "true" : undefined}
+        className="settings-view__models-row"
+        onClick={() => onSelectModel(model.modelKey)}
+        type="button"
+      >
+        <span className="settings-view__models-key">
+          <span>{prefix}</span>
+          {base}
+          <span>{tag}</span>
+        </span>
+        {isDefault ? (
+          <span className="settings-view__models-chip">Default</span>
+        ) : null}
+        {isLoading ? (
+          <span className="settings-view__models-loading">
+            <span
+              aria-hidden="true"
+              className="settings-view__status-dot settings-view__status-dot--small"
+              data-tone="pending"
+            />
+            Loading…
+          </span>
+        ) : null}
+        <span className="settings-view__models-column">{columnValue}</span>
+      </button>
     </li>
   )
 }

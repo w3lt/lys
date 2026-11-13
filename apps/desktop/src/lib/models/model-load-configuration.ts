@@ -13,16 +13,6 @@ import type {
 import committedDefaultModelLoadConfigurationFile from "./default_model_load_configuration.json"
 
 /**
- * Eval batch sizes the Model pane offers, in tokens and ascending order.
- *
- * @remarks A presentation choice, not a limit: a stored size outside this
- * list stays valid and is sent unchanged.
- */
-export const EVAL_BATCH_SIZE_CHOICES: readonly number[] = Object.freeze([
-  128, 256, 512, 1024, 2048
-])
-
-/**
  * Smallest context-length stop the Model pane's slider offers, in tokens.
  * Stops double from here up to the model's maximum.
  */
@@ -75,18 +65,6 @@ export type ModelLoadConfigurationChange =
       /** Key of the model whose own expert count is removed. */
       readonly modelKey: string
     }
-
-/** One load setting whose loaded value differs from the stored one. */
-export type ModelLoadDifference = {
-  /** Setting that differs. */
-  readonly setting: ModelLoadSettingName
-  /** Value the model was loaded with, as its row shows it. */
-  readonly loadedValue: string
-  /** Label and loaded value, as the reload note lists them. */
-  readonly loadedPhrase: string
-  /** Label and stored value, as the reload note lists them. */
-  readonly storedPhrase: string
-}
 
 /** Load settings in the order the Model pane lists them. */
 const MODEL_LOAD_SETTING_NAMES: readonly ModelLoadSettingName[] = Object.freeze(
@@ -473,112 +451,4 @@ export function formatTokenCount(tokens: number): string {
   if (tokens < TOKENS_PER_KILO_UNIT) return String(tokens)
   const kiloUnits = tokens / TOKENS_PER_KILO_UNIT
   return `${Number.isInteger(kiloUnits) ? kiloUnits : kiloUnits.toFixed(1)}k`
-}
-
-/**
- * Formats the value of one load setting as its row shows it.
- *
- * @param setting - Setting to format.
- * @param configuration - Configuration holding the value.
- * @returns The abbreviated context length, the batch size, `on` or `off`, or
- * the expert count, which reads `auto` when it is not set.
- */
-export function formatModelLoadSetting(
-  setting: ModelLoadSettingName,
-  configuration: CompleteModelLoadConfiguration
-): string {
-  switch (setting) {
-    case "contextLength":
-      return formatTokenCount(configuration.contextLength)
-    case "evalBatchSize":
-      return String(configuration.evalBatchSize)
-    case "flashAttention":
-      return configuration.flashAttention ? "on" : "off"
-    case "offloadKVCacheToGpu":
-      return configuration.offloadKVCacheToGpu ? "on" : "off"
-    case "numExperts":
-      return configuration.numExperts === undefined
-        ? "auto"
-        : String(configuration.numExperts)
-  }
-}
-
-/**
- * Formats one load setting as the reload note names it.
- *
- * @param setting - Setting to format.
- * @param configuration - Configuration holding the value.
- * @returns The setting's short label followed by its value; the KV cache
- * reads `on gpu` or `in ram`.
- */
-function formatModelLoadPhrase(
-  setting: ModelLoadSettingName,
-  configuration: CompleteModelLoadConfiguration
-): string {
-  const settingText = formatModelLoadSetting(setting, configuration)
-  switch (setting) {
-    case "contextLength":
-      return `ctx ${settingText}`
-    case "evalBatchSize":
-      return `batch ${settingText}`
-    case "flashAttention":
-      return `flash attn ${settingText}`
-    case "offloadKVCacheToGpu":
-      return `kv cache ${configuration.offloadKVCacheToGpu ? "on gpu" : "in ram"}`
-    case "numExperts":
-      return `experts ${settingText}`
-  }
-}
-
-/**
- * Lists the load settings whose loaded value differs from the stored one.
- *
- * @param loaded - Configuration the model was loaded with.
- * @param stored - Configuration the model would be loaded with now.
- * @returns One description per differing setting, in the Model pane's order;
- * empty when the configurations are equal.
- */
-export function listModelLoadDifferences(
-  loaded: CompleteModelLoadConfiguration,
-  stored: CompleteModelLoadConfiguration
-): readonly ModelLoadDifference[] {
-  return MODEL_LOAD_SETTING_NAMES.filter(
-    (setting) => loaded[setting] !== stored[setting]
-  ).map((setting) => ({
-    setting,
-    loadedValue: formatModelLoadSetting(setting, loaded),
-    loadedPhrase: formatModelLoadPhrase(setting, loaded),
-    storedPhrase: formatModelLoadPhrase(setting, stored)
-  }))
-}
-
-/**
- * Formats the note shown when a loaded model's stored settings changed.
- *
- * @param differences - Settings that differ, at least one.
- * @returns What the model was loaded with and what a reload would apply.
- */
-export function formatModelReloadNote(
-  differences: readonly ModelLoadDifference[]
-): string {
-  const loadedPhrases = differences.map(({ loadedPhrase }) => loadedPhrase)
-  const storedPhrases = differences.map(({ storedPhrase }) => storedPhrase)
-  return `loaded with ${loadedPhrases.join(", ")} · reload to apply ${storedPhrases.join(", ")}`
-}
-
-/**
- * Finds the model whose load configuration the Model pane edits.
- *
- * @typeParam TModel - Inventory entry type; the found entry is returned as is.
- * @param models - Downloaded models the runtime lists.
- * @param defaultModel - Key of the selected default model, or null for none.
- * @returns The selected default model's entry when the inventory lists it,
- * otherwise undefined. Without a selected default model nothing is edited,
- * even while a model is loaded.
- */
-export function findLoadConfigurationTarget<TModel extends ModelLoadTarget>(
-  models: readonly TModel[],
-  defaultModel: string | null
-): TModel | undefined {
-  return models.find((model) => model.modelKey === defaultModel)
 }

@@ -2,17 +2,16 @@ import { llmProviderSettingsSchema, providerAddressSchema } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   buildProvidersWithAddress,
-  buildProvidersWithOnlyProvider,
+  buildProvidersWithProviderOn,
   calculateProviderBadge,
   calculateProviderKeyFieldValue,
   findProviderAccessKind,
-  findProviderCardProvider,
   formatProviderAddressPlaceholder,
   formatProviderKeyPlaceholder,
   formatProviderMessage,
-  formatProviderModeTag,
-  isProviderCardOn,
+  isProviderOn,
   parseProviderAddressDraft,
+  PROVIDER_DESCRIPTIONS,
   parseProviderKeyDraft,
   UNEDITED_PROVIDER_DRAFT,
   type ProviderFieldDraft,
@@ -83,49 +82,51 @@ function buildStatusInput(
 }
 
 describe("provider-presentation", () => {
-  it("tags each provider with where it runs", () => {
-    expect(formatProviderModeTag("lmStudio", STORED_PROVIDERS_SETTINGS)).toBe(
-      "local"
-    )
-    expect(formatProviderModeTag("ollama", STORED_PROVIDERS_SETTINGS)).toBe(
-      "local"
-    )
-    expect(formatProviderModeTag("ollama", OLLAMA_CLOUD)).toBe("cloud")
-    expect(formatProviderModeTag("groq", STORED_PROVIDERS_SETTINGS)).toBe(
-      "cloud"
-    )
+  it("names each provider and tags it with where it runs", () => {
+    expect(
+      Object.values(PROVIDER_DESCRIPTIONS).map(({ name, tag }) => [name, tag])
+    ).toEqual([
+      ["LM Studio", "local"],
+      ["Ollama", "local"],
+      ["Ollama Cloud", "cloud"],
+      ["Groq", "cloud"]
+    ])
   })
 
-  describe("provider cards", () => {
-    it("presents Ollama Cloud on Ollama's card only while it is on and the local server is not", () => {
-      expect(findProviderCardProvider("ollama", OLLAMA_CLOUD)).toBe(
-        "ollamaCloud"
-      )
-      expect(
-        findProviderCardProvider("ollama", STORED_PROVIDERS_SETTINGS)
-      ).toBe("ollama")
-      expect(findProviderCardProvider("ollama", BOTH_OLLAMAS_AND_GROQ)).toBe(
-        "ollama"
-      )
-      expect(findProviderCardProvider("ollama", GROQ_ACTIVE)).toBe("ollama")
-      expect(findProviderCardProvider("groq", OLLAMA_CLOUD)).toBe("groq")
-      expect(findProviderCardProvider("lmStudio", OLLAMA_CLOUD)).toBe(
-        "lmStudio"
-      )
+  describe("turning providers on and off", () => {
+    it("marks a provider on while the enabled list holds it", () => {
+      expect(isProviderOn("ollamaCloud", OLLAMA_CLOUD)).toBe(true)
+      expect(isProviderOn("ollama", OLLAMA_CLOUD)).toBe(false)
+      expect(isProviderOn("groq", BOTH_OLLAMAS_AND_GROQ)).toBe(true)
+      expect(isProviderOn("lmStudio", BOTH_OLLAMAS_AND_GROQ)).toBe(false)
     })
 
-    it("marks a card on while the provider it presents is on", () => {
-      expect(isProviderCardOn("ollama", OLLAMA_CLOUD)).toBe(true)
-      expect(isProviderCardOn("ollama", STORED_PROVIDERS_SETTINGS)).toBe(true)
-      expect(isProviderCardOn("groq", BOTH_OLLAMAS_AND_GROQ)).toBe(true)
-      expect(isProviderCardOn("lmStudio", BOTH_OLLAMAS_AND_GROQ)).toBe(false)
-      expect(isProviderCardOn("ollama", GROQ_ACTIVE)).toBe(false)
+    it("adds a provider in provider order and keeps the others on and the addresses", () => {
+      expect(
+        buildProvidersWithProviderOn(GROQ_ACTIVE, "lmStudio", true)
+      ).toEqual({ ...GROQ_ACTIVE, enabled: ["lmStudio", "groq"] })
+      expect(
+        buildProvidersWithProviderOn(OLLAMA_CLOUD, "ollama", true)
+      ).toEqual({ ...OLLAMA_CLOUD, enabled: ["ollama", "ollamaCloud"] })
     })
 
-    it("turns exactly one provider on, keeping the addresses", () => {
+    it("removes a provider and keeps the order of the rest", () => {
       expect(
-        buildProvidersWithOnlyProvider(BOTH_OLLAMAS_AND_GROQ, "lmStudio")
-      ).toEqual({ ...BOTH_OLLAMAS_AND_GROQ, enabled: ["lmStudio"] })
+        buildProvidersWithProviderOn(BOTH_OLLAMAS_AND_GROQ, "ollama", false)
+      ).toEqual({ ...BOTH_OLLAMAS_AND_GROQ, enabled: ["ollamaCloud", "groq"] })
+    })
+
+    it("leaves no provider on once the last one is turned off", () => {
+      expect(
+        buildProvidersWithProviderOn(GROQ_ACTIVE, "groq", false).enabled
+      ).toEqual([])
+    })
+
+    it("lists each provider once whatever the saved order", () => {
+      expect(
+        buildProvidersWithProviderOn(BOTH_OLLAMAS_AND_GROQ, "groq", true)
+          .enabled
+      ).toEqual(["ollama", "ollamaCloud", "groq"])
     })
   })
 
@@ -299,7 +300,12 @@ describe("provider-presentation", () => {
 
     it("asks for a key a turned-on provider needs and lacks", () => {
       expect(
-        calculateProviderBadge("ollama", OLLAMA_CLOUD, SECRETS, "unreachable")
+        calculateProviderBadge(
+          "ollamaCloud",
+          OLLAMA_CLOUD,
+          SECRETS,
+          "unreachable"
+        )
       ).toEqual({ label: "needs key", tone: "attention" })
     })
 
@@ -314,7 +320,7 @@ describe("provider-presentation", () => {
           SECRETS,
           "unreachable"
         )
-      ).toEqual({ label: "unreachable", tone: "danger" })
+      ).toEqual({ label: "not reachable", tone: "danger" })
       expect(
         calculateProviderBadge(
           "ollama",

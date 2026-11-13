@@ -400,6 +400,8 @@ describe("useLysStore", () => {
     expect(useLysStore.getState()).toMatchObject({
       activeView: "chat",
       settingsPane: "runtime",
+      modelPaneSelection: null,
+      modelPaneProvider: null,
       backendUrl: BACKEND_URL,
       initializing: true,
       backendServerInfo: { status: "stopped" },
@@ -435,6 +437,48 @@ describe("useLysStore", () => {
     expect(useLysStore.getState()).toMatchObject({
       activeView: "settings",
       settingsPane: "generation"
+    })
+  })
+
+  it("selects the model the Model pane shows, and clears it", async () => {
+    const useLysStore = await loadFreshLysStore()
+
+    useLysStore
+      .getState()
+      .setModelPaneSelection({ provider: "groq", modelKey: "llama-3.3-70b" })
+    expect(useLysStore.getState().modelPaneSelection).toEqual({
+      provider: "groq",
+      modelKey: "llama-3.3-70b"
+    })
+
+    useLysStore.getState().setModelPaneSelection(null)
+    expect(useLysStore.getState().modelPaneSelection).toBeNull()
+  })
+
+  it("shows a provider the Model pane's picker chose with no model selected", async () => {
+    const useLysStore = await loadFreshLysStore()
+    useLysStore
+      .getState()
+      .setModelPaneSelection({ provider: "lmStudio", modelKey: "qwen3-8b" })
+
+    useLysStore.getState().setModelPaneProvider("groq")
+
+    expect(useLysStore.getState()).toMatchObject({
+      modelPaneProvider: "groq",
+      modelPaneSelection: null
+    })
+  })
+
+  it("opens the settings view on the Model pane showing one model", async () => {
+    const useLysStore = await loadFreshLysStore()
+    const model = { provider: "lmStudio", modelKey: "qwen3-8b" } as const
+
+    useLysStore.getState().showModelInSettings(model)
+
+    expect(useLysStore.getState()).toMatchObject({
+      activeView: "settings",
+      settingsPane: "model",
+      modelPaneSelection: model
     })
   })
 

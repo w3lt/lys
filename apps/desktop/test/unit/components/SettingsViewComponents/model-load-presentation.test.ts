@@ -1,135 +1,100 @@
 import { describe, expect, it } from "vitest"
 import {
-  buildModelReloadPrompt,
-  findLoadedSettingValue,
-  formatContextLengthNote,
-  isModelResidencyChanging,
-  type ModelReloadPrompt
+  buildLoadSettingsWithBaseline,
+  formatModelLoadChangeNote,
+  parseEvalBatchSize
 } from "@/components/SettingsViewComponents/model-load-presentation"
-import type { ModelRequestState } from "@/lib/store/model-runtime"
+import { buildModelLoadConfiguration } from "@/lib/models/model-load-configuration"
 import type { CompleteModelLoadConfiguration } from "@/lib/store/settings"
 import { FIRST_RUN_LOAD_CONFIGURATION } from "../../support/settingsFixtures"
 
-/** Configuration the model would be loaded with now. */
-const STORED: CompleteModelLoadConfiguration = FIRST_RUN_LOAD_CONFIGURATION
+/** Settings a model ran with before the change. */
+const BASELINE: CompleteModelLoadConfiguration = FIRST_RUN_LOAD_CONFIGURATION
 
-/** Configuration the model runs with: a smaller context and no flash attention. */
-const LOADED: CompleteModelLoadConfiguration = Object.freeze({
-  ...FIRST_RUN_LOAD_CONFIGURATION,
-  contextLength: 4096,
-  flashAttention: false
+/** Settings that differ from {@link BASELINE} in the flash attention. */
+const CHANGED: CompleteModelLoadConfiguration = Object.freeze({
+  ...BASELINE,
+  flashAttention: !BASELINE.flashAttention
 })
 
-describe("isModelResidencyChanging", () => {
-  it.each(["loading", "unloading"] as const)(
-    "is true while the model itself is %s",
-    (status) => {
-      expect(
-        isModelResidencyChanging({ status, modelKey: "qwen3-8b" }, "qwen3-8b")
-      ).toBe(true)
+describe("formatModelLoadChangeNote", () => {
+  it("says nothing while the stored settings equal the baseline", () => {
+    expect(
+      formatModelLoadChangeNote("qwen3-8b", true, BASELINE, { ...BASELINE })
+    ).toBeNull()
+  })
+
+  it("asks to reload a loaded model to apply a change", () => {
+    expect(formatModelLoadChangeNote("qwen3-8b", true, BASELINE, CHANGED)).toBe(
+      "Saved. Reload qwen3-8b to apply it."
+    )
+  })
+
+  it("says a change applies when a model that is not loaded is loaded", () => {
+    expect(
+      formatModelLoadChangeNote("qwen3-8b", false, BASELINE, CHANGED)
+    ).toBe("Saved. Applies when you load it.")
+  })
+})
+
+describe("buildLoadSettingsWithBaseline", () => {
+  it("gives the model the baseline back without an expert count of its own when the baseline has none", () => {
+    const changed = {
+      default: {},
+      models: new Map([["qwen3-8b", { flashAttention: false, numExperts: 4 }]])
+    }
+
+    const restored = buildLoadSettingsWithBaseline(
+      changed,
+      "qwen3-8b",
+      BASELINE
+    )
+
+    expect(
+      buildModelLoadConfiguration(restored, {
+        modelKey: "qwen3-8b",
+        maxContextLength: null
+      })
+    ).toEqual(BASELINE)
+    expect(restored.models.get("qwen3-8b")).not.toHaveProperty("numExperts")
+  })
+
+  it("gives the model the baseline's expert count back", () => {
+    const restored = buildLoadSettingsWithBaseline(
+      { default: {}, models: new Map() },
+      "qwen3-8b",
+      { ...BASELINE, numExperts: 2 }
+    )
+
+    expect(restored.models.get("qwen3-8b")).toMatchObject({ numExperts: 2 })
+  })
+
+  it("leaves other models' settings as they are", () => {
+    const other = { evalBatchSize: 256 }
+
+    const restored = buildLoadSettingsWithBaseline(
+      { default: {}, models: new Map([["gemma-3", other]]) },
+      "qwen3-8b",
+      BASELINE
+    )
+
+    expect(restored.models.get("gemma-3")).toEqual(other)
+  })
+})
+
+describe("parseEvalBatchSize", () => {
+  it.each([
+    ["1", 1],
+    ["512", 512],
+    [" 8192 ", 8192]
+  ])("accepts %s", (text, size) => {
+    expect(parseEvalBatchSize(text)).toBe(size)
+  })
+
+  it.each(["", "0", "8193", "1.5", "-4", "abc", "1e3"])(
+    "rejects %j",
+    (text) => {
+      expect(parseEvalBatchSize(text)).toBeNull()
     }
   )
-
-  it.each<ModelRequestState>([
-    { status: "loading", modelKey: "gemma-3" },
-    { status: "unloading", modelKey: "gemma-3" },
-    { status: "testing", modelKey: "qwen3-8b" },
-    { status: "listing" },
-    { status: "idle" }
-  ])("is false for the request %o", (modelRequest) => {
-    expect(isModelResidencyChanging(modelRequest, "qwen3-8b")).toBe(false)
-  })
-})
-
-describe("buildModelReloadPrompt", () => {
-  it("says nothing when nothing is known about the loaded model", () => {
-    expect(buildModelReloadPrompt(undefined, STORED)).toBeNull()
-  })
-
-  it.each(["sent", "assumed"] as const)(
-    "says nothing when the %s configuration equals the stored one",
-    (origin) => {
-      expect(
-        buildModelReloadPrompt({ origin, configuration: { ...STORED } }, STORED)
-      ).toBeNull()
-    }
-  )
-
-  it("lists what a model Lys loaded runs with and what a reload would apply", () => {
-    expect(
-      buildModelReloadPrompt({ origin: "sent", configuration: LOADED }, STORED)
-    ).toEqual({
-      note: "loaded with ctx 4k, flash attn off · reload to apply ctx 8k, flash attn on",
-      differences: [
-        {
-          setting: "contextLength",
-          loadedValue: "4k",
-          loadedPhrase: "ctx 4k",
-          storedPhrase: "ctx 8k"
-        },
-        {
-          setting: "flashAttention",
-          loadedValue: "off",
-          loadedPhrase: "flash attn off",
-          storedPhrase: "flash attn on"
-        }
-      ]
-    })
-  })
-
-  it("claims no loaded values for a model found already loaded, only that changes wait for the next load", () => {
-    expect(
-      buildModelReloadPrompt(
-        { origin: "assumed", configuration: LOADED },
-        STORED
-      )
-    ).toEqual({
-      note: "Changes apply the next time this model loads.",
-      differences: []
-    })
-  })
-})
-
-describe("findLoadedSettingValue", () => {
-  /** Prompt of a model Lys loaded with {@link LOADED}. */
-  const sentPrompt: ModelReloadPrompt | null = buildModelReloadPrompt(
-    { origin: "sent", configuration: LOADED },
-    STORED
-  )
-
-  it("finds the value a differing setting was loaded with", () => {
-    expect(findLoadedSettingValue(sentPrompt, "contextLength")).toBe("4k")
-    expect(findLoadedSettingValue(sentPrompt, "flashAttention")).toBe("off")
-  })
-
-  it("finds nothing for a setting that does not differ", () => {
-    expect(findLoadedSettingValue(sentPrompt, "evalBatchSize")).toBeNull()
-  })
-
-  it("finds nothing without a reload prompt", () => {
-    expect(findLoadedSettingValue(null, "contextLength")).toBeNull()
-  })
-
-  it("finds nothing when the loaded values are only assumed", () => {
-    const assumedPrompt = buildModelReloadPrompt(
-      { origin: "assumed", configuration: LOADED },
-      STORED
-    )
-
-    expect(findLoadedSettingValue(assumedPrompt, "contextLength")).toBeNull()
-  })
-})
-
-describe("formatContextLengthNote", () => {
-  it("names the model's maximum when the runtime reports one", () => {
-    expect(formatContextLengthNote("qwen3-8b", "8k")).toBe(
-      "Tokens the weights can hold at once. qwen3-8b tops out at 8k."
-    )
-  })
-
-  it("leaves the maximum out when none is known", () => {
-    expect(formatContextLengthNote("qwen3-8b", null)).toBe(
-      "Tokens the weights can hold at once."
-    )
-  })
 })

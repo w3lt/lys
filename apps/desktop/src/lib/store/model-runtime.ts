@@ -120,6 +120,11 @@ export type ProviderModelState = {
   /** Latest health observation, cleared by the next operation. */
   readonly health: LlmTestModelApiResponse | null
   /**
+   * When the latest operation settled with its closing inventory read, or
+   * null before one has settled since the last release.
+   */
+  readonly settledAt: Date | null
+  /**
    * Load configuration known for each model observed as loaded; a model that
    * is not loaded has no entry. Only LM Studio's models have entries: the
    * stored load settings name LM Studio's models, the only ones Lys loads.
@@ -142,6 +147,7 @@ export const RELEASED_PROVIDER_MODELS: Omit<ProviderModelState, "status"> =
     request: Object.freeze({ status: "idle" }),
     error: null,
     health: null,
+    settledAt: null,
     loadedModelConfigurations: NO_LOADED_MODEL_CONFIGURATIONS
   })
 

@@ -35,13 +35,14 @@ import ComposerToolCallPrompt from "./ComposerComponents/ComposerToolCallPrompt"
 import { buildContextMeterState } from "./ComposerComponents/composer-context"
 import {
   calculateComposerActivity,
-  findReconnectSettingsPane,
+  findComposerBannerAction,
   formatComposerActivity,
   formatComposerModelLabel,
   formatComposerPlaceholder,
-  formatReconnectAction,
   formatUnavailableRuntimeMessage,
-  calculateLocalRuntimeConnection
+  calculateLocalRuntimeConnection,
+  listComposerModelGroups,
+  type ComposerModelState
 } from "./ComposerComponents/composer-presentation"
 import { describeLlmProviderTarget } from "@/lib/models/llm-provider-target"
 
@@ -137,9 +138,16 @@ export type ComposerProps = {
  * file is said in the field's polite status line, which stays in the page
  * while it has nothing to say. Pasted text stays in the draft, however long
  * it is.
- * Choosing a model in the weights menu picks it for the shown conversation
- * only, until another conversation is shown; it changes neither the default
- * nor the settings. Context figures come from the
+ * The model menu lists the models of every turned-on provider, one labelled
+ * group per provider in provider order, each named with its provider.
+ * Choosing a model there picks it for the shown conversation only, until
+ * another conversation is shown; it changes neither the default nor the
+ * settings. While the conversation's model cannot answer, Send stays off and
+ * the banner above the field says why, with one action: start the backend,
+ * open the settings pane that fixes it, open the model menu, or show the
+ * model in the Model pane to load it there. A model whose provider is off or
+ * not reachable stays the conversation's model, and nothing is sent to
+ * another provider instead. Context figures come from the
  * backend's measurement of the conversation with its loaded model, plus an
  * estimate of the draft and of the staged images, and are marked `~`
  * wherever they appear; staged text files are read on request, so they are
@@ -155,8 +163,10 @@ export function Composer({
 }: ComposerProps): ReactElement {
   const backendServerInfo = useLysStore((state) => state.backendServerInfo)
   const settings = useLysStore((state) => state.settings)
+  const providerModels = useLysStore((state) => state.providerModels)
   const setActiveView = useLysStore((state) => state.setActiveView)
   const setSettingsPane = useLysStore((state) => state.setSettingsPane)
+  const showModelInSettings = useLysStore((state) => state.showModelInSettings)
   const startBackend = useLysStore((state) => state.startBackend)
   const conversationModel = useConversationModel()
 
@@ -192,6 +202,7 @@ export function Composer({
 
   const [isDropping, setIsDropping] = useState(false)
   const [isFocused, setIsFocused] = useState(false)
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const backendStatus = backendServerInfo.status
@@ -202,6 +213,22 @@ export function Composer({
   )
   const provider = describeLlmProviderTarget(
     model?.provider ?? "lmStudio",
+    settings.providers
+  )
+  const modelState: ComposerModelState = {
+    backendStatus,
+    model,
+    availability,
+    provider,
+    hasProviderOn: settings.providers.enabled.length > 0
+  }
+  const bannerAction = findComposerBannerAction(modelState)
+  const modelGroups = listComposerModelGroups(
+    {
+      backendStatus,
+      enabledProviders: settings.providers.enabled,
+      providerModels
+    },
     settings.providers
   )
   const isUnavailable = connection !== "ready"
@@ -373,21 +400,33 @@ export function Composer({
   }
 
   /**
-   * Starts a stopped backend, or opens the settings pane that fixes the first
-   * missing prerequisite.
+   * Carries out the banner's recovery action: starts the backend, opens the
+   * settings pane that fixes the missing prerequisite, opens the model menu,
+   * or shows the model in the Model pane to be loaded there.
    */
-  function handleReconnect(): void {
-    if (backendStatus === "stopped") {
-      void startBackend()
-      return
+  function handleBannerAction(): void {
+    switch (bannerAction.kind) {
+      case "start-backend":
+        void startBackend()
+        return
+      case "open-settings":
+        setSettingsPane(bannerAction.pane)
+        setActiveView("settings")
+        return
+      case "open-model-menu":
+        setIsModelMenuOpen(true)
+        return
+      case "show-model":
+        showModelInSettings(bannerAction.model)
+        return
+      case "none":
+        return
     }
+  }
 
-    // Runtime owns the backend, Providers each provider, Model inventory and loading.
-    setSettingsPane(
-      backendStatus === "running"
-        ? findReconnectSettingsPane(availability)
-        : "runtime"
-    )
+  /** Opens the Providers pane, from the model menu while no provider is on. */
+  function handleOpenProviders(): void {
+    setSettingsPane("providers")
     setActiveView("settings")
   }
 
@@ -407,20 +446,12 @@ export function Composer({
     <footer className="composer">
       {isUnavailable ? (
         <ComposerOfflineBanner
-          action={formatReconnectAction({
-            backendStatus,
-            model,
-            availability,
-            provider
-          })}
+          action={bannerAction}
           message={formatUnavailableRuntimeMessage({
-            backendStatus,
-            backendAddress: settings.runtime.backendAddress,
-            model,
-            availability,
-            provider
+            ...modelState,
+            backendAddress: settings.runtime.backendAddress
           })}
-          onReconnect={handleReconnect}
+          onReconnect={handleBannerAction}
         />
       ) : null}
       <ComposerDeletedAgentNotice
@@ -576,11 +607,15 @@ export function Composer({
 
             <ComposerModelMenu
               availability={availability}
+              groups={modelGroups}
+              isOpen={isModelMenuOpen}
               label={formatComposerModelLabel(
                 backendStatus,
                 model,
                 availability
               )}
+              onIsOpenChange={setIsModelMenuOpen}
+              onOpenProviders={handleOpenProviders}
               onSelectModel={updateModelPick}
               selectedModel={model}
             />

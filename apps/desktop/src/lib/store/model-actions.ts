@@ -538,6 +538,8 @@ export function createModelSlice(
 
   /**
    * Owns one admitted operation through acknowledgement and reconciliation.
+   * @remarks The closing publication records the time the operation
+   * settled, which the Model pane reports as the last refresh or check.
    * @param operation - Operation performed without automatically retrying effects.
    * @returns Resolves after settlement, failure presentation, or invalidation.
    */
@@ -570,6 +572,7 @@ export function createModelSlice(
       error: result.error,
       health: progress.health,
       request: { status: "idle" },
+      settledAt: new Date(),
       loadedModelConfigurations: buildProviderLoadedModelConfigurations(
         provider,
         progress.loadedModelConfigurations,

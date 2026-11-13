@@ -6,7 +6,6 @@ import {
   formatComposerModelRowTag,
   formatModelResidencyHeading,
   formatModelResidencyMeta,
-  formatModelRowTag,
   readModelResidencyTone,
   readModelRowTone
 } from "@/lib/models/model-residency"
@@ -143,31 +142,6 @@ describe("formatModelResidencyMeta", () => {
     expect(formatModelResidencyMeta(null, null)).toBe(
       "no default model chosen · pick one in Model"
     )
-  })
-})
-
-describe("formatModelRowTag", () => {
-  it.each(["loading", "unloading"] as const)(
-    "tags the row in play as %s",
-    (status) => {
-      expect(
-        formatModelRowTag({ status, modelKey: "on-disk" }, ON_DISK_ROW)
-      ).toBe(status)
-    }
-  )
-
-  it("tags a resident row as loaded, also while another model loads", () => {
-    expect(formatModelRowTag(IDLE, RESIDENT_ROW)).toBe("loaded")
-    expect(
-      formatModelRowTag(
-        { status: "loading", modelKey: "on-disk" },
-        RESIDENT_ROW
-      )
-    ).toBe("loaded")
-  })
-
-  it("tags a row that is only on disk with its size", () => {
-    expect(formatModelRowTag(IDLE, ON_DISK_ROW)).toBe("4.0 GB on disk")
   })
 })
 

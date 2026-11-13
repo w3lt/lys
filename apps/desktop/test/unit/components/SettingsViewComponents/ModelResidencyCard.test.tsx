@@ -4,22 +4,16 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import ModelResidencyCard from "@/components/SettingsViewComponents/ModelResidencyCard"
-import type { LlmProviderTarget } from "@/lib/models/llm-provider-target"
 import type { ModelAvailability } from "@/lib/models/model-availability"
-import type { ProviderAvailability } from "@/lib/models/provider-connection"
 import type {
   ModelInventoryState,
   ModelRequestState
 } from "@/lib/store/model-runtime"
 import { buildLlmInfo } from "../../support/modelFixtures"
-import {
-  GROQ_TARGET,
-  LM_STUDIO_TARGET
-} from "../../support/providerTargetFixtures"
 
 /** What the card shows and whether its commands can be sent. */
 type ModelResidencyArrangement = {
-  readonly providerAvailability: ProviderAvailability
+  readonly isProviderAvailable: boolean
   readonly model: LlmModelReference | null
   readonly availability: ModelAvailability | null
   readonly modelInventory: ModelInventoryState
@@ -28,8 +22,8 @@ type ModelResidencyArrangement = {
 
 /** Callbacks of one rendered card, as spies. */
 type ModelResidencyCardSpies = {
-  readonly onLoadModel: (modelKey: string) => void
-  readonly onUnloadModel: (modelKey: string) => void
+  readonly onLoadModel: (model: LlmModelReference) => void
+  readonly onUnloadModel: (model: LlmModelReference) => void
 }
 
 /** Key of the model a new conversation uses. */
@@ -105,7 +99,7 @@ const LOADED: ModelAvailability = Object.freeze({
 
 /** LM Studio connected, the default on disk, no request. */
 const READY_TO_LOAD: ModelResidencyArrangement = Object.freeze({
-  providerAvailability: "available",
+  isProviderAvailable: true,
   model: DEFAULT_MODEL,
   availability: NOT_LOADED,
   modelInventory: DEFAULT_LISTED,
@@ -114,7 +108,7 @@ const READY_TO_LOAD: ModelResidencyArrangement = Object.freeze({
 
 /** LM Studio connected, the default in memory, no request. */
 const READY_TO_UNLOAD: ModelResidencyArrangement = Object.freeze({
-  providerAvailability: "available",
+  isProviderAvailable: true,
   model: DEFAULT_MODEL,
   availability: LOADED,
   modelInventory: DEFAULT_LISTED_RESIDENT,
@@ -133,22 +127,16 @@ const NO_MODEL: ModelResidencyArrangement = Object.freeze({
  * request feedback.
  *
  * @param arrangement - What the card shows.
- * @param provider - Provider the card shows, which it names; LM Studio when
- * omitted.
  * @returns The spies and the render result's rerender function.
  */
-function startModelResidencyCard(
-  arrangement: ModelResidencyArrangement,
-  provider: LlmProviderTarget = LM_STUDIO_TARGET
-) {
+function startModelResidencyCard(arrangement: ModelResidencyArrangement) {
   const spies: ModelResidencyCardSpies = {
     onLoadModel: vi.fn(),
     onUnloadModel: vi.fn()
   }
   const { rerender } = render(
     <ModelResidencyCard
-      provider={provider}
-      providerAvailability={arrangement.providerAvailability}
+      isProviderAvailable={arrangement.isProviderAvailable}
       model={arrangement.model}
       availability={arrangement.availability}
       modelInventory={arrangement.modelInventory}
@@ -224,36 +212,31 @@ describe("ModelResidencyCard", () => {
   )
 
   it.each<{
-    providerAvailability: ProviderAvailability
     availability: ModelAvailability
     meta: string
   }>([
     {
-      providerAvailability: "backend-offline",
       availability: { status: "backend-not-running" },
       meta: "start the backend first"
     },
     {
-      providerAvailability: "provider-off",
       availability: { status: "provider-off" },
       meta: "LM Studio is off · turn it on in Providers"
     },
     {
-      providerAvailability: "provider-connecting",
       availability: { status: "provider-connecting" },
       meta: "connecting to LM Studio"
     },
     {
-      providerAvailability: "provider-unreachable",
       availability: { status: "provider-unreachable" },
       meta: "LM Studio is not reachable"
     }
   ])(
     "says why the model's state is unavailable, recedes, and offers no command while $availability.status",
-    ({ providerAvailability, availability, meta }) => {
+    ({ availability, meta }) => {
       startModelResidencyCard({
         ...READY_TO_LOAD,
-        providerAvailability,
+        isProviderAvailable: false,
         availability,
         modelInventory: INVENTORY_UNAVAILABLE
       })
@@ -307,15 +290,6 @@ describe("ModelResidencyCard", () => {
       },
       canLoad: false,
       canUnload: false
-    },
-    {
-      name: "the model belongs to another provider",
-      arrangement: {
-        ...READY_TO_LOAD,
-        model: { provider: "ollama", modelKey: DEFAULT_KEY } as const
-      },
-      canLoad: false,
-      canUnload: false
     }
   ])(
     "offers Load and Unload only when they apply: $name",
@@ -333,7 +307,7 @@ describe("ModelResidencyCard", () => {
     }
   )
 
-  it("says to pick a default when there is no model", () => {
+  it("says to pick a default when there is none, and names no model", () => {
     startModelResidencyCard(NO_MODEL)
 
     expect(
@@ -342,6 +316,24 @@ describe("ModelResidencyCard", () => {
     expect(
       screen.getByText("no default model chosen · pick one in Model")
     ).toBeInTheDocument()
+    expect(getCard()).not.toHaveTextContent(" · LM Studio")
+    expect(
+      screen.getByText(
+        "This summary shows the model a new conversation uses; see every model in Model settings."
+      )
+    ).toBeInTheDocument()
+  })
+
+  it.each<{ model: LlmModelReference; label: string }>([
+    { model: DEFAULT_MODEL, label: `${DEFAULT_KEY} · LM Studio` },
+    {
+      model: { provider: "groq", modelKey: "llama-3.3-70b" },
+      label: "llama-3.3-70b · Groq"
+    }
+  ])("names the model with its provider as $label", ({ model, label }) => {
+    startModelResidencyCard({ ...READY_TO_LOAD, model })
+
+    expect(screen.getByText(label)).toBeInTheDocument()
   })
 
   it("asks to load the default once per press", async () => {
@@ -350,7 +342,7 @@ describe("ModelResidencyCard", () => {
 
     await user.click(screen.getByRole("button", { name: "Load" }))
 
-    expect(spies.onLoadModel).toHaveBeenCalledExactlyOnceWith(DEFAULT_KEY)
+    expect(spies.onLoadModel).toHaveBeenCalledExactlyOnceWith(DEFAULT_MODEL)
     expect(spies.onUnloadModel).not.toHaveBeenCalled()
   })
 
@@ -360,7 +352,7 @@ describe("ModelResidencyCard", () => {
 
     await user.click(screen.getByRole("button", { name: "Unload" }))
 
-    expect(spies.onUnloadModel).toHaveBeenCalledExactlyOnceWith(DEFAULT_KEY)
+    expect(spies.onUnloadModel).toHaveBeenCalledExactlyOnceWith(DEFAULT_MODEL)
     expect(spies.onLoadModel).not.toHaveBeenCalled()
   })
 
@@ -391,8 +383,7 @@ describe("ModelResidencyCard", () => {
 
     rerender(
       <ModelResidencyCard
-        provider={LM_STUDIO_TARGET}
-        providerAvailability="available"
+        isProviderAvailable
         model={DEFAULT_MODEL}
         availability={LOADED}
         modelInventory={DEFAULT_LISTED_RESIDENT}
@@ -460,27 +451,21 @@ describe("ModelResidencyCard", () => {
   )
 
   it("offers Load and Unload when the inventory reports that Lys loads the models, whatever the provider", () => {
-    startModelResidencyCard(
-      {
-        ...READY_TO_UNLOAD,
-        model: { provider: "groq", modelKey: DEFAULT_KEY }
-      },
-      GROQ_TARGET
-    )
+    startModelResidencyCard({
+      ...READY_TO_UNLOAD,
+      model: { provider: "groq", modelKey: DEFAULT_KEY }
+    })
 
     expect(screen.getByRole("button", { name: "Load" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Unload" })).toBeEnabled()
   })
 
   it("offers no Load or Unload when the inventory reports that the provider loads its own models", () => {
-    startModelResidencyCard(
-      {
-        ...READY_TO_UNLOAD,
-        model: { provider: "groq", modelKey: DEFAULT_KEY },
-        modelInventory: PROVIDER_LOADED_RESIDENT
-      },
-      GROQ_TARGET
-    )
+    startModelResidencyCard({
+      ...READY_TO_UNLOAD,
+      model: { provider: "groq", modelKey: DEFAULT_KEY },
+      modelInventory: PROVIDER_LOADED_RESIDENT
+    })
 
     expect(
       screen.getByText(`${DEFAULT_KEY} · loaded in Groq`)

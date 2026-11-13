@@ -1,12 +1,16 @@
-import { act, render, screen, within } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import type { LlmProvider } from "@lys/share"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
-import { formatProviderUnreachableMessage } from "@/lib/models/provider-connection"
-import { LM_STUDIO_TARGET } from "../../support/providerTargetFixtures"
+import {
+  updateProviderModelState,
+  type ProviderModelState
+} from "@/lib/store/model-runtime"
+import type { LysSettings } from "@/lib/store/settings"
 import {
   buildJsonResponse,
+  listRouteKeys,
   startBackendFake,
-  type BackendRoute,
   type BackendRoutes
 } from "../../support/backendFake"
 import { buildLlmInfo } from "../../support/modelFixtures"
@@ -20,349 +24,553 @@ import {
   INVENTORY_ROUTE,
   loadFreshSettingsView
 } from "../../support/settingsViewFixtures"
-import { createControlledPromise } from "../../support/settlement"
-import { startHover, waitForRenderedWork } from "../../support/rendering"
-import { FIRST_RUN_LOAD_CONFIGURATION } from "../../support/settingsFixtures"
+import {
+  openMenuWithKeyboard,
+  waitForRenderedWork
+} from "../../support/rendering"
+import { STORED_GROQ_API_KEY } from "../../support/settingsFixtures"
 
-/** Explanation shown while the first-run provider, LM Studio, is not reachable. */
-const UNREACHABLE_MESSAGE = formatProviderUnreachableMessage(LM_STUDIO_TARGET)
-
-/** One resident model chosen as default, and one on disk. */
+/** LM Studio with one loaded default model and one model on disk. */
 const TWO_MODELS: RuntimeArrangement = {
   ...READY_RUNTIME,
   modelInventory: {
     status: "ready",
     modelLoading: "lys",
     models: [
-      buildLlmInfo("qwen3-8b", { loaded: true }),
-      buildLlmInfo("gemma-3")
+      buildLlmInfo("qwen3-8b", {
+        loaded: true,
+        loadedContextLength: 8192,
+        maxContextLength: 32_768
+      }),
+      buildLlmInfo("google/gemma-3:4b", { maxContextLength: 32_768 })
     ]
   }
 }
 
+/** Groq's inventory: one hosted model. */
+const GROQ_MODELS: Partial<ProviderModelState> = {
+  status: "connected",
+  inventory: {
+    status: "ready",
+    modelLoading: "provider",
+    models: [
+      {
+        ...buildLlmInfo("llama-3.3-70b", {
+          loaded: true,
+          maxContextLength: 131_072
+        }),
+        sizeBytes: undefined
+      }
+    ]
+  }
+}
+
+/** Ollama's inventory: one loaded model and one on disk. */
+const OLLAMA_MODELS: Partial<ProviderModelState> = {
+  status: "connected",
+  inventory: {
+    status: "ready",
+    modelLoading: "provider",
+    models: [
+      buildLlmInfo("llama3.2:3b", { loaded: true, loadedContextLength: 4096 }),
+      buildLlmInfo("mistral")
+    ]
+  }
+}
+
+/** Another provider the pane shows beside LM Studio, with its routes. */
+type ExtraProvider = {
+  /** The provider, turned on in the settings. */
+  readonly provider: Exclude<LlmProvider, "lmStudio">
+  /** Its status and models. */
+  readonly state: Partial<ProviderModelState>
+}
+
 /**
- * Renders the settings view on the Model pane and waits for its model list
- * heading.
+ * Builds the inventory route of a provider other than LM Studio.
  *
- * @param runtime - Backend, LM Studio, and model facts.
- * @param routes - Backend routes replacing or adding to the inventory read.
+ * @param extra - The provider and its models.
+ * @returns The route answering its inventory read.
+ */
+function buildExtraInventoryRoutes(extra: ExtraProvider): BackendRoutes {
+  const { inventory } = extra.state
+  if (inventory?.status !== "ready") return {}
+  return {
+    [`GET /api/v1/llm/${extra.provider}/list`]: () =>
+      buildJsonResponse(200, {
+        llms: inventory.models,
+        modelLoading: inventory.modelLoading
+      })
+  }
+}
+
+/**
+ * Renders the settings view on the Model pane with LM Studio, and another
+ * provider when given, and waits for the pane's body to settle.
+ *
+ * @param runtime - Backend, LM Studio, and default model facts.
+ * @param options - Extra routes, another provider, and settings changes.
  * @returns The application store and the backend observation handle.
  */
 async function startModelPane(
   runtime: RuntimeArrangement = TWO_MODELS,
-  routes: BackendRoutes = {}
+  options: {
+    readonly routes?: BackendRoutes
+    readonly extra?: ExtraProvider
+    readonly change?: (settings: LysSettings) => LysSettings
+  } = {}
 ) {
   const backend = startBackendFake({
     [INVENTORY_ROUTE]: buildInventoryRoute(runtime),
-    ...routes
+    ...(options.extra ? buildExtraInventoryRoutes(options.extra) : {}),
+    ...options.routes
   })
   const { useLysStore, SettingsView } = await loadFreshSettingsView(
     "model",
     runtime
   )
+  const { settings, providerModels } = useLysStore.getState()
+  const { extra } = options
+  const enabled: LlmProvider[] = extra
+    ? ["lmStudio", extra.provider]
+    : ["lmStudio"]
+  const arranged = {
+    ...settings,
+    providers: { ...settings.providers, enabled },
+    secrets: { ...settings.secrets, groqApiKey: STORED_GROQ_API_KEY }
+  }
+  useLysStore.setState({
+    settings: options.change ? options.change(arranged) : arranged,
+    providerModels: extra
+      ? updateProviderModelState(providerModels, extra.provider, extra.state)
+      : providerModels
+  })
   render(<SettingsView onDone={vi.fn()} />)
-  await screen.findByRole("heading", { name: "models · LM Studio" })
+  await screen.findByText("Default for this session")
   await waitForRenderedWork()
-  return { useLysStore, backend }
+  return { useLysStore, backend, user: userEvent.setup() }
 }
 
 /**
- * Gets the pane's Refresh button.
+ * Lists the visible text of every row of one group of the model list.
  *
- * @returns The inventory Refresh button.
+ * @param name - Name of the group's list.
+ * @returns Each row button's text.
  */
-function getRefreshButton(): HTMLElement {
-  return screen.getByRole("button", { name: "Refresh" })
+function listRowTexts(name: string): string[] {
+  return within(screen.getByRole("list", { name }))
+    .getAllByRole("button")
+    .map((row) => row.textContent ?? "")
 }
 
 describe("ModelPaneContent", () => {
-  it("names the active provider in the heading of its models", async () => {
+  it("shows the default, LM Studio's status, its models grouped by whether they are loaded, and the default's details", async () => {
     await startModelPane()
 
+    expect(screen.getByText("Default for this session")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "qwen3-8b" })).toHaveAttribute(
+      "title",
+      "Show its details"
+    )
+    expect(screen.getByText("LM Studio · 8k context")).toBeInTheDocument()
+    expect(screen.getByText("Running · 1 of 2 loaded")).toBeInTheDocument()
+    expect(screen.getByText("All models · 2")).toBeInTheDocument()
+    expect(listRowTexts("Loaded · 1")).toEqual(["qwen3-8bDefault4.0 GB"])
+    expect(listRowTexts("On disk · 1")).toEqual(["google/gemma-3:4b4.0 GB"])
     expect(
-      screen.getByRole("heading", { level: 2, name: "models · LM Studio" })
+      screen.getByRole("heading", { level: 3, name: "qwen3-8b" })
+    ).toBeInTheDocument()
+    expect(screen.getByText("Loaded")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "It’s the default for this session. Choose another default before unloading it."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Unload" })).toBeDisabled()
+    expect(
+      screen.getByText("Default for new conversations")
     ).toBeInTheDocument()
   })
 
-  it("offers Load, Unload, and the load configuration when the inventory reports that Lys loads the models", async () => {
+  it("lists the facts of an LM Studio model", async () => {
     await startModelPane()
 
+    expect(screen.getAllByRole("term").map((term) => term.textContent)).toEqual(
+      ["Size", "Format", "Runs on"]
+    )
     expect(
-      screen.getByRole("button", { name: "Load gemma-3" })
-    ).toBeInTheDocument()
+      screen.getAllByRole("definition").map((value) => value.textContent)
+    ).toEqual(["4.0 GB", "GGUF", "This machine"])
+  })
+
+  it("shows a pressed row's model, offering Load and Load and set as default for a model on disk", async () => {
+    const { useLysStore, user } = await startModelPane()
+
+    await user.click(screen.getByRole("button", { name: /^google\/gemma-3/ }))
+
+    expect(useLysStore.getState().modelPaneSelection).toEqual({
+      provider: "lmStudio",
+      modelKey: "google/gemma-3:4b"
+    })
     expect(
-      screen.getByRole("heading", { name: "load configuration" })
-    ).toBeInTheDocument()
+      screen.getByRole("button", { name: /^google\/gemma-3/ })
+    ).toHaveAttribute("aria-current", "true")
+    expect(screen.getByText("Not loaded")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Load" })).toBeEnabled()
+    expect(
+      screen.getByRole("button", { name: "Load and set as default" })
+    ).toBeEnabled()
     expect(
       screen.getByText(
-        "Choosing a row sets the default for this session. Load and Unload update LM Studio. Test checks loaded state; it does not generate a response."
+        "Only loaded models can answer. Load it to make it the default."
       )
     ).toBeInTheDocument()
   })
 
-  it("offers Test but no Load, Unload, or load configuration when the inventory reports that the provider loads its own models", async () => {
-    await startModelPane({
-      ...TWO_MODELS,
-      modelInventory: {
-        status: "ready",
-        modelLoading: "provider",
-        models: [
-          buildLlmInfo("qwen3-8b", { loaded: true }),
-          buildLlmInfo("gemma-3", { loaded: true })
-        ]
+  it("loads a model and makes it the default once it is listed as loaded", async () => {
+    let isGemmaLoaded = false
+    const { useLysStore, backend, user } = await startModelPane(TWO_MODELS, {
+      routes: {
+        "POST /api/v1/llm/lmStudio/load": () => {
+          isGemmaLoaded = true
+          return buildJsonResponse(
+            200,
+            buildLlmInfo("google/gemma-3:4b", { loaded: true })
+          )
+        },
+        [INVENTORY_ROUTE]: () =>
+          buildJsonResponse(200, {
+            llms: [
+              buildLlmInfo("qwen3-8b", { loaded: true }),
+              buildLlmInfo("google/gemma-3:4b", { loaded: isGemmaLoaded })
+            ],
+            modelLoading: "lys"
+          })
       }
     })
-
-    expect(
-      screen.getByRole("button", { name: "Test gemma-3" })
-    ).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Unload gemma-3" })).toBeNull()
-    expect(
-      screen.queryByRole("heading", { name: "load configuration" })
-    ).toBeNull()
-    expect(
-      screen.getByText(
-        "Choosing a row sets the default for this session. LM Studio decides which models are in memory: a model it is not running answers once you start it in LM Studio. Test checks loaded state; it does not generate a response."
-      )
-    ).toBeInTheDocument()
-  })
-
-  it.each<[string, RuntimeArrangement, BackendRoutes]>([
-    ["the backend is stopped", buildUnreachableRuntime("stopped"), {}],
-    [
-      "the inventory read failed",
-      TWO_MODELS,
-      {
-        [INVENTORY_ROUTE]: () => new Response(null, { status: 500 }),
-        // A failed model request makes the store read the LM Studio status.
-        "GET /api/v1/llm/lmStudio/runtime": () =>
-          buildJsonResponse(200, { status: "connected" })
-      }
-    ]
-  ])(
-    "offers no load configuration, and says nothing about who loads the models, while %s",
-    async (_case, runtime, routes) => {
-      await startModelPane(runtime, routes)
-
-      expect(
-        screen.queryByRole("heading", { name: "load configuration" })
-      ).toBeNull()
-      expect(
-        screen.getByText(
-          "Choosing a row sets the default for this session. Test checks loaded state; it does not generate a response."
-        )
-      ).toBeInTheDocument()
-    }
-  )
-
-  it("lists the downloaded models, marking the default", async () => {
-    await startModelPane()
-
-    const list = screen.getByRole("list", { name: "Downloaded models" })
-    const rows = within(list).getAllByRole("listitem")
-    expect(rows).toHaveLength(2)
-    expect(
-      within(rows[0]).getByRole("button", { pressed: true })
-    ).toHaveTextContent(/^qwen3-8bdefault/)
-    expect(
-      within(rows[1]).getByRole("button", { pressed: false })
-    ).toHaveTextContent(/^gemma-3/)
-  })
-
-  it("makes a row the default for this session without loading it", async () => {
-    const { useLysStore, backend } = await startModelPane()
-    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: /^google\/gemma-3/ }))
 
     await user.click(
-      screen.getByRole("button", { name: /^gemma-3/, pressed: false })
+      screen.getByRole("button", { name: "Load and set as default" })
     )
+    await waitForRenderedWork()
+
+    expect(listRouteKeys(backend)).toContain("POST /api/v1/llm/lmStudio/load")
+    expect(useLysStore.getState().settings.runtime.defaultModel).toEqual({
+      provider: "lmStudio",
+      modelKey: "google/gemma-3:4b"
+    })
+    expect(
+      screen.getByText("Default for new conversations")
+    ).toBeInTheDocument()
+  })
+
+  it("makes a loaded model the default for this session", async () => {
+    const { useLysStore, user } = await startModelPane({
+      ...TWO_MODELS,
+      defaultModel: null
+    })
+    await user.click(screen.getByRole("button", { name: /^qwen3-8b/ }))
+
+    await user.click(screen.getByRole("button", { name: "Set as default" }))
 
     expect(useLysStore.getState().settings.runtime.defaultModel).toEqual({
       provider: "lmStudio",
-      modelKey: "gemma-3"
+      modelKey: "qwen3-8b"
     })
-    expect(
-      screen.getByRole("button", { name: /^gemma-3/, pressed: true })
-    ).toBeInTheDocument()
-    expect(backend.requests.map((request) => request.method)).toEqual(["GET"])
   })
 
-  it("loads, unloads, and tests models from their rows", async () => {
-    const { backend } = await startModelPane(TWO_MODELS, {
-      "POST /api/v1/llm/lmStudio/load": () =>
-        buildJsonResponse(200, buildLlmInfo("gemma-3", { loaded: true })),
-      "PATCH /api/v1/llm/lmStudio/unload": () =>
-        new Response(null, { status: 204 }),
-      "GET /api/v1/llm/lmStudio/qwen3-8b/health": () =>
-        buildJsonResponse(200, {
-          status: "ready",
-          modelId: "qwen3-8b",
-          latencyMs: 12
-        })
-    })
-    const user = userEvent.setup()
+  it("asks to choose a model while none is selected and there is no default", async () => {
+    await startModelPane({ ...TWO_MODELS, defaultModel: null })
 
-    await user.click(screen.getByRole("button", { name: "Test qwen3-8b" }))
-    await waitForRenderedWork()
+    expect(screen.getByText("None chosen yet.")).toBeInTheDocument()
     expect(
-      screen.getByText("qwen3-8b: loaded · health query 12 ms")
+      screen.getByText("Choose a model to see its status and load settings.")
     ).toBeInTheDocument()
-
-    await user.click(screen.getByRole("button", { name: "Load gemma-3" }))
-    await waitForRenderedWork()
-    await user.click(screen.getByRole("button", { name: "Unload qwen3-8b" }))
-    await waitForRenderedWork()
-
-    expect(
-      backend.requests
-        .filter((request) => request.method !== "GET")
-        .map((request) => [request.method, request.body])
-    ).toEqual([
-      [
-        "POST",
-        { modelId: "gemma-3", configuration: FIRST_RUN_LOAD_CONFIGURATION }
-      ],
-      ["PATCH", { modelId: "qwen3-8b" }]
-    ])
   })
 
-  it("refreshes the inventory on request, refusing new actions while it is read", async () => {
-    const reads: ReturnType<typeof createControlledPromise<Response>>[] = []
-    const controlledInventory: BackendRoute = () => {
-      const read = createControlledPromise<Response>()
-      reads.push(read)
-      return read.promise
-    }
-    const { backend } = await startModelPane(TWO_MODELS, {
-      [INVENTORY_ROUTE]: controlledInventory
+  it("selects the default model when its key is pressed", async () => {
+    const { useLysStore, user } = await startModelPane()
+    await user.click(screen.getByRole("button", { name: /^google\/gemma-3/ }))
+
+    await user.click(screen.getByRole("button", { name: "qwen3-8b" }))
+
+    expect(useLysStore.getState().modelPaneSelection).toEqual({
+      provider: "lmStudio",
+      modelKey: "qwen3-8b"
     })
-    const user = userEvent.setup()
-    reads[0]?.resolve(
-      buildJsonResponse(200, {
-        llms:
-          TWO_MODELS.modelInventory.status === "ready"
-            ? TWO_MODELS.modelInventory.models
-            : [],
-        modelLoading: "lys"
-      })
+  })
+
+  it("filters the list by name, and clears a filter that matches nothing", async () => {
+    const { user } = await startModelPane()
+    const filter = screen.getByRole("searchbox", { name: "Filter models" })
+
+    await user.type(filter, "gemma")
+
+    expect(screen.getByText("Showing 1 of 2")).toBeInTheDocument()
+    expect(screen.queryByRole("list", { name: "Loaded · 1" })).toBeNull()
+
+    await user.type(filter, "zzz")
+
+    expect(screen.getByText("No model matches “gemmazzz”.")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Clear filter" }))
+
+    expect(filter).toHaveValue("")
+    expect(screen.getByText("All models · 2")).toBeInTheDocument()
+  })
+
+  it("saves a load setting change, says a reload applies it, and undoes it", async () => {
+    const { useLysStore, user } = await startModelPane()
+    const flash = screen.getByRole("switch", { name: "Flash attention" })
+
+    await user.click(flash)
+
+    expect(
+      useLysStore.getState().settings.loadConfiguration.models.get("qwen3-8b")
+    ).toMatchObject({ flashAttention: false })
+    const changes = screen.getByRole("status", {
+      name: "Load settings changes"
+    })
+    expect(changes).toHaveTextContent("Saved. Reload qwen3-8b to apply it.")
+    expect(
+      within(changes).getByRole("button", { name: "Reload" })
+    ).toBeEnabled()
+
+    await user.click(within(changes).getByRole("button", { name: "Undo" }))
+
+    expect(flash).toBeChecked()
+    expect(changes).toBeEmptyDOMElement()
+  })
+
+  it("keeps a typed batch size outside 1 to 8,192 out of the settings, saving each accepted one", async () => {
+    const { useLysStore, user } = await startModelPane()
+    const batch = screen.getByRole("spinbutton", {
+      name: "Evaluation batch size"
+    })
+
+    await user.clear(batch)
+    await user.type(batch, "9000")
+
+    expect(batch).toHaveAttribute("aria-invalid", "true")
+    expect(batch).toHaveAccessibleDescription(
+      "Enter a whole number from 1 to 8,192."
     )
-    await waitForRenderedWork()
-
-    await user.click(getRefreshButton())
-    await waitForRenderedWork()
-
-    expect(getRefreshButton()).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Load gemma-3" })).toBeDisabled()
     expect(
-      screen.getByRole("list", { name: "Downloaded models" })
-    ).toHaveAttribute("aria-busy", "true")
-    expect(screen.getByText("Refreshing model inventory…")).toBeInTheDocument()
-    expect(backend.requests).toHaveLength(2)
+      useLysStore.getState().settings.loadConfiguration.models.get("qwen3-8b")
+        ?.evalBatchSize
+    ).toBe(900)
 
-    reads[1]?.resolve(
-      buildJsonResponse(200, {
-        llms: [buildLlmInfo("llama-4")],
-        modelLoading: "lys"
-      })
-    )
-    await waitForRenderedWork()
+    await user.clear(batch)
+    await user.type(batch, "1024")
 
-    expect(getRefreshButton()).toBeEnabled()
+    expect(batch).toHaveAttribute("aria-invalid", "false")
     expect(
-      within(screen.getByRole("list", { name: "Downloaded models" }))
-        .getAllByRole("listitem")
-        .map((row) => within(row).getAllByRole("button")[0].textContent)
-    ).toEqual(["llama-47B · Q4_K_M · 4.0 GB4.0 GB on disk"])
+      useLysStore.getState().settings.loadConfiguration.models.get("qwen3-8b")
+        ?.evalBatchSize
+    ).toBe(1024)
   })
 
-  it.each<[string, RuntimeArrangement, string]>([
-    [
-      "the backend is stopped",
-      buildUnreachableRuntime("stopped"),
-      "Start the backend to list models."
-    ],
-    [
-      "LM Studio is connecting",
-      buildUnreachableRuntime("running", "connecting"),
-      "Connecting to LM Studio…"
-    ],
-    [
-      "the backend has LM Studio off",
-      buildUnreachableRuntime("running", "off"),
-      "LM Studio is off. Turn it on in Providers to list its models."
-    ],
-    [
-      "LM Studio has no downloaded language models",
-      {
-        ...TWO_MODELS,
-        modelInventory: { status: "ready", modelLoading: "lys", models: [] }
-      },
-      "No downloaded language models found in LM Studio."
-    ]
-  ])("explains an empty list when %s", async (_case, runtime, message) => {
-    await startModelPane(runtime)
-
-    expect(screen.queryAllByRole("listitem")).toEqual([])
-    expect(screen.getByText(message)).toBeInTheDocument()
-  })
-
-  it("explains a failed inventory read and offers Refresh", async () => {
-    await startModelPane(TWO_MODELS, {
-      [INVENTORY_ROUTE]: () => new Response(null, { status: 500 }),
-      "GET /api/v1/llm/lmStudio/runtime": () =>
-        buildJsonResponse(200, { status: "connected" })
-    })
-
-    expect(
-      screen.getByText("Model inventory is unavailable. Refresh to try again.")
-    ).toBeInTheDocument()
-    expect(getRefreshButton()).toBeEnabled()
-  })
-
-  it("disables Refresh while LM Studio is not reachable, describing why", async () => {
-    await startModelPane(buildUnreachableRuntime("running", "unreachable"))
-
-    expect(getRefreshButton()).toBeDisabled()
-    expect(getRefreshButton()).toHaveAccessibleDescription(UNREACHABLE_MESSAGE)
-    expect(screen.getByText(UNREACHABLE_MESSAGE)).toBeInTheDocument()
-  })
-
-  it("repeats why Refresh is disabled in a tooltip after 600 ms of hover", async () => {
-    await startModelPane(buildUnreachableRuntime("running", "unreachable"))
-    vi.useFakeTimers()
+  it("shows a Groq model as available, with its context, and checks it without generating a reply", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
     onTestFinished(() => {
       vi.useRealTimers()
     })
-
-    // A disabled button receives no pointer events; its tooltip trigger
-    // wraps it.
-    startHover(getRefreshButton().parentElement ?? getRefreshButton())
-    act(() => {
-      vi.advanceTimersByTime(599)
+    vi.setSystemTime(new Date(2026, 10, 13, 9, 5))
+    const { backend, user } = await startModelPane(TWO_MODELS, {
+      extra: { provider: "groq", state: GROQ_MODELS },
+      change: (settings) => ({
+        ...settings,
+        runtime: {
+          ...settings.runtime,
+          defaultModel: { provider: "groq", modelKey: "llama-3.3-70b" }
+        }
+      }),
+      routes: {
+        "GET /api/v1/llm/groq/llama-3.3-70b/health": () =>
+          buildJsonResponse(200, {
+            status: "ready",
+            modelId: "llama-3.3-70b",
+            latencyMs: 40
+          })
+      }
     })
-    const beforeDelay = screen.getAllByText(UNREACHABLE_MESSAGE)
-    act(() => {
-      vi.advanceTimersByTime(1)
-    })
 
-    expect(beforeDelay).toHaveLength(1)
-    expect(screen.getAllByText(UNREACHABLE_MESSAGE)).toHaveLength(2)
+    expect(screen.getByText("Connected · 1 model")).toBeInTheDocument()
+    expect(screen.getByText("Available")).toBeInTheDocument()
+    expect(screen.getByText("Hosted by Groq")).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", { level: 4, name: "Context" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("131,072 tokens", { selector: "dd" })
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Load" })).toBeNull()
+
+    await user.click(screen.getByRole("button", { name: "Check status" }))
+    await waitForRenderedWork()
+
+    expect(listRouteKeys(backend)).toContain(
+      "GET /api/v1/llm/groq/llama-3.3-70b/health"
+    )
+    expect(screen.getByText("Checked at 09:05. Available.")).toBeInTheDocument()
   })
 
-  it("describes Refresh only while LM Studio is not reachable", async () => {
-    await startModelPane()
+  it("says a failed check could not ask Groq, and offers to try again", async () => {
+    const { user } = await startModelPane(TWO_MODELS, {
+      extra: { provider: "groq", state: GROQ_MODELS },
+      change: (settings) => ({
+        ...settings,
+        runtime: {
+          ...settings.runtime,
+          defaultModel: { provider: "groq", modelKey: "llama-3.3-70b" }
+        }
+      }),
+      routes: {
+        "GET /api/v1/llm/groq/llama-3.3-70b/health": () =>
+          new Response(null, { status: 500 }),
+        "GET /api/v1/llm/groq/runtime": () =>
+          buildJsonResponse(200, { status: "connected" })
+      }
+    })
 
-    expect(getRefreshButton()).toBeEnabled()
-    expect(getRefreshButton()).not.toHaveAttribute("aria-describedby")
-  })
+    await user.click(screen.getByRole("button", { name: "Check status" }))
+    await waitForRenderedWork()
 
-  it("states that a load configuration is saved per model and applies at load, and that the meters measure against the loaded context length", async () => {
-    await startModelPane()
-
+    expect(screen.getByText("Couldn’t check")).toBeInTheDocument()
     expect(
       screen.getByText(
-        "Model operations use the backend. A load configuration is saved for each model and applies when that model is loaded, not per request. The composer's context meter and the Agents pane measure against the context length the model is loaded with. Default selection lasts for this session."
+        "Groq didn’t answer. The last known state was available."
       )
     ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled()
+  })
+
+  it("shows Ollama's load and unload, and its load settings, disabled with why", async () => {
+    await startModelPane(TWO_MODELS, {
+      extra: { provider: "ollama", state: OLLAMA_MODELS },
+      change: (settings) => ({
+        ...settings,
+        runtime: {
+          ...settings.runtime,
+          defaultModel: { provider: "ollama", modelKey: "llama3.2:3b" }
+        }
+      })
+    })
+
+    expect(screen.getByRole("button", { name: "Unload" })).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: "Unload" })
+    ).toHaveAccessibleDescription(
+      "Ollama unloads it when it sits idle. Lys can’t unload Ollama models yet."
+    )
+    expect(
+      screen.getByRole("slider", { hidden: true, name: "Context length" })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole("combobox", { name: "Unload when idle" })
+    ).toBeDisabled()
+    expect(
+      screen.getByText(
+        "Ollama applies its own load settings. Lys can’t change them yet."
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("shows the provider the picker chose, with no model selected", async () => {
+    const { useLysStore, user } = await startModelPane(TWO_MODELS, {
+      extra: { provider: "groq", state: GROQ_MODELS }
+    })
+
+    await openMenuWithKeyboard(
+      user,
+      screen.getByRole("button", { name: /^LM Studio/ })
+    )
+    await user.click(
+      await screen.findByRole("menuitemradio", { name: /^Groq/ })
+    )
+    await waitForRenderedWork()
+
+    expect(useLysStore.getState().modelPaneProvider).toBe("groq")
+    expect(screen.getByRole("button", { name: /^Groq/ })).toBeInTheDocument()
+    expect(listRowTexts("Models")).toEqual(["llama-3.3-70b128k"])
+    expect(
+      screen.getByText("Choose a model to see its status and load settings.")
+    ).toBeInTheDocument()
+  })
+
+  it("says LM Studio isn't running and asks the backend to connect again on Refresh", async () => {
+    const { backend, user } = await startModelPane(
+      buildUnreachableRuntime("running", "unreachable"),
+      {
+        routes: {
+          "POST /api/v1/llm/lmStudio/runtime/connect": () =>
+            buildJsonResponse(200, { status: "unreachable" })
+        }
+      }
+    )
+
+    expect(
+      screen.getByText("LM Studio isn’t running on this machine.")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Start its local server, then refresh. Its models show here once it answers at 127.0.0.1:1234."
+      )
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }))
+    await waitForRenderedWork()
+
+    expect(listRouteKeys(backend)).toEqual([
+      "POST /api/v1/llm/lmStudio/runtime/connect"
+    ])
+  })
+
+  it("opens the Runtime pane from the notice while the backend is not running", async () => {
+    const { useLysStore, user } = await startModelPane(
+      buildUnreachableRuntime("stopped")
+    )
+
+    expect(screen.getByText("The backend isn’t running.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled()
+
+    await user.click(screen.getByRole("button", { name: "Open Runtime" }))
+
+    expect(useLysStore.getState().settingsPane).toBe("runtime")
+  })
+
+  it("asks for a key in Providers while Groq has none", async () => {
+    const { useLysStore, user } = await startModelPane(TWO_MODELS, {
+      extra: {
+        provider: "groq",
+        state: { status: "unreachable" }
+      },
+      change: (settings) => ({
+        ...settings,
+        secrets: { ...settings.secrets, groqApiKey: null },
+        runtime: {
+          ...settings.runtime,
+          defaultModel: { provider: "groq", modelKey: "llama-3.3-70b" }
+        }
+      })
+    })
+
+    expect(screen.getByText("Groq needs a key.")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Open Providers" }))
+
+    expect(useLysStore.getState().settingsPane).toBe("providers")
+  })
+
+  it("reports when LM Studio was last read, beside Refresh", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
+    vi.setSystemTime(new Date(2026, 10, 13, 14, 7))
+    await startModelPane()
+
+    expect(screen.getByText("Refreshed at 14:07")).toBeInTheDocument()
   })
 })

@@ -53,7 +53,11 @@ import {
 } from "./provider-status"
 import { create, type StoreApi } from "zustand"
 import { BACKEND_HOST, BACKEND_PORT } from "@lys/protocol"
-import { LLM_PROVIDERS, type LlmProvider } from "@lys/share"
+import {
+  LLM_PROVIDERS,
+  type LlmModelReference,
+  type LlmProvider
+} from "@lys/share"
 import { getBackendStatus, startBackend, stopBackend } from "../apis"
 import { getVmoStatus } from "@/lib/apis/tauri/vmo"
 import { sendWebSearchKeyCheck } from "../apis/http/tools"
@@ -90,6 +94,16 @@ type LysState = ProviderModelsState & {
   activeView: AppView
   /** Pane the settings view opens on; retained across visits to settings. */
   settingsPane: SettingsPane
+  /**
+   * Model the Model pane shows, or null for the pane's own choice; retained
+   * across visits to settings.
+   */
+  modelPaneSelection: LlmModelReference | null
+  /**
+   * Provider the Model pane's picker chose while no model of it is selected,
+   * or null for the pane's own choice; retained across visits to settings.
+   */
+  modelPaneProvider: LlmProvider | null
   /** Settings loaded from or destined for Tauri persistence. */
   settings: LysSettings
   /** Local HTTP base URL used by desktop transport consumers. */
@@ -114,6 +128,24 @@ type LysActions = {
    * @param pane - Pane to make active; it stays selected until changed again.
    */
   setSettingsPane: (pane: SettingsPane) => void
+  /**
+   * Selects the model the Model pane shows.
+   *
+   * @param model - Model to show, or null to leave the choice to the pane.
+   */
+  setModelPaneSelection: (model: LlmModelReference | null) => void
+  /**
+   * Shows one provider in the Model pane with no model of it selected.
+   *
+   * @param provider - Provider the pane's picker chose.
+   */
+  setModelPaneProvider: (provider: LlmProvider) => void
+  /**
+   * Opens the settings view on the Model pane, showing one model.
+   *
+   * @param model - Model the pane shows.
+   */
+  showModelInSettings: (model: LlmModelReference) => void
   /**
    * Replaces store-owned settings and automatically persists generation, load
    * configuration, tools, and startup switch edits.
@@ -203,6 +235,8 @@ const initialState: LysState = {
   providerModels: INITIAL_PROVIDER_MODEL_STATES,
   activeView: "chat",
   settingsPane: "runtime",
+  modelPaneSelection: null,
+  modelPaneProvider: null,
   settings: initialSettingsState,
   backendUrl: `http://${BACKEND_HOST}:${BACKEND_PORT}`,
   initializing: true,
@@ -467,6 +501,22 @@ function createLysStoreState(
 
     setSettingsPane: (pane) => {
       set({ settingsPane: pane })
+    },
+
+    setModelPaneSelection: (model) => {
+      set({ modelPaneSelection: model })
+    },
+
+    setModelPaneProvider: (provider) => {
+      set({ modelPaneProvider: provider, modelPaneSelection: null })
+    },
+
+    showModelInSettings: (model) => {
+      set({
+        activeView: "settings",
+        settingsPane: "model",
+        modelPaneSelection: model
+      })
     },
 
     setSettings: (settings) => {

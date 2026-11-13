@@ -1,26 +1,27 @@
 import { Button } from "@/components/ui/button"
 
-import type { ReconnectAction } from "./composer-presentation"
+import type { ComposerBannerAction } from "./composer-presentation"
 
 /** Properties accepted by {@link ComposerOfflineBanner}. */
 export type ComposerOfflineBannerProps = {
-  /** Sentence explaining why local generation is unavailable. */
+  /** Sentence explaining why the conversation's model cannot answer. */
   readonly message: string
-  /** Label and enablement for the recovery action. */
-  readonly action: ReconnectAction
+  /** The recovery action; disabled while it is `none`. */
+  readonly action: ComposerBannerAction
   /** Invoked once when the recovery action is activated. */
   readonly onReconnect: () => void
 }
 
 /**
- * States why local generation is unavailable and offers the recovery action.
+ * States why the conversation's model cannot answer and offers the recovery
+ * action.
  *
- * @remarks The parent owns the message, the
- * action's label and enablement, and the callback; this component owns no
- * state, effects, or resources. The banner is a polite status region so a
- * reader is told about the change without losing their place in the composer,
- * and the button is disabled rather than hidden while the runtime is already
- * transitioning, keeping the row's height stable.
+ * @remarks The parent owns the message, the action, and the callback, and
+ * carries the action out; this component owns no state, effects, or
+ * resources. The banner is a polite status region so a reader is told about
+ * the change without losing their place in the composer, and the button is
+ * disabled rather than hidden while the runtime is already transitioning,
+ * keeping the row's height stable.
  *
  * @param props - Explanation copy and the parent-owned recovery action.
  * @returns The composer's runtime availability banner.
@@ -36,7 +37,7 @@ export default function ComposerOfflineBanner({
       <span className="composer__offline-message">{message}</span>
       <Button
         className="composer__offline-action"
-        disabled={!action.isEnabled}
+        disabled={action.kind === "none"}
         onClick={onReconnect}
         size="sm"
         type="button"

@@ -1,9 +1,15 @@
-import type { LlmProvider } from "@lys/share"
+import {
+  LLM_PROVIDER_NAMES,
+  LLM_PROVIDERS,
+  type LlmModelReference,
+  type LlmProvider
+} from "@lys/share"
 import type { BackendServerStatus } from "@/lib/store"
 import type {
   LlmProviderStatus,
   ProviderModelStates
 } from "@/lib/store/model-runtime"
+import type { ProvidersSettings } from "@/lib/store/settings"
 import type { LlmProviderTarget } from "./llm-provider-target"
 
 /**
@@ -185,4 +191,56 @@ export function calculateProviderStatusTone(
     case "unreachable":
       return "danger"
   }
+}
+
+/**
+ * Lists the providers the saved settings turn on.
+ *
+ * @param enabledProviders - The saved enabled list, in any order.
+ * @returns Those providers in provider order, each once.
+ */
+export function listEnabledProviders(
+  enabledProviders: readonly LlmProvider[]
+): LlmProvider[] {
+  return LLM_PROVIDERS.filter((provider) => enabledProviders.includes(provider))
+}
+
+/**
+ * Lists the turned-on providers a refresh connects to again.
+ *
+ * @param providers - Saved providers, of which the enabled list is read.
+ * @param providerModels - What the desktop knows of every provider.
+ * @returns Every turned-on provider whose status is not `connecting`, in
+ * provider order; an attempt in flight is not asked for again.
+ */
+export function listRefreshableProviders(
+  providers: ProvidersSettings,
+  providerModels: ProviderModelStates
+): LlmProvider[] {
+  return listEnabledProviders(providers.enabled).filter(
+    (provider) => providerModels[provider].status !== "connecting"
+  )
+}
+
+/**
+ * Formats the line under the provider connections heading.
+ *
+ * @param enabledCount - How many providers are on.
+ * @returns How many providers are on, or, while none is, where to turn one
+ * on.
+ */
+export function formatProviderConnectionsSummary(enabledCount: number): string {
+  if (enabledCount === 0) return "No provider is on · turn one on in Providers"
+  return enabledCount === 1 ? "1 provider on" : `${enabledCount} providers on`
+}
+
+/**
+ * Formats a model's name with its provider's, as every model list shows it.
+ *
+ * @param model - Model to name.
+ * @returns `<key> · <Provider name>`, such as `gpt-oss-20b · LM Studio`, which
+ * tells the same key on two providers apart.
+ */
+export function formatModelReferenceLabel(model: LlmModelReference): string {
+  return `${model.modelKey} · ${LLM_PROVIDER_NAMES[model.provider]}`
 }

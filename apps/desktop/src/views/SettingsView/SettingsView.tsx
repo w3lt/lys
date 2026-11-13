@@ -145,16 +145,16 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     ordinal: "01",
     note: "Start the server, then load the weights. Nothing runs until you say so.",
     footNote:
-      "Starting launches the Lys backend, which then connects to the provider chosen in Providers. Lys doesn't start the provider for you, and stopping the backend does not unload its models.",
+      "Starting launches the Lys backend, which then connects to every provider turned on in Providers. Lys doesn't start a provider for you, and stopping the backend does not unload their models.",
     contentComponent: RuntimePaneContent
   },
   {
     value: "model",
-    label: "Model",
+    label: "Models",
     ordinal: "02",
-    note: "Every model on disk, which one is default, and what it is loaded with.",
+    note: "Choose a provider, then a model. Cloud models answer right away; a local model answers only once it is loaded on this machine.",
     footNote:
-      "Model operations use the backend. A load configuration is saved for each model and applies when that model is loaded, not per request. The composer's context meter and the Agents pane measure against the context length the model is loaded with. Default selection lasts for this session.",
+      "Model operations use the backend. Load settings are saved for each LM Studio model and apply when that model is loaded, not per message. The composer's context meter and the Agents pane measure against the context length the model is loaded with. The default lasts for this session.",
     contentComponent: ModelPaneContent
   },
   {
@@ -197,7 +197,7 @@ const SETTINGS_PANES: readonly SettingsPaneDescriptor[] = [
     value: "providers",
     label: "Providers",
     ordinal: "07",
-    note: "Where every message is answered. One provider at a time; switching reconnects Lys.",
+    note: "Where messages are answered. Several can be on at once; each conversation's model names its provider.",
     footNote:
       "Saved in settings.json in Lys's home folder, readable only by your user account; keys are kept in plain text there and go only to their own provider. LM Studio and a local Ollama server keep conversations on the machine at the address you give, over plain HTTP. Ollama Cloud and Groq receive your conversations to answer them.",
     contentComponent: ProvidersPane
@@ -320,7 +320,8 @@ function formatRailStatus(
 }
 
 /**
- * Finds the provider whose models the settings panes show.
+ * Finds the provider whose requests the Runtime pane reports and the rail
+ * summary describes.
  *
  * @param settings - Current settings.
  * @param newConversationModel - The model a new conversation uses, or null
@@ -340,20 +341,6 @@ function findShownProvider(
   return (
     LLM_PROVIDERS.find((provider) => enabled.includes(provider)) ?? "lmStudio"
   )
-}
-
-/**
- * Builds a reference to one of the shown provider's models.
- *
- * @param provider - Shown provider.
- * @param modelKey - Key of the model.
- * @returns The reference.
- */
-function buildShownModelReference(
-  provider: LlmProvider,
-  modelKey: string
-): LlmModelReference {
-  return { provider, modelKey }
 }
 
 /**
@@ -393,10 +380,11 @@ export type SettingsViewProps = {
  * session-only.
  *
  * Inventory, load, unload, reload, and health requests belong to the
- * application store; the panes show one provider's models, as
- * {@link findShownProvider} finds it, and act on them. Entering settings
- * refreshes every provider's inventory; leaving the view does not cancel
- * work.
+ * application store; the context holds one provider's request, failure, and
+ * health, as {@link findShownProvider} finds it, for the Runtime pane's
+ * request feedback, while the Runtime and Models panes read every
+ * provider's models from the store. Entering settings refreshes every
+ * provider's inventory; leaving the view does not cancel work.
  * Request errors and loaded-state health observations are rendered by the panes.
  * Agents are managed through the agent store, which the Agents pane reads
  * directly rather than through `SettingsContext`; its prompt measure reads the
@@ -426,12 +414,6 @@ export default function SettingsView({
   const setSettings = useLysStore((state) => state.setSettings)
   const backendStatus = useLysStore((state) => state.backendServerInfo.status)
   const providerModels = useLysStore((state) => state.providerModels)
-  const loadModel = useLysStore((state) => state.loadModel)
-  const unloadModel = useLysStore((state) => state.unloadModel)
-  const updateLoadedModelConfiguration = useLysStore(
-    (state) => state.updateLoadedModelConfiguration
-  )
-  const testModel = useLysStore((state) => state.testModel)
   const updateModelInventory = useLysStore(
     (state) => state.updateModelInventory
   )
@@ -455,13 +437,9 @@ export default function SettingsView({
   const contextValue = useMemo<SettingsContextValue>(
     () => ({
       settings,
-      shownProvider,
-      providerAvailability,
-      modelInventory: shownProviderModels.inventory,
       modelRequest: shownProviderModels.request,
       modelError: shownProviderModels.error,
       modelHealth: shownProviderModels.health,
-      loadedModelConfigurations: shownProviderModels.loadedModelConfigurations,
       newConversationModel,
       onRuntimeChange: (patch) =>
         setSettings({
@@ -487,32 +465,9 @@ export default function SettingsView({
           modelKey
         }
         setSettings(buildSettingsWithLoadConfigurationChange(settings, change))
-      },
-      onLoadModel: (modelKey) =>
-        loadModel(buildShownModelReference(shownProvider, modelKey)),
-      onUnloadModel: (modelKey) =>
-        unloadModel(buildShownModelReference(shownProvider, modelKey)),
-      onReloadModel: (modelKey) =>
-        updateLoadedModelConfiguration(
-          buildShownModelReference(shownProvider, modelKey)
-        ),
-      onTestModel: (modelKey) =>
-        testModel(buildShownModelReference(shownProvider, modelKey)),
-      onRefreshModels: () => updateModelInventory(shownProvider)
+      }
     }),
-    [
-      settings,
-      shownProvider,
-      providerAvailability,
-      shownProviderModels,
-      newConversationModel,
-      setSettings,
-      loadModel,
-      unloadModel,
-      updateLoadedModelConfiguration,
-      testModel,
-      updateModelInventory
-    ]
+    [settings, shownProviderModels, newConversationModel, setSettings]
   )
 
   const railStatus = formatRailStatus(

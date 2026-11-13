@@ -24,28 +24,18 @@ type ModelFeedbackArrangement = Partial<
 function buildSettingsContext(
   arrangement: ModelFeedbackArrangement
 ): SettingsContextValue {
-  const { inventory, request, error, health, loadedModelConfigurations } =
-    INITIAL_PROVIDER_MODEL_STATES.lmStudio
+  const { request, error, health } = INITIAL_PROVIDER_MODEL_STATES.lmStudio
   return {
     settings: initialSettingsState,
-    shownProvider: "lmStudio",
-    providerAvailability: "available",
-    modelInventory: inventory,
     modelRequest: request,
     modelError: error,
     modelHealth: health,
-    loadedModelConfigurations,
     newConversationModel: { model: null, availability: null },
     ...arrangement,
     onRuntimeChange: vi.fn(),
     onGenerationChange: vi.fn(),
     onAssignModelLoadSettings: vi.fn(),
-    onRemoveModelExpertCount: vi.fn(),
-    onLoadModel: vi.fn(() => Promise.resolve()),
-    onUnloadModel: vi.fn(() => Promise.resolve()),
-    onReloadModel: vi.fn(() => Promise.resolve()),
-    onTestModel: vi.fn(() => Promise.resolve()),
-    onRefreshModels: vi.fn(() => Promise.resolve())
+    onRemoveModelExpertCount: vi.fn()
   }
 }
 

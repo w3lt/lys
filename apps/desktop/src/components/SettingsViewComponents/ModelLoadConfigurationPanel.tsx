@@ -1,21 +1,31 @@
-import type { ReactElement } from "react"
+import { useId, useState, type ReactElement, type ReactNode } from "react"
 import type { LlmInfo } from "@lys/protocol"
+import type { LlmProvider } from "@lys/share"
 
 import { Button } from "@/components/ui/button"
 import {
   buildDefaultModelLoadConfiguration,
-  buildModelLoadConfiguration,
-  findLoadConfigurationTarget
+  buildModelLoadConfiguration
 } from "@/lib/models/model-load-configuration"
 import { useLysStore } from "@/lib/store"
 import type { LoadConfigurationSaveState } from "@/lib/store/load-configuration-settings"
+import type { CompleteModelLoadConfiguration } from "@/lib/store/settings"
 
+import ModelContextLengthField from "./ModelContextLengthField"
 import ModelLoadSettingFields from "./ModelLoadSettingFields"
 import {
-  buildModelReloadPrompt,
-  isModelResidencyChanging
+  buildLoadSettingsWithBaseline,
+  formatModelLoadChangeNote
 } from "./model-load-presentation"
+import {
+  findModelTransition,
+  formatContextTokens
+} from "./model-pane-presentation"
 import { useSettingsContext } from "./SettingsContext"
+
+/** Note under a context length the composer measures against. */
+const MEASURED_CONTEXT_NOTE =
+  "The composer's context meter and the Agents pane measure against this length."
 
 /**
  * Formats the load-configuration save outcome announced beneath the settings.
@@ -29,9 +39,9 @@ function formatLoadConfigurationSaveStatus(
 ): string {
   switch (save.status) {
     case "saving":
-      return "Saving the load configuration…"
+      return "Saving the load settings…"
     case "failed":
-      return "Could not save the load configuration. Your edits still apply to models loaded in this session."
+      return "Couldn’t save the load settings. Your edits still apply to models loaded in this session."
     case "idle":
     case "saved":
       return ""
@@ -43,8 +53,9 @@ function formatLoadConfigurationSaveStatus(
  * a write fails.
  *
  * @returns A persistent status region and a retry button only after failure.
- * @remarks The application store owns saves across pane unmounts; failure
- * leaves edits available and allows an explicit retry.
+ * @remarks Composition view over the application store, which owns saves
+ * across pane unmounts; failure leaves edits available and allows an
+ * explicit retry.
  */
 function LoadConfigurationSaveFeedback(): ReactElement {
   const save = useLysStore((state) => state.loadConfigurationSave)
@@ -52,11 +63,11 @@ function LoadConfigurationSaveFeedback(): ReactElement {
     (state) => state.saveLoadConfigurationSettings
   )
   return (
-    <div>
+    <div className="settings-view__models-save">
       <p
-        aria-label="Load configuration save"
+        aria-label="Load settings save"
         aria-live="polite"
-        className="settings-view__note"
+        className="settings-view__models-note"
         role="status"
       >
         {formatLoadConfigurationSaveStatus(save)}
@@ -64,6 +75,7 @@ function LoadConfigurationSaveFeedback(): ReactElement {
       {save.status === "failed" ? (
         <Button
           onClick={() => void saveLoadConfigurationSettings()}
+          size="sm"
           type="button"
           variant="outline"
         >
@@ -74,105 +86,178 @@ function LoadConfigurationSaveFeedback(): ReactElement {
   )
 }
 
-/** Properties accepted by {@link ModelReloadControl}. */
-type ModelReloadControlProps = {
-  /** Key of the loaded model a reload would address. */
-  readonly modelKey: string
-  /**
-   * What a reload would apply, or an empty string when the stored settings
-   * match the ones the model runs with.
-   */
-  readonly note: string
+/** Properties accepted by {@link LoadSettingsSection}. */
+type LoadSettingsSectionProps = {
+  /** Section title. */
+  readonly title: string
+  /** What the settings are and when they apply. */
+  readonly caption: string
+  /** The section's settings. */
+  readonly children: ReactNode
 }
 
 /**
- * Tells the person that a loaded model's stored settings changed, and offers
- * to reload it.
+ * Presents the titled region holding the selected model's load settings.
  *
- * @remarks Requires SettingsContext and the application store. The status
- * region stays mounted, so the note is announced when it appears. The button
- * is rendered only while there is a note. It asks the settings owner to
- * reload the model, and it is disabled while any model request is in flight
- * or the model runtime is unavailable, so a second reload cannot start before
- * the first settles.
- * @param props - Model to reload and the note to show.
- * @returns The status region and, with a note, the Reload now button.
+ * @remarks Presentational; owns no state. The title is a level-four heading
+ * under the selected model's heading.
+ * @param props - Title, caption, and the settings.
+ * @returns The section.
  */
-function ModelReloadControl({
-  modelKey,
-  note
-}: ModelReloadControlProps): ReactElement {
-  const { providerAvailability, modelRequest, onReloadModel } =
-    useSettingsContext()
+function LoadSettingsSection({
+  title,
+  caption,
+  children
+}: LoadSettingsSectionProps): ReactElement {
   return (
-    <div className="settings-view__load-reload">
-      <p
-        aria-label="Load configuration changes"
-        aria-live="polite"
-        role="status"
-      >
-        {note}
-      </p>
-      {note === "" ? null : (
-        <Button
-          disabled={
-            providerAvailability !== "available" ||
-            modelRequest.status !== "idle"
-          }
-          onClick={() => void onReloadModel(modelKey)}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          Reload now
-        </Button>
+    <section className="settings-view__models-load">
+      <div className="settings-view__models-load-heading">
+        <h4>{title}</h4>
+        <p>{caption}</p>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+/** Properties accepted by {@link ModelLoadChangeNotice}. */
+type ModelLoadChangeNoticeProps = {
+  /** Model whose stored settings changed. */
+  readonly model: LlmInfo
+  /** Settings the change is measured from and Undo restores. */
+  readonly baseline: CompleteModelLoadConfiguration
+  /** Settings the model would be loaded with now. */
+  readonly stored: CompleteModelLoadConfiguration
+}
+
+/**
+ * Tells the person that a model's stored load settings changed, and offers
+ * to reload a loaded model or undo the change.
+ *
+ * @remarks Composition view over SettingsContext and the application store.
+ * The status region stays mounted, so the note is announced when it
+ * appears; it is empty while nothing differs from the baseline and while
+ * the model itself is being loaded or unloaded. Reload asks the store to
+ * reload the model with the stored settings and is disabled while any of
+ * LM Studio's requests is in flight. Undo gives the model the baseline as
+ * its own settings in one change, which is saved like any edit.
+ * @param props - Model, baseline, and stored settings.
+ * @returns The status region with its note and, with a note, its buttons.
+ */
+function ModelLoadChangeNotice({
+  model,
+  baseline,
+  stored
+}: ModelLoadChangeNoticeProps): ReactElement {
+  const { settings } = useSettingsContext()
+  const setSettings = useLysStore((state) => state.setSettings)
+  const request = useLysStore((state) => state.providerModels.lmStudio.request)
+  const reloadModel = useLysStore(
+    (state) => state.updateLoadedModelConfiguration
+  )
+  const reference = { provider: "lmStudio", modelKey: model.modelKey } as const
+  const note =
+    findModelTransition(request, model.modelKey) === null
+      ? formatModelLoadChangeNote(
+          model.modelKey,
+          model.loaded,
+          baseline,
+          stored
+        )
+      : null
+
+  /** Gives the model the baseline as its own load settings again. */
+  function handleUndoClick(): void {
+    setSettings({
+      ...settings,
+      loadConfiguration: buildLoadSettingsWithBaseline(
+        settings.loadConfiguration,
+        model.modelKey,
+        baseline
+      )
+    })
+  }
+
+  return (
+    <div
+      aria-label="Load settings changes"
+      className="settings-view__models-change"
+      role="status"
+    >
+      {note === null ? null : (
+        <>
+          <span
+            aria-hidden="true"
+            className="settings-view__status-dot"
+            data-tone="warning"
+          />
+          <span>{note}</span>
+          {model.loaded ? (
+            <Button
+              disabled={request.status !== "idle"}
+              onClick={() => void reloadModel(reference)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Reload
+            </Button>
+          ) : null}
+          <Button
+            onClick={handleUndoClick}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            Undo
+          </Button>
+        </>
       )}
     </div>
   )
 }
 
-/** Properties accepted by {@link ModelLoadConfigurationEditor}. */
-type ModelLoadConfigurationEditorProps = {
-  /** Inventory entry of the model whose load configuration is edited. */
+/** Properties accepted by {@link LmStudioLoadSettings}. */
+type LmStudioLoadSettingsProps = {
+  /** LM Studio model whose load settings are edited. */
   readonly model: LlmInfo
 }
 
 /**
- * Connects one model's load settings to the settings and model state the
- * application owns.
+ * Connects one LM Studio model's load settings to the settings and model
+ * state the application owns.
  *
- * @remarks Requires SettingsContext. Each edit is a request to the settings
- * owner, which applies it in memory and saves it; the rows show the owner's
- * values. For a loaded model whose stored settings differ from the ones it
- * runs with, the changed rows and the reload control say so. That prompt is
- * withheld while the model itself is being loaded or unloaded.
+ * @remarks Composition view over SettingsContext and the application store.
+ * Each edit is a request to the settings owner, which applies it in memory
+ * and saves it; the rows show the owner's values. A change is measured from
+ * the settings a loaded model runs with, as the store knows them, or for a
+ * model that is not loaded from the settings it had when this editor
+ * mounted, which the parent remounts for each model.
  * @param props - Model to edit.
- * @returns The five setting rows and the reload control.
+ * @returns The load settings section with its rows, change notice, and save
+ * feedback.
  */
-function ModelLoadConfigurationEditor({
+function LmStudioLoadSettings({
   model
-}: ModelLoadConfigurationEditorProps): ReactElement {
-  const {
-    settings,
-    modelRequest,
-    loadedModelConfigurations,
-    onAssignModelLoadSettings,
-    onRemoveModelExpertCount
-  } = useSettingsContext()
-  const configuration = buildModelLoadConfiguration(
-    settings.loadConfiguration,
-    model
+}: LmStudioLoadSettingsProps): ReactElement {
+  const { settings, onAssignModelLoadSettings, onRemoveModelExpertCount } =
+    useSettingsContext()
+  const known = useLysStore((state) =>
+    state.providerModels.lmStudio.loadedModelConfigurations.get(model.modelKey)
   )
-  const reloadPrompt = isModelResidencyChanging(modelRequest, model.modelKey)
-    ? null
-    : buildModelReloadPrompt(
-        loadedModelConfigurations.get(model.modelKey),
-        configuration
-      )
+  const stored = buildModelLoadConfiguration(settings.loadConfiguration, model)
+  const [shownConfiguration] = useState(stored)
+  const baseline =
+    model.loaded && known !== undefined
+      ? known.configuration
+      : shownConfiguration
   return (
-    <>
+    <LoadSettingsSection
+      caption="Saved for this model and applied each time it loads."
+      title="Load settings"
+    >
       <ModelLoadSettingFields
-        configuration={configuration}
+        configuration={stored}
         isAutomaticExpertCountAvailable={
           buildDefaultModelLoadConfiguration(settings.loadConfiguration)
             .numExperts === undefined
@@ -181,59 +266,134 @@ function ModelLoadConfigurationEditor({
         modelKey={model.modelKey}
         onAssignModelLoadSettings={onAssignModelLoadSettings}
         onRemoveModelExpertCount={onRemoveModelExpertCount}
-        reloadPrompt={reloadPrompt}
       />
-      <ModelReloadControl
-        modelKey={model.modelKey}
-        note={reloadPrompt?.note ?? ""}
+      <ModelLoadChangeNotice
+        baseline={baseline}
+        model={model}
+        stored={stored}
       />
-    </>
+      <LoadConfigurationSaveFeedback />
+    </LoadSettingsSection>
+  )
+}
+
+/**
+ * Shows how long Ollama keeps an idle model loaded, disabled because Lys
+ * cannot set it yet.
+ *
+ * @remarks Presentational. The native select shows Ollama's own default of
+ * five minutes; its label names it and its note, which also says that Lys
+ * cannot change it, describes it.
+ * @returns The labelled, disabled select and its note.
+ */
+function IdleUnloadField(): ReactElement {
+  const selectId = useId()
+  const noteId = useId()
+  return (
+    <div className="settings-view__models-idle">
+      <label htmlFor={selectId}>Unload when idle</label>
+      <select
+        aria-describedby={noteId}
+        defaultValue="5m"
+        disabled
+        id={selectId}
+      >
+        <option value="5m">After 5 minutes</option>
+        <option value="30m">After 30 minutes</option>
+        <option value="1h">After 1 hour</option>
+        <option value="never">Never</option>
+      </select>
+      <p className="settings-view__models-note" id={noteId}>
+        Frees this machine’s memory. An unloaded model can’t answer until you
+        load it again. Lys can’t change it yet, so Ollama’s own setting applies.
+      </p>
+    </div>
+  )
+}
+
+/** Properties accepted by {@link ProviderLoadSettings}. */
+type ProviderLoadSettingsProps = {
+  /** Ollama or Ollama Cloud, which apply their own load settings. */
+  readonly provider: "ollama" | "ollamaCloud"
+  /** Model whose load settings are shown. */
+  readonly model: LlmInfo
+}
+
+/**
+ * Shows the load settings of a model whose provider applies its own, with
+ * the controls disabled because Lys cannot set them yet.
+ *
+ * @remarks Presentational. The context length is the one the model is
+ * loaded with, else its maximum. For Ollama, the idle unload delay shows
+ * Ollama's own default of five minutes. The caption says why nothing can be
+ * changed.
+ * @param props - Provider and model.
+ * @returns The load settings section with disabled controls.
+ */
+function ProviderLoadSettings({
+  provider,
+  model
+}: ProviderLoadSettingsProps): ReactElement {
+  const providerName = provider === "ollama" ? "Ollama" : "Ollama Cloud"
+  return (
+    <LoadSettingsSection
+      caption={`${providerName} applies its own load settings. Lys can’t change them yet.`}
+      title="Load settings"
+    >
+      <ModelContextLengthField
+        contextLength={model.loadedContextLength ?? model.maxContextLength}
+        maxContextLength={model.maxContextLength}
+        note={`${providerName} sets this length. ${MEASURED_CONTEXT_NOTE}`}
+        onContextLengthChange={null}
+      />
+      {provider === "ollama" ? <IdleUnloadField /> : null}
+    </LoadSettingsSection>
   )
 }
 
 /** Properties accepted by {@link ModelLoadConfigurationPanel}. */
-type ModelLoadConfigurationPanelProps = {
-  /** Models of an inventory that was read, among which the edited one is found. */
-  readonly models: readonly LlmInfo[]
+export type ModelLoadConfigurationPanelProps = {
+  /** Provider of the selected model. */
+  readonly provider: LlmProvider
+  /** The selected model. */
+  readonly model: LlmInfo
 }
 
 /**
- * Presents the load configuration of the model the Model pane edits.
+ * Presents the load settings of the Model pane's selected model, as its
+ * provider lets them be set.
  *
- * @param props - The models of the inventory that was read.
- * @returns The section heading with the model's key, then that model's load
- * settings, or a request to choose a default model when none can be edited,
- * and the save feedback.
- * @remarks Requires SettingsContext. The edited model is the selected default
- * model when it is one of the shown provider's and the models include it; a
- * loaded model that is not the default is not edited. Choosing another model starts a new editor, so text being typed
- * for the previous model is discarded.
+ * @remarks Composition view. LM Studio's models have editable settings
+ * that Lys saves and sends with each load; Ollama and Ollama Cloud apply
+ * their own, which are shown disabled; Groq sets the context of its models,
+ * which is shown as a fact. The parent remounts it for each model, so text
+ * being typed for the previous model is discarded.
+ * @param props - Provider and model.
+ * @returns The provider's load settings section.
  */
 export default function ModelLoadConfigurationPanel({
-  models
+  provider,
+  model
 }: ModelLoadConfigurationPanelProps): ReactElement {
-  const { settings, shownProvider } = useSettingsContext()
-  const { defaultModel } = settings.runtime
-  const model = findLoadConfigurationTarget(
-    models,
-    defaultModel?.provider === shownProvider ? defaultModel.modelKey : null
-  )
-  return (
-    <section className="settings-view__section">
-      <div className="settings-view__section-heading">
-        <h2>load configuration</h2>
-        {model === undefined ? null : (
-          <span className="settings-view__load-target">{model.modelKey}</span>
-        )}
-      </div>
-      {model === undefined ? (
-        <p className="settings-view__note">
-          Choose a default model above to edit its load configuration.
-        </p>
-      ) : (
-        <ModelLoadConfigurationEditor key={model.modelKey} model={model} />
-      )}
-      <LoadConfigurationSaveFeedback />
-    </section>
-  )
+  switch (provider) {
+    case "lmStudio":
+      return <LmStudioLoadSettings model={model} />
+    case "ollama":
+    case "ollamaCloud":
+      return <ProviderLoadSettings model={model} provider={provider} />
+    case "groq":
+      return (
+        <LoadSettingsSection
+          caption="Set by Groq for this model. The composer’s context meter and the Agents pane measure against it."
+          title="Context"
+        >
+          <div className="settings-view__models-fixed">
+            <span>Context length</span>
+            <span className="settings-view__models-mono">
+              {formatContextTokens(model.maxContextLength)}
+            </span>
+          </div>
+        </LoadSettingsSection>
+      )
+  }
 }

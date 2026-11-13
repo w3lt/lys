@@ -22,7 +22,7 @@ import { waitForRenderedWork } from "../../support/rendering"
 /** Rail entries as their tabs are named, in order. */
 const RAIL_TABS = [
   "Runtime01",
-  "Model02",
+  "Models02",
   "Generation03",
   "Agents04",
   "Tools05",
@@ -96,11 +96,11 @@ describe("SettingsView", () => {
     const user = userEvent.setup()
     render(<SettingsView onDone={vi.fn()} />)
 
-    await user.click(getRailTab("Model", "02"))
+    await user.click(getRailTab("Models", "02"))
 
     expect(useLysStore.getState().settingsPane).toBe("model")
     expect(
-      screen.getByRole("heading", { level: 1, name: "Model" })
+      screen.getByRole("heading", { level: 1, name: "Models" })
     ).toBeInTheDocument()
     await waitForRenderedWork()
   })

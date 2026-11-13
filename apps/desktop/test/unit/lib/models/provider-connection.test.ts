@@ -1,12 +1,20 @@
+import { llmProviderSettingsSchema } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   calculateProviderAvailability,
   calculateProviderStatusTone,
+  formatModelReferenceLabel,
+  formatProviderConnectionsSummary,
   formatProviderStatusLabel,
   formatProviderStatusMeta,
-  formatProviderUnreachableMessage
+  formatProviderUnreachableMessage,
+  listEnabledProviders,
+  listRefreshableProviders
 } from "@/lib/models/provider-connection"
-import { buildModelAvailabilitySource } from "../../support/providerModelFixtures"
+import {
+  buildModelAvailabilitySource,
+  buildProviderModelStates
+} from "../../support/providerModelFixtures"
 import {
   GROQ_TARGET,
   LM_STUDIO_TARGET
@@ -152,5 +160,58 @@ describe("calculateProviderStatusTone", () => {
     ["unreachable", "danger"]
   ] as const)("shows %s in the %s tone", (status, tone) => {
     expect(calculateProviderStatusTone(status)).toBe(tone)
+  })
+})
+
+describe("listEnabledProviders", () => {
+  it("lists the turned-on providers in provider order, whatever the saved order", () => {
+    expect(listEnabledProviders(["groq", "lmStudio", "ollamaCloud"])).toEqual([
+      "lmStudio",
+      "ollamaCloud",
+      "groq"
+    ])
+    expect(listEnabledProviders([])).toEqual([])
+  })
+})
+
+describe("listRefreshableProviders", () => {
+  it("lists every turned-on provider that is not connecting, in provider order", () => {
+    const providers = llmProviderSettingsSchema.parse({
+      enabled: ["groq", "ollama", "lmStudio"],
+      lmStudio: { address: null },
+      ollama: { address: null }
+    })
+    const providerModels = buildProviderModelStates({
+      lmStudio: { status: "unreachable" },
+      ollama: { status: "connecting" },
+      groq: { status: "off" },
+      ollamaCloud: { status: "connected" }
+    })
+
+    expect(listRefreshableProviders(providers, providerModels)).toEqual([
+      "lmStudio",
+      "groq"
+    ])
+  })
+})
+
+describe("formatProviderConnectionsSummary", () => {
+  it.each([
+    [0, "No provider is on · turn one on in Providers"],
+    [1, "1 provider on"],
+    [3, "3 providers on"]
+  ] as const)("summarizes %i turned-on providers as %s", (count, summary) => {
+    expect(formatProviderConnectionsSummary(count)).toBe(summary)
+  })
+})
+
+describe("formatModelReferenceLabel", () => {
+  it("names the model with its provider, so one key on two providers reads as two models", () => {
+    expect(
+      formatModelReferenceLabel({ provider: "lmStudio", modelKey: "qwen3-8b" })
+    ).toBe("qwen3-8b · LM Studio")
+    expect(
+      formatModelReferenceLabel({ provider: "ollama", modelKey: "qwen3-8b" })
+    ).toBe("qwen3-8b · Ollama")
   })
 })

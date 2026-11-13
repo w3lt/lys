@@ -9,20 +9,13 @@ import {
   buildModelLoadConfiguration,
   calculateContextLength,
   calculateContextLengthStopIndex,
-  findLoadConfigurationTarget,
-  formatModelLoadSetting,
-  formatModelReloadNote,
   formatTokenCount,
   isLoadConfigurationSettingsEqual,
   isModelLoadConfigurationEqual,
   isUsableContextLimit,
-  listContextLengthStops,
-  listModelLoadDifferences
+  listContextLengthStops
 } from "@/lib/models/model-load-configuration"
-import type {
-  CompleteModelLoadConfiguration,
-  LoadConfigurationSettings
-} from "@/lib/store/settings"
+import type { LoadConfigurationSettings } from "@/lib/store/settings"
 import { FIRST_RUN_LOAD_CONFIGURATION } from "../../support/settingsFixtures"
 
 /** Maximum context lengths that cannot bound a setting. */
@@ -486,124 +479,5 @@ describe("formatTokenCount", () => {
     [131_072, "128k"]
   ])("abbreviates %d tokens as %s", (tokens, text) => {
     expect(formatTokenCount(tokens)).toBe(text)
-  })
-})
-
-/** Configuration of a model loaded with the committed default. */
-const LOADED: CompleteModelLoadConfiguration = FIRST_RUN_LOAD_CONFIGURATION
-
-/** Configuration that differs from {@link LOADED} in every setting. */
-const STORED: CompleteModelLoadConfiguration = Object.freeze({
-  contextLength: 16_384,
-  evalBatchSize: 1024,
-  flashAttention: false,
-  offloadKVCacheToGpu: false,
-  numExperts: 4
-})
-
-describe("formatModelLoadSetting", () => {
-  it.each([
-    ["contextLength", "8k", LOADED],
-    ["evalBatchSize", "512", LOADED],
-    ["flashAttention", "on", LOADED],
-    ["flashAttention", "off", STORED],
-    ["offloadKVCacheToGpu", "on", LOADED],
-    ["offloadKVCacheToGpu", "off", STORED],
-    ["numExperts", "auto", LOADED],
-    ["numExperts", "4", STORED]
-  ] as const)("shows %s as %s", (setting, text, configuration) => {
-    expect(formatModelLoadSetting(setting, configuration)).toBe(text)
-  })
-})
-
-describe("listModelLoadDifferences", () => {
-  it("lists nothing for configurations that hold the same settings", () => {
-    expect(listModelLoadDifferences(LOADED, { ...LOADED })).toEqual([])
-  })
-
-  it("describes each differing setting in the Model pane's order", () => {
-    expect(listModelLoadDifferences(LOADED, STORED)).toEqual([
-      {
-        setting: "contextLength",
-        loadedValue: "8k",
-        loadedPhrase: "ctx 8k",
-        storedPhrase: "ctx 16k"
-      },
-      {
-        setting: "evalBatchSize",
-        loadedValue: "512",
-        loadedPhrase: "batch 512",
-        storedPhrase: "batch 1024"
-      },
-      {
-        setting: "flashAttention",
-        loadedValue: "on",
-        loadedPhrase: "flash attn on",
-        storedPhrase: "flash attn off"
-      },
-      {
-        setting: "offloadKVCacheToGpu",
-        loadedValue: "on",
-        loadedPhrase: "kv cache on gpu",
-        storedPhrase: "kv cache in ram"
-      },
-      {
-        setting: "numExperts",
-        loadedValue: "auto",
-        loadedPhrase: "experts auto",
-        storedPhrase: "experts 4"
-      }
-    ])
-  })
-
-  it("lists only the settings that differ", () => {
-    const stored = { ...LOADED, evalBatchSize: 256 }
-
-    expect(
-      listModelLoadDifferences(LOADED, stored).map(({ setting }) => setting)
-    ).toEqual(["evalBatchSize"])
-  })
-})
-
-describe("formatModelReloadNote", () => {
-  it("says what the model was loaded with and what a reload would apply", () => {
-    expect(
-      formatModelReloadNote([
-        {
-          setting: "contextLength",
-          loadedValue: "8k",
-          loadedPhrase: "ctx 8k",
-          storedPhrase: "ctx 16k"
-        },
-        {
-          setting: "flashAttention",
-          loadedValue: "on",
-          loadedPhrase: "flash attn on",
-          storedPhrase: "flash attn off"
-        }
-      ])
-    ).toBe(
-      "loaded with ctx 8k, flash attn on · reload to apply ctx 16k, flash attn off"
-    )
-  })
-})
-
-describe("findLoadConfigurationTarget", () => {
-  /** Inventory in which the second model is loaded. */
-  const models = [
-    { modelKey: "qwen3-8b", maxContextLength: 8192, loaded: false },
-    { modelKey: "gemma-3", maxContextLength: 32_768, loaded: true }
-  ]
-
-  it("finds the selected default model's own inventory entry", () => {
-    expect(findLoadConfigurationTarget(models, "qwen3-8b")).toBe(models[0])
-  })
-
-  it("finds nothing without a selected default model, even while a model is loaded", () => {
-    expect(findLoadConfigurationTarget(models, null)).toBeUndefined()
-  })
-
-  it("finds nothing when the inventory does not list the default model", () => {
-    expect(findLoadConfigurationTarget(models, "phi-4")).toBeUndefined()
   })
 })

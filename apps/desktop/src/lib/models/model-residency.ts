@@ -145,25 +145,6 @@ export function formatModelResidencyMeta(
 }
 
 /**
- * Formats the tag shown at the end of one model row.
- *
- * @param request - Request in flight for the row's provider.
- * @param model - Weights the row represents.
- * @returns `loading` or `unloading` while the row's model is in transition,
- * `loaded` while it is loaded, otherwise its disk size, or `not loaded` when
- * the provider reports no size.
- */
-export function formatModelRowTag(
-  request: ModelRequestState,
-  model: LocalModelDescriptor
-): string {
-  const transition = findRowTransition(request, model)
-  if (transition !== null) return transition
-  if (model.loaded) return "loaded"
-  return formatOnDiskTag(model)
-}
-
-/**
  * Formats the tag shown at the end of one row in the composer's weights menu.
  *
  * @param request - Request in flight for the row's provider.

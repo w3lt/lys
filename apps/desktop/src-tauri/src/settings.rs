@@ -65,7 +65,7 @@ const TEMPORARY_FILE_NAME_ENDING: &str = ".tmp";
 /// tools group's default puts no tool on Just run and saves no tool switch,
 /// the location group's default saves no location, the MCP group's default
 /// lists no server and switches every server Lys ships off, the providers
-/// group's default is LM Studio at its default address, and the email
+/// group's default turns LM Studio on at its default address, and the email
 /// group's default saves no account. A group the value does not hold, such
 /// as the `model` group of files written before the local context estimate
 /// was removed, is ignored when loading and left out of the next save.
@@ -84,8 +84,8 @@ pub struct LysSettings {
     location: LocationSettings,
     /// MCP servers Lys connects to, in the `mcp` object.
     mcp: McpSettings,
-    /// Provider every request goes to and the servers' addresses, in the
-    /// `providers` object.
+    /// Providers that are on and the servers' addresses, in the `providers`
+    /// object.
     providers: ProvidersSettings,
     /// Email account the person saved, in the `email` object.
     email: EmailSettings,
@@ -471,8 +471,8 @@ mod tests {
     /// Stored settings whose load configuration has a hand-written default
     /// and one model's settings, with saved Tavily, Ollama, and Groq API keys,
     /// a location, two MCP servers of which one is switched off, the built-in
-    /// email server switched on, Groq as the active provider, and an email
-    /// account with its password.
+    /// email server switched on, LM Studio and Groq on, and an email account
+    /// with its password.
     fn get_complete_settings() -> Value {
         let mut settings = get_settings_without_load_configuration();
         settings["loadConfiguration"] = json!({
@@ -509,7 +509,7 @@ mod tests {
         settings["secrets"]["groqApiKey"] = json!("gsk_synthetic_0123456789");
         settings["secrets"]["emailPassword"] = json!("email-synthetic-password");
         settings["providers"] = json!({
-            "active": "groq",
+            "enabled": ["lmStudio", "groq"],
             "lmStudio": { "address": "studio-box.local:1234" },
             "ollama": { "address": null }
         });
@@ -535,11 +535,11 @@ mod tests {
         })
     }
 
-    /// Providers group of a settings file that chose no provider: LM Studio
-    /// at its default address.
+    /// Providers group of a settings file without one: LM Studio on at its
+    /// default address.
     fn get_default_providers() -> Value {
         json!({
-            "active": "lmStudio",
+            "enabled": ["lmStudio"],
             "lmStudio": { "address": null },
             "ollama": { "address": null }
         })
@@ -745,6 +745,68 @@ mod tests {
         );
     }
 
+    /// Checks that a providers group saved before several providers could be
+    /// on loads with its `active` provider on, or LM Studio when it names
+    /// none, leaves the file's text as it was, and is saved as an `enabled`
+    /// list without `active`.
+    #[test]
+    fn turns_on_the_active_provider_of_a_file_saved_before_several_could_be_on() {
+        let cases = [
+            (json!({ "active": "groq" }), json!(["groq"])),
+            (json!({}), json!(["lmStudio"])),
+        ];
+
+        for (stored_choice, enabled) in cases {
+            let directory = TestDirectory::create("settings-active-provider");
+            let mut stored = get_complete_settings();
+            stored["providers"] = stored_choice;
+            stored["providers"]["lmStudio"] = json!({ "address": "studio-box.local:1234" });
+            let stored_text = stored.to_string();
+            let path = directory.create_file("settings.json", &stored_text);
+            let saved_path = directory.path().join("saved.json");
+
+            let settings = load_settings_file(&path).expect("settings for an older file");
+            save_settings_file(&settings, &saved_path).expect("save the settings");
+
+            let mut expected = get_complete_settings();
+            expected["providers"]["enabled"] = enabled;
+            assert_eq!(get_settings_json(&settings), expected);
+            assert_eq!(read_settings_json(&saved_path), expected);
+            assert_eq!(
+                fs::read_to_string(&path).expect("read the settings file"),
+                stored_text
+            );
+        }
+    }
+
+    /// Checks that the `enabled` list of a file wins over its `active`
+    /// provider, an empty list included, and that a save writes the list in
+    /// provider order without `active`.
+    #[test]
+    fn saves_the_enabled_providers_in_provider_order_without_the_active_provider() {
+        let cases = [
+            (json!(["groq", "lmStudio"]), json!(["lmStudio", "groq"])),
+            (json!([]), json!([])),
+        ];
+
+        for (stored_enabled, enabled) in cases {
+            let directory = TestDirectory::create("settings-enabled-providers");
+            let mut stored = get_complete_settings();
+            stored["providers"]["enabled"] = stored_enabled;
+            stored["providers"]["active"] = json!("ollama");
+            let path = directory.create_file("settings.json", stored.to_string());
+            let saved_path = directory.path().join("saved.json");
+
+            let settings = load_settings_file(&path).expect("settings with enabled providers");
+            save_settings_file(&settings, &saved_path).expect("save the settings");
+
+            let mut expected = get_complete_settings();
+            expected["providers"]["enabled"] = enabled;
+            assert_eq!(get_settings_json(&settings), expected);
+            assert_eq!(read_settings_json(&saved_path), expected);
+        }
+    }
+
     #[test]
     fn fails_on_an_unusable_file_without_rewriting_it() {
         let mut invalid_group = get_complete_settings();
@@ -874,6 +936,33 @@ mod tests {
     }
 
     /// Checks that loading fails with a parse failure, leaving the file's
+    /// text as it was, when the enabled providers name a provider twice or
+    /// an unknown one, or are not a list, when the `active` provider is
+    /// unknown, also beside an `enabled` list, or when the providers group
+    /// has an unknown field.
+    #[test]
+    fn fails_on_unusable_providers_without_rewriting_the_file() {
+        let unusable_groups = [
+            json!({ "enabled": ["groq", "lmStudio", "groq"] }),
+            json!({ "enabled": ["lmStudio", "openai"] }),
+            json!({ "enabled": null }),
+            json!({ "enabled": "groq" }),
+            json!({ "enabled": ["groq"], "active": "openai" }),
+            json!({ "active": "openai" }),
+            json!({ "enabled": ["groq"], "default": "groq" }),
+        ];
+
+        for providers in unusable_groups {
+            let mut settings = get_complete_settings();
+            settings["providers"] = providers;
+
+            let failure = assert_loading_fails_without_rewriting(&settings.to_string());
+
+            assert!(failure.starts_with("Failed to parse "), "{failure}");
+        }
+    }
+
+    /// Checks that loading fails with a parse failure, leaving the file's
     /// text as it was, when an array stands in place of a group or of an
     /// object inside one, the built-in MCP switches and the email objects
     /// among them, or when the whole document is an array or null.
@@ -898,7 +987,7 @@ mod tests {
             ("/mcp", json!([[]])),
             (
                 "/providers",
-                json!(["groq", { "address": null }, { "address": null }]),
+                json!([["lmStudio", "groq"], "groq", { "address": null }, { "address": null }]),
             ),
             ("/providers/lmStudio", json!(["10.0.0.5:1234"])),
             ("/providers/ollama", json!([null])),
@@ -939,13 +1028,16 @@ mod tests {
         // Pretty-printed, as saves write the file, so each value has a line
         // of its own. A value of the wrong type stops reading on its own
         // line. A rule a string breaks is found once the string is read, and
-        // the JSON reader then names the end of the string's object.
+        // the JSON reader then names the end of the string's object; a list
+        // that names a provider twice is found once the list is read, and the
+        // reader names the end of the list's object.
         let unusable_values = [
             (json!({ "generation": { "temperature": "hot" } }), 3),
             (
                 json!({ "providers": { "lmStudio": { "address": "http://127.0.0.1:1234" } } }),
                 5,
             ),
+            (json!({ "providers": { "enabled": ["groq", "groq"] } }), 7),
             (
                 json!({ "loadConfiguration": { "models": { "qwen/qwen3-8b": { "contextLength": 0 } } } }),
                 5,

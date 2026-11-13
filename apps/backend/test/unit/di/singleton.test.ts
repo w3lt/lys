@@ -574,6 +574,8 @@ describe("createSingletonServices", () => {
       createTurnDelegation: expect.any(Function),
       handleReplyEnded: expect.any(Function)
     })
+    expect(services.stopReply).toEqual(expect.any(Function))
+    expect(services.stopConversationJobs).toEqual(expect.any(Function))
   })
 
   it("gives a member work through the bundle's delegation hooks: the job's turn is stored and answered by the member, and its result waits while the lead's reply streams", async () => {

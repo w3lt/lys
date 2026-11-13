@@ -39,6 +39,10 @@ import {
 import ConversationWakeSettings from "../../../src/modules/delegation/conversationWakeSettings"
 import { createDelegationRuntime } from "../../../src/modules/delegation/delegationRuntime"
 import { handleDelegationEvent } from "../../../src/modules/delegation/delegationEventLog"
+import {
+  stopConversationJobs,
+  stopReplyForPerson
+} from "../../../src/modules/delegation/jobStops"
 import ReplyStopRequests from "../../../src/modules/delegation/replyStopRequests"
 import LlmRuntimeService from "../../../src/modules/llm/llmRuntimeService"
 import LlmService from "../../../src/modules/llm/llmService"
@@ -308,9 +312,9 @@ export type AgentConversationTestServices = Readonly<{
  * a case applies settings, and it is closed when the test finishes. The
  * decorated turn start is the real one, as {@link registerTestTurnStart}
  * binds it to the decorated services and to the decorated reply generation
- * registry, which is the returned one. The decorated delegation hooks are
- * the real ones, as {@link registerTestTurnDelegations} builds them over
- * the decorated services and the same database. When the
+ * registry, which is the returned one. The decorated delegation hooks and
+ * person's stops are the real ones, as {@link registerTestTurnDelegations}
+ * builds them over the decorated services and the same database. When the
  * test finishes, the activity hub of the delegation hooks is closed and the
  * generation registry is disposed first, so every generation it holds has
  * stored its final state before the in-memory conversation database is
@@ -388,15 +392,17 @@ function registerTestTurnStart(
 }
 
 /**
- * Registers the delegation hooks with the chat route test app, over a
- * delegation runtime built as the backend's composition root builds its own.
+ * Registers the delegation hooks and the person's stops with the chat route
+ * test app, over a delegation runtime built as the backend's composition
+ * root builds its own.
  *
  * @param app - Application with the agent services, the conversation
  * services, the turn start, and the reply generation registry registered;
  * the runtime borrows them for the test.
  * @param database - Database the job records read and write; the caller
  * closes it.
- * @throws If the application already has delegation hooks.
+ * @throws If the application already has delegation hooks or either of the
+ * person's stops.
  * @remarks The runtime's job records are the Sqlite ones over the database,
  * and it stores job turns through `app.conversationTurns`, whose turn
  * creation throws until a case configures it. Its hub is a real activity
@@ -441,6 +447,10 @@ function registerTestTurnDelegations(
     logger: app.log
   })
   app.decorate("turnDelegations", runtime.hooks)
+  app.decorate("stopReply", (target) => stopReplyForPerson(runtime, target))
+  app.decorate("stopConversationJobs", (conversationId) =>
+    stopConversationJobs(runtime, conversationId)
+  )
 }
 
 /**

@@ -21,6 +21,7 @@ import ChatService, {
 import LlmReplyContextMeter from "../modules/chat/llmReplyContextMeter"
 import OpenAiReplyModel from "../modules/chat/openAiReplyModel"
 import ReplyGenerationRegistry from "../modules/chat/replyGenerationRegistry"
+import type { StopReply } from "../modules/chat/replyStop"
 import {
   startTurn,
   type StartTurn,
@@ -38,6 +39,10 @@ import StoredConversationTurns from "../modules/conversation/turns"
 import ConversationWakeSettings from "../modules/delegation/conversationWakeSettings"
 import type { DelegationEvent } from "../modules/delegation/delegationEvent"
 import { createDelegationRuntime } from "../modules/delegation/delegationRuntime"
+import {
+  stopConversationJobs,
+  stopReplyForPerson
+} from "../modules/delegation/jobStops"
 import ReplyStopRequests from "../modules/delegation/replyStopRequests"
 import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
@@ -257,6 +262,18 @@ export type SingletonServices = Readonly<{
    * start, and the activity hub; they own nothing to release.
    */
   turnDelegations: TurnDelegationHooks
+  /**
+   * Stops a reply for the person, with every working job below its
+   * conversation, as delegation's runtime stops replies; it owns nothing to
+   * release.
+   */
+  stopReply: StopReply
+  /**
+   * Stops every working job below a conversation for the person, as
+   * delegation's runtime stops replies, and resolves once each stopped reply
+   * reached its stored final state; it owns nothing to release.
+   */
+  stopConversationJobs: (conversationId: string) => Promise<void>
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
@@ -270,10 +287,16 @@ type TurnStartServices = Pick<
   "replyGenerations" | "startTurn"
 >
 
-/** What delegation adds to a bundle: its wake settings and its hooks. */
+/**
+ * What delegation adds to a bundle: its wake settings, its hooks, and the
+ * person's stops.
+ */
 type DelegationServices = Pick<
   SingletonServices,
-  "conversationWakeSettings" | "turnDelegations"
+  | "conversationWakeSettings"
+  | "turnDelegations"
+  | "stopReply"
+  | "stopConversationJobs"
 >
 
 /**
@@ -388,19 +411,19 @@ type DatabaseServices = Pick<
  * creation. The reply generation registry and the turn start are created
  * next, over the services before them, then the activity hub, and last
  * delegation's wake settings, stop requests, and job records, over the
- * database, with the hooks of its runtime over the services before them;
- * they read nothing at creation and own nothing to release. Only the
- * MCP server registry, the email account checker, the reply generation
- * registry, and the activity hub own resources: the connections and the
- * check process the first two open later, the generations the turn start
- * starts later, and the activity streams clients open later. The bundle's
- * cleanup closes delegation's wake settings first, so no wake-up turn
- * starts any more, then the activity hub, which ends every activity stream,
- * then disposes the reply generation registry, which ends every generation,
- * then closes the email account checker, then the MCP server registry.
- * Creation stops at the first failure. The database is not part of the
- * returned bundle: the bundle's cleanup closes it last, after the chat
- * service and the LLM runtime service.
+ * database, with the hooks of its runtime and the person's stops over the
+ * services before them; they read nothing at creation and own nothing to
+ * release. Only the MCP server registry, the email account checker, the
+ * reply generation registry, and the activity hub own resources: the
+ * connections and the check process the first two open later, the
+ * generations the turn start starts later, and the activity streams clients
+ * open later. The bundle's cleanup closes delegation's wake settings first,
+ * so no wake-up turn starts any more, then the activity hub, which ends
+ * every activity stream, then disposes the reply generation registry, which
+ * ends every generation, then closes the email account checker, then the
+ * MCP server registry. Creation stops at the first failure. The database is
+ * not part of the returned bundle: the bundle's cleanup closes it last,
+ * after the chat service and the LLM runtime service.
  */
 export async function createSingletonServices(
   config: BackendConfig,
@@ -505,8 +528,8 @@ function createSingletonServiceBundle(
 }
 
 /**
- * Creates what delegation remembers, its job records, and the hooks of its
- * runtime.
+ * Creates what delegation remembers, its job records, the hooks of its
+ * runtime, and the person's stops.
  *
  * @param context - The job message limit, delegation's log reporters, and
  * the shared database the job records read and write.
@@ -514,8 +537,9 @@ function createSingletonServiceBundle(
  * the agent service and the agent runtime service, which find and load
  * agents, the history reader and turn persistence, the turn start and its
  * registry, and the activity hub.
- * @returns The wake settings and the runtime's hooks; they read and contact
- * nothing at creation and own nothing to release.
+ * @returns The wake settings, the runtime's hooks, and the person's stop of
+ * a reply and of a conversation's jobs, bound to the runtime; they read and
+ * contact nothing at creation and own nothing to release.
  */
 function createDelegationServices(
   context: Pick<SingletonBundleContext, "config" | "logReporters" | "database">,
@@ -557,7 +581,13 @@ function createDelegationServices(
     reportEvent: logReporters.reportDelegationEvent,
     logger: logReporters.backendTurnLogger
   })
-  return { conversationWakeSettings, turnDelegations: runtime.hooks }
+  return {
+    conversationWakeSettings,
+    turnDelegations: runtime.hooks,
+    stopReply: (target) => stopReplyForPerson(runtime, target),
+    stopConversationJobs: (conversationId) =>
+      stopConversationJobs(runtime, conversationId)
+  }
 }
 
 /**

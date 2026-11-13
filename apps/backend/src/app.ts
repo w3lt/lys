@@ -2,6 +2,7 @@ import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify"
 import registerActivityRoutes from "./modules/activity/routes"
 import updateFastifyWithAgentRoutes from "./modules/agent/routes"
 import updateFastifyWithConversationRoutes from "./modules/conversation/routes"
+import registerDelegationRoutes from "./modules/delegation/routes"
 import registerHealthRoutes from "./modules/health/routes"
 import updateFastifyWithLlmRoutes from "./modules/llm/routes"
 import registerMcpRoutes from "./modules/mcp/routes"
@@ -60,6 +61,7 @@ export async function buildApp(
   await app.register(registerHealthRoutes)
   await app.register(updateFastifyWithLlmRoutes)
   await app.register(registerChatRoutes)
+  await app.register(registerDelegationRoutes)
   await app.register(registerActivityRoutes)
   await app.register(updateFastifyWithConversationRoutes)
   await app.register(updateFastifyWithAgentRoutes)

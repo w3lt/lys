@@ -183,6 +183,12 @@ export type DelegationTestServices = Readonly<{
   conversation: ConversationTestServices
   /** Hub the runtime tells which replies it started and how jobs changed. */
   hub: RecordingActivityHub
+  /**
+   * Registry the scripted turn start registers each generation with, where
+   * the runtime finds running generations; a case may register generations
+   * of its own. Disposed when the test finishes.
+   */
+  generations: ReplyGenerationRegistry
   /** Event reporter of the runtime; records each event. */
   reportEvent: Mock<(event: DelegationEvent) => void>
   /**
@@ -329,7 +335,8 @@ const UNUSED_REPLY_MODEL = Object.freeze({
  * member. Its wake settings and stop requests are real; its hub records and
  * follows nothing; its events are recorded; it logs to a destination no
  * case reads. Its turn start is scripted, as {@link startScriptedTurn}
- * describes, over a real reply generation registry.
+ * describes, over a real reply generation registry, which the services
+ * return.
  * @remarks When the test finishes, the registry is disposed first, which
  * ends every reply still running as interrupted; then the case fails if a
  * reply task failed; then the database is closed.
@@ -355,6 +362,7 @@ export function openDelegationTestServices(
     runtime,
     conversation,
     hub,
+    generations: start.generations,
     reportEvent,
     listStartedTurns: () =>
       Object.freeze([...start.replies.values()].map(({ started }) => started)),

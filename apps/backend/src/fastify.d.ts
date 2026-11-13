@@ -6,6 +6,7 @@ import type AgentService from "./modules/agent/agentService"
 import type AttachmentFileStore from "./modules/attachment/attachmentFileStore"
 import type ChatService from "./modules/chat/chatService"
 import type ReplyGenerationRegistry from "./modules/chat/replyGenerationRegistry"
+import type { StopReply } from "./modules/chat/replyStop"
 import type { StartTurn, TurnDelegationHooks } from "./modules/chat/turnStart"
 import type StoredConversationHistoryEditor from "./modules/conversation/historyEditor"
 import type StoredConversationHistoryReader from "./modules/conversation/historyReader"
@@ -97,5 +98,16 @@ declare module "fastify" {
      * delegation, as the application's delegation runtime handles it.
      */
     turnDelegations: TurnDelegationHooks
+    /**
+     * Stops a reply for the person, with every working job below its
+     * conversation, as the application's delegation runtime stops replies.
+     */
+    stopReply: StopReply
+    /**
+     * Stops every working job below a conversation for the person, as the
+     * application's delegation runtime stops replies, and resolves once each
+     * stopped reply reached its stored final state.
+     */
+    stopConversationJobs: (conversationId: string) => Promise<void>
   }
 }

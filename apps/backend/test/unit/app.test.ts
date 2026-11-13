@@ -1,3 +1,4 @@
+import { stopChatReplyApi, stopConversationJobsApi } from "@lys/protocol"
 import type { McpServerSettings } from "@lys/share"
 import {
   existsSync,
@@ -370,6 +371,71 @@ describe("buildApp", () => {
     ).toMatchObject([
       { role: "user", content: "Find what moths eat" },
       { id: job.replyId, status: "completed" }
+    ])
+  })
+
+  it("decorates the person's stops, which the reply-stop and jobs-stop routes use, and logs each stop with its logger", async () => {
+    const log = new CapturedLogDestination()
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(log)
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    const lead = createPersonTurn(app.conversationTurns)
+    const conversationId = lead.turn.conversation.id
+    const assistantMessageId = lead.turn.assistantMessage.id
+    const replyTask = new ControlledReplyTask()
+    app.replyGenerations.startReplyGeneration(
+      { conversationId, assistantMessageId },
+      {
+        startReplyTask: (context) => replyTask.start(context),
+        startTitleTask: undefined,
+        reportTaskFailure: vi.fn()
+      }
+    )
+    onTestFinished(() => {
+      replyTask.resolve()
+    })
+
+    const replyStop = app.inject({
+      method: stopChatReplyApi.method,
+      url: stopChatReplyApi.path
+        .replace(":conversationId", conversationId)
+        .replace(":assistantMessageId", assistantMessageId)
+    })
+    await vi.waitFor(() => {
+      expect(replyTask.context.abortSignal.aborted).toBe(true)
+    })
+    replyTask.resolve()
+    const replyStopResponse = await replyStop
+    const jobsStopResponse = await app.inject({
+      method: stopConversationJobsApi.method,
+      url: stopConversationJobsApi.path.replace(
+        ":conversationId",
+        conversationId
+      )
+    })
+
+    expect(replyStopResponse.statusCode).toBe(204)
+    expect(jobsStopResponse.statusCode).toBe(204)
+    expect(
+      log.records.filter(
+        (record) => record["msg"] === "Jobs were asked to stop"
+      )
+    ).toEqual([
+      expect.objectContaining({
+        level: "info",
+        conversationId,
+        requester: "person",
+        stoppedReplyCount: 1
+      }),
+      expect.objectContaining({
+        level: "info",
+        conversationId,
+        requester: "person",
+        stoppedReplyCount: 0
+      })
     ])
   })
 

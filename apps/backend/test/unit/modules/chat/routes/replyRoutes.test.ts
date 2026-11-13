@@ -14,15 +14,15 @@ import {
   type ChatToolCall,
   type ChatToolResult
 } from "@lys/protocol"
-import type { Conversation } from "@lys/share"
+import type { Conversation, JobState } from "@lys/share"
 import type { FastifyInstance } from "fastify"
 import { describe, expect, it, onTestFinished, vi, type Mock } from "vitest"
 import { updateFastifyWithHttpTransport } from "../../../../../src/http"
 import type { ReplyTaskContext } from "../../../../../src/modules/chat/replyGeneration"
-import ReplyGenerationRegistry, {
-  type ReplyTarget
-} from "../../../../../src/modules/chat/replyGenerationRegistry"
+import type ReplyGenerationRegistry from "../../../../../src/modules/chat/replyGenerationRegistry"
+import type { ReplyTarget } from "../../../../../src/modules/chat/replyGenerationRegistry"
 import updateFastifyWithChatReplyRoutes from "../../../../../src/modules/chat/routes/replyRoutes"
+import { stopReplyForPerson } from "../../../../../src/modules/delegation/jobStops"
 import { parseSseEvents } from "../../../support/chatSseRoute"
 import ControlledReplyTask from "../../../support/controlledReplyTask"
 import {
@@ -32,7 +32,12 @@ import {
   createUserMessage,
   FIXTURE_TIMESTAMP
 } from "../../../support/conversationFixtures"
-import { openConversationTestServices } from "../../../support/conversationDatabase"
+import {
+  MOTHS_REQUEST,
+  openDelegationTestServices,
+  sendJobMessage,
+  startPersonTurn
+} from "../../../support/delegationTestServices"
 import { createTestFastify } from "../../../support/fastifyTestApp"
 import { waitForMicrotasks } from "../../../support/microtasks"
 
@@ -115,32 +120,42 @@ function handleUnexpectedHistoryCall(operationName: string): never {
 
 /**
  * Creates an application with the HTTP transport and the reply routes
- * registered over a stubbed history reader and a real registry.
+ * registered over a stubbed history reader, a real registry, and the
+ * person's stop of a reply over a delegation runtime.
  *
- * @returns The application, the destination of its log, the registry, and a
- * spy for the history read the routes perform.
+ * @returns The application, the destination of its log, the delegation
+ * test services, their registry, and a spy for the history read the routes
+ * perform.
  * @remarks The routes read the decorated history reader at registration, so
  * the returned spy controls every snapshot; it throws until the case
- * configures it and no database row is read. They find generations in the
- * decorated reply generation registry, which is the returned one. When the
- * test finishes, the registry is disposed first, then the in-memory
- * conversation database, then the application.
+ * configures it and no database row is read through it. They find
+ * generations in the decorated reply generation registry, which is the
+ * services' registry, and stop a reply as the services' delegation runtime
+ * stops one for the person, over the same database and registry, so a case
+ * can start a person's turn and its jobs with the services. When the test
+ * finishes, the registry is disposed first, then the in-memory conversation
+ * database, then the application.
  */
 async function createReplyRouteApp() {
   const testFastify = createTestFastify()
-  const { history } = openConversationTestServices()
-  const generations = new ReplyGenerationRegistry()
-  onTestFinished(async () => {
-    await generations[Symbol.asyncDispose]()
-  })
+  const services = openDelegationTestServices()
+  const { history } = services.conversation
   const getConversation = vi
     .spyOn(history, "getConversation")
     .mockImplementation(() => handleUnexpectedHistoryCall("getConversation"))
   await updateFastifyWithHttpTransport(testFastify.app)
   testFastify.app.decorate("conversationHistoryReader", history)
-  testFastify.app.decorate("replyGenerations", generations)
+  testFastify.app.decorate("replyGenerations", services.generations)
+  testFastify.app.decorate("stopReply", (target) =>
+    stopReplyForPerson(services.runtime, target)
+  )
   await updateFastifyWithChatReplyRoutes(testFastify.app)
-  return { ...testFastify, generations, getConversation }
+  return {
+    ...testFastify,
+    services,
+    generations: services.generations,
+    getConversation
+  }
 }
 
 /**
@@ -484,6 +499,24 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       expect(
         otherConversationGeneration.replyTask.context.abortSignal.aborted
       ).toBe(false)
+    })
+
+    it("fails with a server error once the registry is closed for shutdown", async () => {
+      const { app, generations, getConversation, log } =
+        await createReplyRouteApp()
+      getConversation.mockReturnValue(CONVERSATION)
+      await generations[Symbol.asyncDispose]()
+
+      const response = await app.inject({
+        method: "GET",
+        url: REPLY_EVENTS_URL
+      })
+
+      expect(response.statusCode).toBe(500)
+      expect(response.headers["content-type"]).toMatch(/^application\/json/)
+      expect(log.records).toContainEqual(
+        expect.objectContaining({ level: "error", err: expect.any(Object) })
+      )
     })
   })
 
@@ -1109,6 +1142,74 @@ describe("updateFastifyWithChatReplyRoutes", () => {
       expect(response.body).toBe("")
       expect(generation.titleTask.context.abortSignal.aborted).toBe(false)
     })
+
+    it("stops the working jobs below the reply's conversation and answers 204 once each reached its final state", async () => {
+      const { app, services } = await createReplyRouteApp()
+      const lead = startPersonTurn(services)
+      const conversationId = lead.turn.conversation.id
+      const leadReplyId = lead.turn.assistantMessage.id
+      const job = sendJobMessage(services, lead, MOTHS_REQUEST)
+      const jobStatesWhenSent: (JobState | undefined)[] = []
+      app.addHook("onSend", async () => {
+        jobStatesWhenSent.push(
+          services.runtime.jobs.findJobByNumber(conversationId, job.number)
+            ?.state
+        )
+      })
+
+      const response = await app.inject({
+        method: "POST",
+        url: createReplyUrl(stopChatReplyApi.path, conversationId, leadReplyId)
+      })
+
+      expect(response.statusCode).toBe(204)
+      expect(response.body).toBe("")
+      expect(jobStatesWhenSent).toEqual(["stopped"])
+      expect(
+        services.runtime.jobActivity.findEndedReply(leadReplyId)?.status
+      ).toBe("interrupted")
+    })
+
+    it("still answers 409 with the not-generating problem and stops no job when no generation runs for the reply", async () => {
+      const { app, services } = await createReplyRouteApp()
+      const lead = startPersonTurn(services)
+      const conversationId = lead.turn.conversation.id
+      const leadReplyId = lead.turn.assistantMessage.id
+      const job = sendJobMessage(services, lead, MOTHS_REQUEST)
+      await services.resolveReply(leadReplyId, "completed")
+
+      const response = await app.inject({
+        method: "POST",
+        url: createReplyUrl(stopChatReplyApi.path, conversationId, leadReplyId)
+      })
+      await waitForMicrotasks()
+
+      expect(response.statusCode).toBe(409)
+      expect(
+        chatReplyNotGeneratingProblemSchema.safeParse(response.json()).success
+      ).toBe(true)
+      expect(
+        services.runtime.jobs.findJobByNumber(conversationId, job.number)?.state
+      ).toBe("working")
+      expect(services.reportEvent).not.toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "stop-requested" })
+      )
+    })
+
+    it("responds with the not-generating problem once the registry is closed for shutdown", async () => {
+      const { app, generations } = await createReplyRouteApp()
+      await generations[Symbol.asyncDispose]()
+
+      const response = await app.inject({
+        method: "POST",
+        url: STOP_REPLY_URL
+      })
+
+      expect(response.statusCode).toBe(409)
+      expect(
+        chatReplyNotGeneratingProblemSchema.safeParse(response.json()).success
+      ).toBe(true)
+    })
   })
 
   describe.each([
@@ -1141,27 +1242,5 @@ describe("updateFastifyWithChatReplyRoutes", () => {
         expect(generation.replyTask.context.abortSignal.aborted).toBe(false)
       }
     )
-
-    it("fails with a server error once the registry is closed for shutdown", async () => {
-      const { app, generations, getConversation, log } =
-        await createReplyRouteApp()
-      getConversation.mockReturnValue(CONVERSATION)
-      await generations[Symbol.asyncDispose]()
-
-      const response = await app.inject({
-        method,
-        url: createReplyUrl(
-          path,
-          REPLY_TARGET.conversationId,
-          REPLY_TARGET.assistantMessageId
-        )
-      })
-
-      expect(response.statusCode).toBe(500)
-      expect(response.headers["content-type"]).toMatch(/^application\/json/)
-      expect(log.records).toContainEqual(
-        expect.objectContaining({ level: "error", err: expect.any(Object) })
-      )
-    })
   })
 })

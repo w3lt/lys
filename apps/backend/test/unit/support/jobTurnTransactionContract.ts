@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
-import type { JobReport } from "@lys/share"
+import type { ConversationSource, JobReport } from "@lys/share"
 import type {
   JobReportDelivery,
   JobTurnTransaction
@@ -34,6 +34,7 @@ export type JobTurnTransactionHarness = Pick<
   | "saveConversation"
   | "saveUserMessage"
   | "saveAssistantMessage"
+  | "saveSource"
   | "saveJobReport"
   | "closeRecords"
 >
@@ -46,6 +47,20 @@ export type JobTurnTransactionHarnessFactory = () => JobTurnTransactionHarness
 
 /** Identity no case stores. */
 const UNKNOWN_ID = createFixtureUuidV7(999)
+
+/** Source the source cases store before their write. */
+const STORED_SOURCE: ConversationSource = Object.freeze({
+  number: 1,
+  url: "https://example.com/moths",
+  title: "Moths"
+})
+
+/** Source a write stores after {@link STORED_SOURCE}. */
+const NEW_SOURCE: ConversationSource = Object.freeze({
+  number: 2,
+  url: "https://example.com/moths/diet",
+  title: "What moths eat"
+})
 
 /** What a case stores to have one report waiting for its delegator. */
 type WaitingReportFixture = Readonly<{
@@ -114,6 +129,26 @@ function listUndeliveredReports(
 ): readonly JobReport[] {
   return harness.turnRecordWriter.handleConversationTurnWriteRequest(
     (_transaction, jobs) => jobs.listUndeliveredJobReports(parentConversationId)
+  )
+}
+
+/**
+ * Stores one source of a conversation in a turn write of its own.
+ *
+ * @param harness - Store under test.
+ * @param conversationId - Conversation the source is stored for.
+ * @param source - The source to store.
+ * @throws What {@link JobTurnTransaction.createConversationSource} throws.
+ */
+function createSourceInTurnWrite(
+  harness: JobTurnTransactionHarness,
+  conversationId: string,
+  source: ConversationSource
+): void {
+  harness.turnRecordWriter.handleConversationTurnWriteRequest(
+    (_transaction, jobs) => {
+      jobs.createConversationSource(conversationId, source)
+    }
   )
 }
 
@@ -495,6 +530,61 @@ function registerReportDeliveryRefusalCases(
 }
 
 /**
+ * Registers the {@link JobTurnTransaction.createConversationSource} cases.
+ *
+ * @param createHarness - Creates the records over an empty store per case.
+ */
+function registerConversationSourceCases(
+  createHarness: JobTurnTransactionHarnessFactory
+): void {
+  it("stores a source of a conversation, which the conversation then reads back", () => {
+    const harness = createHarness()
+    const mainId = saveMainConversation(harness, 1)
+    harness.saveSource(mainId, STORED_SOURCE)
+    const before = harness.recordReader.findConversation(mainId)
+
+    createSourceInTurnWrite(harness, mainId, NEW_SOURCE)
+
+    expect(harness.recordReader.findConversation(mainId)).toEqual({
+      ...before,
+      sources: [STORED_SOURCE, NEW_SOURCE]
+    })
+  })
+
+  it.each([
+    [
+      "whose number the conversation stores for another URL",
+      { ...NEW_SOURCE, number: STORED_SOURCE.number }
+    ],
+    [
+      "whose URL the conversation stores under another number",
+      { ...NEW_SOURCE, url: STORED_SOURCE.url }
+    ]
+  ] as const)(
+    "refuses a source %s and keeps the conversation's sources as they are",
+    (_label, source) => {
+      const harness = createHarness()
+      const mainId = saveMainConversation(harness, 1)
+      harness.saveSource(mainId, STORED_SOURCE)
+
+      expect(() => createSourceInTurnWrite(harness, mainId, source)).toThrow()
+
+      expect(harness.recordReader.findConversation(mainId)?.sources).toEqual([
+        STORED_SOURCE
+      ])
+    }
+  )
+
+  it("refuses a source of a conversation that is not stored", () => {
+    const harness = createHarness()
+
+    expect(() =>
+      createSourceInTurnWrite(harness, UNKNOWN_ID, NEW_SOURCE)
+    ).toThrow()
+  })
+}
+
+/**
  * Registers the cases about how long the job records lent to a turn write
  * are valid, and about what a failed write leaves.
  *
@@ -513,6 +603,7 @@ function registerJobTurnLifetimeCases(
         harness.turnRecordWriter.handleConversationTurnWriteRequest(
           (_transaction, jobs) => {
             jobs.updateJobTitle(waiting.job.id, "Now look at butterflies")
+            jobs.createConversationSource(waiting.mainId, NEW_SOURCE)
             jobs.updateJobReportToDelivered(waiting.delivery)
             throw failure
           }
@@ -523,6 +614,9 @@ function registerJobTurnLifetimeCases(
     expect(harness.recordReader.findConversation(waiting.job.id)?.title).toBe(
       "Job 1"
     )
+    expect(
+      harness.recordReader.findConversation(waiting.mainId)?.sources
+    ).toEqual([])
     expect(listUndeliveredReports(harness, waiting.mainId)).toEqual([
       buildExpectedReport(waiting.row, 1)
     ])
@@ -539,6 +633,9 @@ function registerJobTurnLifetimeCases(
     expect(() => jobs.listUndeliveredJobReports(waiting.mainId)).toThrow(
       "Database operation has ended"
     )
+    expect(() =>
+      jobs.createConversationSource(waiting.mainId, NEW_SOURCE)
+    ).toThrow("Database operation has ended")
     expect(() => jobs.updateJobReportToDelivered(waiting.delivery)).toThrow(
       "Database operation has ended"
     )
@@ -546,6 +643,9 @@ function registerJobTurnLifetimeCases(
     expect(harness.recordReader.findConversation(waiting.job.id)?.title).toBe(
       "Job 1"
     )
+    expect(
+      harness.recordReader.findConversation(waiting.mainId)?.sources
+    ).toEqual([])
     expect(listUndeliveredReports(harness, waiting.mainId)).toEqual([
       buildExpectedReport(waiting.row, 1)
     ])
@@ -563,6 +663,9 @@ function registerJobTurnLifetimeCases(
     expect(() => jobs.listUndeliveredJobReports(waiting.mainId)).toThrow(
       "Database is closed"
     )
+    expect(() =>
+      jobs.createConversationSource(waiting.mainId, NEW_SOURCE)
+    ).toThrow("Database is closed")
     expect(() => jobs.updateJobReportToDelivered(waiting.delivery)).toThrow(
       "Database is closed"
     )
@@ -590,6 +693,10 @@ export function registerJobTurnTransactionContractSuite(
     describe("updateJobReportToDelivered", () => {
       registerReportDeliveryCases(createHarness)
       registerReportDeliveryRefusalCases(createHarness)
+    })
+
+    describe("createConversationSource", () => {
+      registerConversationSourceCases(createHarness)
     })
 
     registerJobTurnLifetimeCases(createHarness)

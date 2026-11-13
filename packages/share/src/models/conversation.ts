@@ -146,7 +146,8 @@ export const conversationUserMessageSchema = z.strictObject({
 })
 
 /**
- * Validates one web source a conversation's tool calls read.
+ * Validates one web source a conversation's tool calls read, or one a report
+ * delivered to it cites.
  *
  * @remarks A conversation stores each URL once, under one number that never
  * changes; a later read of the same URL reuses it. The title is the one
@@ -392,7 +393,10 @@ export const conversationSchema = z.strictObject({
   delegatorAgentCode: agentCodeSchema.nullable(),
   /** Messages remain in persisted conversation order. */
   messages: z.array(conversationMessageSchema),
-  /** Sources the conversation's tool calls read, in number order. */
+  /**
+   * Sources the conversation's tool calls read, and those the reports
+   * delivered to it cite, in number order.
+   */
   sources: z.array(conversationSourceSchema).readonly(),
   /**
    * Jobs started from this conversation, in number order; empty for a job,

@@ -3,6 +3,7 @@ import type {
   Conversation,
   ConversationAssistantMessage,
   ConversationMetadata,
+  ConversationSource,
   ConversationUserMessage,
   JobReport,
   ReplyPart,
@@ -498,8 +499,8 @@ export interface ConversationTurnTransaction {
 /**
  * Reads and writes what storing one turn changes about jobs, inside the
  * write transaction lent to a {@link ConversationTurnOperation}: the title
- * of a continued job, and the delivery of the reports that wait for the
- * turn's conversation.
+ * of a continued job, the delivery of the reports that wait for the turn's
+ * conversation, and the sources those reports add to it.
  *
  * @remarks Every change is part of the enclosing transaction: it commits only
  * when the operation returns and is rolled back when it throws. No call
@@ -550,4 +551,20 @@ export interface JobTurnTransaction {
    * precondition; the report then stays undelivered.
    */
   updateJobReportToDelivered(delivery: JobReportDelivery): void
+  /**
+   * Stores one source of a conversation, which then reads it among its
+   * sources.
+   *
+   * @param conversationId - UUIDv7 of a stored conversation.
+   * @param source - Valid source under a number none of the conversation's
+   * sources has, for a URL none of them has.
+   * @throws If the transaction has ended or the write fails.
+   * @throws The store's own error when the conversation is not stored, or one
+   * of its sources has the number or the URL, each of which breaks the
+   * precondition; its sources are then kept as they are.
+   */
+  createConversationSource(
+    conversationId: string,
+    source: ConversationSource
+  ): void
 }

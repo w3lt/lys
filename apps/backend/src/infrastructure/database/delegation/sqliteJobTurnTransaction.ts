@@ -1,4 +1,4 @@
-import type { JobReport } from "@lys/share"
+import type { ConversationSource, JobReport } from "@lys/share"
 import type {
   JobReportDelivery,
   JobTurnTransaction
@@ -84,5 +84,26 @@ export default class SqliteJobTurnTransaction implements JobTurnTransaction {
         reportId: delivery.reportId
       })
     if (changes !== 1) throw new Error(REPORT_NOT_WAITING_MESSAGE)
+  }
+
+  /**
+   * Implements {@link JobTurnTransaction.createConversationSource}; no
+   * trigger moves the conversation's activity time.
+   * @param conversationId - Interface-defined conversation.
+   * @param source - Interface-defined source.
+   * @throws The interface-defined failures; a conversation that is not stored
+   * fails the foreign-key constraint, a number one of its sources has the
+   * primary key, and a URL one of them has the unique constraint.
+   */
+  public createConversationSource(
+    conversationId: string,
+    source: ConversationSource
+  ): void {
+    this.#statements
+      .getStatement(
+        `INSERT INTO conversation_sources (conversation_id, number, url, title)
+    VALUES (?, ?, ?, ?)`
+      )
+      .run(conversationId, source.number, source.url, source.title)
   }
 }

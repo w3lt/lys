@@ -114,6 +114,8 @@ export type ConversationTurn = Readonly<{
   /**
    * Snapshot before this turn, including the code of its agent. A job this
    * turn starts or continues carries the title of the turn's job message.
+   * Its sources include the ones the reports this turn delivered added, so
+   * the turn numbers its new sources after them.
    */
   conversation: Conversation
   /**

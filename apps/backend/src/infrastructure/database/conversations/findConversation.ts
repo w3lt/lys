@@ -252,7 +252,7 @@ function parseConversationMessage(
 }
 
 /**
- * Reads the sources one conversation's tool calls read.
+ * Reads the stored sources of one conversation.
  * @param statements - Statement compilation lent to the caller's transaction.
  * @param conversationId - Stored UUIDv7 of the conversation.
  * @returns The validated sources in number order.

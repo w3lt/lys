@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
+import type { ConversationSource, JobReport } from "@lys/share"
+import SourceCatalog from "../../../../src/modules/agent/sourceCatalog"
 import { createConversationTurn } from "../../../../src/modules/conversation/createTurn"
 import type {
   ConversationTurn,
@@ -60,6 +62,19 @@ const RESULT_REPORT: JobReportFixture = Object.freeze({
   content: "They eat wool.",
   createdAt: createFixtureTimestamp(30)
 })
+
+/** A page the source cases store for a parent conversation as its first. */
+const MOTHS_PAGE: ConversationSource = Object.freeze({
+  number: 1,
+  url: "https://example.com/moths",
+  title: "Moths"
+})
+
+/** Address of a page about what moths eat, which jobs read in the source cases. */
+const DIET_URL = "https://example.com/moths/diet"
+
+/** Address of a page about silk moths, which jobs read in the source cases. */
+const SILK_URL = "https://example.com/moths/silk"
 
 /**
  * Creates a turn at {@link NOW} inside a turn write, as the turn service does.
@@ -832,6 +847,150 @@ describe("createConversationTurn", () => {
       records.recordReader.findConversation(mainId)?.messages.at(-2)
     ).toEqual(turn.userMessage)
     expect(otherTurn.userMessage.reports).toEqual([])
+  })
+
+  it("gives a delivered report the parent's number for a source the parent already has, by URL", () => {
+    const records = openSqliteConversationRecords()
+    const mainId = saveMainConversation(records, 1)
+    const job = saveJob(records, createJobFixture(mainId, 1, "completed"))
+    const dietPage = { number: 2, url: DIET_URL, title: "Moth diet" }
+    records.saveSource(mainId, MOTHS_PAGE)
+    records.saveSource(mainId, dietPage)
+    records.saveSource(job.id, { number: 1, url: DIET_URL, title: "Diet" })
+    const row = saveReport(records, job, {
+      ...RESULT_REPORT,
+      content: "They eat wool [1]."
+    })
+
+    const turn = createPersonTurn(records, mainId, "Any news?")
+
+    const delivered: JobReport = {
+      ...buildExpectedReport(row, 1),
+      content: "They eat wool [2].",
+      sourceNumbers: [2]
+    }
+    expect(turn.userMessage.reports).toEqual([delivered])
+    expect(records.recordReader.findConversation(mainId)?.sources).toEqual([
+      MOTHS_PAGE,
+      dietPage
+    ])
+  })
+
+  it("adds a source the parent lacks under the parent's next number, with the job's title for it", () => {
+    const records = openSqliteConversationRecords()
+    const mainId = saveMainConversation(records, 1)
+    const job = saveJob(records, createJobFixture(mainId, 1, "completed"))
+    const silkPage = { number: 3, url: SILK_URL, title: "Silk moths" }
+    records.saveSource(mainId, MOTHS_PAGE)
+    records.saveSource(mainId, silkPage)
+    records.saveSource(job.id, { number: 1, url: DIET_URL, title: "Diet" })
+    saveReport(records, job, {
+      ...RESULT_REPORT,
+      content: "They eat wool [1]."
+    })
+
+    const turn = createPersonTurn(records, mainId, "Any news?")
+
+    expect(records.recordReader.findConversation(mainId)?.sources).toEqual([
+      MOTHS_PAGE,
+      silkPage,
+      { number: 4, url: DIET_URL, title: "Diet" }
+    ])
+    expect(turn.userMessage.reports).toMatchObject([
+      { content: "They eat wool [4].", sourceNumbers: [4] }
+    ])
+  })
+
+  it("rewrites the report's markers and stores the parent's numbers as its sourceNumbers", () => {
+    const records = openSqliteConversationRecords()
+    const mainId = saveMainConversation(records, 1)
+    const job = saveJob(records, createJobFixture(mainId, 1, "completed"))
+    records.saveSource(mainId, { number: 1, url: DIET_URL, title: "Diet" })
+    records.saveSource(mainId, { ...MOTHS_PAGE, number: 2 })
+    records.saveSource(job.id, { number: 1, url: SILK_URL, title: "Silk" })
+    records.saveSource(job.id, { number: 2, url: DIET_URL, title: "Food" })
+    const row = saveReport(records, job, {
+      ...RESULT_REPORT,
+      content: "Wool [2], silk [1], and wool again [2]."
+    })
+
+    const turn = createPersonTurn(records, mainId, "Any news?")
+
+    const delivered: JobReport = {
+      ...buildExpectedReport(row, 1),
+      content: "Wool [1], silk [3], and wool again [1].",
+      sourceNumbers: [1, 3]
+    }
+    expect(listUserMessageReports(records, mainId).at(-1)).toEqual([delivered])
+    expect(turn.userMessage.reports).toEqual([delivered])
+  })
+
+  it("numbers the sources of two reports that cite the same page once", () => {
+    const records = openSqliteConversationRecords()
+    const mainId = saveMainConversation(records, 1)
+    const first = saveJob(records, createJobFixture(mainId, 1, "completed"))
+    const second = saveJob(records, createJobFixture(mainId, 2, "completed"))
+    records.saveSource(first.id, { number: 1, url: DIET_URL, title: "Diet" })
+    records.saveSource(second.id, { number: 1, url: SILK_URL, title: "Silk" })
+    records.saveSource(second.id, { number: 2, url: DIET_URL, title: "Food" })
+    saveReport(records, first, { ...RESULT_REPORT, content: "Wool [1]." })
+    saveReport(records, second, {
+      ...RESULT_REPORT,
+      sequence: 201,
+      content: "Mulberry leaves [1], or wool [2].",
+      createdAt: createFixtureTimestamp(30, 1)
+    })
+
+    const turn = createPersonTurn(records, mainId, "Any news?")
+
+    expect(turn.userMessage.reports).toMatchObject([
+      { content: "Wool [1].", sourceNumbers: [1] },
+      { content: "Mulberry leaves [2], or wool [1].", sourceNumbers: [1, 2] }
+    ])
+    expect(records.recordReader.findConversation(mainId)?.sources).toEqual([
+      { number: 1, url: DIET_URL, title: "Diet" },
+      { number: 2, url: SILK_URL, title: "Silk" }
+    ])
+  })
+
+  it("leaves a marker whose number is not a source of the job as it is", () => {
+    const records = openSqliteConversationRecords()
+    const mainId = saveMainConversation(records, 1)
+    const job = saveJob(records, createJobFixture(mainId, 1, "completed"))
+    records.saveSource(mainId, MOTHS_PAGE)
+    records.saveSource(job.id, { number: 1, url: DIET_URL, title: "Diet" })
+    saveReport(records, job, {
+      ...RESULT_REPORT,
+      content: "They eat wool [1], not steel [5]."
+    })
+
+    const turn = createPersonTurn(records, mainId, "Any news?")
+
+    expect(turn.userMessage.reports).toMatchObject([
+      { content: "They eat wool [2], not steel [5].", sourceNumbers: [2] }
+    ])
+  })
+
+  it("returns the turn with the added sources, so the next web source gets the number after them", () => {
+    const records = openSqliteConversationRecords()
+    const mainId = saveMainConversation(records, 1)
+    const job = saveJob(records, createJobFixture(mainId, 1, "completed"))
+    records.saveSource(mainId, MOTHS_PAGE)
+    records.saveSource(job.id, { number: 1, url: DIET_URL, title: "Diet" })
+    saveReport(records, job, {
+      ...RESULT_REPORT,
+      content: "They eat wool [1]."
+    })
+
+    const turn = createPersonTurn(records, mainId, "Any news?")
+    const catalog = new SourceCatalog(turn.conversation.sources)
+    const webSources = catalog.addWebSources([{ url: SILK_URL, title: "Silk" }])
+
+    expect(turn.conversation.sources).toEqual([
+      MOTHS_PAGE,
+      { number: 2, url: DIET_URL, title: "Diet" }
+    ])
+    expect(webSources).toEqual([{ number: 3, url: SILK_URL, title: "Silk" }])
   })
 
   it.each(MISFIT_TURNS)(

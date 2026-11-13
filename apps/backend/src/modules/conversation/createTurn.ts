@@ -5,6 +5,7 @@ import {
   conversationAssistantMessageSchema,
   type Conversation,
   type ConversationAssistantMessage,
+  type ConversationSource,
   type ConversationUserMessage,
   type JobReport
 } from "@lys/share"
@@ -16,6 +17,7 @@ import type {
   CreateConversationTurnOptions
 } from "../chat/persistence"
 import { ConversationNotFoundError } from "../../utils/errors"
+import { buildRenumberedCitations, listCitedNumbers } from "./citationNumbers"
 import type {
   ConversationTurnRecords,
   ConversationTurnTransaction,
@@ -38,6 +40,47 @@ type ContinuedConversationRecords = Readonly<{
   >
   /** The new title of a continued job. */
   jobs: Pick<JobTurnTransaction, "updateJobTitle">
+}>
+
+/**
+ * The records the reports that wait for a turn's conversation are delivered
+ * through.
+ */
+type JobReportDeliveryRecords = Readonly<{
+  /** Reads of the jobs whose reports are delivered. */
+  turn: Pick<ConversationTurnTransaction, "findConversation">
+  /** The reports that wait, their delivery, and the sources they add. */
+  jobs: Pick<
+    JobTurnTransaction,
+    | "listUndeliveredJobReports"
+    | "updateJobReportToDelivered"
+    | "createConversationSource"
+  >
+}>
+
+/** One report as its delegator reads it, and the sources it adds there. */
+type RenumberedJobReport = Readonly<{
+  /**
+   * The report with each marker that cites a source of its job carrying the
+   * delegator's number for that source, and those numbers, ascending.
+   */
+  report: JobReport
+  /**
+   * The sources it cites whose URL the delegator has no source for, numbered
+   * after the delegator's highest number in the order of the job's numbers.
+   */
+  addedSources: readonly ConversationSource[]
+}>
+
+/** The reports a turn delivered, and its conversation's sources after them. */
+type DeliveredJobReports = Readonly<{
+  /** The delivered reports, oldest first, as the delegator reads them. */
+  reports: readonly JobReport[]
+  /**
+   * Every source of the conversation once the reports are delivered, in
+   * number order: the ones it had, then the ones the reports added.
+   */
+  sources: readonly ConversationSource[]
 }>
 
 /**
@@ -308,37 +351,148 @@ function buildStreamingReply(
 }
 
 /**
+ * Calculates the number the next source of a conversation gets.
+ * @param sources - The conversation's sources.
+ * @returns One more than the highest number they have; 1 when there are
+ * none.
+ */
+function calculateNextSourceNumber(
+  sources: readonly ConversationSource[]
+): number {
+  let highestNumber = 0
+  for (const source of sources)
+    highestNumber = Math.max(highestNumber, source.number)
+  return highestNumber + 1
+}
+
+/**
+ * Lists the sources of the job a report is from.
+ * @param turn - Conversation reads lent by the turn's write transaction.
+ * @param jobId - UUIDv7 of the job: its conversation.
+ * @returns The job's sources, in number order.
+ * @throws If the job is not stored, which the job of a stored report always
+ * is, the transaction has ended, or a stored value violates the
+ * conversation contract.
+ */
+function listJobSources(
+  turn: Pick<ConversationTurnTransaction, "findConversation">,
+  jobId: string
+): readonly ConversationSource[] {
+  const job = turn.findConversation(jobId)
+  if (job === undefined) throw new Error("A report's job is not stored")
+  return job.sources
+}
+
+/**
+ * Builds a report as its delegator reads it, with the sources it adds to the
+ * delegator's conversation.
+ * @param report - Undelivered report, whose markers carry its job's numbers.
+ * @param jobSources - Sources of the report's job, in number order.
+ * @param delegatorSources - Sources of the delegator's conversation so far,
+ * in number order, the ones earlier reports of the delivery added included.
+ * @returns The report with each marker whose number is a source of its job
+ * rewritten to the delegator's number for that source's URL, and with the
+ * delegator's numbers it cites; every other marker is kept. Each cited
+ * source whose URL the delegator has no source for is among the added
+ * sources, with the job's title for it, numbered on from the delegator's
+ * highest number in the order of the job's numbers.
+ */
+function buildRenumberedJobReport(
+  report: JobReport,
+  jobSources: readonly ConversationSource[],
+  delegatorSources: readonly ConversationSource[]
+): RenumberedJobReport {
+  const citedNumbers = new Set(listCitedNumbers(report.content))
+  const sourcesByUrl = new Map(
+    delegatorSources.map((source) => [source.url, source])
+  )
+  const firstAddedNumber = calculateNextSourceNumber(delegatorSources)
+  const numbers = new Map<number, number>()
+  const addedSources: ConversationSource[] = []
+  for (const jobSource of jobSources) {
+    if (!citedNumbers.has(jobSource.number)) continue
+    let source = sourcesByUrl.get(jobSource.url)
+    if (source === undefined) {
+      source = {
+        number: firstAddedNumber + addedSources.length,
+        url: jobSource.url,
+        title: jobSource.title
+      }
+      addedSources.push(source)
+    }
+    numbers.set(jobSource.number, source.number)
+  }
+  const renumbered = buildRenumberedCitations(report.content, numbers)
+  const renumberedReport: JobReport = {
+    ...report,
+    content: renumbered.text,
+    sourceNumbers: renumbered.citedNumbers
+  }
+  return { report: renumberedReport, addedSources }
+}
+
+/**
+ * Builds the delivery of a report as its delegator reads it.
+ * @param report - The report, renumbered into its delegator's conversation.
+ * @param messageId - Stored user message that delivers it.
+ * @returns The delivery that stores the report's text and source numbers
+ * with the message.
+ */
+function buildJobReportDelivery(
+  report: JobReport,
+  messageId: string
+): JobReportDelivery {
+  return {
+    reportId: report.id,
+    messageId,
+    content: report.content,
+    sourceNumbers: report.sourceNumbers
+  }
+}
+
+/**
  * Marks the reports that wait for a conversation as delivered with one of
- * its user messages.
- * @param jobs - Job records lent by the turn's write transaction.
- * @param conversationId - Conversation whose jobs sent the reports.
+ * its user messages, each as the conversation's agent reads it.
+ * @param records - Records lent by the turn's write transaction.
+ * @param conversation - Snapshot of the conversation whose jobs sent the
+ * reports, read in this transaction.
  * @param messageId - Stored user message of that conversation.
  * @returns The delivered reports, oldest first: every report of the
- * conversation's jobs that was not delivered yet, of any kind, with its text
- * as it was and without cited sources; none when no report waits.
- * @throws If the transaction has ended, a stored report violates the report
- * contract, or a write fails.
+ * conversation's jobs that was not delivered yet, of any kind, as
+ * {@link buildRenumberedJobReport} builds it; and the conversation's sources
+ * with the ones the reports added. No report and no new source when no
+ * report waits.
+ * @throws If a report's job is not stored, the transaction has ended, a
+ * stored value violates the conversation or report contract, or a write
+ * fails.
+ * @remarks Each job is read once, however many of its reports wait. The
+ * sources a report adds are stored before it is marked delivered, and a
+ * later report of the delivery finds them by URL like the stored ones.
  */
 function updateJobReportsToDelivered(
-  jobs: Pick<
-    JobTurnTransaction,
-    "listUndeliveredJobReports" | "updateJobReportToDelivered"
-  >,
-  conversationId: string,
+  records: JobReportDeliveryRecords,
+  conversation: Conversation,
   messageId: string
-): JobReport[] {
-  const deliveredReports: JobReport[] = []
-  for (const report of jobs.listUndeliveredJobReports(conversationId)) {
-    const delivery: JobReportDelivery = {
-      reportId: report.id,
-      messageId,
-      content: report.content,
-      sourceNumbers: []
-    }
-    jobs.updateJobReportToDelivered(delivery)
-    deliveredReports.push({ ...report, sourceNumbers: delivery.sourceNumbers })
+): DeliveredJobReports {
+  const waitingReports = records.jobs.listUndeliveredJobReports(conversation.id)
+  const jobSourcesById = new Map<string, readonly ConversationSource[]>()
+  const reports: JobReport[] = []
+  let sources = conversation.sources
+  for (const report of waitingReports) {
+    const jobSources =
+      jobSourcesById.get(report.jobId) ??
+      listJobSources(records.turn, report.jobId)
+    jobSourcesById.set(report.jobId, jobSources)
+    const renumbered = buildRenumberedJobReport(report, jobSources, sources)
+    for (const source of renumbered.addedSources)
+      records.jobs.createConversationSource(conversation.id, source)
+    records.jobs.updateJobReportToDelivered(
+      buildJobReportDelivery(renumbered.report, messageId)
+    )
+    reports.push(renumbered.report)
+    sources = [...sources, ...renumbered.addedSources]
   }
-  return deliveredReports
+  return { reports, sources }
 }
 
 /**
@@ -355,10 +509,12 @@ function updateJobReportsToDelivered(
  * @param now - Time of the turn, read once by the caller. Every value the turn
  * builds carries it: a new conversation's times, both messages' times, and
  * the update time of each reply the turn interrupts.
- * @returns The conversation snapshot and both messages written to the
- * transaction; the user message carries its author's origin, its
- * attachments, numbered after the conversation's highest attachment number
- * in message order, and the reports the turn delivered with it.
+ * @returns The conversation snapshot, with the sources the delivered reports
+ * added, and both messages written to the transaction; the user message
+ * carries its author's origin, its attachments, numbered after the
+ * conversation's highest attachment number in message order, and the
+ * reports the turn delivered with it, as the conversation's agent reads
+ * them.
  * @throws If the turn starts or continues a job and its message is not a
  * delegator's, or a delegator's message starts or continues a main
  * conversation; nothing is stored by then.
@@ -366,7 +522,8 @@ function updateJobReportsToDelivered(
  * parent of a new job, is not stored.
  * @throws If a job message continues a conversation that is not a job,
  * validation fails, the transaction has ended, a stored value violates the
- * conversation contract, or storage rejects a write.
+ * conversation or report contract, a delivered report's job is not stored,
+ * or storage rejects a write.
  * @remarks Both messages are validated before the first write; the user
  * message's attachments get their final numbers once the snapshot is read.
  * A reply still streaming in an existing conversation becomes interrupted
@@ -378,7 +535,11 @@ function updateJobReportsToDelivered(
  * Every report of the conversation's jobs that is not delivered yet is
  * marked delivered with the user message once that message is stored, oldest
  * first, so a report reaches its delegator once, with the next turn of the
- * conversation, whoever starts it.
+ * conversation, whoever starts it. Each source of its job that a report
+ * cites is found by URL among the conversation's sources, or stored there
+ * under the next number, and the report's markers are rewritten to the
+ * conversation's numbers, so the delegator's citations open the pages the
+ * job read.
  */
 export function createConversationTurn(
   records: ConversationTurnRecords,
@@ -395,15 +556,22 @@ export function createConversationTurn(
     conversation
   )
   records.turn.createUserMessage(conversation.id, storedUserMessage, jobCallId)
-  const reports = updateJobReportsToDelivered(
-    records.jobs,
-    conversation.id,
+  const delivered = updateJobReportsToDelivered(
+    records,
+    conversation,
     storedUserMessage.id
   )
   records.turn.createAssistantMessage(conversation.id, assistantMessage)
-  const userMessage: ConversationUserMessage = { ...storedUserMessage, reports }
+  const userMessage: ConversationUserMessage = {
+    ...storedUserMessage,
+    reports: delivered.reports
+  }
+  const turnConversation: Conversation = {
+    ...conversation,
+    sources: delivered.sources
+  }
   return {
-    conversation,
+    conversation: turnConversation,
     userMessage,
     assistantMessage,
     isNewConversation: target.kind === "new" || target.kind === "new-job"

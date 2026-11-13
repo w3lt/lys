@@ -1,3 +1,7 @@
+import {
+  calculateRankingScores,
+  listRankingWords
+} from "../../../../utils/search/textRanking"
 import type { PageBlock } from "./pageExtraction"
 
 /** One passage of page text. */
@@ -52,19 +56,10 @@ export const MAXIMUM_SELECTED_PASSAGE_LENGTH = 12_000
 /** Text between two blocks of a passage. */
 const BLOCK_SEPARATOR = "\n\n"
 
-/** Term-frequency saturation of the passage ranking. */
-const RANKING_TERM_SATURATION = 1.2
-
-/** Strength of the passage-length normalization of the ranking. */
-const RANKING_LENGTH_NORMALIZATION = 0.75
-
 /** Splits text into sentences in any language. */
 const SENTENCE_SEGMENTER = new Intl.Segmenter("und", {
   granularity: "sentence"
 })
-
-/** Splits text into words in any language, including those without spaces. */
-const WORD_SEGMENTER = new Intl.Segmenter("und", { granularity: "word" })
 
 /**
  * Splits text longer than a passage into pieces that fit one.
@@ -127,148 +122,6 @@ export function calculatePagePassages(
   if (passageText !== "") texts.push(passageText)
   return Object.freeze(
     texts.map((text, index) => Object.freeze({ index, text }))
-  )
-}
-
-/**
- * Lists the words of a text for ranking.
- *
- * @param text - Text to split.
- * @returns Its words, lowercase and compatibility-normalized, in order.
- */
-function listRankingWords(text: string): readonly string[] {
-  const normalized = text.normalize("NFKC").toLowerCase()
-  return [...WORD_SEGMENTER.segment(normalized)]
-    .filter((segment) => segment.isWordLike === true)
-    .map((segment) => segment.segment)
-}
-
-/**
- * Counts how often each word occurs.
- *
- * @param words - Words of one passage.
- * @returns Occurrences by word.
- */
-function countWords(words: readonly string[]): ReadonlyMap<string, number> {
-  const counts = new Map<string, number>()
-  for (const word of words) counts.set(word, (counts.get(word) ?? 0) + 1)
-  return counts
-}
-
-/** Words of one passage, counted for ranking. */
-type RankedPassageWords = Readonly<{
-  /** Number of words in the passage. */
-  wordCount: number
-  /** Occurrences by word. */
-  wordCounts: ReadonlyMap<string, number>
-}>
-
-/** One focus word and how rare it is among a page's passages. */
-type RankedFocusWord = Readonly<{
-  /** Focus word. */
-  word: string
-  /** Inverse passage frequency of the word; higher for rarer words. */
-  inverseFrequency: number
-}>
-
-/** What scoring one passage needs. */
-type PassageScoreInput = Readonly<{
-  /** Counted words of the passage scored. */
-  passageWords: RankedPassageWords
-  /** Every distinct focus word with its rarity. */
-  focusWords: readonly RankedFocusWord[]
-  /** Average word count of the page's passages; positive. */
-  averageWordCount: number
-}>
-
-/**
- * Counts the words of one passage for ranking.
- *
- * @param passage - Passage to count.
- * @returns Its word count and occurrences by word.
- */
-function buildRankedPassageWords(passage: PagePassage): RankedPassageWords {
-  const words = listRankingWords(passage.text)
-  return Object.freeze({
-    wordCount: words.length,
-    wordCounts: countWords(words)
-  })
-}
-
-/**
- * Calculates how rare a word is among a page's passages.
- *
- * @param word - Focus word.
- * @param passageWords - Counted words of every passage.
- * @returns The BM25 inverse passage frequency of the word, which is
- * positive.
- */
-function calculateInverseFrequency(
-  word: string,
-  passageWords: readonly RankedPassageWords[]
-): number {
-  const containingCount = passageWords.filter((words) =>
-    words.wordCounts.has(word)
-  ).length
-  const missingCount = passageWords.length - containingCount
-  return Math.log(1 + (missingCount + 0.5) / (containingCount + 0.5))
-}
-
-/**
- * Calculates how well one passage matches the focus, by the BM25 ranking
- * function.
- *
- * @param input - The passage's counted words, the ranked focus words, and
- * the page's average passage length.
- * @returns The score; zero when the passage contains no focus word.
- */
-function calculatePassageScore(input: PassageScoreInput): number {
-  const { passageWords, averageWordCount } = input
-  const lengthFactor =
-    1 -
-    RANKING_LENGTH_NORMALIZATION +
-    (RANKING_LENGTH_NORMALIZATION * passageWords.wordCount) / averageWordCount
-  let score = 0
-  for (const { word, inverseFrequency } of input.focusWords) {
-    const frequency = passageWords.wordCounts.get(word) ?? 0
-    const saturation =
-      (frequency * (RANKING_TERM_SATURATION + 1)) /
-      (frequency + RANKING_TERM_SATURATION * lengthFactor)
-    score += inverseFrequency * saturation
-  }
-  return score
-}
-
-/**
- * Calculates how well each passage matches the focus.
- *
- * @param passages - Passages of the page, at least one.
- * @param focusWords - Distinct words of the focus, at least one.
- * @returns One score per passage, in passage order; zero when the passage
- * contains no focus word.
- */
-function calculatePassageScores(
-  passages: readonly PagePassage[],
-  focusWords: readonly string[]
-): readonly number[] {
-  const passageWords = passages.map(buildRankedPassageWords)
-  const totalWordCount = passageWords.reduce(
-    (total, words) => total + words.wordCount,
-    0
-  )
-  const averageWordCount = Math.max(totalWordCount / passageWords.length, 1)
-  const rankedFocusWords = focusWords.map((word) =>
-    Object.freeze({
-      word,
-      inverseFrequency: calculateInverseFrequency(word, passageWords)
-    })
-  )
-  return passageWords.map((words) =>
-    calculatePassageScore({
-      passageWords: words,
-      focusWords: rankedFocusWords,
-      averageWordCount
-    })
   )
 }
 
@@ -389,7 +242,10 @@ function rankMatchingPassages(
   passages: readonly PagePassage[],
   focusWords: readonly string[]
 ): readonly PagePassage[] {
-  const scores = calculatePassageScores(passages, focusWords)
+  const scores = calculateRankingScores(
+    passages.map((passage) => passage.text),
+    focusWords
+  )
   /**
    * Finds the score of one passage.
    *

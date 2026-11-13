@@ -214,7 +214,12 @@ describe("buildApp", () => {
     expect(agentsResponse.json()).toEqual({
       builtInAgents: [
         { code: "caliginia", name: "Caliginia", bio: "Lys's dark side." },
-        { code: "lysiptera", name: "Lysiptera", bio: "Lys's light side." }
+        { code: "lysiptera", name: "Lysiptera", bio: "Lys's light side." },
+        {
+          code: "armitage",
+          name: "Armitage",
+          bio: "Lys's tool keeper. It finds the tools the other agents need and answers agents, not chats."
+        }
       ],
       agents: [],
       storedCount: 0,

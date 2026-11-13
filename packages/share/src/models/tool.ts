@@ -1,6 +1,7 @@
 import * as z from "zod"
 import {
   FIND_AGENTS_TOOL_NAME,
+  FIND_TOOLS_TOOL_NAME,
   READ_AGENT_STATE_TOOL_NAME,
   READ_MY_STATE_TOOL_NAME
 } from "./agent"
@@ -543,8 +544,8 @@ export function buildToolFunctionFormat(
 }
 
 /**
- * Names of the tools the backend adds to a turn itself: the attachment reader
- * and the agent tools.
+ * Names of the tools the backend adds to a turn itself: the attachment
+ * reader, the agent state tools, and the tool that asks Armitage for tools.
  *
  * @remarks They have no switch, so a chat request may not offer them or name
  * them as switched off or unable to run; the request contract refuses each
@@ -554,5 +555,6 @@ export const BACKEND_INTERNAL_TOOL_NAMES: readonly string[] = Object.freeze([
   READ_ATTACHMENT_TOOL_NAME,
   READ_MY_STATE_TOOL_NAME,
   FIND_AGENTS_TOOL_NAME,
-  READ_AGENT_STATE_TOOL_NAME
+  READ_AGENT_STATE_TOOL_NAME,
+  FIND_TOOLS_TOOL_NAME
 ])

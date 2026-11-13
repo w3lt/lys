@@ -46,6 +46,17 @@ function tableIdentifiers(title: string): string[] {
   return [...rows].map((row) => row[1] ?? "")
 }
 
+/**
+ * Counts the cells of a Markdown table row.
+ *
+ * @remarks An escaped pipe, `\|`, is cell content and does not end a cell.
+ * @param row - Table row, starting and ending with a pipe.
+ * @returns Number of cells.
+ */
+function tableCellCount(row: string): number {
+  return row.split(/(?<!\\)\|/).length - 2
+}
+
 describe("rule check inventory", () => {
   it("classifies every rule identifier of the item standards exactly once", () => {
     const standardIdentifiers = [...chapters.values()].flatMap((text) =>
@@ -64,6 +75,18 @@ describe("rule check inventory", () => {
       classifiedIdentifiers.toSorted(),
       standardIdentifiers.toSorted()
     )
+  })
+
+  it("gives every table row as many cells as its header", () => {
+    const misshapenRows = ["Exact rules", "Advisory rules"].flatMap((title) => {
+      const rows = inventorySection(title)
+        .split("\n")
+        .filter((line) => line.startsWith("|"))
+      const headerCells = tableCellCount(rows[0] ?? "")
+      return rows.filter((row) => tableCellCount(row) !== headerCells)
+    })
+
+    assert.deepEqual(misshapenRows, [])
   })
 
   it("names every plugin rule as the check of an exact rule", () => {

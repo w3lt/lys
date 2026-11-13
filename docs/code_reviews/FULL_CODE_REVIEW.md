@@ -80,6 +80,8 @@ The reviewer takes each item in inventory order and assesses it on two axes.
 
 **Code quality.** Does the item satisfy the triggered rules of its owning item standard, cited by identifier? Repository-owned JavaScript and TypeScript declarations MUST also satisfy the [JSDoc Standard](../JSDOC.md).
 
+For TypeScript and JavaScript, the rules and parts of rules that the [rule check inventory](../../apps/docs/src/content/docs/reference/rule-checks.mdx) marks exact are decided by their checks, not by hand. The reviewer runs `pnpm exec eslint <target paths>`; each report of the `lys` plugin on the item decides that part and is cited by the finding. Every other rule, every part the inventory leaves to hand review, and every rule for Rust and Swift is assessed by hand. A violation of an exact part that the check missed is still a finding; it states that the check missed it, so that an issue is filed against the check.
+
 The item is judged together with its declared contract, meaning its signature, types, and documentation, and with the tests that exercise it. The reviewer MAY read callers to establish what the contract is, but the verdict is about the item, not about its callers.
 
 An item whose construct has no active standard is still reviewed for logical correctness and clarity. Its quality findings MUST cite the foundation in [Code Construction Rules](../CODE_STANDARDS.md) or the requirements in [Contributing to Lys](../../CONTRIBUTING.md). The reviewer MUST NOT cite an identifier from the deferred registry.

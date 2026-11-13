@@ -19,9 +19,6 @@ import {
   type JobMessageRequest
 } from "../../support/delegationTestServices"
 
-/** Time the clock reads when a case starts. */
-const NOW = "2026-11-13T10:00:00.000Z"
-
 /** Time of a case's later turn, after every message stored before it. */
 const LATER = "2026-11-13T10:05:00.000Z"
 
@@ -58,22 +55,16 @@ const GPT_OSS_SETTINGS: TurnSettings = Object.freeze({
   model: "openai/gpt-oss-20b"
 })
 
-/**
- * Number of a job that only the other conversation of the refusal cases
- * has.
- */
-const OTHER_CONVERSATIONS_JOB = 2
-
-/** Job messages a limited case allows since the person's last message. */
-const JOB_MESSAGE_LIMIT = 12
-
 /** A low limit, which a case reaches with few messages. */
 const LOW_JOB_MESSAGE_LIMIT = 2
 
 describe("createJobMessage", () => {
   beforeEach(() => {
+    /** Time the clock reads when a case starts. */
+    const now = "2026-11-13T10:00:00.000Z"
+
     vi.useFakeTimers({ toFake: ["Date"] })
-    vi.setSystemTime(new Date(NOW))
+    vi.setSystemTime(new Date(now))
   })
 
   afterEach(() => {
@@ -275,6 +266,11 @@ describe("createJobMessage", () => {
     })
   })
 
+  /**
+   * Number of a job that only the other conversation of the refusal cases has.
+   */
+  const otherConversationsJob = 2
+
   it.each<[string, string, number | undefined, JobMessageRefusal]>([
     [
       "an unknown agent",
@@ -309,8 +305,8 @@ describe("createJobMessage", () => {
     [
       "a job of another conversation",
       FIRST_MEMBER,
-      OTHER_CONVERSATIONS_JOB,
-      { kind: "job-not-found", jobNumber: OTHER_CONVERSATIONS_JOB }
+      otherConversationsJob,
+      { kind: "job-not-found", jobNumber: otherConversationsJob }
     ],
     [
       "another agent's job",
@@ -370,12 +366,15 @@ describe("createJobMessage", () => {
   )
 
   it("refuses the 13th job message since the person's last message with the limit in the refusal", () => {
+    /** Job messages a limited case allows since the person's last message. */
+    const jobMessageLimit = 12
+
     const services = openDelegationTestServices({
-      agentJobMessageLimit: JOB_MESSAGE_LIMIT
+      agentJobMessageLimit: jobMessageLimit
     })
     const delegating = createPersonTurn(services.conversation.turns)
     const conversationId = delegating.turn.conversation.id
-    for (let sent = 0; sent < JOB_MESSAGE_LIMIT; sent += 1)
+    for (let sent = 0; sent < jobMessageLimit; sent += 1)
       sendJobMessage(services, delegating, MOTHS_REQUEST)
     const draft = createJobMessageDraft(
       services.conversation.replyParts,
@@ -387,10 +386,10 @@ describe("createJobMessage", () => {
 
     expect(outcome).toEqual({
       status: "refused",
-      refusal: { kind: "limit-reached", limit: JOB_MESSAGE_LIMIT }
+      refusal: { kind: "limit-reached", limit: jobMessageLimit }
     })
     expect(services.runtime.jobs.listJobs(conversationId)).toHaveLength(
-      JOB_MESSAGE_LIMIT
+      jobMessageLimit
     )
     expect(services.reportEvent).toHaveBeenLastCalledWith({
       kind: "job-message-refused",

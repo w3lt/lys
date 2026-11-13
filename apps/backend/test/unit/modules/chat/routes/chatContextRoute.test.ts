@@ -94,18 +94,6 @@ const CALIGINIA: BuiltInAgent = Object.freeze({
 /** Model every case names. */
 const MODEL = "qwen/qwen3-8b"
 
-/**
- * Request limits of the live agents; a measurement takes no request slot, so
- * no case depends on them.
- */
-const REQUEST_LIMITS = Object.freeze({ slotCount: 2, waitingLimit: 1 })
-
-/** Model access the chat-context route never uses. */
-const UNUSED_REPLY_MODEL = Object.freeze({
-  openReplyStream: () =>
-    Promise.reject(new Error("Unexpected model call from the context route"))
-} satisfies ReplyModel)
-
 /** Conversation every continued-conversation case stores. */
 const STORED_CONVERSATION_ID = createFixtureUuidV7(1)
 
@@ -150,33 +138,6 @@ const RESEARCHER_DEFINITION = Object.freeze({
   name: "Researcher",
   bio: "Finds things out.",
   systemPrompt: "You are the test researcher."
-})
-
-/** Job 1 of a conversation Caliginia answers, as the job's turn is told. */
-const CALIGINIA_JOB: JobTurn = Object.freeze({
-  delegatorName: CALIGINIA.name,
-  jobNumber: 1
-})
-
-/** What a leader's turn in a main conversation that offers it may delegate. */
-const DELEGATING_OFFER = Object.freeze({
-  mayDelegate: true,
-  hasJobs: false,
-  job: undefined
-})
-
-/** What a leader's turn in a main conversation with a job may stop. */
-const STOPPING_OFFER = Object.freeze({
-  mayDelegate: false,
-  hasJobs: true,
-  job: undefined
-})
-
-/** What the turn of job 1 of a conversation Caliginia answers may report. */
-const REPORTING_OFFER = Object.freeze({
-  mayDelegate: false,
-  hasJobs: false,
-  job: CALIGINIA_JOB
 })
 
 /**
@@ -264,19 +225,31 @@ function createTestAgentServices(
   agentService: AgentService
   agentRuntimeService: AgentRuntimeService
 }> {
+  /**
+   * Request limits of the live agents; a measurement takes no request slot, so
+   * no case depends on them.
+   */
+  const requestLimits = Object.freeze({ slotCount: 2, waitingLimit: 1 })
+
+  /** Model access the chat-context route never uses. */
+  const unusedReplyModel = Object.freeze({
+    openReplyStream: () =>
+      Promise.reject(new Error("Unexpected model call from the context route"))
+  } satisfies ReplyModel)
+
   const agentService = new AgentService({
     recordStore: SqliteAgentRecordStore.create(conversation.database),
     builtInAgents: [CALIGINIA]
   })
   const agentRuntimeService = new AgentRuntimeService({
     agents: agentService,
-    replyModel: UNUSED_REPLY_MODEL,
+    replyModel: unusedReplyModel,
     replyContextMeter,
     findConversationTitle: (conversationId) =>
       buildConversationTitleLookup(
         conversation.history.getConversation(conversationId)
       ),
-    requestLimits: REQUEST_LIMITS
+    requestLimits
   })
   return Object.freeze({ agentService, agentRuntimeService })
 }
@@ -985,6 +958,15 @@ describe("registerChatContextRoute", () => {
   })
 
   it("measures delegate_work after the leader's state tools for a new conversation whose request offers it, as a turn offers it", async () => {
+    /**
+     * What a leader's turn in a main conversation that offers it may delegate.
+     */
+    const delegatingOffer = Object.freeze({
+      mayDelegate: true,
+      hasJobs: false,
+      job: undefined
+    })
+
     const { app, replyContextMeter, listDownloadedLlmModels } =
       await createChatContextRouteApp()
     listDownloadedLlmModels.mockResolvedValue([TOOL_MODEL_INFO])
@@ -1000,13 +982,18 @@ describe("registerChatContextRoute", () => {
       replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0].tools
     ).toEqual([
       ...LEADER_STATE_TOOL_FORMATS,
-      ...buildToolFormats(
-        buildDelegationDefinitions("leader", DELEGATING_OFFER)
-      )
+      ...buildToolFormats(buildDelegationDefinitions("leader", delegatingOffer))
     ])
   })
 
   it("measures stop_job after the leader's state tools for a stored conversation with a job, as a turn offers it", async () => {
+    /** What a leader's turn in a main conversation with a job may stop. */
+    const stoppingOffer = Object.freeze({
+      mayDelegate: false,
+      hasJobs: true,
+      job: undefined
+    })
+
     const testApp = await createChatContextRouteApp()
     const { mainId } = saveResearcherJob(testApp)
     testApp.listDownloadedLlmModels.mockResolvedValue([TOOL_MODEL_INFO])
@@ -1022,11 +1009,26 @@ describe("registerChatContextRoute", () => {
         .tools
     ).toEqual([
       ...LEADER_STATE_TOOL_FORMATS,
-      ...buildToolFormats(buildDelegationDefinitions("leader", STOPPING_OFFER))
+      ...buildToolFormats(buildDelegationDefinitions("leader", stoppingOffer))
     ])
   })
 
   it("measures a stored job's note with its delegator's name, and report_progress after the member's state tools but never delegate_work, as the job's turn sends them", async () => {
+    /** Job 1 of a conversation Caliginia answers, as the job's turn is told. */
+    const caliginiaJob: JobTurn = Object.freeze({
+      delegatorName: CALIGINIA.name,
+      jobNumber: 1
+    })
+
+    /**
+     * What the turn of job 1 of a conversation Caliginia answers may report.
+     */
+    const reportingOffer = Object.freeze({
+      mayDelegate: false,
+      hasJobs: false,
+      job: caliginiaJob
+    })
+
     const testApp = await createChatContextRouteApp()
     const { jobId } = saveResearcherJob(testApp)
     testApp.listDownloadedLlmModels.mockResolvedValue([TOOL_MODEL_INFO])
@@ -1045,13 +1047,13 @@ describe("registerChatContextRoute", () => {
       content: formatSystemPrompt(
         RESEARCHER_DEFINITION.systemPrompt,
         NO_UNOFFERED_TOOLS,
-        formatJobNote(CALIGINIA_JOB, true)
+        formatJobNote(caliginiaJob, true)
       )
     })
     expect(measured?.tools).toEqual(
       buildToolFormats([
         ...buildAgentStateDefinitions("member"),
-        ...buildDelegationDefinitions("member", REPORTING_OFFER)
+        ...buildDelegationDefinitions("member", reportingOffer)
       ])
     )
   })

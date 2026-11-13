@@ -32,20 +32,6 @@ const LAMPS_REQUEST: JobMessageRequest = Object.freeze({
   jobNumber: undefined
 })
 
-/** Call of a desktop tool the reply sends to run. */
-const DESKTOP_TOOL_CALL = Object.freeze({
-  id: "01900000-0000-7000-8000-00000000000a",
-  toolName: "read_text_file",
-  arguments: Object.freeze({ path: "/notes/moths.md" })
-} satisfies ChatToolCall)
-
-/** Call the reply shows to the person for approval. */
-const APPROVAL_TOOL_CALL = Object.freeze({
-  id: "01900000-0000-7000-8000-00000000000b",
-  toolName: "read_page",
-  arguments: Object.freeze({ url: "https://moths.example/" })
-} satisfies ChatToolCall)
-
 /**
  * Builds the address of a turn's reply.
  *
@@ -220,14 +206,27 @@ describe("stopDeletedReplies", () => {
   })
 
   it("ends an approval prompt and a desktop tool call a deleted conversation's reply was waiting on", async () => {
+    /** Call of a desktop tool the reply sends to run. */
+    const desktopToolCall = Object.freeze({
+      id: "01900000-0000-7000-8000-00000000000a",
+      toolName: "read_text_file",
+      arguments: Object.freeze({ path: "/notes/moths.md" })
+    } satisfies ChatToolCall)
+
+    /** Call the reply shows to the person for approval. */
+    const approvalToolCall = Object.freeze({
+      id: "01900000-0000-7000-8000-00000000000b",
+      toolName: "read_page",
+      arguments: Object.freeze({ url: "https://moths.example/" })
+    } satisfies ChatToolCall)
+
     const services = openDelegationTestServices()
     const lead = createPersonTurn(services.conversation.turns)
     const conversationId = lead.turn.conversation.id
     const { generation, replyTask } = startControlledGeneration(services, lead)
     await waitForMicrotasks()
-    const approval =
-      replyTask.context.sendToolApprovalPrompt(APPROVAL_TOOL_CALL)
-    const toolResult = replyTask.context.sendClientToolCall(DESKTOP_TOOL_CALL)
+    const approval = replyTask.context.sendToolApprovalPrompt(approvalToolCall)
+    const toolResult = replyTask.context.sendClientToolCall(desktopToolCall)
     const replies = listWorkingReplies(services.runtime, conversationId)
     services.conversation.editor.deleteConversation(conversationId)
 
@@ -240,10 +239,10 @@ describe("stopDeletedReplies", () => {
       toolApprovals: []
     })
     expect(
-      generation.resolveToolCall(APPROVAL_TOOL_CALL.id, { status: "allowed" })
+      generation.resolveToolCall(approvalToolCall.id, { status: "allowed" })
     ).toBe("not-pending")
     expect(
-      generation.resolveToolCall(DESKTOP_TOOL_CALL.id, {
+      generation.resolveToolCall(desktopToolCall.id, {
         status: "succeeded",
         content: "Moths eat nectar."
       })

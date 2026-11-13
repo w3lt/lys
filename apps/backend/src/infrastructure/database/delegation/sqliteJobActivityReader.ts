@@ -13,28 +13,6 @@ import type {
   DatabaseStatementCompiler
 } from "../databaseTransactions"
 
-/** Validates the stored address of one streaming reply. */
-const replyAddressSchema = z.strictObject({
-  /** Identity of the conversation that holds the reply. */
-  conversationId: conversationMetadataSchema.shape.id,
-  /** Identity of the reply. */
-  assistantMessageId: conversationAssistantMessageSchema.shape.id
-})
-
-/** Validates one stored reply as the end of its generation is reported. */
-const endedReplyRecordSchema = z.strictObject({
-  /** Identity of the conversation that holds the reply. */
-  conversationId: conversationMetadataSchema.shape.id,
-  /** Identity of that conversation's parent; null for a main conversation. */
-  parentConversationId: conversationMetadataSchema.shape.parentConversationId,
-  /** Stored state of the reply. */
-  status: conversationAssistantMessageSchema.shape.status,
-  /** Stored finish reason; null unless the reply completed. */
-  finishReason: conversationAssistantMessageSchema.shape.finishReason,
-  /** Text of the reply's last round, possibly empty. */
-  lastRoundText: z.string()
-})
-
 /**
  * Answers whether a `result` or `failed` report of one of a conversation's
  * jobs is not delivered, inside the caller's read transaction.
@@ -101,6 +79,14 @@ function listStreamingReplies(
   statements: DatabaseStatementCompiler,
   conversationId: string
 ): ReplyAddress[] {
+  /** Validates the stored address of one streaming reply. */
+  const replyAddressSchema = z.strictObject({
+    /** Identity of the conversation that holds the reply. */
+    conversationId: conversationMetadataSchema.shape.id,
+    /** Identity of the reply. */
+    assistantMessageId: conversationAssistantMessageSchema.shape.id
+  })
+
   return statements
     .getStatement(
       `WITH RECURSIVE below (id, created_at) AS (
@@ -134,6 +120,20 @@ function findEndedReply(
   statements: DatabaseStatementCompiler,
   assistantMessageId: string
 ): EndedReplyRecord | undefined {
+  /** Validates one stored reply as the end of its generation is reported. */
+  const endedReplyRecordSchema = z.strictObject({
+    /** Identity of the conversation that holds the reply. */
+    conversationId: conversationMetadataSchema.shape.id,
+    /** Identity of that conversation's parent; null for a main conversation. */
+    parentConversationId: conversationMetadataSchema.shape.parentConversationId,
+    /** Stored state of the reply. */
+    status: conversationAssistantMessageSchema.shape.status,
+    /** Stored finish reason; null unless the reply completed. */
+    finishReason: conversationAssistantMessageSchema.shape.finishReason,
+    /** Text of the reply's last round, possibly empty. */
+    lastRoundText: z.string()
+  })
+
   const row = statements
     .getStatement(
       `SELECT r.conversation_id AS conversationId,

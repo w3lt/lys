@@ -33,18 +33,6 @@ const ARCHIVE_REQUEST: JobMessageRequest = Object.freeze({
 })
 
 /**
- * Settings of a later turn of the person's, written with another model than
- * {@link DELEGATING_TURN_SETTINGS}.
- */
-const LATER_TURN_SETTINGS: TurnSettings = Object.freeze({
-  ...DELEGATING_TURN_SETTINGS,
-  model: "qwen/qwen3-14b"
-})
-
-/** Cancellation of a wait that a case never cancels. */
-const NEVER_ABORTED_SIGNAL = new AbortController().signal
-
-/**
  * Ends a working job in a way that wakes nobody.
  *
  * @param services - The case's runtime and controls.
@@ -73,10 +61,13 @@ async function stopJobAsDelegator(
   job: Job,
   conversationId: string
 ): Promise<void> {
+  /** Cancellation of a wait that a case never cancels. */
+  const neverAbortedSignal = new AbortController().signal
+
   await stopJob(services.runtime, {
     conversationId,
     jobNumber: job.number,
-    abortSignal: NEVER_ABORTED_SIGNAL
+    abortSignal: neverAbortedSignal
   })
 }
 
@@ -457,6 +448,15 @@ describe("startDueWakeUpTurn", () => {
   })
 
   it("takes the wake settings from the person's latest turn while a job works: the wake-up runs with the newer model", async () => {
+    /**
+     * Settings of a later turn of the person's, written with another model than
+     * {@link DELEGATING_TURN_SETTINGS}.
+     */
+    const laterTurnSettings: TurnSettings = Object.freeze({
+      ...DELEGATING_TURN_SETTINGS,
+      model: "qwen/qwen3-14b"
+    })
+
     const services = openDelegationTestServices()
     const lead = startPersonTurn(services)
     const conversationId = lead.turn.conversation.id
@@ -465,14 +465,14 @@ describe("startDueWakeUpTurn", () => {
     const later = startPersonTurn(
       services,
       { kind: "existing", id: conversationId },
-      LATER_TURN_SETTINGS
+      laterTurnSettings
     )
     await services.resolveReply(later.turn.assistantMessage.id, "completed")
 
     await services.resolveReply(job.replyId, "completed")
 
     const { options } = findOnlyWakeUpTurn(services)
-    expect(options.settings).toBe(LATER_TURN_SETTINGS)
+    expect(options.settings).toBe(laterTurnSettings)
     expect(options.turn.assistantMessage.model).toBe("qwen/qwen3-14b")
   })
 

@@ -74,13 +74,6 @@ const RESERVED_OFFERED_TOOL_MESSAGE =
   "A request does not offer read_attachment, read_my_state, find_agents, read_agent_state, report_progress, or stop_job; the backend adds them to a turn itself."
 
 /**
- * Refusal of a request that names a tool the backend adds itself as switched
- * off or unable to run.
- */
-const RESERVED_UNOFFERED_TOOL_MESSAGE =
-  "A request does not name read_attachment, read_my_state, find_agents, read_agent_state, report_progress, or stop_job as switched off or unable to run; they have no switch and the backend adds them to a turn itself."
-
-/**
  * Builds the request form of a text attachment.
  *
  * @param name - Attachment name.
@@ -205,12 +198,6 @@ async function* createChunkStream(
   yield* chunks
 }
 
-/** The request model as the inventory lists a model trained for tool use. */
-const TOOL_MODEL_INFO: DownloadedLlmModel = Object.freeze({
-  ...createDownloadedLlmModel({ modelKey: NEW_CONVERSATION_REQUEST.model }),
-  trainedForToolUse: true
-})
-
 /**
  * Registers the chat route on a test application whose turns are stored for
  * real and whose request model is trained for tool use.
@@ -218,9 +205,15 @@ const TOOL_MODEL_INFO: DownloadedLlmModel = Object.freeze({
  * @returns The test application.
  */
 async function createStateToolApp(): Promise<ChatRouteTestApp> {
+  /** The request model as the inventory lists a model trained for tool use. */
+  const toolModelInfo: DownloadedLlmModel = Object.freeze({
+    ...createDownloadedLlmModel({ modelKey: NEW_CONVERSATION_REQUEST.model }),
+    trainedForToolUse: true
+  })
+
   const testApp = await createChatRouteTestApp()
   registerStoringChatRoute(testApp)
-  testApp.listDownloadedLlmModels.mockResolvedValue([TOOL_MODEL_INFO])
+  testApp.listDownloadedLlmModels.mockResolvedValue([toolModelInfo])
   return testApp
 }
 
@@ -1075,6 +1068,13 @@ describe("updateFastifyWithChatRoute", () => {
     }
   )
 
+  /**
+   * Refusal of a request that names a tool the backend adds itself as switched
+   * off or unable to run.
+   */
+  const reservedUnofferedToolMessage =
+    "A request does not name read_attachment, read_my_state, find_agents, read_agent_state, report_progress, or stop_job as switched off or unable to run; they have no switch and the backend adds them to a turn itself."
+
   it.each(
     [
       "read_attachment",
@@ -1100,13 +1100,13 @@ describe("updateFastifyWithChatRoute", () => {
         name,
         "named as switched off",
         { switchedOffToolNames: [name] },
-        RESERVED_UNOFFERED_TOOL_MESSAGE
+        reservedUnofferedToolMessage
       ],
       [
         name,
         "named as unable to run",
         { unavailableTools: [{ name, reason: "page-reader-not-ready" }] },
-        RESERVED_UNOFFERED_TOOL_MESSAGE
+        reservedUnofferedToolMessage
       ]
     ])
   )(

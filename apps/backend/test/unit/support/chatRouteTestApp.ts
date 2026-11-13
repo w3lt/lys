@@ -86,12 +86,6 @@ const CHAT_PATH = "/api/v1/chat"
 const MCP_TEST_OPENING_TIMEOUT_MILLISECONDS = 10_000
 
 /**
- * Most title requests the chat route test app's turn start makes for one
- * turn.
- */
-const TEST_TITLE_GENERATION_MAX_ATTEMPTS = 2
-
-/**
  * System prompts of the built-in agents in the chat route test app; each
  * differs from the other and from every stored prompt, so a case can tell
  * which one the model received.
@@ -373,12 +367,18 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
  * turn start.
  * @remarks Title requests and loaded checks go through `app.chatService` and
  * `app.llmService` when they run, so a case's spies on them apply. A turn
- * gets at most {@link TEST_TITLE_GENERATION_MAX_ATTEMPTS} title requests.
+ * gets at most two title requests.
  */
 function registerTestTurnStart(
   app: FastifyInstance,
   generations: ReplyGenerationRegistry
 ): void {
+  /**
+   * Most title requests the chat route test app's turn start makes for one
+   * turn.
+   */
+  const testTitleGenerationMaxAttempts = 2
+
   const turns = app.conversationTurns
   const dependencies: TurnStartDependencies = {
     generations,
@@ -392,7 +392,7 @@ function registerTestTurnStart(
     findLoadedContextLength: async (model) =>
       (await app.llmService.findLlmContextMeasurement(model, []))
         ?.contextLength,
-    titleGenerationMaxAttempts: TEST_TITLE_GENERATION_MAX_ATTEMPTS,
+    titleGenerationMaxAttempts: testTitleGenerationMaxAttempts,
     toolApprovals: app.toolApprovalService
   }
   app.decorate("replyGenerations", generations)

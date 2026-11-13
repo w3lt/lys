@@ -19,10 +19,6 @@ import { createInterruptedJobReports } from "../delegation/jobReports"
 import SqliteJobTurnTransaction from "../delegation/sqliteJobTurnTransaction"
 import { findConversation } from "./findConversation"
 
-/** What a user message fails with when its call does not fit its author. */
-const JOB_CALL_AUTHOR_MESSAGE =
-  "A job call is given exactly with a delegator's message"
-
 /**
  * Marks the waiting and running tool calls of one conversation's streaming
  * replies as interrupted; bound to the timestamp, then the conversation.
@@ -242,6 +238,10 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
     message: ConversationUserMessage,
     jobCallId: string | undefined
   ): void {
+    /** What a user message fails with when its call does not fit its author. */
+    const jobCallAuthorMessage =
+      "A job call is given exactly with a delegator's message"
+
     const insertMessage = this.#statements.getStatement(
       `INSERT INTO conversation_messages
     (id, conversation_id, role, content, created_at, origin, job_call_id)
@@ -249,7 +249,7 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
     )
     const isJobMessage = message.origin === "delegator"
     if ((jobCallId !== undefined) !== isJobMessage)
-      throw new Error(JOB_CALL_AUTHOR_MESSAGE)
+      throw new Error(jobCallAuthorMessage)
     insertMessage.run(
       message.id,
       conversationId,

@@ -54,20 +54,6 @@ type StoredJobTurn = Readonly<{
   job: Job
 }>
 
-/** A job message has no attachments: the agent sees only the instructions. */
-const NO_ATTACHMENTS: readonly ConversationAttachmentDraft[] = Object.freeze([])
-
-/** Why a message is refused when its conversation is no longer stored. */
-const CONVERSATION_MISSING_REFUSAL: JobMessageRefusal = Object.freeze({
-  kind: "conversation-missing"
-})
-
-/** Answer to a job message whose conversation is no longer stored. */
-const CONVERSATION_MISSING: RefusedJobMessage = Object.freeze({
-  status: "refused",
-  refusal: CONVERSATION_MISSING_REFUSAL
-})
-
 /**
  * Sends one job message from a turn's conversation, in one synchronous step:
  * checks it, stores the job turn, and starts the job's reply.
@@ -126,7 +112,7 @@ export function createJobMessage(
  * reporter.
  * @param request - The delegating turn and what its call asks.
  * @param target - The agent and the job the message goes to.
- * @returns `sent` once the reply started; {@link CONVERSATION_MISSING}
+ * @returns `sent` once the reply started; the refusal `conversation-missing`
  * when the turn cannot be stored because its conversation or job is gone,
  * which stores nothing.
  * @throws As {@link createJobMessage} does.
@@ -146,8 +132,19 @@ function sendJobMessage(
   request: JobMessageRequest,
   target: FoundJobMessageTarget
 ): JobMessageOutcome {
+  /** Why a message is refused when its conversation is no longer stored. */
+  const conversationMissingRefusal: JobMessageRefusal = Object.freeze({
+    kind: "conversation-missing"
+  })
+
+  /** Answer to a job message whose conversation is no longer stored. */
+  const conversationMissing: RefusedJobMessage = Object.freeze({
+    status: "refused",
+    refusal: conversationMissingRefusal
+  })
+
   const stored = saveJobTurn(runtime, request, target.job)
-  if (stored === undefined) return CONVERSATION_MISSING
+  if (stored === undefined) return conversationMissing
   const { context, draft } = request
   const parentConversationId = context.turn.conversation.id
   const generation = runtime.startTurn({
@@ -246,6 +243,11 @@ function buildJobTurnOptions(
   { context, draft }: JobMessageRequest,
   job: Job | undefined
 ): CreateConversationTurnOptions {
+  /** A job message has no attachments: the agent sees only the instructions. */
+  const noAttachments: readonly ConversationAttachmentDraft[] = Object.freeze(
+    []
+  )
+
   const conversation = buildJobTurnTarget(
     context.turn.conversation.id,
     draft,
@@ -258,7 +260,7 @@ function buildJobTurnOptions(
   const userMessage: ConversationTurnUserMessage = {
     id: uuidv7(),
     content: draft.instructions,
-    attachments: NO_ATTACHMENTS,
+    attachments: noAttachments,
     author
   }
   return { conversation, userMessage, model: context.settings.model }

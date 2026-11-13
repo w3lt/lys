@@ -27,22 +27,6 @@ export type AgentIdentity = Readonly<{
 }>
 
 /**
- * Permissions of each role; the tools an agent is offered and every check of
- * a state read or an agent search follow them.
- */
-const AGENT_ROLE_PERMISSIONS: Readonly<
-  Record<AgentRole, readonly AgentPermission[]>
-> = Object.freeze({
-  leader: Object.freeze<AgentPermission[]>([
-    "read-own-state",
-    "find-agents",
-    "read-any-state",
-    "delegate-work"
-  ]),
-  member: Object.freeze<AgentPermission[]>(["read-own-state", "take-work"])
-})
-
-/**
  * Finds the role of an agent from its kind.
  * @param kind - Whether the agent ships with the backend or was stored.
  * @returns `leader` for a built-in agent, `member` for a stored one.
@@ -55,12 +39,27 @@ export function calculateAgentRole(kind: "built-in" | "custom"): AgentRole {
  * Tells whether a role grants a permission.
  * @param role - Role of the agent that asks.
  * @param permission - What it asks to do.
- * @returns True when {@link AGENT_ROLE_PERMISSIONS} lists the permission for
- * the role.
+ * @returns True when the role's permissions include the permission.
  */
 export function hasAgentPermission(
   role: AgentRole,
   permission: AgentPermission
 ): boolean {
-  return AGENT_ROLE_PERMISSIONS[role].includes(permission)
+  /**
+   * Permissions of each role; the tools an agent is offered and every check of
+   * a state read or an agent search follow them.
+   */
+  const agentRolePermissions: Readonly<
+    Record<AgentRole, readonly AgentPermission[]>
+  > = Object.freeze({
+    leader: Object.freeze<AgentPermission[]>([
+      "read-own-state",
+      "find-agents",
+      "read-any-state",
+      "delegate-work"
+    ]),
+    member: Object.freeze<AgentPermission[]>(["read-own-state", "take-work"])
+  })
+
+  return agentRolePermissions[role].includes(permission)
 }

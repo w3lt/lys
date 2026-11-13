@@ -4,40 +4,6 @@ import { isAbsolute, join } from "node:path"
 import { readPrompt } from "./utils/prompts"
 import * as z from "zod"
 
-/**
- * Title-generation attempts allowed in one chat turn, applied as
- * `titleGenerationMaxAttempts` by {@link loadBackendConfig}. No other source
- * overrides it.
- */
-const TITLE_GENERATION_MAX_ATTEMPTS = 3
-
-/**
- * Generated-title length limit in Unicode code points, applied as
- * `generatedTitleMaxLength` by {@link loadBackendConfig}. No other source
- * overrides it.
- */
-const GENERATED_TITLE_MAX_LENGTH = 100
-
-/**
- * Replies each live agent writes at once, applied as `agentRequestSlotCount`
- * by {@link loadBackendConfig}. No other source overrides it.
- */
-const AGENT_REQUEST_SLOT_COUNT = 2
-
-/**
- * Replies that may wait for a free request slot of one agent, applied as
- * `agentWaitingRequestLimit` by {@link loadBackendConfig}. No other source
- * overrides it.
- */
-const AGENT_WAITING_REQUEST_LIMIT = 8
-
-/**
- * Job messages agents may send in one main conversation since the person's
- * last message there, applied as `agentJobMessageLimit` by
- * {@link loadBackendConfig}. No other source overrides it.
- */
-const AGENT_JOB_MESSAGE_LIMIT = 12
-
 /** Validates a TCP port that names one fixed endpoint, from 1 to 65535 inclusive. */
 const tcpPortSchema = z.int().min(1).max(65_535)
 
@@ -251,6 +217,33 @@ export type BackendConfig = z.infer<typeof backendConfigSchema>
  * workspace build of the email server in development.
  */
 export function loadBackendConfig(): BackendConfig {
+  /**
+   * Title-generation attempts allowed in one chat turn. No other source
+   * overrides it.
+   */
+  const titleGenerationMaxAttempts = 3
+
+  /**
+   * Generated-title length limit in Unicode code points. No other source
+   * overrides it.
+   */
+  const generatedTitleMaxLength = 100
+
+  /** Replies each live agent writes at once. No other source overrides it. */
+  const agentRequestSlotCount = 2
+
+  /**
+   * Replies that may wait for a free request slot of one agent. No other source
+   * overrides it.
+   */
+  const agentWaitingRequestLimit = 8
+
+  /**
+   * Job messages agents may send in one main conversation since the person's
+   * last message there. No other source overrides it.
+   */
+  const agentJobMessageLimit = 12
+
   const lysHome = parseLysHome(process.env.LYS_HOME)
   return backendConfigSchema.parse({
     backendHost: BACKEND_HOST,
@@ -267,11 +260,11 @@ export function loadBackendConfig(): BackendConfig {
     caliginiaSystemPrompt: readPrompt("caliginia-system"),
     lysipteraSystemPrompt: readPrompt("lysiptera-system"),
     titleGenerationPrompt: readPrompt("title-generation"),
-    titleGenerationMaxAttempts: TITLE_GENERATION_MAX_ATTEMPTS,
-    generatedTitleMaxLength: GENERATED_TITLE_MAX_LENGTH,
-    agentRequestSlotCount: AGENT_REQUEST_SLOT_COUNT,
-    agentWaitingRequestLimit: AGENT_WAITING_REQUEST_LIMIT,
-    agentJobMessageLimit: AGENT_JOB_MESSAGE_LIMIT
+    titleGenerationMaxAttempts,
+    generatedTitleMaxLength,
+    agentRequestSlotCount,
+    agentWaitingRequestLimit,
+    agentJobMessageLimit
   } satisfies z.input<typeof backendConfigSchema>)
 }
 

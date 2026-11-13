@@ -172,9 +172,6 @@ type SavedTurn = Readonly<{
 /** Outcome of storing a turn: the stored turn, or why no agent answers it. */
 type SavedTurnOutcome = SavedTurn | MissingRequestedAgentOutcome
 
-/** Client tools of a request that offered none. */
-const NO_REQUESTED_TOOLS: readonly ToolDefinition[] = Object.freeze([])
-
 /**
  * Installs the chat endpoint, which stores a turn, starts its generation, and
  * follows that generation on the response stream.
@@ -714,10 +711,13 @@ function buildTurnSettings(
   body: ChatApiRequestBody,
   accepted: AcceptedTurnRequest
 ): TurnSettings {
+  /** Client tools of a request that offered none. */
+  const noRequestedTools: readonly ToolDefinition[] = Object.freeze([])
+
   return {
     model: body.model,
     generationOptions: body.generationOptions,
-    clientTools: body.tools?.definitions ?? NO_REQUESTED_TOOLS,
+    clientTools: body.tools?.definitions ?? noRequestedTools,
     builtInTools: accepted.builtInTools,
     mcpTools: accepted.mcpTools,
     offersDelegateWork: accepted.offersDelegateWork,

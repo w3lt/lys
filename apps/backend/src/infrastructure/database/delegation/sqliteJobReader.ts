@@ -7,11 +7,6 @@ import type {
 } from "../databaseTransactions"
 import { findJobByNumber, findJobRecord, listConversationJobs } from "./jobs"
 
-/** Validates the number of job messages read as one count. */
-const jobMessageCountSchema = z.strictObject({
-  jobMessageCount: z.int().nonnegative()
-})
-
 /**
  * Reads how many job messages a conversation's jobs received since the person
  * last wrote in it, inside the caller's read transaction.
@@ -30,6 +25,11 @@ function getJobMessageCountSincePersonMessage(
   statements: DatabaseStatementCompiler,
   parentConversationId: string
 ): number {
+  /** Validates the number of job messages read as one count. */
+  const jobMessageCountSchema = z.strictObject({
+    jobMessageCount: z.int().nonnegative()
+  })
+
   const { jobMessageCount } = jobMessageCountSchema.parse(
     statements
       .getStatement(

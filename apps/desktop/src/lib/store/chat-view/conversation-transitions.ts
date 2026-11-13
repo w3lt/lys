@@ -184,12 +184,6 @@ export function isCompletedConversationMessage(
   return message.role === "user" || message.status !== "streaming"
 }
 
-/** Sources of a conversation that has none. */
-const NO_SOURCES: readonly ConversationSource[] = Object.freeze([])
-
-/** Jobs of a conversation that has none. */
-const NO_JOBS: readonly Job[] = Object.freeze([])
-
 /**
  * Combines backend metadata and messages with matching local history.
  *
@@ -204,6 +198,12 @@ const NO_JOBS: readonly Job[] = Object.freeze([])
 export function startConversationTurn(
   options: StartConversationTurnOptions
 ): ChatViewConversation {
+  /** Sources of a conversation that has none. */
+  const noSources: readonly ConversationSource[] = Object.freeze([])
+
+  /** Jobs of a conversation that has none. */
+  const noJobs: readonly Job[] = Object.freeze([])
+
   const previousConversation =
     options.previousConversation?.id === options.conversationMetadata.id
       ? options.previousConversation
@@ -221,8 +221,8 @@ export function startConversationTurn(
   return Object.freeze({
     ...options.conversationMetadata,
     messages,
-    sources: previousConversation?.sources ?? NO_SOURCES,
-    jobs: previousConversation?.jobs ?? NO_JOBS
+    sources: previousConversation?.sources ?? noSources,
+    jobs: previousConversation?.jobs ?? noJobs
   })
 }
 

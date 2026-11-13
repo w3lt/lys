@@ -82,22 +82,6 @@ export const FIRST_MEMBER_DEFINITION = Object.freeze({
   systemPrompt: "You research what you are asked about."
 })
 
-/** Definition of {@link SECOND_MEMBER}. */
-const SECOND_MEMBER_DEFINITION = Object.freeze({
-  code: SECOND_MEMBER,
-  name: "Archivist",
-  bio: "Keeps records.",
-  systemPrompt: "You keep records of what you are given."
-})
-
-/** Definition of {@link DELETED_MEMBER}, before it was deleted. */
-const DELETED_MEMBER_DEFINITION = Object.freeze({
-  code: DELETED_MEMBER,
-  name: "Scribe",
-  bio: "Writes things down.",
-  systemPrompt: "You write down what you are told."
-})
-
 /** Sampling of every turn a case starts. */
 const TEST_GENERATION_OPTIONS = Object.freeze({ temperature: 0.4 })
 
@@ -288,47 +272,6 @@ type CaseDependencies = Pick<
   "hub" | "reportEvent" | "agentJobMessageLimit"
 >
 
-/** Ending of a reply whose generation was stopped or disposed. */
-const STOPPED_REPLY_ENDING: ScriptedReplyEnding = Object.freeze({
-  status: "interrupted",
-  errorMessage: undefined
-})
-
-/** Final state of a reply a case ends as completed. */
-const COMPLETED_REPLY: AssistantMessageCompletion = Object.freeze({
-  status: "completed",
-  finishReason: "stop"
-})
-
-/** Built-in agents of every case's agent service: Caliginia and Lysiptera. */
-const TEST_BUILT_IN_AGENTS = buildBuiltInAgents({
-  caliginia: "You are Caliginia.",
-  lysiptera: "You are Lysiptera."
-})
-
-/**
- * Stored agents of every case's agent service, in creation order: the two
- * members that take work, then {@link DELETED_MEMBER}, which is deleted
- * once created.
- */
-const MEMBER_DEFINITIONS = Object.freeze([
-  FIRST_MEMBER_DEFINITION,
-  SECOND_MEMBER_DEFINITION,
-  DELETED_MEMBER_DEFINITION
-])
-
-/**
- * Request limits of every live agent of a case: two replies at once, one
- * more waiting.
- */
-const REQUEST_LIMITS = Object.freeze({ slotCount: 2, waitingLimit: 1 })
-
-/** Model access no case's agent calls: the scripted turn start runs none. */
-const UNUSED_REPLY_MODEL = Object.freeze({
-  openReplyStream: () =>
-    Promise.reject(new Error("Unexpected model call in a delegation case"))
-} satisfies ReplyModel)
-
 /**
  * Opens a delegation runtime over stores the current test owns.
  *
@@ -479,10 +422,16 @@ function buildDelegationDependencies(
 function createTestAgentLookups(
   conversation: ConversationTestServices
 ): DelegationAgentLookups {
+  /** Built-in agents of every case's agent service: Caliginia and Lysiptera. */
+  const testBuiltInAgents = buildBuiltInAgents({
+    caliginia: "You are Caliginia.",
+    lysiptera: "You are Lysiptera."
+  })
+
   const recordStore = SqliteAgentRecordStore.create(conversation.database)
   const agentService = new AgentService({
     recordStore,
-    builtInAgents: TEST_BUILT_IN_AGENTS
+    builtInAgents: testBuiltInAgents
   })
   if (agentService.findAgent(FIRST_MEMBER) === undefined)
     saveTestMembers(agentService)
@@ -499,14 +448,41 @@ function createTestAgentLookups(
 }
 
 /**
- * Stores the members of a case in the order of {@link MEMBER_DEFINITIONS},
+ * Stores the members of a case in the order of `memberDefinitions`,
  * then deletes {@link DELETED_MEMBER}.
  *
  * @param agentService - Agent service over a database that holds no member.
  * @throws If a member cannot be stored or deleted.
  */
 function saveTestMembers(agentService: AgentService): void {
-  for (const definition of MEMBER_DEFINITIONS)
+  /** Definition of {@link SECOND_MEMBER}. */
+  const secondMemberDefinition = Object.freeze({
+    code: SECOND_MEMBER,
+    name: "Archivist",
+    bio: "Keeps records.",
+    systemPrompt: "You keep records of what you are given."
+  })
+
+  /** Definition of {@link DELETED_MEMBER}, before it was deleted. */
+  const deletedMemberDefinition = Object.freeze({
+    code: DELETED_MEMBER,
+    name: "Scribe",
+    bio: "Writes things down.",
+    systemPrompt: "You write down what you are told."
+  })
+
+  /**
+   * Stored agents of every case's agent service, in creation order: the two
+   * members that take work, then {@link DELETED_MEMBER}, which is deleted once
+   * created.
+   */
+  const memberDefinitions = Object.freeze([
+    FIRST_MEMBER_DEFINITION,
+    secondMemberDefinition,
+    deletedMemberDefinition
+  ])
+
+  for (const definition of memberDefinitions)
     if (agentService.createAgent(definition) === undefined)
       throw new Error(`The member ${definition.code} could not be stored`)
   if (agentService.deleteAgent(DELETED_MEMBER) !== "deleted")
@@ -520,7 +496,7 @@ function saveTestMembers(agentService: AgentService): void {
  * @param agentService - The agents it makes live.
  * @param conversation - The history the live agents title their requests'
  * conversations from.
- * @returns The service; each live agent has {@link REQUEST_LIMITS}, a meter
+ * @returns The service; each live agent has `requestLimits`, a meter
  * that finds every model loaded with room to spare, and model access that
  * rejects.
  */
@@ -528,16 +504,28 @@ function createTestAgentRuntimeService(
   agentService: AgentService,
   conversation: Pick<ConversationTestServices, "history">
 ): AgentRuntimeService {
+  /**
+   * Request limits of every live agent of a case: two replies at once, one more
+   * waiting.
+   */
+  const requestLimits = Object.freeze({ slotCount: 2, waitingLimit: 1 })
+
+  /** Model access no case's agent calls: the scripted turn start runs none. */
+  const unusedReplyModel = Object.freeze({
+    openReplyStream: () =>
+      Promise.reject(new Error("Unexpected model call in a delegation case"))
+  } satisfies ReplyModel)
+
   const replyContextMeter = createRoomyReplyContextMeter()
   return new AgentRuntimeService({
     agents: agentService,
-    replyModel: UNUSED_REPLY_MODEL,
+    replyModel: unusedReplyModel,
     replyContextMeter,
     findConversationTitle: (conversationId) =>
       buildConversationTitleLookup(
         conversation.history.getConversation(conversationId)
       ),
-    requestLimits: REQUEST_LIMITS
+    requestLimits
   })
 }
 
@@ -610,9 +598,9 @@ function startScriptedTurn(
  * reply.
  * @param abortSignal - Cancellation of the reply task, aborted when its
  * generation is stopped or disposed.
- * @returns The case's ending, or {@link STOPPED_REPLY_ENDING} once the
- * signal aborts first. An ending the case gave before the stop wins, also
- * when both came before the task started.
+ * @returns The case's ending, or an `interrupted` ending without an error
+ * message once the signal aborts first. An ending the case gave before the
+ * stop wins, also when both came before the task started.
  */
 async function waitForReplyEnding(
   ending: Promise<ScriptedReplyEnding>,
@@ -620,7 +608,13 @@ async function waitForReplyEnding(
 ): Promise<ScriptedReplyEnding> {
   const stopped = Promise.withResolvers<ScriptedReplyEnding>()
   const resolveStopped = () => {
-    stopped.resolve(STOPPED_REPLY_ENDING)
+    /** Ending of a reply whose generation was stopped or disposed. */
+    const stoppedReplyEnding: ScriptedReplyEnding = Object.freeze({
+      status: "interrupted",
+      errorMessage: undefined
+    })
+
+    stopped.resolve(stoppedReplyEnding)
   }
   abortSignal.addEventListener("abort", resolveStopped, { once: true })
   if (abortSignal.aborted) resolveStopped()
@@ -668,13 +662,19 @@ async function runScriptedReply(
  * Builds the final state a scripted reply is stored in.
  *
  * @param status - State the case ends the reply in.
- * @returns {@link COMPLETED_REPLY}, which finished with `stop`, for a
+ * @returns The `completed` state, which finished with `stop`, for a
  * completed reply; otherwise the state alone.
  */
 function buildReplyCompletion(
   status: ScriptedReplyStatus
 ): AssistantMessageCompletion {
-  return status === "completed" ? COMPLETED_REPLY : Object.freeze({ status })
+  /** Final state of a reply a case ends as completed. */
+  const completedReply: AssistantMessageCompletion = Object.freeze({
+    status: "completed",
+    finishReason: "stop"
+  })
+
+  return status === "completed" ? completedReply : Object.freeze({ status })
 }
 
 /**

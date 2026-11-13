@@ -311,22 +311,6 @@ const ENDED_REPLY_ROUND = Object.freeze({
   status: "ended"
 } satisfies ReplyRound)
 
-/** State tools of a turn whose model is not trained for tool use. */
-const NO_AGENT_STATE_TOOLS: readonly TurnBuiltInTool[] = Object.freeze([])
-
-/** Delegation tools of a turn whose model is not trained for tool use. */
-const NO_DELEGATION_TOOLS: readonly TurnBuiltInTool[] = Object.freeze([])
-
-/**
- * The next message as a context measurement sends it: without text, files,
- * or reports.
- */
-const EMPTY_USER_MESSAGE = Object.freeze({
-  content: "",
-  attachments: [],
-  reports: []
-} satisfies AgentContextUserMessage)
-
 /** What the next message of a conversation would be sent with. */
 export type AgentContextInput = Readonly<{
   /** Stored transcript, in conversation order; empty for a new conversation. */
@@ -532,6 +516,16 @@ export default class Agent {
   public async findContextMeasurement(
     input: AgentContextInput
   ): Promise<AgentContextMeasurement | undefined> {
+    /**
+     * The next message as a context measurement sends it: without text, files,
+     * or reports.
+     */
+    const emptyUserMessage = Object.freeze({
+      content: "",
+      attachments: [],
+      reports: []
+    } satisfies AgentContextUserMessage)
+
     const systemPrompt = this.#systemPrompt
     const images: AgentContextImages<ReplyContextImageSides> =
       input.canSeeImages
@@ -548,7 +542,7 @@ export default class Agent {
         jobNote
       ),
       history: input.history,
-      userMessage: EMPTY_USER_MESSAGE,
+      userMessage: emptyUserMessage,
       images
     })
     const tools = buildDefinedToolOffer(
@@ -869,16 +863,22 @@ function buildTurnToolset(
   self: AgentIdentity,
   stateReader: AgentStateReader
 ): AgentToolset {
+  /** State tools of a turn whose model is not trained for tool use. */
+  const noAgentStateTools: readonly TurnBuiltInTool[] = Object.freeze([])
+
+  /** Delegation tools of a turn whose model is not trained for tool use. */
+  const noDelegationTools: readonly TurnBuiltInTool[] = Object.freeze([])
+
   const agentStateTools = turn.trainedForToolUse
     ? buildAgentStateTools({
         self,
         requestId: turn.requestId,
         reader: stateReader
       })
-    : NO_AGENT_STATE_TOOLS
+    : noAgentStateTools
   const delegationTools = turn.trainedForToolUse
     ? buildDelegationTools(self.role, turn.delegation)
-    : NO_DELEGATION_TOOLS
+    : noDelegationTools
   return buildAgentToolset({
     clientTools: turn.clientTools,
     builtInTools: turn.builtInTools,

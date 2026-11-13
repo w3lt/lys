@@ -19,14 +19,6 @@ import {
 } from "../../../support/delegationTestServices"
 import { createTestFastify } from "../../../support/fastifyTestApp"
 
-/** Work a case gives {@link SECOND_MEMBER} beside the moths job. */
-const ARCHIVE_REQUEST: JobMessageRequest = Object.freeze({
-  agentCode: SECOND_MEMBER,
-  title: "Archive",
-  instructions: "File what is known about moths",
-  jobNumber: undefined
-})
-
 /**
  * Creates an application with the HTTP transport and the delegation routes
  * registered over a delegation runtime.
@@ -80,11 +72,19 @@ function listJobStates(
 
 describe("registerDelegationRoutes", () => {
   it("POST /api/v1/chat/:conversationId/jobs/stop answers 204 and stops the working jobs", async () => {
+    /** Work a case gives {@link SECOND_MEMBER} beside the moths job. */
+    const archiveRequest: JobMessageRequest = Object.freeze({
+      agentCode: SECOND_MEMBER,
+      title: "Archive",
+      instructions: "File what is known about moths",
+      jobNumber: undefined
+    })
+
     const { app, services } = await createDelegationRouteApp()
     const lead = startPersonTurn(services)
     const conversationId = lead.turn.conversation.id
     sendJobMessage(services, lead, MOTHS_REQUEST)
-    sendJobMessage(services, lead, ARCHIVE_REQUEST)
+    sendJobMessage(services, lead, archiveRequest)
 
     const response = await app.inject({
       method: stopConversationJobsApi.method,

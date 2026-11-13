@@ -42,12 +42,9 @@ const NOW = "2026-03-04T05:06:07.890Z"
 const EXISTING_CONVERSATION_ID = createFixtureUuidV7(1)
 
 /**
- * Job number 1 of {@link EXISTING_CONVERSATION_ID}, as the job fixtures
- * store it.
+ * The `delegate_work` call that sent the first message of job 1 of
+ * {@link EXISTING_CONVERSATION_ID}.
  */
-const JOB_ID = createFixtureUuidV7(10)
-
-/** The `delegate_work` call that sent the first message of {@link JOB_ID}. */
 const JOB_CALL_ID = createFixtureUuidV7(12)
 
 /** What a turn says when its message and its conversation do not fit. */
@@ -198,51 +195,6 @@ type MisfitTurnRow = readonly [
   label: string,
   conversation: ConversationTurnTarget,
   userMessage: ConversationTurnUserMessage
-]
-
-/**
- * One misfit turn for each kind of target and each author it refuses, over
- * {@link EXISTING_CONVERSATION_ID} and its job {@link JOB_ID}.
- */
-const MISFIT_TURNS: readonly MisfitTurnRow[] = [
-  [
-    "a delegator's message that starts a main conversation",
-    createNewConversationTarget("caliginia"),
-    createTurnJobMessage("Find out what moths eat.", JOB_CALL_ID)
-  ],
-  [
-    "a delegator's message that continues a main conversation",
-    { kind: "existing", id: EXISTING_CONVERSATION_ID },
-    createTurnJobMessage("Find out what moths eat.", JOB_CALL_ID)
-  ],
-  [
-    "a person's message that starts a job",
-    createNewJobTarget(
-      EXISTING_CONVERSATION_ID,
-      "researcher",
-      "Find what moths eat"
-    ),
-    createTurnUserMessage("Find out what moths eat.")
-  ],
-  [
-    "a wake-up message that starts a job",
-    createNewJobTarget(
-      EXISTING_CONVERSATION_ID,
-      "researcher",
-      "Find what moths eat"
-    ),
-    createTurnWakeUpMessage("Reports from your jobs arrived.")
-  ],
-  [
-    "a person's message that continues a job as a job message",
-    { kind: "existing-job", id: JOB_ID, title: "Now look at butterflies" },
-    createTurnUserMessage("Look at butterflies too.")
-  ],
-  [
-    "a wake-up message that continues a job as a job message",
-    { kind: "existing-job", id: JOB_ID, title: "Now look at butterflies" },
-    createTurnWakeUpMessage("Reports from your jobs arrived.")
-  ]
 ]
 
 /**
@@ -993,7 +945,58 @@ describe("createConversationTurn", () => {
     expect(webSources).toEqual([{ number: 3, url: SILK_URL, title: "Silk" }])
   })
 
-  it.each(MISFIT_TURNS)(
+  /**
+   * Job number 1 of {@link EXISTING_CONVERSATION_ID}, as the job fixtures store
+   * it.
+   */
+  const jobId = createFixtureUuidV7(10)
+
+  /**
+   * One misfit turn for each kind of target and each author it refuses, over
+   * {@link EXISTING_CONVERSATION_ID} and its job `jobId`.
+   */
+  const misfitTurns: readonly MisfitTurnRow[] = [
+    [
+      "a delegator's message that starts a main conversation",
+      createNewConversationTarget("caliginia"),
+      createTurnJobMessage("Find out what moths eat.", JOB_CALL_ID)
+    ],
+    [
+      "a delegator's message that continues a main conversation",
+      { kind: "existing", id: EXISTING_CONVERSATION_ID },
+      createTurnJobMessage("Find out what moths eat.", JOB_CALL_ID)
+    ],
+    [
+      "a person's message that starts a job",
+      createNewJobTarget(
+        EXISTING_CONVERSATION_ID,
+        "researcher",
+        "Find what moths eat"
+      ),
+      createTurnUserMessage("Find out what moths eat.")
+    ],
+    [
+      "a wake-up message that starts a job",
+      createNewJobTarget(
+        EXISTING_CONVERSATION_ID,
+        "researcher",
+        "Find what moths eat"
+      ),
+      createTurnWakeUpMessage("Reports from your jobs arrived.")
+    ],
+    [
+      "a person's message that continues a job as a job message",
+      { kind: "existing-job", id: jobId, title: "Now look at butterflies" },
+      createTurnUserMessage("Look at butterflies too.")
+    ],
+    [
+      "a wake-up message that continues a job as a job message",
+      { kind: "existing-job", id: jobId, title: "Now look at butterflies" },
+      createTurnWakeUpMessage("Reports from your jobs arrived.")
+    ]
+  ]
+
+  it.each(misfitTurns)(
     "refuses %s before any write",
     (_label, conversation, userMessage) => {
       const records = openSqliteConversationRecords()
@@ -1004,7 +1007,7 @@ describe("createConversationTurn", () => {
         userMessage,
         model: "qwen/qwen3-8b"
       }
-      const conversationIds = [mainId, JOB_ID, conversation.id]
+      const conversationIds = [mainId, jobId, conversation.id]
       const before = listReadConversations(
         records.recordReader,
         conversationIds

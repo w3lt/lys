@@ -99,16 +99,6 @@ const PLAIN_TURN_SETTINGS: TurnSettings = Object.freeze({
 /** Attachments of a turn whose message carries none. */
 const NO_ATTACHMENTS: readonly ConversationAttachmentDraft[] = Object.freeze([])
 
-/** A photo the person attached, before its conversation numbers it. */
-const PHOTO_ATTACHMENT: ConversationAttachmentDraft = Object.freeze({
-  kind: "image",
-  name: "photo.png",
-  sizeBytes: 33,
-  mediaType: "image/png",
-  width: 64,
-  height: 32
-})
-
 /** Reply a case registers a generation for; no conversation stores it. */
 const UNSTORED_REPLY_TARGET: ReplyTarget = Object.freeze({
   conversationId: createFixtureUuidV7(1),
@@ -205,6 +195,31 @@ function updateServiceClose(
     closeLog.push(name)
     await close()
   })
+}
+
+/**
+ * Starts a generation for {@link UNSTORED_REPLY_TARGET} whose reply task stays
+ * pending until the case settles it, without a title task.
+ *
+ * @param generations - Registry that admits the generation.
+ * @returns The reply task. It begins after the current synchronous step, so
+ * the case reads its context after a barrier such as `waitForMicrotasks`.
+ * @remarks The reply task is resolved when the test finishes, so a case that
+ * fails early does not leave the bundle's close waiting.
+ */
+function startControlledGeneration(
+  generations: ReplyGenerationRegistry
+): ControlledReplyTask {
+  const replyTask = new ControlledReplyTask()
+  generations.startReplyGeneration(UNSTORED_REPLY_TARGET, {
+    startReplyTask: (context) => replyTask.start(context),
+    startTitleTask: undefined,
+    reportTaskFailure: vi.fn()
+  })
+  onTestFinished(() => {
+    replyTask.resolve()
+  })
+  return replyTask
 }
 
 /**
@@ -751,6 +766,16 @@ describe("createSingletonServices", () => {
   })
 
   it("reads a turn's image from the bundle's attachment file store for a model that sees images", async () => {
+    /** A photo the person attached, before its conversation numbers it. */
+    const photoAttachment: ConversationAttachmentDraft = Object.freeze({
+      kind: "image",
+      name: "photo.png",
+      sizeBytes: 33,
+      mediaType: "image/png",
+      width: 64,
+      height: 32
+    })
+
     const { factories } = createRecordedFactories()
     const services = await createSingletonServices(
       TEST_BACKEND_CONFIG,
@@ -768,7 +793,7 @@ describe("createSingletonServices", () => {
     const { turn, generation } = startHelloTurn(
       services,
       { ...PLAIN_TURN_SETTINGS, canSeeImages: true },
-      [PHOTO_ATTACHMENT]
+      [photoAttachment]
     )
     await generation.settled
 
@@ -1204,15 +1229,7 @@ describe("closeSingletonServices", () => {
     )
     updateServiceClose(services.activityHub, "activity-hub", closeLog)
     const closeMcpServerRegistry = vi.spyOn(services.mcpServerRegistry, "close")
-    const replyTask = new ControlledReplyTask()
-    services.replyGenerations.startReplyGeneration(UNSTORED_REPLY_TARGET, {
-      startReplyTask: (context) => replyTask.start(context),
-      startTitleTask: undefined,
-      reportTaskFailure: vi.fn()
-    })
-    onTestFinished(() => {
-      replyTask.resolve()
-    })
+    const replyTask = startControlledGeneration(services.replyGenerations)
     // The reply task starts here, so the case can observe what was closed
     // at the moment the cleanup cancels it.
     await waitForMicrotasks()

@@ -11,16 +11,6 @@ const CONVERSATION_ID = createFixtureUuidV7(1)
 /** Identity of a job of that conversation. */
 const JOB_ID = createFixtureUuidV7(2)
 
-/** Identity of a wake-up reply of that conversation. */
-const WAKE_UP_REPLY_ID = createFixtureUuidV7(3)
-
-/** Names of the fields every backend log line has, whatever was logged. */
-const COMMON_FIELD_NAMES: ReadonlySet<string> = new Set([
-  "time",
-  "pid",
-  "hostname"
-])
-
 /**
  * Gets the fields of the one line the backend's logger writes for an event.
  *
@@ -30,6 +20,13 @@ const COMMON_FIELD_NAMES: ReadonlySet<string> = new Set([
  * @throws When the logger wrote no line or more than one.
  */
 function getLoggedFields(event: DelegationEvent): Record<string, unknown> {
+  /** Names of the fields every backend log line has, whatever was logged. */
+  const commonFieldNames: ReadonlySet<string> = new Set([
+    "time",
+    "pid",
+    "hostname"
+  ])
+
   const destination = new CapturedLogDestination()
   handleDelegationEvent(createBackendLogger(destination), event)
   const records = destination.records
@@ -37,7 +34,7 @@ function getLoggedFields(event: DelegationEvent): Record<string, unknown> {
   if (record === undefined || records.length !== 1)
     throw new Error(`Expected one log line, got ${records.length}`)
   return Object.fromEntries(
-    Object.entries(record).filter(([name]) => !COMMON_FIELD_NAMES.has(name))
+    Object.entries(record).filter(([name]) => !commonFieldNames.has(name))
   )
 }
 
@@ -121,17 +118,20 @@ describe("handleDelegationEvent", () => {
   })
 
   it("logs a started wake-up turn with its reply and the number of reports", () => {
+    /** Identity of a wake-up reply of that conversation. */
+    const wakeUpReplyId = createFixtureUuidV7(3)
+
     expect(
       getLoggedFields({
         kind: "wake-up-started",
         conversationId: CONVERSATION_ID,
-        assistantMessageId: WAKE_UP_REPLY_ID,
+        assistantMessageId: wakeUpReplyId,
         reportCount: 3
       })
     ).toEqual({
       level: "info",
       conversationId: CONVERSATION_ID,
-      assistantMessageId: WAKE_UP_REPLY_ID,
+      assistantMessageId: wakeUpReplyId,
       reportCount: 3,
       msg: "A wake-up turn started"
     })

@@ -14,12 +14,6 @@ import { createFixtureUuidV7 } from "../../support/conversationFixtures"
 /** Text of the last round of the replies whose end the cases report. */
 const LAST_ROUND_TEXT = "Most moths drink nectar."
 
-/** Paragraph that tells a reply was cut off at the model's length limit. */
-const LENGTH_LIMIT_NOTE = "(The reply was cut off at the model's length limit.)"
-
-/** Text of a failed report whose reply sent no usable error sentence. */
-const UNKNOWN_FAILURE = "The agent's reply failed."
-
 /**
  * Builds a reply of a job as stored once its end is reported.
  *
@@ -44,6 +38,12 @@ function buildEndedJobReply(
 }
 
 describe("buildEndReport", () => {
+  /** Paragraph that tells a reply was cut off at the model's length limit. */
+  const lengthLimitNote = "(The reply was cut off at the model's length limit.)"
+
+  /** Text of a failed report whose reply sent no usable error sentence. */
+  const unknownFailure = "The agent's reply failed."
+
   it.each<
     [
       string,
@@ -72,14 +72,14 @@ describe("buildEndReport", () => {
       buildEndedJobReply("completed", "length"),
       undefined,
       undefined,
-      { kind: "result", content: `${LAST_ROUND_TEXT}\n\n${LENGTH_LIMIT_NOTE}` }
+      { kind: "result", content: `${LAST_ROUND_TEXT}\n\n${lengthLimitNote}` }
     ],
     [
       "completed at the length limit with an empty last round",
       buildEndedJobReply("completed", "length", ""),
       undefined,
       undefined,
-      { kind: "result", content: LENGTH_LIMIT_NOTE }
+      { kind: "result", content: lengthLimitNote }
     ],
     [
       "completed before the stop its delegator asked for took effect",
@@ -100,14 +100,14 @@ describe("buildEndReport", () => {
       buildEndedJobReply("failed", null),
       undefined,
       undefined,
-      { kind: "failed", content: UNKNOWN_FAILURE }
+      { kind: "failed", content: unknownFailure }
     ],
     [
       "failed with a blank error sentence",
       buildEndedJobReply("failed", null),
       undefined,
       " \n",
-      { kind: "failed", content: UNKNOWN_FAILURE }
+      { kind: "failed", content: unknownFailure }
     ],
     [
       "was interrupted by stop_job",

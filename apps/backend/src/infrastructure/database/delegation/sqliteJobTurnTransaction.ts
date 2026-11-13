@@ -6,9 +6,6 @@ import type {
 import type { DatabaseStatementCompiler } from "../databaseTransactions"
 import { listUndeliveredJobReports } from "./jobReports"
 
-/** What a delivery fails with when its report does not wait for one. */
-const REPORT_NOT_WAITING_MESSAGE = "Job report is not waiting for delivery"
-
 /**
  * Reads and writes what one turn changes about jobs through the statement
  * compiler lent to one write operation.
@@ -70,6 +67,9 @@ export default class SqliteJobTurnTransaction implements JobTurnTransaction {
    * `failed` report the check constraint.
    */
   public updateJobReportToDelivered(delivery: JobReportDelivery): void {
+    /** What a delivery fails with when its report does not wait for one. */
+    const reportNotWaitingMessage = "Job report is not waiting for delivery"
+
     const { changes } = this.#statements
       .getStatement(
         `UPDATE job_reports
@@ -83,7 +83,7 @@ export default class SqliteJobTurnTransaction implements JobTurnTransaction {
         sourceNumbers: JSON.stringify(delivery.sourceNumbers),
         reportId: delivery.reportId
       })
-    if (changes !== 1) throw new Error(REPORT_NOT_WAITING_MESSAGE)
+    if (changes !== 1) throw new Error(reportNotWaitingMessage)
   }
 
   /**

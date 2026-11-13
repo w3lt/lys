@@ -69,13 +69,6 @@ const JOB_OFFER: DelegationOffer = Object.freeze({
   job: JOB_TURN
 })
 
-/** Offer of a turn that takes no part in delegation. */
-const NO_OFFER: DelegationOffer = Object.freeze({
-  mayDelegate: false,
-  hasJobs: false,
-  job: undefined
-})
-
 /** Arguments of a `delegate_work` call that starts a new job. */
 const DELEGATE_WORK_ARGUMENTS = Object.freeze({
   agent: "researcher",
@@ -83,25 +76,13 @@ const DELEGATE_WORK_ARGUMENTS = Object.freeze({
   instructions: "Collect this week's news about holograms."
 })
 
-/** Arguments of a `delegate_work` call whose title is blank. */
-const BLANK_TITLE_ARGUMENTS = Object.freeze({
-  ...DELEGATE_WORK_ARGUMENTS,
-  title: "   "
-})
-
 /** Arguments of a `stop_job` call that names job 2. */
 const STOP_JOB_ARGUMENTS = Object.freeze({ job: 2 })
-
-/** Arguments of a `stop_job` call whose number cannot be a job's. */
-const ZERO_JOB_ARGUMENTS = Object.freeze({ job: 0 })
 
 /** Arguments of a `report_progress` call that can run. */
 const REPORT_PROGRESS_ARGUMENTS = Object.freeze({
   note: "Two of five sources are read."
 })
-
-/** Arguments of a `report_progress` call whose note is blank. */
-const BLANK_NOTE_ARGUMENTS = Object.freeze({ note: "   " })
 
 /** Outcome of the job message that started job 1. */
 const SENT_NEW_JOB: JobMessageOutcome = Object.freeze({
@@ -151,63 +132,6 @@ const INVALID_JOB_CALL = Object.freeze({
   status: "invalid",
   message: "The job must be a whole number of 1 or more."
 })
-
-/** Parse outcome of a `report_progress` call whose note cannot run. */
-const INVALID_NOTE_CALL = Object.freeze({
-  status: "invalid",
-  message: "The note must be 1 to 2000 characters long after trimming."
-})
-
-/** Arguments of `delegate_work` as the model is offered them, in order. */
-const DELEGATE_WORK_ARGUMENT_DEFINITIONS = Object.freeze([
-  {
-    type: "string",
-    name: "agent",
-    description: "Code of the agent that should do the work.",
-    required: true
-  },
-  {
-    type: "string",
-    name: "title",
-    description:
-      "A few words that name the work, at most 80 characters on one line. The person sees it on the job's card.",
-    required: true
-  },
-  {
-    type: "string",
-    name: "instructions",
-    description:
-      "Everything the agent needs to do the work. It sees only these instructions and nothing else of this conversation.",
-    required: true
-  },
-  {
-    type: "integer",
-    name: "job",
-    description:
-      "Number of an earlier job of this conversation to continue. Leave it out to start a new job.",
-    required: false
-  }
-])
-
-/** Arguments of `stop_job` as the model is offered them. */
-const STOP_JOB_ARGUMENT_DEFINITIONS = Object.freeze([
-  {
-    type: "integer",
-    name: "job",
-    description: "Number of the job to stop.",
-    required: true
-  }
-])
-
-/** Arguments of `report_progress` as the model is offered them. */
-const REPORT_PROGRESS_ARGUMENT_DEFINITIONS = Object.freeze([
-  {
-    type: "string",
-    name: "note",
-    description: "Where the job stands, at most 2000 characters.",
-    required: true
-  }
-])
 
 /** One offer, the role it is applied for, and the tools it leads to. */
 type OfferCase = [
@@ -372,13 +296,19 @@ async function runDelegationTool(
  * arguments whose title is blank, and the count of job messages it sent.
  */
 function createDelegateWorkHarness(): Promise<BuiltInToolHarness> {
+  /** Arguments of a `delegate_work` call whose title is blank. */
+  const blankTitleArguments = Object.freeze({
+    ...DELEGATE_WORK_ARGUMENTS,
+    title: "   "
+  })
+
   const createJobMessage = vi.fn<TurnDelegation["createJobMessage"]>(
     () => SENT_NEW_JOB
   )
   const harness: BuiltInToolHarness = {
     tool: buildDelegateWorkTool(createJobMessage),
     runnableArguments: DELEGATE_WORK_ARGUMENTS,
-    invalidArguments: BLANK_TITLE_ARGUMENTS,
+    invalidArguments: blankTitleArguments,
     countStartedWork: () => createJobMessage.mock.calls.length
   }
   return Promise.resolve(harness)
@@ -391,13 +321,16 @@ function createDelegateWorkHarness(): Promise<BuiltInToolHarness> {
  * run, one that cannot be a job's, and the count of stops it asked for.
  */
 function createStopJobHarness(): Promise<BuiltInToolHarness> {
+  /** Arguments of a `stop_job` call whose number cannot be a job's. */
+  const zeroJobArguments = Object.freeze({ job: 0 })
+
   const stopJob = vi.fn<TurnDelegation["stopJob"]>((jobNumber) =>
     Promise.resolve({ status: "stopped", jobNumber })
   )
   const harness: BuiltInToolHarness = {
     tool: buildStopJobTool(stopJob),
     runnableArguments: STOP_JOB_ARGUMENTS,
-    invalidArguments: ZERO_JOB_ARGUMENTS,
+    invalidArguments: zeroJobArguments,
     countStartedWork: () => stopJob.mock.calls.length
   }
   return Promise.resolve(harness)
@@ -410,19 +343,29 @@ function createStopJobHarness(): Promise<BuiltInToolHarness> {
  * blank note, and the count of notes it stored.
  */
 function createReportProgressHarness(): Promise<BuiltInToolHarness> {
+  /** Arguments of a `report_progress` call whose note is blank. */
+  const blankNoteArguments = Object.freeze({ note: "   " })
+
   const createProgressNote = vi.fn<TurnDelegation["createProgressNote"]>(
     () => "stored"
   )
   const harness: BuiltInToolHarness = {
     tool: buildReportProgressTool(createProgressNote),
     runnableArguments: REPORT_PROGRESS_ARGUMENTS,
-    invalidArguments: BLANK_NOTE_ARGUMENTS,
+    invalidArguments: blankNoteArguments,
     countStartedWork: () => createProgressNote.mock.calls.length
   }
   return Promise.resolve(harness)
 }
 
 describe("buildDelegationDefinitions", () => {
+  /** Offer of a turn that takes no part in delegation. */
+  const noOffer: DelegationOffer = Object.freeze({
+    mayDelegate: false,
+    hasJobs: false,
+    job: undefined
+  })
+
   it.each<OfferCase>([
     [
       "a leader that may delegate",
@@ -450,7 +393,7 @@ describe("buildDelegationDefinitions", () => {
       ["stop_job"]
     ],
     ["a member in a job", "member", JOB_OFFER, ["report_progress"]],
-    ["a turn outside delegation", "leader", NO_OFFER, []]
+    ["a turn outside delegation", "leader", noOffer, []]
   ])("offers %s exactly these tools", (_label, role, offer, toolNames) => {
     const definitions = buildDelegationDefinitions(role, offer)
     const tools = buildDelegationTools(role, buildTurnDelegation(offer))
@@ -460,6 +403,16 @@ describe("buildDelegationDefinitions", () => {
   })
 
   it("describes stop_job and its argument to the model", () => {
+    /** Arguments of `stop_job` as the model is offered them. */
+    const stopJobArgumentDefinitions = Object.freeze([
+      {
+        type: "integer",
+        name: "job",
+        description: "Number of the job to stop.",
+        required: true
+      }
+    ])
+
     const definitions = buildDelegationDefinitions("leader", JOBS_ONLY_OFFER)
 
     expect(definitions).toEqual([
@@ -470,12 +423,22 @@ describe("buildDelegationDefinitions", () => {
         group: "agents",
         access: "agents",
         runner: "backend",
-        arguments: STOP_JOB_ARGUMENT_DEFINITIONS
+        arguments: stopJobArgumentDefinitions
       }
     ])
   })
 
   it("describes report_progress and its argument to the model", () => {
+    /** Arguments of `report_progress` as the model is offered them. */
+    const reportProgressArgumentDefinitions = Object.freeze([
+      {
+        type: "string",
+        name: "note",
+        description: "Where the job stands, at most 2000 characters.",
+        required: true
+      }
+    ])
+
     const definitions = buildDelegationDefinitions("member", JOB_OFFER)
 
     expect(definitions).toEqual([
@@ -486,7 +449,7 @@ describe("buildDelegationDefinitions", () => {
         group: "agents",
         access: "agents",
         runner: "backend",
-        arguments: REPORT_PROGRESS_ARGUMENT_DEFINITIONS
+        arguments: reportProgressArgumentDefinitions
       }
     ])
   })
@@ -494,6 +457,37 @@ describe("buildDelegationDefinitions", () => {
 
 describe("buildListedDelegationDefinitions", () => {
   it("lists only delegate_work for Settings, in the agents group with agents access", () => {
+    /** Arguments of `delegate_work` as the model is offered them, in order. */
+    const delegateWorkArgumentDefinitions = Object.freeze([
+      {
+        type: "string",
+        name: "agent",
+        description: "Code of the agent that should do the work.",
+        required: true
+      },
+      {
+        type: "string",
+        name: "title",
+        description:
+          "A few words that name the work, at most 80 characters on one line. The person sees it on the job's card.",
+        required: true
+      },
+      {
+        type: "string",
+        name: "instructions",
+        description:
+          "Everything the agent needs to do the work. It sees only these instructions and nothing else of this conversation.",
+        required: true
+      },
+      {
+        type: "integer",
+        name: "job",
+        description:
+          "Number of an earlier job of this conversation to continue. Leave it out to start a new job.",
+        required: false
+      }
+    ])
+
     expect(buildListedDelegationDefinitions()).toEqual([
       {
         name: "delegate_work",
@@ -502,7 +496,7 @@ describe("buildListedDelegationDefinitions", () => {
         group: "agents",
         access: "agents",
         runner: "backend",
-        arguments: DELEGATE_WORK_ARGUMENT_DEFINITIONS
+        arguments: delegateWorkArgumentDefinitions
       }
     ])
   })
@@ -862,6 +856,12 @@ describe("buildDelegationTools", () => {
   describe("report_progress", () => {
     registerBuiltInToolContractSuite(createReportProgressHarness)
 
+    /** Parse outcome of a `report_progress` call whose note cannot run. */
+    const invalidNoteCall = Object.freeze({
+      status: "invalid",
+      message: "The note must be 1 to 2000 characters long after trimming."
+    })
+
     it.each<TextParseCase>([
       ["2000 characters", "parsed", "n".repeat(2000), PARSED_CALL],
       [
@@ -870,8 +870,8 @@ describe("buildDelegationTools", () => {
         `\n${"n".repeat(2000)}\n`,
         PARSED_CALL
       ],
-      ["2001 characters", "invalid", "n".repeat(2001), INVALID_NOTE_CALL],
-      ["only spaces and line breaks", "invalid", " \n ", INVALID_NOTE_CALL]
+      ["2001 characters", "invalid", "n".repeat(2001), invalidNoteCall],
+      ["only spaces and line breaks", "invalid", " \n ", invalidNoteCall]
     ])("parses a note of %s as %s", (_label, _status, note, outcome) => {
       const tool = buildReportProgressTool(handleUnexpectedDelegationCall)
 

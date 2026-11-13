@@ -20,14 +20,6 @@ import {
 /** Text the job replies of the cases write in their last round. */
 const LAST_ROUND_TEXT = "Most moths drink nectar."
 
-/** Work a case gives {@link SECOND_MEMBER} beside the moths job. */
-const ARCHIVE_REQUEST: JobMessageRequest = Object.freeze({
-  agentCode: SECOND_MEMBER,
-  title: "Archive",
-  instructions: "File what is known about moths",
-  jobNumber: undefined
-})
-
 /** What a stored end report is expected to say. */
 type ExpectedEndReport = Readonly<{
   /** How the reply ended. */
@@ -439,11 +431,19 @@ describe("handleReplyEnded", () => {
   })
 
   it("keeps the delegator's wake settings while another of its jobs works", () => {
+    /** Work a case gives {@link SECOND_MEMBER} beside the moths job. */
+    const archiveRequest: JobMessageRequest = Object.freeze({
+      agentCode: SECOND_MEMBER,
+      title: "Archive",
+      instructions: "File what is known about moths",
+      jobNumber: undefined
+    })
+
     const services = openDelegationTestServices()
     const delegating = createPersonTurn(services.conversation.turns)
     const conversationId = delegating.turn.conversation.id
     const job = sendJobMessage(services, delegating, MOTHS_REQUEST)
-    sendJobMessage(services, delegating, ARCHIVE_REQUEST)
+    sendJobMessage(services, delegating, archiveRequest)
     services.runtime.stopRequests.addStopRequest(job.replyId, "delegator")
     services.conversation.turns.updateAssistantMessageState(job.replyId, {
       status: "interrupted"

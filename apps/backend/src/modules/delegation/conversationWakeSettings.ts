@@ -39,14 +39,6 @@ type WakeSettingsState =
       status: "closed"
     }>
 
-/** Lookup of a conversation that has no wake settings. */
-const NO_WAKE_SETTINGS: WakeSettingsLookup = Object.freeze({ status: "none" })
-
-/** Lookup of any conversation once the wake settings were closed. */
-const CLOSED_WAKE_SETTINGS: WakeSettingsLookup = Object.freeze({
-  status: "closed"
-})
-
 /**
  * Owns the wake settings of conversations, the settings each conversation's
  * wake-up turns are written with, to tell whether a wake-up turn may start
@@ -109,9 +101,17 @@ export default class ConversationWakeSettings {
    * conversation, once the instance is closed.
    */
   public findWakeSettings(conversationId: string): WakeSettingsLookup {
-    if (this.#state.status === "closed") return CLOSED_WAKE_SETTINGS
+    /** Lookup of a conversation that has no wake settings. */
+    const noWakeSettings: WakeSettingsLookup = Object.freeze({ status: "none" })
+
+    /** Lookup of any conversation once the wake settings were closed. */
+    const closedWakeSettings: WakeSettingsLookup = Object.freeze({
+      status: "closed"
+    })
+
+    if (this.#state.status === "closed") return closedWakeSettings
     const settings = this.#state.wakeSettings.get(conversationId)
-    if (settings === undefined) return NO_WAKE_SETTINGS
+    if (settings === undefined) return noWakeSettings
     return Object.freeze({ status: "found", settings })
   }
 

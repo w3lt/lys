@@ -18,23 +18,6 @@ import { waitForMicrotasks } from "../../../support/microtasks"
 /** Published path of the activity stream. */
 const ACTIVITY_EVENTS_PATH = "/api/v1/activity/events"
 
-/** Main conversation the reported job was started from. */
-const MAIN_CONVERSATION_ID = createFixtureUuidV7(1)
-
-/** A job the hub reports while a client is connected. */
-const WORKING_JOB = Object.freeze({
-  id: createFixtureUuidV7(2),
-  number: 1,
-  agentCode: "lysiptera",
-  title: "Compare the two plans",
-  state: "working",
-  latestNote: null,
-  replyId: createFixtureUuidV7(3),
-  jobCallIds: Object.freeze([createFixtureUuidV7(20)]),
-  createdAt: FIXTURE_TIMESTAMP,
-  updatedAt: FIXTURE_TIMESTAMP
-} satisfies Job)
-
 /** Snapshot of a hub that follows no reply. */
 const EMPTY_SNAPSHOT = Object.freeze({
   type: "activity-snapshot",
@@ -105,6 +88,23 @@ describe("registerActivityRoutes", () => {
   })
 
   it("sends an event of the hub to a connected client under the event's type, as the activity contract defines it", async () => {
+    /** Main conversation the reported job was started from. */
+    const mainConversationId = createFixtureUuidV7(1)
+
+    /** A job the hub reports while a client is connected. */
+    const workingJob = Object.freeze({
+      id: createFixtureUuidV7(2),
+      number: 1,
+      agentCode: "lysiptera",
+      title: "Compare the two plans",
+      state: "working",
+      latestNote: null,
+      replyId: createFixtureUuidV7(3),
+      jobCallIds: Object.freeze([createFixtureUuidV7(20)]),
+      createdAt: FIXTURE_TIMESTAMP,
+      updatedAt: FIXTURE_TIMESTAMP
+    } satisfies Job)
+
     const { app, hub, streamOpened } = await createActivityRouteApp()
 
     const responsePromise = app.inject({
@@ -116,7 +116,7 @@ describe("registerActivityRoutes", () => {
     // The stream stays open while nothing happens: the update below is sent
     // a full turn of the event loop after the client connected.
     await waitForMicrotasks()
-    hub.sendJobUpdate(MAIN_CONVERSATION_ID, WORKING_JOB)
+    hub.sendJobUpdate(mainConversationId, workingJob)
     hub.close()
     const response = await responsePromise
 
@@ -127,8 +127,8 @@ describe("registerActivityRoutes", () => {
         event: "job-updated",
         data: {
           type: "job-updated",
-          parentConversationId: MAIN_CONVERSATION_ID,
-          job: WORKING_JOB
+          parentConversationId: mainConversationId,
+          job: workingJob
         }
       }
     ])

@@ -346,30 +346,30 @@ function saveVersion11Conversation(database: DatabaseSync): void {
 }
 
 /**
- * Queries that read every version-11 column of the tables holding
- * conversations, messages, attachments, and sources; version 12 keeps each
- * column with the same meaning.
- */
-const VERSION_11_ROW_QUERIES = [
-  "SELECT id, title, created_at, updated_at, agent_code FROM conversations ORDER BY id",
-  `SELECT id, conversation_id, role, reply_id, position, round, model, content,
-    status, finish_reason, tool_name, tool_arguments, source_numbers, created_at,
-    updated_at FROM conversation_messages ORDER BY id`,
-  `SELECT conversation_id, message_id, number, name, kind, media_type,
-    size_bytes, width, height FROM conversation_attachments ORDER BY number`,
-  "SELECT conversation_id, number, url, title FROM conversation_sources ORDER BY number"
-] as const
-
-/**
  * Lists the conversation, message, attachment, and source rows by their
  * version-11 columns.
  *
  * @param database - Open connection at version 11 or later.
- * @returns The rows of each table, in the order of
- * {@link VERSION_11_ROW_QUERIES}.
+ * @returns The rows of each table: conversations, messages, attachments, then
+ * sources.
  */
 function listVersion11Rows(database: DatabaseSync): unknown[][] {
-  return VERSION_11_ROW_QUERIES.map((sql) => database.prepare(sql).all())
+  /**
+   * Queries that read every version-11 column of the tables holding
+   * conversations, messages, attachments, and sources; version 12 keeps each
+   * column with the same meaning.
+   */
+  const version11RowQueries = [
+    "SELECT id, title, created_at, updated_at, agent_code FROM conversations ORDER BY id",
+    `SELECT id, conversation_id, role, reply_id, position, round, model, content,
+    status, finish_reason, tool_name, tool_arguments, source_numbers, created_at,
+    updated_at FROM conversation_messages ORDER BY id`,
+    `SELECT conversation_id, message_id, number, name, kind, media_type,
+    size_bytes, width, height FROM conversation_attachments ORDER BY number`,
+    "SELECT conversation_id, number, url, title FROM conversation_sources ORDER BY number"
+  ] as const
+
+  return version11RowQueries.map((sql) => database.prepare(sql).all())
 }
 
 /**

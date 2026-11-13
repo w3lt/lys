@@ -88,42 +88,6 @@ const REPLIED_JOB_UPDATE = Object.freeze({
 } satisfies ActivityEvent)
 
 /**
- * One generation event of every kind the activity stream does not carry, by
- * its type; a kind added to the generation events must be placed here or
- * among the forwarded ones.
- */
-const UNFORWARDED_EVENTS = Object.freeze({
-  title: { type: "title", title: "Trip plan" },
-  "reply-part": {
-    type: "reply-part",
-    part: createTextPart({ sequence: 30, round: 0, content: "Here is" })
-  },
-  "reply-part-delta": {
-    type: "reply-part-delta",
-    partId: createFixtureUuidV7(30),
-    content: " a plan",
-    updatedAt: FIXTURE_TIMESTAMP
-  },
-  sources: {
-    type: "sources",
-    sources: [{ number: 1, url: "https://trips.example/", title: "Trips" }]
-  },
-  done: { type: "done", finishReason: "stop" },
-  interrupted: { type: "interrupted" },
-  error: { type: "error", message: "The model stopped answering." }
-} satisfies {
-  [
-    Type in Exclude<ChatGenerationEvent["type"], "tool-approval" | "tool-call">
-  ]: Extract<ChatGenerationEvent, { type: Type }>
-})
-
-/**
- * Most events offered while measuring a stream's queue capacity, so a queue
- * that never refuses an event fails the case instead of growing forever.
- */
-const CAPACITY_PROBE_EVENT_LIMIT = 100_000
-
-/**
  * Builds the snapshot of a hub that follows these replies while none of
  * them waits on a call.
  *
@@ -245,12 +209,18 @@ function recordFollowers(generation: ReplyGeneration) {
  * @param subscription - Subscription that has accepted nothing yet.
  * @returns The number of events accepted before the first refusal: the
  * queue capacity of one stream.
- * @throws If no event was refused within {@link CAPACITY_PROBE_EVENT_LIMIT}.
+ * @throws If no event was refused within `capacityProbeEventLimit` offers.
  */
 function offerEventsUntilRefused(
   subscription: ReplyEventSubscription<ActivityEvent>
 ): number {
-  for (let accepted = 0; accepted < CAPACITY_PROBE_EVENT_LIMIT; accepted += 1) {
+  /**
+   * Most events offered while measuring a stream's queue capacity, so a queue
+   * that never refuses an event fails the case instead of growing forever.
+   */
+  const capacityProbeEventLimit = 100_000
+
+  for (let accepted = 0; accepted < capacityProbeEventLimit; accepted += 1) {
     if (!subscription.handleStreamEvent(WORKING_JOB_UPDATE)) return accepted
   }
   throw new Error("The subscription never refused an event")
@@ -451,13 +421,48 @@ describe("ActivityHub", () => {
     })
 
     it("forwards no reply-part, reply-part-delta, sources, title, done, interrupted, or error event, and keeps following the reply after them", async () => {
+      /**
+       * One generation event of every kind the activity stream does not carry,
+       * by its type; a kind added to the generation events must be placed here
+       * or among the forwarded ones.
+       */
+      const unforwardedEvents = Object.freeze({
+        title: { type: "title", title: "Trip plan" },
+        "reply-part": {
+          type: "reply-part",
+          part: createTextPart({ sequence: 30, round: 0, content: "Here is" })
+        },
+        "reply-part-delta": {
+          type: "reply-part-delta",
+          partId: createFixtureUuidV7(30),
+          content: " a plan",
+          updatedAt: FIXTURE_TIMESTAMP
+        },
+        sources: {
+          type: "sources",
+          sources: [
+            { number: 1, url: "https://trips.example/", title: "Trips" }
+          ]
+        },
+        done: { type: "done", finishReason: "stop" },
+        interrupted: { type: "interrupted" },
+        error: { type: "error", message: "The model stopped answering." }
+      } satisfies {
+        [
+          Type in Exclude<
+            ChatGenerationEvent["type"],
+            "tool-approval" | "tool-call"
+          >
+        ]: Extract<ChatGenerationEvent, { type: Type }>
+      })
+
       const hub = new ActivityHub()
       const { generation, replyTask } = startControlledGeneration()
       hub.addReply(JOB_REPLY, generation)
       const stream = openRecordingStream(hub)
       await waitForMicrotasks()
 
-      for (const event of Object.values(UNFORWARDED_EVENTS))
+      for (const event of Object.values(unforwardedEvents))
         replyTask.context.sendEvent(event)
       await waitForMicrotasks()
       const writtenAfterUnforwardedEvents = [...stream.written]

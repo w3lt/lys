@@ -52,12 +52,6 @@ type FoundContinuedJob = Readonly<{
   job: Job | undefined
 }>
 
-/** Answer of the job check for a message that starts a new job. */
-const NEW_JOB: FoundContinuedJob = Object.freeze({
-  status: "found",
-  job: undefined
-})
-
 /**
  * Finds where a job message of a conversation goes, checking it in one
  * synchronous step, in this order: the limit of job messages, the agent,
@@ -156,7 +150,7 @@ function findJobMessageAgent(
  * @param jobs - Reads a job of the conversation by its number.
  * @param conversationId - UUIDv7 of the delegator's conversation.
  * @param draft - Agent and job number the `delegate_work` call named.
- * @returns {@link NEW_JOB} for a message without a job number; `found`
+ * @returns `found` without a job for a message without a job number; `found`
  * with the job for a job of this conversation that belongs to the named
  * agent and is not working; otherwise the refusal `job-not-found`,
  * `job-has-another-agent` with the job's agent, or `job-is-working`.
@@ -167,8 +161,14 @@ function findContinuedJob(
   conversationId: string,
   draft: Pick<JobMessageDraft, "agentCode" | "jobNumber">
 ): FoundContinuedJob | RefusedJobMessage {
+  /** Answer of the job check for a message that starts a new job. */
+  const newJob: FoundContinuedJob = Object.freeze({
+    status: "found",
+    job: undefined
+  })
+
   const { jobNumber } = draft
-  if (jobNumber === undefined) return NEW_JOB
+  if (jobNumber === undefined) return newJob
   const job = jobs.findJobByNumber(conversationId, jobNumber)
   if (job === undefined)
     return buildRefusedJobMessage({ kind: "job-not-found", jobNumber })

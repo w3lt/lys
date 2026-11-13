@@ -679,37 +679,10 @@ const DELEGATING_OFFER: DelegationOffer = Object.freeze({
   job: undefined
 })
 
-/** Offer of a main conversation's turn that may delegate and has jobs. */
-const DELEGATING_OFFER_WITH_JOBS: DelegationOffer = Object.freeze({
-  mayDelegate: true,
-  hasJobs: true,
-  job: undefined
-})
-
-/**
- * Offer of a turn whose conversation has jobs and whose tool offer leaves
- * `delegate_work` out, as it does while tool calls are off.
- */
-const JOBS_ONLY_OFFER: DelegationOffer = Object.freeze({
-  mayDelegate: false,
-  hasJobs: true,
-  job: undefined
-})
-
 /** Offer of a turn of {@link JOB_TURN}'s job. */
 const JOB_OFFER: DelegationOffer = Object.freeze({
   mayDelegate: false,
   hasJobs: false,
-  job: JOB_TURN
-})
-
-/**
- * Offer that allows every delegation tool at once, which no conversation
- * does; a case uses it to show that a turn offers none of them.
- */
-const EVERY_TOOL_OFFER: DelegationOffer = Object.freeze({
-  mayDelegate: true,
-  hasJobs: true,
   job: JOB_TURN
 })
 
@@ -737,56 +710,6 @@ const DELEGATE_WORK_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
         argumentText:
           '{"agent":"researcher","title":"Hologram news","instructions":"Collect this week\'s news about holograms."}'
       }
-    ]
-  }
-])
-
-/**
- * Round in which the model gives the researcher work under a title that
- * holds a zero-width space, written as its JSON escape.
- */
-const DELEGATE_ZERO_WIDTH_TITLE_ROUND: readonly ReplyStreamEvent[] =
-  Object.freeze([
-    {
-      type: "tool-calls",
-      toolCalls: [
-        {
-          toolName: "delegate_work",
-          argumentText:
-            '{"agent":"researcher","title":"Hologram\\u200B news","instructions":"Collect this week\'s news about holograms."}'
-        }
-      ]
-    }
-  ])
-
-/** Round in which the model reports where its job stands. */
-const REPORT_PROGRESS_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
-  {
-    type: "tool-calls",
-    toolCalls: [
-      {
-        toolName: "report_progress",
-        argumentText: '{"note":"Two of five sources are read."}'
-      }
-    ]
-  }
-])
-
-/** Round in which the model stops job 2. */
-const STOP_JOB_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
-  {
-    type: "tool-calls",
-    toolCalls: [{ toolName: "stop_job", argumentText: '{"job":2}' }]
-  }
-])
-
-/** Round in which the model looks up the words `moth` and `owl`. */
-const LOOK_UP_TWO_WORDS_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
-  {
-    type: "tool-calls",
-    toolCalls: [
-      { toolName: "look_up_word", argumentText: '{"word":"moth"}' },
-      { toolName: "look_up_word", argumentText: '{"word":"owl"}' }
     ]
   }
 ])
@@ -3288,6 +3211,17 @@ describe("Agent", () => {
     })
 
     it("gives each run of a backend tool the id of its own call", async () => {
+      /** Round in which the model looks up the words `moth` and `owl`. */
+      const lookUpTwoWordsRound: readonly ReplyStreamEvent[] = Object.freeze([
+        {
+          type: "tool-calls",
+          toolCalls: [
+            { toolName: "look_up_word", argumentText: '{"word":"moth"}' },
+            { toolName: "look_up_word", argumentText: '{"word":"owl"}' }
+          ]
+        }
+      ])
+
       const runCallIds: string[] = []
       const { entry } = createLookUpWordTool((word, context) => {
         runCallIds.push(context.toolCallId)
@@ -3295,10 +3229,7 @@ describe("Agent", () => {
       })
 
       const run = await getAgentReplyOutcome({
-        openReplyStream: createRoundStreams(
-          LOOK_UP_TWO_WORDS_ROUND,
-          FINISH_ROUND
-        ),
+        openReplyStream: createRoundStreams(lookUpTwoWordsRound, FINISH_ROUND),
         builtInTools: [entry]
       })
 
@@ -4735,23 +4666,46 @@ describe("Agent", () => {
     })
 
     it("offers no delegation tool to a model that is not trained for tool use", async () => {
+      /**
+       * Offer that allows every delegation tool at once, which no conversation
+       * does; a case uses it to show that a turn offers none of them.
+       */
+      const everyToolOffer: DelegationOffer = Object.freeze({
+        mayDelegate: true,
+        hasJobs: true,
+        job: JOB_TURN
+      })
+
       const openReplyStream = createRoundStreams(FINISH_ROUND)
 
       await getAgentReplyOutcome({
         openReplyStream,
-        delegation: buildTurnDelegation(EVERY_TOOL_OFFER)
+        delegation: buildTurnDelegation(everyToolOffer)
       })
 
       expect(listOfferedToolNames(openReplyStream)).toEqual([])
     })
 
     it("offers report_progress in a job's turn, runs a call at once, and ends every round's instructions with the note about the job", async () => {
+      /** Round in which the model reports where its job stands. */
+      const reportProgressRound: readonly ReplyStreamEvent[] = Object.freeze([
+        {
+          type: "tool-calls",
+          toolCalls: [
+            {
+              toolName: "report_progress",
+              argumentText: '{"note":"Two of five sources are read."}'
+            }
+          ]
+        }
+      ])
+
       const createProgressNote = vi.fn<TurnDelegation["createProgressNote"]>(
         () => "stored"
       )
       const delegation = buildTurnDelegation(JOB_OFFER, { createProgressNote })
       const openReplyStream = createRoundStreams(
-        REPORT_PROGRESS_ROUND,
+        reportProgressRound,
         FINISH_ROUND
       )
       const agent = createAgentOfRole(
@@ -4805,12 +4759,30 @@ describe("Agent", () => {
     })
 
     it("offers stop_job when the conversation has jobs, also while tool calls are off, and runs a call at once under the turn's signal", async () => {
+      /**
+       * Offer of a turn whose conversation has jobs and whose tool offer leaves
+       * `delegate_work` out, as it does while tool calls are off.
+       */
+      const jobsOnlyOffer: DelegationOffer = Object.freeze({
+        mayDelegate: false,
+        hasJobs: true,
+        job: undefined
+      })
+
+      /** Round in which the model stops job 2. */
+      const stopJobRound: readonly ReplyStreamEvent[] = Object.freeze([
+        {
+          type: "tool-calls",
+          toolCalls: [{ toolName: "stop_job", argumentText: '{"job":2}' }]
+        }
+      ])
+
       const cancellation = new AbortController()
       const stopJob = vi.fn<TurnDelegation["stopJob"]>((jobNumber) =>
         Promise.resolve({ status: "stopped", jobNumber })
       )
-      const delegation = buildTurnDelegation(JOBS_ONLY_OFFER, { stopJob })
-      const openReplyStream = createRoundStreams(STOP_JOB_ROUND, FINISH_ROUND)
+      const delegation = buildTurnDelegation(jobsOnlyOffer, { stopJob })
+      const openReplyStream = createRoundStreams(stopJobRound, FINISH_ROUND)
       const createToolCallGate = vi.fn(handleUnexpectedToolCall)
 
       const run = await getAgentReplyOutcome({
@@ -4837,11 +4809,29 @@ describe("Agent", () => {
     })
 
     it("removes invisible characters from a delegation tool's result and says how many", async () => {
+      /**
+       * Round in which the model gives the researcher work under a title that
+       * holds a zero-width space, written as its JSON escape.
+       */
+      const delegateZeroWidthTitleRound: readonly ReplyStreamEvent[] =
+        Object.freeze([
+          {
+            type: "tool-calls",
+            toolCalls: [
+              {
+                toolName: "delegate_work",
+                argumentText:
+                  '{"agent":"researcher","title":"Hologram\\u200B news","instructions":"Collect this week\'s news about holograms."}'
+              }
+            ]
+          }
+        ])
+
       const delegation = buildTurnDelegation(DELEGATING_OFFER, {
         createJobMessage: startResearcherJob
       })
       const openReplyStream = createRoundStreams(
-        DELEGATE_ZERO_WIDTH_TITLE_ROUND,
+        delegateZeroWidthTitleRound,
         FINISH_ROUND
       )
 
@@ -4862,17 +4852,24 @@ describe("Agent", () => {
       ])
     })
 
+    /** Offer of a main conversation's turn that may delegate and has jobs. */
+    const delegatingOfferWithJobs: DelegationOffer = Object.freeze({
+      mayDelegate: true,
+      hasJobs: true,
+      job: undefined
+    })
+
     it.each<MeasuredDelegationCase>([
       [
         "a leader whose conversation may delegate and has jobs",
         "leader",
-        DELEGATING_OFFER_WITH_JOBS,
+        delegatingOfferWithJobs,
         [...LEADER_STATE_TOOL_NAMES, "delegate_work", "stop_job"]
       ],
       [
         "a member whose conversation may delegate and has jobs",
         "member",
-        DELEGATING_OFFER_WITH_JOBS,
+        delegatingOfferWithJobs,
         ["read_my_state", "stop_job"]
       ],
       [

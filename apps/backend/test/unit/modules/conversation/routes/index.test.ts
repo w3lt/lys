@@ -75,33 +75,6 @@ const CONVERSATION_METADATA = Object.freeze({
   updatedAt: FIXTURE_TIMESTAMP
 } satisfies ConversationMetadata)
 
-/** Complete transcript of {@link CONVERSATION_ID} returned by the stubbed history. */
-const CONVERSATION = Object.freeze({
-  ...CONVERSATION_METADATA,
-  messages: [
-    createUserMessage(2, "Plan my trip"),
-    createAssistantMessage(
-      3,
-      [
-        createReasoningPart(4, 0, "They want a plan."),
-        createToolCallPart(
-          {
-            sequence: 5,
-            round: 0,
-            toolName: "web_search",
-            argumentText: '{"query":"trip"}'
-          },
-          { status: "succeeded", result: "Results", sourceNumbers: [1] }
-        ),
-        createTextPart({ sequence: 6, round: 1, content: "Here is a plan [1]" })
-      ],
-      { status: "completed", finishReason: "stop" }
-    )
-  ],
-  sources: [{ number: 1, url: "https://trips.example/", title: "Trips" }],
-  jobs: []
-} satisfies Conversation)
-
 /** Identity of the job the stubbed history answers for. */
 const JOB_ID = createFixtureUuidV7(7)
 
@@ -120,24 +93,6 @@ const JOB_METADATA = Object.freeze({
   updatedAt: FIXTURE_TIMESTAMP
 } satisfies ConversationMetadata)
 
-/**
- * Complete transcript of {@link JOB_ID} returned by the stubbed history: its
- * delegator's message and one completed reply.
- */
-const JOB = Object.freeze({
-  ...JOB_METADATA,
-  messages: [
-    { ...createUserMessage(8, "Find what moths eat"), origin: "delegator" },
-    createAssistantMessage(
-      9,
-      [createTextPart({ sequence: 10, round: 0, content: "Mostly nectar." })],
-      { status: "completed", finishReason: "stop" }
-    )
-  ],
-  sources: [],
-  jobs: []
-} satisfies Conversation)
-
 /** One-conversation page returned by the stubbed history. */
 const CONVERSATION_PAGE = Object.freeze({
   conversations: [
@@ -153,22 +108,6 @@ const CONVERSATION_PAGE = Object.freeze({
   matchCount: 1,
   nextCursor: null
 } satisfies ListConversationsApiResponse)
-
-/** Chat request body that starts a new conversation Caliginia answers. */
-const NEW_CONVERSATION_CHAT_REQUEST = Object.freeze({
-  conversation: { kind: "new", agentCode: "caliginia" },
-  message: "Plan my trip",
-  model: "qwen/qwen3-8b",
-  generationOptions: { temperature: 0.4 }
-})
-
-/** Work a case gives {@link SECOND_MEMBER} beside the moths job. */
-const LAMPS_REQUEST: JobMessageRequest = Object.freeze({
-  agentCode: SECOND_MEMBER,
-  title: "Lamps",
-  instructions: "Find which lamps draw moths",
-  jobNumber: undefined
-})
 
 /**
  * Fails a history call that the current case did not arrange.
@@ -517,8 +456,42 @@ describe("updateFastifyWithConversationRoutes", () => {
 
   describe("GET /api/v1/conversations/:conversationId", () => {
     it("responds with the conversation, its transcript with every reply part, and its sources read from history", async () => {
+      /**
+       * Complete transcript of {@link CONVERSATION_ID} returned by the stubbed
+       * history.
+       */
+      const conversation = Object.freeze({
+        ...CONVERSATION_METADATA,
+        messages: [
+          createUserMessage(2, "Plan my trip"),
+          createAssistantMessage(
+            3,
+            [
+              createReasoningPart(4, 0, "They want a plan."),
+              createToolCallPart(
+                {
+                  sequence: 5,
+                  round: 0,
+                  toolName: "web_search",
+                  argumentText: '{"query":"trip"}'
+                },
+                { status: "succeeded", result: "Results", sourceNumbers: [1] }
+              ),
+              createTextPart({
+                sequence: 6,
+                round: 1,
+                content: "Here is a plan [1]"
+              })
+            ],
+            { status: "completed", finishReason: "stop" }
+          )
+        ],
+        sources: [{ number: 1, url: "https://trips.example/", title: "Trips" }],
+        jobs: []
+      } satisfies Conversation)
+
       const { app, historyCalls } = await createConversationRouteApp()
-      historyCalls.getConversation.mockReturnValue(CONVERSATION)
+      historyCalls.getConversation.mockReturnValue(conversation)
 
       const response = await app.inject({
         method: "GET",
@@ -526,13 +499,40 @@ describe("updateFastifyWithConversationRoutes", () => {
       })
 
       expect(response.statusCode).toBe(200)
-      expect(response.json()).toEqual(CONVERSATION)
+      expect(response.json()).toEqual(conversation)
       expect(historyCalls.getConversation).toHaveBeenCalledWith(CONVERSATION_ID)
     })
 
     it("still reads a job with GET", async () => {
+      /**
+       * Complete transcript of {@link JOB_ID} returned by the stubbed history:
+       * its delegator's message and one completed reply.
+       */
+      const job = Object.freeze({
+        ...JOB_METADATA,
+        messages: [
+          {
+            ...createUserMessage(8, "Find what moths eat"),
+            origin: "delegator"
+          },
+          createAssistantMessage(
+            9,
+            [
+              createTextPart({
+                sequence: 10,
+                round: 0,
+                content: "Mostly nectar."
+              })
+            ],
+            { status: "completed", finishReason: "stop" }
+          )
+        ],
+        sources: [],
+        jobs: []
+      } satisfies Conversation)
+
       const { app, historyCalls } = await createConversationRouteApp()
-      historyCalls.getConversation.mockReturnValue(JOB)
+      historyCalls.getConversation.mockReturnValue(job)
 
       const response = await app.inject({
         method: "GET",
@@ -540,7 +540,7 @@ describe("updateFastifyWithConversationRoutes", () => {
       })
 
       expect(response.statusCode).toBe(200)
-      expect(response.json()).toEqual(JOB)
+      expect(response.json()).toEqual(job)
     })
 
     it("responds with the missing-conversation problem", async () => {
@@ -832,12 +832,20 @@ describe("updateFastifyWithConversationRoutes", () => {
     })
 
     it("deletes a main conversation, its jobs, and their reports, then cancels the replies that were working in them", async () => {
+      /** Work a case gives {@link SECOND_MEMBER} beside the moths job. */
+      const lampsRequest: JobMessageRequest = Object.freeze({
+        agentCode: SECOND_MEMBER,
+        title: "Lamps",
+        instructions: "Find which lamps draw moths",
+        jobNumber: undefined
+      })
+
       const { app, services } = await createDelegationRouteApp()
       const lead = startPersonTurn(services)
       const conversationId = lead.turn.conversation.id
       const finishedJob = sendJobMessage(services, lead, MOTHS_REQUEST)
       await services.resolveReply(finishedJob.replyId, "completed")
-      const workingJob = sendJobMessage(services, lead, LAMPS_REQUEST)
+      const workingJob = sendJobMessage(services, lead, lampsRequest)
       const storedReports = listJobReportRows(services.conversation.database)
 
       const response = await app.inject({
@@ -877,10 +885,18 @@ describe("updateFastifyWithConversationRoutes", () => {
     })
 
     it("aborts the reply request and the title request of a deleted conversation whose model holds its first piece, without the model sending anything", async () => {
+      /** Chat request body that starts a new conversation Caliginia answers. */
+      const newConversationChatRequest = Object.freeze({
+        conversation: { kind: "new", agentCode: "caliginia" },
+        message: "Plan my trip",
+        model: "qwen/qwen3-8b",
+        generationOptions: { temperature: 0.4 }
+      })
+
       const testApp = await createHeldModelChatApp()
       const chatResponse = sendChatRequest(
         testApp.app,
-        NEW_CONVERSATION_CHAT_REQUEST
+        newConversationChatRequest
       )
       await vi.waitFor(() => {
         expect(testApp.completeChatStream).toHaveBeenCalledOnce()

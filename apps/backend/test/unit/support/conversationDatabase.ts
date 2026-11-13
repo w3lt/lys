@@ -429,19 +429,6 @@ export function saveJobReportRow(
   })
 }
 
-/** Validates one stored job-report row once its source numbers are decoded. */
-const jobReportRowSchema = z.strictObject({
-  id: z.string(),
-  jobId: z.string(),
-  replyId: z.string(),
-  kind: jobReportKindSchema,
-  title: z.string(),
-  content: z.string(),
-  sourceNumbers: z.array(z.number()),
-  createdAt: z.string(),
-  deliveredMessageId: z.string().nullable()
-})
-
 /**
  * Projects one stored job-report row into the values it was saved from.
  *
@@ -452,6 +439,21 @@ const jobReportRowSchema = z.strictObject({
  * a JSON list of numbers.
  */
 function parseJobReportRow(row: Record<string, unknown>): JobReportRowFixture {
+  /**
+   * Validates one stored job-report row once its source numbers are decoded.
+   */
+  const jobReportRowSchema = z.strictObject({
+    id: z.string(),
+    jobId: z.string(),
+    replyId: z.string(),
+    kind: jobReportKindSchema,
+    title: z.string(),
+    content: z.string(),
+    sourceNumbers: z.array(z.number()),
+    createdAt: z.string(),
+    deliveredMessageId: z.string().nullable()
+  })
+
   const sourceNumbers: unknown =
     typeof row.sourceNumbers === "string"
       ? JSON.parse(row.sourceNumbers)

@@ -1,6 +1,3 @@
-/** Matches one run of whitespace, line breaks included. */
-const WHITESPACE_RUN_PATTERN = /\s+/g
-
 /**
  * Formats text a person or a model wrote onto one line.
  *
@@ -9,5 +6,8 @@ const WHITESPACE_RUN_PATTERN = /\s+/g
  * space.
  */
 export function formatOneLine(text: string): string {
-  return text.replaceAll(WHITESPACE_RUN_PATTERN, " ")
+  /** Matches one run of whitespace, line breaks included. */
+  const whitespaceRunPattern = /\s+/g
+
+  return text.replaceAll(whitespaceRunPattern, " ")
 }

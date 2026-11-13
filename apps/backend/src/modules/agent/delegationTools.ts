@@ -140,73 +140,14 @@ const REPORT_PROGRESS_DEFINITION = toolDefinitionSchema.parse({
   arguments: REPORT_PROGRESS_ARGUMENTS
 })
 
-/** Definitions Settings lists: `delegate_work`, the one with a switch. */
-const LISTED_DEFINITIONS: readonly ToolDefinition[] = Object.freeze([
-  DELEGATE_WORK_DEFINITION
-])
-
-/** Parse outcome of a call whose agent cannot be an agent code. */
-const INVALID_AGENT_CALL: ParsedBuiltInToolCall = Object.freeze({
-  status: "invalid",
-  message:
-    "The agent must be an agent code: lowercase letters and digits in groups joined by single hyphens."
-})
-
-/** Parse outcome of a call whose title is blank, too long, or on several lines. */
-const INVALID_TITLE_CALL: ParsedBuiltInToolCall = Object.freeze({
-  status: "invalid",
-  message: `The title must be 1 to ${MAXIMUM_JOB_TITLE_LENGTH} characters on one line after trimming.`
-})
-
-/** Parse outcome of a call whose instructions are blank. */
-const INVALID_INSTRUCTIONS_CALL: ParsedBuiltInToolCall = Object.freeze({
-  status: "invalid",
-  message: "The instructions must not be empty."
-})
-
 /** Parse outcome of a call whose job cannot be the number of a job. */
 const INVALID_JOB_CALL: ParsedBuiltInToolCall = Object.freeze({
   status: "invalid",
   message: "The job must be a whole number of 1 or more."
 })
 
-/** Parse outcome of a call whose note is blank or too long. */
-const INVALID_NOTE_CALL: ParsedBuiltInToolCall = Object.freeze({
-  status: "invalid",
-  message: `The note must be 1 to ${MAXIMUM_PROGRESS_NOTE_LENGTH} characters long after trimming.`
-})
-
 /** Sources a delegation tool's result shows: none. */
 const NO_SOURCES = Object.freeze([])
-
-/** Result of a `report_progress` call whose note was stored. */
-const STORED_NOTE_RESULT: BuiltInToolResult = Object.freeze({
-  status: "succeeded",
-  content: "Noted.",
-  sources: NO_SOURCES
-})
-
-/** Result of a `report_progress` call whose job is no longer stored. */
-const MISSING_JOB_NOTE_RESULT: BuiltInToolResult = Object.freeze({
-  status: "failed",
-  content: "This job no longer exists, so the note was not stored."
-})
-
-/**
- * What a job that was not working had done, by its state, as the words that
- * follow "it had" in the result of `stop_job`.
- */
-const ENDED_JOB_STATE_TEXT: Readonly<
-  Record<Exclude<JobState, "working">, string>
-> = Object.freeze({
-  replied: "finished",
-  failed: "failed",
-  stopped: "been stopped",
-  interrupted: "been interrupted"
-})
-
-/** Matches a line break: a title that holds one is not on one line. */
-const LINE_BREAK_PATTERN = /[\n\r\u2028\u2029]/
 
 /**
  * Parses an argument value as text that is not blank.
@@ -230,10 +171,13 @@ function parseTrimmedText(value: unknown): string | undefined {
  * a line break.
  */
 function parseJobTitle(value: unknown): string | undefined {
+  /** Matches a line break: a title that holds one is not on one line. */
+  const lineBreakPattern = /[\n\r\u2028\u2029]/
+
   const title = parseTrimmedText(value)
   if (title === undefined) return undefined
   const isOneBoundedLine =
-    title.length <= MAXIMUM_JOB_TITLE_LENGTH && !LINE_BREAK_PATTERN.test(title)
+    title.length <= MAXIMUM_JOB_TITLE_LENGTH && !lineBreakPattern.test(title)
   return isOneBoundedLine ? title : undefined
 }
 
@@ -360,6 +304,19 @@ function formatJobMessageRefusal(refusal: JobMessageRefusal): string {
  * was not working; a failure when the conversation has no such job.
  */
 function buildStopJobResult(outcome: StopJobOutcome): BuiltInToolResult {
+  /**
+   * What a job that was not working had done, by its state, as the words that
+   * follow "it had" in the result of `stop_job`.
+   */
+  const endedJobStateText: Readonly<
+    Record<Exclude<JobState, "working">, string>
+  > = Object.freeze({
+    replied: "finished",
+    failed: "failed",
+    stopped: "been stopped",
+    interrupted: "been interrupted"
+  })
+
   switch (outcome.status) {
     case "stopped":
       return buildSucceededResult(
@@ -367,7 +324,7 @@ function buildStopJobResult(outcome: StopJobOutcome): BuiltInToolResult {
       )
     case "already-ended":
       return buildSucceededResult(
-        `Job ${outcome.jobNumber} was not working: it had ${ENDED_JOB_STATE_TEXT[outcome.state]}.`
+        `Job ${outcome.jobNumber} was not working: it had ${endedJobStateText[outcome.state]}.`
       )
     case "job-not-found":
       return buildFailedResult(formatMissingJob(outcome.jobNumber))
@@ -431,9 +388,22 @@ function runReportProgress(
   createProgressNote: TurnDelegation["createProgressNote"],
   note: string
 ): BuiltInToolResult {
+  /** Result of a `report_progress` call whose note was stored. */
+  const storedNoteResult: BuiltInToolResult = Object.freeze({
+    status: "succeeded",
+    content: "Noted.",
+    sources: NO_SOURCES
+  })
+
+  /** Result of a `report_progress` call whose job is no longer stored. */
+  const missingJobNoteResult: BuiltInToolResult = Object.freeze({
+    status: "failed",
+    content: "This job no longer exists, so the note was not stored."
+  })
+
   return createProgressNote(note) === "stored"
-    ? STORED_NOTE_RESULT
-    : MISSING_JOB_NOTE_RESULT
+    ? storedNoteResult
+    : missingJobNoteResult
 }
 
 /**
@@ -473,12 +443,34 @@ class DelegateWorkTool implements BuiltInTool {
   public parseToolCall(
     callArguments: BuiltInToolCallArguments
   ): ParsedBuiltInToolCall {
+    /** Parse outcome of a call whose agent cannot be an agent code. */
+    const invalidAgentCall: ParsedBuiltInToolCall = Object.freeze({
+      status: "invalid",
+      message:
+        "The agent must be an agent code: lowercase letters and digits in groups joined by single hyphens."
+    })
+
+    /**
+     * Parse outcome of a call whose title is blank, too long, or on several
+     * lines.
+     */
+    const invalidTitleCall: ParsedBuiltInToolCall = Object.freeze({
+      status: "invalid",
+      message: `The title must be 1 to ${MAXIMUM_JOB_TITLE_LENGTH} characters on one line after trimming.`
+    })
+
+    /** Parse outcome of a call whose instructions are blank. */
+    const invalidInstructionsCall: ParsedBuiltInToolCall = Object.freeze({
+      status: "invalid",
+      message: "The instructions must not be empty."
+    })
+
     const agentCode = agentCodeSchema.safeParse(callArguments["agent"])
-    if (!agentCode.success) return INVALID_AGENT_CALL
+    if (!agentCode.success) return invalidAgentCall
     const title = parseJobTitle(callArguments["title"])
-    if (title === undefined) return INVALID_TITLE_CALL
+    if (title === undefined) return invalidTitleCall
     const instructions = parseTrimmedText(callArguments["instructions"])
-    if (instructions === undefined) return INVALID_INSTRUCTIONS_CALL
+    if (instructions === undefined) return invalidInstructionsCall
     const jobNumber = callArguments["job"]
     if (jobNumber !== undefined && !isJobNumber(jobNumber))
       return INVALID_JOB_CALL
@@ -569,8 +561,14 @@ class ReportProgressTool implements BuiltInTool {
   public parseToolCall(
     callArguments: BuiltInToolCallArguments
   ): ParsedBuiltInToolCall {
+    /** Parse outcome of a call whose note is blank or too long. */
+    const invalidNoteCall: ParsedBuiltInToolCall = Object.freeze({
+      status: "invalid",
+      message: `The note must be 1 to ${MAXIMUM_PROGRESS_NOTE_LENGTH} characters long after trimming.`
+    })
+
     const note = parseProgressNote(callArguments["note"])
-    if (note === undefined) return INVALID_NOTE_CALL
+    if (note === undefined) return invalidNoteCall
     return buildParsedCall(() =>
       runReportProgress(this.#createProgressNote, note)
     )
@@ -695,11 +693,16 @@ export function buildDelegationTools(
 /**
  * Builds the definitions of the delegation tools Settings lists.
  *
- * @returns The frozen definitions, the same on every call: `delegate_work`
+ * @returns The frozen definitions, equal on every call: `delegate_work`
  * only, because the other two have no switch.
  */
 export function buildListedDelegationDefinitions(): readonly ToolDefinition[] {
-  return LISTED_DEFINITIONS
+  /** Definitions Settings lists: `delegate_work`, the one with a switch. */
+  const listedDefinitions: readonly ToolDefinition[] = Object.freeze([
+    DELEGATE_WORK_DEFINITION
+  ])
+
+  return listedDefinitions
 }
 
 /**

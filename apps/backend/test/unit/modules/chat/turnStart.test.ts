@@ -83,9 +83,6 @@ const GENERATION_OPTIONS: MessageGenerationOptions = Object.freeze({
   replyCeiling: 128
 })
 
-/** MCP tools of every case's settings: none. */
-const NO_MCP_TOOLS: readonly TurnMcpTool[] = Object.freeze([])
-
 /**
  * Names of the tools every case's settings offer, in the order a model is
  * offered them: the client tool, then the backend tool.
@@ -103,16 +100,6 @@ const NOTES_ATTACHMENT: ConversationAttachmentDraft = Object.freeze({
   kind: "text",
   name: "notes.md",
   sizeBytes: 18
-})
-
-/** A photo the person attached, before its conversation numbers it. */
-const PHOTO_ATTACHMENT: ConversationAttachmentDraft = Object.freeze({
-  kind: "image",
-  name: "photo.png",
-  sizeBytes: 33,
-  mediaType: "image/png",
-  width: 64,
-  height: 32
 })
 
 /** Events of a model that answers `Hi` and ends its reply. */
@@ -143,12 +130,6 @@ const AGENT_PROFILE: AgentProfile = Object.freeze({
 function handleUnexpectedStateRead(): never {
   throw new Error("Unexpected agent state read")
 }
-
-/** State reader of an agent whose cases read no state; any read fails. */
-const UNEXPECTED_STATE_READER: AgentStateReader = Object.freeze({
-  listAgentMatches: handleUnexpectedStateRead,
-  findAgentState: handleUnexpectedStateRead
-})
 
 /** What a case starts its turns with, and what it observes them through. */
 type TurnStartHarness = Readonly<{
@@ -266,6 +247,9 @@ function openTurnStartHarness(): TurnStartHarness {
  * `delegate_work`, to a model that sees no images.
  */
 function buildTurnSettings(trainedForToolUse: boolean): TurnSettings {
+  /** MCP tools of every case's settings: none. */
+  const noMcpTools: readonly TurnMcpTool[] = Object.freeze([])
+
   const lookUpWordTool: TurnBuiltInTool = Object.freeze({
     definition: LOOK_UP_WORD_TOOL,
     tool: new ScriptedBuiltInTool(),
@@ -276,7 +260,7 @@ function buildTurnSettings(trainedForToolUse: boolean): TurnSettings {
     generationOptions: GENERATION_OPTIONS,
     clientTools: Object.freeze([READ_TEXT_FILE_TOOL]),
     builtInTools: Object.freeze([lookUpWordTool]),
-    mcpTools: NO_MCP_TOOLS,
+    mcpTools: noMcpTools,
     offersDelegateWork: false,
     unofferedTools: NO_UNOFFERED_TOOLS,
     canSeeImages: false,
@@ -292,11 +276,17 @@ function buildTurnSettings(trainedForToolUse: boolean): TurnSettings {
  * context fits.
  */
 function createTestAgent(openReplyStream: OpenReplyStream): Agent {
+  /** State reader of an agent whose cases read no state; any read fails. */
+  const unexpectedStateReader: AgentStateReader = Object.freeze({
+    listAgentMatches: handleUnexpectedStateRead,
+    findAgentState: handleUnexpectedStateRead
+  })
+
   const replyModel: ReplyModel = { openReplyStream }
   return new Agent(AGENT_PROFILE, {
     replyModel,
     replyContextMeter: createRoomyReplyContextMeter(),
-    stateReader: UNEXPECTED_STATE_READER
+    stateReader: unexpectedStateReader
   })
 }
 
@@ -600,6 +590,16 @@ describe("startTurn", () => {
     ])
   })
 
+  /** A photo the person attached, before its conversation numbers it. */
+  const photoAttachment: ConversationAttachmentDraft = Object.freeze({
+    kind: "image",
+    name: "photo.png",
+    sizeBytes: 33,
+    mediaType: "image/png",
+    width: 64,
+    height: 32
+  })
+
   it.each([
     [
       "a model that is not trained for tool use",
@@ -609,7 +609,7 @@ describe("startTurn", () => {
     ],
     [
       "a conversation whose only attachment is an image",
-      [PHOTO_ATTACHMENT],
+      [photoAttachment],
       true,
       [...SETTINGS_TOOL_NAMES, ...LEADER_STATE_TOOL_NAMES]
     ],

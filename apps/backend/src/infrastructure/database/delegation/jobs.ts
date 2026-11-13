@@ -6,14 +6,6 @@ import type { DatabaseStatementCompiler } from "../databaseTransactions"
 /** One stored row as SQLite returns it, before validation. */
 type StoredRow = Record<string, unknown>
 
-/** Validates one stored job with the conversation it belongs to. */
-const jobRecordSchema = z.strictObject({
-  /** UUIDv7 of the conversation the job was started from. */
-  parentConversationId: z.uuidv7(),
-  /** The job, as the shared job contract defines it. */
-  job: jobSchema
-})
-
 /**
  * Selects conversations as jobs, one row each; the condition that picks the
  * jobs follows it.
@@ -110,6 +102,14 @@ export function findJobRecord(
   statements: DatabaseStatementCompiler,
   jobId: string
 ): JobRecord | undefined {
+  /** Validates one stored job with the conversation it belongs to. */
+  const jobRecordSchema = z.strictObject({
+    /** UUIDv7 of the conversation the job was started from. */
+    parentConversationId: z.uuidv7(),
+    /** The job, as the shared job contract defines it. */
+    job: jobSchema
+  })
+
   const row = statements
     .getStatement(
       `${SELECT_JOBS_SQL} WHERE j.id = ? AND j.parent_conversation_id IS NOT NULL`

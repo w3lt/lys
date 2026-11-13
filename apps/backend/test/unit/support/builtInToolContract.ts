@@ -8,9 +8,6 @@ import type {
 } from "../../../src/modules/tool/builtIn/builtInTool"
 import { createFixtureUuidV7 } from "./conversationFixtures"
 
-/** Call identity every recorded run context carries. */
-const RECORDED_TOOL_CALL_ID = createFixtureUuidV7(1)
-
 /** One ready built-in tool with arguments it can run. */
 export type RunnableBuiltInToolHarness = Readonly<{
   /** Tool under test. */
@@ -62,10 +59,13 @@ type RecordedRunContext = Readonly<{
 export function createRecordedRunContext(
   abortSignal: AbortSignal
 ): RecordedRunContext {
+  /** Call identity every recorded run context carries. */
+  const recordedToolCallId = createFixtureUuidV7(1)
+
   const numberedSources: ConversationSource[] = []
   const sourceCatalog = new SourceCatalog([])
   const context: BuiltInToolRunContext = {
-    toolCallId: RECORDED_TOOL_CALL_ID,
+    toolCallId: recordedToolCallId,
     abortSignal,
     addWebSources: (candidates) => {
       const sources = sourceCatalog.addWebSources(candidates)

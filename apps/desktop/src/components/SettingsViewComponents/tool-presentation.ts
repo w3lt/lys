@@ -109,30 +109,8 @@ const TOOL_GROUP_LABELS = Object.freeze({
   agents: "agents"
 } satisfies Readonly<Record<LysToolDefinition["group"], string>>)
 
-/** Lowercase badge text of every access level; a new level must add one. */
-const TOOL_ACCESS_LABELS = Object.freeze({
-  reads: "reads",
-  network: "network",
-  agents: "gives work",
-  unknown: "depends on server"
-} satisfies Readonly<Record<ToolAccess, string>>)
-
 /** Type shown for an MCP argument whose schema names no single type. */
 const MCP_ARGUMENT_JSON_TYPE = "JSON"
-
-/**
- * What Just run does, by what the tool does with the machine; a new access
- * level must add one.
- */
-const JUST_RUN_NOTES = Object.freeze({
-  reads: "Runs the moment the model asks, without showing you the call.",
-  network:
-    "Sends its request off this machine the moment the model asks, without showing you what it sends.",
-  agents:
-    "Starts the job the moment the model asks, without showing you its instructions. The tools the other agent uses still follow their own settings.",
-  unknown:
-    "Runs on its MCP server the moment the model asks, without showing you what it sends. What it does depends on the MCP server."
-} satisfies Readonly<Record<ToolAccess, string>>)
 
 /** Presentation of every runner; a new runner must add one. */
 const TOOL_RUNNER_PRESENTATIONS = Object.freeze({
@@ -317,7 +295,15 @@ export function formatToolGroupCount(
  * @returns The badge's lowercase text.
  */
 export function formatToolAccessLabel(access: ToolAccess): string {
-  return TOOL_ACCESS_LABELS[access]
+  /** Lowercase badge text of every access level; a new level must add one. */
+  const toolAccessLabels = Object.freeze({
+    reads: "reads",
+    network: "network",
+    agents: "gives work",
+    unknown: "depends on server"
+  } satisfies Readonly<Record<ToolAccess, string>>)
+
+  return toolAccessLabels[access]
 }
 
 /**
@@ -529,11 +515,25 @@ export function formatToolApprovalNote(
   approval: ToolApproval,
   access: ToolAccess
 ): string {
+  /**
+   * What Just run does, by what the tool does with the machine; a new access
+   * level must add one.
+   */
+  const justRunNotes = Object.freeze({
+    reads: "Runs the moment the model asks, without showing you the call.",
+    network:
+      "Sends its request off this machine the moment the model asks, without showing you what it sends.",
+    agents:
+      "Starts the job the moment the model asks, without showing you its instructions. The tools the other agent uses still follow their own settings.",
+    unknown:
+      "Runs on its MCP server the moment the model asks, without showing you what it sends. What it does depends on the MCP server."
+  } satisfies Readonly<Record<ToolAccess, string>>)
+
   switch (approval) {
     case "ask":
       return "Each call waits for you with its arguments. Nothing runs until you allow it."
     case "run":
-      return JUST_RUN_NOTES[access]
+      return justRunNotes[access]
   }
 }
 

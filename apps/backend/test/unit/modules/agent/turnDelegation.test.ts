@@ -6,32 +6,12 @@ import {
 } from "../../../../src/modules/agent/turnDelegation"
 import { createFixtureUuidV7 } from "../../support/conversationFixtures"
 
-/** Job started from the main conversation of the cases that have one. */
-const RESEARCH_JOB: Job = jobSchema.parse({
-  id: createFixtureUuidV7(2),
-  number: 1,
-  agentCode: "researcher",
-  title: "Hologram news",
-  state: "working",
-  latestNote: null,
-  replyId: createFixtureUuidV7(4),
-  jobCallIds: [createFixtureUuidV7(3)],
-  createdAt: "2026-11-10T10:00:00.000Z",
-  updatedAt: "2026-11-10T10:00:00.000Z"
-})
-
 /** A main conversation no job was started from. */
 const MAIN_CONVERSATION: ConversationDelegation = Object.freeze({
   parentConversationId: null,
   jobNumber: null,
   delegatorAgentCode: null,
   jobs: Object.freeze([])
-})
-
-/** A main conversation one job was started from. */
-const MAIN_CONVERSATION_WITH_JOB: ConversationDelegation = Object.freeze({
-  ...MAIN_CONVERSATION,
-  jobs: Object.freeze([RESEARCH_JOB])
 })
 
 /** Job 3 of a main conversation of Caliginia. */
@@ -89,12 +69,28 @@ describe("buildDelegationOffer", () => {
   })
 
   it("says a conversation has jobs once a job was started from it", () => {
+    /** Job started from the main conversation of the cases that have one. */
+    const researchJob: Job = jobSchema.parse({
+      id: createFixtureUuidV7(2),
+      number: 1,
+      agentCode: "researcher",
+      title: "Hologram news",
+      state: "working",
+      latestNote: null,
+      replyId: createFixtureUuidV7(4),
+      jobCallIds: [createFixtureUuidV7(3)],
+      createdAt: "2026-11-10T10:00:00.000Z",
+      updatedAt: "2026-11-10T10:00:00.000Z"
+    })
+
+    /** A main conversation one job was started from. */
+    const mainConversationWithJob: ConversationDelegation = Object.freeze({
+      ...MAIN_CONVERSATION,
+      jobs: Object.freeze([researchJob])
+    })
+
     expect(
-      buildDelegationOffer(
-        MAIN_CONVERSATION_WITH_JOB,
-        true,
-        findBuiltInAgentName
-      )
+      buildDelegationOffer(mainConversationWithJob, true, findBuiltInAgentName)
     ).toEqual({ mayDelegate: true, hasJobs: true, job: undefined })
   })
 

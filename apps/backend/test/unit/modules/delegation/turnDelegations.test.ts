@@ -17,12 +17,6 @@ import {
   sendJobMessage
 } from "../../support/delegationTestServices"
 
-/** Settings of a turn whose tool offer does not name `delegate_work`. */
-const NON_DELEGATING_SETTINGS: TurnSettings = Object.freeze({
-  ...DELEGATING_TURN_SETTINGS,
-  offersDelegateWork: false
-})
-
 /**
  * Settings of a later turn, whose reply `openai/gpt-oss-20b` writes, which
  * tells them from the settings of the turn that gave the work.
@@ -32,17 +26,20 @@ const LATER_TURN_SETTINGS: TurnSettings = Object.freeze({
   model: "openai/gpt-oss-20b"
 })
 
-/** Cancellation of a wait that a case never cancels. */
-const NEVER_ABORTED_SIGNAL = new AbortController().signal
-
 describe("createTurnDelegation", () => {
   it("lets a main conversation's turn delegate when its settings offer delegate_work, and not otherwise", () => {
+    /** Settings of a turn whose tool offer does not name `delegate_work`. */
+    const nonDelegatingSettings: TurnSettings = Object.freeze({
+      ...DELEGATING_TURN_SETTINGS,
+      offersDelegateWork: false
+    })
+
     const services = openDelegationTestServices()
     const offering = createPersonTurn(services.conversation.turns)
     const notOffering = createPersonTurn(
       services.conversation.turns,
       createNewConversationTarget(CALIGINIA_AGENT_CODE),
-      NON_DELEGATING_SETTINGS
+      nonDelegatingSettings
     )
 
     const offered = createTurnDelegation(services.runtime, offering)
@@ -93,6 +90,9 @@ describe("createTurnDelegation", () => {
   })
 
   it("sends job messages from its own turn's conversation, and stops that conversation's jobs", async () => {
+    /** Cancellation of a wait that a case never cancels. */
+    const neverAbortedSignal = new AbortController().signal
+
     const services = openDelegationTestServices()
     const delegating = createPersonTurn(services.conversation.turns)
     const draft = createJobMessageDraft(
@@ -103,7 +103,7 @@ describe("createTurnDelegation", () => {
     const delegation = createTurnDelegation(services.runtime, delegating)
 
     const sent = delegation.createJobMessage(draft)
-    const stopped = await delegation.stopJob(1, NEVER_ABORTED_SIGNAL)
+    const stopped = await delegation.stopJob(1, neverAbortedSignal)
 
     expect(sent).toMatchObject({ status: "sent", jobNumber: 1 })
     expect(stopped).toEqual({ status: "stopped", jobNumber: 1 })

@@ -58,12 +58,6 @@ export function createUserMessage(
   }
 }
 
-/**
- * Identity sequence the jobs of report fixtures count from: job `n` of a
- * report fixture has the sequence `9000 + n`.
- */
-const REPORT_JOB_SEQUENCE_BASE = 9000
-
 /** Values that distinguish one delivered report fixture from another. */
 export type DeliveredReportFixture = Readonly<{
   /** Identity sequence of the report. */
@@ -92,9 +86,15 @@ export type DeliveredReportFixture = Readonly<{
 export function createDeliveredReport(
   fixture: DeliveredReportFixture
 ): JobReport {
+  /**
+   * Identity sequence the jobs of report fixtures count from: job `n` of a
+   * report fixture has the sequence `9000 + n`.
+   */
+  const reportJobSequenceBase = 9000
+
   return {
     id: createFixtureUuidV7(fixture.sequence),
-    jobId: createFixtureUuidV7(REPORT_JOB_SEQUENCE_BASE + fixture.jobNumber),
+    jobId: createFixtureUuidV7(reportJobSequenceBase + fixture.jobNumber),
     jobNumber: fixture.jobNumber,
     agentCode: fixture.agentCode,
     title: fixture.title,

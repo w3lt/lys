@@ -152,6 +152,7 @@ describe("getToolChoice", () => {
     const findFiles = buildToolDefinition("find_files")
     const toolChoices = {
       switches: new Map([["find_files", false]]),
+      approvedFolderPaths: [],
       justRunToolNames: new Set(["find_files"])
     }
 
@@ -164,6 +165,7 @@ describe("getToolChoice", () => {
   it("asks first for a tool whose name is not saved as Just run, network tools included", () => {
     const toolChoices = {
       switches: new Map([["read_page", true]]),
+      approvedFolderPaths: [],
       justRunToolNames: new Set(["find_files"])
     }
 

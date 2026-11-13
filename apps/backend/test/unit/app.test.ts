@@ -6,7 +6,7 @@ import {
   rmSync,
   writeFileSync
 } from "node:fs"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
@@ -234,18 +234,31 @@ describe("buildApp", () => {
   })
 
   it("installs the chat routes with the tool call policy of the configured settings file", async () => {
-    const config = createOwnedBackendConfig()
+    const config = createConfigWithMcpServers([])
     const app = await buildApp({
       config,
       logger: createBackendLogger(new CapturedLogDestination())
     })
     onTestFinished(async () => await app.close())
     await app.ready()
+    writeFileSync(
+      config.settingsFilePath,
+      JSON.stringify({ tools: { approvedFolders: ["/srv/shared/"] } })
+    )
 
-    expect(vi.mocked(registerChatRoutes).mock.lastCall?.[1]).toEqual({
+    const registration = vi.mocked(registerChatRoutes).mock.lastCall?.[1]
+
+    expect(registration).toEqual({
       titleGenerationMaxAttempts: config.titleGenerationMaxAttempts,
-      toolCallPolicy: { settingsFilePath: config.settingsFilePath }
+      toolCallPolicy: {
+        settingsFilePath: config.settingsFilePath,
+        homeFolderPath: homedir(),
+        readApprovedFolders: expect.any(Function)
+      }
     })
+    await expect(
+      registration?.toolCallPolicy.readApprovedFolders()
+    ).resolves.toStrictEqual({ kind: "listed", folderPaths: ["/srv/shared"] })
   })
 
   it("decorates the reply part store over the configured database", async () => {

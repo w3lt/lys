@@ -10,7 +10,7 @@ use std::thread;
 
 use tauri::Manager;
 
-use crate::utils::lys_home::LysHome;
+use crate::{tools::credential_files::CredentialFiles, utils::lys_home::LysHome};
 
 mod backend;
 mod settings;
@@ -36,10 +36,13 @@ fn greet(name: &str) -> String {
 /// Builds and runs the Tauri application.
 ///
 /// The Lys home is resolved once from `LYS_HOME` before the builder runs, as
-/// described by `LysHome::resolve`. If resolution fails, the error is written
-/// to stderr and the process exits with status 1 before any window opens.
+/// described by `LysHome::resolve`, and the credential file list the backend
+/// shares is parsed once for its settings file. If either fails, the error is
+/// written to stderr and the process exits with status 1 before any window
+/// opens.
 ///
-/// The builder registers the opener plugin, manages the resolved `LysHome`, one
+/// The builder registers the opener plugin, manages the resolved `LysHome`,
+/// the `CredentialFiles` that the file tools refuse, one
 /// mutex-protected `backend::Backend` resource, which reads the backend's list
 /// of MCP server process groups from that Lys home, and one `vmo::Vmo` owner, and
 /// exposes the backend, vmo, settings, and client tool commands to the
@@ -62,11 +65,20 @@ pub fn run() {
         }
     };
 
+    let credential_files = match CredentialFiles::load(lys_home.settings_path()) {
+        Ok(credential_files) => credential_files,
+        Err(error) => {
+            eprintln!("Lys cannot start: {error}");
+            std::process::exit(1);
+        }
+    };
+
     let backend = backend::Backend::new(lys_home.mcp_process_groups_path());
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(lys_home)
+        .manage(credential_files)
         .manage(backend)
         .manage(vmo::Vmo::new(vmo::VMO_STOP_TIMEOUT))
         .invoke_handler(tauri::generate_handler![

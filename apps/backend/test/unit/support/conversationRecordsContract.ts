@@ -21,6 +21,7 @@ import {
   createTextAttachment
 } from "./attachmentFixtures"
 import {
+  ASK_ME_TOOL_CALL_DECISION,
   createFixtureUuidV7,
   createReasoningPart,
   createTextPart,
@@ -2207,7 +2208,8 @@ function createSearchCall(
  * Stores one part in the reply most cases address.
  *
  * @param harness - Store under test.
- * @param part - Part to store.
+ * @param part - Part to store; a tool call is stored with
+ * {@link ASK_ME_TOOL_CALL_DECISION}.
  * @returns What {@link ReplyPartRecordWriter.createReplyPart} returned.
  */
 function createTestReplyPart(
@@ -2216,7 +2218,9 @@ function createTestReplyPart(
 ): boolean {
   return harness.replyPartRecordWriter.createReplyPart({
     assistantMessageId: REPLY_ID,
-    part
+    part,
+    toolCallDecision:
+      part.kind === "tool-call" ? ASK_ME_TOOL_CALL_DECISION : undefined
   })
 }
 
@@ -2475,10 +2479,13 @@ function registerUpdateReplyToolCallStateCases(
     const call = createSearchCall(1001, status)
     saveReplyWithParts(harness, [call])
 
-    const updated = updateTestReplyToolCall(harness, call.id, {
-      status: nextStatus,
-      result: "Not this time."
-    })
+    const updated = updateTestReplyToolCall(
+      harness,
+      call.id,
+      nextStatus === "rejected"
+        ? { status: nextStatus, result: "Not this time.", reason: "declined" }
+        : { status: nextStatus, result: "Not this time." }
+    )
 
     const ended = { ...call, status: nextStatus, result: "Not this time." }
     expect(updated).toEqual({ ...ended, updatedAt: CHANGED_AT })
@@ -2562,7 +2569,11 @@ function registerUpdateReplyToolCallStateRefusalCases(
     ],
     ["failed", "awaiting-approval", { status: "failed", result: "x" }],
     ["running", "running", { status: "running" }],
-    ["rejected", "running", { status: "rejected", result: "x" }]
+    [
+      "rejected",
+      "running",
+      { status: "rejected", result: "x", reason: "declined" }
+    ]
   ] as const)(
     "returns undefined for a change that does not follow the call's state (%s from %s)",
     (_label, status, change) => {

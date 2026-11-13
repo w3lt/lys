@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest"
 import MemoryReply from "../../../../src/modules/agent/memoryReply"
 import type { ReplyPartDraft } from "../../../../src/modules/agent/replyPartSequence"
-import { UUID_V7_PATTERN } from "../../support/conversationFixtures"
+import {
+  ASK_ME_TOOL_CALL_DECISION,
+  UUID_V7_PATTERN
+} from "../../support/conversationFixtures"
 
 /** Identifier of the tool call most cases store. */
 const TOOL_CALL_ID = "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f"
@@ -25,6 +28,7 @@ function buildToolCallDraft(
     round,
     toolName: "search_tools",
     argumentText: '{"query":"web"}',
+    decision: ASK_ME_TOOL_CALL_DECISION,
     status
   }
 }
@@ -89,8 +93,13 @@ describe("MemoryReply", () => {
     ["awaiting-approval", { status: "running" }, { status: "running" }],
     [
       "awaiting-approval",
-      { status: "rejected", result: "Not allowed." },
+      { status: "rejected", result: "Not allowed.", reason: "declined" },
       { status: "rejected", result: "Not allowed." }
+    ],
+    [
+      "awaiting-approval",
+      { status: "expired", result: "Nobody answered." },
+      { status: "failed", result: "Nobody answered." }
     ]
   ] as const)(
     "changes a %s tool call as %o",
@@ -109,7 +118,8 @@ describe("MemoryReply", () => {
 
   it.each([
     ["running", { status: "running" }],
-    ["running", { status: "rejected", result: "No." }],
+    ["running", { status: "rejected", result: "No.", reason: "declined" }],
+    ["running", { status: "expired", result: "Nobody answered." }],
     ["awaiting-approval", { status: "succeeded", result: "", sources: [] }],
     ["awaiting-approval", { status: "failed", result: "Broke." }]
   ] as const)(

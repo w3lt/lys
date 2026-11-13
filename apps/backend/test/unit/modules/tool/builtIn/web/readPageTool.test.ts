@@ -25,6 +25,7 @@ import {
   type VmoReadOptions,
   type VmoRoute
 } from "../../../../support/vmoServer"
+import { RUN_TOOL_CALL_ID } from "../../../../support/toolFixtures"
 
 /** Paragraph long enough to count as readable text on its own. */
 const PAGE_PARAGRAPH =
@@ -268,6 +269,7 @@ describe("ReadPageTool", () => {
       const recordedCandidates: unknown[] = []
 
       const result = await readable.runToolCall({
+        toolCallId: RUN_TOOL_CALL_ID,
         abortSignal: new AbortController().signal,
         addWebSources: (candidates) => {
           recordedCandidates.push(...candidates)

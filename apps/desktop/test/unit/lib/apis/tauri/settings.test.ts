@@ -85,6 +85,7 @@ const PROTOTYPE_KEY_SETTINGS: LysSettings = Object.freeze({
     models: new Map([["__proto__", PROTOTYPE_KEY_LOAD_CONFIGURATION]])
   }),
   tools: Object.freeze({
+    approvedFolderPaths: [],
     justRunToolNames: STORED_SETTINGS.tools.justRunToolNames,
     switches: new Map([["__proto__", false]])
   })
@@ -250,9 +251,28 @@ describe("loadSettings", () => {
     const settings = await loadSettings()
 
     expect(settings.tools).toEqual({
+      approvedFolderPaths: [],
       justRunToolNames: new Set(),
       switches: new Map()
     })
+  })
+
+  it("reads the approved folders as a frozen list in the stored order", async () => {
+    startNativeHostFake({
+      load_settings: () => ({
+        ...STORED_SETTINGS_DOCUMENT,
+        tools: {
+          justRun: [],
+          switches: {},
+          approvedFolders: ["/Users/ada/work", "/srv/shared"]
+        }
+      })
+    })
+
+    const { approvedFolderPaths } = (await loadSettings()).tools
+
+    expect(approvedFolderPaths).toEqual(["/Users/ada/work", "/srv/shared"])
+    expect(Object.isFrozen(approvedFolderPaths)).toBe(true)
   })
 
   it("reads a server's omitted lists as empty, an omitted switch as on, omitted built-in switches as off, and freezes the servers", async () => {
@@ -895,6 +915,7 @@ describe("saveToolSettings", () => {
     })
 
     await saveToolSettings({
+      approvedFolderPaths: [],
       justRunToolNames: new Set(["read_text_file", "find_files"]),
       switches: new Map([
         ["web_search", true],
@@ -919,13 +940,17 @@ describe("saveToolSettings", () => {
     ])
   })
 
-  it("writes an empty list and an empty object when no tool is on Just run or switched", async () => {
+  it("writes an empty list and an empty object when no tool is on Just run or switched, and no folder list when none is listed", async () => {
     const host = startNativeHostFake({
       load_settings: () => STORED_SETTINGS_DOCUMENT,
       save_settings: () => null
     })
 
-    await saveToolSettings({ justRunToolNames: new Set(), switches: new Map() })
+    await saveToolSettings({
+      approvedFolderPaths: [],
+      justRunToolNames: new Set(),
+      switches: new Map()
+    })
 
     expect(host.commands[1]).toEqual({
       command: "save_settings",
@@ -933,6 +958,33 @@ describe("saveToolSettings", () => {
         newSettings: {
           ...STORED_SETTINGS_DOCUMENT,
           tools: { justRun: [], switches: {} }
+        }
+      }
+    })
+  })
+
+  it("writes the approved folders in the list's order", async () => {
+    const host = startNativeHostFake({
+      load_settings: () => STORED_SETTINGS_DOCUMENT,
+      save_settings: () => null
+    })
+
+    await saveToolSettings({
+      approvedFolderPaths: ["/srv/shared", "/Users/ada/work"],
+      justRunToolNames: new Set(),
+      switches: new Map()
+    })
+
+    expect(host.commands[1]).toEqual({
+      command: "save_settings",
+      args: {
+        newSettings: {
+          ...STORED_SETTINGS_DOCUMENT,
+          tools: {
+            justRun: [],
+            switches: {},
+            approvedFolders: ["/srv/shared", "/Users/ada/work"]
+          }
         }
       }
     })
@@ -946,6 +998,7 @@ describe("saveToolSettings", () => {
 
     await expect(
       saveToolSettings({
+        approvedFolderPaths: [],
         justRunToolNames: new Set(["find_files"]),
         switches: new Map()
       })
@@ -963,6 +1016,7 @@ describe("saveToolSettings", () => {
 
     await expect(
       saveToolSettings({
+        approvedFolderPaths: [],
         justRunToolNames: new Set(["find_files"]),
         switches: new Map()
       })

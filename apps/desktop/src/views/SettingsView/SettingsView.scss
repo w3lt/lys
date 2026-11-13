@@ -2687,7 +2687,8 @@ legend.settings-view__mcp-field-label {
 
 .settings-view__secret-card,
 .settings-view__location-card,
-.settings-view__email-card {
+.settings-view__email-card,
+.settings-view__folder-card {
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -2793,6 +2794,44 @@ legend.settings-view__mcp-field-label {
   }
 }
 
+.settings-view__folder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-view__folder-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+
+  code {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+  }
+}
+
+.settings-view__folder-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  label {
+    font-size: 12px;
+  }
+}
+
+.settings-view__folder-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .settings-view__location-fields {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -2811,7 +2850,8 @@ legend.settings-view__mcp-field-label {
 }
 
 .settings-view__location-field-error,
-.settings-view__email-field-error {
+.settings-view__email-field-error,
+.settings-view__folder-field-error {
   margin: 0;
   color: var(--app-text-danger);
   font-family: var(--font-mono);

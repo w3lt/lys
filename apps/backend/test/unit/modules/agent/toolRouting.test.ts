@@ -33,6 +33,7 @@ import {
 import {
   buildFoundToolSearchOutcome,
   READ_TEXT_FILE_TOOL,
+  RUN_TOOL_CALL_ID,
   TOOL_CALL_POLICY
 } from "../../support/toolFixtures"
 
@@ -81,6 +82,7 @@ const MCP_DEFINITION = parseMcpToolDefinition({
 const MCP_TOOL: TurnMcpTool = Object.freeze({
   definition: MCP_DEFINITION,
   isDestructive: false,
+  isOpenWorldWrite: false,
   sendToolCall: async () => ({ status: "succeeded" as const, content: "echo" })
 })
 
@@ -246,6 +248,7 @@ describe("buildReplyTools", () => {
     const parsed = replyTools.findTools.parseToolCall({ task: "read a file" })
     if (parsed.status !== "parsed") throw new Error("find_tools did not parse")
     await parsed.runToolCall({
+      toolCallId: RUN_TOOL_CALL_ID,
       abortSignal: new AbortController().signal,
       addWebSources: () => []
     })

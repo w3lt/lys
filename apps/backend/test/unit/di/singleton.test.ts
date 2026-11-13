@@ -41,7 +41,11 @@ import {
   createFakeLlmRuntime
 } from "../support/fakeLlmRuntime"
 import { writeSettingsFile } from "../support/settingsFile"
-import { READ_TEXT_FILE_TOOL, TOOL_CALL_POLICY } from "../support/toolFixtures"
+import {
+  READ_TEXT_FILE_TOOL,
+  SEARCH_CALL_ID,
+  TOOL_CALL_POLICY
+} from "../support/toolFixtures"
 import { answerWithBody, startVmoServer } from "../support/vmoServer"
 
 // The bundle imports the LM Studio SDK through its runtime adapter. No case
@@ -561,6 +565,7 @@ describe("createSingletonServices", () => {
 
     const outcome = await services.agentRuntimeService.findTools({
       task: "read a web page",
+      searchCallId: SEARCH_CALL_ID,
       tools: [READ_TEXT_FILE_TOOL],
       conversationId: createFixtureUuidV7(1),
       model: "qwen/qwen3-8b",

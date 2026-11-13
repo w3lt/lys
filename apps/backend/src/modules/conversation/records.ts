@@ -346,6 +346,70 @@ export interface ReplyPartRecordWriter {
   ): ToolCallReplyPart | undefined
 }
 
+/** One call of a tool search's reply, with how it was decided. */
+export type CreateToolSearchCallRecordInput = Readonly<{
+  /**
+   * UUIDv7 of the stored `find_tools` call that started the search; it
+   * gives the record its conversation.
+   */
+  searchCallId: string
+  /** Code of the agent that answered the search, such as Armitage's. */
+  agentCode: string
+  /**
+   * The call as the search's reply kept it, `running` or `failed`, with its
+   * identity, tool, argument text, and times.
+   */
+  call: ToolCallReplyPart
+  /**
+   * How the backend decided the call before it ran; a search's call never
+   * reaches the approval gate, so it has no approval mode.
+   */
+  decision: ToolCallDecisionRecord
+}>
+
+/**
+ * Stores the decision records of the tool calls of a tool search's reply,
+ * such as Armitage's `search_tools` and `recommend_tool` calls, which that
+ * reply never stores, so the records are the calls' only trace.
+ *
+ * @remarks A record exists only while its search runs: it is refused once
+ * the `find_tools` call that started the search is no longer stored as
+ * running, and a call recorded as running is marked interrupted when that
+ * `find_tools` call stops running. Every call runs in one write transaction
+ * that commits before it returns and changes nothing when it fails.
+ * Borrowed from the store's owner without the authority to close it; every
+ * call fails with `Database is closed` after the owner closes the store.
+ * Calls cannot be nested. Concurrency model: single-owner, synchronous on
+ * the backend's event loop.
+ */
+export interface ToolSearchCallRecordWriter {
+  /**
+   * Stores the decision record of one call a search's reply just kept.
+   *
+   * @param input - The search's `find_tools` call, the answering agent, the
+   * kept call, and how it was decided.
+   * @returns True when stored; false when the `find_tools` call is not
+   * stored as running, which changes nothing.
+   * @throws If the store is closed or the write fails, including when the
+   * call is already recorded, its status is neither `running` nor
+   * `failed`, or the decision has an approval mode or asks the person;
+   * nothing is then changed.
+   */
+  createToolSearchCallRecord(input: CreateToolSearchCallRecordInput): boolean
+  /**
+   * Stores how a recorded running call of a search's reply ended.
+   *
+   * @param call - The call as the search's reply kept it after the change,
+   * `succeeded` or `failed`, with its update time.
+   * @returns True when stored; false when the call is not recorded as
+   * running, such as after its `find_tools` call stopped running, which
+   * changes nothing.
+   * @throws If the store is closed or the write fails, including when the
+   * call's status is not one a run ends with; nothing is then changed.
+   */
+  updateToolSearchCallOutcome(call: ToolCallReplyPart): boolean
+}
+
 /**
  * Reads and writes one turn's records inside the write transaction lent to a
  * {@link ConversationTurnOperation}.

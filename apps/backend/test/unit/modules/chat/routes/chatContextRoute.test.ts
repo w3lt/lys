@@ -71,6 +71,7 @@ import {
   LEADER_STATE_TOOL_FORMATS,
   READ_TEXT_FILE_TOOL
 } from "../../../support/toolFixtures"
+import SqliteToolSearchCallRecordWriter from "../../../../../src/infrastructure/database/conversations/sqliteToolSearchCallRecordWriter"
 
 /** Built-in agent that answers the cases' conversations. */
 const CALIGINIA: BuiltInAgent = Object.freeze({
@@ -225,7 +226,10 @@ function createTestAgentRuntimeService(
       buildConversationTitleLookup(
         conversation.history.getConversation(conversationId)
       ),
-    requestLimits: REQUEST_LIMITS
+    requestLimits: REQUEST_LIMITS,
+    toolSearchCallRecords: new SqliteToolSearchCallRecordWriter(
+      conversation.database
+    )
   })
 }
 

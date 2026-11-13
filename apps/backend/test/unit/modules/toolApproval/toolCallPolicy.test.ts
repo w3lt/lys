@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import {
+  MAXIMUM_PAID_TOOL_CALLS_PER_TASK,
+  MAXIMUM_TOOL_CALLS_PER_TASK,
+  PAID_TOOL_CALLS_PER_TASK_WITHOUT_APPROVAL,
   buildApprovedFolders,
   decideToolCall,
   formatToolCallDenial,
@@ -39,22 +42,54 @@ function buildListedRules(folderPaths: readonly string[]): ToolCallRules {
 /** Rules approving `/home/ada/work/app` and `/srv/shared` only. */
 const LISTED_RULES = buildListedRules(["/home/ada/work/app", "/srv/shared"])
 
+/** What a case's request says about its tool and its usage. */
+type RequestTraits = Readonly<{
+  /** Whether the tool's server marks it as destructive. */
+  isDestructive?: boolean
+  /** Whether the tool's server marks it as an open-world write. */
+  isOpenWorldWrite?: boolean
+  /** Whether a call spends a paid credit. */
+  isPaid?: boolean
+  /** Earlier calls of the tool in the reply that were not denied. */
+  usageInTask?: number
+}>
+
+/** Traits of a destructive tool's first call. */
+const DESTRUCTIVE_TRAITS = Object.freeze({
+  isDestructive: true
+} satisfies RequestTraits)
+
 /**
  * Builds what the gateway knows about one call.
  *
  * @param callArguments - The call's checked arguments.
- * @param isDestructive - Whether the tool's server marks it as destructive;
- * false by default.
+ * @param traits - The tool's marks and the call's usage; by default an
+ * unmarked tool's first call.
  * @returns The request.
  */
 function buildRequest(
   callArguments: ChatToolCall["arguments"],
-  isDestructive = false
+  traits: RequestTraits = {}
 ): ToolCallRequest {
   return Object.freeze({
-    action: Object.freeze({ isDestructive }),
-    resource: Object.freeze({ arguments: callArguments })
+    action: Object.freeze({
+      isDestructive: traits.isDestructive ?? false,
+      isOpenWorldWrite: traits.isOpenWorldWrite ?? false,
+      isPaid: traits.isPaid ?? false
+    }),
+    resource: Object.freeze({ arguments: callArguments }),
+    environment: Object.freeze({ usageInTask: traits.usageInTask ?? 0 })
   })
+}
+
+/**
+ * Builds what the gateway knows about a call without arguments.
+ *
+ * @param traits - The tool's marks and the call's usage.
+ * @returns The request.
+ */
+function buildTraitRequest(traits: RequestTraits): ToolCallRequest {
+  return buildRequest(Object.freeze({}), traits)
 }
 
 /**
@@ -428,7 +463,10 @@ describe("decideToolCall", () => {
   })
 
   it("requires approval of a call of a tool marked destructive", () => {
-    const request = buildRequest(Object.freeze({ path: "notes/old.md" }), true)
+    const request = buildRequest(
+      Object.freeze({ path: "notes/old.md" }),
+      DESTRUCTIVE_TRAITS
+    )
 
     expect(decideToolCall(request, RULES)).toStrictEqual({
       effect: "require-approval",
@@ -442,11 +480,105 @@ describe("decideToolCall", () => {
   ])(
     "denies a call of a tool marked destructive that names %s, rather than asking",
     (_label, value, decision) => {
-      const request = buildRequest(Object.freeze({ target: value }), true)
+      const request = buildRequest(
+        Object.freeze({ target: value }),
+        DESTRUCTIVE_TRAITS
+      )
 
       expect(decideToolCall(request, RULES)).toStrictEqual(decision)
     }
   )
+
+  it.each(
+    Object.entries({
+      "an open-world write": [{ isOpenWorldWrite: true }, "open-world-write"],
+      "a paid tool's sixth call": [
+        {
+          isPaid: true,
+          usageInTask: PAID_TOOL_CALLS_PER_TASK_WITHOUT_APPROVAL
+        },
+        "paid-tool"
+      ],
+      "a paid tool's twentieth call": [
+        { isPaid: true, usageInTask: MAXIMUM_PAID_TOOL_CALLS_PER_TASK - 1 },
+        "paid-tool"
+      ]
+    } satisfies Record<string, readonly [RequestTraits, string]>)
+  )("requires approval of %s", (_label, [traits, reason]) => {
+    expect(decideToolCall(buildTraitRequest(traits), RULES)).toStrictEqual({
+      effect: "require-approval",
+      reason
+    })
+  })
+
+  it("denies a paid tool's call past its budget, rather than asking", () => {
+    const request = buildTraitRequest({
+      isPaid: true,
+      usageInTask: MAXIMUM_PAID_TOOL_CALLS_PER_TASK
+    })
+
+    expect(decideToolCall(request, RULES)).toStrictEqual({
+      effect: "deny",
+      reason: "paid-tool-budget"
+    })
+  })
+
+  it.each(
+    Object.entries({
+      "a paid tool's fifth call": {
+        isPaid: true,
+        usageInTask: PAID_TOOL_CALLS_PER_TASK_WITHOUT_APPROVAL - 1
+      },
+      "an unmarked tool's hundredth call": {
+        usageInTask: MAXIMUM_TOOL_CALLS_PER_TASK - 1
+      }
+    })
+  )("allows %s", (_label, traits) => {
+    expect(decideToolCall(buildTraitRequest(traits), RULES)).toStrictEqual(
+      ALLOWED
+    )
+  })
+
+  it.each(
+    Object.entries({
+      "an unmarked tool": {},
+      "a destructive tool": DESTRUCTIVE_TRAITS,
+      "a paid tool": { isPaid: true }
+    })
+  )(
+    "denies a call of %s past the usage limit, rather than asking",
+    (_label, traits) => {
+      const request = buildTraitRequest({
+        ...traits,
+        usageInTask: MAXIMUM_TOOL_CALLS_PER_TASK
+      })
+
+      expect(decideToolCall(request, RULES)).toStrictEqual({
+        effect: "deny",
+        reason: "usage-limit"
+      })
+    }
+  )
+
+  it("asks about a destructive tool before an open-world write", () => {
+    const request = buildTraitRequest({
+      isDestructive: true,
+      isOpenWorldWrite: true
+    })
+
+    expect(decideToolCall(request, RULES)).toStrictEqual({
+      effect: "require-approval",
+      reason: "destructive-tool"
+    })
+  })
+
+  it("denies a blocked address before it counts the usage", () => {
+    const request = buildRequest(Object.freeze({ url: "http://127.0.0.1/" }), {
+      usageInTask: MAXIMUM_TOOL_CALLS_PER_TASK
+    })
+
+    expect(decideToolCall(request, RULES)).toStrictEqual(DENIED_BLOCKED_ADDRESS)
+  })
 
   it("compares with the settings file of the policy it is given", () => {
     const policy = Object.freeze({
@@ -628,7 +760,10 @@ describe("decideToolCall with approved folders", () => {
   })
 
   it("denies a path outside before it asks about a destructive tool", () => {
-    const request = buildRequest(Object.freeze({ target: "/etc/hosts" }), true)
+    const request = buildRequest(
+      Object.freeze({ target: "/etc/hosts" }),
+      DESTRUCTIVE_TRAITS
+    )
 
     expect(decideToolCall(request, LISTED_RULES)).toStrictEqual(
       DENIED_OUTSIDE_APPROVED_FOLDERS
@@ -699,6 +834,14 @@ describe("formatToolCallDenial", () => {
     [
       "blocked-address",
       "This call was denied and did not run: an argument names this machine, a private network, or another address Lys never connects to. Do not try to reach it another way; tell the person what you need it for."
+    ],
+    [
+      "usage-limit",
+      "This call was denied and did not run: this reply has already called this tool 100 times, the most one reply may. Do not call it again in this reply; tell the person what you found and what is left to do."
+    ],
+    [
+      "paid-tool-budget",
+      "This call was denied and did not run: this reply has already called this tool 20 times, and each call spends the person's paid credits, so no reply may call it more. Do not call it again in this reply; work with the results you have and tell the person what is left to do."
     ]
   ] as const)("explains a %s denial", (reason, message) => {
     expect(formatToolCallDenial(reason)).toBe(message)

@@ -264,7 +264,8 @@ calls it stored are part of the new turn's context.
    settings file once for the round. For each call the policy does not deny,
    in the model's order: a tool saved as Just run goes on at once, unless the
    policy requires approval because the tool is an MCP tool its server marks
-   as destructive; any other call is stored as `awaiting-approval` and then
+   as destructive or as an open-world write, or because it is a reply's
+   `web_search` call from its sixth on; any other call is stored as `awaiting-approval` and then
    shown to the person with a `tool-approval` event that carries a single-use
    approval token, in the same step. A call the store refuses, because the
    reply has ended, is never shown. If the settings file cannot be read, every

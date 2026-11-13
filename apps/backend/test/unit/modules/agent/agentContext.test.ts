@@ -1,3 +1,4 @@
+import type { ConversationUserMessage } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import {
   buildAgentContext,
@@ -7,9 +8,11 @@ import {
   readAgentContextImages,
   UNSEEN_CONTEXT_IMAGES,
   type AgentContextImages,
+  type AgentContextUserMessage,
   type FindAttachmentImage,
   type GetAttachmentImageFileStatus
 } from "../../../../src/modules/agent/agentContext"
+import { formatJobReportsBlock } from "../../../../src/modules/agent/jobReportContext"
 import type { ReplyContextImage } from "../../../../src/modules/agent/replyModel"
 import {
   NO_UNOFFERED_TOOLS,
@@ -21,6 +24,7 @@ import {
 } from "../../support/attachmentFixtures"
 import {
   createAssistantMessage,
+  createDeliveredReport,
   createFixtureUuidV7,
   createReasoningPart,
   createTextPart,
@@ -60,8 +64,8 @@ const NO_SEEN_IMAGES: AgentContextImages = Object.freeze({
   images: new Map()
 })
 
-/** The new message of most cases, without attachments. */
-const HELLO = Object.freeze({ content: "Hello", attachments: [] })
+/** The new message of most cases, without attachments or reports. */
+const HELLO = Object.freeze({ content: "Hello", attachments: [], reports: [] })
 
 /** Bytes of a stored image, as a case's reader returns them. */
 const PHOTO_BYTES = new Uint8Array([1, 2, 3])
@@ -70,10 +74,26 @@ const PHOTO_BYTES = new Uint8Array([1, 2, 3])
  * Builds the new message of a case.
  *
  * @param content - The person's text.
- * @returns The message without attachments.
+ * @returns The message without attachments or reports.
  */
 function createNewMessage(content: string) {
-  return { content, attachments: [] }
+  return { content, attachments: [], reports: [] }
+}
+
+/**
+ * Creates a stored reply of one round of text that its model finished.
+ *
+ * @param sequence - Identity sequence of the reply; its text part's is ten
+ * more.
+ * @param text - Non-empty text of the reply.
+ * @returns The completed reply.
+ */
+function createCompletedReply(sequence: number, text: string) {
+  return createAssistantMessage(
+    sequence,
+    [createTextPart({ sequence: sequence + 10, round: 0, content: text })],
+    { status: "completed", finishReason: "stop" }
+  )
 }
 
 describe("buildAgentContext", () => {
@@ -437,7 +457,8 @@ describe("buildAgentContext", () => {
       ]
       const userMessage = {
         content: "Now this one",
-        attachments: [createTextAttachment(3, "Plan.txt", 5)]
+        attachments: [createTextAttachment(3, "Plan.txt", 5)],
+        reports: []
       }
 
       expect(
@@ -501,7 +522,11 @@ describe("buildAgentContext", () => {
       const context = buildAgentContext({
         systemPrompt: "You are Lys.",
         history: [],
-        userMessage: { content: "Look", attachments: [first, second, third] },
+        userMessage: {
+          content: "Look",
+          attachments: [first, second, third],
+          reports: []
+        },
         images: {
           status: "seen",
           images: new Map([
@@ -539,7 +564,8 @@ describe("buildAgentContext", () => {
           attachments: [
             createTextAttachment(2, "notes.md"),
             createImageAttachment(3, "now.png")
-          ]
+          ],
+          reports: []
         },
         images: UNSEEN_CONTEXT_IMAGES
       })
@@ -568,6 +594,122 @@ describe("buildAgentContext", () => {
           ].join("\n"),
           images: []
         }
+      ])
+    })
+  })
+
+  describe("reports", () => {
+    const dietNote = createDeliveredReport({
+      sequence: 31,
+      jobNumber: 1,
+      agentCode: "researcher",
+      title: "Find what moths eat",
+      kind: "note",
+      content: "Found 12 species so far."
+    })
+    const dietResult = createDeliveredReport({
+      sequence: 32,
+      jobNumber: 1,
+      agentCode: "researcher",
+      title: "Find what moths eat",
+      kind: "result",
+      content: "Clothes moths eat wool."
+    })
+
+    it("sends a user message with reports as one user message: the block, a blank line, then its own text and attachment list", () => {
+      const userMessage: AgentContextUserMessage = {
+        content: "Go on",
+        attachments: [createTextAttachment(1, "notes.md")],
+        reports: [dietNote, dietResult]
+      }
+
+      expect(
+        buildAgentContext({
+          systemPrompt: "You are Lys.",
+          history: [],
+          userMessage,
+          images: UNSEEN_CONTEXT_IMAGES
+        })
+      ).toStrictEqual([
+        { role: "system", content: "You are Lys." },
+        {
+          role: "user",
+          content: [
+            formatJobReportsBlock([dietNote, dietResult]),
+            "",
+            "Go on",
+            "",
+            "Attached files:",
+            "[attachment 1] notes.md (text, 12 bytes)"
+          ].join("\n"),
+          images: []
+        }
+      ])
+    })
+
+    it("sends a user message without reports as only its text and attachment list", () => {
+      const history = [
+        createUserMessage(1, "Find moths", [
+          createTextAttachment(1, "notes.md")
+        ])
+      ]
+
+      expect(
+        buildAgentContext({
+          systemPrompt: "You are Lys.",
+          history,
+          userMessage: createNewMessage("Go on"),
+          images: UNSEEN_CONTEXT_IMAGES
+        })
+      ).toStrictEqual([
+        { role: "system", content: "You are Lys." },
+        {
+          role: "user",
+          content:
+            "Find moths\n\nAttached files:\n[attachment 1] notes.md (text, 12 bytes)",
+          images: []
+        },
+        { role: "user", content: "Go on", images: [] }
+      ])
+    })
+
+    it("sends a wake-up message and a person's message of the history each with its block", () => {
+      const wakeUpText =
+        "Reports from your jobs arrived. No job is still working."
+      const personMessage: ConversationUserMessage = {
+        ...createUserMessage(3, "How is it going?"),
+        reports: [dietNote]
+      }
+      const wakeUpMessage: ConversationUserMessage = {
+        ...createUserMessage(5, wakeUpText),
+        origin: "wake-up",
+        reports: [dietResult]
+      }
+      const history = [
+        createUserMessage(1, "Find out what moths eat."),
+        createCompletedReply(2, "I gave the work to the researcher."),
+        personMessage,
+        createCompletedReply(4, "The researcher is still working."),
+        wakeUpMessage,
+        createCompletedReply(6, "Clothes moths eat wool.")
+      ]
+
+      expect(
+        buildAgentContext({
+          systemPrompt: "You are Lys.",
+          history,
+          userMessage: createNewMessage("Thanks"),
+          images: UNSEEN_CONTEXT_IMAGES
+        }).map((message) => message.content)
+      ).toEqual([
+        "You are Lys.",
+        "Find out what moths eat.",
+        "I gave the work to the researcher.",
+        `${formatJobReportsBlock([dietNote])}\n\nHow is it going?`,
+        "The researcher is still working.",
+        `${formatJobReportsBlock([dietResult])}\n\n${wakeUpText}`,
+        "Clothes moths eat wool.",
+        "Thanks"
       ])
     })
   })

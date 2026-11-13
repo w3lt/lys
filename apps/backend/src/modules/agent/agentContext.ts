@@ -13,6 +13,7 @@ import {
   formatUnseenImagePlaceholder
 } from "../attachment/attachmentContext"
 import type { AttachmentFileStatus } from "../attachment/attachmentFileStore"
+import { formatJobReportsBlock } from "./jobReportContext"
 import type {
   ContextToolCall,
   ReplyContextImage,
@@ -73,10 +74,13 @@ export type AgentContextImages<
       images: ReadonlyMap<number, TImage>
     }>
 
-/** The message a turn answers, as the context needs it. */
+/**
+ * The message a turn answers, as the context needs it: its text, its
+ * attachments, and the reports of the agent's jobs delivered with it.
+ */
 export type AgentContextUserMessage = Pick<
   ConversationUserMessage,
-  "content" | "attachments"
+  "content" | "attachments" | "reports"
 >
 
 /**
@@ -108,7 +112,10 @@ export type AgentContextSource<
   systemPrompt: string
   /** Stored transcript before the turn, in conversation order. */
   history: readonly ConversationMessage[]
-  /** Text and attachments of the message the turn answers, sent last. */
+  /**
+   * Text, attachments, and delivered reports of the message the turn
+   * answers, sent last.
+   */
   userMessage: AgentContextUserMessage
   /**
    * The images the context sends: {@link UNSEEN_CONTEXT_IMAGES} for a model
@@ -220,15 +227,38 @@ function buildStoredReplyContextMessages(
 }
 
 /**
+ * Builds the text the model reads for one user message.
+ * @param message - The message's text, attachments, and delivered reports.
+ * @param placeholders - Sentences standing for the message's images the model
+ * does not see, in attachment order.
+ * @returns The message's text with its attachment list, as
+ * {@link buildUserMessageText} builds it. A message that delivered reports
+ * has the block {@link formatJobReportsBlock} writes for them first, then a
+ * blank line, so the reports reach the model in the message that delivered
+ * them and never as a user message of their own.
+ */
+function buildUserContextText(
+  message: AgentContextUserMessage,
+  placeholders: readonly string[]
+): string {
+  const text = buildUserMessageText(
+    message.content,
+    message.attachments,
+    placeholders
+  )
+  if (message.reports.length === 0) return text
+  return `${formatJobReportsBlock(message.reports)}\n\n${text}`
+}
+
+/**
  * Builds the context form of one user message.
  * @typeParam TImage - What the context holds of each image the model sees.
- * @param message - The message's text and attachments.
+ * @param message - The message's text, attachments, and delivered reports.
  * @param images - The images the context sends.
- * @returns The person's text with the message's attachment list, as
- * {@link buildUserMessageText} builds it, and the message's images the model
- * sees in attachment order. An image the model does not see, because the
- * model cannot see images or the image's file is missing, is a placeholder
- * sentence in the text instead.
+ * @returns The message's text as {@link buildUserContextText} builds it, and
+ * the message's images the model sees in attachment order. An image the model
+ * does not see, because the model cannot see images or the image's file is
+ * missing, is a placeholder sentence in the text instead.
  */
 function buildUserContextMessage<TImage extends ReplyContextImageSides>(
   message: AgentContextUserMessage,
@@ -250,11 +280,7 @@ function buildUserContextMessage<TImage extends ReplyContextImageSides>(
   }
   return {
     role: "user",
-    content: buildUserMessageText(
-      message.content,
-      message.attachments,
-      placeholders
-    ),
+    content: buildUserContextText(message, placeholders),
     images: contextImages
   }
 }
@@ -440,10 +466,13 @@ export function formatSystemPrompt(
  * of its completed and interrupted replies in order, then the new message
  * once. Each user message sends its text, the list of its attachments when it
  * has any, and its images the model sees, with a placeholder sentence for
- * each image it does not see. Each stored round sends its text and the tool
- * calls that have a result, followed by those results; reasoning, calls
- * without a result, and rounds with neither text nor such a call are left
- * out, and failed and streaming replies are left out whole.
+ * each image it does not see. A user message that delivered reports, the new
+ * message or one of the history, sends the block {@link formatJobReportsBlock}
+ * writes for them and a blank line before its text, in the same message.
+ * Each stored round sends its text and the tool calls that have a result,
+ * followed by those results; reasoning, calls without a result, and rounds
+ * with neither text nor such a call are left out, and failed and streaming
+ * replies are left out whole.
  */
 export function buildAgentContext<TImage extends ReplyContextImageSides>(
   source: AgentContextSource<TImage>

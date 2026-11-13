@@ -4,6 +4,8 @@ import type {
   ConversationMessage,
   ConversationSource,
   ConversationUserMessage,
+  JobReport,
+  JobReportKind,
   ReplyPart,
   ToolCallReplyPart
 } from "@lys/share"
@@ -52,6 +54,53 @@ export function createUserMessage(
     attachments,
     origin: "person",
     reports: [],
+    createdAt: FIXTURE_TIMESTAMP
+  }
+}
+
+/**
+ * Identity sequence the jobs of report fixtures count from: job `n` of a
+ * report fixture has the sequence `9000 + n`.
+ */
+const REPORT_JOB_SEQUENCE_BASE = 9000
+
+/** Values that distinguish one delivered report fixture from another. */
+export type DeliveredReportFixture = Readonly<{
+  /** Identity sequence of the report. */
+  sequence: number
+  /** Number of the job that sent the report, from 1. */
+  jobNumber: number
+  /** Code of the agent that works on the job. */
+  agentCode: string
+  /** Title of the job message the report answers. */
+  title: string
+  /** What the report says. */
+  kind: JobReportKind
+  /** Text of the report; empty for a stopped or an interrupted report. */
+  content: string
+}>
+
+/**
+ * Creates a report as a user-role message of the job's parent conversation
+ * delivers it.
+ *
+ * @param fixture - Identity, job, agent, title, kind, and text of the report.
+ * @returns A valid report written at the fixture time that cites no source.
+ * Its job's conversation identity follows from the job number, so reports of
+ * one job name the same job.
+ */
+export function createDeliveredReport(
+  fixture: DeliveredReportFixture
+): JobReport {
+  return {
+    id: createFixtureUuidV7(fixture.sequence),
+    jobId: createFixtureUuidV7(REPORT_JOB_SEQUENCE_BASE + fixture.jobNumber),
+    jobNumber: fixture.jobNumber,
+    agentCode: fixture.agentCode,
+    title: fixture.title,
+    kind: fixture.kind,
+    content: fixture.content,
+    sourceNumbers: [],
     createdAt: FIXTURE_TIMESTAMP
   }
 }

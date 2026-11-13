@@ -146,7 +146,10 @@ export type AgentTurn = Readonly<{
    * distinct number; the turn numbers new sources after them.
    */
   sources: readonly ConversationSource[]
-  /** Stored user message this turn answers, with its attachments. */
+  /**
+   * Stored user message this turn answers, with its attachments and the
+   * reports of the agent's jobs delivered with it.
+   */
   userMessage: ConversationUserMessage
   /**
    * Whether the model sees images: true sends each image attachment's bytes
@@ -310,10 +313,14 @@ const NO_AGENT_STATE_TOOLS: readonly TurnBuiltInTool[] = Object.freeze([])
 /** Delegation tools of a turn whose model is not trained for tool use. */
 const NO_DELEGATION_TOOLS: readonly TurnBuiltInTool[] = Object.freeze([])
 
-/** The next message as a context measurement sends it: without text or files. */
+/**
+ * The next message as a context measurement sends it: without text, files,
+ * or reports.
+ */
 const EMPTY_USER_MESSAGE = Object.freeze({
   content: "",
-  attachments: []
+  attachments: [],
+  reports: []
 } satisfies AgentContextUserMessage)
 
 /** What the next message of a conversation would be sent with. */
@@ -507,13 +514,13 @@ export default class Agent {
    * with the agent's state tools and the delegation tools after them when
    * the model is trained for tool use, of the stored messages a turn would
    * include, and of the new message's markup, measured exactly as a turn's
-   * first round sends them with an empty new message without files; or to
-   * undefined when the model is not loaded. When the model sees images, the
-   * history's image files are looked up first without reading them, so a
-   * stored image counts the tokens of its sides and a missing one its
-   * placeholder, as a turn sends them. A measurement is not a request: it
-   * takes no request slot and is not listed, so it runs at once while every
-   * slot is held.
+   * first round sends them with an empty new message without files or
+   * reports; or to undefined when the model is not loaded. When the model
+   * sees images, the history's image files are looked up first without
+   * reading them, so a stored image counts the tokens of its sides and a
+   * missing one its placeholder, as a turn sends them. A measurement is not a
+   * request: it takes no request slot and is not listed, so it runs at once
+   * while every slot is held.
    * @throws The meter's failure when the model's runtime cannot be reached,
    * is busy, or fails; the image file lookup's failure; and a Zod error for a
    * definition that does not match `toolDefinitionSchema`.

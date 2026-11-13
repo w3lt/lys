@@ -118,20 +118,17 @@ results go to the backend and on to LM Studio, both on loopback.
   security fixes only when the image is rebuilt on `main`, by a change under
   `sandboxes/readpage`, a change to the backend's address ranges or reader
   exit codes that the image copies, or a manual run of its workflow, and vmo
-  uses the new
-  build from its next start. Whoever can publish that tag decides which reader
+  uses the new build from its next start. Whoever can publish that tag decides which reader
   the next vmo start runs.
 - The address rule for a read's connections runs in the micro VM, next to the
   page's scripts, and only Chromium's switches send its connections through
   the reader's proxy. Chromium's own sandbox is off, so a page that exploits
   Chromium controls the VM and can connect past the proxy to any address the
   VM's network reaches, a private network the machine is on included, and the
-  HTML of what it reached then goes to the model
-  ([#265](https://github.com/w3lt/lys/issues/265)).
+  HTML of what it reached then goes to the model.
 - The rule blocks address ranges, not the addresses of the Mac itself: a
   public IPv4 or global IPv6 address of the Mac is allowed, so a page can
-  reach a service the Mac offers on all of its addresses
-  ([#266](https://github.com/w3lt/lys/issues/266)).
+  reach a service the Mac offers on all of its addresses.
 - vmo does not authenticate its callers: any process on the machine can ask
   it to read a page. Stop and the backend's time limit do not stop the VM of
   a read, which runs until vmo's own 30 seconds end it, and nothing limits

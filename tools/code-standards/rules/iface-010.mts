@@ -1,5 +1,6 @@
 import type { TSESLint, TSESTree } from "@typescript-eslint/utils"
 import { isInExternalAugmentation } from "../declaration-scope.mts"
+import { overloadableName, repeatedSignatures } from "../interface-members.mts"
 import {
   citeStandardRule,
   createStandardRule,
@@ -41,39 +42,6 @@ function countPositionalParameters(node: TSESTree.TSMethodSignature): number {
 }
 
 /**
- * Reads the name of a method signature that can be overloaded.
- *
- * @param node - Method signature.
- * @returns The name of a non-computed method, or `null` for an accessor or a
- * computed key.
- */
-function overloadableName(node: TSESTree.TSMethodSignature): string | null {
-  if (node.computed || node.kind !== "method") {
-    return null
-  }
-  if (node.key.type === "Identifier") {
-    return node.key.name
-  }
-  return node.key.type === "Literal" ? String(node.key.value) : null
-}
-
-/**
- * Lists the method signatures that repeat an earlier method's name.
- *
- * @param methods - Method signatures of one interface, in source order.
- * @returns Every signature after the first of each overloaded method.
- */
-function repeatedSignatures(
-  methods: readonly TSESTree.TSMethodSignature[]
-): TSESTree.TSMethodSignature[] {
-  return methods.filter((method, index) => {
-    const name = overloadableName(method)
-    const earlier = methods.slice(0, index).map(overloadableName)
-    return name !== null && earlier.includes(name)
-  })
-}
-
-/**
  * Reports every method signature with too many parameters and every repeated
  * method name in one interface.
  *
@@ -94,8 +62,9 @@ function checkInterface(
       context.report({ node: method, messageId: "tooManyParameters", data })
     }
   }
-  for (const method of repeatedSignatures(methods)) {
-    const data = Object.freeze({ name: overloadableName(method) })
+  const { sourceCode } = context
+  for (const method of repeatedSignatures(methods, sourceCode)) {
+    const data = Object.freeze({ name: overloadableName(method, sourceCode) })
     context.report({ node: method, messageId: "overload", data })
   }
 }

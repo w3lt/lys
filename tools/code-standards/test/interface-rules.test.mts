@@ -92,6 +92,10 @@ ruleTester.run("iface-006", interfaceOperationCountRule, {
       code: storeInterface(...operations(5))
     },
     {
+      name: "counts an overloaded method once",
+      code: storeInterface(...operations(5), "operation0(input: string): void")
+    },
+    {
       name: "leaves inherited operations to review when the interface extends another",
       code: "interface Store extends Reader {}"
     },
@@ -104,10 +108,9 @@ ruleTester.run("iface-006", interfaceOperationCountRule, {
       errors: [expectedCountReport("tooManyOperations", 6)]
     },
     {
-      name: "counts each overload, getter, and setter",
+      name: "counts a getter and a setter as two operations",
       code: storeInterface(
-        ...operations(3),
-        "operation0(input: string): void",
+        ...operations(4),
         "get size(): number",
         "set size(size: number)"
       ),
@@ -171,6 +174,14 @@ ruleTester.run("iface-010", interfaceOperationRule, {
         '"load"(): void'
       ),
       errors: [expectedReport("overload"), expectedReport("overload")]
+    },
+    {
+      name: "reports an overloaded method with a computed name",
+      code: storeInterface(
+        "[Symbol.iterator](): Iterator<Item>",
+        "[Symbol.iterator](start: number): Iterator<Item>"
+      ),
+      errors: [expectedReport("overload")]
     }
   ]
 })

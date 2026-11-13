@@ -1,5 +1,6 @@
 import type { TSESLint, TSESTree } from "@typescript-eslint/utils"
 import { isInExternalAugmentation } from "../declaration-scope.mts"
+import { repeatedSignatures } from "../interface-members.mts"
 import {
   citeStandardRule,
   createStandardRule,
@@ -38,9 +39,11 @@ const createListeners: StandardRuleCreate<keyof typeof messages> = (
     if (isInExternalAugmentation(context.sourceCode.getAncestors(node))) {
       return
     }
-    const count = node.body.body.filter(
+    const methods = node.body.body.filter(
       (member) => member.type === "TSMethodSignature"
-    ).length
+    )
+    const overloads = repeatedSignatures(methods, context.sourceCode)
+    const count = methods.length - overloads.length
     if (count > operationLimit) {
       const data = Object.freeze({ count })
       context.report({ node, messageId: "tooManyOperations", data })
@@ -55,10 +58,11 @@ const createListeners: StandardRuleCreate<keyof typeof messages> = (
  * Reports an interface that declares more than five operations of its own,
  * or that declares no operation and extends nothing.
  *
- * @remarks Each method signature, overload, getter, and setter counts as one
- * operation. Inherited operations need type information and are not counted,
- * so an interface that extends another is reported only when its own
- * operations exceed the limit. Interfaces that augment an external
+ * @remarks A method counts once however many overload signatures it
+ * declares, and each getter and setter counts once. Inherited operations, and
+ * overloads an external parent contract imposes, need type information and
+ * are not counted, so an interface that extends another is reported only when
+ * its own operations exceed the limit. Interfaces that augment an external
  * declaration are not checked. The report covers the interface.
  */
 export const interfaceOperationCountRule: TSESLint.RuleModule<

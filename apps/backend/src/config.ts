@@ -31,6 +31,13 @@ const AGENT_REQUEST_SLOT_COUNT = 2
  */
 const AGENT_WAITING_REQUEST_LIMIT = 8
 
+/**
+ * Job messages agents may send in one main conversation since the person's
+ * last message there, applied as `agentJobMessageLimit` by
+ * {@link loadBackendConfig}. No other source overrides it.
+ */
+const AGENT_JOB_MESSAGE_LIMIT = 12
+
 /** Validates a TCP port that names one fixed endpoint, from 1 to 65535 inclusive. */
 const tcpPortSchema = z.int().min(1).max(65_535)
 
@@ -201,7 +208,18 @@ export const backendConfigSchema = z
      * started: it is stored as failed, and its `error` event says why. Read
      * once at startup.
      */
-    agentWaitingRequestLimit: z.int().min(0)
+    agentWaitingRequestLimit: z.int().min(0),
+    /**
+     * Inclusive maximum number of job messages agents may send in one main
+     * conversation, over all of its jobs, since the person's last message
+     * there.
+     *
+     * @remarks A positive safe integer. A `delegate_work` call that would
+     * send one more is refused with a reason the model reads, and stores
+     * nothing. A message of the person in the conversation starts the count
+     * again; a wake-up message does not. Read once at startup.
+     */
+    agentJobMessageLimit: z.int().min(1)
   })
   .readonly()
 
@@ -252,7 +270,8 @@ export function loadBackendConfig(): BackendConfig {
     titleGenerationMaxAttempts: TITLE_GENERATION_MAX_ATTEMPTS,
     generatedTitleMaxLength: GENERATED_TITLE_MAX_LENGTH,
     agentRequestSlotCount: AGENT_REQUEST_SLOT_COUNT,
-    agentWaitingRequestLimit: AGENT_WAITING_REQUEST_LIMIT
+    agentWaitingRequestLimit: AGENT_WAITING_REQUEST_LIMIT,
+    agentJobMessageLimit: AGENT_JOB_MESSAGE_LIMIT
   } satisfies z.input<typeof backendConfigSchema>)
 }
 

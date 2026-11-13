@@ -228,12 +228,15 @@ server is applied but not connected, switched off included, returns `409` with
 `urn:lys:problem:chat:backend-tool-unavailable` before anything is stored; see
 [an offered tool that cannot run](#an-offered-tool-that-cannot-run). An MCP
 tool name that no applied server lists, such as one of a removed server or a
-tool its server no longer lists, returns `400`. The model is offered client
-tools first, then Lys's own backend tools, each in request order, then
-`read_attachment` for a model trained for tool use while the conversation
-holds a text file, then MCP tools in request order, then the
+tool its server no longer lists, returns `400`. The model is offered
+`read_attachment` first, for a model trained for tool use while the
+conversation holds a text file, then client tools, then Lys's own backend
+tools, then MCP tools, each in request order, then the
 [agent state tools](/architecture/backend/#agent-state-tools) for a model
-trained for tool use. A turn keeps the MCP tools it was offered; each call
+trained for tool use. For a model trained for tool use, the client, backend,
+and MCP tools are [routed](/architecture/backend/#tool-routing): the first
+round offers `find_tools` in their place, and each tool it finds is offered
+from the reply's next round. A turn keeps the MCP tools it was offered; each call
 runs on the tool's server as it is connected when the call runs, and fails
 for the model when the server is no longer connected or no longer lists the
 tool. Without `tools`, a turn of a model that is not trained for tool use is
@@ -425,7 +428,7 @@ answers `200`:
   image whose file is gone is measured as the placeholder sentence a turn
   sends instead. When a stored message
   holds a text file and the model is trained for tool use, `read_attachment`
-  is measured after the offered tools, as a turn offers it. Whether the model
+  is measured before the offered tools, as a turn offers it. Whether the model
   sees images and is trained for tool use is read as the chat request reads
   it, through the same remembered capabilities. A client adds the same
   estimate for each image it would send.
@@ -480,8 +483,8 @@ document). For `read_page`, it is `page-reader-not-ready`: vmo did not answer
 and asks vmo's health route, contacts nothing else, and never contains the
 key. `read_attachment`, the attachment reader, the agent state tools,
 `read_my_state`, `find_agents`, and `read_agent_state`, and `find_tools` are
-not listed and cannot be offered by name: the chat route adds them to a turn
-by itself; see [attachments](#attachments),
+not listed and cannot be offered by name: the backend adds them to a turn by
+itself; see [attachments](#attachments),
 [agent state tools](/architecture/backend/#agent-state-tools), and
 [tool routing](/architecture/backend/#tool-routing).
 
@@ -549,8 +552,9 @@ The backend decides which tool calls need the person: every call the
 that is not saved as Just run, client, backend, and MCP tools alike, except
 `read_attachment`, the agent state tools, and `find_tools`, which run without
 approval, and every call the policy requires approval of, of an MCP tool its
-server marks as destructive, even on Just run. It shows such a call with a
-`tool-approval` event, and the client answers it with
+server marks as destructive, even on Just run. A tool `find_tools` found is
+asked about like any other. It shows such a call with a `tool-approval`
+event, and the client answers it with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`,
 where `callId` is the `id` of the event's call or of its entry in
 `reply-snapshot.pendingToolApprovals`. One request answers one prompt, and its
@@ -1055,7 +1059,7 @@ contain `code`, and an empty body returns `400`. `DELETE` marks the agent
 deleted and returns `204` without a body. From then on `GET`, `PATCH`, and
 `DELETE` answer `404` for it, no new conversation can name it, and its code
 stays taken: the backend keeps the agent's row, with its definition and the
-time it was deleted, so the built-in agents can still look it up with the
+time it was deleted, so the built-in agents but Armitage can still look it up with the
 [agent state tools](/architecture/backend/#agent-state-tools) and a reply it
 was writing when it was deleted runs to its end. A conversation the deleted
 agent answered keeps its messages and its agent code; see

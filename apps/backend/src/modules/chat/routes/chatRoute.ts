@@ -717,8 +717,9 @@ function buildTurnOptions(
  * @param dependencies - Borrowed turn persistence and agent and conversation
  * lookups.
  * @returns The stored turn with its agent; or why no agent answers, with
- * nothing stored: a new conversation names a code no agent has, the
- * continued conversation is not stored, or its agent no longer exists.
+ * nothing stored: a new conversation names a code no agent has, a deleted
+ * agent's, or Armitage's, which answers no chat; the continued conversation
+ * is not stored; or its agent no longer exists.
  * @throws Any persistence failure of a lookup, and the turn persistence's
  * failure.
  * @remarks Nothing awaits between the lookup and the write, so the stored
@@ -977,15 +978,16 @@ async function createTurnReplyTask(
  * keeps.
  * @param context - Generation-owned cancellation, event sender, tool call
  * sender, and approval prompt sender.
- * @returns The agent turn, whose parts and final state go to the stored reply
- * and whose reply state is read back from the stored conversation, which
- * numbers new sources after the conversation's stored ones, whose tool calls
- * pass the tool call policy and then the approval gate, and whose images are
- * read from the conversation's attachment files. With the request's logger, an
- * unreadable settings file, and a reply refused because its agent's request
- * slots and line were full, are logged as warnings; a cancelled reply, and a
- * round that was not sent because it did not fit or its model was not loaded,
- * at debug level; and any other reply failure as an error.
+ * @returns The agent turn, whose parts and final state go to the stored
+ * reply and whose reply state is read back from the stored conversation,
+ * which numbers new sources after the conversation's stored ones, whose tool
+ * calls pass the tool call policy and then the approval gate, and whose
+ * images are read from the conversation's attachment files. With the
+ * request's logger, an unreadable settings file, a reply refused because its
+ * agent's request slots and line were full, and a tool search Armitage could
+ * not finish are logged as warnings; a cancelled reply, and a round that was
+ * not sent because it did not fit or its model was not loaded, at debug
+ * level; and any other reply failure as an error.
  */
 function buildAgentTurn(
   input: TurnGenerationInput,

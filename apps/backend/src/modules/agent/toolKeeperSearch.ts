@@ -7,10 +7,11 @@ import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
 import type Agent from "./agent"
 import type { AgentTurn } from "./agent"
-import type {
-  ReportToolSearchFailure,
-  ToolSearch,
-  ToolSearchOutcome
+import {
+  FAILED_TOOL_SEARCH,
+  type ReportToolSearchFailure,
+  type ToolSearch,
+  type ToolSearchOutcome
 } from "./findToolsTool"
 import MemoryReply from "./memoryReply"
 import ToolCatalog from "./toolCatalog"
@@ -23,23 +24,17 @@ import { NO_UNOFFERED_TOOLS } from "./unofferedTools"
  */
 export const MAXIMUM_TOOL_KEEPER_ROUND_COUNT = 6
 
-/** Outcome of a search that ended without finding. */
-const FAILED_SEARCH: ToolSearchOutcome = Object.freeze({ status: "failed" })
-
-/** Transcript before a search's message: none. */
-const NO_HISTORY = Object.freeze([])
-
-/** Sources of a search's conversation: none. */
-const NO_SOURCES = Object.freeze([])
-
-/** Client tools of a search: none. */
-const NO_CLIENT_TOOLS = Object.freeze([])
-
-/** Built-in tools of a search besides Armitage's own: none. */
-const NO_BUILT_IN_TOOLS: readonly TurnBuiltInTool[] = Object.freeze([])
-
-/** MCP tools of a search: none. */
-const NO_MCP_TOOLS: readonly TurnMcpTool[] = Object.freeze([])
+/** What building the turn of one search needs. */
+type SearchTurnInput = Readonly<{
+  /** The search. */
+  search: ToolSearch
+  /** The asking turn's tools and the search's recommendations. */
+  catalog: ToolCatalog
+  /** Time the search started, as ISO 8601 text; the time of its message. */
+  now: string
+  /** Receives the failure that ended the search without finding. */
+  reportFailure: ReportToolSearchFailure
+}>
 
 /**
  * Has Armitage, the tool keeper, find the tools of an asking turn that fit
@@ -63,7 +58,8 @@ const NO_MCP_TOOLS: readonly TurnMcpTool[] = Object.freeze([])
  * run at once without the person being asked; it runs none of the asking
  * turn's tools. Its reply starts from Armitage's own system prompt and a
  * user message holding the task, without history, images, or the asking
- * reply's other tools.
+ * reply's other tools. The clock is read once, when the search starts, for
+ * the time of that message.
  */
 export async function runToolKeeperSearch(
   armitage: Agent,
@@ -71,15 +67,27 @@ export async function runToolKeeperSearch(
 ): Promise<ToolSearchOutcome> {
   const catalog = new ToolCatalog(search.tools)
   let failed = false
-  const reportSearchFailure = (failure: unknown): void => {
+  /**
+   * Handles the failure that ends the search without finding: marks the
+   * search as failed, then passes the failure to the search's receiver.
+   *
+   * @param failure - The refusal, failure, or reported cancellation.
+   */
+  const handleSearchFailure = (failure: unknown): void => {
     failed = true
     search.reportFailure(failure)
   }
+  const now = new Date().toISOString()
   await armitage.createReply(
-    buildSearchTurn(search, catalog, reportSearchFailure)
+    buildSearchTurn({
+      search,
+      catalog,
+      now,
+      reportFailure: handleSearchFailure
+    })
   )
   search.abortSignal.throwIfAborted()
-  if (failed) return FAILED_SEARCH
+  if (failed) return FAILED_TOOL_SEARCH
   const toolNames = catalog.listRecommendedToolNames()
   return Object.freeze({ status: "found", toolNames })
 }
@@ -87,38 +95,45 @@ export async function runToolKeeperSearch(
 /**
  * Builds the turn Armitage answers for one search.
  *
- * @param search - The search.
- * @param catalog - The asking turn's tools and the search's
- * recommendations.
- * @param reportFailure - Receives the failure that ended the search
- * without finding.
+ * @param input - The search, its catalog, the time it started, and the
+ * receiver of the failure that ended it without finding.
  * @returns A turn on a new in-memory reply that keeps the tool calls of
  * {@link MAXIMUM_TOOL_KEEPER_ROUND_COUNT} rounds, offering Armitage's two
  * tools and nothing else, so it is never routed; a cancellation is reported
  * only when the asking reply was not stopped.
+ * @throws If the search's message breaks the conversation contract.
  */
-function buildSearchTurn(
-  search: ToolSearch,
-  catalog: ToolCatalog,
-  reportFailure: ReportToolSearchFailure
-): AgentTurn {
+function buildSearchTurn(input: SearchTurnInput): AgentTurn {
+  /** Transcript before a search's message: none. */
+  const noHistory = Object.freeze([])
+  /** Sources of a search's conversation: none. */
+  const noSources = Object.freeze([])
+  /** Client tools of a search: none. */
+  const noClientTools = Object.freeze([])
+  /** Built-in tools of a search besides Armitage's own: none. */
+  const noBuiltInTools: readonly TurnBuiltInTool[] = Object.freeze([])
+  /** MCP tools of a search: none. */
+  const noMcpTools: readonly TurnMcpTool[] = Object.freeze([])
+
+  const { search, reportFailure } = input
   const reply = new MemoryReply(MAXIMUM_TOOL_KEEPER_ROUND_COUNT)
-  const userMessage = buildSearchMessage(search.task)
+  const userMessage = buildSearchMessage(search.task, input.now)
+  const directTools = buildToolKeeperTools(input.catalog)
   return {
     conversationId: search.conversationId,
     requestId: uuidv7(),
-    history: NO_HISTORY,
-    sources: NO_SOURCES,
+    history: noHistory,
+    sources: noSources,
     userMessage,
     canSeeImages: false,
     findAttachmentImage: rejectAttachmentImageRead,
     model: search.model,
     trainedForToolUse: true,
     generationOptions: search.generationOptions,
-    directTools: buildToolKeeperTools(catalog),
-    clientTools: NO_CLIENT_TOOLS,
-    builtInTools: NO_BUILT_IN_TOOLS,
-    mcpTools: NO_MCP_TOOLS,
+    directTools,
+    clientTools: noClientTools,
+    builtInTools: noBuiltInTools,
+    mcpTools: noMcpTools,
     unofferedTools: NO_UNOFFERED_TOOLS,
     abortSignal: search.abortSignal,
     createReplyPart: (draft) => reply.createReplyPart(draft),
@@ -129,13 +144,12 @@ function buildSearchTurn(
     updateAssistantMessageState: (completion) =>
       reply.updateAssistantMessageState(completion),
     findReplyStatus: () => reply.findReplyStatus(),
-    sendEvent: dropSearchEvent,
+    sendEvent: handleSearchEvent,
     sendClientToolCall: rejectClientToolCall,
     toolCallPolicy: search.toolCallPolicy,
     createToolCallGate: rejectToolCallGate,
-    reportReplyCancellation: (failure) => {
-      if (!search.abortSignal.aborted) reportFailure(failure)
-    },
+    reportReplyCancellation: (failure) =>
+      handleSearchCancellation(search.abortSignal, reportFailure, failure),
     reportReplyRefusal: reportFailure,
     reportReplyFailure: reportFailure,
     reportToolSearchFailure: reportFailure
@@ -146,13 +160,18 @@ function buildSearchTurn(
  * Builds the user message a search sends Armitage.
  *
  * @param task - Trimmed, non-empty task of the search.
+ * @param now - Time the search started, as ISO 8601 text; the message's
+ * time.
  * @returns A new validated message holding the task, without attachments.
  * @throws If the message breaks the conversation contract.
  */
-function buildSearchMessage(task: string): ConversationUserMessage {
+function buildSearchMessage(
+  task: string,
+  now: string
+): ConversationUserMessage {
   return conversationUserMessageSchema.parse({
     id: uuidv7(),
-    createdAt: new Date().toISOString(),
+    createdAt: now,
     role: "user",
     content: task,
     attachments: []
@@ -160,12 +179,31 @@ function buildSearchMessage(task: string): ConversationUserMessage {
 }
 
 /**
- * Drops one event of a search's reply.
+ * Handles a cancellation Armitage's reply reported.
+ *
+ * @param abortSignal - Cancellation of the asking reply.
+ * @param reportFailure - Receives the failure that ended the search without
+ * finding.
+ * @param failure - The cancellation.
+ * @remarks The cancellation is the search's failure only while the asking
+ * reply was not stopped. After Stop the search ends with the abort reason,
+ * so the receiver is not called.
+ */
+function handleSearchCancellation(
+  abortSignal: AbortSignal,
+  reportFailure: ReportToolSearchFailure,
+  failure: unknown
+): void {
+  if (!abortSignal.aborted) reportFailure(failure)
+}
+
+/**
+ * Handles one event of a search's reply by dropping it.
  *
  * @remarks A search's reply is never stored or shown, so its events have no
  * follower; the asking reply shows the search as its `find_tools` call.
  */
-function dropSearchEvent(): void {
+function handleSearchEvent(): void {
   // Nothing follows a search's reply.
 }
 

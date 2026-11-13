@@ -24,6 +24,7 @@ import {
   createTurnUserMessage
 } from "../../support/conversationFixtures"
 import {
+  buildExpectedInterruptedReportRow,
   buildExpectedReport,
   createFixtureTimestamp,
   createJobFixture,
@@ -185,6 +186,48 @@ describe("StoredConversationTurns", () => {
         status: reply.status,
         updatedAt: "2025-01-01T00:00:02.000Z"
       })
+    })
+
+    it("gives each job reply found streaming at startup an interrupted report with the job's title, and marks it interrupted", () => {
+      const records = openSqliteConversationRecords()
+      const mainId = saveMainConversation(records, 1)
+      const job = saveJob(records, createJobFixture(mainId, 1, "streaming"))
+
+      createTurns(records.database)
+
+      expect(records.listJobReports()).toEqual([
+        buildExpectedInterruptedReportRow(job, 1, NOW)
+      ])
+      expect(
+        records.recordReader.findConversation(job.id)?.messages.at(-1)
+      ).toMatchObject({
+        id: job.replyId,
+        status: "interrupted",
+        updatedAt: NOW
+      })
+    })
+
+    it("gives a main conversation's streaming reply no report", () => {
+      const records = openSqliteConversationRecords()
+      saveConversationWithReply(records.database, { status: "streaming" })
+
+      createTurns(records.database)
+
+      expect(records.listJobReports()).toEqual([])
+    })
+
+    it("inserts no second report when recovery runs again", () => {
+      const records = openSqliteConversationRecords()
+      const mainId = saveMainConversation(records, 1)
+      const job = saveJob(records, createJobFixture(mainId, 1, "streaming"))
+      createTurns(records.database)
+      vi.setSystemTime(new Date(LATER))
+
+      createTurns(records.database)
+
+      expect(records.listJobReports()).toEqual([
+        buildExpectedInterruptedReportRow(job, 1, NOW)
+      ])
     })
 
     it("refuses a closed database", () => {

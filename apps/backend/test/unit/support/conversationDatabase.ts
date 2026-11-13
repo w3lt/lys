@@ -54,8 +54,9 @@ export function openTestDatabase(
  *
  * @param databaseFilePath - SQLite location; an isolated in-memory database
  * when omitted.
- * @returns The records, row-level seeding of the same database, and its close.
- * The turn records are created directly, so no startup recovery runs.
+ * @returns The records, row-level seeding and report listing of the same
+ * database, and its close. The turn records are created directly, so no
+ * startup recovery runs.
  */
 export function openSqliteConversationRecords(
   databaseFilePath = ":memory:"
@@ -82,6 +83,7 @@ export function openSqliteConversationRecords(
     saveJobReport: (row) => {
       saveJobReportRow(database, row)
     },
+    listJobReports: () => listJobReportRows(database),
     closeRecords: () => {
       database[Symbol.dispose]()
     }

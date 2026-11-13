@@ -159,7 +159,7 @@ export type RecordingActivityHub = Readonly<{
   sendJobUpdate: Mock<ActivityHub["sendJobUpdate"]>
 }>
 
-/** What a case's delegation runtime allows. */
+/** What a case's delegation runtime allows, and where it stores. */
 export type DelegationTestOptions = Readonly<{
   /**
    * Job messages agents may send in one main conversation since the
@@ -167,6 +167,13 @@ export type DelegationTestOptions = Readonly<{
    * when omitted.
    */
   agentJobMessageLimit?: number
+  /**
+   * SQLite location of the runtime's database, in a directory the case
+   * owns; an isolated in-memory database when omitted. A second runtime
+   * opened on the file of a first one finds what the first one stored, as
+   * the backend does after a restart.
+   */
+  databaseFilePath?: string
 }>
 
 /**
@@ -325,26 +332,28 @@ const UNUSED_REPLY_MODEL = Object.freeze({
 /**
  * Opens a delegation runtime over stores the current test owns.
  *
- * @param options - What the runtime allows; the test backend
- * configuration's limit of job messages by default.
+ * @param options - What the runtime allows, and where it stores; the test
+ * backend configuration's limit of job messages, and an in-memory database,
+ * by default.
  * @returns The runtime and the case's controls and observations. The
- * runtime's job records are the Sqlite ones over an in-memory database it
- * shares with the conversation services. Its agent lookups know Caliginia
- * and Lysiptera, the leaders; {@link FIRST_MEMBER} and
- * {@link SECOND_MEMBER}, members; and {@link DELETED_MEMBER}, a deleted
- * member. Its wake settings and stop requests are real; its hub records and
- * follows nothing; its events are recorded; it logs to a destination no
- * case reads. Its turn start is scripted, as {@link startScriptedTurn}
- * describes, over a real reply generation registry, which the services
- * return.
+ * runtime's job records are the Sqlite ones over the database it shares
+ * with the conversation services, whose creation settles what an earlier
+ * runtime left streaming there. Its agent lookups know Caliginia and
+ * Lysiptera, the leaders; {@link FIRST_MEMBER} and {@link SECOND_MEMBER},
+ * members; and {@link DELETED_MEMBER}, a deleted member. Its wake settings
+ * and stop requests are real; its hub records and follows nothing; its
+ * events are recorded; it logs to a destination no case reads. Its turn
+ * start is scripted, as {@link startScriptedTurn} describes, over a real
+ * reply generation registry, which the services return.
  * @remarks When the test finishes, the registry is disposed first, which
  * ends every reply still running as interrupted; then the case fails if a
- * reply task failed; then the database is closed.
+ * reply task failed; then the database is closed. A runtime opened later in
+ * the case does all three before one opened earlier.
  */
 export function openDelegationTestServices(
   options: DelegationTestOptions = {}
 ): DelegationTestServices {
-  const conversation = openConversationTestServices()
+  const conversation = openConversationTestServices(options.databaseFilePath)
   const start = createScriptedTurnStart(conversation.turns)
   const hub = createRecordingActivityHub()
   const reportEvent = vi.fn<(event: DelegationEvent) => void>()
@@ -464,6 +473,8 @@ function buildDelegationDependencies(
  * and the deleted member, and load the live agents of all but the deleted
  * one.
  * @throws If a member cannot be stored or deleted.
+ * @remarks The members are stored only when the database holds none yet;
+ * a database an earlier runtime of the case opened already holds them.
  */
 function createTestAgentLookups(
   conversation: ConversationTestServices
@@ -473,11 +484,8 @@ function createTestAgentLookups(
     recordStore,
     builtInAgents: TEST_BUILT_IN_AGENTS
   })
-  for (const definition of MEMBER_DEFINITIONS)
-    if (agentService.createAgent(definition) === undefined)
-      throw new Error(`The member ${definition.code} could not be stored`)
-  if (agentService.deleteAgent(DELETED_MEMBER) !== "deleted")
-    throw new Error("The deleted member could not be deleted")
+  if (agentService.findAgent(FIRST_MEMBER) === undefined)
+    saveTestMembers(agentService)
   const runtimeService = createTestAgentRuntimeService(
     agentService,
     conversation
@@ -488,6 +496,21 @@ function createTestAgentLookups(
     findConversationAgentCode: (conversationId) =>
       conversation.history.getConversationMetadata(conversationId)?.agentCode
   })
+}
+
+/**
+ * Stores the members of a case in the order of {@link MEMBER_DEFINITIONS},
+ * then deletes {@link DELETED_MEMBER}.
+ *
+ * @param agentService - Agent service over a database that holds no member.
+ * @throws If a member cannot be stored or deleted.
+ */
+function saveTestMembers(agentService: AgentService): void {
+  for (const definition of MEMBER_DEFINITIONS)
+    if (agentService.createAgent(definition) === undefined)
+      throw new Error(`The member ${definition.code} could not be stored`)
+  if (agentService.deleteAgent(DELETED_MEMBER) !== "deleted")
+    throw new Error("The deleted member could not be deleted")
 }
 
 /**
@@ -885,7 +908,10 @@ export async function waitForFirstJobReplyEnd(
  * @returns The job numbered first, as stored now.
  * @throws If the conversation is not stored or has no job.
  */
-function findFirstJob(reader: ConversationReader, conversationId: string): Job {
+export function findFirstJob(
+  reader: ConversationReader,
+  conversationId: string
+): Job {
   const job = reader.getConversation(conversationId)?.jobs.at(0)
   if (job === undefined) throw new Error("The conversation has no job")
   return job

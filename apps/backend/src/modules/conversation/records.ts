@@ -292,15 +292,24 @@ export interface ConversationTurnRecordWriter {
     operation: ConversationTurnOperation<Result>
   ): Result
   /**
-   * Marks every reply still streaming, in every conversation, as interrupted.
+   * Stores an `interrupted` report for each reply of a job that is still
+   * streaming, then marks every reply still streaming, in every
+   * conversation, as interrupted.
    *
-   * @param updatedAt - Message timestamp stored on each interrupted reply.
-   * @remarks Keeps each reply's parts, has no finish reason, and changes no
+   * @param updatedAt - Message timestamp stored on each interrupted reply,
+   * and the time each report is written at.
+   * @remarks Each report has a new UUIDv7 identity, carries its job's title,
+   * has no text and no cited source, and waits to be delivered to the job's
+   * delegator. A reply that already has an end report keeps it and gets no
+   * second one, and a reply of a main conversation gets no report. Each
+   * reply keeps its parts, has no finish reason, and changes no
    * conversation's activity time. Each such reply's tool calls still waiting
    * for approval or running become interrupted too, keeping their
    * `updatedAt`: the reply stopped working when the earlier process ended,
-   * not now. Repeating the call changes nothing more.
-   * @throws If the store is closed or the write fails.
+   * not now. The reports and the marks are written together. Repeating the
+   * call changes nothing more and stores no second report.
+   * @throws If the store is closed, a stored reply of a job or its job
+   * violates its contract, or the write fails.
    */
   updateAllStreamingAssistantMessagesToInterrupted(updatedAt: string): void
   /**

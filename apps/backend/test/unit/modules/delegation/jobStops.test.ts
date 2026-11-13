@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type {
   ConversationAssistantMessageStatus,
   Job,
@@ -15,6 +18,7 @@ import {
 import ControlledReplyTask from "../../support/controlledReplyTask"
 import {
   createPersonTurn,
+  FIRST_MEMBER,
   MOTHS_REQUEST,
   openDelegationTestServices,
   SECOND_MEMBER,
@@ -35,6 +39,19 @@ const ARCHIVE_REQUEST: JobMessageRequest = Object.freeze({
   instructions: "File what is known about moths",
   jobNumber: undefined
 })
+
+/**
+ * Creates a database file location in a directory owned by the current test.
+ *
+ * @returns An absolute path whose directory is removed when the test finishes.
+ */
+function createOwnedDatabaseFilePath(): string {
+  const directory = mkdtempSync(join(tmpdir(), "lys-job-stops-test-"))
+  onTestFinished(() => {
+    rmSync(directory, { recursive: true, force: true })
+  })
+  return join(directory, "lys_db.sqlite")
+}
 
 /**
  * Builds the address of a turn's reply, as the person's stop names it.
@@ -630,5 +647,45 @@ describe("the person's stops", () => {
     expect(
       services.runtime.wakeSettings.findWakeSettings(conversationId)
     ).toMatchObject({ status: "found" })
+  })
+})
+
+describe("a restart of the backend", () => {
+  it("starts nothing after a restart, shows the job as interrupted, and delivers the interrupted report with the person's next message", async () => {
+    const databaseFilePath = createOwnedDatabaseFilePath()
+    const earlier = openDelegationTestServices({ databaseFilePath })
+    const lead = startPersonTurn(earlier)
+    const conversationId = lead.turn.conversation.id
+    const job = sendJobMessage(earlier, lead, MOTHS_REQUEST)
+    // The earlier backend ends here without storing the final state of the
+    // lead's reply or of the job's reply, as when its process is killed.
+
+    const restarted = openDelegationTestServices({ databaseFilePath })
+    await waitForMicrotasks()
+
+    expect(restarted.listStartedTurns()).toEqual([])
+    expect(restarted.hub.addReply).not.toHaveBeenCalled()
+    expect(restarted.reportEvent).not.toHaveBeenCalled()
+    expect(listJobStates(restarted, conversationId)).toEqual(["interrupted"])
+    const next = startPersonTurn(restarted, {
+      kind: "existing",
+      id: conversationId
+    })
+    expect(next.turn.userMessage.reports).toEqual([
+      {
+        id: expect.any(String),
+        jobId: job.id,
+        jobNumber: 1,
+        agentCode: FIRST_MEMBER,
+        title: "Moths",
+        kind: "interrupted",
+        content: "",
+        sourceNumbers: [],
+        createdAt: expect.any(String)
+      }
+    ])
+    expect(
+      restarted.listStartedTurns().map(({ context }) => context.startedBy)
+    ).toEqual(["person"])
   })
 })

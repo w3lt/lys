@@ -157,6 +157,8 @@ export type ConversationRecordsHarness = Readonly<{
   saveSource: (conversationId: string, source: ConversationSource) => void
   /** Stores one report of a stored job's reply exactly as given. */
   saveJobReport: (row: JobReportRowFixture) => void
+  /** Lists every stored report, oldest first and then by identity. */
+  listJobReports: () => readonly JobReportRowFixture[]
   /** Closes the store as its owner does; a repeated call changes nothing. */
   closeRecords: () => void
 }>
@@ -644,6 +646,36 @@ export function buildExpectedReport(
     content: row.content,
     sourceNumbers: row.sourceNumbers,
     createdAt: row.createdAt
+  }
+}
+
+/**
+ * Builds the row of the report startup recovery stores for the streaming
+ * reply of a job stored by {@link saveJob}.
+ *
+ * @param job - Identities the job was stored with.
+ * @param jobNumber - Number the job was stored with, which its title holds.
+ * @param createdAt - Time the recovery ran at.
+ * @returns The expected undelivered `interrupted` row: the job's title, no
+ * text, no cited source, and any UUIDv7 the store chose.
+ */
+export function buildExpectedInterruptedReportRow(
+  job: StoredJobFixture,
+  jobNumber: number,
+  createdAt: string
+): JobReportRowFixture {
+  return {
+    id: expect.stringMatching(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    ),
+    jobId: job.id,
+    replyId: job.replyId,
+    kind: "interrupted",
+    title: `Job ${jobNumber}`,
+    content: "",
+    sourceNumbers: [],
+    createdAt,
+    deliveredMessageId: null
   }
 }
 
@@ -2519,6 +2551,100 @@ export function registerConversationTurnRecordWriterContractSuite(
         expect(
           harness.recordReader.findConversation(CONVERSATION_ID)?.messages[0]
         ).toMatchObject({ ...state, updatedAt: "2025-01-01T00:00:01.000Z" })
+      })
+
+      it("gives each job reply found streaming at startup an interrupted report with the job's title, and marks it interrupted", () => {
+        const harness = createHarness()
+        const mainId = saveMainConversation(harness, 1)
+        const firstFixture = createJobFixture(mainId, 1, "streaming")
+        const secondFixture = createJobFixture(mainId, 2, "streaming")
+        const first = saveJob(harness, firstFixture)
+        const second = saveJob(harness, secondFixture)
+
+        harness.turnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted(
+          CHANGED_AT
+        )
+
+        // Both reports carry the recovery's time, so they list in the order
+        // of their random identities.
+        const reports = harness.listJobReports()
+        expect(reports).toHaveLength(2)
+        expect(reports).toEqual(
+          expect.arrayContaining([
+            buildExpectedInterruptedReportRow(first, 1, CHANGED_AT),
+            buildExpectedInterruptedReportRow(second, 2, CHANGED_AT)
+          ])
+        )
+        expect(harness.recordReader.findConversation(mainId)?.jobs).toEqual([
+          buildExpectedJob(first, firstFixture, "interrupted"),
+          buildExpectedJob(second, secondFixture, "interrupted")
+        ])
+        expect(
+          harness.recordReader.findConversation(first.id)?.messages.at(-1)
+        ).toMatchObject({
+          id: first.replyId,
+          status: "interrupted",
+          updatedAt: CHANGED_AT
+        })
+      })
+
+      it("gives a main conversation's streaming reply no report", () => {
+        const harness = createHarness()
+        saveConversationWithReply(harness, CONVERSATION_ID, {
+          sequence: 11,
+          parts: [],
+          status: "streaming",
+          finishReason: null
+        })
+
+        harness.turnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted(
+          CHANGED_AT
+        )
+
+        expect(harness.listJobReports()).toEqual([])
+        expect(
+          harness.recordReader.findConversation(CONVERSATION_ID)?.messages
+        ).toMatchObject([{ status: "interrupted" }])
+      })
+
+      it("inserts no second report when recovery runs again", () => {
+        const harness = createHarness()
+        const mainId = saveMainConversation(harness, 1)
+        const job = saveJob(harness, createJobFixture(mainId, 1, "streaming"))
+        harness.turnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted(
+          CHANGED_AT
+        )
+
+        harness.turnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted(
+          "2026-03-04T05:06:08.000Z"
+        )
+
+        expect(harness.listJobReports()).toEqual([
+          buildExpectedInterruptedReportRow(job, 1, CHANGED_AT)
+        ])
+      })
+
+      it("keeps the end report a streaming job reply already has and stores no second one", () => {
+        const harness = createHarness()
+        const mainId = saveMainConversation(harness, 1)
+        const fixture = createJobFixture(mainId, 1, "streaming")
+        const job = saveJob(harness, fixture)
+        const row = saveReport(harness, job, {
+          sequence: 200,
+          kind: "stopped",
+          title: "Job 1",
+          content: "",
+          createdAt: createFixtureTimestamp(30)
+        })
+
+        harness.turnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted(
+          CHANGED_AT
+        )
+
+        expect(harness.listJobReports()).toEqual([row])
+        expect(harness.recordReader.findConversation(mainId)?.jobs).toEqual([
+          buildExpectedJob(job, fixture, "stopped")
+        ])
       })
     })
 

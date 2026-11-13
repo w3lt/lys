@@ -40,12 +40,14 @@ export default class StoredConversationTurns
    * access.
    * @param turnRecordWriter - Turn records lent by the composition root.
    * @returns The ready turn access; it owns nothing to release.
-   * @throws If the store is closed or the recovery write fails; a failed
-   * recovery changes nothing.
+   * @throws If the store is closed, a stored reply of a job or its job
+   * violates its contract, or the recovery write fails; a failed recovery
+   * changes nothing.
    * @remarks Marks every reply still streaming as interrupted at the current
    * time, without changing its conversation's activity time or history order;
    * its waiting and running calls become interrupted and keep their update
-   * time.
+   * time. Each such reply of a job first gets an `interrupted` report written
+   * at that time, which waits to be delivered to the job's delegator.
    * Create one instance per process, before any reply streams: a later
    * creation would also interrupt the replies streaming at that moment.
    */

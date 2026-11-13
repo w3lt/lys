@@ -15,6 +15,7 @@ import type {
   DatabaseStatementCompiler,
   DatabaseWriter
 } from "../databaseTransactions"
+import { createInterruptedJobReports } from "../delegation/jobReports"
 import SqliteJobTurnTransaction from "../delegation/sqliteJobTurnTransaction"
 import { findConversation } from "./findConversation"
 
@@ -336,14 +337,18 @@ export default class SqliteConversationTurnRecordWriter implements ConversationT
 
   /**
    * Implements
-   * {@link ConversationTurnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted}.
-   * @param updatedAt - Interface-defined message timestamp.
-   * @throws The interface-defined closed and write failures.
+   * {@link ConversationTurnRecordWriter.updateAllStreamingAssistantMessagesToInterrupted}:
+   * the reports are stored as {@link createInterruptedJobReports} stores
+   * them, while the replies still stream, and then the replies are marked.
+   * @param updatedAt - Interface-defined message and report timestamp; also
+   * the time of each report's identity.
+   * @throws The interface-defined closed, validation, and write failures.
    */
   public updateAllStreamingAssistantMessagesToInterrupted(
     updatedAt: string
   ): void {
     this.#databaseWriter.handleDatabaseWriteRequest((statements) => {
+      createInterruptedJobReports(statements, updatedAt)
       updateAllStreamingRepliesToInterrupted(statements, updatedAt)
     })
   }

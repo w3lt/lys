@@ -3,7 +3,8 @@ import {
   stopChatReplyApi,
   stopConversationJobsApi
 } from "@lys/protocol"
-import type { McpServerSettings } from "@lys/share"
+import type { Job, McpServerSettings } from "@lys/share"
+import { once } from "node:events"
 import {
   existsSync,
   mkdtempSync,
@@ -25,14 +26,17 @@ import {
 import AgentRuntimeService from "../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../src/modules/agent/agentService"
 import AttachmentFileStore from "../../src/modules/attachment/attachmentFileStore"
+import type { CompleteChatOptions } from "../../src/modules/chat/chatService"
 import StoredConversationHistoryEditor from "../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../src/modules/conversation/historyReader"
 import StoredReplyParts from "../../src/modules/conversation/replyParts"
 import StoredConversationTurns from "../../src/modules/conversation/turns"
+import { ChatCompletionCancelledError } from "../../src/utils/errors"
 import { TEST_BACKEND_CONFIG } from "./support/backendConfig"
 import { sendChatRequest } from "./support/chatRouteTestApp"
 import { parseSseEvents } from "./support/chatSseRoute"
 import ControlledReplyTask from "./support/controlledReplyTask"
+import { openSqliteConversationRecords } from "./support/conversationDatabase"
 import {
   createFixtureUuidV7,
   createNewConversationTarget,
@@ -41,6 +45,7 @@ import {
 import {
   createJobMessageDraft,
   createPersonTurn,
+  findFirstJob,
   FIRST_MEMBER_DEFINITION,
   MOTHS_REQUEST,
   waitForFirstJobReplyEnd
@@ -165,6 +170,59 @@ function createModelSpies(app: FastifyInstance) {
     .spyOn(app.chatService, "completeChatStream")
     .mockImplementation(async () => createHiReplyStream())
   return { findLlmContextMeasurement, completeChatStream }
+}
+
+/**
+ * Waits on a chat completion request that the model never answers, as a
+ * model still working while the backend closes.
+ *
+ * @param options - The request; the agent aborts its signal when the
+ * reply's generation ends.
+ * @returns A promise that never resolves; on a request without a signal it
+ * waits for good.
+ * @throws {@link ChatCompletionCancelledError} once the signal aborts, as
+ * the chat service fails a request the SDK cancelled.
+ */
+async function waitForCancelledCompletion(
+  options: CompleteChatOptions
+): Promise<never> {
+  const signal = options.signal ?? new AbortController().signal
+  if (!signal.aborted) await once(signal, "abort")
+  throw new ChatCompletionCancelledError(signal.reason)
+}
+
+/** A job that works while its backend closes. */
+type WorkingJob = Readonly<{
+  /** UUIDv7 of the person's main conversation the job was started from. */
+  conversationId: string
+  /** The job as stored while its reply's model request waits. */
+  job: Job
+}>
+
+/**
+ * Gives a member work through the decorated delegation hooks, and leaves
+ * the job's model request waiting.
+ *
+ * @param app - Ready application that no provider is connected to; its
+ * model calls are spied on here.
+ * @returns The person's conversation and the job, once the job's reply has
+ * sent its model request; the request waits until it is cancelled.
+ * @throws If the request is not sent within the wait, or the job is not
+ * stored.
+ */
+async function startWorkingJob(app: FastifyInstance): Promise<WorkingJob> {
+  const { completeChatStream } = createModelSpies(app)
+  completeChatStream.mockImplementation(waitForCancelledCompletion)
+  app.agentService.createAgent(FIRST_MEMBER_DEFINITION)
+  const delegating = createPersonTurn(app.conversationTurns)
+  const conversationId = delegating.turn.conversation.id
+  const draft = createJobMessageDraft(app.replyParts, delegating, MOTHS_REQUEST)
+  app.turnDelegations.createTurnDelegation(delegating).createJobMessage(draft)
+  await vi.waitFor(() => {
+    expect(completeChatStream).toHaveBeenCalledOnce()
+  })
+  const job = findFirstJob(app.conversationHistoryReader, conversationId)
+  return { conversationId, job }
 }
 
 /**
@@ -651,6 +709,55 @@ describe("buildApp", () => {
       }
     ])
     expect(serverCloseCountWhenStreamEnded).toBe(0)
+  })
+
+  it("closes with a working job: the job's reply is interrupted, its report is stored, no wake-up starts, and the activity stream ends", async () => {
+    const log = new CapturedLogDestination()
+    const config = createOwnedBackendConfig()
+    const app = await buildApp({ config, logger: createBackendLogger(log) })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    const { conversationId, job } = await startWorkingJob(app)
+    const streamResponse = app.inject({
+      method: "GET",
+      url: "/api/v1/activity/events",
+      headers: { accept: "text/event-stream" }
+    })
+    await vi.waitFor(() => {
+      expect(log.records).toContainEqual(
+        expect.objectContaining({ msg: "Activity stream connected" })
+      )
+    })
+
+    await app.close()
+
+    const response = await streamResponse
+    // A records connection of its own reads what the closed backend left,
+    // without the startup recovery a backend runs when it opens.
+    const records = openSqliteConversationRecords(config.databaseFilePath)
+    expect(records.recordReader.findConversation(conversationId)?.jobs).toEqual(
+      [{ ...job, state: "interrupted" }]
+    )
+    expect(records.listJobReports()).toEqual([
+      {
+        id: expect.any(String),
+        jobId: job.id,
+        replyId: job.replyId,
+        kind: "interrupted",
+        title: "Moths",
+        content: "",
+        sourceNumbers: [],
+        createdAt: expect.any(String),
+        deliveredMessageId: null
+      }
+    ])
+    expect(log.records).not.toContainEqual(
+      expect.objectContaining({ msg: "A wake-up turn started" })
+    )
+    expect(response.statusCode).toBe(200)
+    expect(parseSseEvents(response.body)).toMatchObject([
+      { data: { replies: [{ assistantMessageId: job.replyId }] } }
+    ])
   })
 
   it("logs a request by its full URL, query string included", async () => {

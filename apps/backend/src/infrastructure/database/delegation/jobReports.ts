@@ -1,4 +1,10 @@
-import { jobReportSchema, type JobReport } from "@lys/share"
+import { v7 as uuidv7 } from "uuid"
+import * as z from "zod"
+import {
+  conversationAssistantMessageSchema,
+  jobReportSchema,
+  type JobReport
+} from "@lys/share"
 import type { DatabaseStatementCompiler } from "../databaseTransactions"
 
 /** One stored row as SQLite returns it, before validation. */
@@ -105,4 +111,69 @@ export function listUndeliveredJobReports(
     )
     .all(parentConversationId)
     .map((row) => jobReportSchema.parse(buildStoredJobReport(row)))
+}
+
+/**
+ * Stores an `interrupted` report for each reply of a job that is still
+ * streaming, inside the caller's write transaction.
+ *
+ * @param statements - Statement compilation lent to the caller's write
+ * transaction.
+ * @param createdAt - Time each report is written at.
+ * @throws If SQLite access or a write fails, or a stored reply of a job or
+ * its job violates its contract, which is checked before anything is
+ * written; the caller's transaction then rolls back.
+ * @remarks Each report carries its job's title as it is now, which is the
+ * title of the job message the reply answers, has no text and no cited
+ * source, and waits to be delivered. Its identity is a new UUIDv7 whose time
+ * is `createdAt`, so nothing here reads the clock; the reports of one call
+ * share that time and list among themselves in the order of their random
+ * identities. A reply that already has an end report keeps it and gets no
+ * second one: the conflict clause names the unique index that holds end
+ * reports only. Call it while the replies still stream; once they no longer
+ * do, it stores nothing.
+ */
+export function createInterruptedJobReports(
+  statements: DatabaseStatementCompiler,
+  createdAt: string
+): void {
+  /**
+   * Validates one stored reply of a job that is still streaming, with what
+   * its `interrupted` report carries.
+   */
+  const streamingJobReplySchema = z.strictObject({
+    /** Identity of the job: its conversation. */
+    jobId: jobReportSchema.shape.jobId,
+    /** Identity of the reply. */
+    replyId: conversationAssistantMessageSchema.shape.id,
+    /** The job's title as it is now, which the report carries. */
+    title: jobReportSchema.shape.title
+  })
+
+  const replies = statements
+    .getStatement(
+      `SELECT j.id AS jobId, r.id AS replyId, j.title
+    FROM conversations j
+    JOIN conversation_messages r ON r.conversation_id = j.id
+    WHERE j.parent_conversation_id IS NOT NULL AND r.role = 'assistant'
+      AND r.status = 'streaming'`
+    )
+    .all()
+    .map((row) => streamingJobReplySchema.parse(row))
+  const insertReport = statements.getStatement(
+    `INSERT INTO job_reports
+    (id, job_conversation_id, reply_id, kind, title, content, source_numbers,
+      created_at)
+    VALUES ($id, $jobId, $replyId, 'interrupted', $title, '', '[]', $createdAt)
+    ON CONFLICT (reply_id) WHERE kind <> 'note' DO NOTHING`
+  )
+  const createdAtMilliseconds = Date.parse(createdAt)
+  for (const reply of replies)
+    insertReport.run({
+      id: uuidv7({ msecs: createdAtMilliseconds }),
+      jobId: reply.jobId,
+      replyId: reply.replyId,
+      title: reply.title,
+      createdAt
+    })
 }

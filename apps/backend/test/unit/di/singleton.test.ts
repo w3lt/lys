@@ -576,6 +576,11 @@ describe("createSingletonServices", () => {
     })
     expect(services.stopReply).toEqual(expect.any(Function))
     expect(services.stopConversationJobs).toEqual(expect.any(Function))
+    expect(services.conversationDeletionActivity).toEqual({
+      listWorkingReplies: expect.any(Function),
+      stopDeletedReplies: expect.any(Function)
+    })
+    expect(Object.isFrozen(services.conversationDeletionActivity)).toBe(true)
   })
 
   it("gives a member work through the bundle's delegation hooks: the job's turn is stored and answered by the member, and its result waits while the lead's reply streams", async () => {

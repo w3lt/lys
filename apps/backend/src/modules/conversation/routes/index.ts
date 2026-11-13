@@ -16,7 +16,8 @@ import type {
   ConversationReader,
   ConversationMetadataReader,
   ConversationTitleEditor,
-  ConversationDeleter
+  ConversationDeleter,
+  ConversationDeletionActivity
 } from "../capabilities"
 import { parseConversationListOptions } from "../listOptions"
 import { createConversationIsJobProblem } from "./jobProblem"
@@ -41,21 +42,26 @@ type ConversationRenaming = Readonly<{
 
 /**
  * What deleting a conversation needs: its metadata's read, its rows'
- * deleter, and its files'.
+ * deleter, what ends the work running in it, and its files' deleter.
  */
 type ConversationDeletion = Readonly<{
   /** Borrowed read of its metadata, which tells whether it is a job. */
   reader: ConversationMetadataReader
   /** Borrowed history deletion access. */
   history: ConversationDeleter
+  /**
+   * Borrowed listing and cancellation of the work running in the
+   * conversation and in its jobs.
+   */
+  activity: ConversationDeletionActivity
   /** Borrowed deletion of the conversation's files. */
   attachmentFiles: AttachmentFileDeleter
 }>
 
 /**
  * Installs all protocol-defined history endpoints on a configured backend.
- * @param app - Application with validation, conversation persistence, and
- * the attachment file store installed.
+ * @param app - Application with validation, conversation persistence, the
+ * deletion's activity, and the attachment file store installed.
  * @returns A promise resolving after route registration.
  * @throws If route registration fails. The failure rejects the promise, so
  * `app.register` reports it rather than an uncaught exception.
@@ -72,8 +78,8 @@ export default function updateFastifyWithConversationRoutes(
 /**
  * Registers the list, read, title-update, and delete endpoints and the
  * response serializer they share.
- * @param app - Application with validation, conversation persistence, and
- * the attachment file store installed.
+ * @param app - Application with validation, conversation persistence, the
+ * deletion's activity, and the attachment file store installed.
  * @throws If route registration fails.
  */
 function registerConversationRoutes(app: FastifyInstance): void {
@@ -138,13 +144,15 @@ function registerUpdateConversationTitleRoute(app: FastifyInstance): void {
 /**
  * Registers the delete endpoint.
  * @param app - Application with validation, the response serializer,
- * conversation persistence, and the attachment file store installed.
+ * conversation persistence, the deletion's activity, and the attachment
+ * file store installed.
  * @throws If route registration fails.
  */
 function registerDeleteConversationRoute(app: FastifyInstance): void {
   const deletion: ConversationDeletion = Object.freeze({
     reader: app.conversationHistoryReader,
     history: app.conversationHistoryEditor,
+    activity: app.conversationDeletionActivity,
     attachmentFiles: app.attachmentFileStore
   })
   app.route<DeleteConversationApiRoute>({
@@ -255,19 +263,26 @@ function handleUpdateConversationTitle(
 }
 
 /**
- * Deletes the conversation and transcript, then its attachment files, before
- * sending a bodyless success, or sends the declared conversation-is-job or
- * missing-conversation problem.
+ * Deletes the conversation and transcript, with its jobs, then cancels the
+ * work that was running in them and removes the conversation's attachment
+ * files, before sending a bodyless success, or sends the declared
+ * conversation-is-job or missing-conversation problem.
  * @param request - Validated target identifier.
  * @param reply - HTTP response owner.
- * @param deletion - Borrowed read of the conversation's metadata, and
- * deletion of its rows and of its files.
+ * @param deletion - Borrowed read of the conversation's metadata, deletion
+ * of its rows, the listing and cancellation of its work, and deletion of
+ * its files.
  * @returns Settlement after the response is sent.
- * @throws If storage access fails.
+ * @throws If storage access fails; nothing is deleted or cancelled when the
+ * working replies cannot be listed or the rows cannot be deleted.
  * @remarks The conversation's metadata is read first: a job is refused and
- * stays stored, with its files. The read and the deletion of the rows run in
- * one synchronous step, so the conversation cannot change between them. The
- * rows are deleted first; the files are removed once the rows are gone, so a
+ * stays stored, with its files and its work. The read, the listing of the
+ * working replies of the conversation and of its jobs, and the deletion of
+ * the rows run in one synchronous step, so the conversation cannot change
+ * between them. Only once the rows are deleted is the listed work
+ * cancelled, which a delete that fails or finds nothing leaves running; the
+ * response waits until it has ended. The files are removed last, once
+ * nothing that was running reads them and the rows are gone, so a
  * conversation is never left without its files. When the files cannot be
  * removed, the failure is logged with its cause and the deletion still
  * succeeds: the conversation is gone, and the files stay under the
@@ -288,6 +303,7 @@ async function handleDeleteConversation(
     reply.type("application/problem+json").code(409).send(jobProblem)
     return
   }
+  const workingReplies = deletion.activity.listWorkingReplies(conversationId)
   if (!deletion.history.deleteConversation(conversationId)) {
     reply
       .type("application/problem+json")
@@ -295,6 +311,7 @@ async function handleDeleteConversation(
       .send(createConversationNotFoundProblem(conversationId, request.url))
     return
   }
+  await deletion.activity.stopDeletedReplies(conversationId, workingReplies)
   try {
     await deletion.attachmentFiles.deleteConversationAttachments(conversationId)
   } catch (error) {

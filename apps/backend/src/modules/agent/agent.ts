@@ -203,7 +203,10 @@ export type AgentTurn = Readonly<{
    * job.
    */
   delegation: TurnDelegation
-  /** Generation-owned cancellation, aborted by Stop or shutdown. */
+  /**
+   * Generation-owned cancellation, aborted by Stop, by the deletion of the
+   * conversation, or by shutdown.
+   */
   abortSignal: AbortSignal
   /**
    * Stores a new part after the reply's last one; undefined after deletion,
@@ -244,8 +247,8 @@ export type AgentTurn = Readonly<{
   /**
    * Sends one allowed call of a client tool to every stream following the
    * reply to run and waits for the client's result; resolves with undefined
-   * when the reply was stopped or shut down while the call waited. Never
-   * rejects.
+   * when the reply was stopped, deleted with its conversation, or shut down
+   * while the call waited. Never rejects.
    */
   sendClientToolCall: SendClientToolCall
   /**
@@ -257,8 +260,9 @@ export type AgentTurn = Readonly<{
    */
   createToolCallGate: CreateToolCallGate
   /**
-   * Receives the failure that ended a reply cancelled by Stop or shutdown, or
-   * reported as cancelled by the model.
+   * Receives the failure that ended a reply cancelled by Stop, by the
+   * deletion of its conversation, or by shutdown, or reported as cancelled
+   * by the model.
    */
   reportReplyCancellation: (failure: unknown) => void
   /**
@@ -615,8 +619,9 @@ export default class Agent {
    * holds one of the agent's request slots from
    * the call's start to its end, also while it waits on the person. When
    * every slot is held, it waits in line for one, first come first served,
-   * and starts once a slot frees; Stop or shutdown while it waits ends it as
-   * cancelled before anything is read or sent. When every slot is held and
+   * and starts once a slot frees; Stop, the deletion of its conversation, or
+   * shutdown while it waits ends it as cancelled before anything is read or
+   * sent. When every slot is held and
    * the line is full, the reply is refused: stored as failed without
    * reaching the model, with an `error` event that says why. The request is
    * listed in the agent's activity from the call's start, preparing round 0,

@@ -1,5 +1,6 @@
 import type { Conversation, ConversationMetadata } from "@lys/share"
 import type { ListConversationsApiResponse } from "@lys/protocol"
+import type { ReplyTarget } from "../chat/replyGenerationRegistry"
 import type { ConversationListOptions } from "./listOptions"
 
 /** Synchronous read access borrowed for one backend lifetime; calls after closure fail. */
@@ -75,3 +76,40 @@ export interface ConversationDeleter {
    */
   deleteConversation(conversationId: string): boolean
 }
+
+/**
+ * What deleting a conversation does about the work running in it and in its
+ * jobs, which the delete route calls around the delete; bound to the
+ * delegation runtime by the composition root.
+ */
+export type ConversationDeletionActivity = Readonly<{
+  /**
+   * Lists the working replies of the conversation and of every job below it.
+   * Called before the delete, in the same synchronous step, because the
+   * delete removes the rows that name them.
+   *
+   * @param conversationId - UUIDv7 of the conversation about to be deleted.
+   * @returns The conversation's own working reply first, then those of the
+   * jobs below it, at any depth, in the order the jobs were created; empty
+   * when none works or the conversation is not stored.
+   * @throws If the conversation store is closed or a stored identity
+   * violates the conversation contract; nothing is listed then.
+   */
+  listWorkingReplies: (conversationId: string) => readonly ReplyTarget[]
+  /**
+   * Called after the delete succeeded: cancels the generation of each listed
+   * reply (its model request, the tool calls and approval prompts it waits
+   * on, and its title request), forgets what is kept in memory for the
+   * conversation, and waits until each cancelled generation has settled.
+   *
+   * @param conversationId - UUIDv7 of the deleted conversation.
+   * @param replies - The working replies listed right before the delete.
+   * @returns A promise that resolves once every cancelled generation has
+   * settled; it never rejects. A listed reply without a running generation
+   * is skipped.
+   */
+  stopDeletedReplies: (
+    conversationId: string,
+    replies: readonly ReplyTarget[]
+  ) => Promise<void>
+}>

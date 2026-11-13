@@ -64,8 +64,9 @@ const sendChatToolApprovalApiResponseSchemas = Object.freeze({
  * answered, not waiting for approval, or whose reply ended returns the
  * tool-call-not-pending problem with HTTP 409 and changes nothing, so a
  * repeated request is harmless. The backend sets no time limit on a prompt:
- * it waits until this request, Stop, or backend shutdown. A newer turn in the
- * conversation or deleting the conversation does not end the wait yet.
+ * it waits until this request, Stop, the deletion of the reply's
+ * conversation or of the main conversation its job belongs to, or backend
+ * shutdown. A newer turn in the conversation does not end the wait yet.
  * Changing the method, path, or schemas requires coordinated consumers.
  */
 export const sendChatToolApprovalApi = Object.freeze({

@@ -714,7 +714,7 @@ function handleReplyRefusal(
  * @param turns - Turn persistence borrowed while turns are started.
  * @param assistantMessageId - UUIDv7 of the reply.
  * @param abortSignal - The reply task's cancellation; aborted means the reply
- * was stopped or shut down.
+ * was stopped, deleted with its conversation, or shut down.
  * @throws If the state cannot be stored.
  * @remarks Stores `interrupted` after cancellation and `failed` otherwise. A
  * reply that is already final, superseded, or deleted is left unchanged.

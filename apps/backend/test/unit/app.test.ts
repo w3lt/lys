@@ -1,4 +1,8 @@
-import { stopChatReplyApi, stopConversationJobsApi } from "@lys/protocol"
+import {
+  deleteConversationApi,
+  stopChatReplyApi,
+  stopConversationJobsApi
+} from "@lys/protocol"
 import type { McpServerSettings } from "@lys/share"
 import {
   existsSync,
@@ -435,6 +439,61 @@ describe("buildApp", () => {
         conversationId,
         requester: "person",
         stoppedReplyCount: 0
+      })
+    ])
+  })
+
+  it("decorates the deletion's activity, which the delete route uses to cancel a deleted conversation's reply and title request, and logs the cancellation with its logger", async () => {
+    const log = new CapturedLogDestination()
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(log)
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    const lead = createPersonTurn(app.conversationTurns)
+    const conversationId = lead.turn.conversation.id
+    const replyTask = new ControlledReplyTask()
+    const titleTask = new ControlledReplyTask()
+    app.replyGenerations.startReplyGeneration(
+      { conversationId, assistantMessageId: lead.turn.assistantMessage.id },
+      {
+        startReplyTask: (context) => replyTask.start(context),
+        startTitleTask: (context) => titleTask.start(context),
+        reportTaskFailure: vi.fn()
+      }
+    )
+    onTestFinished(() => {
+      replyTask.resolve()
+      titleTask.resolve()
+    })
+
+    const deletion = app.inject({
+      method: deleteConversationApi.method,
+      url: deleteConversationApi.path.replace(":conversationId", conversationId)
+    })
+    await vi.waitFor(() => {
+      expect(replyTask.context.abortSignal.aborted).toBe(true)
+      expect(titleTask.context.abortSignal.aborted).toBe(true)
+    })
+    replyTask.resolve()
+    titleTask.resolve()
+    const response = await deletion
+
+    expect(response.statusCode).toBe(204)
+    expect(
+      app.conversationHistoryReader.getConversationMetadata(conversationId)
+    ).toBeUndefined()
+    expect(
+      log.records.filter(
+        (record) => record["msg"] === "Jobs were asked to stop"
+      )
+    ).toEqual([
+      expect.objectContaining({
+        level: "info",
+        conversationId,
+        requester: "person",
+        stoppedReplyCount: 1
       })
     ])
   })

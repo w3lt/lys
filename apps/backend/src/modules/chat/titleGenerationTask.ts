@@ -20,7 +20,10 @@ export type CreateTitleGenerationTaskOptions = {
   userMessageContent: string
   /** Model identifier passed to the chat service. */
   model: string
-  /** Signal owned by the generation and aborted only at backend shutdown. */
+  /**
+   * Signal owned by the generation and aborted only when the generation is
+   * disposed: at backend shutdown, or when the conversation is deleted.
+   */
   abortSignal: AbortSignal
   /** Queues the title event for every stream following the turn; never waits. */
   sendEvent: (event: ChatGenerationEvent) => void
@@ -61,7 +64,10 @@ type TitleGenerationResult =
       readonly attempts: number
     }
   | {
-      /** Shutdown cancelled title generation, so no further title request is made. */
+      /**
+       * Shutdown or the conversation's deletion cancelled title generation,
+       * so no further title request is made.
+       */
       readonly status: "abandoned"
       /** Title requests made before the cancellation was observed. */
       readonly attempts: number
@@ -102,14 +108,16 @@ type GeneratedTitle = Extract<TitleGenerationResult, { status: "generated" }>
  * unsuccessful outcomes leave this task's candidate unsaved; a turn that
  * starts after this task settles retries if the conversation is still
  * untitled. Stopping the reply does not cancel this task; only backend
- * shutdown does. Retries and unsuccessful outcomes are logged with
+ * shutdown and the deletion of the conversation do. Retries and
+ * unsuccessful outcomes are logged with
  * `titleGenerationOutcome` and `titleGenerationAttempts` fields, plus `err`
  * for the failure or abort reason behind them: `retrying` at debug level
  * before each further request; `title-not-generated` at warn level after
  * exhausted attempts, a failure that is not retried, or a failed loaded
  * check; `model-not-loaded` at debug level, without `err`, when the model is
- * not loaded; `abandoned` at debug level after a shutdown cancellation,
- * including one during the loaded check; `already-titled` at debug level,
+ * not loaded; `abandoned` at debug level after a cancellation by shutdown or
+ * by the conversation's deletion, including one during the loaded check;
+ * `already-titled` at debug level,
  * without `err`, when the conversation was renamed or deleted first; and
  * `title-not-saved` at error level after a persistence failure. The task
  * never sends an `error` event.
@@ -146,7 +154,7 @@ export default async function createTitleGenerationTask(
           titleGenerationOutcome: "abandoned",
           titleGenerationAttempts: titleGeneration.attempts
         },
-        "Title generation stopped because the backend is shutting down"
+        "Title generation stopped because the backend is shutting down or the conversation was deleted"
       )
       return
     case "failed":
@@ -164,7 +172,8 @@ export default async function createTitleGenerationTask(
 
 /**
  * Requests a title until one is usable, the attempt limit is reached, the
- * model is not loaded, or shutdown cancels it.
+ * model is not loaded, or shutdown or the conversation's deletion cancels
+ * it.
  *
  * @remarks Only {@link TitleGenerationOutputError} consumes another attempt.
  * HTTP, connection, and cancellation failures end generation at once; within
@@ -230,12 +239,13 @@ async function generateTitleWithinAttempts(
  * Checks that a title request may be sent: the task is not cancelled and the
  * model is loaded.
  *
- * @param options - Loaded check, model, and shutdown signal.
+ * @param options - Loaded check, model, and cancellation signal, aborted by
+ * shutdown or by the conversation's deletion.
  * @param attempts - Title requests made so far.
  * @returns Undefined when the request may be sent; otherwise the result that
- * ends generation: abandoned on shutdown, including during the check,
+ * ends generation: abandoned once cancelled, including during the check,
  * model-not-loaded, or failed when the check fails.
- * @remarks Shutdown ends the wait for the check at once; the queue still
+ * @remarks Cancellation ends the wait for the check at once; the queue still
  * completes a check it accepted, and its outcome is ignored.
  */
 async function findUnsentTitleResult(

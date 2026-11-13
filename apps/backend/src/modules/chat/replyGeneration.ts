@@ -83,9 +83,9 @@ export type StartReplyGenerationOptions = Readonly<{
  * Concurrency model: single-owner, on the backend's event loop.
  */
 export default class ReplyGeneration implements AsyncDisposable {
-  /** Cancels the reply task for stop and shutdown. */
+  /** Cancels the reply task for stop and disposal. */
   readonly #replyController = new AbortController()
-  /** Cancels the title task at shutdown only. */
+  /** Cancels the title task at disposal only. */
   readonly #titleController = new AbortController()
   /** Followers receiving events until they end or the generation settles. */
   readonly #subscriptions = new Set<

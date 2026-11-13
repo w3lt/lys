@@ -200,7 +200,7 @@ function findWorkingReplyGeneration(
  * conversation, or once the registry's disposal began, which ends every
  * generation.
  */
-function findRunningReplyGeneration(
+export function findRunningReplyGeneration(
   generations: DelegationRuntime["generations"],
   target: ReplyTarget
 ): ReplyGeneration | undefined {

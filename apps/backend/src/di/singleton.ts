@@ -32,13 +32,19 @@ import SqliteConversationRecordEditor from "../infrastructure/database/conversat
 import SqliteConversationRecordReader from "../infrastructure/database/conversations/sqliteConversationRecordReader"
 import SqliteConversationTurnRecordWriter from "../infrastructure/database/conversations/sqliteConversationTurnRecordWriter"
 import SqliteReplyPartRecordWriter from "../infrastructure/database/conversations/sqliteReplyPartRecordWriter"
+import type { ConversationDeletionActivity } from "../modules/conversation/capabilities"
 import StoredConversationHistoryEditor from "../modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../modules/conversation/historyReader"
 import StoredReplyParts from "../modules/conversation/replyParts"
 import StoredConversationTurns from "../modules/conversation/turns"
+import {
+  listWorkingReplies,
+  stopDeletedReplies
+} from "../modules/delegation/conversationDeletions"
 import ConversationWakeSettings from "../modules/delegation/conversationWakeSettings"
 import type { DelegationEvent } from "../modules/delegation/delegationEvent"
 import { createDelegationRuntime } from "../modules/delegation/delegationRuntime"
+import type { DelegationRuntime } from "../modules/delegation/dependencies"
 import {
   stopConversationJobs,
   stopReplyForPerson
@@ -274,6 +280,13 @@ export type SingletonServices = Readonly<{
    * reached its stored final state; it owns nothing to release.
    */
   stopConversationJobs: (conversationId: string) => Promise<void>
+  /**
+   * Lists the working replies of a conversation and of its jobs before the
+   * conversation is deleted, and cancels their work once the delete
+   * succeeded, as delegation's runtime finds and ends generations; it owns
+   * nothing to release.
+   */
+  conversationDeletionActivity: ConversationDeletionActivity
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
@@ -288,8 +301,8 @@ type TurnStartServices = Pick<
 >
 
 /**
- * What delegation adds to a bundle: its wake settings, its hooks, and the
- * person's stops.
+ * What delegation adds to a bundle: its wake settings, its hooks, the
+ * person's stops, and what a deletion cancels.
  */
 type DelegationServices = Pick<
   SingletonServices,
@@ -297,6 +310,7 @@ type DelegationServices = Pick<
   | "turnDelegations"
   | "stopReply"
   | "stopConversationJobs"
+  | "conversationDeletionActivity"
 >
 
 /**
@@ -529,7 +543,7 @@ function createSingletonServiceBundle(
 
 /**
  * Creates what delegation remembers, its job records, the hooks of its
- * runtime, and the person's stops.
+ * runtime, the person's stops, and what a deletion cancels.
  *
  * @param context - The job message limit, delegation's log reporters, and
  * the shared database the job records read and write.
@@ -537,9 +551,10 @@ function createSingletonServiceBundle(
  * the agent service and the agent runtime service, which find and load
  * agents, the history reader and turn persistence, the turn start and its
  * registry, and the activity hub.
- * @returns The wake settings, the runtime's hooks, and the person's stop of
- * a reply and of a conversation's jobs, bound to the runtime; they read and
- * contact nothing at creation and own nothing to release.
+ * @returns The wake settings, the runtime's hooks, the person's stop of a
+ * reply and of a conversation's jobs, and the deletion's activity, bound to
+ * the runtime; they read and contact nothing at creation and own nothing to
+ * release.
  */
 function createDelegationServices(
   context: Pick<SingletonBundleContext, "config" | "logReporters" | "database">,
@@ -586,8 +601,31 @@ function createDelegationServices(
     turnDelegations: runtime.hooks,
     stopReply: (target) => stopReplyForPerson(runtime, target),
     stopConversationJobs: (conversationId) =>
-      stopConversationJobs(runtime, conversationId)
+      stopConversationJobs(runtime, conversationId),
+    conversationDeletionActivity: buildConversationDeletionActivity(runtime)
   }
+}
+
+/**
+ * Builds what deleting a conversation does about the work running in it,
+ * bound to delegation's runtime.
+ *
+ * @param runtime - The runtime whose reply reader lists the working replies
+ * and whose generation registry, wake settings, and event reporter end
+ * them.
+ * @returns The frozen activity, whose callbacks call
+ * {@link listWorkingReplies} and {@link stopDeletedReplies} with the
+ * runtime; it reads nothing at creation and owns nothing to release.
+ */
+function buildConversationDeletionActivity(
+  runtime: DelegationRuntime
+): ConversationDeletionActivity {
+  return Object.freeze({
+    listWorkingReplies: (conversationId) =>
+      listWorkingReplies(runtime, conversationId),
+    stopDeletedReplies: (conversationId, replies) =>
+      stopDeletedReplies(runtime, conversationId, replies)
+  })
 }
 
 /**

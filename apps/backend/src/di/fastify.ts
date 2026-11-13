@@ -178,6 +178,10 @@ function registerSingletonServices(
   app.decorate("turnDelegations", singletonServices.turnDelegations)
   app.decorate("stopReply", singletonServices.stopReply)
   app.decorate("stopConversationJobs", singletonServices.stopConversationJobs)
+  app.decorate(
+    "conversationDeletionActivity",
+    singletonServices.conversationDeletionActivity
+  )
 }
 
 /** Fastify plugin that opens the application-scoped singleton services. */

@@ -8,6 +8,7 @@ import type ChatService from "./modules/chat/chatService"
 import type ReplyGenerationRegistry from "./modules/chat/replyGenerationRegistry"
 import type { StopReply } from "./modules/chat/replyStop"
 import type { StartTurn, TurnDelegationHooks } from "./modules/chat/turnStart"
+import type { ConversationDeletionActivity } from "./modules/conversation/capabilities"
 import type StoredConversationHistoryEditor from "./modules/conversation/historyEditor"
 import type StoredConversationHistoryReader from "./modules/conversation/historyReader"
 import type StoredReplyParts from "./modules/conversation/replyParts"
@@ -109,5 +110,11 @@ declare module "fastify" {
      * stopped reply reached its stored final state.
      */
     stopConversationJobs: (conversationId: string) => Promise<void>
+    /**
+     * Lists the working replies of a conversation and of its jobs before the
+     * delete route deletes it, and cancels their work once the delete
+     * succeeded, as the application's delegation runtime ends generations.
+     */
+    conversationDeletionActivity: ConversationDeletionActivity
   }
 }

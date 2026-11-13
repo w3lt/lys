@@ -74,6 +74,11 @@ export type ToolSearchOutcome =
       status: "failed"
     }>
 
+/** Outcome of a search that could not run or did not finish. */
+export const FAILED_TOOL_SEARCH: ToolSearchOutcome = Object.freeze({
+  status: "failed"
+})
+
 /**
  * A tool keeper can tell an asking agent which of its turn's tools fit a
  * task, so the agent is offered only those tools.
@@ -131,23 +136,6 @@ export type FindToolsContext = Readonly<{
   toolCallPolicy: ToolCallPolicy
 }>
 
-/** Copy shown for a task that is blank or too long. */
-const INVALID_TASK_MESSAGE = `The task must be 1 to ${MAXIMUM_TOOL_TASK_LENGTH} characters long after trimming.`
-
-/** Copy shown when the keeper found no tool. */
-const NO_TOOL_FOUND_MESSAGE =
-  "Armitage found no tool for this task. Describe the task in other words, or tell the person you have no tool for it."
-
-/** Result shown when the keeper could not search. */
-const FAILED_SEARCH_RESULT: BuiltInToolResult = Object.freeze({
-  status: "failed",
-  content:
-    "Armitage could not search the tools now. Try again, or go on without a tool."
-})
-
-/** Sources a `find_tools` result shows: none. */
-const NO_SOURCES = Object.freeze([])
-
 /** The task argument of `find_tools`. */
 const TASK_ARGUMENT = Object.freeze({
   type: "string",
@@ -191,21 +179,25 @@ export function formatToolRoutingNote(toolCount: number): string {
  * @returns The frozen result, showing no sources.
  */
 function buildSucceededResult(content: string): BuiltInToolResult {
-  return Object.freeze({ status: "succeeded", content, sources: NO_SOURCES })
+  /** Sources a `find_tools` result shows: none. */
+  const noSources = Object.freeze([])
+
+  return Object.freeze({ status: "succeeded", content, sources: noSources })
 }
 
 /**
  * Asks the tool keeper for the tools that fit a task, for one routed reply,
  * and keeps the tools it found for the reply's next rounds.
  *
- * @remarks Invariant: every kept name is one of the turn's tools, kept
- * once, in the order found; the list only grows. A failed or stopped search
- * keeps nothing. It never runs a found tool and never decides whether one
- * may run: the reply offers the found tools, and each call of one passes
- * the reply's checks and gate. Created per reply and dropped with it; owns
- * no resource, and the keeper is lent for the reply. Concurrency model:
- * reentrant on the backend's event loop; parsed calls run independently,
- * each keeping its names in one synchronous step when its search settles.
+ * @remarks Invariant: every kept name is a name the keeper found, which its
+ * contract makes one of the turn's tools, kept once, in the order found; the
+ * list only grows. A failed or stopped search keeps nothing. It never runs a
+ * found tool and never decides whether one may run: the reply offers the
+ * found tools, and each call of one passes the reply's checks and gate.
+ * Created per reply and dropped with it; owns no resource, and the keeper
+ * is lent for the reply. Concurrency model: single-owner, used by one reply
+ * on the backend's event loop; its parsed calls may overlap, each keeping
+ * its names in one synchronous step when its search settles.
  */
 export default class FindToolsTool implements BuiltInTool {
   /** The keeper, the turn's tools, and the reply's model and controls. */
@@ -236,17 +228,16 @@ export default class FindToolsTool implements BuiltInTool {
   public parseToolCall(
     callArguments: BuiltInToolCallArguments
   ): ParsedBuiltInToolCall {
+    /** Copy shown for a task that is blank or too long. */
+    const invalidTaskMessage = `The task must be 1 to ${MAXIMUM_TOOL_TASK_LENGTH} characters long after trimming.`
+
     const value = callArguments["task"]
-    const task = typeof value === "string" ? value.trim() : undefined
-    if (
-      task === undefined ||
-      task.length === 0 ||
-      task.length > MAXIMUM_TOOL_TASK_LENGTH
-    )
-      return Object.freeze({ status: "invalid", message: INVALID_TASK_MESSAGE })
+    const task = typeof value === "string" ? value.trim() : ""
+    if (task.length === 0 || task.length > MAXIMUM_TOOL_TASK_LENGTH)
+      return Object.freeze({ status: "invalid", message: invalidTaskMessage })
     return Object.freeze({
       status: "parsed",
-      runToolCall: async (context) => await this.#findTools(task, context)
+      runToolCall: async (context) => await this.#runFindTools(task, context)
     })
   }
 
@@ -271,10 +262,20 @@ export default class FindToolsTool implements BuiltInTool {
    * @throws The abort reason when the run's signal aborted before or during
    * the search; nothing is kept then.
    */
-  async #findTools(
+  async #runFindTools(
     task: string,
     context: BuiltInToolRunContext
   ): Promise<BuiltInToolResult> {
+    /** Result shown when the keeper could not search. */
+    const failedSearchResult: BuiltInToolResult = Object.freeze({
+      status: "failed",
+      content:
+        "Armitage could not search the tools now. Try again, or go on without a tool."
+    })
+    /** Copy shown when the keeper found no tool. */
+    const noToolFoundMessage =
+      "Armitage found no tool for this task. Describe the task in other words, or tell the person you have no tool for it."
+
     const { abortSignal } = context
     abortSignal.throwIfAborted()
     const { keeper, ...search } = this.#context
@@ -285,12 +286,9 @@ export default class FindToolsTool implements BuiltInTool {
       abortSignal
     })
     abortSignal.throwIfAborted()
-    if (outcome.status === "failed") return FAILED_SEARCH_RESULT
-    const toolNames = outcome.toolNames.filter((name) =>
-      search.tools.some((tool) => tool.name === name)
-    )
-    if (toolNames.length === 0)
-      return buildSucceededResult(NO_TOOL_FOUND_MESSAGE)
+    if (outcome.status === "failed") return failedSearchResult
+    const { toolNames } = outcome
+    if (toolNames.length === 0) return buildSucceededResult(noToolFoundMessage)
     for (const name of toolNames) this.#foundNames.add(name)
     return buildSucceededResult(
       `Armitage found these tools for the task, and you can call them from your next step: ${toolNames.join(", ")}.`

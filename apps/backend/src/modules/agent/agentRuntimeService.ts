@@ -23,7 +23,12 @@ import type {
   AgentSearchMatch,
   FoundAgent
 } from "./capabilities"
-import type { ToolKeeper, ToolSearch, ToolSearchOutcome } from "./findToolsTool"
+import {
+  FAILED_TOOL_SEARCH,
+  type ToolKeeper,
+  type ToolSearch,
+  type ToolSearchOutcome
+} from "./findToolsTool"
 import type { ReplyContextMeter } from "./replyContextMeter"
 import type { ReplyModel } from "./replyModel"
 import { runToolKeeperSearch } from "./toolKeeperSearch"
@@ -93,11 +98,6 @@ const MISSING_OUTCOME = Object.freeze({ status: "missing" } as const)
 
 /** Requests of an agent that has no live instance. */
 const NO_REQUESTS: readonly AgentRequestState[] = Object.freeze([])
-
-/** Outcome of a tool search that could not run. */
-const FAILED_TOOL_SEARCH: ToolSearchOutcome = Object.freeze({
-  status: "failed"
-})
 
 /**
  * Builds the listing of an agent a search found.
@@ -227,9 +227,11 @@ export default class AgentRuntimeService
    * reporting why, also when Armitage is not one of the built-in agents.
    * The search runs on Armitage's live agent, made live on the first
    * search, as {@link runToolKeeperSearch} runs it.
-   * @throws The signal's abort reason once `search.abortSignal` aborts.
+   * @throws The signal's abort reason once `search.abortSignal` aborts,
+   * before anything is read or reported when it aborted already.
    */
   public async findTools(search: ToolSearch): Promise<ToolSearchOutcome> {
+    search.abortSignal.throwIfAborted()
     const found = this.#agents.findAgent(ARMITAGE_AGENT_CODE)
     if (found === undefined) {
       search.reportFailure(
@@ -251,8 +253,8 @@ export default class AgentRuntimeService
    * {@link AgentStateReader.listAgentMatches} takes it.
    * @returns `forbidden` without searching when the reader's role does not
    * grant `find-agents`; otherwise `found` with the frozen first matches in
-   * search order, deleted agents included, each with the role its kind
-   * gives, and the number of all matches.
+   * search order, deleted agents included, each with the role its code and
+   * kind give, and the number of all matches.
    * @throws If the store is closed or a matched agent is invalid.
    */
   public listAgentMatches(

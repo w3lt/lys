@@ -82,6 +82,7 @@ import {
 } from "../../../../src/modules/toolApproval/toolCallPolicy"
 import { ChatCompletionCancelledError } from "../../../../src/utils/errors"
 import { createImageAttachment } from "../../support/attachmentFixtures"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 import { parseMcpToolDefinition } from "../../support/mcpToolFixtures"
 import {
   openConversationTestServices,
@@ -162,7 +163,7 @@ const SWITCHED_OFF_SEARCH_TOOLS: UnofferedTools = Object.freeze({
 /** Request values and the tool call policy every case's turn carries. */
 const TURN_REQUEST = Object.freeze({
   userMessage: createUserMessage(100, "Hello"),
-  model: "qwen/qwen3-8b",
+  model: LM_STUDIO_QWEN3_8B,
   generationOptions: { temperature: 0.4, replyCeiling: 128 },
   toolCallPolicy: TOOL_CALL_POLICY
 })
@@ -5262,7 +5263,7 @@ describe("Agent", () => {
           "You are Lys (code lys), a leader. As a leader you can find other agents with find_agents and read their state with read_agent_state.",
           `Now: ${NOW}.`,
           "Request slots: 1 of 2 in use.",
-          `1. This reply, in this conversation: started ${NOW} (less than a minute ago) with ${TURN_REQUEST.model}; using tools: read_my_state running.`,
+          `1. This reply, in this conversation: started ${NOW} (less than a minute ago) with qwen/qwen3-8b on LM Studio; using tools: read_my_state running.`,
           "Nothing else is in progress."
         ].join("\n")
         expect(createToolCallGate).not.toHaveBeenCalled()

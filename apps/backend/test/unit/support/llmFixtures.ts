@@ -1,8 +1,15 @@
 import type { LLMInfo } from "@lmstudio/sdk"
 import {
+  groqApiKeySchema,
+  ollamaApiKeySchema,
+  type LlmModelReference
+} from "@lys/share"
+import {
   DEFAULT_LM_STUDIO_ADDRESS,
+  DEFAULT_OLLAMA_ADDRESS,
   type LlmProviderAccess
 } from "../../../src/modules/llm/llmProviderAccess"
+import type { LlmProviderRecord } from "../../../src/modules/llm/llmProviderServices"
 import type { DownloadedLlmModel } from "../../../src/modules/llm/llmRuntimeTypes"
 
 /** LM Studio at its default address, the provider most cases connect to. */
@@ -10,6 +17,34 @@ export const DEFAULT_LM_STUDIO_ACCESS: LlmProviderAccess = Object.freeze({
   provider: "lmStudio",
   address: DEFAULT_LM_STUDIO_ADDRESS
 })
+
+/** Qwen 3 8B on LM Studio, the model most cases name. */
+export const LM_STUDIO_QWEN3_8B: LlmModelReference = Object.freeze({
+  provider: "lmStudio",
+  modelKey: "qwen/qwen3-8b"
+})
+
+/**
+ * How cases reach each provider: LM Studio and a local Ollama server at
+ * their default addresses, Ollama Cloud and Groq with synthetic keys that
+ * are not real credentials.
+ */
+export const TEST_LLM_PROVIDER_ACCESSES: LlmProviderRecord<LlmProviderAccess> =
+  Object.freeze({
+    lmStudio: DEFAULT_LM_STUDIO_ACCESS,
+    ollama: Object.freeze({
+      provider: "ollama",
+      address: DEFAULT_OLLAMA_ADDRESS
+    }),
+    ollamaCloud: Object.freeze({
+      provider: "ollamaCloud",
+      apiKey: ollamaApiKeySchema.parse("ollama-synthetic-0123456789")
+    }),
+    groq: Object.freeze({
+      provider: "groq",
+      apiKey: groqApiKeySchema.parse("gsk_synthetic_0123456789")
+    })
+  })
 
 /** Identity fields that distinguish one fixture model from another. */
 export type LlmModelFixtureIdentity = Readonly<{

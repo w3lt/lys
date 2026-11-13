@@ -1,6 +1,7 @@
 import { chatContextApi } from "@lys/protocol"
 import {
   ARMITAGE_AGENT_CODE,
+  LLM_PROVIDERS,
   mcpSettingsSchema,
   type BuiltInAgent,
   type McpServerSettings
@@ -28,10 +29,16 @@ import type { ReplyModel } from "../../../../../src/modules/agent/replyModel"
 import AttachmentFileStore from "../../../../../src/modules/attachment/attachmentFileStore"
 import { buildReadAttachmentDefinition } from "../../../../../src/modules/attachment/readAttachmentTool"
 import registerChatContextRoute from "../../../../../src/modules/chat/routes/chatContextRoute"
-import { createModelCapabilitiesLookup } from "../../../../../src/modules/chat/routes/modelCapabilities"
+import {
+  createLlmModelCapabilitiesLookup,
+  type ModelCapabilitiesSource
+} from "../../../../../src/modules/chat/routes/modelCapabilities"
+import {
+  buildLlmProviderRecord,
+  type LlmProviderRecord
+} from "../../../../../src/modules/llm/llmProviderServices"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
 import { createLlmServiceBusyError } from "../../../../../src/modules/llm/llmServiceBusyError"
-import LlmService from "../../../../../src/modules/llm/llmService"
 import type { DownloadedLlmModel } from "../../../../../src/modules/llm/llmRuntimeTypes"
 import AgentTool from "../../../../../src/modules/tool/tool"
 import {
@@ -58,7 +65,8 @@ import {
 import { createTestFastify } from "../../../support/fastifyTestApp"
 import {
   createDownloadedLlmModel,
-  DEFAULT_LM_STUDIO_ACCESS
+  LM_STUDIO_QWEN3_8B,
+  TEST_LLM_PROVIDER_ACCESSES
 } from "../../../support/llmFixtures"
 import { buildFakeStdioServerSettings } from "../../../support/mcpTestServers"
 import { createRoomyReplyContextMeter } from "../../../support/replyContextMeterFakes"
@@ -89,8 +97,8 @@ const ARMITAGE: BuiltInAgent = Object.freeze({
   systemPrompt: "You are the test Armitage."
 })
 
-/** Model every case names. */
-const MODEL = "qwen/qwen3-8b"
+/** Model most cases name. */
+const MODEL = LM_STUDIO_QWEN3_8B
 
 /**
  * Request limits of the live agents; a measurement takes no request slot, so
@@ -131,7 +139,7 @@ const FAILED_ANSWER_PART = createTextPart({
 
 /** The model as the inventory lists it when it sees images. */
 const VISION_MODEL_INFO: DownloadedLlmModel = Object.freeze({
-  ...createDownloadedLlmModel({ modelKey: MODEL }),
+  ...createDownloadedLlmModel({ modelKey: MODEL.modelKey }),
   vision: true,
   trainedForToolUse: true
 })
@@ -143,8 +151,9 @@ const VISION_MODEL_INFO: DownloadedLlmModel = Object.freeze({
  *
  * @returns The application, the database for seeding rows, the context
  * meter spy every agent measures with, which every context fits by default,
- * the downloaded-model spy behind the route's capability lookup, which lists
- * no model until a case configures it, the attachment file store, over a
+ * each provider's downloaded-model spy behind the route's capability lookup,
+ * which lists no model until a case configures it, LM Studio's among them
+ * as `listDownloadedLlmModels`, the attachment file store, over a
  * directory removed when the test finishes, and the settings reader of the
  * real MCP server registry, which reads no server until a case configures
  * it; the registry opens servers with a 10-second limit, logs nothing, and
@@ -161,18 +170,11 @@ async function createChatContextRouteApp() {
     rmSync(attachmentsDirectoryPath, { recursive: true, force: true })
   })
   const attachmentFileStore = new AttachmentFileStore(attachmentsDirectoryPath)
-  const llmService = new LlmService({
-    llmEngineOperationQueue: Object.freeze({
-      handleLlmEngineOperationRequest: () =>
-        Promise.reject(new Error("Unexpected LLM engine operation"))
-    })
-  })
-  const listDownloadedLlmModels = vi
-    .spyOn(llmService, "listDownloadedLlmModels")
-    .mockResolvedValue([])
+  const listings = buildLlmProviderRecord(() =>
+    vi.fn(async (): Promise<readonly DownloadedLlmModel[]> => [])
+  )
   const { mcpServerRegistry, readMcpSettings } = createTestMcpServerRegistry()
   await updateFastifyWithHttpTransport(app)
-  app.decorate("llmService", llmService)
   app.decorate("mcpServerRegistry", mcpServerRegistry)
   app.decorate("attachmentFileStore", attachmentFileStore)
   app.decorate(
@@ -184,12 +186,13 @@ async function createChatContextRouteApp() {
     "builtInTools",
     buildScriptedBuiltInTools(new ScriptedBuiltInTool())
   )
-  await app.register(registerSerializedChatContextRoute, { llmService })
+  await app.register(registerSerializedChatContextRoute, { listings })
   return {
     app,
     database,
     replyContextMeter,
-    listDownloadedLlmModels,
+    listDownloadedLlmModels: listings.lmStudio,
+    listings,
     attachmentFileStore,
     readMcpSettings
   }
@@ -197,8 +200,10 @@ async function createChatContextRouteApp() {
 
 /** What {@link registerSerializedChatContextRoute} reads. */
 type ChatContextRouteTestOptions = Readonly<{
-  /** Lists the downloaded models the capability lookup reads. */
-  llmService: Pick<LlmService, "listDownloadedLlmModels">
+  /** Lists each provider's downloaded models, which the capability lookup reads. */
+  listings: LlmProviderRecord<
+    ModelCapabilitiesSource["llmService"]["listDownloadedLlmModels"]
+  >
 }>
 
 /**
@@ -236,22 +241,26 @@ function createTestAgentRuntimeService(
 /**
  * Registers the chat-context route in the scope Fastify gives it, which
  * serializes the route's answers with their schemas, over a capability
- * lookup of the LLM service's downloaded models from
- * {@link DEFAULT_LM_STUDIO_ACCESS}.
+ * lookup of each provider's downloaded models, each provider connected as
+ * {@link TEST_LLM_PROVIDER_ACCESSES} reaches it.
  *
  * @param scope - The route's scope.
- * @param options - The LLM service the lookup reads.
+ * @param options - Each provider's listing the lookup reads.
  * @returns A promise that resolves once the route is registered.
  * @throws If Fastify cannot register the route. The failure rejects the
  * promise, so `app.register` reports it rather than an uncaught exception.
  */
 function registerSerializedChatContextRoute(
   scope: FastifyInstance,
-  { llmService }: ChatContextRouteTestOptions
+  { listings }: ChatContextRouteTestOptions
 ): Promise<void> {
-  const findModelCapabilities = createModelCapabilitiesLookup(
-    () => llmService.listDownloadedLlmModels(),
-    () => DEFAULT_LM_STUDIO_ACCESS
+  const findModelCapabilities = createLlmModelCapabilitiesLookup(
+    buildLlmProviderRecord((provider) => ({
+      llmService: { listDownloadedLlmModels: listings[provider] },
+      llmRuntimeService: {
+        connectedLlmProviderAccess: TEST_LLM_PROVIDER_ACCESSES[provider]
+      }
+    }))
   )
   return new Promise((resolve) => {
     scope.setSerializerCompiler(serializerCompiler)
@@ -340,7 +349,8 @@ function saveStoredConversation(
   saveAssistantMessageRow(database, {
     id: createFixtureUuidV7(3),
     conversationId: STORED_CONVERSATION_ID,
-    model: MODEL,
+    model: MODEL.modelKey,
+    provider: MODEL.provider,
     parts: [EARLIER_ANSWER_PART],
     status: "completed",
     finishReason: "stop",
@@ -356,7 +366,8 @@ function saveStoredConversation(
   saveAssistantMessageRow(database, {
     id: createFixtureUuidV7(5),
     conversationId: STORED_CONVERSATION_ID,
-    model: MODEL,
+    model: MODEL.modelKey,
+    provider: MODEL.provider,
     parts: [FAILED_ANSWER_PART],
     status: "failed",
     finishReason: null,
@@ -1025,6 +1036,41 @@ describe("registerChatContextRoute", () => {
       expect(listDownloadedLlmModels).not.toHaveBeenCalled()
     }
   )
+
+  it("measures on the provider the request's model names, with that provider's capabilities for the model", async () => {
+    const { app, replyContextMeter, listings } =
+      await createChatContextRouteApp()
+    const groqModel = Object.freeze({
+      provider: "groq",
+      modelKey: MODEL.modelKey
+    } as const)
+    listings.groq.mockResolvedValue([VISION_MODEL_INFO])
+
+    const response = await sendChatContextRequest(app, {
+      conversation: { kind: "new", agentCode: "caliginia" },
+      model: groqModel
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(
+      replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0].model
+    ).toEqual(groqModel)
+    expect(
+      LLM_PROVIDERS.map((provider) => listings[provider].mock.calls.length)
+    ).toEqual(LLM_PROVIDERS.map((provider) => (provider === "groq" ? 1 : 0)))
+  })
+
+  it("refuses a model on a provider Lys does not know before measuring", async () => {
+    const { app, replyContextMeter } = await createChatContextRouteApp()
+
+    const response = await sendChatContextRequest(app, {
+      conversation: { kind: "new", agentCode: "caliginia" },
+      model: { provider: "openai", modelKey: MODEL.modelKey }
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(replyContextMeter.findReplyContextMeasurement).not.toHaveBeenCalled()
+  })
 
   it("reads the model's capabilities for a new conversation, which has no attachment", async () => {
     const { app, listDownloadedLlmModels } = await createChatContextRouteApp()

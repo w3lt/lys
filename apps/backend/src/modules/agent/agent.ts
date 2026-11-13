@@ -8,6 +8,7 @@ import type {
   ConversationMessage,
   ConversationSource,
   ConversationUserMessage,
+  LlmModelReference,
   ReplyPart,
   ToolCallReplyPart,
   ToolDefinition
@@ -162,8 +163,11 @@ export type AgentTurn = Readonly<{
    * images.
    */
   findAttachmentImage: FindAttachmentImage
-  /** Model selected by the request. */
-  model: string
+  /**
+   * Model selected by the request; every round and tool search of the turn
+   * goes to its provider.
+   */
+  model: LlmModelReference
   /**
    * Whether the model is trained for tool use: true offers the agent's state
    * tools after the turn's other tools, also while tool calls are off, and
@@ -333,8 +337,8 @@ const EMPTY_USER_MESSAGE = Object.freeze({
 export type AgentContextInput = Readonly<{
   /** Stored transcript, in conversation order; empty for a new conversation. */
   history: readonly ConversationMessage[]
-  /** Identifier of the model the message would be sent to. */
-  model: string
+  /** Model the message would be sent to, and its provider. */
+  model: LlmModelReference
   /** Whether that model sees images, as {@link AgentTurn.canSeeImages}. */
   canSeeImages: boolean
   /**

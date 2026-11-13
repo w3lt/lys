@@ -10,6 +10,7 @@ import {
   createTextPart,
   createToolCallPart
 } from "../../support/conversationFixtures"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 import { waitForMicrotasks } from "../../support/microtasks"
 import { createSettlementReader } from "../../support/settlement"
 
@@ -29,7 +30,7 @@ const BACKEND_TOOL_NAME = "web_search"
 const START: AgentRequestStart = Object.freeze({
   requestId: REQUEST_ID,
   conversationId: createFixtureUuidV7(1),
-  model: "qwen/qwen3-8b",
+  model: LM_STUDIO_QWEN3_8B,
   startedAt: "2026-10-24T10:00:00.000Z",
   clientToolNames: new Set([CLIENT_TOOL_NAME])
 })

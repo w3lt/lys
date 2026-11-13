@@ -270,7 +270,8 @@ export function createToolCallPart(
  * @param sequence - Identity sequence of the message.
  * @param parts - Stored parts in order; empty for a reply without any.
  * @param state - Lifecycle status and, for completed replies, finish reason.
- * @returns A valid assistant message from model `fixture-model`.
+ * @returns A valid assistant message from model `fixture-model` on LM
+ * Studio.
  */
 export function createAssistantMessage(
   sequence: number,
@@ -281,6 +282,7 @@ export function createAssistantMessage(
     id: createFixtureUuidV7(sequence),
     role: "assistant",
     model: "fixture-model",
+    provider: "lmStudio",
     parts,
     status: state.status,
     finishReason: state.status === "completed" ? state.finishReason : null,

@@ -4,6 +4,7 @@ import * as z from "zod"
 import type {
   ConversationAttachment,
   ConversationSource,
+  LlmProvider,
   ReplyPart,
   ToolCallReplyPart
 } from "@lys/share"
@@ -67,6 +68,11 @@ export type AssistantMessageRowFixture = Readonly<{
   conversationId: string
   /** Generating model. */
   model: string
+  /**
+   * Provider of that model; null for a reply stored before Lys recorded
+   * providers.
+   */
+  provider: LlmProvider | null
   /**
    * Stored parts in order, each one row under the reply, valid or not; empty
    * for a reply without any.
@@ -256,6 +262,7 @@ function saveConversationWithReply(
     id: createFixtureUuidV7(reply.sequence),
     conversationId,
     model: "qwen/qwen3-8b",
+    provider: "lmStudio",
     parts: reply.parts,
     status: reply.status,
     finishReason: reply.finishReason,
@@ -317,6 +324,7 @@ function saveQuestionWithReply(
     id: createFixtureUuidV7(150),
     conversationId,
     model: "qwen/qwen3-8b",
+    provider: "lmStudio",
     parts,
     status,
     finishReason: status === "completed" ? "stop" : null,
@@ -567,6 +575,7 @@ export function registerConversationRecordReaderContractSuite(
           id: createFixtureUuidV7(11),
           conversationId: CONVERSATION_ID,
           model: "qwen/qwen3-8b",
+          provider: "ollamaCloud",
           parts: EVERY_KIND_OF_REPLY_PART,
           status: "completed",
           finishReason: "stop",
@@ -588,6 +597,7 @@ export function registerConversationRecordReaderContractSuite(
             id: createFixtureUuidV7(11),
             role: "assistant",
             model: "qwen/qwen3-8b",
+            provider: "ollamaCloud",
             parts: EVERY_KIND_OF_REPLY_PART,
             status: "completed",
             finishReason: "stop",
@@ -595,6 +605,37 @@ export function registerConversationRecordReaderContractSuite(
             updatedAt: "2025-01-01T00:00:03.000Z"
           }
         ])
+      })
+
+      it("projects a reply stored before Lys recorded providers with a null provider", () => {
+        const harness = createHarness()
+        harness.saveConversation({
+          id: CONVERSATION_ID,
+          title: null,
+          agentCode: "lys",
+          createdAt: CREATED_AT
+        })
+        harness.saveAssistantMessage({
+          id: createFixtureUuidV7(11),
+          conversationId: CONVERSATION_ID,
+          model: "qwen/qwen3-8b",
+          provider: null,
+          parts: [],
+          status: "completed",
+          finishReason: "stop",
+          createdAt: "2025-01-01T00:00:02.000Z",
+          updatedAt: "2025-01-01T00:00:02.000Z"
+        })
+
+        expect(
+          harness.recordReader
+            .findConversation(CONVERSATION_ID)
+            ?.messages.map((message) =>
+              message.role === "assistant"
+                ? { model: message.model, provider: message.provider }
+                : undefined
+            )
+        ).toEqual([{ model: "qwen/qwen3-8b", provider: null }])
       })
 
       it("projects a user message's stored attachments in number order, not in name or write order, each with its kind's values", () => {
@@ -1390,6 +1431,7 @@ export function registerConversationTurnRecordWriterContractSuite(
             id: createFixtureUuidV7(11),
             role: "assistant",
             model: "qwen/qwen3-8b",
+            provider: "lmStudio",
             parts: [],
             status: "streaming",
             finishReason: null,
@@ -1945,6 +1987,7 @@ export function registerConversationTurnTransactionContractSuite(
             id: createFixtureUuidV7(11),
             role: "assistant",
             model: "qwen/qwen3-8b",
+            provider: "lmStudio",
             parts: [],
             status: "streaming",
             finishReason: null,
@@ -2013,6 +2056,7 @@ export function registerConversationTurnTransactionContractSuite(
             id: createFixtureUuidV7(11),
             role: "assistant",
             model: "qwen/qwen3-8b",
+            provider: "lmStudio",
             parts: [],
             status: "streaming",
             finishReason: null,
@@ -2038,6 +2082,7 @@ export function registerConversationTurnTransactionContractSuite(
         id: createFixtureUuidV7(11),
         role: "assistant",
         model: "qwen/qwen3-8b",
+        provider: "groq",
         parts: [],
         status: "completed",
         finishReason: "stop",

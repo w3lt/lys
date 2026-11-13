@@ -25,7 +25,7 @@ import type { McpTurnToolLookup } from "../../mcp/mcpServerRegistry"
 import type { BuiltInToolEntry } from "../../tool/builtIn/builtInTool"
 import {
   findListedModelCapabilities,
-  type FindModelCapabilities
+  type FindLlmModelCapabilities
 } from "./modelCapabilities"
 import {
   loadRequestedAgent,
@@ -52,10 +52,10 @@ type ChatContextRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      */
     findMcpTool: (toolName: string) => McpTurnToolLookup
     /**
-     * Capabilities of the model a request names, read from the connected
-     * provider's inventory.
+     * Capabilities of the model a request names, read from its provider's
+     * inventory.
      */
-    findModelCapabilities: FindModelCapabilities
+    findModelCapabilities: FindLlmModelCapabilities
     /** Examines stored attachment files without reading them. */
     attachmentFiles: Pick<AttachmentFileStore, "getAttachmentFileStatus">
   }>
@@ -102,12 +102,12 @@ const MODEL_NOT_LOADED_DETAIL =
  * message would be sent with.
  *
  * @param app - Backend with validation, the Zod response serializer, the
- * agent runtime service, the conversation reader, the LLM service behind the
- * agents, the built-in tools, the MCP server registry, and the attachment
- * file store installed.
+ * agent runtime service, the conversation reader, the providers' LLM
+ * services behind the agents, the built-in tools, the MCP server registry,
+ * and the attachment file store installed.
  * @param findModelCapabilities - Capabilities of the model a request names,
- * read from the connected provider's inventory and remembered by the lookup
- * while that provider stays connected; shared with
+ * read from its provider's inventory and remembered by the lookup while that
+ * provider stays connected; shared with
  * the chat route, so a measurement offers what a turn would.
  * @throws If route registration fails.
  * @remarks Every response prevents caching, because a measurement observes
@@ -116,7 +116,7 @@ const MODEL_NOT_LOADED_DETAIL =
  */
 export default function registerChatContextRoute(
   app: FastifyInstance,
-  findModelCapabilities: FindModelCapabilities
+  findModelCapabilities: FindLlmModelCapabilities
 ): void {
   const dependencies = {
     loadChatAgent: (code: string) =>

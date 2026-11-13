@@ -187,7 +187,9 @@ export default class LlmService
   public async getLlmModelHealth(
     modelKey: string
   ): Promise<LlmModelHealthOutcome> {
-    const { modelId } = llmTestModelApiParamsSchema.parse({ modelId: modelKey })
+    const modelId = llmTestModelApiParamsSchema
+      .unwrap()
+      .shape.modelId.parse(modelKey)
     return await this.#llmEngineOperationQueue.handleLlmEngineOperationRequest(
       async ({ llmEngine }) =>
         await getLlmModelHealth(

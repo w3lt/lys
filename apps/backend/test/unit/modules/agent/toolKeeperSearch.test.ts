@@ -29,6 +29,7 @@ import {
   type ToolCallPolicy
 } from "../../../../src/modules/toolApproval/toolCallPolicy"
 import { ChatCompletionCancelledError } from "../../../../src/utils/errors"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 import {
   createRoomyReplyContextMeter,
   createUnloadedReplyContextMeter
@@ -165,7 +166,7 @@ function buildSearch(
     searchCallId: SEARCH_CALL_ID,
     tools,
     conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
-    model: "qwen/qwen3-8b",
+    model: LM_STUDIO_QWEN3_8B,
     generationOptions,
     abortSignal,
     reportFailure,
@@ -202,7 +203,7 @@ describe("runToolKeeperSearch", () => {
       RECOMMEND_TOOL_TOOL_NAME
     ])
     expect(request).toMatchObject({
-      model: "qwen/qwen3-8b",
+      model: LM_STUDIO_QWEN3_8B,
       generationOptions: search.generationOptions
     })
     const [lastRequest] = openReplyStream.mock.calls[2] ?? []
@@ -385,7 +386,7 @@ describe("runToolKeeperSearch", () => {
     expect(requests).toEqual([
       expect.objectContaining({
         conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
-        model: "qwen/qwen3-8b"
+        model: LM_STUDIO_QWEN3_8B
       })
     ])
     expect(armitage.listRequests()).toEqual([])

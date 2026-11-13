@@ -248,13 +248,14 @@ class SqliteConversationTurnTransaction implements ConversationTurnTransaction {
     this.#statements
       .getStatement(
         `INSERT INTO conversation_messages
-    (id, conversation_id, role, model, content, status, finish_reason, created_at, updated_at)
-    VALUES (?, ?, 'assistant', ?, '', ?, ?, ?, ?)`
+    (id, conversation_id, role, model, provider, content, status, finish_reason, created_at, updated_at)
+    VALUES (?, ?, 'assistant', ?, ?, '', ?, ?, ?, ?)`
       )
       .run(
         message.id,
         conversationId,
         message.model,
+        message.provider,
         message.status,
         message.finishReason,
         message.createdAt,

@@ -1,4 +1,4 @@
-import { ARMITAGE_AGENT_CODE } from "@lys/share"
+import { ARMITAGE_AGENT_CODE, type LlmModelReference } from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   AgentRequestStep,
@@ -28,6 +28,7 @@ import {
   type RunnableBuiltInToolHarness
 } from "../../support/builtInToolContract"
 import { createFixtureUuidV7 } from "../../support/conversationFixtures"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 import { RUN_TOOL_CALL_ID } from "../../support/toolFixtures"
 
 /** Time the clock reads during every run. */
@@ -52,7 +53,7 @@ const MEMBER: AgentIdentity = Object.freeze({
 const OWN_REQUEST: AgentRequestView = Object.freeze({
   requestId: OWN_REQUEST_ID,
   conversationId: createFixtureUuidV7(1),
-  model: "qwen/qwen3-8b",
+  model: LM_STUDIO_QWEN3_8B,
   startedAt: "2026-10-24T10:05:00.000Z",
   step: Object.freeze({ kind: "preparing", round: 0 }),
   conversationTitle: Object.freeze({ status: "found", title: "Trip to Kyoto" })
@@ -63,7 +64,7 @@ type RequestVariation = Readonly<{
   /** Start time; the own request's by default. */
   startedAt?: string
   /** Model; the own request's by default. */
-  model?: string
+  model?: LlmModelReference
   /** Step; the own request's by default. */
   step?: AgentRequestStep
   /** Title of its conversation; the own request's by default. */
@@ -310,7 +311,7 @@ describe("buildAgentStateTools", () => {
             requests: [
               buildRequest(102, {
                 startedAt: "2026-10-24T09:58:10.000Z",
-                model: "qwen/qwen3-14b",
+                model: { provider: "groq", modelKey: "qwen/qwen3-14b" },
                 step: {
                   kind: "using-tools",
                   round: 1,
@@ -340,8 +341,8 @@ describe("buildAgentStateTools", () => {
           "You are Caliginia (code caliginia), a leader. As a leader you can find other agents with find_agents and read their state with read_agent_state.",
           "Now: 2026-10-24T10:05:30.000Z.",
           "Request slots: 2 of 2 in use.",
-          `1. In "Weekly plan": started 2026-10-24T09:58:10.000Z (7 minutes ago) with qwen/qwen3-14b; using tools: web_search done, read_page waiting for the person's approval.`,
-          "2. This reply, in this conversation: started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; getting ready to answer."
+          `1. In "Weekly plan": started 2026-10-24T09:58:10.000Z (7 minutes ago) with qwen/qwen3-14b on Groq; using tools: web_search done, read_page waiting for the person's approval.`,
+          "2. This reply, in this conversation: started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; getting ready to answer."
         ].join("\n"),
         sources: []
       })
@@ -379,7 +380,7 @@ describe("buildAgentStateTools", () => {
           "You are Researcher (code researcher), a member. As a member you can see only your own state.",
           "Now: 2026-10-24T10:05:30.000Z.",
           "Request slots: 1 of 2 in use.",
-          "1. This reply, in this conversation: started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; getting ready to answer.",
+          "1. This reply, in this conversation: started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; getting ready to answer.",
           "Nothing else is in progress."
         ].join("\n")
       })
@@ -535,7 +536,7 @@ describe("buildAgentStateTools", () => {
           "Web researcher (code researcher) is a member.",
           "Now: 2026-10-24T10:05:30.000Z.",
           "Request slots: 1 of 2 in use.",
-          `1. In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; getting ready to answer.`
+          `1. In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; getting ready to answer.`
         ].join("\n")
       })
     })
@@ -547,7 +548,7 @@ describe("buildAgentStateTools", () => {
           conversationTitle: { status: "found", title: null },
           step: { kind: "thinking", round: 0 }
         },
-        "In an untitled conversation: started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; thinking."
+        "In an untitled conversation: started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; thinking."
       ],
       [
         "in a deleted conversation, writing, a minute in",
@@ -556,12 +557,12 @@ describe("buildAgentStateTools", () => {
           startedAt: "2026-10-24T10:04:30.000Z",
           step: { kind: "writing", round: 2 }
         },
-        "In a conversation that was deleted: started 2026-10-24T10:04:30.000Z (1 minute ago) with qwen/qwen3-8b; writing the reply."
+        "In a conversation that was deleted: started 2026-10-24T10:04:30.000Z (1 minute ago) with qwen/qwen3-8b on LM Studio; writing the reply."
       ],
       [
         "reading tool results in a later round",
         { step: { kind: "preparing", round: 1 } },
-        `In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; reading tool results.`
+        `In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; reading tool results.`
       ],
       [
         "with a call of each other status",
@@ -578,7 +579,7 @@ describe("buildAgentStateTools", () => {
             ]
           }
         },
-        `In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; using tools: a running, b running in the app, c failed, d rejected by the person, e interrupted.`
+        `In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; using tools: a running, b running in the app, c failed, d rejected by the person, e interrupted.`
       ]
     ])("tells another agent's request %s", async (_label, variation, line) => {
       const reader = createReader({
@@ -674,11 +675,11 @@ describe("buildAgentStateTools", () => {
             "Lysiptera (code lysiptera) is a leader.",
             "Now: 2026-10-24T10:05:30.000Z.",
             slotLine,
-            `1. In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; thinking.`,
-            `2. In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b; writing the reply.`,
+            `1. In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; thinking.`,
+            `2. In "Trip to Kyoto": started 2026-10-24T10:05:00.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; writing the reply.`,
             ...waiting.map(
               (_request, index) =>
-                `${index + 3}. In "Errand ${index + 1}": started 2026-10-24T10:05:10.000Z (less than a minute ago) with qwen/qwen3-8b; waiting for a free request slot, number ${index + 1} in line.`
+                `${index + 3}. In "Errand ${index + 1}": started 2026-10-24T10:05:10.000Z (less than a minute ago) with qwen/qwen3-8b on LM Studio; waiting for a free request slot, number ${index + 1} in line.`
             )
           ].join("\n"),
           sources: []

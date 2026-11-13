@@ -24,6 +24,7 @@ import {
 } from "../../../../src/modules/agent/unofferedTools"
 import type { TurnMcpTool } from "../../../../src/modules/mcp/mcpServerRegistry"
 import type { TurnBuiltInTool } from "../../../../src/modules/tool/builtIn/builtInTool"
+import { LM_STUDIO_QWEN3_8B } from "../../support/llmFixtures"
 import { parseMcpToolDefinition } from "../../support/mcpToolFixtures"
 import {
   CHECK_SPELLING_TOOL,
@@ -113,7 +114,7 @@ function buildTurn(trainedForToolUse: boolean): ReplyToolsTurn {
   const generationOptions: MessageGenerationOptions = { temperature: 0.7 }
   return {
     conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
-    model: "qwen/qwen3-8b",
+    model: LM_STUDIO_QWEN3_8B,
     trainedForToolUse,
     generationOptions,
     directTools: [buildTurnTool(CHECK_SPELLING_TOOL, true)],
@@ -265,7 +266,7 @@ describe("buildReplyTools", () => {
       expect.objectContaining({
         task: "read a file",
         tools: [READ_TEXT_FILE_TOOL, LOOK_UP_WORD_TOOL, MCP_TOOL.definition],
-        model: "qwen/qwen3-8b"
+        model: LM_STUDIO_QWEN3_8B
       })
     )
   })

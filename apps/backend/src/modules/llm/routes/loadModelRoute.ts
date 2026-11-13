@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify"
 import * as z from "zod"
 import type { LlmModelLoader } from "../llmModelCapabilities"
 import handleLlmServiceRequestFailure from "./handleLlmServiceRequestFailure"
+import { buildLlmRouteValidatorCompiler } from "./llmRouteValidation"
 
 /**
  * Load settings of a request that names none, so the runtime decides every
@@ -18,9 +19,11 @@ const UNSET_MODEL_LOAD_CONFIGURATION: ModelLoadConfiguration = Object.freeze({})
  * @returns A promise that resolves after route registration completes.
  * @throws If Fastify cannot register the route. The failure rejects the
  * promise rather than escaping the call synchronously.
- * @remarks Refused queue admission returns service-busy Problem Details, a
- * missing or lost LLM runtime connection returns runtime-unavailable Problem
- * Details, and a connected provider that loads its own models returns
+ * @remarks The model is loaded on the provider the path names; a path naming
+ * no known provider is refused with 400 before the handler runs. Refused
+ * queue admission returns service-busy Problem Details, a missing or lost
+ * LLM runtime connection of the provider returns runtime-unavailable Problem
+ * Details, and a provider that loads its own models returns
  * provider-loads-models Problem Details. Other service failures remain owned
  * by Fastify's parent error boundary.
  */
@@ -40,12 +43,13 @@ export default function updateFastifyWithLlmModelLoadRoute(
  * @throws If Fastify cannot register the route.
  */
 function registerLlmModelLoadRoute(app: FastifyInstance): void {
-  const llmModelLoader: LlmModelLoader = app.llmService
+  const llmProviderServices = app.llmProviderServices
 
   app.route<LlmLoadModelApiRoute>({
     method: llmLoadModelApi.method,
     url: llmLoadModelApi.path,
     schema: {
+      params: z.toJSONSchema(llmLoadModelApi.params, { target: "draft-7" }),
       body: llmLoadModelApi.body,
       response: {
         200: z.toJSONSchema(llmLoadModelApi.responses[200], {
@@ -59,13 +63,16 @@ function registerLlmModelLoadRoute(app: FastifyInstance): void {
         })
       }
     },
-    validatorCompiler: () => (data) => {
-      const result = llmLoadModelApi.body.safeParse(data)
-      return result.success ? { value: result.data } : { error: result.error }
-    },
+    validatorCompiler: buildLlmRouteValidatorCompiler({
+      params: llmLoadModelApi.params,
+      body: llmLoadModelApi.body
+    }),
     errorHandler: handleLlmServiceRequestFailure,
     handler: async (request) =>
-      await handleLlmModelLoadRequest(request, llmModelLoader)
+      await handleLlmModelLoadRequest(
+        request,
+        llmProviderServices[request.params.provider].llmService
+      )
   })
 }
 
@@ -74,7 +81,8 @@ function registerLlmModelLoadRoute(app: FastifyInstance): void {
  *
  * @param request - Validated Fastify request containing the model identifier
  * or alias to load and, optionally, the load settings for this load.
- * @param llmModelLoader - Application capability that performs the model load.
+ * @param llmModelLoader - Application capability of the provider the path
+ * names that performs the model load.
  * @returns A promise resolving to validated metadata for the canonical loaded model.
  * @throws If the service cannot load or enumerate models, the canonical model
  * is absent from inventory, admission is refused, no LLM runtime is connected

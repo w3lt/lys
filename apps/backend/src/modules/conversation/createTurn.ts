@@ -113,9 +113,9 @@ function buildNumberedUserMessage(
  * Stores a validated user/assistant pair inside the caller-owned transaction.
  * @param transaction - Records lent to the caller's write transaction.
  * @param options - Conversation selection, the user message with its
- * identity and attachment drafts, and the model. A new conversation stores
- * the identity and the agent code it names; an existing conversation keeps
- * its agent.
+ * identity and attachment drafts, and the model, whose key and provider the
+ * reply stores. A new conversation stores the identity and the agent code it
+ * names; an existing conversation keeps its agent.
  * @param now - Time of the turn, read once by the caller. Every value the turn
  * builds carries it: a new conversation's times, both messages' times, and
  * the update time of each reply the turn interrupts.
@@ -144,7 +144,8 @@ export function createConversationTurn(
   const assistantMessage = conversationAssistantMessageSchema.parse({
     id: uuidv7(),
     role: "assistant",
-    model: options.model,
+    model: options.model.modelKey,
+    provider: options.model.provider,
     parts: [],
     status: "streaming",
     finishReason: null,

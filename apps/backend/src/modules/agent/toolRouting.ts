@@ -1,5 +1,5 @@
 import type { MessageGenerationOptions } from "@lys/protocol"
-import type { ToolDefinition } from "@lys/share"
+import type { LlmModelReference, ToolDefinition } from "@lys/share"
 import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
 import type { ToolCallPolicy } from "../toolApproval/toolCallPolicy"
@@ -52,8 +52,8 @@ export type OfferedDefinitionsInput = Readonly<{
 export type ReplyToolsTurn = Readonly<{
   /** UUIDv7 of the turn's conversation. */
   conversationId: string
-  /** Model the turn uses. */
-  model: string
+  /** Model the turn uses, and its provider. */
+  model: LlmModelReference
   /** Whether the model is trained for tool use. */
   trainedForToolUse: boolean
   /** Sampling and reply length controls of the turn. */

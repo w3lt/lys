@@ -1,4 +1,4 @@
-import { calculateImageTokens } from "@lys/share"
+import { calculateImageTokens, type LlmModelReference } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import type { ReplyContextMessage } from "../../../../src/modules/agent/replyModel"
 import LlmReplyContextMeter from "../../../../src/modules/chat/llmReplyContextMeter"
@@ -19,6 +19,15 @@ const TOOL_OFFER_TEMPLATE_TOKENS = 160
 const READ_TEXT_FILE_OFFER = new AgentTool(
   READ_TEXT_FILE_TOOL
 ).buildAgentFormat()
+
+/**
+ * Model every case measures: one on Groq, so a case shows the query receives
+ * the provider with the key.
+ */
+const GROQ_QWEN3_32B: LlmModelReference = Object.freeze({
+  provider: "groq",
+  modelKey: "qwen/qwen3-32b"
+})
 
 /** Context length every loaded model reports in these cases. */
 const CONTEXT_LENGTH = 8192
@@ -54,7 +63,7 @@ const TOOL_ROUND_CONTEXT: readonly ReplyContextMessage[] = Object.freeze([
 function createCharacterTokenizer() {
   return vi.fn(
     async (
-      _model: string,
+      _model: LlmModelReference,
       texts: readonly string[]
     ): Promise<LlmContextMeasurement | undefined> => ({
       contextLength: CONTEXT_LENGTH,
@@ -64,18 +73,18 @@ function createCharacterTokenizer() {
 }
 
 describe("LlmReplyContextMeter", () => {
-  it("counts each message's text and each tool's JSON with the model's tokenizer, in order", async () => {
+  it("counts each message's text and each tool's JSON with the tokenizer of the model on its provider, in order", async () => {
     const findLlmContextMeasurement = createCharacterTokenizer()
     const meter = new LlmReplyContextMeter(findLlmContextMeasurement)
 
     await meter.findReplyContextMeasurement({
       messages: TOOL_ROUND_CONTEXT,
       tools: [READ_TEXT_FILE_OFFER],
-      model: "qwen/qwen3-8b"
+      model: GROQ_QWEN3_32B
     })
 
     expect(findLlmContextMeasurement).toHaveBeenCalledExactlyOnceWith(
-      "qwen/qwen3-8b",
+      GROQ_QWEN3_32B,
       [
         "You are Lys.",
         "Read /a",
@@ -92,7 +101,7 @@ describe("LlmReplyContextMeter", () => {
     const measurement = await meter.findReplyContextMeasurement({
       messages: TOOL_ROUND_CONTEXT,
       tools: [READ_TEXT_FILE_OFFER],
-      model: "qwen/qwen3-8b"
+      model: GROQ_QWEN3_32B
     })
 
     expect(measurement).toEqual({
@@ -136,11 +145,11 @@ describe("LlmReplyContextMeter", () => {
         { role: "user", content: "Look", images }
       ],
       tools: [],
-      model: "qwen/qwen3-8b"
+      model: GROQ_QWEN3_32B
     })
 
     expect(findLlmContextMeasurement).toHaveBeenCalledExactlyOnceWith(
-      "qwen/qwen3-8b",
+      GROQ_QWEN3_32B,
       ["You are Lys.", "Look"]
     )
     expect(measurement?.messageTokenCounts).toEqual([
@@ -160,7 +169,7 @@ describe("LlmReplyContextMeter", () => {
     const measurement = await meter.findReplyContextMeasurement({
       messages: [{ role: "system", content: "You are Lys." }],
       tools: [],
-      model: "qwen/qwen3-8b"
+      model: GROQ_QWEN3_32B
     })
 
     expect(measurement?.toolTokenCount).toBe(0)
@@ -173,7 +182,7 @@ describe("LlmReplyContextMeter", () => {
       meter.findReplyContextMeasurement({
         messages: [{ role: "system", content: "You are Lys." }],
         tools: [],
-        model: "qwen/qwen3-8b"
+        model: GROQ_QWEN3_32B
       })
     ).resolves.toBeUndefined()
   })
@@ -188,7 +197,7 @@ describe("LlmReplyContextMeter", () => {
       meter.findReplyContextMeasurement({
         messages: [{ role: "system", content: "You are Lys." }],
         tools: [],
-        model: "qwen/qwen3-8b"
+        model: GROQ_QWEN3_32B
       })
     ).rejects.toBe(queryFailure)
   })
@@ -206,7 +215,7 @@ describe("LlmReplyContextMeter", () => {
           { role: "user", content: "Hello", images: [] }
         ],
         tools: [],
-        model: "qwen/qwen3-8b"
+        model: GROQ_QWEN3_32B
       })
     ).rejects.toThrow("The context measurement has no count for text 1")
   })

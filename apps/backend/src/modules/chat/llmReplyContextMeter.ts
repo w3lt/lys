@@ -1,4 +1,8 @@
-import { calculateImageTokens, type OpenAIFunctionTool } from "@lys/share"
+import {
+  calculateImageTokens,
+  type LlmModelReference,
+  type OpenAIFunctionTool
+} from "@lys/share"
 import type {
   ReplyContextMeasurement,
   ReplyContextMeasurementRequest,
@@ -10,9 +14,12 @@ import type {
 } from "../agent/replyModel"
 import type { LlmContextMeasurement } from "../llm/llmRuntimeTypes"
 
-/** Measures texts with a loaded model's tokenizer; the LLM service's query. */
+/**
+ * Measures texts with a loaded model's tokenizer on the model's provider;
+ * the query of that provider's LLM service.
+ */
 type FindLlmContextMeasurement = (
-  model: string,
+  model: LlmModelReference,
   texts: readonly string[]
 ) => Promise<LlmContextMeasurement | undefined>
 

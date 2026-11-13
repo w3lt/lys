@@ -1,5 +1,6 @@
 import type { LoggerInterface } from "@lmstudio/sdk"
 import { homedir } from "node:os"
+import type { LlmProvider } from "@lys/share"
 import type { BackendConfig } from "../config"
 import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgentRecordStore"
 import AttachmentFileStore from "../modules/attachment/attachmentFileStore"
@@ -29,6 +30,11 @@ import LlmRuntimeService, {
 } from "../modules/llm/llmRuntimeService"
 import LlmService from "../modules/llm/llmService"
 import { buildLlmChatEndpoint } from "../modules/llm/llmProviderAccess"
+import {
+  buildLlmProviderRecord,
+  type LlmProviderRecord,
+  type LlmProviderServices
+} from "../modules/llm/llmProviderServices"
 import { findLlmProviderAccess } from "../infrastructure/settings/llmProviderSettingsFile"
 import ToolApprovalService from "../modules/toolApproval/toolApprovalService"
 import { readJustRunToolNames } from "../infrastructure/settings/justRunToolsFile"
@@ -69,11 +75,26 @@ export type SingletonServiceAcquisition<Service> = Readonly<{
   closeService: () => Promise<void>
 }>
 
+/** What creating one provider's LLM runtime service takes. */
+export type LlmRuntimeServiceFactoryOptions = Readonly<{
+  /** Provider the service connects to. */
+  provider: LlmProvider
+  /**
+   * Settings file read, at every connection attempt, for whether the
+   * provider is on, its address, and its key.
+   */
+  settingsFilePath: BackendConfig["settingsFilePath"]
+  /** Receive the provider's runtime failures that no caller observes. */
+  llmRuntimeFailureReporters: LlmRuntimeFailureReporters
+  /** Receives the messages of each acquired LM Studio SDK client. */
+  lmStudioSdkLogger: LoggerInterface
+}>
+
 /** Factories for the independently created application services and the database they share. */
 export type SingletonServiceFactories = Readonly<{
   /**
-   * Creates the chat service for the connected provider's OpenAI-compatible
-   * endpoint and its title settings.
+   * Creates the chat service for each connected provider's
+   * OpenAI-compatible endpoint and its title settings.
    */
   createChatService: (
     options: ChatServiceCreationOptions
@@ -83,13 +104,11 @@ export type SingletonServiceFactories = Readonly<{
     databaseFilePath: BackendConfig["databaseFilePath"]
   ) => SingletonServiceAcquisition<SqliteDatabase>
   /**
-   * Creates the owned LLM runtime service for the provider the settings file
-   * names, without reading the file or contacting the provider.
+   * Creates the owned LLM runtime service of one provider, without reading
+   * the settings file or contacting the provider.
    */
   createLlmRuntimeService: (
-    settingsFilePath: BackendConfig["settingsFilePath"],
-    llmRuntimeFailureReporters: LlmRuntimeFailureReporters,
-    lmStudioSdkLogger: LoggerInterface
+    options: LlmRuntimeServiceFactoryOptions
   ) => SingletonServiceAcquisition<LlmRuntimeService>
 }>
 
@@ -98,8 +117,11 @@ export type SingletonServiceFactories = Readonly<{
  * full: their failures and the LM Studio SDK's own messages.
  */
 export type SingletonLogReporters = Readonly<{
-  /** Receive the LLM runtime failures that no caller observes. */
-  llmRuntime: LlmRuntimeFailureReporters
+  /**
+   * Receive, for each provider, the LLM runtime failures that no caller
+   * observes.
+   */
+  llmRuntime: LlmProviderRecord<LlmRuntimeFailureReporters>
   /** Receive the causes of read failures the model learns only by kind. */
   pageRendering: PageRenderingFailureReporters
   /**
@@ -134,12 +156,16 @@ const DEFAULT_SINGLETON_SERVICE_FACTORIES = Object.freeze({
 
 /** Application-scoped services owned for a Fastify application's lifetime. */
 export type SingletonServices = Readonly<{
-  /** Chat completion adapter for the connected provider's endpoint. */
+  /**
+   * Chat completion adapter that sends each request to the endpoint of the
+   * provider its model is on.
+   */
   chatService: ChatService
-  /** LLM model policy served through the runtime service's queue. */
-  llmService: LlmService
-  /** LLM runtime connection and model-operation queue owned by the application. */
-  llmRuntimeService: LlmRuntimeService
+  /**
+   * Each provider's runtime connection and model-operation queue, owned by
+   * the application, and its model policy served through that queue.
+   */
+  llmProviderServices: LlmProviderRecord<LlmProviderServices>
   /** Turn persistence over the shared database; it owns nothing to release. */
   conversationTurns: StoredConversationTurns
   /**
@@ -229,38 +255,43 @@ type DatabaseServices = Pick<
 /**
  * Creates the application-scoped service bundle from backend network configuration.
  *
- * @param config - Settings file the LLM runtime service reads the active
- * provider from, the title-generation prompt and title length limit given to
+ * @param config - Settings file each provider's LLM runtime service reads
+ * whether its provider is on from, the title-generation prompt and title
+ * length limit given to
  * the chat service, the built-in agents' system prompts given to the agent service,
  * vmo's host and port given to the read-page tool, the attachments
  * directory given to the attachment file store, the MCP process groups
  * file given to the holder of the MCP servers' process groups, and the
  * email server's path given to the built-in email server and the email
  * account checker.
- * @param logReporters - Receive, for logging, the LLM runtime failures that
- * no caller observes, the causes of read failures the model learns only by
+ * @param logReporters - Receive, for logging, each provider's LLM runtime
+ * failures that no caller observes, the causes of read failures the model
+ * learns only by
  * kind, the LM Studio SDK's messages, the MCP servers' events, the
  * failures to save their process groups file, and the email account
  * checks.
  * @param factories - Service factories owned by the composition root.
  * @returns A promise resolving to the frozen bundle of owned services. No
- * service reads the active provider or contacts it during creation; the
- * runtime service connects later, and the chat service sends each request to
- * the provider connected when the request starts.
+ * service reads the settings file or contacts a provider during creation;
+ * each provider's runtime service connects later, and the chat service sends
+ * each request to the endpoint its model's provider is connected at when the
+ * request starts.
  * @throws The original construction failure, after every resource acquired
  * before it is closed.
  * @throws {AggregateError} If closing the acquired resources also fails; its
  * errors hold the construction failure followed by the cleanup failure.
- * @remarks Resources are acquired in the order database, LLM runtime
- * service, chat service; the chat service comes after the runtime service
- * because it reads the connected provider from it. The conversation services
+ * @remarks Resources are acquired in the order database, the LLM runtime
+ * services in provider order, chat service; the chat service comes after the
+ * runtime services because it reads the connected providers from them. Each
+ * provider's LLM service is created over its own runtime service and owns
+ * nothing to release. The conversation services
  * and the Sqlite records they wrap are created over the database before the
- * runtime service, turn persistence first, so its startup recovery runs
+ * runtime services, turn persistence first, so its startup recovery runs
  * before any history is read. The agent service and the agent runtime
  * service are created after the chat service: the agent service over its
  * Sqlite records, and the runtime service over the agent service, the chat
- * service, the LLM service, and the history reader; they read nothing at
- * creation and own nothing to release.
+ * service, the providers' LLM services, and the history reader; they read
+ * nothing at creation and own nothing to release.
  * The web search tool provider, the built-in tools, the tool approval
  * service, the MCP server registry, the email account checker, and the
  * attachment file store are created last; they read and contact nothing at
@@ -269,7 +300,8 @@ type DatabaseServices = Pick<
  * bundle's cleanup closes them first, the checker before the registry.
  * Creation stops at the first failure. The database is not part of the
  * returned bundle: the bundle's cleanup closes it last, after the chat
- * service and the LLM runtime service.
+ * service and the LLM runtime services; it attempts every close even when
+ * one fails, and keeps every failure.
  */
 export async function createSingletonServices(
   config: BackendConfig,
@@ -285,28 +317,26 @@ export async function createSingletonServices(
     serviceLifetime.defer(databaseAcquisition.closeService)
     const databaseServices = createDatabaseServices(databaseAcquisition.service)
 
-    const llmRuntimeServiceAcquisition = factories.createLlmRuntimeService(
-      config.settingsFilePath,
-      logReporters.llmRuntime,
-      logReporters.lmStudioSdk
-    )
-    serviceLifetime.defer(llmRuntimeServiceAcquisition.closeService)
+    const llmProviderServices = buildLlmProviderRecord((provider) => {
+      const acquisition = factories.createLlmRuntimeService(
+        buildLlmRuntimeServiceFactoryOptions(provider, config, logReporters)
+      )
+      serviceLifetime.defer(acquisition.closeService)
+      return createLlmProviderServices(acquisition.service)
+    })
 
     const chatServiceAcquisition = factories.createChatService(
-      buildChatServiceOptions(config, llmRuntimeServiceAcquisition.service)
+      buildChatServiceOptions(config, llmProviderServices)
     )
     serviceLifetime.defer(chatServiceAcquisition.closeService)
     const chatService = chatServiceAcquisition.service
 
-    const llmService = new LlmService({
-      llmEngineOperationQueue: llmRuntimeServiceAcquisition.service
-    })
     const agentServices = createAgentServices(
       config,
       databaseAcquisition.service,
       {
         chatService,
-        llmService,
+        llmProviderServices,
         historyReader: databaseServices.conversationHistoryReader
       }
     )
@@ -315,8 +345,7 @@ export async function createSingletonServices(
 
     return Object.freeze({
       chatService,
-      llmService,
-      llmRuntimeService: llmRuntimeServiceAcquisition.service,
+      llmProviderServices,
       ...databaseServices,
       ...agentServices,
       ...toolServices,
@@ -335,21 +364,64 @@ export async function createSingletonServices(
 }
 
 /**
+ * Builds what creating one provider's LLM runtime service takes.
+ *
+ * @param provider - Provider the service connects to.
+ * @param config - Settings file the service reads the provider from.
+ * @param logReporters - The provider's runtime failure reporters and the
+ * LM Studio SDK's logger.
+ * @returns The provider, the settings file, the provider's own failure
+ * reporters, and the shared LM Studio SDK logger.
+ */
+function buildLlmRuntimeServiceFactoryOptions(
+  provider: LlmProvider,
+  config: BackendConfig,
+  logReporters: Pick<SingletonLogReporters, "llmRuntime" | "lmStudioSdk">
+): LlmRuntimeServiceFactoryOptions {
+  return Object.freeze({
+    provider,
+    settingsFilePath: config.settingsFilePath,
+    llmRuntimeFailureReporters: logReporters.llmRuntime[provider],
+    lmStudioSdkLogger: logReporters.lmStudioSdk
+  })
+}
+
+/**
+ * Creates one provider's LLM service over its runtime service.
+ *
+ * @param llmRuntimeService - The provider's runtime service; the caller
+ * keeps ownership and closes it.
+ * @returns The runtime service and the LLM service whose model operations
+ * go through its queue; the LLM service owns nothing to release.
+ */
+function createLlmProviderServices(
+  llmRuntimeService: LlmRuntimeService
+): LlmProviderServices {
+  return Object.freeze({
+    llmRuntimeService,
+    llmService: new LlmService({ llmEngineOperationQueue: llmRuntimeService })
+  })
+}
+
+/**
  * Builds the settings the chat service is created with.
  *
  * @param config - Title-generation prompt and title length limit.
- * @param llmRuntimeService - Runtime service whose connected provider every
- * chat request goes to; borrowed for the chat service's lifetime.
- * @returns A lookup of the connected provider's OpenAI-compatible endpoint,
- * undefined while none is connected, and the title settings.
+ * @param llmProviderServices - Each provider's runtime service, whose
+ * connected provider the chat requests for that provider's models go to;
+ * borrowed for the chat service's lifetime.
+ * @returns A lookup of one provider's OpenAI-compatible endpoint, undefined
+ * while that provider is not connected, and the title settings.
  */
 function buildChatServiceOptions(
   config: BackendConfig,
-  llmRuntimeService: LlmRuntimeService
+  llmProviderServices: LlmProviderRecord<LlmProviderServices>
 ): ChatServiceCreationOptions {
   return {
-    findChatEndpoint: () => {
-      const access = llmRuntimeService.connectedLlmProviderAccess
+    findChatEndpoint: (provider) => {
+      const access =
+        llmProviderServices[provider].llmRuntimeService
+          .connectedLlmProviderAccess
       return access === undefined ? undefined : buildLlmChatEndpoint(access)
     },
     titleGenerationPrompt: config.titleGenerationPrompt,
@@ -361,8 +433,11 @@ function buildChatServiceOptions(
 type AgentRuntimeDependencies = Readonly<{
   /** Chat service the agents answer through. */
   chatService: ChatService
-  /** LLM service that measures each context against the loaded model. */
-  llmService: LlmService
+  /**
+   * Each provider's LLM service, which measures each context against the
+   * model loaded on that provider.
+   */
+  llmProviderServices: LlmProviderRecord<LlmProviderServices>
   /** History reader that gives the titles of the agents' conversations. */
   historyReader: StoredConversationHistoryReader
 }>
@@ -381,15 +456,16 @@ type AgentServices = Pick<
  * slots and waiting limit every live agent gets.
  * @param database - Shared database lent to the agent records; the caller
  * keeps ownership and closes it.
- * @param dependencies - Chat and LLM services the agents answer and measure
- * through, and the history reader that titles their conversations.
+ * @param dependencies - Chat service the agents answer through, the
+ * providers' LLM services they measure through, and the history reader that
+ * titles their conversations.
  * @returns Both services, which read nothing at creation and own nothing to
  * release.
  */
 function createAgentServices(
   config: BackendConfig,
   database: SqliteDatabase,
-  { chatService, llmService, historyReader }: AgentRuntimeDependencies
+  { chatService, llmProviderServices, historyReader }: AgentRuntimeDependencies
 ): AgentServices {
   const agentService = new AgentService({
     recordStore: SqliteAgentRecordStore.create(database),
@@ -407,7 +483,9 @@ function createAgentServices(
         chatService.completeChatStream(options)
       ),
       replyContextMeter: new LlmReplyContextMeter((model, texts) =>
-        llmService.findLlmContextMeasurement(model, texts)
+        llmProviderServices[
+          model.provider
+        ].llmService.findLlmContextMeasurement(model.modelKey, texts)
       ),
       findConversationTitle: (conversationId) =>
         buildConversationTitleLookup(
@@ -556,9 +634,9 @@ function createDatabaseServices(database: SqliteDatabase): DatabaseServices {
 }
 
 /**
- * Creates the production chat adapter for the connected provider.
+ * Creates the production chat adapter for the connected providers.
  *
- * @param options - Lookup of the connected provider's OpenAI-compatible
+ * @param options - Lookup of each connected provider's OpenAI-compatible
  * endpoint and the title-generation settings.
  * @returns The newly owned chat service and its cleanup capability.
  */
@@ -595,28 +673,27 @@ function createDatabase(
 }
 
 /**
- * Creates the production LLM runtime service for the provider the settings
- * file names.
+ * Creates the production LLM runtime service of one provider.
  *
- * @param settingsFilePath - Settings file read for the active provider, its
- * address, and its key at every connection attempt.
- * @param llmRuntimeFailureReporters - Receive failures that no caller
- * observes, including a missing key or an unreadable settings file.
- * @param lmStudioSdkLogger - Receives the messages of each acquired LM
+ * @param options - The provider; the settings file read, at every
+ * connection attempt, for whether it is on, its address, and its key; the
+ * reporters of its failures that no caller observes, including a missing
+ * key or an unreadable settings file; and the logger of each acquired LM
  * Studio SDK client.
  * @returns The newly owned runtime service and its cleanup capability. No
  * file is read and no connection is attempted until the service is asked to
  * connect.
  */
-function createLlmRuntimeService(
-  settingsFilePath: BackendConfig["settingsFilePath"],
-  llmRuntimeFailureReporters: LlmRuntimeFailureReporters,
-  lmStudioSdkLogger: LoggerInterface
-): SingletonServiceAcquisition<LlmRuntimeService> {
+function createLlmRuntimeService({
+  provider,
+  settingsFilePath,
+  llmRuntimeFailureReporters,
+  lmStudioSdkLogger
+}: LlmRuntimeServiceFactoryOptions): SingletonServiceAcquisition<LlmRuntimeService> {
   const llmRuntimeService = new LlmRuntimeService({
     ...llmRuntimeFailureReporters,
     findLlmProviderAccess: async () =>
-      await findLlmProviderAccess(settingsFilePath),
+      await findLlmProviderAccess(settingsFilePath, provider),
     acquireLlmRuntime: async (access) =>
       await acquireLlmProviderRuntime(access, lmStudioSdkLogger)
   })

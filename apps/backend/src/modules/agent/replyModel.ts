@@ -2,6 +2,7 @@ import type { MessageGenerationOptions } from "@lys/protocol"
 import type {
   AttachmentImageMediaType,
   ConversationAssistantMessageFinishReason,
+  LlmModelReference,
   OpenAIFunctionTool
 } from "@lys/share"
 
@@ -93,8 +94,8 @@ export type ReplyStreamRequest = Readonly<{
   messages: readonly ReplyContextMessage[]
   /** Tools the model may call, in offer order; empty when none are offered. */
   tools: readonly OpenAIFunctionTool[]
-  /** Identifier of the model that writes the reply. */
-  model: string
+  /** Model that writes the reply; the request goes to its provider. */
+  model: LlmModelReference
   /** Sampling and reply length controls. */
   generationOptions: MessageGenerationOptions
   /** Cancels opening the stream and the stream itself. */

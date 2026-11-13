@@ -1,4 +1,9 @@
-import type { McpServerSettings } from "@lys/share"
+import type { LlmRuntimeConnectionStatus } from "@lys/protocol"
+import {
+  LLM_PROVIDERS,
+  type LlmProvider,
+  type McpServerSettings
+} from "@lys/share"
 import {
   existsSync,
   mkdtempSync,
@@ -30,11 +35,13 @@ import {
   createTurnUserMessage
 } from "./support/conversationFixtures"
 import { CapturedLogDestination } from "./support/fastifyTestApp"
+import { LM_STUDIO_QWEN3_8B } from "./support/llmFixtures"
 import { buildFakeStdioServerSettings } from "./support/mcpTestServers"
 import {
   fakeLmStudio,
   type FakeLmStudioOperations
 } from "./support/lmStudioSdkFake"
+import { startProviderServer } from "./support/providerServer"
 import { createFailingOutput, createWorkingOutput } from "./support/testOutputs"
 
 vi.mock("@lmstudio/sdk", () => import("./support/lmStudioSdkFake"))
@@ -271,7 +278,7 @@ describe("buildApp", () => {
     const turn = app.conversationTurns.createConversationTurn({
       conversation: createNewConversationTarget("caliginia"),
       userMessage: createTurnUserMessage("Hello"),
-      model: "qwen/qwen3-8b"
+      model: LM_STUDIO_QWEN3_8B
     })
 
     const part = app.replyParts.createReplyPart(turn.assistantMessage.id, {
@@ -371,12 +378,71 @@ describe("buildApp", () => {
     onTestFinished(async () => await app.close())
     await app.ready()
 
-    await app.llmRuntimeService.connectLlmRuntime()
+    await app.llmProviderServices.lmStudio.llmRuntimeService.connectLlmRuntime()
 
     expect(log.records).toContainEqual(
       expect.objectContaining({
         level: "warn",
         msg: "[LMStudioClient][System] WebSocket connection refused."
+      })
+    )
+  })
+
+  it("starts every provider's connection once listening, and LM Studio failing to connect stops no other provider", async () => {
+    fakeLmStudio.operations = {
+      ...fakeLmStudio.operations,
+      getLMStudioVersion: () =>
+        Promise.reject(new Error("WebSocket connection refused."))
+    }
+    const ollama = await startProviderServer({
+      "GET /api/tags": () => ({ status: 200, body: { models: [] } })
+    })
+    const config = createOwnedBackendConfig()
+    const settingsFilePath = join(
+      dirname(config.databaseFilePath),
+      "settings.json"
+    )
+    writeFileSync(
+      settingsFilePath,
+      JSON.stringify({
+        providers: {
+          enabled: ["lmStudio", "ollama"],
+          lmStudio: { address: null },
+          ollama: { address: new URL(ollama.baseUrl).host }
+        }
+      })
+    )
+    const log = new CapturedLogDestination()
+    const app = await buildApp({
+      config: { ...config, settingsFilePath },
+      logger: createBackendLogger(log)
+    })
+    onTestFinished(async () => await app.close())
+
+    await app.listen({ host: "127.0.0.1", port: 0 })
+
+    await vi.waitFor(() => {
+      expect(
+        LLM_PROVIDERS.map(
+          (provider) =>
+            app.llmProviderServices[provider].llmRuntimeService
+              .llmRuntimeConnectionStatus
+        )
+      ).toEqual([
+        "unreachable",
+        "connected",
+        "off",
+        "off"
+      ] satisfies readonly LlmRuntimeConnectionStatus[])
+    })
+    expect(ollama.requests).toContainEqual(
+      expect.objectContaining({ method: "GET", path: "/api/tags" })
+    )
+    expect(log.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        provider: "lmStudio" satisfies LlmProvider,
+        msg: "Model provider runtime acquisition failed"
       })
     )
   })

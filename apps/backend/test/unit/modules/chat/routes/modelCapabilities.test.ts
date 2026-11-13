@@ -1,15 +1,24 @@
-import { groqApiKeySchema } from "@lys/share"
+import {
+  groqApiKeySchema,
+  LLM_PROVIDERS,
+  type LlmModelReference
+} from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import {
+  createLlmModelCapabilitiesLookup,
   createModelCapabilitiesLookup,
   findListedModelCapabilities,
-  NO_MODEL_CAPABILITIES
+  NO_MODEL_CAPABILITIES,
+  type ModelCapabilitiesSource
 } from "../../../../../src/modules/chat/routes/modelCapabilities"
+import { buildLlmProviderRecord } from "../../../../../src/modules/llm/llmProviderServices"
 import type { LlmProviderAccess } from "../../../../../src/modules/llm/llmProviderAccess"
 import type { DownloadedLlmModel } from "../../../../../src/modules/llm/llmRuntimeTypes"
 import {
   createDownloadedLlmModel,
-  DEFAULT_LM_STUDIO_ACCESS
+  DEFAULT_LM_STUDIO_ACCESS,
+  LM_STUDIO_QWEN3_8B,
+  TEST_LLM_PROVIDER_ACCESSES
 } from "../../../support/llmFixtures"
 
 /** Groq with a synthetic key; not a real credential. */
@@ -51,16 +60,16 @@ describe("findListedModelCapabilities", () => {
     const findModelCapabilities = vi.fn(async () => capabilities)
 
     await expect(
-      findListedModelCapabilities("qwen/qwen3-8b", findModelCapabilities)
+      findListedModelCapabilities(LM_STUDIO_QWEN3_8B, findModelCapabilities)
     ).resolves.toBe(capabilities)
     expect(findModelCapabilities).toHaveBeenCalledExactlyOnceWith(
-      "qwen/qwen3-8b"
+      LM_STUDIO_QWEN3_8B
     )
   })
 
   it("answers with no capability for a model the inventory does not list", async () => {
     await expect(
-      findListedModelCapabilities("qwen/qwen3-8b", async () => undefined)
+      findListedModelCapabilities(LM_STUDIO_QWEN3_8B, async () => undefined)
     ).resolves.toBe(NO_MODEL_CAPABILITIES)
   })
 
@@ -68,10 +77,89 @@ describe("findListedModelCapabilities", () => {
     const failure = new Error("queue full")
 
     await expect(
-      findListedModelCapabilities("qwen/qwen3-8b", () =>
+      findListedModelCapabilities(LM_STUDIO_QWEN3_8B, () =>
         Promise.reject(failure)
       )
     ).rejects.toBe(failure)
+  })
+})
+
+/**
+ * Creates each provider's source, connected as
+ * {@link TEST_LLM_PROVIDER_ACCESSES} reaches it, whose listing is a spy that
+ * lists no model until a case configures it.
+ *
+ * @returns Each provider's source and its listing spy.
+ */
+function createProviderSources() {
+  const listings = buildLlmProviderRecord(() =>
+    vi.fn(async (): Promise<readonly DownloadedLlmModel[]> => [])
+  )
+  const sources = buildLlmProviderRecord(
+    (provider): ModelCapabilitiesSource => ({
+      llmService: { listDownloadedLlmModels: listings[provider] },
+      llmRuntimeService: {
+        connectedLlmProviderAccess: TEST_LLM_PROVIDER_ACCESSES[provider]
+      }
+    })
+  )
+  return { sources, listings }
+}
+
+describe("createLlmModelCapabilitiesLookup", () => {
+  it("lists only the downloaded models of the provider the model names", async () => {
+    const { sources, listings } = createProviderSources()
+    listings.ollama.mockResolvedValue([VISION_MODEL])
+    const findModelCapabilities = createLlmModelCapabilitiesLookup(sources)
+
+    const capabilities = await findModelCapabilities({
+      provider: "ollama",
+      modelKey: VISION_MODEL.modelKey
+    })
+
+    expect(capabilities).toEqual({ vision: true, trainedForToolUse: true })
+    expect(
+      LLM_PROVIDERS.map((provider) => listings[provider].mock.calls.length)
+    ).toEqual(LLM_PROVIDERS.map((provider) => (provider === "ollama" ? 1 : 0)))
+  })
+
+  it("finds and remembers the same key on two providers as two models", async () => {
+    const { sources, listings } = createProviderSources()
+    listings.lmStudio.mockResolvedValue([TEXT_MODEL])
+    listings.groq.mockResolvedValue([
+      { ...TEXT_MODEL, trainedForToolUse: false }
+    ])
+    const groqModel: LlmModelReference = {
+      provider: "groq",
+      modelKey: TEXT_MODEL.modelKey
+    }
+    const findModelCapabilities = createLlmModelCapabilitiesLookup(sources)
+
+    const onLmStudio = await findModelCapabilities(LM_STUDIO_QWEN3_8B)
+    const onGroq = await findModelCapabilities(groqModel)
+    await findModelCapabilities(LM_STUDIO_QWEN3_8B)
+    await findModelCapabilities(groqModel)
+
+    expect(onLmStudio).toEqual({ vision: false, trainedForToolUse: true })
+    expect(onGroq).toEqual({ vision: false, trainedForToolUse: false })
+    expect(listings.lmStudio).toHaveBeenCalledOnce()
+    expect(listings.groq).toHaveBeenCalledOnce()
+  })
+
+  it("rejects with the named provider's failure and still finds another provider's models", async () => {
+    const { sources, listings } = createProviderSources()
+    const failure = new Error("The model provider is not reachable.")
+    listings.groq.mockRejectedValue(failure)
+    listings.lmStudio.mockResolvedValue([TEXT_MODEL])
+    const findModelCapabilities = createLlmModelCapabilitiesLookup(sources)
+
+    await expect(
+      findModelCapabilities({ provider: "groq", modelKey: TEXT_MODEL.modelKey })
+    ).rejects.toBe(failure)
+    await expect(findModelCapabilities(LM_STUDIO_QWEN3_8B)).resolves.toEqual({
+      vision: false,
+      trainedForToolUse: true
+    })
   })
 })
 

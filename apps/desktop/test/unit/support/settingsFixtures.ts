@@ -27,15 +27,24 @@ import type {
  * Settings document as the Tauri settings commands exchange it: the JSON form
  * of Rust's `LysSettings`.
  *
- * @remarks The runtime, generation, secrets, providers, location, MCP, and
- * email groups are the renderer's groups field for field; the saved keys,
- * the email password, addresses, and place names are plain text in JSON and
- * branded only in the renderer. JSON has no map or set, so the per-model load settings are one
- * object whose keys are model keys, where the renderer holds a map, and the
- * tools on Just run are an array, where the renderer holds a set.
+ * @remarks The generation, secrets, providers, location, MCP, and email
+ * groups are the renderer's groups field for field; the saved keys, the
+ * email password, addresses, and place names are plain text in JSON and
+ * branded only in the renderer. The runtime group names the default model by
+ * its bare key, where the renderer holds a reference. JSON has no map or
+ * set, so the per-model load settings are one object whose keys are model
+ * keys, where the renderer holds a map, and the tools on Just run are an
+ * array, where the renderer holds a set.
  */
 export type SettingsDocument = Readonly<
-  Omit<LysSettings, "loadConfiguration" | "tools"> & {
+  Omit<LysSettings, "runtime" | "loadConfiguration" | "tools"> & {
+    /** Backend process settings, the default model as a bare key. */
+    runtime: Readonly<
+      Omit<RuntimeSettings, "defaultModel"> & {
+        /** Key of the model a new conversation uses, or null. */
+        defaultModel: string | null
+      }
+    >
     /** Default and per-model load settings, the latter as one object. */
     loadConfiguration: Readonly<{
       /** Settings for every model that has none of its own. */
@@ -86,11 +95,20 @@ export const FIRST_RUN_LOAD_CONFIGURATION = Object.freeze({
 })
 
 /** Runtime group on disk, distinct from every default. */
-const STORED_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
+const STORED_RUNTIME_DOCUMENT: SettingsDocument["runtime"] = Object.freeze({
   autoStartBackend: false,
   autoStartVmo: false,
   defaultModel: "qwen3-8b",
   backendAddress: "http://127.0.0.1:23456"
+})
+
+/**
+ * The renderer's runtime group for {@link STORED_RUNTIME_DOCUMENT}: the
+ * stored key on local Ollama, the one provider the stored document turns on.
+ */
+const STORED_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
+  ...STORED_RUNTIME_DOCUMENT,
+  defaultModel: Object.freeze({ provider: "ollama", modelKey: "qwen3-8b" })
 })
 
 /** Generation group on disk, distinct from the default. */
@@ -150,12 +168,12 @@ const STORED_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
 })
 
 /**
- * Providers group on disk, distinct from the first-run group: local Ollama is
- * active at a saved address, and LM Studio keeps its default.
+ * Providers group on disk, distinct from the first-run group: only local
+ * Ollama is on, at a saved address, and LM Studio keeps its default.
  */
 export const STORED_PROVIDERS_SETTINGS: ProvidersSettings =
   llmProviderSettingsSchema.parse({
-    active: "ollama",
+    enabled: ["ollama"],
     lmStudio: { address: null },
     ollama: { address: "192.168.1.20:11434" }
   })
@@ -229,13 +247,13 @@ export const STORED_EMAIL_SETTINGS: EmailSettings = Object.freeze({
 /**
  * Settings document `load_settings` resolves with: every group is set, one
  * model has load settings of its own, a Tavily and a Groq API key are saved,
- * local Ollama is the active provider at a saved address, one tool is on Just
+ * local Ollama is the one provider on, at a saved address, one tool is on Just
  * run, one tool is switched off, a location is saved, two MCP servers are
  * saved with the email server switched off, and an email account is saved
  * with its password.
  */
 export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
-  runtime: STORED_RUNTIME_SETTINGS,
+  runtime: STORED_RUNTIME_DOCUMENT,
   generation: STORED_GENERATION_SETTINGS,
   loadConfiguration: Object.freeze({
     default: STORED_DEFAULT_LOAD_CONFIGURATION,
@@ -254,7 +272,8 @@ export const STORED_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
 
 /**
  * The renderer's settings for {@link STORED_SETTINGS_DOCUMENT}: the same
- * groups, with the per-model load settings as a map keyed by model key, the
+ * groups, with the default model as a reference to the stored key on local
+ * Ollama, the per-model load settings as a map keyed by model key, the
  * tools on Just run as a set, and the tool switches as a map keyed by tool
  * name.
  *

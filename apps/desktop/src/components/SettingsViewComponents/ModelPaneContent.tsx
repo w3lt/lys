@@ -3,16 +3,15 @@ import { useId, type ReactElement } from "react"
 import { Button } from "@/components/ui/button"
 import { Tooltip } from "@/components/ui/tooltip"
 import { buildModelDescriptor } from "@/lib/models/inventory"
+import { isSameLlmModelReference } from "@lys/share"
 import {
-  calculateModelRuntimeAvailability,
   formatProviderUnreachableMessage,
-  type ModelRuntimeAvailability
-} from "@/lib/models/lm-studio-connection"
+  type ProviderAvailability
+} from "@/lib/models/provider-connection"
 import {
   describeLlmProviderTarget,
   type LlmProviderTarget
 } from "@/lib/models/llm-provider-target"
-import { useLysStore } from "@/lib/store"
 import {
   readObservedModelLoading,
   type ModelInventoryState,
@@ -28,18 +27,18 @@ import { useSettingsContext } from "./SettingsContext"
 /**
  * Formats the empty-state explanation for the model inventory.
  *
- * @param availability - Whether model requests can reach the active
+ * @param availability - Whether model requests can reach the shown
  * provider, and why not.
  * @param inventoryStatus - Latest inventory observation status.
  * @param requestStatus - Current model request status.
- * @param provider - Active provider, which the explanation names.
+ * @param provider - Shown provider, which the explanation names.
  * @returns The first applicable reason, checked in order: the backend is not
- * running, the provider is connecting, the provider is not reachable, the
- * inventory read failed, models are being listed, the provider has no language
- * models, or the inventory has not been read yet.
+ * running, the provider is off, the provider is connecting, the provider is
+ * not reachable, the inventory read failed, models are being listed, the
+ * provider has no language models, or the inventory has not been read yet.
  */
 function formatModelInventoryEmptyMessage(
-  availability: ModelRuntimeAvailability,
+  availability: ProviderAvailability,
   inventoryStatus: ModelInventoryState["status"],
   requestStatus: ModelRequestState["status"],
   provider: LlmProviderTarget
@@ -47,10 +46,13 @@ function formatModelInventoryEmptyMessage(
   if (availability === "backend-offline") {
     return "Start the backend to list models."
   }
-  if (availability === "lm-studio-connecting") {
+  if (availability === "provider-off") {
+    return `${provider.name} is off. Turn it on in Providers to list its models.`
+  }
+  if (availability === "provider-connecting") {
     return `Connecting to ${provider.name}…`
   }
-  if (availability === "lm-studio-unreachable") {
+  if (availability === "provider-unreachable") {
     return formatProviderUnreachableMessage(provider)
   }
   if (inventoryStatus === "failed") {
@@ -71,7 +73,7 @@ function formatModelInventoryEmptyMessage(
  * Formats the note under the model list.
  *
  * @param modelLoading - Who loads the models, as the inventory reports.
- * @param provider - Active provider, which the note names.
+ * @param provider - Shown provider, which the note names.
  * @returns How choosing and testing a row work, and who loads the models,
  * with where to start a model the provider is not running; nothing about
  * loading while no inventory has been read.
@@ -91,7 +93,7 @@ function formatModelInventoryNote(
 }
 
 /**
- * Presents the active provider's downloaded inventory and the default-model
+ * Presents the shown provider's downloaded inventory and the default-model
  * selection.
  * @returns A heading naming the provider, then backend model rows or an
  * explicit unavailable/empty state.
@@ -104,27 +106,23 @@ function formatModelInventoryNote(
  * pointer tooltip plus `aria-describedby` repeat the empty-state explanation.
  */
 function ModelInventoryPanel(): ReactElement {
-  const backendStatus = useLysStore((state) => state.backendServerInfo.status)
-  const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
   const emptyMessageId = useId()
   const {
     settings,
+    shownProvider,
+    providerAvailability: availability,
     modelInventory,
     modelRequest,
-    modelRuntime,
     onRuntimeChange,
     onLoadModel,
     onUnloadModel,
     onTestModel,
     onRefreshModels
   } = useSettingsContext()
-  const availability = calculateModelRuntimeAvailability(
-    backendStatus,
-    lmStudioStatus
-  )
-  const provider = describeLlmProviderTarget(settings.providers)
+  const provider = describeLlmProviderTarget(shownProvider, settings.providers)
+  const { defaultModel } = settings.runtime
   const modelLoading = readObservedModelLoading(modelInventory)
-  const isLmStudioUnreachable = availability === "lm-studio-unreachable"
+  const isProviderUnreachable = availability === "provider-unreachable"
   const disabled =
     availability !== "available" || modelRequest.status !== "idle"
   const models =
@@ -139,7 +137,7 @@ function ModelInventoryPanel(): ReactElement {
   )
   const refreshButton = (
     <Button
-      aria-describedby={isLmStudioUnreachable ? emptyMessageId : undefined}
+      aria-describedby={isProviderUnreachable ? emptyMessageId : undefined}
       disabled={disabled}
       onClick={() => void onRefreshModels()}
       size="sm"
@@ -153,7 +151,7 @@ function ModelInventoryPanel(): ReactElement {
     <section className="settings-view__section">
       <div className="settings-view__section-heading">
         <h2>{`models · ${provider.name}`}</h2>
-        {isLmStudioUnreachable ? (
+        {isProviderUnreachable ? (
           <Tooltip description={formatProviderUnreachableMessage(provider)}>
             {refreshButton}
           </Tooltip>
@@ -169,10 +167,21 @@ function ModelInventoryPanel(): ReactElement {
         {models.map((model) => (
           <ModelRow
             key={model.modelKey}
+            provider={shownProvider}
             model={model}
-            isDefault={model.modelKey === settings.runtime.defaultModel}
-            modelRuntime={modelRuntime}
-            onSelect={(modelKey) => onRuntimeChange({ defaultModel: modelKey })}
+            isDefault={
+              defaultModel !== null &&
+              isSameLlmModelReference(defaultModel, {
+                provider: shownProvider,
+                modelKey: model.modelKey
+              })
+            }
+            modelRequest={modelRequest}
+            onSelect={(modelKey) =>
+              onRuntimeChange({
+                defaultModel: { provider: shownProvider, modelKey }
+              })
+            }
             disabled={disabled}
             modelLoading={modelLoading}
             onLoad={onLoadModel}

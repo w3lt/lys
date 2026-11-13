@@ -1,14 +1,15 @@
 import type { LlmInfo } from "@lys/protocol"
+import type { LlmModelReference } from "@lys/share"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import ModelResidencyCard from "@/components/SettingsViewComponents/ModelResidencyCard"
-import type { ModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
 import type { LlmProviderTarget } from "@/lib/models/llm-provider-target"
+import type { ModelAvailability } from "@/lib/models/model-availability"
+import type { ProviderAvailability } from "@/lib/models/provider-connection"
 import type {
   ModelInventoryState,
-  ModelRequestState,
-  ModelRuntimeState
+  ModelRequestState
 } from "@/lib/store/model-runtime"
 import { buildLlmInfo } from "../../support/modelFixtures"
 import {
@@ -18,11 +19,11 @@ import {
 
 /** What the card shows and whether its commands can be sent. */
 type ModelResidencyArrangement = {
-  readonly availability: ModelRuntimeAvailability
-  readonly defaultModel: string | null
+  readonly providerAvailability: ProviderAvailability
+  readonly model: LlmModelReference | null
+  readonly availability: ModelAvailability | null
   readonly modelInventory: ModelInventoryState
   readonly modelRequest: ModelRequestState
-  readonly modelRuntime: ModelRuntimeState
 }
 
 /** Callbacks of one rendered card, as spies. */
@@ -31,11 +32,14 @@ type ModelResidencyCardSpies = {
   readonly onUnloadModel: (modelKey: string) => void
 }
 
-/** Key of the chosen default model. */
-const DEFAULT_MODEL = "qwen3-8b"
+/** Key of the model a new conversation uses. */
+const DEFAULT_KEY = "qwen3-8b"
 
-/** Key of a listed model that is not the default. */
-const OTHER_MODEL = "gemma-3-4b"
+/** The model a new conversation uses, on LM Studio. */
+const DEFAULT_MODEL: LlmModelReference = Object.freeze({
+  provider: "lmStudio",
+  modelKey: DEFAULT_KEY
+})
 
 /** Text the cases pass as the request feedback. */
 const REQUEST_FEEDBACK = "Request feedback"
@@ -46,91 +50,34 @@ const IDLE_REQUEST: ModelRequestState = Object.freeze({ status: "idle" })
 /** A refresh of the model inventory in flight. */
 const LISTING_REQUEST: ModelRequestState = Object.freeze({ status: "listing" })
 
-/** Nothing resident in memory. */
-const NOTHING_RESIDENT: ModelRuntimeState = Object.freeze({ status: "none" })
-
-/** The default model resident in memory. */
-const DEFAULT_RESIDENT: ModelRuntimeState = Object.freeze({
-  status: "loaded",
-  modelKey: DEFAULT_MODEL
-})
-
-/** The default model being loaded. */
-const DEFAULT_LOADING: ModelRuntimeState = Object.freeze({
-  status: "loading",
-  modelKey: DEFAULT_MODEL
-})
-
-/** The default model being unloaded. */
-const DEFAULT_UNLOADING: ModelRuntimeState = Object.freeze({
-  status: "unloading",
-  modelKey: DEFAULT_MODEL
-})
-
-/** Residency observation failed. */
-const RESIDENCY_UNKNOWN: ModelRuntimeState = Object.freeze({
-  status: "unknown"
-})
-
-/** Residency cannot be read yet. */
-const RESIDENCY_UNAVAILABLE: ModelRuntimeState = Object.freeze({
-  status: "unavailable"
-})
-
 /** The default model on disk only. */
-const DEFAULT_ON_DISK: LlmInfo = buildLlmInfo(DEFAULT_MODEL)
+const DEFAULT_ON_DISK: LlmInfo = buildLlmInfo(DEFAULT_KEY)
 
 /** The default model in memory. */
-const DEFAULT_IN_MEMORY: LlmInfo = buildLlmInfo(DEFAULT_MODEL, {
-  loaded: true
-})
+const DEFAULT_IN_MEMORY: LlmInfo = buildLlmInfo(DEFAULT_KEY, { loaded: true })
 
 /** Another model, on disk only. */
-const OTHER_ON_DISK: LlmInfo = buildLlmInfo(OTHER_MODEL)
-
-/** Inventory listing the default model on disk. */
-const DEFAULT_LISTED_MODELS: readonly LlmInfo[] = Object.freeze([
-  DEFAULT_ON_DISK,
-  OTHER_ON_DISK
-])
-
-/** Inventory listing the default model in memory. */
-const DEFAULT_RESIDENT_MODELS: readonly LlmInfo[] = Object.freeze([
-  DEFAULT_IN_MEMORY,
-  OTHER_ON_DISK
-])
-
-/** Inventory without the default model. */
-const DEFAULT_MISSING_MODELS: readonly LlmInfo[] = Object.freeze([
-  OTHER_ON_DISK
-])
+const OTHER_ON_DISK: LlmInfo = buildLlmInfo("gemma-3-4b")
 
 /** Read inventory with the default model on disk. */
 const DEFAULT_LISTED: ModelInventoryState = Object.freeze({
   status: "ready",
   modelLoading: "lys",
-  models: DEFAULT_LISTED_MODELS
+  models: Object.freeze([DEFAULT_ON_DISK, OTHER_ON_DISK])
 })
 
 /** Read inventory with the default model in memory. */
 const DEFAULT_LISTED_RESIDENT: ModelInventoryState = Object.freeze({
   status: "ready",
   modelLoading: "lys",
-  models: DEFAULT_RESIDENT_MODELS
-})
-
-/** Read inventory without the default model. */
-const DEFAULT_NOT_LISTED: ModelInventoryState = Object.freeze({
-  status: "ready",
-  modelLoading: "lys",
-  models: DEFAULT_MISSING_MODELS
+  models: Object.freeze([DEFAULT_IN_MEMORY, OTHER_ON_DISK])
 })
 
 /** Read inventory with the default in memory in a provider that loads its own models. */
 const PROVIDER_LOADED_RESIDENT: ModelInventoryState = Object.freeze({
   status: "ready",
   modelLoading: "provider",
-  models: DEFAULT_RESIDENT_MODELS
+  models: Object.freeze([DEFAULT_IN_MEMORY])
 })
 
 /** Inventory that cannot be read yet. */
@@ -143,52 +90,42 @@ const INVENTORY_FAILED: ModelInventoryState = Object.freeze({
   status: "failed"
 })
 
-/** LM Studio connected, the default on disk, nothing loaded, no request. */
+/** The default is listed and Lys can load it. */
+const NOT_LOADED: ModelAvailability = Object.freeze({
+  status: "not-loaded",
+  modelLoading: "lys",
+  model: DEFAULT_ON_DISK
+})
+
+/** The default is loaded. */
+const LOADED: ModelAvailability = Object.freeze({
+  status: "loaded",
+  model: DEFAULT_IN_MEMORY
+})
+
+/** LM Studio connected, the default on disk, no request. */
 const READY_TO_LOAD: ModelResidencyArrangement = Object.freeze({
-  availability: "available",
-  defaultModel: DEFAULT_MODEL,
+  providerAvailability: "available",
+  model: DEFAULT_MODEL,
+  availability: NOT_LOADED,
   modelInventory: DEFAULT_LISTED,
-  modelRequest: IDLE_REQUEST,
-  modelRuntime: NOTHING_RESIDENT
+  modelRequest: IDLE_REQUEST
 })
 
 /** LM Studio connected, the default in memory, no request. */
 const READY_TO_UNLOAD: ModelResidencyArrangement = Object.freeze({
-  availability: "available",
-  defaultModel: DEFAULT_MODEL,
+  providerAvailability: "available",
+  model: DEFAULT_MODEL,
+  availability: LOADED,
   modelInventory: DEFAULT_LISTED_RESIDENT,
-  modelRequest: IDLE_REQUEST,
-  modelRuntime: DEFAULT_RESIDENT
+  modelRequest: IDLE_REQUEST
 })
 
-/** The default in memory while an inventory refresh is in flight. */
-const LISTING_WHILE_RESIDENT: ModelResidencyArrangement = Object.freeze({
-  ...READY_TO_UNLOAD,
-  modelRequest: LISTING_REQUEST
-})
-
-/** Nothing loaded and no default chosen. */
-const NO_DEFAULT_CHOSEN: ModelResidencyArrangement = Object.freeze({
+/** No default chosen and nothing loaded. */
+const NO_MODEL: ModelResidencyArrangement = Object.freeze({
   ...READY_TO_LOAD,
-  defaultModel: null
-})
-
-/** Nothing loaded and the default not in the inventory. */
-const DEFAULT_NOT_IN_INVENTORY: ModelResidencyArrangement = Object.freeze({
-  ...READY_TO_LOAD,
-  modelInventory: DEFAULT_NOT_LISTED
-})
-
-/** Nothing loaded and the inventory not read yet. */
-const INVENTORY_NOT_READ: ModelResidencyArrangement = Object.freeze({
-  ...READY_TO_LOAD,
-  modelInventory: INVENTORY_UNAVAILABLE
-})
-
-/** Nothing loaded and the inventory read failed. */
-const INVENTORY_READ_FAILED: ModelResidencyArrangement = Object.freeze({
-  ...READY_TO_LOAD,
-  modelInventory: INVENTORY_FAILED
+  model: null,
+  availability: null
 })
 
 /**
@@ -196,7 +133,7 @@ const INVENTORY_READ_FAILED: ModelResidencyArrangement = Object.freeze({
  * request feedback.
  *
  * @param arrangement - What the card shows.
- * @param provider - Active provider, which the card names; LM Studio when
+ * @param provider - Provider the card shows, which it names; LM Studio when
  * omitted.
  * @returns The spies and the render result's rerender function.
  */
@@ -211,11 +148,11 @@ function startModelResidencyCard(
   const { rerender } = render(
     <ModelResidencyCard
       provider={provider}
+      providerAvailability={arrangement.providerAvailability}
+      model={arrangement.model}
       availability={arrangement.availability}
-      defaultModel={arrangement.defaultModel}
       modelInventory={arrangement.modelInventory}
       modelRequest={arrangement.modelRequest}
-      modelRuntime={arrangement.modelRuntime}
       {...spies}
     >
       <p>{REQUEST_FEEDBACK}</p>
@@ -224,77 +161,122 @@ function startModelResidencyCard(
   return { spies, rerender }
 }
 
+/**
+ * Gets the card the cases render.
+ *
+ * @returns The card's section.
+ */
+function getCard(): HTMLElement {
+  const card = screen.getByText(REQUEST_FEEDBACK).closest("section")
+  if (card === null) throw new Error("The card renders a section")
+  return card
+}
+
 describe("ModelResidencyCard", () => {
-  it.each([
+  it.each<{
+    availability: ModelAvailability
+    heading: string
+    meta: string
+  }>([
     {
-      modelRuntime: NOTHING_RESIDENT,
+      availability: NOT_LOADED,
       heading: "No model loaded",
-      meta: `${DEFAULT_MODEL} is default · not in memory`
+      meta: `${DEFAULT_KEY} is default · not in memory`
     },
     {
-      modelRuntime: DEFAULT_RESIDENT,
+      availability: LOADED,
       heading: "Model loaded",
-      meta: `${DEFAULT_MODEL} · loaded in LM Studio`
+      meta: `${DEFAULT_KEY} · loaded in LM Studio`
     },
     {
-      modelRuntime: DEFAULT_LOADING,
+      availability: { status: "loading" },
       heading: "Loading weights",
-      meta: DEFAULT_MODEL
+      meta: DEFAULT_KEY
     },
     {
-      modelRuntime: DEFAULT_UNLOADING,
+      availability: { status: "unloading" },
       heading: "Unloading",
-      meta: `releasing ${DEFAULT_MODEL}`
+      meta: `releasing ${DEFAULT_KEY}`
     },
     {
-      modelRuntime: RESIDENCY_UNKNOWN,
+      availability: { status: "not-listed" },
+      heading: "Model not listed",
+      meta: `${DEFAULT_KEY} is not listed by LM Studio`
+    },
+    {
+      availability: { status: "inventory-failed" },
       heading: "Model state unavailable",
       meta: "refresh the model inventory to check loaded weights"
     },
     {
-      modelRuntime: RESIDENCY_UNAVAILABLE,
+      availability: { status: "inventory-unread" },
       heading: "Model state unavailable",
       meta: "refresh the model inventory to check loaded weights"
     }
   ])(
-    "shows $modelRuntime.status residency as $heading",
-    ({ modelRuntime, heading, meta }) => {
-      startModelResidencyCard({ ...READY_TO_LOAD, modelRuntime })
+    "shows the $availability.status model as $heading",
+    ({ availability, heading, meta }) => {
+      startModelResidencyCard({ ...READY_TO_LOAD, availability })
 
       expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument()
       expect(screen.getByText(meta)).toBeInTheDocument()
     }
   )
 
-  it.each([
-    { availability: "backend-offline", meta: "start the backend first" },
-    { availability: "lm-studio-connecting", meta: "connecting to LM Studio" },
+  it.each<{
+    providerAvailability: ProviderAvailability
+    availability: ModelAvailability
+    meta: string
+  }>([
     {
-      availability: "lm-studio-unreachable",
+      providerAvailability: "backend-offline",
+      availability: { status: "backend-not-running" },
+      meta: "start the backend first"
+    },
+    {
+      providerAvailability: "provider-off",
+      availability: { status: "provider-off" },
+      meta: "LM Studio is off · turn it on in Providers"
+    },
+    {
+      providerAvailability: "provider-connecting",
+      availability: { status: "provider-connecting" },
+      meta: "connecting to LM Studio"
+    },
+    {
+      providerAvailability: "provider-unreachable",
+      availability: { status: "provider-unreachable" },
       meta: "LM Studio is not reachable"
     }
-  ] as const)(
-    "says why residency is unavailable and offers no command while $availability",
-    ({ availability, meta }) => {
+  ])(
+    "says why the model's state is unavailable, recedes, and offers no command while $availability.status",
+    ({ providerAvailability, availability, meta }) => {
       startModelResidencyCard({
         ...READY_TO_LOAD,
+        providerAvailability,
         availability,
-        modelInventory: INVENTORY_UNAVAILABLE,
-        modelRuntime: RESIDENCY_UNAVAILABLE
+        modelInventory: INVENTORY_UNAVAILABLE
       })
 
       expect(
         screen.getByRole("heading", { name: "Model state unavailable" })
       ).toBeInTheDocument()
       expect(screen.getByText(meta)).toBeInTheDocument()
+      expect(getCard()).toHaveAttribute("data-dimmed")
       expect(screen.queryByRole("button", { name: "Load" })).toBeNull()
       expect(screen.queryByRole("button", { name: "Unload" })).toBeNull()
     }
   )
 
+  it("does not recede while the provider can be reached", () => {
+    startModelResidencyCard(READY_TO_LOAD)
+
+    expect(getCard()).not.toHaveAttribute("data-dimmed")
+  })
+
   it.each([
     {
-      name: "nothing loaded, the default on disk",
+      name: "the default is listed and not loaded",
       arrangement: READY_TO_LOAD,
       canLoad: true,
       canUnload: false
@@ -307,19 +289,31 @@ describe("ModelResidencyCard", () => {
     },
     {
       name: "a model request is in flight",
-      arrangement: LISTING_WHILE_RESIDENT,
+      arrangement: { ...READY_TO_UNLOAD, modelRequest: LISTING_REQUEST },
       canLoad: false,
       canUnload: false
     },
     {
-      name: "no default is chosen",
-      arrangement: NO_DEFAULT_CHOSEN,
+      name: "there is no model",
+      arrangement: NO_MODEL,
       canLoad: false,
       canUnload: false
     },
     {
       name: "the default is not listed",
-      arrangement: DEFAULT_NOT_IN_INVENTORY,
+      arrangement: {
+        ...READY_TO_LOAD,
+        availability: { status: "not-listed" } as const
+      },
+      canLoad: false,
+      canUnload: false
+    },
+    {
+      name: "the model belongs to another provider",
+      arrangement: {
+        ...READY_TO_LOAD,
+        model: { provider: "ollama", modelKey: DEFAULT_KEY } as const
+      },
       canLoad: false,
       canUnload: false
     }
@@ -339,9 +333,12 @@ describe("ModelResidencyCard", () => {
     }
   )
 
-  it("says to pick a default when none is chosen", () => {
-    startModelResidencyCard(NO_DEFAULT_CHOSEN)
+  it("says to pick a default when there is no model", () => {
+    startModelResidencyCard(NO_MODEL)
 
+    expect(
+      screen.getByRole("heading", { name: "No model loaded" })
+    ).toBeInTheDocument()
     expect(
       screen.getByText("no default model chosen · pick one in Model")
     ).toBeInTheDocument()
@@ -353,7 +350,7 @@ describe("ModelResidencyCard", () => {
 
     await user.click(screen.getByRole("button", { name: "Load" }))
 
-    expect(spies.onLoadModel).toHaveBeenCalledExactlyOnceWith(DEFAULT_MODEL)
+    expect(spies.onLoadModel).toHaveBeenCalledExactlyOnceWith(DEFAULT_KEY)
     expect(spies.onUnloadModel).not.toHaveBeenCalled()
   })
 
@@ -363,17 +360,20 @@ describe("ModelResidencyCard", () => {
 
     await user.click(screen.getByRole("button", { name: "Unload" }))
 
-    expect(spies.onUnloadModel).toHaveBeenCalledExactlyOnceWith(DEFAULT_MODEL)
+    expect(spies.onUnloadModel).toHaveBeenCalledExactlyOnceWith(DEFAULT_KEY)
     expect(spies.onLoadModel).not.toHaveBeenCalled()
   })
 
   it.each([
-    { modelRuntime: DEFAULT_LOADING, progress: "Loading weights" },
-    { modelRuntime: DEFAULT_UNLOADING, progress: "Unloading" }
+    {
+      availability: { status: "loading" } as const,
+      progress: "Loading weights"
+    },
+    { availability: { status: "unloading" } as const, progress: "Unloading" }
   ])(
-    "marks the card busy and shows indeterminate progress while $modelRuntime.status",
-    ({ modelRuntime, progress }) => {
-      startModelResidencyCard({ ...READY_TO_LOAD, modelRuntime })
+    "marks the card busy and shows indeterminate progress while $availability.status",
+    ({ availability, progress }) => {
+      startModelResidencyCard({ ...READY_TO_LOAD, availability })
 
       const progressbar = screen.getByRole("progressbar", { name: progress })
       const busyParts = document.querySelectorAll('[aria-busy="true"]')
@@ -386,17 +386,17 @@ describe("ModelResidencyCard", () => {
   it("clears the busy state and the progress once the weights are loaded", () => {
     const { spies, rerender } = startModelResidencyCard({
       ...READY_TO_LOAD,
-      modelRuntime: DEFAULT_LOADING
+      availability: { status: "loading" }
     })
 
     rerender(
       <ModelResidencyCard
         provider={LM_STUDIO_TARGET}
-        availability="available"
-        defaultModel={DEFAULT_MODEL}
+        providerAvailability="available"
+        model={DEFAULT_MODEL}
+        availability={LOADED}
         modelInventory={DEFAULT_LISTED_RESIDENT}
         modelRequest={IDLE_REQUEST}
-        modelRuntime={DEFAULT_RESIDENT}
         {...spies}
       >
         <p>{REQUEST_FEEDBACK}</p>
@@ -414,7 +414,7 @@ describe("ModelResidencyCard", () => {
     startModelResidencyCard(READY_TO_LOAD)
 
     const note = screen.getByText(
-      "Loading and unloading use LM Studio through the backend. This summary prefers the loaded default; manage every loaded model in Model settings."
+      "Loading and unloading use LM Studio through the backend. This summary shows the model a new conversation uses; manage every loaded model in Model settings."
     )
     const feedback = screen.getByText(REQUEST_FEEDBACK)
     expect(
@@ -430,9 +430,20 @@ describe("ModelResidencyCard", () => {
   it.each([
     {
       name: "the inventory cannot be read yet",
-      arrangement: INVENTORY_NOT_READ
+      arrangement: {
+        ...READY_TO_LOAD,
+        availability: { status: "inventory-unread" } as const,
+        modelInventory: INVENTORY_UNAVAILABLE
+      }
     },
-    { name: "the inventory read failed", arrangement: INVENTORY_READ_FAILED }
+    {
+      name: "the inventory read failed",
+      arrangement: {
+        ...READY_TO_LOAD,
+        availability: { status: "inventory-failed" } as const,
+        modelInventory: INVENTORY_FAILED
+      }
+    }
   ])(
     "offers no Load or Unload, and says nothing about who loads the models, while $name",
     ({ arrangement }) => {
@@ -442,14 +453,20 @@ describe("ModelResidencyCard", () => {
       expect(screen.queryByRole("button", { name: "Unload" })).toBeNull()
       expect(
         screen.getByText(
-          "This summary prefers the loaded default; see every model in Model settings."
+          "This summary shows the model a new conversation uses; see every model in Model settings."
         )
       ).toBeInTheDocument()
     }
   )
 
   it("offers Load and Unload when the inventory reports that Lys loads the models, whatever the provider", () => {
-    startModelResidencyCard(READY_TO_UNLOAD, GROQ_TARGET)
+    startModelResidencyCard(
+      {
+        ...READY_TO_UNLOAD,
+        model: { provider: "groq", modelKey: DEFAULT_KEY }
+      },
+      GROQ_TARGET
+    )
 
     expect(screen.getByRole("button", { name: "Load" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Unload" })).toBeEnabled()
@@ -457,18 +474,22 @@ describe("ModelResidencyCard", () => {
 
   it("offers no Load or Unload when the inventory reports that the provider loads its own models", () => {
     startModelResidencyCard(
-      { ...READY_TO_UNLOAD, modelInventory: PROVIDER_LOADED_RESIDENT },
+      {
+        ...READY_TO_UNLOAD,
+        model: { provider: "groq", modelKey: DEFAULT_KEY },
+        modelInventory: PROVIDER_LOADED_RESIDENT
+      },
       GROQ_TARGET
     )
 
     expect(
-      screen.getByText(`${DEFAULT_MODEL} · loaded in Groq`)
+      screen.getByText(`${DEFAULT_KEY} · loaded in Groq`)
     ).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Load" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Unload" })).toBeNull()
     expect(
       screen.getByText(
-        "Groq decides which models are in memory, so Lys does not load or unload them. This summary prefers the default; see every model in Model settings."
+        "Groq decides which models are in memory, so Lys does not load or unload them. This summary shows the model a new conversation uses; see every model in Model settings."
       )
     ).toBeInTheDocument()
   })

@@ -6,7 +6,6 @@ import ModelResidencyCard from "./ModelResidencyCard"
 import StartupSwitchSaveStatus from "./StartupSwitchSaveStatus"
 import VmoStatusCard from "./VmoStatusCard"
 import { useBackendUptimeMs } from "@/lib/hooks/backendRuntime"
-import { calculateModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
 import { describeLlmProviderTarget } from "@/lib/models/llm-provider-target"
 import { useLysStore } from "@/lib/store"
 
@@ -79,54 +78,54 @@ function ProcessCardGroup(): ReactElement {
 }
 
 /**
- * Presents the active provider's card and, under it, the model card with the
- * model request feedback.
+ * Presents the shown provider's card and, under it, the card of the model a
+ * new conversation uses, with the model request feedback.
  *
  * @remarks The application store owns the backend and provider status and
- * the connect command; the settings context owns the provider choice, the
- * default model, the model state, and the load and unload requests, and must
- * be provided. Refresh, Load, and Unload intentionally discard their promises
+ * the connect command; the settings context owns the shown provider, the
+ * model a new conversation uses, the shown provider's model state, and the
+ * load and unload requests, and must be provided. Refresh, Load, and Unload intentionally discard their promises
  * with `void`; their stores own each request's completion, and the model
  * request feedback, rendered last in the model card, reports the model
  * requests. The group renders no host of its own, so each card takes its
  * place in the pane's stack.
- * @returns The LM Studio and model cards.
+ * @returns The provider and model cards.
  */
 function ModelRuntimeCardGroup(): ReactElement {
   const backendStatus = useLysStore((state) => state.backendServerInfo.status)
-  const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
-  const connectLmStudio = useLysStore((state) => state.connectLmStudio)
   const {
     settings,
-    modelRuntime,
+    shownProvider,
+    providerAvailability,
+    newConversationModel,
     modelRequest,
     modelInventory,
     onLoadModel,
     onUnloadModel
   } = useSettingsContext()
-  const availability = calculateModelRuntimeAvailability(
-    backendStatus,
-    lmStudioStatus
+  const providerStatus = useLysStore(
+    (state) => state.providerModels[shownProvider].status
   )
-  const provider = describeLlmProviderTarget(settings.providers)
+  const connectProvider = useLysStore((state) => state.connectProvider)
+  const provider = describeLlmProviderTarget(shownProvider, settings.providers)
 
   return (
     <>
       <LmStudioStatusCard
         backendStatus={backendStatus}
-        provider={provider}
-        lmStudioStatus={lmStudioStatus}
-        onRefreshLmStudioStatus={() => {
-          void connectLmStudio()
+        onRefreshStatus={() => {
+          void connectProvider(shownProvider)
         }}
+        provider={provider}
+        status={providerStatus}
       />
       <ModelResidencyCard
-        availability={availability}
-        provider={provider}
-        defaultModel={settings.runtime.defaultModel}
+        availability={newConversationModel.availability}
+        model={newConversationModel.model}
         modelInventory={modelInventory}
         modelRequest={modelRequest}
-        modelRuntime={modelRuntime}
+        provider={provider}
+        providerAvailability={providerAvailability}
         onLoadModel={(modelKey) => {
           void onLoadModel(modelKey)
         }}
@@ -142,12 +141,12 @@ function ModelRuntimeCardGroup(): ReactElement {
 
 /**
  * Presents the Runtime pane: Lys's backend and vmo with their startup
- * switches, then LM Studio and the model weights.
+ * switches, then the shown provider and the model weights.
  *
  * @remarks The pane accepts no props and is loaded lazily by the settings
  * view, under the settings context. It owns the stack and the order of its
  * parts: the backend card, the vmo card under it, the save status of both
- * startup switches, the LM Studio card, which owns the only reconnect
+ * startup switches, the shown provider's card, which owns the only reconnect
  * action, and the model card. Each group selects only the application store
  * and settings context state its cards show.
  * @returns The Runtime pane body.

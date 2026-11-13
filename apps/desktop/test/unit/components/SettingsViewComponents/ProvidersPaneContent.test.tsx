@@ -1,7 +1,12 @@
-import { llmProviderSettingsSchema } from "@lys/share"
+import {
+  LLM_PROVIDERS,
+  llmProviderSettingsSchema,
+  type LlmProvider
+} from "@lys/share"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
+import { updateProviderModelState } from "@/lib/store/model-runtime"
 import type { LysSettings } from "@/lib/store/settings"
 import {
   buildJsonResponse,
@@ -22,52 +27,91 @@ import {
   loadFreshSettingsView
 } from "../../support/settingsViewFixtures"
 
-/** Route key of the backend's reconnection. */
-const CONNECT_ROUTE = "POST /api/v1/llm/runtime/connect"
+/**
+ * Builds the route key of the backend's reconnection to one provider.
+ *
+ * @param provider - Provider reconnected.
+ * @returns The route key.
+ */
+function buildConnectRoute(provider: LlmProvider): string {
+  return `POST /api/v1/llm/${provider}/runtime/connect`
+}
 
-/** Backend reconnection that settles connected. */
-const CONNECTED_ROUTE: BackendRoutes = Object.freeze({
-  [CONNECT_ROUTE]: () => buildJsonResponse(200, { status: "connected" })
-})
+/**
+ * Builds the backend's provider routes as the backend answers them: a
+ * reconnection settles `connected` for a provider the settings turn on and
+ * `off` for one they leave off, as the backend reads the saved group at each
+ * attempt, and every provider lists no model.
+ *
+ * @param readEnabled - Reads the providers the settings turn on, at request
+ * time.
+ * @returns A connect and a list route for every provider.
+ */
+function buildProviderRoutes(
+  readEnabled: () => readonly LlmProvider[]
+): BackendRoutes {
+  return Object.fromEntries(
+    LLM_PROVIDERS.flatMap((provider) => [
+      [
+        buildConnectRoute(provider),
+        () =>
+          buildJsonResponse(200, {
+            status: readEnabled().includes(provider) ? "connected" : "off"
+          })
+      ],
+      [
+        `GET /api/v1/llm/${provider}/list`,
+        () => buildJsonResponse(200, { llms: [], modelLoading: "lys" })
+      ]
+    ])
+  )
+}
 
-/** Stored settings with Ollama Cloud active, the local address still saved. */
+/** Stored settings with only Ollama Cloud on, the local address still saved. */
 const OLLAMA_CLOUD_ACTIVE_SETTINGS: LysSettings = Object.freeze({
   ...STORED_SETTINGS,
   providers: llmProviderSettingsSchema.parse({
     ...STORED_PROVIDERS_SETTINGS,
-    active: "ollamaCloud"
+    enabled: ["ollamaCloud"]
   })
 })
 
-/** Stored settings with Groq active and its key saved. */
+/** Stored settings with only Groq on and its key saved. */
 const GROQ_ACTIVE_SETTINGS: LysSettings = Object.freeze({
   ...STORED_SETTINGS,
   providers: llmProviderSettingsSchema.parse({
     ...STORED_PROVIDERS_SETTINGS,
-    active: "groq"
+    enabled: ["groq"]
   })
 })
 
 /**
  * Renders the settings view on the Providers pane, with the given settings
- * in the application store and the backend connected, and waits for the
- * pane body.
+ * in the application store, every provider they turn on connected and every
+ * other one off, and waits for the pane body.
  *
- * @param settings - Settings in the store; the stored ones, with local
- * Ollama active, when omitted.
- * @param routes - Backend routes the case needs besides the inventory read.
- * @returns The application store and the backend observation handle.
+ * @param settings - Settings in the store; the stored ones, with only local
+ * Ollama on, when omitted.
+ * @returns The application store and the backend observation handle, whose
+ * provider routes answer as {@link buildProviderRoutes} builds them.
  */
-async function startProvidersPane(
-  settings: LysSettings = STORED_SETTINGS,
-  routes: BackendRoutes = {}
-) {
+async function startProvidersPane(settings: LysSettings = STORED_SETTINGS) {
+  let readEnabled = (): readonly LlmProvider[] => settings.providers.enabled
   const backend = startBackendFake({
-    [INVENTORY_ROUTE]: buildInventoryRoute(),
-    ...routes
+    ...buildProviderRoutes(() => readEnabled()),
+    [INVENTORY_ROUTE]: buildInventoryRoute()
   })
   const { useLysStore, SettingsView } = await loadFreshSettingsView("providers")
-  useLysStore.setState({ settings })
+  readEnabled = () => useLysStore.getState().settings.providers.enabled
+  let { providerModels } = useLysStore.getState()
+  for (const provider of LLM_PROVIDERS) {
+    providerModels = updateProviderModelState(providerModels, provider, {
+      status: settings.providers.enabled.includes(provider)
+        ? "connected"
+        : "off"
+    })
+  }
+  useLysStore.setState({ settings, providerModels })
   render(<SettingsView onDone={vi.fn()} />)
   // The closing note is withheld until the lazily loaded pane body is shown.
   await screen.findByText(/^Saved in settings\.json in Lys's home folder/)
@@ -103,19 +147,23 @@ function listSettingsWrites(
 }
 
 /**
- * Counts the reconnections the backend received.
+ * Counts the reconnections to one provider the backend received.
  *
  * @param backend - Backend observation handle.
- * @returns How many connect requests arrived.
+ * @param provider - Provider reconnected.
+ * @returns How many connect requests for that provider arrived.
  */
-function countReconnections(backend: BackendFake): number {
+function countReconnections(
+  backend: BackendFake,
+  provider: LlmProvider
+): number {
   return backend.requests.filter(
-    (request) => request.routeKey === CONNECT_ROUTE
+    (request) => request.routeKey === buildConnectRoute(provider)
   ).length
 }
 
 describe("ProvidersPaneContent", () => {
-  it("lists every provider with the active one open on its connection", async () => {
+  it("lists every provider with the turned-on one checked and open on its connection", async () => {
     startNativeHostFake({})
     await startProvidersPane()
 
@@ -139,7 +187,7 @@ describe("ProvidersPaneContent", () => {
     ])
     expect(
       screen.getByRole("article", { name: "LM Studio" })
-    ).toHaveTextContent("standby")
+    ).toHaveTextContent("off")
     const ollama = screen.getByRole("article", { name: "Ollama" })
     expect(ollama).toHaveTextContent("connected")
     const modes = within(ollama).getByRole("group", { name: "Configure" })
@@ -174,27 +222,27 @@ describe("ProvidersPaneContent", () => {
     ).toEqual(["LM Studio", "Ollama", "Groq"])
   })
 
-  it("saves a picked provider and reconnects to it", async () => {
+  it("turns the picked provider on in place of the one that was on, and reconnects both", async () => {
     const host = startSettingsHost()
-    const { useLysStore, backend } = await startProvidersPane(
-      STORED_SETTINGS,
-      CONNECTED_ROUTE
-    )
+    const { useLysStore, backend } = await startProvidersPane()
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("radio", { name: "Groq" }))
     await waitForRenderedWork()
 
-    expect(useLysStore.getState().settings.providers.active).toBe("groq")
+    expect(useLysStore.getState().settings.providers.enabled).toEqual(["groq"])
     expect(listSettingsWrites(host.commands)).toEqual([
       {
         newSettings: {
           ...STORED_SETTINGS_DOCUMENT,
-          providers: { ...STORED_PROVIDERS_SETTINGS, active: "groq" }
+          providers: { ...STORED_PROVIDERS_SETTINGS, enabled: ["groq"] }
         }
       }
     ])
-    expect(countReconnections(backend)).toBe(1)
+    expect(countReconnections(backend, "groq")).toBe(1)
+    expect(countReconnections(backend, "ollama")).toBe(1)
+    expect(useLysStore.getState().providerModels.ollama.status).toBe("off")
+    expect(screen.getByRole("radio", { name: "Ollama" })).not.toBeChecked()
     const groq = screen.getByRole("article", { name: "Groq" })
     expect(within(groq).getByLabelText("Groq API key")).toHaveAttribute(
       "placeholder",
@@ -205,7 +253,7 @@ describe("ProvidersPaneContent", () => {
 
   it("saves a new server address on Enter and refuses one that is not an address", async () => {
     const host = startSettingsHost()
-    await startProvidersPane(STORED_SETTINGS, CONNECTED_ROUTE)
+    await startProvidersPane()
     const user = userEvent.setup()
     const field = screen.getByLabelText("Server address")
 
@@ -234,24 +282,23 @@ describe("ProvidersPaneContent", () => {
     expect(field).toHaveAttribute("placeholder", "localhost:11500")
   })
 
-  it("makes Ollama Cloud the active provider from Ollama's card, which asks for a key", async () => {
+  it("turns Ollama Cloud on in place of the local server from Ollama's card, which asks for a key", async () => {
     const host = startSettingsHost()
-    const { useLysStore } = await startProvidersPane(
-      STORED_SETTINGS,
-      CONNECTED_ROUTE
-    )
+    const { useLysStore } = await startProvidersPane()
     const user = userEvent.setup()
     const ollama = screen.getByRole("article", { name: "Ollama" })
 
     await user.click(within(ollama).getByRole("button", { name: "Cloud" }))
     await waitForRenderedWork()
 
-    expect(useLysStore.getState().settings.providers.active).toBe("ollamaCloud")
+    expect(useLysStore.getState().settings.providers.enabled).toEqual([
+      "ollamaCloud"
+    ])
     expect(listSettingsWrites(host.commands)).toEqual([
       {
         newSettings: {
           ...STORED_SETTINGS_DOCUMENT,
-          providers: { ...STORED_PROVIDERS_SETTINGS, active: "ollamaCloud" }
+          providers: { ...STORED_PROVIDERS_SETTINGS, enabled: ["ollamaCloud"] }
         }
       }
     ])
@@ -270,7 +317,7 @@ describe("ProvidersPaneContent", () => {
 
   it("shows Ollama Cloud on Ollama's card and switches back to the local server", async () => {
     const host = startSettingsHost()
-    await startProvidersPane(OLLAMA_CLOUD_ACTIVE_SETTINGS, CONNECTED_ROUTE)
+    await startProvidersPane(OLLAMA_CLOUD_ACTIVE_SETTINGS)
     const user = userEvent.setup()
     const ollama = screen.getByRole("article", { name: "Ollama" })
 
@@ -297,9 +344,9 @@ describe("ProvidersPaneContent", () => {
     )
   })
 
-  it("makes the local Ollama server active when Ollama's card is picked", async () => {
+  it("turns the local Ollama server on when Ollama's card is picked", async () => {
     const host = startSettingsHost()
-    await startProvidersPane(GROQ_ACTIVE_SETTINGS, CONNECTED_ROUTE)
+    await startProvidersPane(GROQ_ACTIVE_SETTINGS)
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("radio", { name: "Ollama" }))
@@ -321,12 +368,10 @@ describe("ProvidersPaneContent", () => {
     ).toHaveAttribute("aria-pressed", "true")
   })
 
-  it("saves a new key of the active provider and reconnects, then removes it", async () => {
+  it("saves a new key of a turned-on provider and reconnects it, then removes it", async () => {
     const host = startSettingsHost()
-    const { useLysStore, backend } = await startProvidersPane(
-      GROQ_ACTIVE_SETTINGS,
-      CONNECTED_ROUTE
-    )
+    const { useLysStore, backend } =
+      await startProvidersPane(GROQ_ACTIVE_SETTINGS)
     const user = userEvent.setup()
 
     await user.type(
@@ -349,7 +394,7 @@ describe("ProvidersPaneContent", () => {
         }
       }
     ])
-    expect(countReconnections(backend)).toBe(1)
+    expect(countReconnections(backend, "groq")).toBe(1)
 
     await user.click(screen.getByRole("button", { name: "Remove" }))
     await waitForRenderedWork()
@@ -361,17 +406,15 @@ describe("ProvidersPaneContent", () => {
     expect(screen.getByLabelText("Groq API key")).toHaveFocus()
   })
 
-  it("reconnects to the active provider on Test", async () => {
+  it("reconnects to the turned-on provider on Test", async () => {
     startNativeHostFake({})
-    const { backend } = await startProvidersPane(
-      STORED_SETTINGS,
-      CONNECTED_ROUTE
-    )
+    const { backend } = await startProvidersPane()
     const user = userEvent.setup()
 
     await user.click(screen.getByRole("button", { name: "Test" }))
     await waitForRenderedWork()
 
-    expect(countReconnections(backend)).toBe(1)
+    expect(countReconnections(backend, "ollama")).toBe(1)
+    expect(countReconnections(backend, "lmStudio")).toBe(0)
   })
 })

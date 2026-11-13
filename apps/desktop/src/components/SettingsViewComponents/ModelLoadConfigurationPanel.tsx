@@ -2,7 +2,6 @@ import type { ReactElement } from "react"
 import type { LlmInfo } from "@lys/protocol"
 
 import { Button } from "@/components/ui/button"
-import { calculateModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
 import {
   buildDefaultModelLoadConfiguration,
   buildModelLoadConfiguration,
@@ -103,13 +102,8 @@ function ModelReloadControl({
   modelKey,
   note
 }: ModelReloadControlProps): ReactElement {
-  const backendStatus = useLysStore((state) => state.backendServerInfo.status)
-  const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
-  const { modelRequest, onReloadModel } = useSettingsContext()
-  const availability = calculateModelRuntimeAvailability(
-    backendStatus,
-    lmStudioStatus
-  )
+  const { providerAvailability, modelRequest, onReloadModel } =
+    useSettingsContext()
   return (
     <div className="settings-view__load-reload">
       <p
@@ -122,7 +116,8 @@ function ModelReloadControl({
       {note === "" ? null : (
         <Button
           disabled={
-            availability !== "available" || modelRequest.status !== "idle"
+            providerAvailability !== "available" ||
+            modelRequest.status !== "idle"
           }
           onClick={() => void onReloadModel(modelKey)}
           size="sm"
@@ -210,17 +205,18 @@ type ModelLoadConfigurationPanelProps = {
  * settings, or a request to choose a default model when none can be edited,
  * and the save feedback.
  * @remarks Requires SettingsContext. The edited model is the selected default
- * model when the models include it; a loaded model that is not the default is
- * not edited. Choosing another model starts a new editor, so text being typed
+ * model when it is one of the shown provider's and the models include it; a
+ * loaded model that is not the default is not edited. Choosing another model starts a new editor, so text being typed
  * for the previous model is discarded.
  */
 export default function ModelLoadConfigurationPanel({
   models
 }: ModelLoadConfigurationPanelProps): ReactElement {
-  const { settings } = useSettingsContext()
+  const { settings, shownProvider } = useSettingsContext()
+  const { defaultModel } = settings.runtime
   const model = findLoadConfigurationTarget(
     models,
-    settings.runtime.defaultModel
+    defaultModel?.provider === shownProvider ? defaultModel.modelKey : null
   )
   return (
     <section className="settings-view__section">

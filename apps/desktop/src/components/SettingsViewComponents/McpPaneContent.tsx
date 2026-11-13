@@ -14,6 +14,8 @@ import {
 } from "react"
 
 import { Button } from "@/components/ui/button"
+import { useNewConversationModel } from "@/lib/hooks/conversationModel"
+import { findLoadedModelInfo } from "@/lib/models/model-availability"
 import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
 import { useLysStore, type BackendServerStatus } from "@/lib/store"
 import {
@@ -320,18 +322,17 @@ function McpPaneStatus({ notes, onRetry }: McpPaneStatusProps): ReactElement {
  * @remarks The tool store owns whether tool calls are on, and the
  * application store owns the model state and which settings pane is shown;
  * the component owns no state. The warning shows while tool calls are off,
- * or while the loaded model is not trained for tool use; Open Tools selects
- * the Tools pane.
+ * or while the model a new conversation uses is loaded and not trained for
+ * tool use; Open Tools selects the Tools pane.
  * @returns The warning, or null while the tools are offered.
  */
 function McpToolOfferNotice(): ReactElement | null {
   const areToolCallsOn = useToolStore((state) => state.areToolCallsOn)
-  const modelRuntime = useLysStore((state) => state.modelRuntime)
-  const modelInventory = useLysStore((state) => state.modelInventory)
+  const { availability } = useNewConversationModel()
   const setSettingsPane = useLysStore((state) => state.setSettingsPane)
   const text = formatMcpToolOfferWarning(
     areToolCallsOn,
-    calculateToolModelSupport(modelRuntime, modelInventory)
+    calculateToolModelSupport(findLoadedModelInfo(availability))
   )
 
   if (text === "") return null

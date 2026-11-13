@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
 import type { BackendServerStatus } from "@/lib/store"
+import { updateProviderModelState } from "@/lib/store/model-runtime"
 import { initialSettingsState } from "@/lib/store/settings"
 import {
   buildJsonResponse,
@@ -55,7 +56,10 @@ const NOTHING_LOADED: RuntimeArrangement = {
  * starts when Lys opens, so a saved `false` can only come from the switch.
  */
 const FIRST_RUN_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
-  runtime: initialSettingsState.runtime,
+  runtime: Object.freeze({
+    ...initialSettingsState.runtime,
+    defaultModel: null
+  }),
   generation: initialSettingsState.generation,
   loadConfiguration: Object.freeze({ default: {}, models: {} }),
   secrets: initialSettingsState.secrets,
@@ -391,7 +395,7 @@ describe("RuntimePaneContent", () => {
     it("asks the backend to reconnect and shows the result", async () => {
       const runtime = buildUnreachableRuntime("running", "unreachable")
       const { backend } = await startRuntimePane(runtime, {
-        "POST /api/v1/llm/runtime/connect": () =>
+        "POST /api/v1/llm/lmStudio/runtime/connect": () =>
           buildJsonResponse(200, { status: "connected" }),
         // Once reconnected, the backend lists the models again.
         [INVENTORY_ROUTE]: buildInventoryRoute(NOTHING_LOADED)
@@ -409,7 +413,66 @@ describe("RuntimePaneContent", () => {
       ).toBeInTheDocument()
       expect(screen.getByText("127.0.0.1:1234")).toBeInTheDocument()
       expect(listRouteKeys(backend)).toContain(
-        "POST /api/v1/llm/runtime/connect"
+        "POST /api/v1/llm/lmStudio/runtime/connect"
+      )
+    })
+  })
+
+  describe("another provider", () => {
+    it("shows the provider of the model a new conversation uses, and asks that provider to reconnect", async () => {
+      const groqInventory = {
+        status: "ready",
+        modelLoading: "provider",
+        models: [buildLlmInfo("llama-3.3-70b", { loaded: true })]
+      } as const
+      const backend = startBackendFake({
+        "GET /api/v1/llm/groq/list": () =>
+          buildJsonResponse(200, {
+            llms: groqInventory.models,
+            modelLoading: groqInventory.modelLoading
+          }),
+        "POST /api/v1/llm/groq/runtime/connect": () =>
+          buildJsonResponse(200, { status: "connected" })
+      })
+      const { useLysStore, SettingsView } = await loadFreshSettingsView(
+        "runtime",
+        buildUnreachableRuntime("running", "off")
+      )
+      const { settings, providerModels } = useLysStore.getState()
+      useLysStore.setState({
+        settings: {
+          ...settings,
+          providers: { ...settings.providers, enabled: ["groq"] },
+          runtime: {
+            ...settings.runtime,
+            defaultModel: { provider: "groq", modelKey: "llama-3.3-70b" }
+          }
+        },
+        providerModels: updateProviderModelState(providerModels, "groq", {
+          status: "connected",
+          inventory: groqInventory
+        })
+      })
+      render(<SettingsView onDone={vi.fn()} />)
+      await screen.findByRole("switch", { name: "Start it when Lys opens" })
+      await waitForRenderedWork()
+      const user = userEvent.setup()
+
+      expect(
+        screen.getByRole("heading", { name: "Groq connected" })
+      ).toBeInTheDocument()
+      expect(
+        screen.getByText("llama-3.3-70b · loaded in Groq")
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByRole("region", { name: "LM Studio connection" })
+      ).toBeNull()
+
+      await user.click(screen.getByRole("button", { name: "Refresh" }))
+      await waitForRenderedWork()
+
+      expect(listRouteKeys(backend)).toContain(
+        "POST /api/v1/llm/groq/runtime/connect"
       )
     })
   })
@@ -417,7 +480,8 @@ describe("RuntimePaneContent", () => {
   describe("model residency", () => {
     it("shows loaded weights and unloads them", async () => {
       const { backend } = await startRuntimePane(READY_RUNTIME, {
-        "PATCH /api/v1/llm/unload": () => new Response(null, { status: 204 })
+        "PATCH /api/v1/llm/lmStudio/unload": () =>
+          new Response(null, { status: 204 })
       })
       const user = userEvent.setup()
 
@@ -441,7 +505,7 @@ describe("RuntimePaneContent", () => {
     it("loads the chosen default while nothing is loaded, showing progress meanwhile", async () => {
       const load = createControlledPromise<Response>()
       const { backend } = await startRuntimePane(NOTHING_LOADED, {
-        "POST /api/v1/llm/load": () => load.promise
+        "POST /api/v1/llm/lmStudio/load": () => load.promise
       })
       const user = userEvent.setup()
       expect(

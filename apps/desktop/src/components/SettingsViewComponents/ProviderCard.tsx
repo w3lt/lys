@@ -3,7 +3,7 @@ import { useId, useRef, useState, type ReactElement } from "react"
 
 import { Button } from "@/components/ui/button"
 import type { BackendServerStatus } from "@/lib/store"
-import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
+import type { LlmProviderStatus } from "@/lib/store/model-runtime"
 import type {
   ProviderApiKeyChange,
   ProviderSettingsSaveOutcome,
@@ -14,16 +14,18 @@ import type { ProvidersSettings, SecretsSettings } from "@/lib/store/settings"
 import { ProviderAddressForm, ProviderKeyForm } from "./ProviderAccessForms"
 import {
   buildProvidersWithAddress,
+  buildProvidersWithOnlyProvider,
   calculateProviderBadge,
   findProviderAccessKind,
+  findProviderCardProvider,
   findSavedProviderApiKey,
   formatProviderMessage,
   formatProviderModeTag,
+  isProviderCardOn,
   OLLAMA_PROVIDER_LABELS,
   OLLAMA_PROVIDER_NOTES,
   OLLAMA_PROVIDERS,
   PROVIDER_CARD_PROVIDERS,
-  PROVIDER_CARDS,
   PROVIDER_DESCRIPTIONS,
   UNEDITED_PROVIDER_DRAFT,
   type OllamaLlmProvider,
@@ -34,7 +36,7 @@ import {
 
 /** Requests a provider card sends to the pane. */
 export type ProviderCardRequests = {
-  /** Requests that the pane save a new provider choice; never rejects. */
+  /** Requests that the pane save new provider settings; never rejects. */
   readonly onSaveProviders: (
     providers: ProvidersSettings
   ) => Promise<ProviderSettingsSaveOutcome>
@@ -42,7 +44,7 @@ export type ProviderCardRequests = {
   readonly onSaveApiKey: (
     change: ProviderApiKeyChange
   ) => Promise<ProviderSettingsSaveOutcome>
-  /** Requests that the pane connect to the active provider again. */
+  /** Requests that the pane connect to the card's provider again. */
   readonly onTest: () => void
 }
 
@@ -52,12 +54,12 @@ type ProviderCardProps = ProviderCardRequests & {
   readonly card: ProviderCardKind
   /** Name shared by the pane's radio buttons. */
   readonly radioName: string
-  /** Saved provider choice and addresses. */
+  /** Saved providers and addresses. */
   readonly providers: ProvidersSettings
   /** Saved keys. */
   readonly secrets: SecretsSettings
-  /** Latest published connection status of the backend's provider. */
-  readonly status: LmStudioStatus
+  /** Latest published connection status of the card's provider. */
+  readonly status: LlmProviderStatus
   /** Backend lifecycle state, which explains an `unknown` status. */
   readonly backendStatus: BackendServerStatus
   /** Latest provider save, owned by the application store. */
@@ -66,14 +68,14 @@ type ProviderCardProps = ProviderCardRequests & {
 
 /** Properties accepted by {@link ProviderCardBody}. */
 type ProviderCardBodyProps = ProviderCardRequests & {
-  /** Active provider the body configures. */
+  /** Turned-on provider the body configures. */
   readonly provider: LlmProvider
-  /** Saved provider choice and addresses. */
+  /** Saved providers and addresses. */
   readonly providers: ProvidersSettings
   /** Saved keys. */
   readonly secrets: SecretsSettings
-  /** Latest published connection status. */
-  readonly status: LmStudioStatus
+  /** Latest published connection status of that provider. */
+  readonly status: LlmProviderStatus
   /** Backend lifecycle state, which explains an `unknown` status. */
   readonly backendStatus: BackendServerStatus
   /** Latest provider save. */
@@ -82,11 +84,11 @@ type ProviderCardBodyProps = ProviderCardRequests & {
 
 /** Properties accepted by {@link OllamaProviderRow}. */
 type OllamaProviderRowProps = {
-  /** Active Ollama provider: a local server or Ollama Cloud. */
+  /** Ollama provider that is on: a local server or Ollama Cloud. */
   readonly provider: OllamaLlmProvider
   /** Whether a provider save runs, which blocks another. */
   readonly isSaving: boolean
-  /** Requests that the card make the other Ollama provider active. */
+  /** Requests that the card turn the other Ollama provider on instead. */
   readonly onProviderChange: (provider: OllamaLlmProvider) => void
 }
 
@@ -96,12 +98,12 @@ type ProviderCardFooterProps = {
   readonly statusId: string
   /** How the provider is reached. */
   readonly access: ProviderAccessKind
-  /** Saved provider choice and addresses. */
+  /** Saved providers and addresses. */
   readonly providers: ProvidersSettings
   /** Saved keys. */
   readonly secrets: SecretsSettings
-  /** Latest published connection status. */
-  readonly status: LmStudioStatus
+  /** Latest published connection status of the card's provider. */
+  readonly status: LlmProviderStatus
   /** Backend lifecycle state, which explains an `unknown` status. */
   readonly backendStatus: BackendServerStatus
   /** Latest provider save. */
@@ -115,12 +117,13 @@ type ProviderCardFooterProps = {
 }
 
 /**
- * Presents the Ollama card's Local and Cloud row: a note on what the active
- * Ollama provider means, and a button per Ollama provider.
+ * Presents the Ollama card's Local and Cloud row: a note on what the Ollama
+ * provider that is on means, and a button per Ollama provider.
  *
- * @remarks A pure projection of its props; the pressed button is the active
- * provider, and the buttons are disabled while a save runs.
- * @param props - Active Ollama provider, whether a save runs, and the request.
+ * @remarks A pure projection of its props; the pressed button is the
+ * provider that is on, and the buttons are disabled while a save runs.
+ * @param props - Ollama provider that is on, whether a save runs, and the
+ * request.
  * @returns The row.
  */
 function OllamaProviderRow({
@@ -160,7 +163,7 @@ function OllamaProviderRow({
 }
 
 /**
- * Presents the active card's status line and, while its key is saved and
+ * Presents a turned-on card's status line and, while its key is saved and
  * unedited, Test and Remove.
  *
  * @remarks A pure projection of its props. The status line is a polite live
@@ -233,7 +236,7 @@ function ProviderCardFooter({
 }
 
 /**
- * Presents the active provider's settings: for an Ollama provider, the row
+ * Presents a turned-on provider's settings: for an Ollama provider, the row
  * that switches between a local server and Ollama Cloud; the address or key
  * form; and the status line.
  *
@@ -318,8 +321,10 @@ function ProviderCardBody({
       {provider === "ollama" || provider === "ollamaCloud" ? (
         <OllamaProviderRow
           isSaving={isSaving}
-          onProviderChange={(active) =>
-            void onSaveProviders({ ...providers, active })
+          onProviderChange={(ollamaProvider) =>
+            void onSaveProviders(
+              buildProvidersWithOnlyProvider(providers, ollamaProvider)
+            )
           }
           provider={provider}
         />
@@ -369,15 +374,15 @@ function ProviderCardBody({
 }
 
 /**
- * Presents one card: a radio button that makes its provider the active one,
- * its logo, name, mode, and line, its badge, and, while it presents the
- * active provider, that provider's settings.
+ * Presents one card: a radio button that turns its provider on alone, its
+ * logo, name, mode, and line, its badge, and, while its provider is on, that
+ * provider's settings.
  *
- * @remarks Picking a card saves the choice of
- * {@link PROVIDER_CARD_PROVIDERS}' provider, which makes the backend connect
- * to it; Ollama's card then makes the local server active. The radio button
- * is disabled while a save runs. Only the card of the active provider shows
- * its settings. The logo is the provider's monochrome mark from
+ * @remarks Picking a card saves {@link PROVIDER_CARD_PROVIDERS}' provider as
+ * the only one turned on, which makes the backend connect to it; Ollama's
+ * card then turns the local server on. The radio button is checked while the
+ * card's provider is on, and disabled while a save runs. Only a card whose
+ * provider is on shows its settings. The logo is the provider's monochrome mark from
  * `@lobehub/icons`, drawn in the text color and hidden from assistive
  * technology, because the name beside it says the same.
  * @param props - Card, radio name, saved settings, connection, save, and
@@ -399,28 +404,30 @@ export default function ProviderCard({
   const nameId = useId()
   const lineId = useId()
   const description = PROVIDER_DESCRIPTIONS[card]
-  const isActive = PROVIDER_CARDS[providers.active] === card
+  const isOn = isProviderCardOn(card, providers)
   const badge = calculateProviderBadge(card, providers, secrets, status)
 
   return (
     <article
       aria-labelledby={nameId}
       className="settings-view__provider-card"
-      data-active={isActive}
+      data-active={isOn}
     >
       <label className="settings-view__provider-header">
         <input
           aria-describedby={lineId}
           aria-labelledby={nameId}
-          checked={isActive}
+          checked={isOn}
           className="settings-view__provider-radio"
           disabled={saveState.status === "saving"}
           name={radioName}
           onChange={() =>
-            void onSaveProviders({
-              ...providers,
-              active: PROVIDER_CARD_PROVIDERS[card]
-            })
+            void onSaveProviders(
+              buildProvidersWithOnlyProvider(
+                providers,
+                PROVIDER_CARD_PROVIDERS[card]
+              )
+            )
           }
           type="radio"
           value={card}
@@ -447,12 +454,12 @@ export default function ProviderCard({
           {badge.label}
         </span>
       </label>
-      {isActive ? (
+      {isOn ? (
         <ProviderCardBody
           onSaveApiKey={onSaveApiKey}
           onSaveProviders={onSaveProviders}
           onTest={onTest}
-          provider={providers.active}
+          provider={findProviderCardProvider(card, providers)}
           providers={providers}
           saveState={saveState}
           secrets={secrets}

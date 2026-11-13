@@ -5,6 +5,7 @@ import type {
   CompleteModelLoadConfiguration,
   LoadConfigurationSettings
 } from "@/lib/store/settings"
+import { updateProviderModelState } from "@/lib/store/model-runtime"
 import {
   buildJsonResponse,
   createControlledRoute,
@@ -80,7 +81,7 @@ async function startLoadConfigurationPanel(arrangement: PanelArrangement = {}) {
     "model",
     runtime
   )
-  const { settings } = useLysStore.getState()
+  const { settings, providerModels } = useLysStore.getState()
   useLysStore.setState({
     settings: {
       ...settings,
@@ -90,12 +91,14 @@ async function startLoadConfigurationPanel(arrangement: PanelArrangement = {}) {
     ...(arrangement.sentConfiguration === undefined
       ? {}
       : {
-          loadedModelConfigurations: new Map([
-            [
-              "qwen3-8b",
-              { origin: "sent", configuration: arrangement.sentConfiguration }
-            ]
-          ])
+          providerModels: updateProviderModelState(providerModels, "lmStudio", {
+            loadedModelConfigurations: new Map([
+              [
+                "qwen3-8b",
+                { origin: "sent", configuration: arrangement.sentConfiguration }
+              ]
+            ])
+          })
         })
   })
   render(<SettingsView onDone={vi.fn()} />)
@@ -354,8 +357,9 @@ describe("ModelLoadConfigurationPanel", () => {
       const { backend } = await startLoadConfigurationPanel({
         sentConfiguration: FIRST_RUN_LOAD_CONFIGURATION,
         routes: {
-          "PATCH /api/v1/llm/unload": () => new Response(null, { status: 204 }),
-          "POST /api/v1/llm/load": () =>
+          "PATCH /api/v1/llm/lmStudio/unload": () =>
+            new Response(null, { status: 204 }),
+          "POST /api/v1/llm/lmStudio/load": () =>
             buildJsonResponse(200, buildLlmInfo("qwen3-8b", { loaded: true }))
         }
       })
@@ -413,7 +417,7 @@ describe("ModelLoadConfigurationPanel", () => {
       const health = createControlledRoute()
       await startLoadConfigurationPanel({
         sentConfiguration: FIRST_RUN_LOAD_CONFIGURATION,
-        routes: { "GET /api/v1/llm/qwen3-8b/health": health.route }
+        routes: { "GET /api/v1/llm/lmStudio/qwen3-8b/health": health.route }
       })
       const user = userEvent.setup()
       await updateEvalBatchSize(user, 1024)
@@ -442,8 +446,8 @@ describe("ModelLoadConfigurationPanel", () => {
       await startLoadConfigurationPanel({
         sentConfiguration: FIRST_RUN_LOAD_CONFIGURATION,
         routes: {
-          "PATCH /api/v1/llm/unload": unload.route,
-          "POST /api/v1/llm/load": () =>
+          "PATCH /api/v1/llm/lmStudio/unload": unload.route,
+          "POST /api/v1/llm/lmStudio/load": () =>
             buildJsonResponse(200, buildLlmInfo("qwen3-8b", { loaded: true }))
         }
       })

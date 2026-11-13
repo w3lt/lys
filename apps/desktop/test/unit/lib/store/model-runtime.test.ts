@@ -1,14 +1,15 @@
+import { LLM_PROVIDERS } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   addSentModelConfiguration,
   buildLoadedModelConfigurations,
-  buildModelRuntime,
-  isModelTransitionInFlight,
+  INITIAL_PROVIDER_MODEL_STATES,
+  RELEASED_PROVIDER_MODELS,
   removeLoadedModelConfiguration,
+  updateProviderModelState,
   type LoadedModelConfiguration,
   type LoadedModelConfigurations,
-  type ModelInventoryState,
-  type ModelRuntimeState
+  type ModelInventoryState
 } from "@/lib/store/model-runtime"
 import type { LoadConfigurationSettings } from "@/lib/store/settings"
 import { buildLlmInfo } from "../../support/modelFixtures"
@@ -25,90 +26,36 @@ const TWO_RESIDENT: ModelInventoryState = {
   ]
 }
 
-describe("buildModelRuntime", () => {
-  it.each(["loading", "unloading"] as const)(
-    "reports a %s request as the transition, whatever the inventory says",
-    (status) => {
-      expect(
-        buildModelRuntime(
-          { status: "failed" },
-          { status, modelKey: "on-disk" },
-          null
-        )
-      ).toEqual({ status, modelKey: "on-disk" })
-    }
-  )
-
-  it("prefers the loaded default model", () => {
-    expect(
-      buildModelRuntime(TWO_RESIDENT, { status: "idle" }, "second")
-    ).toEqual({
-      status: "loaded",
-      modelKey: "second"
-    })
-  })
-
-  it("falls back to the first loaded model when the default is not loaded", () => {
-    expect(
-      buildModelRuntime(TWO_RESIDENT, { status: "idle" }, "on-disk")
-    ).toEqual({
-      status: "loaded",
-      modelKey: "first"
-    })
-  })
-
-  it("reports no resident weights when the inventory has none loaded", () => {
-    const inventory: ModelInventoryState = {
-      status: "ready",
-      modelLoading: "lys",
-      models: [buildLlmInfo("on-disk")]
-    }
-
-    expect(buildModelRuntime(inventory, { status: "idle" }, "on-disk")).toEqual(
-      {
-        status: "none"
-      }
-    )
-  })
-
-  it("reports residency as unknown after a failed observation, not as empty", () => {
-    expect(
-      buildModelRuntime({ status: "failed" }, { status: "idle" }, null)
-    ).toEqual({
-      status: "unknown"
-    })
-  })
-
-  it("reports residency as unavailable, not as empty, while the inventory cannot be read", () => {
-    expect(
-      buildModelRuntime({ status: "unavailable" }, { status: "idle" }, null)
-    ).toEqual({ status: "unavailable" })
-  })
-
-  it.each(["listing", "testing"] as const)(
-    "keeps the observed residency during a %s request",
-    (status) => {
-      const request =
-        status === "listing" ? { status } : { status, modelKey: "second" }
-
-      expect(buildModelRuntime(TWO_RESIDENT, request, null)).toEqual({
-        status: "loaded",
-        modelKey: "first"
+describe("INITIAL_PROVIDER_MODEL_STATES", () => {
+  it("knows nothing of any provider before the backend reports", () => {
+    for (const provider of LLM_PROVIDERS) {
+      expect(INITIAL_PROVIDER_MODEL_STATES[provider]).toEqual({
+        status: "unknown",
+        ...RELEASED_PROVIDER_MODELS
       })
     }
-  )
+  })
 })
 
-describe("isModelTransitionInFlight", () => {
-  it.each<[ModelRuntimeState, boolean]>([
-    [{ status: "loading", modelKey: "x" }, true],
-    [{ status: "unloading", modelKey: "x" }, true],
-    [{ status: "loaded", modelKey: "x" }, false],
-    [{ status: "none" }, false],
-    [{ status: "unknown" }, false],
-    [{ status: "unavailable" }, false]
-  ])("answers %o with %s", (modelRuntime, isInFlight) => {
-    expect(isModelTransitionInFlight(modelRuntime)).toBe(isInFlight)
+describe("updateProviderModelState", () => {
+  it("replaces the given fields of one provider and leaves the others", () => {
+    const states = updateProviderModelState(
+      INITIAL_PROVIDER_MODEL_STATES,
+      "groq",
+      { status: "connected", inventory: TWO_RESIDENT }
+    )
+
+    expect(states.groq).toEqual({
+      ...INITIAL_PROVIDER_MODEL_STATES.groq,
+      status: "connected",
+      inventory: TWO_RESIDENT
+    })
+    expect(states.lmStudio).toBe(INITIAL_PROVIDER_MODEL_STATES.lmStudio)
+    expect(states.ollama).toBe(INITIAL_PROVIDER_MODEL_STATES.ollama)
+    expect(states.ollamaCloud).toBe(INITIAL_PROVIDER_MODEL_STATES.ollamaCloud)
+    expect(INITIAL_PROVIDER_MODEL_STATES.groq.status).toBe("unknown")
+    expect(Object.isFrozen(states)).toBe(true)
+    expect(Object.isFrozen(states.groq)).toBe(true)
   })
 })
 

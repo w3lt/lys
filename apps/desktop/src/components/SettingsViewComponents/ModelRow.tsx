@@ -1,5 +1,6 @@
 import type { ReactElement } from "react"
 import { llmTestModelApi } from "@lys/protocol"
+import type { LlmProvider } from "@lys/share"
 
 import { Button } from "@/components/ui/button"
 import type { LocalModelDescriptor } from "@/lib/models/inventory"
@@ -8,7 +9,7 @@ import {
   readModelRowTone
 } from "@/lib/models/model-residency"
 import type {
-  ModelRuntimeState,
+  ModelRequestState,
   ObservedModelLoading
 } from "@/lib/store/model-runtime"
 
@@ -18,8 +19,8 @@ type ModelChoiceProps = {
   readonly model: LocalModelDescriptor
   /** Whether the settings owner selected this default. */
   readonly isDefault: boolean
-  /** Current request/residency summary used for a transition tag. */
-  readonly modelRuntime: ModelRuntimeState
+  /** Request in flight for the row's provider, used for a transition tag. */
+  readonly modelRequest: ModelRequestState
   /** Proposes this key as the default, without loading it. */
   readonly onSelect: (modelKey: string) => void
 }
@@ -33,7 +34,7 @@ type ModelChoiceProps = {
 function ModelChoice({
   model,
   isDefault,
-  modelRuntime,
+  modelRequest,
   onSelect
 }: ModelChoiceProps): ReactElement {
   return (
@@ -47,7 +48,7 @@ function ModelChoice({
       <span
         aria-hidden="true"
         className="settings-view__status-dot settings-view__status-dot--small"
-        data-tone={readModelRowTone(modelRuntime, model)}
+        data-tone={readModelRowTone(modelRequest, model)}
       />
       <span className="settings-view__model-lines">
         <span className="settings-view__model-name">
@@ -59,7 +60,7 @@ function ModelChoice({
         <span className="settings-view__model-detail">{model.detail}</span>
       </span>
       <span className="settings-view__model-tag">
-        {formatModelRowTag(modelRuntime, model)}
+        {formatModelRowTag(modelRequest, model)}
       </span>
     </button>
   )
@@ -67,6 +68,8 @@ function ModelChoice({
 
 /** Backend actions for one model, with application-owned completion. */
 type ModelRowActionsProps = {
+  /** Provider that lists the model, whose health route Test asks. */
+  readonly provider: LlmProvider
   /** Canonical model metadata including observed residency. */
   readonly model: LocalModelDescriptor
   /** Prevents new requests while the backend is stopped or busy. */
@@ -94,6 +97,7 @@ type ModelRowActionsProps = {
  * comes from the shared parameter validator rather than a copied length limit.
  */
 function ModelRowActions({
+  provider,
   model,
   disabled,
   modelLoading,
@@ -102,6 +106,7 @@ function ModelRowActions({
   onTest
 }: ModelRowActionsProps): ReactElement {
   const canTest = llmTestModelApi.params.safeParse({
+    provider,
     modelId: model.modelKey
   }).success
   return (
@@ -152,9 +157,10 @@ type ModelRowProps = ModelChoiceProps & ModelRowActionsProps
  * @remarks Selection never implies loading.
  */
 export default function ModelRow({
+  provider,
   model,
   isDefault,
-  modelRuntime,
+  modelRequest,
   onSelect,
   disabled,
   modelLoading,
@@ -170,10 +176,11 @@ export default function ModelRow({
       <ModelChoice
         model={model}
         isDefault={isDefault}
-        modelRuntime={modelRuntime}
+        modelRequest={modelRequest}
         onSelect={onSelect}
       />
       <ModelRowActions
+        provider={provider}
         model={model}
         disabled={disabled}
         modelLoading={modelLoading}

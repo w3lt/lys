@@ -1,6 +1,8 @@
-import { calculateModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
+import { LLM_PROVIDER_NAMES, type LlmModelReference } from "@lys/share"
+
+import type { SettingsPane } from "@/app/types"
 import type { LlmProviderTarget } from "@/lib/models/llm-provider-target"
-import { findEligibleChatModel } from "@/lib/models/model-residency"
+import type { ModelAvailability } from "@/lib/models/model-availability"
 import type { BackendServerStatus } from "@/lib/store"
 import {
   formatConversationAgentName,
@@ -10,11 +12,6 @@ import type {
   ChatRequestState,
   ConversationOpenState
 } from "@/lib/store/chat-view"
-import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
-import type {
-  ModelRuntimeState,
-  ObservedModelLoading
-} from "@/lib/store/model-runtime"
 
 /**
  * Chat work that keeps the composer from sending.
@@ -36,73 +33,65 @@ export type ReconnectAction = {
 }
 
 /**
- * Availability of the local generation runtime as the composer describes it.
+ * Whether the conversation's model can answer, as the composer describes it.
  *
- * @remarks Ordered by prerequisite: the backend must answer, then the active
- * provider must be connected, then weights must be loaded.
+ * @remarks Ordered by prerequisite: the backend must answer, then the
+ * model's provider must be on and connected, then the model must be loaded.
  */
 export type LocalRuntimeConnection =
   "ready" | "no-model" | "provider-unavailable" | "offline"
 
-/** Runtime facts explained by the composer's unavailable banner. */
-export type UnavailableRuntimeState = {
+/** The model the composer's next message goes to, as the banner explains it. */
+export type ComposerModelState = {
   /** Store-owned backend lifecycle state. */
   readonly backendStatus: BackendServerStatus
-  /** Persisted backend origin named in the copy. */
-  readonly backendAddress: string
-  /** Latest published provider status. */
-  readonly lmStudioStatus: LmStudioStatus
-  /** Active provider, named with its location in the copy. */
+  /** The model, or null when there is none. */
+  readonly model: LlmModelReference | null
+  /** Its availability, or null when there is no model. */
+  readonly availability: ModelAvailability | null
+  /** The model's provider, named with its location in the copy. */
   readonly provider: LlmProviderTarget
-  /** Observed residency, including unavailable observations. */
-  readonly modelRuntime: ModelRuntimeState
 }
 
-/** Runtime facts that choose the unavailable banner's recovery action. */
-export type ReconnectActionState = {
-  /** Store-owned backend lifecycle state. */
-  readonly backendStatus: BackendServerStatus
-  /** Latest published provider status. */
-  readonly lmStudioStatus: LmStudioStatus
-  /** Observed residency or current weight transition. */
-  readonly modelRuntime: ModelRuntimeState
-  /** Who loads the models, as the latest inventory reports. */
-  readonly modelLoading: ObservedModelLoading
-  /** Active provider, which the action names. */
-  readonly provider: LlmProviderTarget
+/** Runtime facts explained by the composer's unavailable banner. */
+export type UnavailableRuntimeState = ComposerModelState & {
+  /** Persisted backend origin named in the copy. */
+  readonly backendAddress: string
 }
 
 /**
- * Calculates the composer's view of local generation availability.
+ * Calculates whether the conversation's model can answer, as the composer
+ * describes it.
  *
  * @param backendStatus - Store-owned backend lifecycle state.
- * @param lmStudioStatus - Latest published LM Studio status.
- * @param modelRuntime - Current validated residency projection.
- * @returns The first missing prerequisite, or `ready` when
- * {@link findEligibleChatModel} finds a loaded model.
+ * @param availability - Availability of the conversation's model, or null
+ * when there is none.
+ * @returns The first missing prerequisite, or `ready` only while the model's
+ * availability is `loaded`; no other model answers in its place.
  */
 export function calculateLocalRuntimeConnection(
   backendStatus: BackendServerStatus,
-  lmStudioStatus: LmStudioStatus,
-  modelRuntime: ModelRuntimeState
+  availability: ModelAvailability | null
 ): LocalRuntimeConnection {
-  switch (calculateModelRuntimeAvailability(backendStatus, lmStudioStatus)) {
-    case "backend-offline":
+  if (backendStatus !== "running") return "offline"
+  switch (availability?.status) {
+    case "loaded":
+      return "ready"
+    case "backend-not-running":
       return "offline"
-    case "lm-studio-connecting":
-    case "lm-studio-unreachable":
+    case "provider-off":
+    case "provider-connecting":
+    case "provider-unreachable":
       return "provider-unavailable"
-    case "available":
-      return findEligibleChatModel(backendStatus, modelRuntime) === null
-        ? "no-model"
-        : "ready"
+    default:
+      return "no-model"
   }
 }
 
 /**
  * Formats the banner sentence explaining why generation is unavailable.
  *
- * @param runtime - Backend, provider, and residency facts to explain.
+ * @param runtime - Backend, model, and provider facts to explain.
  * @returns The visible explanation naming the first missing prerequisite.
  */
 export function formatUnavailableRuntimeMessage(
@@ -118,58 +107,66 @@ export function formatUnavailableRuntimeMessage(
     case "unresponsive":
       return `The backend is not responding on ${runtime.backendAddress}.`
     case "running":
-      return formatRunningRuntimeMessage(
-        runtime.lmStudioStatus,
-        runtime.provider,
-        runtime.modelRuntime
-      )
+      return formatRunningRuntimeMessage(runtime)
   }
 }
 
 /**
  * Formats the banner sentence while the backend runs.
  *
- * @param lmStudioStatus - Latest published provider status.
- * @param provider - Active provider.
- * @param modelRuntime - Observed residency or current weight transition.
- * @returns The provider problem when it is not connected, otherwise the
- * weights problem.
+ * @param runtime - The conversation's model, its availability, and its
+ * provider.
+ * @returns The model's first missing prerequisite: no model, its provider
+ * off, connecting, or not reachable, its state unread, the model not listed,
+ * not loaded, or in a load or unload.
  */
-function formatRunningRuntimeMessage(
-  lmStudioStatus: LmStudioStatus,
-  provider: LlmProviderTarget,
-  modelRuntime: ModelRuntimeState
-): string {
-  if (lmStudioStatus === "unreachable") {
-    return `${provider.name} is not reachable on ${provider.location}.`
+function formatRunningRuntimeMessage({
+  model,
+  availability,
+  provider
+}: ComposerModelState): string {
+  if (model === null || availability === null) {
+    return "The backend is up, but no model is loaded."
   }
-  if (lmStudioStatus !== "connected") {
-    return `Connecting to ${provider.name} on ${provider.location}…`
+  switch (availability.status) {
+    case "provider-off":
+      return `${provider.name} is turned off.`
+    case "provider-connecting":
+      return `Connecting to ${provider.name} on ${provider.location}…`
+    case "provider-unreachable":
+      return `${provider.name} is not reachable on ${provider.location}.`
+    case "backend-not-running":
+    case "inventory-unread":
+    case "inventory-failed":
+      return "The backend is up, but model state is unavailable."
+    case "not-listed":
+      return `${provider.name} does not list ${model.modelKey}.`
+    case "not-loaded":
+      return `${model.modelKey} is not loaded in ${provider.name}.`
+    case "loading":
+      return "Loading model weights…"
+    case "unloading":
+      return "Unloading model weights…"
+    case "loaded":
+      return `${model.modelKey} is loaded.`
   }
-  if (
-    modelRuntime.status === "unknown" ||
-    modelRuntime.status === "unavailable"
-  ) {
-    return "The backend is up, but model state is unavailable."
-  }
-  if (modelRuntime.status === "loading") return "Loading model weights…"
-  if (modelRuntime.status === "unloading") return "Unloading model weights…"
-  return "The backend is up, but no model is loaded."
 }
 
 /**
  * Formats the banner's recovery action for the current runtime state.
  *
- * @param runtime - Backend, provider, residency, and model-loading facts.
+ * @param runtime - The backend, the conversation's model, its availability,
+ * and its provider.
  * @returns The action for the first missing prerequisite; a state that is
- * already transitioning offers no action. With no model in memory, the
- * action loads one when the inventory reports that Lys loads the models, and
- * chooses one otherwise.
+ * already transitioning offers no action. A provider that is off or not
+ * reachable is checked in Providers. With the model not in memory, the
+ * action loads it when its provider lets Lys load models, and chooses one
+ * otherwise.
  */
 export function formatReconnectAction(
-  runtime: ReconnectActionState
+  runtime: ComposerModelState
 ): ReconnectAction {
-  const { backendStatus, lmStudioStatus, modelRuntime, provider } = runtime
+  const { backendStatus, availability, provider } = runtime
   const workingAction = Object.freeze({
     label: "Working",
     isEnabled: false
@@ -181,23 +178,54 @@ export function formatReconnectAction(
     return { label: "Check backend", isEnabled: true }
   }
   if (backendStatus !== "running") return workingAction
-  if (lmStudioStatus === "unreachable") {
-    return { label: `Check ${provider.name}`, isEnabled: true }
+  if (availability === null) return { label: "Choose model", isEnabled: true }
+  switch (availability.status) {
+    case "provider-off":
+      return { label: "Open Providers", isEnabled: true }
+    case "provider-unreachable":
+      return { label: `Check ${provider.name}`, isEnabled: true }
+    case "inventory-unread":
+    case "inventory-failed":
+      return { label: "Check models", isEnabled: true }
+    case "not-listed":
+      return { label: "Choose model", isEnabled: true }
+    case "not-loaded":
+      return {
+        label:
+          availability.modelLoading === "lys" ? "Load model" : "Choose model",
+        isEnabled: true
+      }
+    case "backend-not-running":
+    case "provider-connecting":
+    case "loading":
+    case "unloading":
+    case "loaded":
+      return workingAction
   }
-  if (lmStudioStatus !== "connected") return workingAction
-  if (
-    modelRuntime.status === "unknown" ||
-    modelRuntime.status === "unavailable"
-  ) {
-    return { label: "Check models", isEnabled: true }
+}
+
+/**
+ * Finds the settings pane the banner's recovery action opens.
+ *
+ * @param availability - Availability of the conversation's model, or null
+ * when there is none.
+ * @returns Providers for a provider that is off, connecting, or not
+ * reachable; Runtime while the backend does not run; Model otherwise, which
+ * owns inventory and loading.
+ */
+export function findReconnectSettingsPane(
+  availability: ModelAvailability | null
+): SettingsPane {
+  switch (availability?.status) {
+    case "provider-off":
+    case "provider-connecting":
+    case "provider-unreachable":
+      return "providers"
+    case "backend-not-running":
+      return "runtime"
+    default:
+      return "model"
   }
-  if (modelRuntime.status === "none") {
-    return {
-      label: runtime.modelLoading === "lys" ? "Load model" : "Choose model",
-      isEnabled: true
-    }
-  }
-  return workingAction
 }
 
 /**
@@ -228,10 +256,11 @@ export function calculateComposerActivity(
 /**
  * Formats the composer textarea placeholder.
  *
- * @param connection - Current local generation availability.
+ * @param connection - Whether the conversation's model can answer.
  * @param activity - Chat work that keeps the composer from sending.
  * @param agent - Agent that answers the next message.
- * @param providerName - Name of the active provider.
+ * @param providerName - Name of the model's provider, or null when there is
+ * no model.
  * @returns The placeholder shown while the field is empty: what the composer
  * waits on, that a conversation whose agent was deleted is read-only, or an
  * invitation naming the agent.
@@ -240,10 +269,10 @@ export function formatComposerPlaceholder(
   connection: LocalRuntimeConnection,
   activity: ComposerActivity,
   agent: ConversationAgent,
-  providerName: string
+  providerName: string | null
 ): string {
   if (connection === "offline") return "Waiting on the backend…"
-  if (connection !== "ready") return `Waiting on ${providerName}…`
+  if (connection !== "ready") return `Waiting on ${providerName ?? "a model"}…`
   if (agent.status === "deleted") return "This conversation is read-only."
 
   switch (activity) {
@@ -274,19 +303,31 @@ export function formatComposerActivity(activity: ComposerActivity): string {
 }
 
 /**
+ * Formats how the composer names a model.
+ *
+ * @param model - Model to name.
+ * @returns Its key and its provider's name, such as `qwen3-8b · LM Studio`,
+ * so the same key on two providers reads as two models.
+ */
+export function formatComposerModelName(model: LlmModelReference): string {
+  return `${model.modelKey} · ${LLM_PROVIDER_NAMES[model.provider]}`
+}
+
+/**
  * Formats the model label shown beside the composer's weights indicator.
  *
  * @param backendStatus - Store-owned backend process lifecycle state.
- * @param modelRuntime - Current weight residency state.
- * @param modelName - Persisted default model identifier, when one is chosen.
- * @returns The label naming the process transition, the weight transition, or
- * the weights themselves. A weight transition is named in words so the trigger
+ * @param model - The model the next message goes to, or null when there is
+ * none.
+ * @param availability - Its availability, or null when there is no model.
+ * @returns The label naming the process transition, or the model with any
+ * load or unload it is in. A transition is named in words so the trigger
  * does not rest on its indicator tone alone while the menu is closed.
  */
 export function formatComposerModelLabel(
   backendStatus: BackendServerStatus,
-  modelRuntime: ModelRuntimeState,
-  modelName: string | null
+  model: LlmModelReference | null,
+  availability: ModelAvailability | null
 ): string {
   switch (backendStatus) {
     case "starting":
@@ -298,34 +339,16 @@ export function formatComposerModelLabel(
     case "unresponsive":
       return "backend not responding"
     case "running":
-      return formatRunningModelLabel(modelRuntime, modelName)
+      break
   }
-}
-
-/**
- * Formats the weights label used while the backend process is up.
- *
- * @param modelRuntime - Current weight residency state.
- * @param modelName - Persisted default model identifier, when one is chosen.
- * @returns The weights named, with any transition they are currently in. The
- * chosen default is named while nothing is loaded and while the inventory
- * cannot be read yet.
- */
-function formatRunningModelLabel(
-  modelRuntime: ModelRuntimeState,
-  modelName: string | null
-): string {
-  switch (modelRuntime.status) {
+  if (model === null) return "no model selected"
+  const name = formatComposerModelName(model)
+  switch (availability?.status) {
     case "loading":
-      return `${modelRuntime.modelKey} · loading`
+      return `${name} · loading`
     case "unloading":
-      return `${modelRuntime.modelKey} · releasing`
-    case "loaded":
-      return modelRuntime.modelKey
-    case "unknown":
-      return "model state unavailable"
-    case "none":
-    case "unavailable":
-      return modelName ?? "no model selected"
+      return `${name} · releasing`
+    default:
+      return name
   }
 }

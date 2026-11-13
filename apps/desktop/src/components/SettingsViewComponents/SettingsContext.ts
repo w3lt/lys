@@ -1,8 +1,15 @@
 import { createContext, use } from "react"
 
-import type { ModelLoadConfiguration } from "@lys/share"
+import type { LlmProvider, ModelLoadConfiguration } from "@lys/share"
+import type { LlmTestModelApiResponse } from "@lys/protocol"
 
-import type { ModelState } from "@/lib/store/model-runtime"
+import type { ShownModelState } from "@/lib/hooks/conversationModel"
+import type { ProviderAvailability } from "@/lib/models/provider-connection"
+import type {
+  LoadedModelConfigurations,
+  ModelInventoryState,
+  ModelRequestState
+} from "@/lib/store/model-runtime"
 import type {
   GenerationSettings,
   LysSettings,
@@ -19,15 +26,37 @@ import type {
  * outcome. Consumers must render below the provider and must not retain or
  * mutate the settings object.
  *
- * The model callbacks describe weight-lifecycle intent. `onLoadModel`,
- * `onUnloadModel`, and `onReloadModel` await backend acknowledgement and
- * inventory reconciliation. `onTestModel` observes loaded state without
- * inference. The application store owns request completion and exposes errors
- * and health results to the panes.
+ * The panes show one provider's models: the default model's provider while
+ * it is on, else the first provider that is on, in provider order, else LM
+ * Studio. The model fields hold that provider's state, and the model
+ * callbacks act on its models. They describe weight-lifecycle intent.
+ * `onLoadModel`, `onUnloadModel`, and `onReloadModel` await backend
+ * acknowledgement and inventory reconciliation. `onTestModel` observes
+ * loaded state without inference. The application store owns request
+ * completion and exposes errors and health results to the panes.
  */
-export type SettingsContextValue = ModelState & {
+export type SettingsContextValue = {
   /** Complete settings value currently shown by the panes. */
   readonly settings: LysSettings
+  /** Provider whose models the panes show. */
+  readonly shownProvider: LlmProvider
+  /** Whether model requests can reach the shown provider, and why not. */
+  readonly providerAvailability: ProviderAvailability
+  /** The shown provider's latest complete inventory observation. */
+  readonly modelInventory: ModelInventoryState
+  /** The shown provider's request in flight, or idle. */
+  readonly modelRequest: ModelRequestState
+  /** The shown provider's latest safe request failure, or null. */
+  readonly modelError: string | null
+  /** The shown provider's latest health observation, or null. */
+  readonly modelHealth: LlmTestModelApiResponse | null
+  /** Load configurations known for the shown provider's loaded models. */
+  readonly loadedModelConfigurations: LoadedModelConfigurations
+  /**
+   * The model a new conversation uses, with whether it can answer: the
+   * default model, or without one the first model that can answer.
+   */
+  readonly newConversationModel: ShownModelState
   /**
    * Proposes a runtime settings patch to the provider.
    *
@@ -60,7 +89,8 @@ export type SettingsContextValue = ModelState & {
    */
   onRemoveModelExpertCount: (modelKey: string) => void
   /**
-   * Requests that the named weights be loaded into memory.
+   * Requests that the named weights of the shown provider be loaded into
+   * memory.
    *
    * @param modelKey - Model identifier to load.
    * @returns Resolves after settlement or cancellation; failures other than a
@@ -68,7 +98,8 @@ export type SettingsContextValue = ModelState & {
    */
   onLoadModel: (modelKey: string) => Promise<void>
   /**
-   * Requests that the named weights be released from memory.
+   * Requests that the named weights of the shown provider be released from
+   * memory.
    *
    * @param modelKey - Model identifier to unload.
    * @returns Resolves after settlement or cancellation; failures other than a
@@ -76,8 +107,8 @@ export type SettingsContextValue = ModelState & {
    */
   onUnloadModel: (modelKey: string) => Promise<void>
   /**
-   * Requests that the named loaded weights be released and loaded again with
-   * their stored load configuration.
+   * Requests that the named loaded weights of the shown provider be released
+   * and loaded again with their stored load configuration.
    *
    * @param modelKey - Model identifier to reload.
    * @returns Resolves after settlement or cancellation; failures other than a
@@ -86,15 +117,16 @@ export type SettingsContextValue = ModelState & {
    */
   onReloadModel: (modelKey: string) => Promise<void>
   /**
-   * Observes whether the named weights are currently loaded.
+   * Observes whether the named weights of the shown provider are currently
+   * loaded.
    *
    * @param modelKey - Canonical model identifier to query.
    * @returns Resolves after publishing the health observation or handled failure.
    */
   onTestModel: (modelKey: string) => Promise<void>
   /**
-   * Refreshes inventory; failures other than a missing LLM runtime are exposed
-   * through modelError.
+   * Refreshes the shown provider's inventory; failures other than a missing
+   * LLM runtime are exposed through modelError.
    */
   onRefreshModels: () => Promise<void>
 }

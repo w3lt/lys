@@ -1,7 +1,7 @@
 import { act, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, onTestFinished, vi } from "vitest"
-import { formatProviderUnreachableMessage } from "@/lib/models/lm-studio-connection"
+import { formatProviderUnreachableMessage } from "@/lib/models/provider-connection"
 import { LM_STUDIO_TARGET } from "../../support/providerTargetFixtures"
 import {
   buildJsonResponse,
@@ -135,7 +135,7 @@ describe("ModelPaneContent", () => {
       {
         [INVENTORY_ROUTE]: () => new Response(null, { status: 500 }),
         // A failed model request makes the store read the LM Studio status.
-        "GET /api/v1/llm/runtime": () =>
+        "GET /api/v1/llm/lmStudio/runtime": () =>
           buildJsonResponse(200, { status: "connected" })
       }
     ]
@@ -177,7 +177,10 @@ describe("ModelPaneContent", () => {
       screen.getByRole("button", { name: /^gemma-3/, pressed: false })
     )
 
-    expect(useLysStore.getState().settings.runtime.defaultModel).toBe("gemma-3")
+    expect(useLysStore.getState().settings.runtime.defaultModel).toEqual({
+      provider: "lmStudio",
+      modelKey: "gemma-3"
+    })
     expect(
       screen.getByRole("button", { name: /^gemma-3/, pressed: true })
     ).toBeInTheDocument()
@@ -186,10 +189,11 @@ describe("ModelPaneContent", () => {
 
   it("loads, unloads, and tests models from their rows", async () => {
     const { backend } = await startModelPane(TWO_MODELS, {
-      "POST /api/v1/llm/load": () =>
+      "POST /api/v1/llm/lmStudio/load": () =>
         buildJsonResponse(200, buildLlmInfo("gemma-3", { loaded: true })),
-      "PATCH /api/v1/llm/unload": () => new Response(null, { status: 204 }),
-      "GET /api/v1/llm/qwen3-8b/health": () =>
+      "PATCH /api/v1/llm/lmStudio/unload": () =>
+        new Response(null, { status: 204 }),
+      "GET /api/v1/llm/lmStudio/qwen3-8b/health": () =>
         buildJsonResponse(200, {
           status: "ready",
           modelId: "qwen3-8b",
@@ -283,6 +287,11 @@ describe("ModelPaneContent", () => {
       "Connecting to LM Studio…"
     ],
     [
+      "the backend has LM Studio off",
+      buildUnreachableRuntime("running", "off"),
+      "LM Studio is off. Turn it on in Providers to list its models."
+    ],
+    [
       "LM Studio has no downloaded language models",
       {
         ...TWO_MODELS,
@@ -300,7 +309,7 @@ describe("ModelPaneContent", () => {
   it("explains a failed inventory read and offers Refresh", async () => {
     await startModelPane(TWO_MODELS, {
       [INVENTORY_ROUTE]: () => new Response(null, { status: 500 }),
-      "GET /api/v1/llm/runtime": () =>
+      "GET /api/v1/llm/lmStudio/runtime": () =>
         buildJsonResponse(200, { status: "connected" })
     })
 

@@ -2,6 +2,7 @@ import type {
   EmailPassword,
   EmailSettings,
   GroqApiKey,
+  LlmModelReference,
   LlmProviderSettings,
   McpSettings,
   ModelLoadConfiguration,
@@ -13,11 +14,13 @@ import type {
 /**
  * Runtime process settings persisted under the `runtime` JSON object.
  *
- * @remarks Mirrors Rust's `RunTimeSettings`. Field names match the camelCase
- * wire representation, so a loaded value round-trips without mapping. The
- * two startup switches are saved when the Runtime pane changes them and are
- * read when Lys opens. Edits of `defaultModel` and `backendAddress` remain
- * session-only.
+ * @remarks Mirrors Rust's `RunTimeSettings`, field names in the camelCase
+ * wire representation. The settings file names the default model by its bare
+ * key; the Tauri settings adapter reads it as a reference, so only
+ * `defaultModel` differs from the file. The two startup switches are saved
+ * when the Runtime pane changes them and are read when Lys opens. Edits of
+ * `defaultModel` and `backendAddress` remain session-only; the desktop never
+ * writes the file's default model.
  */
 export type RuntimeSettings = {
   /** Whether desktop initialization requests backend startup. */
@@ -25,12 +28,14 @@ export type RuntimeSettings = {
   /** Whether desktop initialization starts vmo, Lys's page reader. */
   autoStartVmo: boolean
   /**
-   * Preferred chat model, or `null` when absent.
+   * Model a new conversation uses, or `null` when none is set.
    *
-   * @remarks Selection does not load weights. The loaded-model preference and
-   * fallback are documented in [ModelRuntimeState](./model-runtime.ts).
+   * @remarks Choosing it does not load the model. The settings file holds a
+   * bare key, read as that key on the first provider that is on, in provider
+   * order; the reference is null when the file holds none or no provider is
+   * on. A conversation that names a model of its own uses that model instead.
    */
-  defaultModel: string | null
+  defaultModel: LlmModelReference | null
   /** Backend origin shown in runtime settings; HTTP consumers use shared protocol constants. */
   backendAddress: string
 }
@@ -113,7 +118,7 @@ export type LoadConfigurationSettings = {
  * in the Providers pane, the email password with its account in the MCP
  * pane. The backend reads them from the settings file: the Tavily key for
  * each turn that offers `web_search`, a provider's key at each connection
- * attempt while that provider is active, the email password each time it
+ * attempt while that provider is on, the email password each time it
  * starts the email server. The renderer never logs them, and sends the
  * email password only to the backend's account check.
  */
@@ -132,14 +137,14 @@ export type SecretsSettings = {
 }
 
 /**
- * Provider choice and server addresses persisted under the `providers` JSON
- * object.
+ * Providers that are on and server addresses persisted under the
+ * `providers` JSON object.
  *
  * @remarks Mirrors Rust's `ProvidersSettings`; the Tauri settings adapter
  * parses the group with the shared provider settings schema, which brands the
  * addresses. A null address means the provider's default address. The group
- * is saved when the Providers pane picks a provider, a mode, or an address;
- * the backend reads it at each connection attempt.
+ * is saved when the Providers pane turns a provider on or off or changes an
+ * address; the backend reads it at each connection attempt.
  */
 export type ProvidersSettings = LlmProviderSettings
 
@@ -201,12 +206,14 @@ export type LocationSettings = {
  *
  * @remarks Holds the eight groups of Rust's `LysSettings` under the same
  * names, so a saved value cannot silently drop a persisted group. The
- * runtime and generation groups match Rust field for field. The load
- * configuration group differs only in its per-model settings, a map here and
- * one object in the document, and the tools group in its Just run names, a
- * set here and one array in the document, and its switches, a map here and
- * one object in the document; the Tauri settings adapter converts between
- * the two.
+ * generation group matches Rust field for field. The runtime group differs
+ * only in its default model, a reference here and a bare key in the
+ * document, which the Tauri settings adapter reads but never writes. The
+ * load configuration group differs only in its per-model settings, a map
+ * here and one object in the document, and the tools group in its Just run
+ * names, a set here and one array in the document, and its switches, a map
+ * here and one object in the document; the Tauri settings adapter converts
+ * between the two.
  */
 export type LysSettings = {
   /** Backend process and default-model settings. */
@@ -217,7 +224,7 @@ export type LysSettings = {
   loadConfiguration: LoadConfigurationSettings
   /** Keys of the services Lys calls on the person's behalf. */
   secrets: SecretsSettings
-  /** Provider every request goes to, and its server's address. */
+  /** Providers that are on, and their servers' addresses. */
   providers: ProvidersSettings
   /** Tools the person set to Just run and tools the person switched. */
   tools: ToolSettings
@@ -285,11 +292,11 @@ const INITIAL_SECRETS_SETTINGS: SecretsSettings = Object.freeze({
 })
 
 /**
- * Providers shown before Tauri initialization completes: LM Studio at its
- * default address, as in a first-run settings file.
+ * Providers shown before Tauri initialization completes: only LM Studio on,
+ * at its default address, as in a first-run settings file.
  */
 const INITIAL_PROVIDERS_SETTINGS: ProvidersSettings = Object.freeze({
-  active: "lmStudio",
+  enabled: Object.freeze(["lmStudio" as const]),
   lmStudio: Object.freeze({ address: null }),
   ollama: Object.freeze({ address: null })
 })

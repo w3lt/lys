@@ -1,11 +1,6 @@
-import type {
-  ModelInventoryState,
-  ModelRuntimeState
-} from "@/lib/store/model-runtime"
+import type { LlmInfo } from "@lys/protocol"
 
-import { findLoadedModel } from "./model-residency"
-
-/** What the loaded model can take as attachments. */
+/** What a loaded model can take as attachments. */
 export type AttachmentModelSupport = Readonly<{
   /** Whether the model sees the images sent with a message. */
   vision: boolean
@@ -17,19 +12,16 @@ export type AttachmentModelSupport = Readonly<{
 }>
 
 /**
- * Calculates what the loaded model can take as attachments.
+ * Calculates what a loaded model can take as attachments.
  *
- * @param modelRuntime - Residency summary; only a loaded model counts.
- * @param modelInventory - Latest inventory, which says whether each model
- * has vision and was trained for tool use.
- * @returns The loaded model's support while a ready inventory lists it, and
- * undefined otherwise.
+ * @param loadedModel - Inventory entry of the model, which says whether it
+ * has vision and was trained for tool use, while it is loaded; undefined
+ * while it is not, or there is no model.
+ * @returns The loaded model's support, and undefined otherwise.
  */
 export function calculateAttachmentModelSupport(
-  modelRuntime: ModelRuntimeState,
-  modelInventory: ModelInventoryState
+  loadedModel: LlmInfo | undefined
 ): AttachmentModelSupport | undefined {
-  const loadedModel = findLoadedModel(modelRuntime, modelInventory)
   if (loadedModel === undefined) return undefined
 
   return Object.freeze({

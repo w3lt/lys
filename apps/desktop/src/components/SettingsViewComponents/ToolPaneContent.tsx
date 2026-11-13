@@ -3,6 +3,8 @@ import type { ToolDefinition } from "@lys/share"
 import { useEffect, useId, useRef, useState, type ReactElement } from "react"
 
 import { Button } from "@/components/ui/button"
+import { useNewConversationModel } from "@/lib/hooks/conversationModel"
+import { findLoadedModelInfo } from "@/lib/models/model-availability"
 import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
 import { useLysStore } from "@/lib/store"
 import { useToolStore, type ToolListState } from "@/lib/store/tools"
@@ -240,14 +242,15 @@ type ToolWorkspaceProps = {
 }
 
 /**
- * Presents the tool controls: the unavailable card when the loaded model was
- * not trained for tools, the tool-calls card, and every tool group.
+ * Presents the tool controls: the unavailable card when the model a new
+ * conversation uses is loaded and was not trained for tools, the tool-calls
+ * card, and every tool group.
  *
  * @remarks The tool store owns the tool-calls switch, and the application
- * store owns each tool's switch and approval, the loaded model, and the
+ * store owns each tool's switch and approval and every provider's
  * inventory; the workspace owns only which tool's details are shown, at most
  * one, which resets when the pane is left. While
- * the loaded model was not trained for tools, the controls below the card
+ * that model was not trained for tools, the controls below the card
  * recede and are disabled, and no tool's details are shown; the tool that
  * was expanded opens again once the controls unlock. A switch applies to the
  * next chat request; an approval applies to the next round of tool calls
@@ -264,10 +267,9 @@ function ToolWorkspace({
   const areToolCallsOn = useToolStore((state) => state.areToolCallsOn)
   const toolSwitches = useLysStore((state) => state.settings.tools.switches)
   const updateToolCallsOn = useToolStore((state) => state.updateToolCallsOn)
-  const modelRuntime = useLysStore((state) => state.modelRuntime)
-  const modelInventory = useLysStore((state) => state.modelInventory)
+  const { availability } = useNewConversationModel()
   const [expandedToolName, setExpandedToolName] = useState<string | null>(null)
-  const support = calculateToolModelSupport(modelRuntime, modelInventory)
+  const support = calculateToolModelSupport(findLoadedModelInfo(availability))
   const isLocked = support.status === "untrained"
   const shownToolName = isLocked ? null : expandedToolName
   const totals = calculateOfferedToolTotals(

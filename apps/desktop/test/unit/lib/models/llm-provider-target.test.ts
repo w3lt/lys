@@ -3,14 +3,14 @@ import { describe, expect, it } from "vitest"
 import { describeLlmProviderTarget } from "@/lib/models/llm-provider-target"
 
 /**
- * Builds a provider choice from the first-run one.
+ * Builds providers from the first-run ones.
  *
  * @param changes - Fields the case changes.
- * @returns The validated choice.
+ * @returns The validated providers.
  */
 function buildProviders(changes: Record<string, unknown>) {
   return llmProviderSettingsSchema.parse({
-    active: "lmStudio",
+    enabled: ["lmStudio"],
     lmStudio: { address: null },
     ollama: { address: null },
     ...changes
@@ -19,7 +19,7 @@ function buildProviders(changes: Record<string, unknown>) {
 
 describe("describeLlmProviderTarget", () => {
   it("reaches LM Studio at its default address while none is saved", () => {
-    expect(describeLlmProviderTarget(buildProviders({}))).toEqual({
+    expect(describeLlmProviderTarget("lmStudio", buildProviders({}))).toEqual({
       provider: "lmStudio",
       name: "LM Studio",
       access: "address",
@@ -30,6 +30,7 @@ describe("describeLlmProviderTarget", () => {
   it("reaches LM Studio at the saved address", () => {
     expect(
       describeLlmProviderTarget(
+        "lmStudio",
         buildProviders({ lmStudio: { address: "192.168.1.5:1234" } })
       ).location
     ).toBe("192.168.1.5:1234")
@@ -37,7 +38,10 @@ describe("describeLlmProviderTarget", () => {
 
   it("reaches local Ollama at an address", () => {
     expect(
-      describeLlmProviderTarget(buildProviders({ active: "ollama" }))
+      describeLlmProviderTarget(
+        "ollama",
+        buildProviders({ enabled: ["ollama"] })
+      )
     ).toEqual({
       provider: "ollama",
       name: "Ollama",
@@ -47,26 +51,34 @@ describe("describeLlmProviderTarget", () => {
   })
 
   it("reaches Ollama Cloud and Groq at their hosts with a key", () => {
-    expect(
-      describeLlmProviderTarget(
-        buildProviders({
-          active: "ollamaCloud",
-          ollama: { address: "192.168.1.20:11434" }
-        })
-      )
-    ).toEqual({
+    const providers = buildProviders({
+      enabled: ["ollamaCloud", "groq"],
+      ollama: { address: "192.168.1.20:11434" }
+    })
+
+    expect(describeLlmProviderTarget("ollamaCloud", providers)).toEqual({
       provider: "ollamaCloud",
       name: "Ollama Cloud",
       access: "key",
       location: "ollama.com"
     })
-    expect(
-      describeLlmProviderTarget(buildProviders({ active: "groq" }))
-    ).toEqual({
+    expect(describeLlmProviderTarget("groq", providers)).toEqual({
       provider: "groq",
       name: "Groq",
       access: "key",
       location: "api.groq.com"
     })
+  })
+
+  it("describes a provider that is off where it would be reached", () => {
+    expect(
+      describeLlmProviderTarget(
+        "ollama",
+        buildProviders({
+          enabled: ["lmStudio"],
+          ollama: { address: "192.168.1.20:11434" }
+        })
+      ).location
+    ).toBe("192.168.1.20:11434")
   })
 })

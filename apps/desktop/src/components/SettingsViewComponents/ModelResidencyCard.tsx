@@ -1,64 +1,58 @@
+import type { LlmModelReference } from "@lys/share"
 import type { ReactElement } from "react"
 import { Button } from "@/components/ui/button"
-import type { ModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
 import type { LlmProviderTarget } from "@/lib/models/llm-provider-target"
+import type { ModelAvailability } from "@/lib/models/model-availability"
 import {
   formatModelResidencyHeading,
   formatModelResidencyMeta,
-  readLoadedModelKey,
   readModelResidencyTone
 } from "@/lib/models/model-residency"
+import type { ProviderAvailability } from "@/lib/models/provider-connection"
 import {
-  isModelTransitionInFlight,
   readObservedModelLoading,
   type ModelInventoryState,
   type ModelRequestState,
-  type ModelRuntimeState,
   type ObservedModelLoading
 } from "@/lib/store/model-runtime"
 
-/**
- * Answers whether a model request can be sent now.
- *
- * @param availability - Whether model requests can reach LM Studio, and why
- * not.
- * @param modelRequest - The model request in flight, if any.
- * @returns Whether LM Studio is connected and no model request is in flight;
- * requests are sent one at a time.
- */
-function canSendModelRequest(
-  availability: ModelRuntimeAvailability,
-  modelRequest: ModelRequestState
-): boolean {
-  return availability === "available" && modelRequest.status === "idle"
+/** The command the card offers for its model, and the key it applies to. */
+type ModelResidencyCommand = {
+  /** Key of the model to load, or null when Load cannot be sent. */
+  readonly loadModelKey: string | null
+  /** Key of the model to unload, or null when Unload cannot be sent. */
+  readonly unloadModelKey: string | null
 }
 
 /**
- * Finds the default model when it can be loaded.
+ * Finds which command the card can send for its model now.
  *
- * @param modelInventory - The models the backend listed.
- * @param defaultModel - Key of the default model, or null when none is
- * chosen.
- * @returns The default's key while the inventory lists it on disk only, or
- * null: no default, a default the inventory does not list or lists as
- * loaded, or an inventory that is not read.
+ * @param provider - Provider the card shows, whose requests the commands
+ * become.
+ * @param model - Model the card shows, or null when there is none.
+ * @param availability - Availability of that model, or null when there is
+ * none.
+ * @param modelRequest - The provider's request in flight, if any.
+ * @returns Load for a model of that provider the inventory lists and that is
+ * not loaded, Unload for one that is loaded, and neither while a request of
+ * the provider is in flight; requests are sent one at a time per provider.
  */
-function findLoadableDefaultModelKey(
-  modelInventory: ModelInventoryState,
-  defaultModel: string | null
-): string | null {
-  switch (modelInventory.status) {
-    case "unavailable":
-    case "failed":
-      return null
-    case "ready": {
-      const defaultEntry = modelInventory.models.find(
-        (model) => model.modelKey === defaultModel
-      )
-      return defaultEntry === undefined || defaultEntry.loaded
-        ? null
-        : defaultEntry.modelKey
-    }
+function findModelResidencyCommand(
+  provider: LlmProviderTarget,
+  model: LlmModelReference | null,
+  availability: ModelAvailability | null,
+  modelRequest: ModelRequestState
+): ModelResidencyCommand {
+  if (
+    model === null ||
+    model.provider !== provider.provider ||
+    modelRequest.status !== "idle"
+  ) {
+    return { loadModelKey: null, unloadModelKey: null }
+  }
+  return {
+    loadModelKey: availability?.status === "not-loaded" ? model.modelKey : null,
+    unloadModelKey: availability?.status === "loaded" ? model.modelKey : null
   }
 }
 
@@ -66,7 +60,7 @@ function findLoadableDefaultModelKey(
  * Formats the card's note.
  *
  * @param modelLoading - Who loads the models, as the inventory reports.
- * @param provider - Active provider, which the note names.
+ * @param provider - Provider the card shows, which the note names.
  * @returns That Load and Unload go to the provider through the backend, or
  * that the provider loads its models itself, then where every model is
  * listed; only where every model is listed while no inventory has been read.
@@ -77,11 +71,11 @@ function formatModelResidencyNote(
 ): string {
   switch (modelLoading) {
     case "lys":
-      return `Loading and unloading use ${provider.name} through the backend. This summary prefers the loaded default; manage every loaded model in Model settings.`
+      return `Loading and unloading use ${provider.name} through the backend. This summary shows the model a new conversation uses; manage every loaded model in Model settings.`
     case "provider":
-      return `${provider.name} decides which models are in memory, so Lys does not load or unload them. This summary prefers the default; see every model in Model settings.`
+      return `${provider.name} decides which models are in memory, so Lys does not load or unload them. This summary shows the model a new conversation uses; see every model in Model settings.`
     case "unknown":
-      return "This summary prefers the loaded default; see every model in Model settings."
+      return "This summary shows the model a new conversation uses; see every model in Model settings."
   }
 }
 
@@ -106,28 +100,29 @@ function buildModelCommandHandler(
 
 /** Properties accepted by {@link ModelResidencyRow}. */
 type ModelResidencyRowProps = {
-  /** Active provider, which the meta line names. */
+  /** Provider the card shows, whose requests the commands become. */
   readonly provider: LlmProviderTarget
-  /** Whether model requests can reach the active provider, and why not. */
-  readonly availability: ModelRuntimeAvailability
-  /** Key of the default model, or null when none is chosen. */
-  readonly defaultModel: string | null
-  /** The models the backend listed. */
-  readonly modelInventory: ModelInventoryState
-  /** The model request in flight, if any. */
+  /**
+   * Model a new conversation uses: the default, or without one the first
+   * model that can answer; null when there is neither.
+   */
+  readonly model: LlmModelReference | null
+  /** Availability of that model, or null when there is none. */
+  readonly availability: ModelAvailability | null
+  /** Who loads the provider's models, as its inventory reports. */
+  readonly modelLoading: ObservedModelLoading
+  /** The provider's request in flight, if any. */
   readonly modelRequest: ModelRequestState
-  /** Which weights are resident in the provider or in transition. */
-  readonly modelRuntime: ModelRuntimeState
   /**
    * Requests one load, once per press of Load.
    *
-   * @param modelKey - Key of the default model.
+   * @param modelKey - Key of the shown model.
    */
   readonly onLoadModel: (modelKey: string) => void
   /**
    * Requests one unload, once per press of Unload.
    *
-   * @param modelKey - Key of the loaded model.
+   * @param modelKey - Key of the shown model.
    */
   readonly onUnloadModel: (modelKey: string) => void
 }
@@ -138,30 +133,29 @@ type ModelResidencyRowProps = {
  *
  * @remarks Owns no state or effects. Load and Unload are absent for a
  * provider that loads its models itself, and before an inventory says who
- * loads the models. A command can be sent only while
- * the provider is connected and no model request is in flight. Load is
- * offered then only while the inventory lists the default model and it is
- * not loaded, and requests the default; Unload only while a model is loaded,
- * and requests that model. The dot is hidden from assistive technology; the
- * heading carries the state.
+ * loads the models. A command applies only to the shown model, only while it
+ * belongs to the shown provider and no request of that provider is in
+ * flight: Load while the inventory lists the model and it is not loaded,
+ * Unload while it is loaded. The dot is hidden from assistive technology;
+ * the heading carries the state.
  * @param props - Parent-owned provider, model state, and requests.
  * @returns The card's first row.
  */
 function ModelResidencyRow({
   provider,
+  model,
   availability,
-  defaultModel,
-  modelInventory,
+  modelLoading,
   modelRequest,
-  modelRuntime,
   onLoadModel,
   onUnloadModel
 }: ModelResidencyRowProps): ReactElement {
-  const canSend = canSendModelRequest(availability, modelRequest)
-  const loadModelKey = canSend
-    ? findLoadableDefaultModelKey(modelInventory, defaultModel)
-    : null
-  const unloadModelKey = canSend ? readLoadedModelKey(modelRuntime) : null
+  const { loadModelKey, unloadModelKey } = findModelResidencyCommand(
+    provider,
+    model,
+    availability,
+    modelRequest
+  )
 
   return (
     <div className="settings-view__card-row">
@@ -169,21 +163,16 @@ function ModelResidencyRow({
         <span
           aria-hidden="true"
           className="settings-view__status-dot"
-          data-tone={readModelResidencyTone(modelRuntime)}
+          data-tone={readModelResidencyTone(availability)}
         />
         <div className="settings-view__identity-lines">
-          <h2>{formatModelResidencyHeading(modelRuntime)}</h2>
+          <h2>{formatModelResidencyHeading(availability)}</h2>
           <p className="settings-view__meta">
-            {formatModelResidencyMeta(
-              modelRuntime,
-              availability,
-              defaultModel,
-              provider.name
-            )}
+            {formatModelResidencyMeta(model, availability)}
           </p>
         </div>
       </div>
-      {readObservedModelLoading(modelInventory) === "lys" ? (
+      {modelLoading === "lys" ? (
         <div className="settings-view__actions">
           <Button
             disabled={loadModelKey === null}
@@ -209,28 +198,31 @@ function ModelResidencyRow({
 
 /** Properties accepted by {@link ModelResidencyCard}. */
 type ModelResidencyCardProps = {
-  /** Active provider, which the card names. */
+  /** Provider the card shows, which the note names. */
   readonly provider: LlmProviderTarget
-  /** Whether model requests can reach the active provider, and why not. */
-  readonly availability: ModelRuntimeAvailability
-  /** Key of the default model, or null when none is chosen. */
-  readonly defaultModel: string | null
-  /** The models the backend listed. */
+  /** Whether model requests can reach that provider, and why not. */
+  readonly providerAvailability: ProviderAvailability
+  /**
+   * Model a new conversation uses: the default, or without one the first
+   * model that can answer; null when there is neither.
+   */
+  readonly model: LlmModelReference | null
+  /** Availability of that model, or null when there is none. */
+  readonly availability: ModelAvailability | null
+  /** The models the provider's inventory lists. */
   readonly modelInventory: ModelInventoryState
-  /** The model request in flight, if any. */
+  /** The provider's request in flight, if any. */
   readonly modelRequest: ModelRequestState
-  /** Which weights are resident in the provider or in transition. */
-  readonly modelRuntime: ModelRuntimeState
   /**
    * Requests one load, once per press of Load.
    *
-   * @param modelKey - Key of the default model.
+   * @param modelKey - Key of the shown model.
    */
   readonly onLoadModel: (modelKey: string) => void
   /**
    * Requests one unload, once per press of Unload.
    *
-   * @param modelKey - Key of the loaded model.
+   * @param modelKey - Key of the shown model.
    */
   readonly onUnloadModel: (modelKey: string) => void
   /**
@@ -242,15 +234,15 @@ type ModelResidencyCardProps = {
 }
 
 /**
- * Presents which model weights are resident in the active provider, with
- * Load for the default model and Unload for the loaded one while the
- * inventory reports that Lys loads the models.
+ * Presents whether the model a new conversation uses is in memory, with Load
+ * and Unload for it while its provider's inventory reports that Lys loads
+ * the models.
  *
  * @remarks The parent owns every input and the requests; the card owns no
  * state, effect, or store access. Its first row shows the residency and the
  * commands, which the parent's request feedback, rendered last, reports on.
- * The card recedes unless the provider is connected. While a load or unload
- * is in flight the card is marked busy and shows an indeterminate progress
+ * The card recedes unless the provider is connected. While the model loads
+ * or unloads the card is marked busy and shows an indeterminate progress
  * bar named after the heading: the backend reports completion without
  * progress, so no value is claimed. A note says that the commands go to the
  * provider through the backend, or that the provider loads its models
@@ -261,32 +253,33 @@ type ModelResidencyCardProps = {
  */
 export default function ModelResidencyCard({
   provider,
+  providerAvailability,
+  model,
   availability,
-  defaultModel,
   modelInventory,
   modelRequest,
-  modelRuntime,
   onLoadModel,
   onUnloadModel,
   children
 }: ModelResidencyCardProps): ReactElement {
-  const isTransitioning = isModelTransitionInFlight(modelRuntime)
+  const isTransitioning =
+    availability?.status === "loading" || availability?.status === "unloading"
+  const modelLoading = readObservedModelLoading(modelInventory)
 
   return (
     <section
       aria-busy={isTransitioning}
       className="settings-view__card"
-      data-dimmed={availability === "available" ? undefined : ""}
+      data-dimmed={providerAvailability === "available" ? undefined : ""}
     >
       <ModelResidencyRow
         availability={availability}
-        provider={provider}
-        defaultModel={defaultModel}
-        modelInventory={modelInventory}
+        model={model}
+        modelLoading={modelLoading}
         modelRequest={modelRequest}
-        modelRuntime={modelRuntime}
         onLoadModel={onLoadModel}
         onUnloadModel={onUnloadModel}
+        provider={provider}
       />
 
       {isTransitioning ? (
@@ -297,7 +290,7 @@ export default function ModelResidencyCard({
          */
         <div className="settings-view__progress">
           <progress
-            aria-label={formatModelResidencyHeading(modelRuntime)}
+            aria-label={formatModelResidencyHeading(availability)}
             className="sr-only"
           />
           <span aria-hidden="true" className="settings-view__progress-fill" />
@@ -307,10 +300,7 @@ export default function ModelResidencyCard({
       <div className="settings-view__card-divider" />
 
       <p className="settings-view__card-note">
-        {formatModelResidencyNote(
-          readObservedModelLoading(modelInventory),
-          provider
-        )}
+        {formatModelResidencyNote(modelLoading, provider)}
       </p>
       {children}
     </section>

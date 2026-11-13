@@ -2,15 +2,23 @@ import {
   createLlmRuntimeUnavailableProblem,
   createLlmServiceBusyProblem
 } from "@lys/protocol"
-import { modelLoadConfigurationSchema } from "@lys/share"
+import {
+  LLM_PROVIDERS,
+  modelLoadConfigurationSchema,
+  type LlmModelReference,
+  type LlmProvider
+} from "@lys/share"
 import { describe, expect, it } from "vitest"
 import { createStore } from "zustand/vanilla"
+import { createModelSlice, type ModelActions } from "@/lib/store/model-actions"
 import {
-  createModelSlice,
-  type ModelConnectionState,
-  type ModelSlice
-} from "@/lib/store/model-actions"
-import type { ModelRequestState } from "@/lib/store/model-runtime"
+  INITIAL_PROVIDER_MODEL_STATES,
+  updateProviderModelState,
+  type LlmProviderStatus,
+  type ModelRequestState,
+  type ProviderModelStates
+} from "@/lib/store/model-runtime"
+import type { ProviderModelsState } from "@/lib/store/provider-status"
 import type { LoadConfigurationSettings } from "@/lib/store/settings"
 import {
   buildJsonResponse,
@@ -29,10 +37,27 @@ import {
   waitForMicrotasks
 } from "../../support/settlement"
 
-/** Route keys of the model endpoints. */
-const LIST_ROUTE = "GET /api/v1/llm/list"
-const LOAD_ROUTE = "POST /api/v1/llm/load"
-const UNLOAD_ROUTE = "PATCH /api/v1/llm/unload"
+/** Route keys of LM Studio's model endpoints. */
+const LIST_ROUTE = "GET /api/v1/llm/lmStudio/list"
+const LOAD_ROUTE = "POST /api/v1/llm/lmStudio/load"
+const UNLOAD_ROUTE = "PATCH /api/v1/llm/lmStudio/unload"
+
+/**
+ * Names one of LM Studio's models.
+ *
+ * @param modelKey - Key of the model.
+ * @returns The reference.
+ */
+function buildLmStudioModel(modelKey: string): LlmModelReference {
+  return { provider: "lmStudio", modelKey }
+}
+
+/** Every provider connected, so each admits model requests. */
+const CONNECTED_PROVIDER_MODELS: ProviderModelStates = LLM_PROVIDERS.reduce(
+  (states, provider) =>
+    updateProviderModelState(states, provider, { status: "connected" }),
+  INITIAL_PROVIDER_MODEL_STATES
+)
 
 /** Inventory with one resident and one downloaded model. */
 const INVENTORY = [
@@ -98,38 +123,57 @@ const RESOLVED_ON_DISK_CONFIGURATION = Object.freeze({
 })
 
 /**
- * Creates a store owning one model slice over a connection and stored load
- * settings the case controls.
+ * Creates a store owning one model slice over a backend and stored load
+ * settings the case controls, with every provider connected.
  *
- * @param defaultModel - Default model the summary prefers.
- * @returns The store, a switch for whether the model runtime is available
- * (it starts available), the stored load settings the slice reads (they
- * start as {@link LOAD_CONFIGURATION_SETTINGS}; a case may replace them), and
- * a reader of how many times the slice asked the store to re-read the LM
- * Studio status.
+ * @returns The store; a switch for whether the backend runs (it starts
+ * running); a setter of one provider's status; the stored load settings the
+ * slice reads (they start as {@link LOAD_CONFIGURATION_SETTINGS}; a case may
+ * replace them); a reader of how many times the slice asked the store to
+ * re-read a provider's status; and the providers it asked for, in order.
  */
-function createModelStore(defaultModel: string | null = null) {
-  const connection = { isModelRuntimeAvailable: true }
+function createModelStore() {
+  const backend = { isBackendRunning: true }
   const storedSettings = { loadConfiguration: LOAD_CONFIGURATION_SETTINGS }
-  let failureReactions = 0
-  const store = createStore<ModelSlice>()((set, get) =>
-    createModelSlice(set, get, {
-      getConnection: (): ModelConnectionState => ({
-        backendUrl: FIXTURE_BACKEND_URL,
-        isModelRuntimeAvailable: connection.isModelRuntimeAvailable,
-        defaultModel
-      }),
-      handleModelRequestFailure: async () => {
-        failureReactions += 1
-      },
-      getLoadConfigurationSettings: () => storedSettings.loadConfiguration
+  const failedProviders: LlmProvider[] = []
+  const store = createStore<ProviderModelsState & ModelActions>()(
+    (set, get) => ({
+      providerModels: CONNECTED_PROVIDER_MODELS,
+      ...createModelSlice(set, get, {
+        getBackendConnection: () => ({
+          backendUrl: FIXTURE_BACKEND_URL,
+          isBackendRunning: backend.isBackendRunning
+        }),
+        handleModelRequestFailure: async (provider) => {
+          failedProviders.push(provider)
+        },
+        getLoadConfigurationSettings: () => storedSettings.loadConfiguration
+      })
     })
   )
+
+  /**
+   * Publishes one provider's status, as the status slice would.
+   *
+   * @param provider - Provider whose status changes.
+   * @param status - Its new status.
+   */
+  function updateStatus(provider: LlmProvider, status: LlmProviderStatus) {
+    store.setState((state) => ({
+      providerModels: updateProviderModelState(state.providerModels, provider, {
+        status
+      })
+    }))
+  }
+
   return {
     store,
-    connection,
+    backend,
+    updateStatus,
     storedSettings,
-    getFailureReactionCount: () => failureReactions
+    failedProviders,
+    getFailureReactionCount: () => failedProviders.length,
+    getLmStudio: () => store.getState().providerModels.lmStudio
   }
 }
 
@@ -178,46 +222,52 @@ function listLoadRequestBodies(backend: BackendFake): unknown[] {
 }
 
 describe("createModelSlice", () => {
-  it("starts with no observation and no request", () => {
-    expect(createModelStore().store.getState()).toMatchObject({
-      modelInventory: { status: "unavailable" },
-      modelRequest: { status: "idle" },
-      modelRuntime: { status: "unavailable" },
-      modelError: null,
-      modelHealth: null,
-      loadedModelConfigurations: new Map()
-    })
+  it("leaves every provider with no observation and no request", () => {
+    const { store } = createModelStore()
+
+    for (const provider of LLM_PROVIDERS) {
+      expect(store.getState().providerModels[provider]).toMatchObject({
+        inventory: { status: "unavailable" },
+        request: { status: "idle" },
+        error: null,
+        health: null,
+        loadedModelConfigurations: new Map()
+      })
+    }
   })
 
   describe("updateModelInventory", () => {
-    it("publishes the listing request, then the inventory and the preferred resident model", async () => {
+    it("publishes the listing request, then the provider's inventory", async () => {
       startModelBackend({ [LIST_ROUTE]: buildInventoryRoute(INVENTORY) })
-      const { store } = createModelStore()
+      const { store, getLmStudio } = createModelStore()
 
-      const update = store.getState().updateModelInventory()
-      const whileListing = store.getState().modelRequest
+      const update = store.getState().updateModelInventory("lmStudio")
+      const whileListing = getLmStudio().request
       await update
 
       expect(whileListing).toEqual({ status: "listing" })
-      expect(store.getState()).toMatchObject({
-        modelInventory: {
+      expect(getLmStudio()).toMatchObject({
+        status: "connected",
+        inventory: {
           status: "ready",
           modelLoading: "lys",
           models: INVENTORY
         },
-        modelRequest: { status: "idle" },
-        modelRuntime: { status: "loaded", modelKey: "resident" },
-        modelError: null
+        request: { status: "idle" },
+        error: null
+      })
+      expect(store.getState().providerModels.groq.inventory).toEqual({
+        status: "unavailable"
       })
     })
 
-    it("assumes the stored configuration for each model it finds already loaded", async () => {
+    it("assumes the stored configuration for each LM Studio model it finds already loaded", async () => {
       startModelBackend({ [LIST_ROUTE]: buildInventoryRoute(INVENTORY) })
-      const { store } = createModelStore()
+      const { store, getLmStudio } = createModelStore()
 
-      await store.getState().updateModelInventory()
+      await store.getState().updateModelInventory("lmStudio")
 
-      expect(store.getState().loadedModelConfigurations).toEqual(
+      expect(getLmStudio().loadedModelConfigurations).toEqual(
         new Map([
           [
             "resident",
@@ -227,45 +277,70 @@ describe("createModelSlice", () => {
       )
     })
 
-    it("asks nothing while the model runtime is unavailable", async () => {
-      const requests = startModelBackend({})
-      const { store, connection } = createModelStore()
-      connection.isModelRuntimeAvailable = false
+    it("records no load configuration for another provider's loaded models", async () => {
+      startModelBackend({
+        "GET /api/v1/llm/ollama/list": () =>
+          buildJsonResponse(200, { llms: INVENTORY, modelLoading: "provider" })
+      })
+      const { store } = createModelStore()
 
-      await store.getState().updateModelInventory()
+      await store.getState().updateModelInventory("ollama")
 
-      expect(requests()).toEqual([])
-      expect(store.getState().modelRequest).toEqual({ status: "idle" })
+      expect(store.getState().providerModels.ollama).toMatchObject({
+        inventory: { status: "ready", modelLoading: "provider" },
+        loadedModelConfigurations: new Map()
+      })
     })
 
-    it("never publishes an answer that arrives after the model runtime became unavailable", async () => {
+    it.each(["unknown", "connecting", "unreachable", "off"] as const)(
+      "asks nothing while the provider is %s",
+      async (status) => {
+        const requests = startModelBackend({})
+        const { store, updateStatus, getLmStudio } = createModelStore()
+        updateStatus("lmStudio", status)
+
+        await store.getState().updateModelInventory("lmStudio")
+
+        expect(requests()).toEqual([])
+        expect(getLmStudio().request).toEqual({ status: "idle" })
+      }
+    )
+
+    it("asks nothing while the backend does not run", async () => {
+      const requests = startModelBackend({})
+      const { store, backend } = createModelStore()
+      backend.isBackendRunning = false
+
+      await store.getState().updateModelInventory("lmStudio")
+
+      expect(requests()).toEqual([])
+    })
+
+    it("never publishes an answer that arrives after the provider became unreachable", async () => {
       const inventory = createControlledPromise<Response>()
       startModelBackend({ [LIST_ROUTE]: () => inventory.promise })
-      const { store, connection } = createModelStore()
-      const update = store.getState().updateModelInventory()
+      const { store, updateStatus, getLmStudio } = createModelStore()
+      const update = store.getState().updateModelInventory("lmStudio")
       await waitForMicrotasks()
 
-      connection.isModelRuntimeAvailable = false
+      updateStatus("lmStudio", "unreachable")
       inventory.resolve(
         buildJsonResponse(200, { llms: INVENTORY, modelLoading: "lys" })
       )
       await update
 
-      expect(store.getState()).toMatchObject({
-        modelInventory: { status: "unavailable" },
-        modelRuntime: { status: "unavailable" }
-      })
+      expect(getLmStudio().inventory).toEqual({ status: "unavailable" })
     })
 
-    it("admits one request at a time", async () => {
+    it("admits one request at a time per provider", async () => {
       const inventory = createControlledPromise<Response>()
       const requests = startModelBackend({
         [LIST_ROUTE]: () => inventory.promise
       })
       const { store } = createModelStore()
-      const first = store.getState().updateModelInventory()
+      const first = store.getState().updateModelInventory("lmStudio")
 
-      await store.getState().loadModel("on-disk")
+      await store.getState().loadModel(buildLmStudioModel("on-disk"))
       inventory.resolve(
         buildJsonResponse(200, { llms: INVENTORY, modelLoading: "lys" })
       )
@@ -274,23 +349,76 @@ describe("createModelSlice", () => {
       expect(requests()).toEqual([LIST_ROUTE])
     })
 
-    it("shows a failed observation as unknown residency with its reason, then re-reads the LM Studio status", async () => {
+    it("lists another provider while one provider's list is still pending", async () => {
+      const slow = createControlledPromise<Response>()
+      const groqModels = [buildLlmInfo("llama-3.3-70b", { loaded: true })]
+      startModelBackend({
+        [LIST_ROUTE]: () => slow.promise,
+        "GET /api/v1/llm/groq/list": () =>
+          buildJsonResponse(200, { llms: groqModels, modelLoading: "provider" })
+      })
+      const { store, getLmStudio } = createModelStore()
+      const lmStudioList = store.getState().updateModelInventory("lmStudio")
+      await waitForMicrotasks()
+
+      await store.getState().updateModelInventory("groq")
+      const groqWhileLmStudioPending =
+        store.getState().providerModels.groq.inventory
+      const lmStudioRequest = getLmStudio().request
+      slow.resolve(
+        buildJsonResponse(200, { llms: INVENTORY, modelLoading: "lys" })
+      )
+      await lmStudioList
+
+      expect(groqWhileLmStudioPending).toEqual({
+        status: "ready",
+        modelLoading: "provider",
+        models: groqModels
+      })
+      expect(lmStudioRequest).toEqual({ status: "listing" })
+      expect(getLmStudio().inventory).toMatchObject({ models: INVENTORY })
+    })
+
+    it("keeps one provider's failure to that provider", async () => {
+      startModelBackend({
+        [LIST_ROUTE]: () => buildJsonResponse(500, { detail: "boom" }),
+        "GET /api/v1/llm/groq/list": () =>
+          buildJsonResponse(200, { llms: [], modelLoading: "provider" })
+      })
+      const { store, failedProviders } = createModelStore()
+
+      await Promise.all([
+        store.getState().updateModelInventory("lmStudio"),
+        store.getState().updateModelInventory("groq")
+      ])
+
+      expect(store.getState().providerModels.lmStudio).toMatchObject({
+        inventory: { status: "failed" },
+        error: expect.stringContaining("500")
+      })
+      expect(store.getState().providerModels.groq).toMatchObject({
+        inventory: { status: "ready" },
+        error: null
+      })
+      expect(failedProviders).toEqual(["lmStudio"])
+    })
+
+    it("shows a failed observation with its reason, then re-reads the provider's status", async () => {
       startModelBackend({
         [LIST_ROUTE]: () => buildJsonResponse(500, { detail: "boom" })
       })
-      const { store, getFailureReactionCount } = createModelStore()
+      const { store, getFailureReactionCount, getLmStudio } = createModelStore()
 
-      await store.getState().updateModelInventory()
+      await store.getState().updateModelInventory("lmStudio")
 
-      expect(store.getState()).toMatchObject({
-        modelInventory: { status: "failed" },
-        modelRuntime: { status: "unknown" },
-        modelError: expect.stringContaining("500")
+      expect(getLmStudio()).toMatchObject({
+        inventory: { status: "failed" },
+        error: expect.stringContaining("500")
       })
       expect(getFailureReactionCount()).toBe(1)
     })
 
-    it("leaves a missing runtime to the LM Studio status instead of showing a model error", async () => {
+    it("leaves a missing runtime to the provider's status instead of showing a model error", async () => {
       startModelBackend({
         [LIST_ROUTE]: () =>
           buildJsonResponse(
@@ -298,14 +426,13 @@ describe("createModelSlice", () => {
             createLlmRuntimeUnavailableProblem("LM Studio is not connected.")
           )
       })
-      const { store, getFailureReactionCount } = createModelStore()
+      const { store, getFailureReactionCount, getLmStudio } = createModelStore()
 
-      await store.getState().updateModelInventory()
+      await store.getState().updateModelInventory("lmStudio")
 
-      expect(store.getState()).toMatchObject({
-        modelInventory: { status: "unavailable" },
-        modelRuntime: { status: "unavailable" },
-        modelError: null
+      expect(getLmStudio()).toMatchObject({
+        inventory: { status: "unavailable" },
+        error: null
       })
       expect(getFailureReactionCount()).toBe(1)
     })
@@ -318,25 +445,52 @@ describe("createModelSlice", () => {
           buildJsonResponse(200, buildLlmInfo("on-disk", { loaded: true })),
         [LIST_ROUTE]: buildInventoryRoute(INVENTORY_AFTER_LOAD)
       })
-      const { store, getFailureReactionCount } = createModelStore("on-disk")
+      const { store, getFailureReactionCount, getLmStudio } = createModelStore()
 
-      const load = store.getState().loadModel("on-disk")
-      const whileLoading = store.getState().modelRuntime
+      const load = store.getState().loadModel(buildLmStudioModel("on-disk"))
+      const whileLoading = getLmStudio().request
       await load
 
       expect(whileLoading).toEqual({ status: "loading", modelKey: "on-disk" })
       expect(requests()).toEqual([LOAD_ROUTE, LIST_ROUTE])
-      expect(store.getState()).toMatchObject({
-        modelInventory: {
+      expect(getLmStudio()).toMatchObject({
+        inventory: {
           status: "ready",
           modelLoading: "lys",
           models: INVENTORY_AFTER_LOAD
         },
-        modelRuntime: { status: "loaded", modelKey: "on-disk" },
-        modelRequest: { status: "idle" },
-        modelError: null
+        request: { status: "idle" },
+        error: null
       })
       expect(getFailureReactionCount()).toBe(0)
+    })
+
+    it("sends the load to the provider the reference names", async () => {
+      const requests = startModelBackend({
+        "POST /api/v1/llm/ollama/load": () =>
+          buildJsonResponse(200, buildLlmInfo("mistral", { loaded: true })),
+        "GET /api/v1/llm/ollama/list": () =>
+          buildJsonResponse(200, {
+            llms: [buildLlmInfo("mistral", { loaded: true })],
+            modelLoading: "lys"
+          })
+      })
+      const { store } = createModelStore()
+
+      await store
+        .getState()
+        .loadModel({ provider: "ollama", modelKey: "mistral" })
+
+      expect(requests()).toEqual([
+        "POST /api/v1/llm/ollama/load",
+        "GET /api/v1/llm/ollama/list"
+      ])
+      expect(store.getState().providerModels.ollama.inventory).toMatchObject({
+        status: "ready"
+      })
+      expect(store.getState().providerModels.lmStudio.inventory).toEqual({
+        status: "unavailable"
+      })
     })
 
     it("shows a refused load and still reconciles the inventory", async () => {
@@ -345,18 +499,18 @@ describe("createModelSlice", () => {
         [LOAD_ROUTE]: () => buildJsonResponse(503, busy),
         [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
       })
-      const { store, getFailureReactionCount } = createModelStore()
+      const { store, getFailureReactionCount, getLmStudio } = createModelStore()
 
-      await store.getState().loadModel("on-disk")
+      await store.getState().loadModel(buildLmStudioModel("on-disk"))
 
       expect(requests()).toEqual([LOAD_ROUTE, LIST_ROUTE])
-      expect(store.getState()).toMatchObject({
-        modelInventory: {
+      expect(getLmStudio()).toMatchObject({
+        inventory: {
           status: "ready",
           modelLoading: "lys",
           models: INVENTORY
         },
-        modelError: busy.detail
+        error: busy.detail
       })
       expect(getFailureReactionCount()).toBe(1)
     })
@@ -367,11 +521,11 @@ describe("createModelSlice", () => {
         [LOAD_ROUTE]: () => buildJsonResponse(503, busy),
         [LIST_ROUTE]: () => buildJsonResponse(500, {})
       })
-      const { store } = createModelStore()
+      const { store, getLmStudio } = createModelStore()
 
-      await store.getState().loadModel("on-disk")
+      await store.getState().loadModel(buildLmStudioModel("on-disk"))
 
-      expect(store.getState().modelError).toMatch(
+      expect(getLmStudio().error).toMatch(
         new RegExp(`^${busy.detail} Inventory refresh also failed: .*500`)
       )
     })
@@ -383,7 +537,7 @@ describe("createModelSlice", () => {
       })
       const { store } = createModelStore()
 
-      await store.getState().loadModel("on-disk")
+      await store.getState().loadModel(buildLmStudioModel("on-disk"))
 
       expect(requests().filter((route) => route === LOAD_ROUTE)).toHaveLength(1)
     })
@@ -395,7 +549,7 @@ describe("createModelSlice", () => {
       })
       const { store } = createModelStore()
 
-      await store.getState().loadModel("on-disk")
+      await store.getState().loadModel(buildLmStudioModel("on-disk"))
 
       expect(listLoadRequestBodies(backend)).toEqual([
         { modelId: "on-disk", configuration: RESOLVED_ON_DISK_CONFIGURATION }
@@ -411,7 +565,7 @@ describe("createModelSlice", () => {
       storedSettings.loadConfiguration =
         DEFAULT_ONLY_LOAD_CONFIGURATION_SETTINGS
 
-      await store.getState().loadModel("on-disk")
+      await store.getState().loadModel(buildLmStudioModel("on-disk"))
 
       expect(listLoadRequestBodies(backend)).toEqual([
         { modelId: "on-disk", configuration: RESOLVED_DEFAULT_CONFIGURATION }
@@ -426,9 +580,9 @@ describe("createModelSlice", () => {
         [LOAD_ROUTE]: buildLoadRoute("on-disk")
       })
       const { store } = createModelStore()
-      await store.getState().updateModelInventory()
+      await store.getState().updateModelInventory("lmStudio")
 
-      await store.getState().loadModel("on-disk")
+      await store.getState().loadModel(buildLmStudioModel("on-disk"))
 
       expect(listLoadRequestBodies(backend)).toEqual([
         {
@@ -446,13 +600,14 @@ describe("createModelSlice", () => {
         [LOAD_ROUTE]: buildLoadRoute("on-disk"),
         [LIST_ROUTE]: buildInventoryRoute(INVENTORY_AFTER_LOAD)
       })
-      const { store } = createModelStore()
+      const { store, getLmStudio } = createModelStore()
 
-      await store.getState().loadModel("on-disk")
+      await store.getState().loadModel(buildLmStudioModel("on-disk"))
 
-      expect(store.getState().loadedModelConfigurations.get("on-disk")).toEqual(
-        { origin: "sent", configuration: RESOLVED_ON_DISK_CONFIGURATION }
-      )
+      expect(getLmStudio().loadedModelConfigurations.get("on-disk")).toEqual({
+        origin: "sent",
+        configuration: RESOLVED_ON_DISK_CONFIGURATION
+      })
     })
   })
 
@@ -463,13 +618,15 @@ describe("createModelSlice", () => {
         [LOAD_ROUTE]: buildLoadRoute("resident"),
         [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
       })
-      const { store } = createModelStore()
+      const { store, getLmStudio } = createModelStore()
       const publishedRequests: ModelRequestState[] = []
       store.subscribe((state) => {
-        publishedRequests.push(state.modelRequest)
+        publishedRequests.push(state.providerModels.lmStudio.request)
       })
 
-      await store.getState().updateLoadedModelConfiguration("resident")
+      await store
+        .getState()
+        .updateLoadedModelConfiguration(buildLmStudioModel("resident"))
 
       expect(requests()).toEqual([UNLOAD_ROUTE, LOAD_ROUTE, LIST_ROUTE])
       expect(publishedRequests).toEqual([
@@ -477,9 +634,9 @@ describe("createModelSlice", () => {
         { status: "loading", modelKey: "resident" },
         { status: "idle" }
       ])
-      expect(store.getState()).toMatchObject({
-        modelRuntime: { status: "loaded", modelKey: "resident" },
-        modelError: null
+      expect(getLmStudio()).toMatchObject({
+        inventory: { status: "ready", models: INVENTORY },
+        error: null
       })
     })
 
@@ -489,16 +646,16 @@ describe("createModelSlice", () => {
         [LOAD_ROUTE]: buildLoadRoute("resident"),
         [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
       })
-      const { store } = createModelStore()
+      const { store, getLmStudio } = createModelStore()
 
-      await store.getState().updateLoadedModelConfiguration("resident")
+      await store
+        .getState()
+        .updateLoadedModelConfiguration(buildLmStudioModel("resident"))
 
       expect(listLoadRequestBodies(backend)).toEqual([
         { modelId: "resident", configuration: RESOLVED_DEFAULT_CONFIGURATION }
       ])
-      expect(
-        store.getState().loadedModelConfigurations.get("resident")
-      ).toEqual({
+      expect(getLmStudio().loadedModelConfigurations.get("resident")).toEqual({
         origin: "sent",
         configuration: RESOLVED_DEFAULT_CONFIGURATION
       })
@@ -521,7 +678,9 @@ describe("createModelSlice", () => {
           ]
         ])
       }
-      const reload = store.getState().updateLoadedModelConfiguration("resident")
+      const reload = store
+        .getState()
+        .updateLoadedModelConfiguration(buildLmStudioModel("resident"))
 
       storedSettings.loadConfiguration = editedSettings
       unload.resolve(new Response(null, { status: 204 }))
@@ -537,37 +696,42 @@ describe("createModelSlice", () => {
         [UNLOAD_ROUTE]: () => buildJsonResponse(500, {}),
         [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
       })
-      const { store, getFailureReactionCount } = createModelStore()
+      const { store, getFailureReactionCount, getLmStudio } = createModelStore()
 
-      await store.getState().updateLoadedModelConfiguration("resident")
+      await store
+        .getState()
+        .updateLoadedModelConfiguration(buildLmStudioModel("resident"))
 
       expect(requests()).toEqual([UNLOAD_ROUTE, LIST_ROUTE])
-      expect(store.getState()).toMatchObject({
-        modelRuntime: { status: "loaded", modelKey: "resident" },
-        modelError: expect.stringContaining("500")
+      expect(getLmStudio()).toMatchObject({
+        inventory: { status: "ready", models: INVENTORY },
+        error: expect.stringContaining("500")
       })
       expect(getFailureReactionCount()).toBe(1)
     })
 
     it("leaves the model unloaded and shows the failure when the load after the unload fails", async () => {
       const busy = createLlmServiceBusyProblem()
+      const unloadedInventory = [
+        buildLlmInfo("resident"),
+        buildLlmInfo("on-disk")
+      ]
       const requests = startModelBackend({
         [UNLOAD_ROUTE]: () => new Response(null, { status: 204 }),
         [LOAD_ROUTE]: () => buildJsonResponse(503, busy),
-        [LIST_ROUTE]: buildInventoryRoute([
-          buildLlmInfo("resident"),
-          buildLlmInfo("on-disk")
-        ])
+        [LIST_ROUTE]: buildInventoryRoute(unloadedInventory)
       })
-      const { store, getFailureReactionCount } = createModelStore()
+      const { store, getFailureReactionCount, getLmStudio } = createModelStore()
 
-      await store.getState().updateLoadedModelConfiguration("resident")
+      await store
+        .getState()
+        .updateLoadedModelConfiguration(buildLmStudioModel("resident"))
 
       expect(requests()).toEqual([UNLOAD_ROUTE, LOAD_ROUTE, LIST_ROUTE])
-      expect(store.getState()).toMatchObject({
-        modelRuntime: { status: "none" },
-        modelRequest: { status: "idle" },
-        modelError: busy.detail
+      expect(getLmStudio()).toMatchObject({
+        inventory: { status: "ready", models: unloadedInventory },
+        request: { status: "idle" },
+        error: busy.detail
       })
       expect(getFailureReactionCount()).toBe(1)
     })
@@ -575,14 +739,17 @@ describe("createModelSlice", () => {
 
   describe("unloadModel", () => {
     it("publishes the unloading transition, unloads, then reconciles the inventory", async () => {
+      const unloadedInventory = [buildLlmInfo("resident")]
       const requests = startModelBackend({
         [UNLOAD_ROUTE]: () => new Response(null, { status: 204 }),
-        [LIST_ROUTE]: buildInventoryRoute([buildLlmInfo("resident")])
+        [LIST_ROUTE]: buildInventoryRoute(unloadedInventory)
       })
-      const { store } = createModelStore()
+      const { store, getLmStudio } = createModelStore()
 
-      const unload = store.getState().unloadModel("resident")
-      const whileUnloading = store.getState().modelRuntime
+      const unload = store
+        .getState()
+        .unloadModel(buildLmStudioModel("resident"))
+      const whileUnloading = getLmStudio().request
       await unload
 
       expect(whileUnloading).toEqual({
@@ -590,7 +757,9 @@ describe("createModelSlice", () => {
         modelKey: "resident"
       })
       expect(requests()).toEqual([UNLOAD_ROUTE, LIST_ROUTE])
-      expect(store.getState().modelRuntime).toEqual({ status: "none" })
+      expect(getLmStudio().inventory).toMatchObject({
+        models: unloadedInventory
+      })
     })
 
     it("reconciles the inventory after a failed unload", async () => {
@@ -598,14 +767,14 @@ describe("createModelSlice", () => {
         [UNLOAD_ROUTE]: () => buildJsonResponse(500, {}),
         [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
       })
-      const { store } = createModelStore()
+      const { store, getLmStudio } = createModelStore()
 
-      await store.getState().unloadModel("resident")
+      await store.getState().unloadModel(buildLmStudioModel("resident"))
 
       expect(requests()).toEqual([UNLOAD_ROUTE, LIST_ROUTE])
-      expect(store.getState()).toMatchObject({
-        modelRuntime: { status: "loaded", modelKey: "resident" },
-        modelError: expect.stringContaining("500")
+      expect(getLmStudio()).toMatchObject({
+        inventory: { status: "ready", models: INVENTORY },
+        error: expect.stringContaining("500")
       })
     })
   })
@@ -614,14 +783,15 @@ describe("createModelSlice", () => {
     it("publishes the health observation without a status re-read", async () => {
       const health = { modelId: "resident", status: "ready", latencyMs: 7 }
       startModelBackend({
-        "GET /api/v1/llm/resident/health": () => buildJsonResponse(200, health),
+        "GET /api/v1/llm/lmStudio/resident/health": () =>
+          buildJsonResponse(200, health),
         [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
       })
-      const { store, getFailureReactionCount } = createModelStore()
+      const { store, getFailureReactionCount, getLmStudio } = createModelStore()
 
-      await store.getState().testModel("resident")
+      await store.getState().testModel(buildLmStudioModel("resident"))
 
-      expect(store.getState().modelHealth).toEqual(health)
+      expect(getLmStudio().health).toEqual(health)
       expect(getFailureReactionCount()).toBe(0)
     })
 
@@ -629,10 +799,10 @@ describe("createModelSlice", () => {
       ["runtime-unavailable", 1],
       ["model-not-loaded", 0]
     ])(
-      "re-reads the LM Studio status after a not-ready %s observation: %s time(s)",
+      "re-reads the provider's status after a not-ready %s observation: %s time(s)",
       async (reason, reactions) => {
         startModelBackend({
-          "GET /api/v1/llm/resident/health": () =>
+          "GET /api/v1/llm/lmStudio/resident/health": () =>
             buildJsonResponse(200, {
               modelId: "resident",
               status: "not-ready",
@@ -643,7 +813,7 @@ describe("createModelSlice", () => {
         })
         const { store, getFailureReactionCount } = createModelStore()
 
-        await store.getState().testModel("resident")
+        await store.getState().testModel(buildLmStudioModel("resident"))
 
         expect(getFailureReactionCount()).toBe(reactions)
       }
@@ -651,7 +821,7 @@ describe("createModelSlice", () => {
 
     it("clears the previous observation when the next request starts", async () => {
       startModelBackend({
-        "GET /api/v1/llm/resident/health": () =>
+        "GET /api/v1/llm/lmStudio/resident/health": () =>
           buildJsonResponse(200, {
             modelId: "resident",
             status: "ready",
@@ -659,11 +829,11 @@ describe("createModelSlice", () => {
           }),
         [LIST_ROUTE]: buildInventoryRoute(INVENTORY)
       })
-      const { store } = createModelStore()
-      await store.getState().testModel("resident")
+      const { store, getLmStudio } = createModelStore()
+      await store.getState().testModel(buildLmStudioModel("resident"))
 
-      const update = store.getState().updateModelInventory()
-      const whileListing = store.getState().modelHealth
+      const update = store.getState().updateModelInventory("lmStudio")
+      const whileListing = getLmStudio().health
       await update
 
       expect(whileListing).toBeNull()
@@ -674,20 +844,22 @@ describe("createModelSlice", () => {
     it("is awaited before a failed request resolves", async () => {
       startModelBackend({ [LIST_ROUTE]: () => buildJsonResponse(500, {}) })
       const reaction = createControlledPromise<void>()
-      const store = createStore<ModelSlice>()((set, get) =>
-        createModelSlice(set, get, {
-          getConnection: () => ({
-            backendUrl: FIXTURE_BACKEND_URL,
-            isModelRuntimeAvailable: true,
-            defaultModel: null
-          }),
-          handleModelRequestFailure: () => reaction.promise,
-          getLoadConfigurationSettings: () => LOAD_CONFIGURATION_SETTINGS
+      const store = createStore<ProviderModelsState & ModelActions>()(
+        (set, get) => ({
+          providerModels: CONNECTED_PROVIDER_MODELS,
+          ...createModelSlice(set, get, {
+            getBackendConnection: () => ({
+              backendUrl: FIXTURE_BACKEND_URL,
+              isBackendRunning: true
+            }),
+            handleModelRequestFailure: () => reaction.promise,
+            getLoadConfigurationSettings: () => LOAD_CONFIGURATION_SETTINGS
+          })
         })
       )
 
       const getSettlement = createSettlementReader(
-        store.getState().updateModelInventory()
+        store.getState().updateModelInventory("lmStudio")
       )
       await waitForMicrotasks()
       const beforeReaction = getSettlement()
@@ -701,27 +873,54 @@ describe("createModelSlice", () => {
     })
   })
 
-  describe("releaseModelRuntime", () => {
-    it("returns to the initial state, aborts the request, and never publishes its late result", async () => {
+  describe("releaseProviderModels", () => {
+    it("returns the provider to its released state, aborts its request, and never publishes its late result", async () => {
       const inventory = createControlledPromise<Response>()
       const backend = startBackendFake({
         [LIST_ROUTE]: () => inventory.promise
       })
-      const { store } = createModelStore()
-      const update = store.getState().updateModelInventory()
+      const { store, getLmStudio } = createModelStore()
+      const update = store.getState().updateModelInventory("lmStudio")
       await waitForMicrotasks()
 
-      store.getState().releaseModelRuntime()
+      store.getState().releaseProviderModels("lmStudio")
       inventory.resolve(
         buildJsonResponse(200, { llms: INVENTORY, modelLoading: "lys" })
       )
       await update
 
       expect(backend.requests[0]?.signal?.aborted).toBe(true)
-      expect(store.getState()).toMatchObject({
-        modelInventory: { status: "unavailable" },
-        modelRequest: { status: "idle" },
-        modelRuntime: { status: "unavailable" }
+      expect(getLmStudio()).toMatchObject({
+        status: "connected",
+        inventory: { status: "unavailable" },
+        request: { status: "idle" }
+      })
+    })
+
+    it("leaves every other provider's state and request alone", async () => {
+      const groqList = createControlledPromise<Response>()
+      const groqModels = [buildLlmInfo("llama-3.3-70b", { loaded: true })]
+      const backend = startBackendFake({
+        [LIST_ROUTE]: buildInventoryRoute(INVENTORY),
+        "GET /api/v1/llm/groq/list": () => groqList.promise
+      })
+      const { store, getLmStudio } = createModelStore()
+      await store.getState().updateModelInventory("lmStudio")
+      const groqUpdate = store.getState().updateModelInventory("groq")
+      await waitForMicrotasks()
+
+      store.getState().releaseProviderModels("lmStudio")
+      groqList.resolve(
+        buildJsonResponse(200, { llms: groqModels, modelLoading: "provider" })
+      )
+      await groqUpdate
+
+      expect(getLmStudio().inventory).toEqual({ status: "unavailable" })
+      expect(backend.requests[1]?.signal?.aborted).toBe(false)
+      expect(store.getState().providerModels.groq.inventory).toEqual({
+        status: "ready",
+        modelLoading: "provider",
+        models: groqModels
       })
     })
 
@@ -730,35 +929,36 @@ describe("createModelSlice", () => {
       const requests = startModelBackend({
         [UNLOAD_ROUTE]: () => unload.promise
       })
-      const { store } = createModelStore()
-      const reload = store.getState().updateLoadedModelConfiguration("resident")
+      const { store, getLmStudio } = createModelStore()
+      const reload = store
+        .getState()
+        .updateLoadedModelConfiguration(buildLmStudioModel("resident"))
       await waitForMicrotasks()
 
-      store.getState().releaseModelRuntime()
+      store.getState().releaseProviderModels("lmStudio")
       unload.resolve(new Response(null, { status: 204 }))
       await reload
       await waitForMicrotasks()
 
       expect(requests()).toEqual([UNLOAD_ROUTE])
-      expect(store.getState()).toMatchObject({
-        modelRequest: { status: "idle" },
-        modelRuntime: { status: "unavailable" },
-        modelError: null
+      expect(getLmStudio()).toMatchObject({
+        request: { status: "idle" },
+        inventory: { status: "unavailable" },
+        error: null
       })
     })
 
     it("forgets the configurations of the loaded models", async () => {
       startModelBackend({ [LIST_ROUTE]: buildInventoryRoute(INVENTORY) })
-      const { store } = createModelStore()
-      await store.getState().updateModelInventory()
-      const recordsBeforeRelease =
-        store.getState().loadedModelConfigurations.size
+      const { store, getLmStudio } = createModelStore()
+      await store.getState().updateModelInventory("lmStudio")
+      const recordsBeforeRelease = getLmStudio().loadedModelConfigurations.size
 
-      store.getState().releaseModelRuntime()
+      store.getState().releaseProviderModels("lmStudio")
 
       expect([
         recordsBeforeRelease,
-        store.getState().loadedModelConfigurations.size
+        getLmStudio().loadedModelConfigurations.size
       ]).toEqual([1, 0])
     })
 
@@ -773,14 +973,14 @@ describe("createModelSlice", () => {
             : buildJsonResponse(200, { llms: INVENTORY, modelLoading: "lys" })
         }
       })
-      const { store } = createModelStore()
-      void store.getState().updateModelInventory()
+      const { store, getLmStudio } = createModelStore()
+      void store.getState().updateModelInventory("lmStudio")
       await waitForMicrotasks()
-      store.getState().releaseModelRuntime()
+      store.getState().releaseProviderModels("lmStudio")
 
-      await store.getState().updateModelInventory()
+      await store.getState().updateModelInventory("lmStudio")
 
-      expect(store.getState().modelInventory).toEqual({
+      expect(getLmStudio().inventory).toEqual({
         status: "ready",
         modelLoading: "lys",
         models: INVENTORY

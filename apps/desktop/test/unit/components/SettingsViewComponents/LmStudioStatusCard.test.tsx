@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import LmStudioStatusCard from "@/components/SettingsViewComponents/LmStudioStatusCard"
 import type { BackendServerStatus } from "@/lib/store"
-import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
+import type { LlmProviderStatus } from "@/lib/store/model-runtime"
 import {
   GROQ_TARGET,
   LM_STUDIO_TARGET
@@ -15,8 +15,8 @@ describe("LmStudioStatusCard", () => {
       <LmStudioStatusCard
         provider={LM_STUDIO_TARGET}
         backendStatus="running"
-        lmStudioStatus="unreachable"
-        onRefreshLmStudioStatus={vi.fn()}
+        status="unreachable"
+        onRefreshStatus={vi.fn()}
       />
     )
 
@@ -29,13 +29,30 @@ describe("LmStudioStatusCard", () => {
     )
   })
 
-  it("names and locates the active provider", () => {
+  it("says a provider the backend has off is off and where to turn it on", () => {
+    render(
+      <LmStudioStatusCard
+        provider={LM_STUDIO_TARGET}
+        backendStatus="running"
+        status="off"
+        onRefreshStatus={vi.fn()}
+      />
+    )
+
+    const card = screen.getByRole("region", { name: "LM Studio connection" })
+    expect(
+      screen.getByRole("heading", { name: "LM Studio is off" })
+    ).toBeInTheDocument()
+    expect(card).toHaveTextContent("127.0.0.1:1234 · turn it on in Providers")
+  })
+
+  it("names and locates the provider it shows", () => {
     render(
       <LmStudioStatusCard
         provider={GROQ_TARGET}
         backendStatus="running"
-        lmStudioStatus="connected"
-        onRefreshLmStudioStatus={vi.fn()}
+        status="connected"
+        onRefreshStatus={vi.fn()}
       />
     )
 
@@ -51,8 +68,8 @@ describe("LmStudioStatusCard", () => {
       <LmStudioStatusCard
         provider={LM_STUDIO_TARGET}
         backendStatus="running"
-        lmStudioStatus="connecting"
-        onRefreshLmStudioStatus={vi.fn()}
+        status="connecting"
+        onRefreshStatus={vi.fn()}
       />
     )
     const heading = screen.getByRole("heading", {
@@ -63,8 +80,8 @@ describe("LmStudioStatusCard", () => {
       <LmStudioStatusCard
         provider={LM_STUDIO_TARGET}
         backendStatus="running"
-        lmStudioStatus="connected"
-        onRefreshLmStudioStatus={vi.fn()}
+        status="connected"
+        onRefreshStatus={vi.fn()}
       />
     )
 
@@ -76,45 +93,46 @@ describe("LmStudioStatusCard", () => {
   })
 
   it("refreshes once per press while the backend runs", async () => {
-    const onRefreshLmStudioStatus = vi.fn()
+    const onRefreshStatus = vi.fn()
     const user = userEvent.setup()
     render(
       <LmStudioStatusCard
         provider={LM_STUDIO_TARGET}
         backendStatus="running"
-        lmStudioStatus="unreachable"
-        onRefreshLmStudioStatus={onRefreshLmStudioStatus}
+        status="unreachable"
+        onRefreshStatus={onRefreshStatus}
       />
     )
 
     await user.click(screen.getByRole("button", { name: "Refresh" }))
 
-    expect(onRefreshLmStudioStatus).toHaveBeenCalledOnce()
+    expect(onRefreshStatus).toHaveBeenCalledOnce()
   })
 
-  it.each<[BackendServerStatus, LmStudioStatus]>([
+  it.each<[BackendServerStatus, LlmProviderStatus]>([
     ["running", "connecting"],
+    ["running", "off"],
     ["stopped", "unknown"],
     ["starting", "unknown"],
     ["unresponsive", "unreachable"]
   ])(
     "cannot refresh while the backend is %s and LM Studio is %s",
-    async (backendStatus, lmStudioStatus) => {
-      const onRefreshLmStudioStatus = vi.fn()
+    async (backendStatus, status) => {
+      const onRefreshStatus = vi.fn()
       const user = userEvent.setup()
       render(
         <LmStudioStatusCard
           provider={LM_STUDIO_TARGET}
           backendStatus={backendStatus}
-          lmStudioStatus={lmStudioStatus}
-          onRefreshLmStudioStatus={onRefreshLmStudioStatus}
+          status={status}
+          onRefreshStatus={onRefreshStatus}
         />
       )
 
       await user.click(screen.getByRole("button", { name: "Refresh" }))
 
       expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled()
-      expect(onRefreshLmStudioStatus).not.toHaveBeenCalled()
+      expect(onRefreshStatus).not.toHaveBeenCalled()
     }
   )
 })

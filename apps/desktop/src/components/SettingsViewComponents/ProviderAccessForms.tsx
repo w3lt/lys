@@ -5,13 +5,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   DEFAULT_PROVIDER_ADDRESSES,
-  LLM_PROVIDER_NAMES,
   type AddressedLlmProvider,
   type KeyedLlmProvider
 } from "@/lib/models/llm-provider-target"
 import type { ProviderApiKeyChange } from "@/lib/store/provider-settings"
 import type { ProvidersSettings, SecretsSettings } from "@/lib/store/settings"
-import type { ProviderAddress } from "@lys/share"
+import { LLM_PROVIDER_NAMES, type ProviderAddress } from "@lys/share"
 
 import {
   calculateProviderKeyFieldValue,

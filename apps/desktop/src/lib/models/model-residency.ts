@@ -1,13 +1,9 @@
-import type { LlmInfo } from "@lys/protocol"
+import { LLM_PROVIDER_NAMES, type LlmModelReference } from "@lys/share"
 
-import type { BackendServerStatus } from "@/lib/store"
-import type { ModelRuntimeAvailability } from "./lm-studio-connection"
-import type {
-  ModelInventoryState,
-  ModelRuntimeState
-} from "@/lib/store/model-runtime"
+import type { ModelRequestState } from "@/lib/store/model-runtime"
 
 import type { LocalModelDescriptor } from "./inventory"
+import type { ModelAvailability } from "./model-availability"
 
 /** Visual tone the status indicator uses for a residency state. */
 export type ModelResidencyTone = "active" | "pending" | "idle"
@@ -17,84 +13,42 @@ const UNOBSERVED_RESIDENCY_META =
   "refresh the model inventory to check loaded weights"
 
 /**
- * Names the weights currently resident in memory.
+ * Finds the transition one row's model is in.
  *
- * @param modelRuntime - Current residency state.
- * @returns The resident model identifier, or `null` while none is loaded.
+ * @param request - Request in flight for the row's provider.
+ * @param model - Model the row represents.
+ * @returns `loading` or `unloading` while that request loads or unloads the
+ * row's model, otherwise null.
  */
-export function readLoadedModelKey(
-  modelRuntime: ModelRuntimeState
-): string | null {
-  return modelRuntime.status === "loaded" ? modelRuntime.modelKey : null
+function findRowTransition(
+  request: ModelRequestState,
+  model: LocalModelDescriptor
+): "loading" | "unloading" | null {
+  return (request.status === "loading" || request.status === "unloading") &&
+    request.modelKey === model.modelKey
+    ? request.status
+    : null
 }
 
 /**
- * Finds the inventory entry of the loaded model.
+ * Selects the status tone for a shown model.
  *
- * @param modelRuntime - Current residency state; only a loaded model counts.
- * @param modelInventory - Latest inventory, which lists what each model can
- * do.
- * @returns The loaded model's entry in a ready inventory, or undefined while
- * no model is loaded, the inventory cannot be read, or it does not list the
- * loaded model.
- */
-export function findLoadedModel(
-  modelRuntime: ModelRuntimeState,
-  modelInventory: ModelInventoryState
-): LlmInfo | undefined {
-  if (modelRuntime.status !== "loaded" || modelInventory.status !== "ready") {
-    return undefined
-  }
-
-  return modelInventory.models.find(
-    (model) => model.modelKey === modelRuntime.modelKey
-  )
-}
-
-/**
- * Finds the model a residency state names.
- *
- * @param modelRuntime - Current residency state.
- * @returns The model being loaded, loaded, or unloaded, or `null` when the
- * state names no model.
- */
-function findRuntimeModelKey(modelRuntime: ModelRuntimeState): string | null {
-  return "modelKey" in modelRuntime ? modelRuntime.modelKey : null
-}
-
-/**
- * Finds the observed loaded model eligible for chat submission.
- *
- * @param backendStatus - Store-owned backend process lifecycle state.
- * @param modelRuntime - Validated runtime projection shared with the Composer.
- * @returns The resident model key while the backend is running, or `null`
- * when either prerequisite is unavailable.
- */
-export function findEligibleChatModel(
-  backendStatus: BackendServerStatus,
-  modelRuntime: ModelRuntimeState
-): string | null {
-  return backendStatus === "running" ? readLoadedModelKey(modelRuntime) : null
-}
-
-/**
- * Selects the status tone for a residency state.
- *
- * @param modelRuntime - Current residency state.
- * @returns The tone name consumed by the status indicator's styles.
+ * @param availability - Availability of the shown model, or null when no
+ * model is shown.
+ * @returns The tone name consumed by the status indicator's styles: active
+ * while the model is loaded, pending while it loads or unloads, idle
+ * otherwise.
  */
 export function readModelResidencyTone(
-  modelRuntime: ModelRuntimeState
+  availability: ModelAvailability | null
 ): ModelResidencyTone {
-  switch (modelRuntime.status) {
+  switch (availability?.status) {
     case "loaded":
       return "active"
     case "loading":
     case "unloading":
       return "pending"
-    case "none":
-    case "unknown":
-    case "unavailable":
+    default:
       return "idle"
   }
 }
@@ -102,124 +56,109 @@ export function readModelResidencyTone(
 /**
  * Selects the status tone for one model row.
  *
- * @param modelRuntime - Current residency state.
+ * @param request - Request in flight for the row's provider.
  * @param model - Inventory entry the row represents.
- * @returns The row's tone; rows the current state does not name stay idle.
+ * @returns Pending while the row's model loads or unloads, active while it is
+ * loaded, idle otherwise.
  */
 export function readModelRowTone(
-  modelRuntime: ModelRuntimeState,
+  request: ModelRequestState,
   model: LocalModelDescriptor
 ): ModelResidencyTone {
-  if (modelRuntime.status === "unknown") return "idle"
-  if (findRuntimeModelKey(modelRuntime) === model.modelKey) {
-    return readModelResidencyTone(modelRuntime)
-  }
+  if (findRowTransition(request, model) !== null) return "pending"
   return model.loaded ? "active" : "idle"
 }
 
 /**
  * Formats the residency heading shown on the runtime pane's model card.
  *
- * @param modelRuntime - Current residency state.
+ * @param availability - Availability of the shown model, or null when no
+ * model is shown.
  * @returns The heading naming the state the weights are in.
  */
 export function formatModelResidencyHeading(
-  modelRuntime: ModelRuntimeState
+  availability: ModelAvailability | null
 ): string {
-  switch (modelRuntime.status) {
+  if (availability === null) return "No model loaded"
+  switch (availability.status) {
     case "loaded":
       return "Model loaded"
     case "loading":
       return "Loading weights"
     case "unloading":
       return "Unloading"
-    case "none":
+    case "not-loaded":
       return "No model loaded"
-    case "unknown":
-    case "unavailable":
+    case "not-listed":
+      return "Model not listed"
+    case "backend-not-running":
+    case "provider-off":
+    case "provider-connecting":
+    case "provider-unreachable":
+    case "inventory-unread":
+    case "inventory-failed":
       return "Model state unavailable"
-  }
-}
-
-/**
- * Formats the supporting line shown while no weights are known to be resident.
- *
- * @param availability - Whether model requests can reach the active
- * provider, and why not.
- * @param defaultModel - Current default model identifier, when one is chosen.
- * @param providerName - Name of the active provider.
- * @returns The reason nothing is in memory, naming what to do about it.
- */
-function formatAbsentResidencyMeta(
-  availability: ModelRuntimeAvailability,
-  defaultModel: string | null,
-  providerName: string
-): string {
-  switch (availability) {
-    case "backend-offline":
-      return "start the backend first"
-    case "lm-studio-connecting":
-      return `connecting to ${providerName}`
-    case "lm-studio-unreachable":
-      return `${providerName} is not reachable`
-    case "available":
-      return defaultModel === null
-        ? "no default model chosen · pick one in Model"
-        : `${defaultModel} is default · not in memory`
   }
 }
 
 /**
  * Formats the supporting line under the residency heading.
  *
- * @param modelRuntime - Current residency state.
- * @param availability - Whether model requests can reach the active
- * provider, and why not.
- * @param defaultModel - Current default model identifier, when one is chosen.
- * @param providerName - Name of the active provider.
- * @returns The observed weights or the reason residency is unavailable.
+ * @param model - Shown model: the default, or without one the first loaded
+ * model; null when there is neither.
+ * @param availability - Availability of the shown model, or null when no
+ * model is shown.
+ * @returns The observed weights, or why the model is not in memory and what
+ * to do about it.
  */
 export function formatModelResidencyMeta(
-  modelRuntime: ModelRuntimeState,
-  availability: ModelRuntimeAvailability,
-  defaultModel: string | null,
-  providerName: string
+  model: LlmModelReference | null,
+  availability: ModelAvailability | null
 ): string {
-  switch (modelRuntime.status) {
+  if (model === null || availability === null) {
+    return "no default model chosen · pick one in Model"
+  }
+  const providerName = LLM_PROVIDER_NAMES[model.provider]
+  switch (availability.status) {
     case "loaded":
-      return `${modelRuntime.modelKey} · loaded in ${providerName}`
+      return `${model.modelKey} · loaded in ${providerName}`
     case "loading":
-      return modelRuntime.modelKey
+      return model.modelKey
     case "unloading":
-      return `releasing ${modelRuntime.modelKey}`
-    case "unknown":
+      return `releasing ${model.modelKey}`
+    case "backend-not-running":
+      return "start the backend first"
+    case "provider-off":
+      return `${providerName} is off · turn it on in Providers`
+    case "provider-connecting":
+      return `connecting to ${providerName}`
+    case "provider-unreachable":
+      return `${providerName} is not reachable`
+    case "inventory-unread":
+    case "inventory-failed":
       return UNOBSERVED_RESIDENCY_META
-    case "unavailable":
-      return availability === "available"
-        ? UNOBSERVED_RESIDENCY_META
-        : formatAbsentResidencyMeta(availability, defaultModel, providerName)
-    case "none":
-      return formatAbsentResidencyMeta(availability, defaultModel, providerName)
+    case "not-listed":
+      return `${model.modelKey} is not listed by ${providerName}`
+    case "not-loaded":
+      return `${model.modelKey} is default · not in memory`
   }
 }
 
 /**
  * Formats the tag shown at the end of one model row.
  *
- * @param modelRuntime - Current residency state.
+ * @param request - Request in flight for the row's provider.
  * @param model - Weights the row represents.
- * @returns The row's state when it is the one in play, otherwise its disk
- * size, or `not loaded` when the provider reports no size.
+ * @returns `loading` or `unloading` while the row's model is in transition,
+ * `loaded` while it is loaded, otherwise its disk size, or `not loaded` when
+ * the provider reports no size.
  */
 export function formatModelRowTag(
-  modelRuntime: ModelRuntimeState,
+  request: ModelRequestState,
   model: LocalModelDescriptor
 ): string {
-  if (findRuntimeModelKey(modelRuntime) === model.modelKey) {
-    return modelRuntime.status
-  }
-
-  if (modelRuntime.status === "unknown") return "state unavailable"
+  const transition = findRowTransition(request, model)
+  if (transition !== null) return transition
   if (model.loaded) return "loaded"
   return formatOnDiskTag(model)
 }
@@ -227,26 +166,23 @@ export function formatModelRowTag(
 /**
  * Formats the tag shown at the end of one row in the composer's weights menu.
  *
- * @param modelRuntime - Current residency state.
+ * @param request - Request in flight for the row's provider.
  * @param model - Weights the row represents.
- * @param selectedModelKey - Current default model identifier, when chosen.
+ * @param isSelected - Whether the row is the conversation's model.
  * @returns The row's live condition when it has one, otherwise whether it is
- * merely the chosen default, otherwise its on-disk size, or `not loaded`
- * when the provider reports no size. A resident tag reports
- * loaded weights for this row, including models outside the runtime projection.
+ * merely the conversation's model, otherwise its on-disk size, or
+ * `not loaded` when the provider reports no size. A resident tag reports
+ * loaded weights for this row.
  */
 export function formatComposerModelRowTag(
-  modelRuntime: ModelRuntimeState,
+  request: ModelRequestState,
   model: LocalModelDescriptor,
-  selectedModelKey: string | null
+  isSelected: boolean
 ): string {
-  if (findRuntimeModelKey(modelRuntime) === model.modelKey) {
-    return modelRuntime.status === "loaded" ? "resident" : modelRuntime.status
-  }
-
-  if (modelRuntime.status === "unknown") return "state unavailable"
+  const transition = findRowTransition(request, model)
+  if (transition !== null) return transition
   if (model.loaded) return "resident"
-  if (model.modelKey === selectedModelKey) return "selected"
+  if (isSelected) return "selected"
 
   return formatOnDiskTag(model)
 }

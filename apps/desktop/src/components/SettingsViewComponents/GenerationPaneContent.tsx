@@ -4,7 +4,7 @@ import { MAXIMUM_GENERATION_TEMPERATURE } from "@lys/protocol"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
-import { findLoadedModel } from "@/lib/models/model-residency"
+import { findLoadedModelInfo } from "@/lib/models/model-availability"
 import { useLysStore } from "@/lib/store"
 import type { GenerationSaveState } from "@/lib/store/generation-settings"
 import { initialSettingsState } from "@/lib/store/settings"
@@ -112,17 +112,17 @@ function GenerationReplyCeilingField(): ReactElement {
  * @returns The labeled ceiling slider and its accepted numeric value.
  * @remarks Requires SettingsContext and a
  * positive ceiling. The usual slider range ends at the context length the
- * loaded model reports, or at {@link UNKNOWN_WINDOW_REPLY_CEILING_RANGE} while
+ * model a new conversation uses is loaded with, or at
+ * {@link UNKNOWN_WINDOW_REPLY_CEILING_RANGE} while
  * none is known; existing ceilings outside that range remain visible without
  * clamping. Empty slider emissions are ignored.
  */
 function GenerationReplyLimitField(): ReactElement {
-  const { settings, modelRuntime, modelInventory, onGenerationChange } =
+  const { settings, newConversationModel, onGenerationChange } =
     useSettingsContext()
   const replyCeiling = settings.generation.replyCeiling
-  const loadedContextLength = findLoadedModel(
-    modelRuntime,
-    modelInventory
+  const loadedContextLength = findLoadedModelInfo(
+    newConversationModel.availability
   )?.loadedContextLength
   const minimumReplyCeiling = Math.min(REPLY_CEILING_STEP, replyCeiling)
   const maximumReplyCeiling = Math.max(

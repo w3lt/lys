@@ -1,10 +1,12 @@
 import {
   apiHeathCheckRoute,
+  buildLlmProviderApiPath,
   llmRuntimeConnectApi,
   llmRuntimeConnectionApiResponseSchema,
   llmRuntimeStatusApi,
   type LlmRuntimeConnectionStatus
 } from "@lys/protocol"
+import type { LlmProvider } from "@lys/share"
 import type { ModelApiConnection } from "./models"
 
 /** Whether the backend HTTP listener answered one health check. */
@@ -37,49 +39,52 @@ export async function getBackendHealth(
 }
 
 /**
- * Reads the backend's LM Studio connection status without contacting LM Studio.
+ * Reads the backend's connection status to one provider without contacting
+ * the provider.
  *
+ * @param provider - Provider whose status is read.
  * @param connection - Backend origin and local cancellation signal.
  * @returns The validated status reported by the backend.
  * @throws On cancellation, transport, HTTP, JSON, or protocol validation failure.
  */
 export async function getLlmRuntimeConnectionStatus(
+  provider: LlmProvider,
   connection: ModelApiConnection
 ): Promise<LlmRuntimeConnectionStatus> {
-  const response = await fetch(
-    `${connection.backendUrl}${llmRuntimeStatusApi.path}`,
-    {
-      method: llmRuntimeStatusApi.method,
-      headers: { Accept: "application/json" },
-      signal: connection.signal,
-      cache: "no-store"
-    }
-  )
+  const path = buildLlmProviderApiPath(llmRuntimeStatusApi.path, provider)
+  const response = await fetch(`${connection.backendUrl}${path}`, {
+    method: llmRuntimeStatusApi.method,
+    headers: { Accept: "application/json" },
+    signal: connection.signal,
+    cache: "no-store"
+  })
   return await parseLlmRuntimeConnectionResponse(response)
 }
 
 /**
- * Asks the backend to connect to LM Studio and waits for the settled status.
+ * Asks the backend to connect to one provider and waits for the settled
+ * status.
  *
+ * @param provider - Provider the backend connects to.
  * @param connection - Backend origin and local cancellation signal.
- * @returns `connected` or `unreachable` once the backend's attempt settles.
+ * @returns `connected`, `unreachable`, or `off` for a provider that is
+ * turned off, once the backend's attempt settles.
  * @throws On cancellation, transport, HTTP (including the service-busy 503),
  * JSON, or protocol validation failure.
  * @remarks Cancelling the signal stops local observation only; the backend
  * completes an accepted attempt.
  */
 export async function connectLlmRuntime(
+  provider: LlmProvider,
   connection: ModelApiConnection
 ): Promise<LlmRuntimeConnectionStatus> {
-  const response = await fetch(
-    `${connection.backendUrl}${llmRuntimeConnectApi.path}`,
-    {
-      method: llmRuntimeConnectApi.method,
-      headers: { Accept: "application/json" },
-      signal: connection.signal,
-      cache: "no-store"
-    }
-  )
+  const path = buildLlmProviderApiPath(llmRuntimeConnectApi.path, provider)
+  const response = await fetch(`${connection.backendUrl}${path}`, {
+    method: llmRuntimeConnectApi.method,
+    headers: { Accept: "application/json" },
+    signal: connection.signal,
+    cache: "no-store"
+  })
   return await parseLlmRuntimeConnectionResponse(response)
 }
 

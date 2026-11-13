@@ -3,7 +3,12 @@ import type {
   ChatToolOffer,
   MessageGenerationOptions
 } from "@lys/protocol"
-import { CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE } from "@lys/share"
+import {
+  CALIGINIA_AGENT_CODE,
+  LYSIPTERA_AGENT_CODE,
+  type Conversation,
+  type LlmModelReference
+} from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import {
   readChatEvents,
@@ -12,7 +17,13 @@ import {
 } from "@/lib/apis/http/chat"
 import { getConversation } from "@/lib/apis/http/conversations"
 import type { AttachmentModelSupport } from "@/lib/models/attachment-model-support"
-import { createChatViewStore } from "@/lib/store/chat-view"
+import type { ModelAvailability } from "@/lib/models/model-availability"
+import {
+  createChatViewStore,
+  findLatestReplyModel,
+  findShownConversationModel
+} from "@/lib/store/chat-view"
+import { createStoredChatViewConversation } from "@/lib/store/chat-view/conversation-transitions"
 import {
   NO_CHAT_TOOL_OFFER,
   TOOL_CALLS_OFF_OFFER,
@@ -49,8 +60,12 @@ import {
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
 } from "../../../support/conversationFixtures"
-import { buildLlmInfo } from "../../../support/modelFixtures"
+import {
+  buildLlmInfo,
+  type LlmInfoVariation
+} from "../../../support/modelFixtures"
 import { startNativeHostFake } from "../../../support/nativeHostFake"
+import { buildProviderModelStates } from "../../../support/providerModelFixtures"
 import {
   createControlledPromise,
   waitForMicrotasks
@@ -131,15 +146,27 @@ const FULL_ATTACHMENT_SUPPORT: AttachmentModelSupport = Object.freeze({
   trainedForToolUse: true
 })
 
+/** Model a harness's new conversations use at first. */
+const QWEN_MODEL: LlmModelReference = Object.freeze({
+  provider: "lmStudio",
+  modelKey: "qwen3-8b"
+})
+
+/** A model of another provider a case picks or a stored reply names. */
+const GROQ_MODEL: LlmModelReference = Object.freeze({
+  provider: "groq",
+  modelKey: "llama-3.3-70b"
+})
+
 /** Answers of the providers a chat harness hands its store; a case may change them. */
 type ChatHarnessProviders = {
-  /** Model eligible to answer the next request, or null when none is loaded. */
-  eligibleModel: string | null
+  /** Model a new conversation uses, or null when there is none. */
+  newConversationModel: LlmModelReference | null
   /**
-   * What the loaded model can take as attachments, or undefined while no
-   * loaded model is listed.
+   * Availability of each model, keyed as {@link buildModelAvailabilityKey}
+   * builds it; a model the map does not hold is `not-listed`.
    */
-  attachmentSupport: AttachmentModelSupport | undefined
+  modelAvailabilities: Map<string, ModelAvailability>
   /** Generation controls the next request samples. */
   generationOptions: MessageGenerationOptions
   /**
@@ -149,6 +176,51 @@ type ChatHarnessProviders = {
   listedAgentCodes: readonly string[]
   /** Tool offer the next request samples. */
   toolOffer: ChatToolOfferResult
+}
+
+/**
+ * Builds the key a harness's availability map holds a model under.
+ *
+ * @param model - Model whose availability is held.
+ * @returns The provider and key of the model, joined by a slash.
+ */
+function buildModelAvailabilityKey(model: LlmModelReference): string {
+  return `${model.provider}/${model.modelKey}`
+}
+
+/**
+ * Builds the availability of a loaded model.
+ *
+ * @param model - Model that is loaded.
+ * @param support - What the model can take as attachments.
+ * @returns `loaded` with an inventory entry carrying that support.
+ */
+function buildLoadedAvailability(
+  model: LlmModelReference,
+  support: AttachmentModelSupport = FULL_ATTACHMENT_SUPPORT
+): ModelAvailability {
+  return {
+    status: "loaded",
+    model: buildLlmInfo(model.modelKey, { loaded: true, ...support })
+  }
+}
+
+/**
+ * Sets the availability a harness answers for one model.
+ *
+ * @param providers - Providers of the harness.
+ * @param model - Model whose availability changes.
+ * @param availability - Availability the harness answers from now on.
+ */
+function setModelAvailability(
+  providers: ChatHarnessProviders,
+  model: LlmModelReference,
+  availability: ModelAvailability
+): void {
+  providers.modelAvailabilities.set(
+    buildModelAvailabilityKey(model),
+    availability
+  )
 }
 
 /**
@@ -170,19 +242,25 @@ function calculateListedAgentCode(
 
 /**
  * Creates a chat-view store over the real chat and conversation wrappers,
- * with the model, generation controls, agent list, and tool offer the case
+ * with the models, generation controls, agent list, and tool offer the case
  * controls, and a recorder of the replies handed to the tool-call follow.
  *
- * @returns The store; the mutable providers: the eligible model (initially
- * `qwen3-8b`), what it can take as attachments (initially images and files),
+ * @returns The store; the mutable providers: the model a new conversation
+ * uses (initially {@link QWEN_MODEL}), the availability of each model
+ * (initially only {@link QWEN_MODEL}, loaded and taking images and files),
  * the generation controls, the listed agents (initially both built-in
  * agents), and the tool offer (initially none); and the reply targets handed
  * to the tool-call follow, in order.
  */
 function createChatHarness() {
   const providers: ChatHarnessProviders = {
-    eligibleModel: "qwen3-8b",
-    attachmentSupport: FULL_ATTACHMENT_SUPPORT,
+    newConversationModel: QWEN_MODEL,
+    modelAvailabilities: new Map([
+      [
+        buildModelAvailabilityKey(QWEN_MODEL),
+        buildLoadedAvailability(QWEN_MODEL)
+      ]
+    ]),
     generationOptions: { temperature: 0.4, replyCeiling: 256 },
     listedAgentCodes: [CALIGINIA_AGENT_CODE, LYSIPTERA_AGENT_CODE],
     toolOffer: NO_CHAT_TOOL_OFFER
@@ -200,8 +278,11 @@ function createChatHarness() {
         signal
       }),
     createTimestamp: () => NOW,
-    findEligibleChatModel: () => providers.eligibleModel,
-    readAttachmentModelSupport: () => providers.attachmentSupport,
+    findNewConversationModel: () => providers.newConversationModel,
+    calculateModelAvailability: (model) =>
+      providers.modelAvailabilities.get(buildModelAvailabilityKey(model)) ?? {
+        status: "not-listed"
+      },
     readGenerationOptions: () => providers.generationOptions,
     readNewConversationAgentCode: (selectedAgentCode) =>
       calculateListedAgentCode(selectedAgentCode, providers.listedAgentCodes),
@@ -340,7 +421,11 @@ describe("createChatViewStore", () => {
       ]
     ])("refuses %s", async (_case, file, support, message) => {
       const { store, providers } = createChatHarness()
-      providers.attachmentSupport = support
+      setModelAvailability(
+        providers,
+        QWEN_MODEL,
+        buildLoadedAvailability(QWEN_MODEL, support)
+      )
 
       await store.getState().addAttachments([file])
 
@@ -350,9 +435,13 @@ describe("createChatViewStore", () => {
       })
     })
 
-    it("refuses every file while no loaded model is listed", async () => {
+    it("refuses every file while the conversation's model is not loaded", async () => {
       const { store, providers } = createChatHarness()
-      providers.attachmentSupport = undefined
+      setModelAvailability(providers, QWEN_MODEL, {
+        status: "not-loaded",
+        modelLoading: "lys",
+        model: buildLlmInfo(QWEN_MODEL.modelKey, FULL_ATTACHMENT_SUPPORT)
+      })
 
       await store
         .getState()
@@ -535,7 +624,7 @@ describe("createChatViewStore", () => {
       expect(backend.requests[0]?.body).toEqual({
         conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
         message: "Hello",
-        model: "qwen3-8b",
+        model: QWEN_MODEL,
         generationOptions: { temperature: 0.4, replyCeiling: 256 }
       })
       streams[0]?.close()
@@ -638,7 +727,7 @@ describe("createChatViewStore", () => {
       expect(backend.requests[0]?.body).toEqual({
         conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
         message: "Read my notes",
-        model: "qwen3-8b",
+        model: QWEN_MODEL,
         generationOptions: { temperature: 0.4, replyCeiling: 256 },
         ...toolFields
       })
@@ -891,10 +980,10 @@ describe("createChatViewStore", () => {
       ])
     })
 
-    it("records why chat is unavailable without a loaded model and keeps the draft", async () => {
+    it("records why chat is unavailable without a model and keeps the draft", async () => {
       const { backend } = startChatBackend()
       const { store, providers } = createChatHarness()
-      providers.eligibleModel = null
+      providers.newConversationModel = null
       store.getState().setInputDraft("Hello")
 
       await store.getState().sendMessage()
@@ -934,9 +1023,9 @@ describe("createChatViewStore", () => {
     it("clears an earlier error when a request starts", async () => {
       startChatBackend()
       const { store, providers } = createChatHarness()
-      providers.eligibleModel = null
+      providers.newConversationModel = null
       await store.getState().sendMessage("Hello")
-      providers.eligibleModel = "qwen3-8b"
+      providers.newConversationModel = QWEN_MODEL
 
       void store.getState().sendMessage("Hello")
 
@@ -1551,6 +1640,218 @@ describe("openConversation", () => {
   })
 })
 
+/** Stored conversation whose latest reply was answered by {@link GROQ_MODEL}. */
+const GROQ_ID = createFixtureUuidV7(40)
+const GROQ_CONVERSATION = buildConversation(GROQ_ID, "Groq", [
+  buildUserMessage(41, "Earlier"),
+  {
+    ...buildCompletedAssistantMessage(42, "Groq answer"),
+    model: GROQ_MODEL.modelKey,
+    provider: GROQ_MODEL.provider
+  }
+])
+
+/**
+ * Opens a stored conversation in a fresh harness whose backend also answers
+ * chat requests.
+ *
+ * @param conversation - Stored conversation the backend returns.
+ * @returns The harness, the backend, and the chat streams in order.
+ */
+async function openStoredConversation(conversation: Conversation) {
+  const chat = startChatBackend(buildStoredConversationRoutes(conversation))
+  const harness = createChatHarness()
+  await harness.store.getState().openConversation(conversation.id)
+  return { ...harness, ...chat }
+}
+
+describe("the conversation's model", () => {
+  describe("findLatestReplyModel", () => {
+    it("finds the latest reply that names its provider, skipping replies stored before replies named one", () => {
+      const conversation = buildConversation(GROQ_ID, null, [
+        ...GROQ_CONVERSATION.messages,
+        buildUserMessage(43, "Later"),
+        buildCompletedAssistantMessage(44, "Answer without a provider")
+      ])
+
+      expect(
+        findLatestReplyModel(createStoredChatViewConversation(conversation))
+      ).toEqual(GROQ_MODEL)
+    })
+
+    it.each([
+      ["no conversation is shown", undefined],
+      [
+        "no reply names its provider",
+        createStoredChatViewConversation(STORED_CONVERSATION)
+      ]
+    ])("finds none when %s", (_case, conversation) => {
+      expect(findLatestReplyModel(conversation)).toBeNull()
+    })
+  })
+
+  describe("findShownConversationModel", () => {
+    it("prefers the model pick over the latest reply's model", () => {
+      expect(
+        findShownConversationModel({
+          modelPick: QWEN_MODEL,
+          conversation: createStoredChatViewConversation(GROQ_CONVERSATION)
+        })
+      ).toEqual(QWEN_MODEL)
+    })
+
+    it("takes the latest reply's model without a pick, and none when neither names one", () => {
+      expect(
+        findShownConversationModel({
+          modelPick: null,
+          conversation: createStoredChatViewConversation(GROQ_CONVERSATION)
+        })
+      ).toEqual(GROQ_MODEL)
+      expect(
+        findShownConversationModel({
+          modelPick: null,
+          conversation: createStoredChatViewConversation(STORED_CONVERSATION)
+        })
+      ).toBeNull()
+    })
+  })
+
+  it("sends a new conversation to the picked model instead of the new conversation's model", async () => {
+    const { backend, streams } = startChatBackend()
+    const { store, providers } = createChatHarness()
+    setModelAvailability(
+      providers,
+      GROQ_MODEL,
+      buildLoadedAvailability(GROQ_MODEL)
+    )
+
+    store.getState().updateModelPick(GROQ_MODEL)
+    const send = store.getState().sendMessage("Hello")
+    await waitForMicrotasks()
+    streams[0]?.close()
+    await send
+
+    expect(store.getState().modelPick).toEqual(GROQ_MODEL)
+    expect(backend.requests[0]?.body).toHaveProperty("model", GROQ_MODEL)
+  })
+
+  it("sends a stored conversation's next message to the model of its latest reply", async () => {
+    const { store, providers, backend, streams } =
+      await openStoredConversation(GROQ_CONVERSATION)
+    setModelAvailability(
+      providers,
+      GROQ_MODEL,
+      buildLoadedAvailability(GROQ_MODEL)
+    )
+
+    const send = store.getState().sendMessage("Next")
+    await waitForMicrotasks()
+    streams[0]?.close()
+    await send
+
+    const chatRequest = backend.requests.find(
+      (request) => request.method === "POST"
+    )
+    expect(chatRequest?.body).toMatchObject({
+      conversation: { kind: "existing", id: GROQ_ID },
+      model: GROQ_MODEL
+    })
+  })
+
+  it("sends a stored conversation whose replies name no provider to the new conversation's model", async () => {
+    const { store, backend, streams } =
+      await openStoredConversation(STORED_CONVERSATION)
+
+    const send = store.getState().sendMessage("Next")
+    await waitForMicrotasks()
+    streams[0]?.close()
+    await send
+
+    const chatRequest = backend.requests.find(
+      (request) => request.method === "POST"
+    )
+    expect(chatRequest?.body).toHaveProperty("model", QWEN_MODEL)
+  })
+
+  it.each<[string, ModelAvailability]>([
+    ["is turned off", { status: "provider-off" }],
+    ["cannot be reached", { status: "provider-unreachable" }],
+    [
+      "lists it as not loaded",
+      {
+        status: "not-loaded",
+        modelLoading: "provider",
+        model: buildLlmInfo(GROQ_MODEL.modelKey)
+      }
+    ],
+    ["does not list it", { status: "not-listed" }]
+  ])(
+    "refuses to send while the conversation's model's provider %s, sending nothing to the loaded new-conversation model instead",
+    async (_case, availability) => {
+      const { store, providers, backend } =
+        await openStoredConversation(GROQ_CONVERSATION)
+      setModelAvailability(providers, GROQ_MODEL, availability)
+      store.getState().setInputDraft("Next")
+
+      await store.getState().sendMessage()
+
+      expect(store.getState()).toMatchObject({
+        inputDraft: "Next",
+        request: { status: "idle" },
+        error: expect.stringContaining("Chat is unavailable") as string
+      })
+      expect(listRouteKeys(backend)).toEqual([
+        `GET /api/v1/conversations/${GROQ_ID}`
+      ])
+    }
+  )
+
+  it("stages only what the picked model can take", async () => {
+    const { store, providers } = createChatHarness()
+    setModelAvailability(
+      providers,
+      GROQ_MODEL,
+      buildLoadedAvailability(GROQ_MODEL, {
+        vision: false,
+        trainedForToolUse: true
+      })
+    )
+    store.getState().updateModelPick(GROQ_MODEL)
+
+    await store
+      .getState()
+      .addAttachments([
+        buildPngFile("photo.png"),
+        buildTextFile("notes.md", "# Notes")
+      ])
+
+    expect(store.getState()).toMatchObject({
+      attachments: [{ draft: { name: "notes.md" } }],
+      attachmentRefusal: { message: "Images need a model with vision" }
+    })
+  })
+
+  it("drops the pick when the conversation is reset", () => {
+    const { store } = createChatHarness()
+    store.getState().updateModelPick(GROQ_MODEL)
+
+    store.getState().resetConversation()
+
+    expect(store.getState().modelPick).toBeNull()
+  })
+
+  it("drops the pick when a stored conversation opens, so its latest reply's model applies", async () => {
+    startBackendFake(buildStoredConversationRoutes(GROQ_CONVERSATION))
+    const { store } = createChatHarness()
+    store.getState().updateModelPick(QWEN_MODEL)
+
+    await store.getState().openConversation(GROQ_ID)
+
+    expect(store.getState().modelPick).toBeNull()
+    expect(findShownConversationModel(store.getState())).toEqual(GROQ_MODEL)
+  })
+})
+
 describe("following a stored reply", () => {
   it("follows a reply still generating from its snapshot to its end", async () => {
     const { replyStreams } = startFollowBackend(
@@ -1920,11 +2221,45 @@ describe("closeConversation", () => {
 })
 
 describe("useChatViewStore", () => {
+  /** Model LM Studio has loaded in every case of this suite. */
+  const RESIDENT_MODEL: LlmModelReference = Object.freeze({
+    provider: "lmStudio",
+    modelKey: "resident"
+  })
+
+  /**
+   * Builds the providers' states in which LM Studio is connected and lists
+   * {@link RESIDENT_MODEL} as loaded.
+   *
+   * @param variation - What the resident model can do; by default, neither
+   * images nor tool use.
+   * @returns Every provider's state, initial except for LM Studio's.
+   */
+  function buildResidentProviderModels(variation: LlmInfoVariation = {}) {
+    return buildProviderModelStates({
+      lmStudio: {
+        status: "connected",
+        inventory: {
+          status: "ready",
+          modelLoading: "lys",
+          models: [
+            buildLlmInfo(RESIDENT_MODEL.modelKey, {
+              ...variation,
+              loaded: true
+            })
+          ]
+        }
+      }
+    })
+  }
+
   /**
    * Loads fresh application and chat-view stores, with a running backend
-   * at {@link FIXTURE_BACKEND_URL} that has loaded `resident` weights. The tool,
-   * agent, and tool-call stores the chat view reads are fresh as well, with
-   * no tool list read, no agent list read, and nothing followed.
+   * at {@link FIXTURE_BACKEND_URL}, LM Studio the only provider turned on,
+   * no default model, and {@link RESIDENT_MODEL} loaded, so a new
+   * conversation uses it. The tool, agent, and tool-call stores the chat
+   * view reads are fresh as well, with no tool list read, no agent list
+   * read, and nothing followed.
    *
    * @param replyCeiling - Saved reply ceiling; zero means no limit.
    * @returns Both store hooks.
@@ -1937,13 +2272,33 @@ describe("useChatViewStore", () => {
     useLysStore.setState({
       backendUrl: FIXTURE_BACKEND_URL,
       backendServerInfo: { status: "running" },
-      modelRuntime: { status: "loaded", modelKey: "resident" },
+      providerModels: buildResidentProviderModels(),
       settings: {
         ...settings,
+        providers: { ...settings.providers, enabled: ["lmStudio"] },
+        runtime: { ...settings.runtime, defaultModel: null },
         generation: { temperature: 0.3, replyCeiling }
       }
     })
     return { useLysStore, useChatViewStore }
+  }
+
+  /**
+   * Replaces what the resident model can do, as a fresh inventory read
+   * would report it.
+   *
+   * @param useLysStore - Application store of the fresh module graph.
+   * @param variation - What the resident model can do.
+   */
+  function setResidentModel(
+    useLysStore: Awaited<
+      ReturnType<typeof loadFreshChatViewStore>
+    >["useLysStore"],
+    variation: LlmInfoVariation
+  ): void {
+    useLysStore.setState({
+      providerModels: buildResidentProviderModels(variation)
+    })
   }
 
   /**
@@ -1986,7 +2341,7 @@ describe("useChatViewStore", () => {
       expect(backend.requests[0]?.body).toEqual({
         conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
         message: "Hello",
-        model: "resident",
+        model: RESIDENT_MODEL,
         generationOptions
       })
       streams[0]?.close()
@@ -2004,15 +2359,7 @@ describe("useChatViewStore", () => {
         })
     })
     const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
-    useLysStore.setState({
-      modelInventory: {
-        status: "ready",
-        modelLoading: "lys",
-        models: [
-          buildLlmInfo("resident", { loaded: true, trainedForToolUse: true })
-        ]
-      }
-    })
+    setResidentModel(useLysStore, { trainedForToolUse: true })
 
     const send = useChatViewStore.getState().sendMessage("Read my notes")
     await waitForMicrotasks()
@@ -2038,15 +2385,7 @@ describe("useChatViewStore", () => {
         })
     })
     const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
-    useLysStore.setState({
-      modelInventory: {
-        status: "ready",
-        modelLoading: "lys",
-        models: [
-          buildLlmInfo("resident", { loaded: true, trainedForToolUse: true })
-        ]
-      }
-    })
+    setResidentModel(useLysStore, { trainedForToolUse: true })
     setToolSwitches(useLysStore, { read_page: true, find_files: false })
 
     const send = useChatViewStore.getState().sendMessage("Read my notes")
@@ -2073,15 +2412,7 @@ describe("useChatViewStore", () => {
         })
     })
     const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
-    useLysStore.setState({
-      modelInventory: {
-        status: "ready",
-        modelLoading: "lys",
-        models: [
-          buildLlmInfo("resident", { loaded: true, trainedForToolUse: true })
-        ]
-      }
-    })
+    setResidentModel(useLysStore, { trainedForToolUse: true })
     setToolSwitches(useLysStore, { web_search: true })
 
     const send = useChatViewStore.getState().sendMessage("Search the news")
@@ -2111,15 +2442,7 @@ describe("useChatViewStore", () => {
       })
       const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
       const { useToolStore } = await import("@/lib/store/tools")
-      useLysStore.setState({
-        modelInventory: {
-          status: "ready",
-          modelLoading: "lys",
-          models: [
-            buildLlmInfo("resident", { loaded: true, trainedForToolUse: true })
-          ]
-        }
-      })
+      setResidentModel(useLysStore, { trainedForToolUse: true })
       if (listState === "failed")
         useToolStore.setState({
           list: { status: "failed", error: "Lys couldn't read its tool list." }
@@ -2138,7 +2461,7 @@ describe("useChatViewStore", () => {
       expect(backend.requests[0]?.body).toEqual({
         conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
         message: "Read my notes",
-        model: "resident",
+        model: RESIDENT_MODEL,
         generationOptions: { temperature: 0.3 },
         areToolCallsSwitchedOff: true
       })
@@ -2150,15 +2473,7 @@ describe("useChatViewStore", () => {
     const host = startNativeHostFake({ list_tools: () => TOOLS })
     const { backend, streams } = startChatBackend()
     const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
-    useLysStore.setState({
-      modelInventory: {
-        status: "ready",
-        modelLoading: "lys",
-        models: [
-          buildLlmInfo("resident", { loaded: true, trainedForToolUse: false })
-        ]
-      }
-    })
+    setResidentModel(useLysStore, { trainedForToolUse: false })
     setToolSwitches(useLysStore, { find_files: false })
 
     const send = useChatViewStore.getState().sendMessage("Hello")
@@ -2190,15 +2505,7 @@ describe("useChatViewStore", () => {
     })
     const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
     const { useToolStore } = await import("@/lib/store/tools")
-    useLysStore.setState({
-      modelInventory: {
-        status: "ready",
-        modelLoading: "lys",
-        models: [
-          buildLlmInfo("resident", { loaded: true, trainedForToolUse: true })
-        ]
-      }
-    })
+    setResidentModel(useLysStore, { trainedForToolUse: true })
     const firstRead = useToolStore.getState().loadTools()
     await waitForMicrotasks()
     toolList.responses[0]?.resolve(
@@ -2236,19 +2543,7 @@ describe("useChatViewStore", () => {
 
   it("stages what the application store's loaded model can take", async () => {
     const { useLysStore, useChatViewStore } = await loadFreshChatViewStore(0)
-    useLysStore.setState({
-      modelInventory: {
-        status: "ready",
-        modelLoading: "lys",
-        models: [
-          buildLlmInfo("resident", {
-            loaded: true,
-            vision: false,
-            trainedForToolUse: true
-          })
-        ]
-      }
-    })
+    setResidentModel(useLysStore, { vision: false, trainedForToolUse: true })
 
     await useChatViewStore
       .getState()

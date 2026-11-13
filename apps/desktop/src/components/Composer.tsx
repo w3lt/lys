@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { useAnsweringAgent } from "@/lib/hooks/answeringAgent"
 import { useChatContextMeasurement } from "@/lib/hooks/chatContextMeasurement"
+import { useConversationModel } from "@/lib/hooks/conversationModel"
 import { useLysStore } from "@/lib/store"
 import { useAgentStore } from "@/lib/store/agents"
 import {
@@ -34,6 +35,7 @@ import ComposerToolCallPrompt from "./ComposerComponents/ComposerToolCallPrompt"
 import { buildContextMeterState } from "./ComposerComponents/composer-context"
 import {
   calculateComposerActivity,
+  findReconnectSettingsPane,
   formatComposerActivity,
   formatComposerModelLabel,
   formatComposerPlaceholder,
@@ -41,9 +43,7 @@ import {
   formatUnavailableRuntimeMessage,
   calculateLocalRuntimeConnection
 } from "./ComposerComponents/composer-presentation"
-import { calculateModelRuntimeAvailability } from "@/lib/models/lm-studio-connection"
 import { describeLlmProviderTarget } from "@/lib/models/llm-provider-target"
-import { readObservedModelLoading } from "@/lib/store/model-runtime"
 
 import "./Composer.scss"
 
@@ -81,11 +81,15 @@ export type ComposerProps = {
  * meter could not measure, or is measuring again, can still be sent; the
  * backend checks every round before sending it. The Past conversations button
  * opens history, or closes it when open, and exposes that state through
- * `aria-expanded`. While generation is unavailable, a banner names the first
- * missing prerequisite — the backend, LM Studio, or loaded weights — and its
- * action starts a stopped backend or opens the settings pane that fixes the
- * problem: Runtime for the backend and LM Studio, Model for inventory and
- * loading.
+ * `aria-expanded`. The next message goes to the conversation's model — the
+ * model picked in the weights menu for the shown conversation, else the
+ * model of its latest reply, else the session's default, else the first
+ * model that can answer — and to no other. While that model cannot answer, a
+ * banner names the first missing prerequisite — the backend, the model's
+ * provider, or its loaded weights — and its action starts a stopped backend
+ * or opens the settings pane that fixes the problem: Runtime for the
+ * backend, Providers for a provider that is off or not reachable, Model for
+ * inventory and loading.
  *
  * The primary control is Stop while a reply is awaited — while the
  * conversation turn is awaited and while the reply streams — and Send
@@ -133,10 +137,10 @@ export type ComposerProps = {
  * file is said in the field's polite status line, which stays in the page
  * while it has nothing to say. Pasted text stays in the draft, however long
  * it is.
- * One affordance is staged ahead of the capability behind it and is
- * deliberately inert: selecting weights updates settings in memory only,
- * since this view does not persist them. Context figures come from the
- * backend's measurement of the conversation with the loaded model, plus an
+ * Choosing a model in the weights menu picks it for the shown conversation
+ * only, until another conversation is shown; it changes neither the default
+ * nor the settings. Context figures come from the
+ * backend's measurement of the conversation with its loaded model, plus an
  * estimate of the draft and of the staged images, and are marked `~`
  * wherever they appear; staged text files are read on request, so they are
  * not counted.
@@ -150,16 +154,11 @@ export function Composer({
   onStartConversation
 }: ComposerProps): ReactElement {
   const backendServerInfo = useLysStore((state) => state.backendServerInfo)
-  const modelRuntime = useLysStore((state) => state.modelRuntime)
-  const modelLoading = useLysStore((state) =>
-    readObservedModelLoading(state.modelInventory)
-  )
-  const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
   const settings = useLysStore((state) => state.settings)
   const setActiveView = useLysStore((state) => state.setActiveView)
   const setSettingsPane = useLysStore((state) => state.setSettingsPane)
-  const setSettings = useLysStore((state) => state.setSettings)
   const startBackend = useLysStore((state) => state.startBackend)
+  const conversationModel = useConversationModel()
 
   const attachments = useChatViewStore((state) => state.attachments)
   const attachmentRefusal = useChatViewStore((state) => state.attachmentRefusal)
@@ -174,6 +173,7 @@ export function Composer({
   const setInputDraft = useChatViewStore((state) => state.setInputDraft)
   const addAttachments = useChatViewStore((state) => state.addAttachments)
   const stopStreaming = useChatViewStore((state) => state.stopStreaming)
+  const updateModelPick = useChatViewStore((state) => state.updateModelPick)
 
   const agentList = useAgentStore((state) => state.list)
   const answeringAgent = useAnsweringAgent()
@@ -195,15 +195,15 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const backendStatus = backendServerInfo.status
+  const { model, availability } = conversationModel
   const connection = calculateLocalRuntimeConnection(
     backendStatus,
-    lmStudioStatus,
-    modelRuntime
+    availability
   )
-  const isModelRuntimeAvailable =
-    calculateModelRuntimeAvailability(backendStatus, lmStudioStatus) ===
-    "available"
-  const provider = describeLlmProviderTarget(settings.providers)
+  const provider = describeLlmProviderTarget(
+    model?.provider ?? "lmStudio",
+    settings.providers
+  )
   const isUnavailable = connection !== "ready"
   const activity = calculateComposerActivity(request, conversationOpen)
   const activityLabel = formatComposerActivity(activity)
@@ -362,21 +362,6 @@ export function Composer({
     void addAttachments(Array.from(event.dataTransfer.files))
   }
 
-  /**
-   * Records the chosen weights in memory without persisting them.
-   *
-   * @param modelKey - Model identifier chosen from the weights menu.
-   * @remarks The application store persists only generation edits, so this
-   * runtime selection stays in memory and is lost on restart until runtime
-   * settings are saved.
-   */
-  function handleSelectModel(modelKey: string): void {
-    setSettings({
-      ...settings,
-      runtime: { ...settings.runtime, defaultModel: modelKey }
-    })
-  }
-
   /** Opens past conversations, or closes them when they are already open. */
   function handleHistoryClick(): void {
     if (isHistoryOpen) {
@@ -397,8 +382,12 @@ export function Composer({
       return
     }
 
-    // Runtime owns backend and provider recovery; Model owns inventory and loading.
-    setSettingsPane(isModelRuntimeAvailable ? "model" : "runtime")
+    // Runtime owns the backend, Providers each provider, Model inventory and loading.
+    setSettingsPane(
+      backendStatus === "running"
+        ? findReconnectSettingsPane(availability)
+        : "runtime"
+    )
     setActiveView("settings")
   }
 
@@ -420,17 +409,16 @@ export function Composer({
         <ComposerOfflineBanner
           action={formatReconnectAction({
             backendStatus,
-            lmStudioStatus,
-            modelRuntime,
-            modelLoading,
+            model,
+            availability,
             provider
           })}
           message={formatUnavailableRuntimeMessage({
             backendStatus,
             backendAddress: settings.runtime.backendAddress,
-            lmStudioStatus,
-            provider,
-            modelRuntime
+            model,
+            availability,
+            provider
           })}
           onReconnect={handleReconnect}
         />
@@ -500,7 +488,7 @@ export function Composer({
                 connection,
                 activity,
                 answeringAgent,
-                provider.name
+                model === null ? null : provider.name
               )}
               ref={messageFieldRef}
               rows={1}
@@ -587,14 +575,14 @@ export function Composer({
             <span aria-hidden="true" className="composer__divider" />
 
             <ComposerModelMenu
+              availability={availability}
               label={formatComposerModelLabel(
                 backendStatus,
-                modelRuntime,
-                settings.runtime.defaultModel
+                model,
+                availability
               )}
-              modelRuntime={modelRuntime}
-              onSelectModel={handleSelectModel}
-              selectedModelKey={settings.runtime.defaultModel}
+              onSelectModel={updateModelPick}
+              selectedModel={model}
             />
           </div>
 

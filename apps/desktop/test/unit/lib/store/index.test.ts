@@ -8,6 +8,7 @@ import type {
   LysSettings,
   RuntimeSettings
 } from "@/lib/store/settings"
+import { INITIAL_PROVIDER_MODEL_STATES } from "@/lib/store/model-runtime"
 import type { VmoServerInfo } from "@/lib/store/vmo-runtime"
 import {
   buildJsonResponse,
@@ -27,6 +28,7 @@ import {
   createSettlementReader,
   waitForMicrotasks
 } from "../../support/settlement"
+import { buildProviderStatusRoutes } from "../../support/providerModelFixtures"
 import {
   isSettingsWrite,
   STORED_EMAIL_ACCOUNT,
@@ -40,30 +42,45 @@ import {
 const BACKEND_URL = "http://127.0.0.1:12345"
 
 /** Runtime group on disk with autostart off and a listed default model. */
-const DISK_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
+const DISK_RUNTIME_DOCUMENT: SettingsDocument["runtime"] = Object.freeze({
   autoStartBackend: false,
   autoStartVmo: false,
   defaultModel: "on-disk",
   backendAddress: BACKEND_URL
 })
 
+/** The store's runtime group once {@link DISK_RUNTIME_DOCUMENT} is loaded. */
+const DISK_RUNTIME_SETTINGS = Object.freeze({
+  ...DISK_RUNTIME_DOCUMENT,
+  defaultModel: Object.freeze({ provider: "lmStudio", modelKey: "on-disk" })
+} satisfies RuntimeSettings)
+
+/** Providers group on disk: only LM Studio on, so the default names its model. */
+const DISK_PROVIDERS_SETTINGS = llmProviderSettingsSchema.parse({
+  ...STORED_SETTINGS_DOCUMENT.providers,
+  enabled: ["lmStudio"]
+})
+
 /** Settings document on disk with autostart off and a default model chosen. */
 const DISK_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
   ...STORED_SETTINGS_DOCUMENT,
-  runtime: DISK_RUNTIME_SETTINGS
+  runtime: DISK_RUNTIME_DOCUMENT,
+  providers: DISK_PROVIDERS_SETTINGS
 })
 
 /** The store's settings once {@link DISK_SETTINGS_DOCUMENT} is loaded. */
 const DISK_SETTINGS: LysSettings = Object.freeze({
   ...STORED_SETTINGS,
-  runtime: DISK_RUNTIME_SETTINGS
+  runtime: DISK_RUNTIME_SETTINGS,
+  providers: DISK_PROVIDERS_SETTINGS
 })
 
 /** Runtime group on disk with backend autostart on. */
-const BACKEND_AUTOSTART_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
-  ...DISK_RUNTIME_SETTINGS,
-  autoStartBackend: true
-})
+const BACKEND_AUTOSTART_RUNTIME_SETTINGS: SettingsDocument["runtime"] =
+  Object.freeze({
+    ...DISK_RUNTIME_DOCUMENT,
+    autoStartBackend: true
+  })
 
 /** Settings document on disk with backend autostart on. */
 const AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
@@ -72,10 +89,11 @@ const AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
 })
 
 /** Runtime group on disk with only vmo autostart on. */
-const VMO_AUTOSTART_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
-  ...DISK_RUNTIME_SETTINGS,
-  autoStartVmo: true
-})
+const VMO_AUTOSTART_RUNTIME_SETTINGS: SettingsDocument["runtime"] =
+  Object.freeze({
+    ...DISK_RUNTIME_DOCUMENT,
+    autoStartVmo: true
+  })
 
 /** Settings document on disk with only vmo autostart on. */
 const VMO_AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
@@ -84,11 +102,12 @@ const VMO_AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
 })
 
 /** Runtime group on disk with backend and vmo autostart on. */
-const BOTH_AUTOSTART_RUNTIME_SETTINGS: RuntimeSettings = Object.freeze({
-  ...DISK_RUNTIME_SETTINGS,
-  autoStartBackend: true,
-  autoStartVmo: true
-})
+const BOTH_AUTOSTART_RUNTIME_SETTINGS: SettingsDocument["runtime"] =
+  Object.freeze({
+    ...DISK_RUNTIME_DOCUMENT,
+    autoStartBackend: true,
+    autoStartVmo: true
+  })
 
 /** Settings document on disk with backend and vmo autostart on. */
 const BOTH_AUTOSTART_SETTINGS_DOCUMENT: SettingsDocument = Object.freeze({
@@ -102,9 +121,9 @@ const EDITED_GENERATION_SETTINGS: GenerationSettings = Object.freeze({
   replyCeiling: 0
 })
 
-/** Providers group a save changes to: Groq is active, with no address saved. */
+/** Providers group a save changes to: LM Studio and Groq on, no address saved. */
 const EDITED_PROVIDERS_SETTINGS = llmProviderSettingsSchema.parse({
-  active: "groq",
+  enabled: ["lmStudio", "groq"],
   lmStudio: { address: null },
   ollama: { address: null }
 })
@@ -149,12 +168,20 @@ const INVENTORY = [
   buildLlmInfo("on-disk")
 ]
 
-/** Backend that answers health, reports LM Studio connected, and lists models. */
+/** Route key of LM Studio's status read. */
+const LM_STUDIO_STATUS_ROUTE = "GET /api/v1/llm/lmStudio/runtime"
+
+/** Route key of LM Studio's inventory read. */
+const LM_STUDIO_LIST_ROUTE = "GET /api/v1/llm/lmStudio/list"
+
+/**
+ * Backend that answers health, reports LM Studio connected and every other
+ * provider off, and lists LM Studio's models.
+ */
 const CONNECTED_BACKEND: BackendRoutes = Object.freeze({
   "GET /api/v1/heath": () => buildJsonResponse(200, { status: "ok" }),
-  "GET /api/v1/llm/runtime": () =>
-    buildJsonResponse(200, { status: "connected" }),
-  "GET /api/v1/llm/list": () =>
+  ...buildProviderStatusRoutes({ lmStudio: "connected" }),
+  [LM_STUDIO_LIST_ROUTE]: () =>
     buildJsonResponse(200, { llms: INVENTORY, modelLoading: "lys" })
 })
 
@@ -376,8 +403,7 @@ describe("useLysStore", () => {
       backendUrl: BACKEND_URL,
       initializing: true,
       backendServerInfo: { status: "stopped" },
-      lmStudioStatus: "unknown",
-      modelRuntime: { status: "unavailable" },
+      providerModels: INITIAL_PROVIDER_MODEL_STATES,
       settings: {
         runtime: { autoStartBackend: true, defaultModel: null },
         generation: { temperature: 0.7, replyCeiling: 2048 }
@@ -394,7 +420,7 @@ describe("useLysStore", () => {
       emailPassword: null
     })
     expect(useLysStore.getState().settings.providers).toEqual({
-      active: "lmStudio",
+      enabled: ["lmStudio"],
       lmStudio: { address: null },
       ollama: { address: null }
     })
@@ -587,7 +613,7 @@ describe("useLysStore", () => {
   })
 
   describe("startBackend", () => {
-    it("publishes running once the health route answers, then reads LM Studio and lists models", async () => {
+    it("publishes running once the health route answers, then reads every provider and lists the connected one's models", async () => {
       vi.useFakeTimers({ toFake: ["Date"] })
       vi.setSystemTime(new Date("2026-05-06T07:08:09.000Z"))
       startBackendFake(CONNECTED_BACKEND)
@@ -604,13 +630,20 @@ describe("useLysStore", () => {
           status: "running",
           startedAt: new Date("2026-05-06T07:08:09.000Z"),
           stoppedAt: undefined
-        },
-        lmStudioStatus: "connected",
-        modelInventory: {
-          status: "ready",
-          modelLoading: "lys",
-          models: INVENTORY
         }
+      })
+      expect(useLysStore.getState().providerModels).toMatchObject({
+        lmStudio: {
+          status: "connected",
+          inventory: {
+            status: "ready",
+            modelLoading: "lys",
+            models: INVENTORY
+          }
+        },
+        ollama: { status: "off", inventory: { status: "unavailable" } },
+        ollamaCloud: { status: "off", inventory: { status: "unavailable" } },
+        groq: { status: "off", inventory: { status: "unavailable" } }
       })
     })
 
@@ -694,7 +727,7 @@ describe("useLysStore", () => {
   })
 
   describe("stopBackend", () => {
-    it("stops a running backend and releases the LM Studio and model observations", async () => {
+    it("stops a running backend and releases every provider's status and models", async () => {
       startBackendFake(CONNECTED_BACKEND)
       const host = startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
@@ -706,9 +739,7 @@ describe("useLysStore", () => {
       expect(listCommandNames(host).at(-1)).toBe("stop_backend")
       expect(useLysStore.getState()).toMatchObject({
         backendServerInfo: { status: "stopped", stoppedAt: expect.any(Date) },
-        lmStudioStatus: "unknown",
-        modelInventory: { status: "unavailable" },
-        modelRuntime: { status: "unavailable" }
+        providerModels: INITIAL_PROVIDER_MODEL_STATES
       })
     })
 
@@ -733,8 +764,7 @@ describe("useLysStore", () => {
             startedAt: expect.any(Date),
             stoppedAt: status === "stopped" ? expect.any(Date) : undefined
           },
-          lmStudioStatus: "unknown",
-          modelRuntime: { status: "unavailable" }
+          providerModels: INITIAL_PROVIDER_MODEL_STATES
         })
       }
     )
@@ -862,7 +892,7 @@ describe("useLysStore", () => {
 
       const newSettings: SettingsDocument = {
         ...DISK_SETTINGS_DOCUMENT,
-        runtime
+        runtime: { ...DISK_RUNTIME_DOCUMENT, autoStartVmo: true }
       }
       const saveSettingsArgs = { newSettings }
       expect(host.commands.at(-1)).toEqual({
@@ -879,49 +909,18 @@ describe("useLysStore", () => {
       const useLysStore = await loadFreshLysStore()
       await useLysStore.getState().initialize()
 
+      const defaultModel = { provider: "groq", modelKey: "resident" } as const
       const runtime: RuntimeSettings = {
         ...DISK_RUNTIME_SETTINGS,
-        defaultModel: "resident"
+        defaultModel
       }
       useLysStore.getState().setSettings({ ...DISK_SETTINGS, runtime })
       await waitForMicrotasks()
 
-      expect(useLysStore.getState().settings.runtime.defaultModel).toBe(
-        "resident"
+      expect(useLysStore.getState().settings.runtime.defaultModel).toEqual(
+        defaultModel
       )
       expect(listCommandNames(host)).not.toContain("save_settings")
-    })
-
-    it("re-derives the resident model summary from a new default model", async () => {
-      startBackendFake({
-        ...CONNECTED_BACKEND,
-        "GET /api/v1/llm/list": () =>
-          buildJsonResponse(200, {
-            llms: [
-              buildLlmInfo("first", { loaded: true }),
-              buildLlmInfo("on-disk", { loaded: true }),
-              buildLlmInfo("later", { loaded: true })
-            ],
-            modelLoading: "lys"
-          })
-      })
-      startDesktopHost(DISK_SETTINGS_DOCUMENT)
-      const useLysStore = await loadFreshLysStore()
-      await useLysStore.getState().initialize()
-      await useLysStore.getState().startBackend()
-      await waitForMicrotasks()
-      const before = useLysStore.getState().modelRuntime
-
-      useLysStore.getState().setSettings({
-        ...useLysStore.getState().settings,
-        runtime: { ...DISK_RUNTIME_SETTINGS, defaultModel: "later" }
-      })
-
-      expect(before).toEqual({ status: "loaded", modelKey: "on-disk" })
-      expect(useLysStore.getState().modelRuntime).toEqual({
-        status: "loaded",
-        modelKey: "later"
-      })
     })
   })
 
@@ -934,7 +933,7 @@ describe("useLysStore", () => {
        */
       const autosavedGroupsEditedSettings: LysSettings = Object.freeze({
         ...DISK_SETTINGS,
-        runtime: VMO_AUTOSTART_RUNTIME_SETTINGS,
+        runtime: { ...DISK_RUNTIME_SETTINGS, autoStartVmo: true },
         generation: EDITED_GENERATION_SETTINGS,
         loadConfiguration: {
           default: DISK_SETTINGS.loadConfiguration.default,
@@ -1094,16 +1093,17 @@ describe("useLysStore", () => {
     })
   })
 
-  describe("LM Studio and model coordination", () => {
-    it("re-reads the LM Studio status after a model request fails", async () => {
+  describe("provider and model coordination", () => {
+    it("re-reads a provider's status after its model request fails, and releases its models once it is not reachable", async () => {
       let isConnected = true
       startBackendFake({
         ...CONNECTED_BACKEND,
-        "GET /api/v1/llm/runtime": () =>
+        [LM_STUDIO_STATUS_ROUTE]: () =>
           buildJsonResponse(200, {
             status: isConnected ? "connected" : "unreachable"
           }),
-        "POST /api/v1/llm/load": () => Promise.reject(createTransportFailure())
+        "POST /api/v1/llm/lmStudio/load": () =>
+          Promise.reject(createTransportFailure())
       })
       startDesktopHost(DISK_SETTINGS_DOCUMENT)
       const useLysStore = await loadFreshLysStore()
@@ -1111,11 +1111,77 @@ describe("useLysStore", () => {
       await waitForMicrotasks()
       isConnected = false
 
-      await useLysStore.getState().loadModel("on-disk")
+      await useLysStore
+        .getState()
+        .loadModel({ provider: "lmStudio", modelKey: "on-disk" })
 
-      expect(useLysStore.getState()).toMatchObject({
-        lmStudioStatus: "unreachable",
-        modelInventory: { status: "unavailable" }
+      expect(useLysStore.getState().providerModels.lmStudio).toMatchObject({
+        status: "unreachable",
+        inventory: { status: "unavailable" }
+      })
+    })
+
+    it("lists every connected provider's models while another provider cannot be reached", async () => {
+      const groqModels = [buildLlmInfo("llama-3.3-70b", { loaded: true })]
+      startBackendFake({
+        "GET /api/v1/heath": () => buildJsonResponse(200, { status: "ok" }),
+        ...buildProviderStatusRoutes({
+          lmStudio: "unreachable",
+          groq: "connected"
+        }),
+        "GET /api/v1/llm/groq/list": () =>
+          buildJsonResponse(200, { llms: groqModels, modelLoading: "provider" })
+      })
+      startDesktopHost({
+        ...DISK_SETTINGS_DOCUMENT,
+        providers: EDITED_PROVIDERS_SETTINGS
+      })
+      const useLysStore = await loadFreshLysStore()
+      await useLysStore.getState().initialize()
+
+      await useLysStore.getState().startBackend()
+      await waitForMicrotasks()
+
+      expect(useLysStore.getState().providerModels).toMatchObject({
+        lmStudio: {
+          status: "unreachable",
+          inventory: { status: "unavailable" }
+        },
+        groq: {
+          status: "connected",
+          inventory: {
+            status: "ready",
+            modelLoading: "provider",
+            models: groqModels
+          }
+        }
+      })
+    })
+
+    it("releases a provider's models once the backend reports it off", async () => {
+      let lmStudioStatus = "connected"
+      startBackendFake({
+        ...CONNECTED_BACKEND,
+        [LM_STUDIO_STATUS_ROUTE]: () =>
+          buildJsonResponse(200, { status: lmStudioStatus }),
+        "POST /api/v1/llm/lmStudio/runtime/connect": () =>
+          buildJsonResponse(200, { status: "off" })
+      })
+      startDesktopHost(DISK_SETTINGS_DOCUMENT)
+      const useLysStore = await loadFreshLysStore()
+      await useLysStore.getState().startBackend()
+      await waitForMicrotasks()
+      const listedBeforeOff =
+        useLysStore.getState().providerModels.lmStudio.inventory.status
+      lmStudioStatus = "off"
+
+      await useLysStore.getState().connectProvider("lmStudio")
+
+      expect(listedBeforeOff).toBe("ready")
+      expect(useLysStore.getState().providerModels.lmStudio).toMatchObject({
+        status: "off",
+        inventory: { status: "unavailable" },
+        loadedModelConfigurations: new Map()
       })
     })
   })

@@ -32,9 +32,10 @@ function startModelRow(props: Partial<ComponentProps<typeof ModelRow>> = {}) {
       <ModelRow
         disabled={false}
         isDefault={false}
+        provider="lmStudio"
         model={ON_DISK}
         modelLoading="lys"
-        modelRuntime={{ status: "loaded", modelKey: "qwen3-8b" }}
+        modelRequest={{ status: "idle" }}
         {...actions}
         {...props}
       />
@@ -67,6 +68,21 @@ describe("ModelRow", () => {
     expect(
       screen.getByRole("button", { pressed: true, name: /^gemma-3default/ })
     ).toBeInTheDocument()
+  })
+
+  it("tags the row while its provider's request loads its model, and only that row", () => {
+    startModelRow({ modelRequest: { status: "loading", modelKey: "gemma-3" } })
+    startModelRow({
+      model: RESIDENT,
+      modelRequest: { status: "loading", modelKey: "gemma-3" }
+    })
+
+    expect(screen.getByRole("button", { name: /^gemma-3/ })).toHaveTextContent(
+      /loading$/
+    )
+    expect(screen.getByRole("button", { name: /^qwen3-8b/ })).toHaveTextContent(
+      /loaded$/
+    )
   })
 
   it("loads a model on disk and unloads a resident one", async () => {

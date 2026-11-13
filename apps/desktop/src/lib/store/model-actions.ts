@@ -1,4 +1,5 @@
 import type { LlmTestModelApiResponse } from "@lys/protocol"
+import type { LlmModelReference, LlmProvider } from "@lys/share"
 import type { StoreApi } from "zustand"
 
 import {
@@ -17,82 +18,97 @@ import {
 import {
   addSentModelConfiguration,
   buildLoadedModelConfigurations,
-  buildModelRuntime,
-  initialModelState,
+  RELEASED_PROVIDER_MODELS,
   removeLoadedModelConfiguration,
+  updateProviderModelState,
   type LoadedModelConfigurations,
   type ModelInventoryState,
   type ModelRequestState,
-  type ModelState
+  type ProviderModelState
 } from "./model-runtime"
+import type {
+  ProviderBackendConnection,
+  ProviderModelsState
+} from "./provider-status"
 import type {
   CompleteModelLoadConfiguration,
   LoadConfigurationSettings
 } from "./settings"
 
-/** Connection and selection sampled from the owning application store. */
-export type ModelConnectionState = {
-  /** Backend origin used by model HTTP consumers. */
-  readonly backendUrl: string
-  /** Whether the backend runs and LM Studio is connected, so model requests are admitted. */
-  readonly isModelRuntimeAvailable: boolean
-  /** Current default used only for the compact residency summary. */
-  readonly defaultModel: string | null
-}
-
 /** Store capabilities the model slice reads and notifies. */
 export type ModelSliceDependencies = {
-  /** Reads current model-runtime availability, origin, and selection. */
-  readonly getConnection: () => ModelConnectionState
+  /** Reads the current backend origin and readiness. */
+  readonly getBackendConnection: () => ProviderBackendConnection
   /**
-   * Re-reads the LM Studio status after a request failed or reported an
+   * Re-reads one provider's status after its request failed or reported an
    * unavailable runtime.
    *
+   * @param provider - Provider whose request failed.
    * @remarks Resolves after the status settles and never rejects.
    */
-  readonly handleModelRequestFailure: () => Promise<void>
+  readonly handleModelRequestFailure: (provider: LlmProvider) => Promise<void>
   /**
-   * Reads the stored default and per-model load settings.
+   * Reads the stored default and per-model load settings, which name LM
+   * Studio's models.
    *
    * @remarks Sampled when a load is admitted, so later edits do not change
-   * the settings that load sends, and when an inventory observation finds a
-   * model already loaded.
+   * the settings that load sends, and when an inventory observation finds an
+   * LM Studio model already loaded.
    */
   readonly getLoadConfigurationSettings: () => LoadConfigurationSettings
 }
 
 /**
- * Application model callbacks; request failures are handled in modelError,
- * except an inventory query that finds no connected LLM runtime, which the LM
- * Studio status explains instead.
+ * Application model callbacks, each for one provider; request failures are
+ * handled in that provider's `error`, except an inventory query that finds
+ * the provider's runtime not connected, which its status explains instead.
  */
 export type ModelActions = {
-  /** Queries inventory; resolves after settlement or invalidation, retaining failure in state. */
-  updateModelInventory: () => Promise<void>
   /**
-   * Loads a key with its stored load configuration and reconciles inventory;
-   * backend work can outlive local observation.
+   * Queries one provider's inventory; resolves after settlement or
+   * invalidation, retaining failure in state.
+   *
+   * @param provider - Provider whose models are listed.
    */
-  loadModel: (modelKey: string) => Promise<void>
+  updateModelInventory: (provider: LlmProvider) => Promise<void>
+  /**
+   * Loads a model with its stored load configuration and reconciles its
+   * provider's inventory; backend work can outlive local observation.
+   *
+   * @param model - Model to load.
+   */
+  loadModel: (model: LlmModelReference) => Promise<void>
   /**
    * Applies the stored load configuration to a loaded model: unloads every
    * instance of the key, then loads it again, and reconciles inventory.
    *
+   * @param model - Model to reload.
    * @remarks The published request is `unloading`, then `loading`. A failed
    * unload starts no load. A load that fails after the unload leaves the
-   * model unloaded, with the failure in modelError.
+   * model unloaded, with the failure in the provider's `error`.
    */
-  updateLoadedModelConfiguration: (modelKey: string) => Promise<void>
-  /** Unloads all instances of a key and reconciles inventory, including after failure. */
-  unloadModel: (modelKey: string) => Promise<void>
-  /** Queries loaded-state health without performing inference. */
-  testModel: (modelKey: string) => Promise<void>
-  /** Invalidates local observations and aborts transport without unloading LM Studio weights. */
-  releaseModelRuntime: () => void
+  updateLoadedModelConfiguration: (model: LlmModelReference) => Promise<void>
+  /**
+   * Unloads all instances of a model and reconciles its provider's
+   * inventory, including after failure.
+   *
+   * @param model - Model to unload.
+   */
+  unloadModel: (model: LlmModelReference) => Promise<void>
+  /**
+   * Queries a model's loaded-state health without performing inference.
+   *
+   * @param model - Model to check.
+   */
+  testModel: (model: LlmModelReference) => Promise<void>
+  /**
+   * Invalidates one provider's model observations and aborts its transport
+   * without unloading weights; the provider's status is kept.
+   *
+   * @param provider - Provider whose model state is released.
+   */
+  releaseProviderModels: (provider: LlmProvider) => void
 }
-
-/** Model state and callbacks composed into the application store. */
-export type ModelSlice = ModelState & ModelActions
 
 /** An admitted request, excluding the idle marker. */
 type ActiveModelRequest = Exclude<ModelRequestState, { status: "idle" }>
@@ -102,10 +118,14 @@ type ModelOperation =
   | {
       /** Reads the inventory without changing the runtime. */
       readonly kind: "inventory-read"
+      /** Provider whose inventory is read. */
+      readonly provider: LlmProvider
     }
   | {
       /** Loads, unloads, reads the health of, or reloads one model. */
       readonly kind: "load" | "unload" | "health-read" | "reload"
+      /** Provider of the model the operation addresses. */
+      readonly provider: LlmProvider
       /** Key of the model the operation addresses. */
       readonly modelKey: string
     }
@@ -134,9 +154,9 @@ type ModelOperationStep =
 /** What the steps of one operation have established so far. */
 type ModelOperationProgress = {
   /** Health observation of a health-read step, otherwise null. */
-  readonly modelHealth: LlmTestModelApiResponse | null
+  readonly health: LlmTestModelApiResponse | null
   /** Failure of the step that ended the operation, otherwise null. */
-  readonly modelError: string | null
+  readonly error: string | null
   /** Known load configurations after the completed steps. */
   readonly loadedModelConfigurations: LoadedModelConfigurations
 }
@@ -161,6 +181,7 @@ function buildModelRequest(step: ModelOperationStep): ActiveModelRequest {
 
 /**
  * Sends one step to the backend and records what it established.
+ * @param provider - Provider the step is sent to.
  * @param step - Step to send.
  * @param connection - Origin and cancellation owned by the operation.
  * @param progress - What the earlier steps established; not modified.
@@ -170,6 +191,7 @@ function buildModelRequest(step: ModelOperationStep): ActiveModelRequest {
  * @throws The adapter failure for the step; the progress is then unchanged.
  */
 async function sendModelOperationStep(
+  provider: LlmProvider,
   step: ModelOperationStep,
   connection: ModelApiConnection,
   progress: ModelOperationProgress
@@ -179,7 +201,7 @@ async function sendModelOperationStep(
       return progress
     case "load": {
       const loaded = await loadModel(
-        step.modelKey,
+        { provider, modelKey: step.modelKey },
         step.configuration,
         connection
       )
@@ -193,7 +215,7 @@ async function sendModelOperationStep(
       }
     }
     case "unload":
-      await unloadModel(step.modelKey, connection)
+      await unloadModel({ provider, modelKey: step.modelKey }, connection)
       return {
         ...progress,
         loadedModelConfigurations: removeLoadedModelConfiguration(
@@ -204,7 +226,10 @@ async function sendModelOperationStep(
     case "health-read":
       return {
         ...progress,
-        modelHealth: await getModelHealth(step.modelKey, connection)
+        health: await getModelHealth(
+          { provider, modelKey: step.modelKey },
+          connection
+        )
       }
   }
 }
@@ -223,44 +248,51 @@ function formatModelFailure(failure: unknown): string {
 /** Inventory and safe failure published together when an operation settles. */
 type ModelInventoryOutcome = {
   /** Fresh snapshot or explicit observation failure. */
-  readonly modelInventory: ModelInventoryState
-  /** Action failure, reconciliation failure, or both; excludes an inventory query that found no connected LLM runtime. */
-  readonly modelError: string | null
-  /** Whether the inventory read found no connected LLM runtime. */
+  readonly inventory: ModelInventoryState
+  /** Action failure, reconciliation failure, or both; excludes an inventory query that found the provider's runtime not connected. */
+  readonly error: string | null
+  /** Whether the inventory read found the provider's runtime not connected. */
   readonly isModelRuntimeUnavailable: boolean
 }
 
 /**
- * Observes inventory without publishing partially settled state.
+ * Observes one provider's inventory without publishing partially settled
+ * state.
+ * @param provider - Provider whose models are listed.
  * @param connection - Cancellation and origin owned by the admitted operation.
  * @param priorError - Failure of the preceding action, if any.
  * @returns A complete observation result; failures remain visible as unknown
- * state, except a missing LLM runtime, which leaves inventory unavailable
- * without a model error because the LM Studio status explains it.
+ * state, except a runtime that is not connected, which leaves inventory
+ * unavailable without a model error because the provider's status explains
+ * it.
  */
 async function readInventoryOutcome(
+  provider: LlmProvider,
   connection: ModelApiConnection,
   priorError: string | null
 ): Promise<ModelInventoryOutcome> {
   try {
-    const { llms: models, modelLoading } = await listModels(connection)
+    const { llms: models, modelLoading } = await listModels(
+      provider,
+      connection
+    )
     return {
-      modelInventory: { status: "ready", models, modelLoading },
-      modelError: priorError,
+      inventory: { status: "ready", models, modelLoading },
+      error: priorError,
       isModelRuntimeUnavailable: false
     }
   } catch (error) {
     if (isModelRuntimeUnavailableError(error)) {
       return {
-        modelInventory: { status: "unavailable" },
-        modelError: priorError,
+        inventory: { status: "unavailable" },
+        error: priorError,
         isModelRuntimeUnavailable: true
       }
     }
     const message = formatModelFailure(error)
     return {
-      modelInventory: { status: "failed" },
-      modelError: priorError
+      inventory: { status: "failed" },
+      error: priorError
         ? `${priorError} Inventory refresh also failed: ${message}`
         : message,
       isModelRuntimeUnavailable: false
@@ -269,77 +301,140 @@ async function readInventoryOutcome(
 }
 
 /**
- * Determines whether a settled request warrants a fresh LM Studio status.
+ * Determines whether a settled request warrants a fresh provider status.
  *
  * @param result - Published inventory observation and failure.
- * @param modelHealth - Health observation from a test request, if any.
+ * @param health - Health observation from a test request, if any.
  * @returns Whether the action or reconciliation failed, or health reported an
  * unavailable runtime.
  */
 function hasModelRequestFailed(
   result: ModelInventoryOutcome,
-  modelHealth: LlmTestModelApiResponse | null
+  health: LlmTestModelApiResponse | null
 ): boolean {
-  if (result.modelError !== null || result.isModelRuntimeUnavailable) {
+  if (result.error !== null || result.isModelRuntimeUnavailable) {
     return true
   }
   return (
-    modelHealth?.status === "not-ready" &&
-    modelHealth.reason === "runtime-unavailable"
+    health?.status === "not-ready" && health.reason === "runtime-unavailable"
   )
+}
+
+/**
+ * Builds the load configurations known after an operation settles.
+ *
+ * @param provider - Provider the operation was sent to.
+ * @param known - Records the operation's steps established; not modified.
+ * @param inventory - Inventory observation being published.
+ * @param settings - Load settings stored now.
+ * @returns For LM Studio, the records of exactly its loaded models, as
+ * {@link buildLoadedModelConfigurations} builds them; for any other provider
+ * none, since the stored load settings name LM Studio's models only.
+ */
+function buildProviderLoadedModelConfigurations(
+  provider: LlmProvider,
+  known: LoadedModelConfigurations,
+  inventory: ModelInventoryState,
+  settings: LoadConfigurationSettings
+): LoadedModelConfigurations {
+  return provider === "lmStudio"
+    ? buildLoadedModelConfigurations(known, inventory, settings)
+    : RELEASED_PROVIDER_MODELS.loadedModelConfigurations
 }
 
 /**
  * Registers model callbacks with one Zustand state owner.
  * @param set - Framework setter for atomic model-state updates.
  * @param get - Framework reader for current model state.
- * @param dependencies - Availability reader and the failure reaction owned by the store.
- * @returns Initial model state and callbacks for the application store.
- * @remarks One request is admitted at a time and survives view unmounts.
- * Release invalidates publication before aborting local transport. Accepted
- * backend work can continue after disconnect. Mutations are never retried;
- * their outcomes, including failures, are followed by a fresh inventory query.
- * A load sends the model's stored load configuration as sampled at admission,
- * and the slice remembers what it sent for as long as the model stays
- * observed as loaded; release discards those records.
- * A settled request that failed, or whose health reported an unavailable
- * runtime, awaits the store's LM Studio status refresh before resolving.
+ * @param dependencies - Backend reader, the failure reaction, and the load
+ * settings owned by the store.
+ * @returns The callbacks; the owning store holds every provider's model
+ * state in `providerModels`.
+ * @remarks Each provider admits one request at a time, and a request for a
+ * provider whose request is in flight is dropped; requests for different
+ * providers run at once, so one provider's slow list or load never delays
+ * another's. A request is admitted only while the backend runs and its
+ * provider is connected, and survives view unmounts. Release invalidates
+ * publication before aborting local transport. Accepted backend work can
+ * continue after disconnect. Mutations are never retried; their outcomes,
+ * including failures, are followed by a fresh inventory query of the same
+ * provider. A load sends the model's stored load configuration as sampled at
+ * admission, and the slice remembers what it sent to LM Studio for as long
+ * as the model stays observed as loaded; release discards those records. A
+ * settled request that failed, or whose health reported an unavailable
+ * runtime, awaits the store's refresh of that provider's status before
+ * resolving.
  */
 export function createModelSlice(
-  set: StoreApi<ModelSlice>["setState"],
-  get: StoreApi<ModelSlice>["getState"],
+  set: StoreApi<ProviderModelsState>["setState"],
+  get: StoreApi<ProviderModelsState>["getState"],
   dependencies: ModelSliceDependencies
-): ModelSlice {
-  let activeRequest: AbortController | null = null
+): ModelActions {
+  const activeRequests = new Map<LlmProvider, AbortController>()
+
+  /**
+   * Replaces some fields of one provider's model state.
+   * @param provider - Provider whose state changes.
+   * @param change - Fields to replace.
+   */
+  function updateProviderModels(
+    provider: LlmProvider,
+    change: Partial<ProviderModelState>
+  ): void {
+    set((state) => ({
+      providerModels: updateProviderModelState(
+        state.providerModels,
+        provider,
+        change
+      )
+    }))
+  }
+
+  /**
+   * Answers whether one provider admits model requests now.
+   * @param provider - Provider to check.
+   * @returns Whether the backend runs and the provider is connected.
+   */
+  function isProviderAvailable(provider: LlmProvider): boolean {
+    return (
+      dependencies.getBackendConnection().isBackendRunning &&
+      get().providerModels[provider].status === "connected"
+    )
+  }
 
   /**
    * Checks publication authority after an asynchronous boundary.
+   * @param provider - Provider the request is for.
    * @param controller - Request identity being checked.
    * @param backendUrl - Origin sampled at admission.
-   * @returns Whether this request is still current for the same backend while
-   * the model runtime remains available.
+   * @returns Whether this request is still its provider's current one for
+   * the same backend while the provider remains available.
    */
   function isCurrentRequest(
+    provider: LlmProvider,
     controller: AbortController,
     backendUrl: string
   ): boolean {
-    const connection = dependencies.getConnection()
     return (
-      activeRequest === controller &&
-      connection.isModelRuntimeAvailable &&
-      connection.backendUrl === backendUrl
+      activeRequests.get(provider) === controller &&
+      isProviderAvailable(provider) &&
+      dependencies.getBackendConnection().backendUrl === backendUrl
     )
   }
 
   /**
    * Builds the load step of one model with its current stored configuration.
+   * @param provider - Provider whose inventory lists the model.
    * @param modelKey - Key of the model to load.
    * @returns A load step whose configuration is resolved now. The context
    * length is capped at the model's maximum when the inventory lists the
    * model; for an unlisted model no maximum is known and none is applied.
    */
-  function buildModelLoadStep(modelKey: string): ModelOperationStep {
-    const inventory = get().modelInventory
+  function buildModelLoadStep(
+    provider: LlmProvider,
+    modelKey: string
+  ): ModelOperationStep {
+    const { inventory } = get().providerModels[provider]
     const listedModel =
       inventory.status === "ready"
         ? inventory.models.find((model) => model.modelKey === modelKey)
@@ -369,11 +464,11 @@ export function createModelSlice(
       case "health-read":
         return [{ kind: "health-read", modelKey: operation.modelKey }]
       case "load":
-        return [buildModelLoadStep(operation.modelKey)]
+        return [buildModelLoadStep(operation.provider, operation.modelKey)]
       case "reload":
         return [
           { kind: "unload", modelKey: operation.modelKey },
-          buildModelLoadStep(operation.modelKey)
+          buildModelLoadStep(operation.provider, operation.modelKey)
         ]
     }
   }
@@ -381,25 +476,24 @@ export function createModelSlice(
   /**
    * Publishes the request of the step about to run and clears the previous
    * operation's failure and health observation.
+   * @param provider - Provider the step is sent to.
    * @param step - Step about to be sent.
    */
-  function handleModelOperationStepStart(step: ModelOperationStep): void {
-    const modelRequest = buildModelRequest(step)
-    set({
-      modelRequest,
-      modelRuntime: buildModelRuntime(
-        get().modelInventory,
-        modelRequest,
-        dependencies.getConnection().defaultModel
-      ),
-      modelError: null,
-      modelHealth: null
+  function handleModelOperationStepStart(
+    provider: LlmProvider,
+    step: ModelOperationStep
+  ): void {
+    updateProviderModels(provider, {
+      request: buildModelRequest(step),
+      error: null,
+      health: null
     })
   }
 
   /**
    * Sends the steps of one admitted operation in order, stopping at the first
    * failure.
+   * @param provider - Provider the steps are sent to.
    * @param steps - Steps sampled at admission.
    * @param controller - Identity of the admitted operation.
    * @param connection - Origin and cancellation owned by the operation.
@@ -408,25 +502,36 @@ export function createModelSlice(
    * authority to publish and nothing more may be written.
    */
   async function sendModelOperationSteps(
+    provider: LlmProvider,
     steps: readonly ModelOperationStep[],
     controller: AbortController,
     connection: ModelApiConnection
   ): Promise<ModelOperationProgress | null> {
     let progress: ModelOperationProgress = {
-      modelHealth: null,
-      modelError: null,
-      loadedModelConfigurations: get().loadedModelConfigurations
+      health: null,
+      error: null,
+      loadedModelConfigurations:
+        get().providerModels[provider].loadedModelConfigurations
     }
     for (const step of steps) {
-      handleModelOperationStepStart(step)
-      if (!isCurrentRequest(controller, connection.backendUrl)) return null
-      try {
-        progress = await sendModelOperationStep(step, connection, progress)
-      } catch (error) {
-        progress = { ...progress, modelError: formatModelFailure(error) }
+      handleModelOperationStepStart(provider, step)
+      if (!isCurrentRequest(provider, controller, connection.backendUrl)) {
+        return null
       }
-      if (!isCurrentRequest(controller, connection.backendUrl)) return null
-      if (progress.modelError !== null) return progress
+      try {
+        progress = await sendModelOperationStep(
+          provider,
+          step,
+          connection,
+          progress
+        )
+      } catch (error) {
+        progress = { ...progress, error: formatModelFailure(error) }
+      }
+      if (!isCurrentRequest(provider, controller, connection.backendUrl)) {
+        return null
+      }
+      if (progress.error !== null) return progress
     }
     return progress
   }
@@ -437,62 +542,69 @@ export function createModelSlice(
    * @returns Resolves after settlement, failure presentation, or invalidation.
    */
   async function startModelOperation(operation: ModelOperation): Promise<void> {
-    const current = dependencies.getConnection()
-    if (!current.isModelRuntimeAvailable || activeRequest !== null) return
+    const { provider } = operation
+    if (!isProviderAvailable(provider) || activeRequests.has(provider)) return
+    const { backendUrl } = dependencies.getBackendConnection()
     const controller = new AbortController()
     const connection: ModelApiConnection = {
-      backendUrl: current.backendUrl,
+      backendUrl,
       signal: controller.signal
     }
-    activeRequest = controller
+    activeRequests.set(provider, controller)
     const progress = await sendModelOperationSteps(
+      provider,
       listModelOperationSteps(operation),
       controller,
       connection
     )
     if (progress === null) return
-    const result = await readInventoryOutcome(connection, progress.modelError)
-    if (!isCurrentRequest(controller, current.backendUrl)) return
-    activeRequest = null
-    set({
-      modelInventory: result.modelInventory,
-      modelError: result.modelError,
-      modelHealth: progress.modelHealth,
-      modelRequest: { status: "idle" },
-      modelRuntime: buildModelRuntime(
-        result.modelInventory,
-        { status: "idle" },
-        dependencies.getConnection().defaultModel
-      ),
-      loadedModelConfigurations: buildLoadedModelConfigurations(
+    const result = await readInventoryOutcome(
+      provider,
+      connection,
+      progress.error
+    )
+    if (!isCurrentRequest(provider, controller, backendUrl)) return
+    activeRequests.delete(provider)
+    updateProviderModels(provider, {
+      inventory: result.inventory,
+      error: result.error,
+      health: progress.health,
+      request: { status: "idle" },
+      loadedModelConfigurations: buildProviderLoadedModelConfigurations(
+        provider,
         progress.loadedModelConfigurations,
-        result.modelInventory,
+        result.inventory,
         dependencies.getLoadConfigurationSettings()
       )
     })
-    if (hasModelRequestFailed(result, progress.modelHealth)) {
-      await dependencies.handleModelRequestFailure()
+    if (hasModelRequestFailed(result, progress.health)) {
+      await dependencies.handleModelRequestFailure(provider)
     }
   }
 
-  /** Invalidates publication before aborting the corresponding local transport. */
-  function releaseModelRuntime(): void {
-    const controller = activeRequest
-    activeRequest = null
-    set(initialModelState)
+  /**
+   * Implements {@link ModelActions.releaseProviderModels}: invalidates
+   * publication before aborting the corresponding local transport.
+   * @param provider - Provider whose model state is released.
+   */
+  function releaseProviderModels(provider: LlmProvider): void {
+    const controller = activeRequests.get(provider)
+    activeRequests.delete(provider)
+    updateProviderModels(provider, RELEASED_PROVIDER_MODELS)
     controller?.abort()
   }
 
   return {
-    ...initialModelState,
-    updateModelInventory: () => startModelOperation({ kind: "inventory-read" }),
-    loadModel: (modelKey) => startModelOperation({ kind: "load", modelKey }),
-    updateLoadedModelConfiguration: (modelKey) =>
-      startModelOperation({ kind: "reload", modelKey }),
-    unloadModel: (modelKey) =>
-      startModelOperation({ kind: "unload", modelKey }),
-    testModel: (modelKey) =>
-      startModelOperation({ kind: "health-read", modelKey }),
-    releaseModelRuntime
+    updateModelInventory: (provider) =>
+      startModelOperation({ kind: "inventory-read", provider }),
+    loadModel: ({ provider, modelKey }) =>
+      startModelOperation({ kind: "load", provider, modelKey }),
+    updateLoadedModelConfiguration: ({ provider, modelKey }) =>
+      startModelOperation({ kind: "reload", provider, modelKey }),
+    unloadModel: ({ provider, modelKey }) =>
+      startModelOperation({ kind: "unload", provider, modelKey }),
+    testModel: ({ provider, modelKey }) =>
+      startModelOperation({ kind: "health-read", provider, modelKey }),
+    releaseProviderModels
   }
 }

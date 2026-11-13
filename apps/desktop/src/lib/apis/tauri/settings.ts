@@ -2,6 +2,7 @@ import {
   emailPasswordSchema,
   emailSettingsSchema,
   groqApiKeySchema,
+  LLM_PROVIDERS,
   llmProviderSettingsSchema,
   locationSettingsSchema,
   mcpSettingsSchema,
@@ -11,6 +12,7 @@ import {
   type EmailAccountCandidate,
   type EmailPassword,
   type EmailSettings,
+  type LlmModelReference,
   type McpSettings,
   type McpSettingsCandidate,
   type ModelLoadConfiguration
@@ -28,6 +30,24 @@ import type {
   ToolSettings
 } from "@/lib/store/settings"
 import { invoke } from "@tauri-apps/api/core"
+
+/**
+ * The `runtime` group as the settings document holds it.
+ *
+ * @remarks Matches Rust's `RunTimeSettings` field for field. The default
+ * model is a bare key here; {@link buildRuntimeSettings} reads it as a
+ * reference, and no save ever writes it.
+ */
+type SettingsDocumentRuntime = {
+  /** Whether desktop initialization requests backend startup. */
+  readonly autoStartBackend: boolean
+  /** Whether desktop initialization starts vmo, Lys's page reader. */
+  readonly autoStartVmo: boolean
+  /** Key of the model a new conversation uses, or null. */
+  readonly defaultModel: string | null
+  /** Backend origin shown in runtime settings. */
+  readonly backendAddress: string
+}
 
 /**
  * The `loadConfiguration` group as the settings document holds it.
@@ -64,13 +84,14 @@ type SettingsDocumentSecrets = {
 /**
  * The `providers` group as the settings document holds it.
  *
- * @remarks Matches Rust's `ProvidersSettings`; the provider and
- * the addresses are plain text here and checked and branded only after
- * {@link buildProvidersSettings} parses them.
+ * @remarks Matches Rust's `ProvidersSettings` as Rust writes it, after it
+ * read an older file's single `active` provider as that provider on; the
+ * providers and the addresses are plain text here and checked and branded
+ * only after {@link buildProvidersSettings} parses them.
  */
 type SettingsDocumentProviders = {
-  /** Provider every request goes to. */
-  readonly active: string
+  /** Providers that are on, each once. */
+  readonly enabled: readonly string[]
   /** LM Studio's server. */
   readonly lmStudio: { readonly address: string | null }
   /** The local Ollama server. */
@@ -141,15 +162,15 @@ type SettingsDocumentEmail = {
  * takes it as the document to write.
  */
 type SettingsDocument = {
-  /** Backend process and default-model settings. */
-  readonly runtime: RuntimeSettings
+  /** Backend process and default-model settings, the model as a key. */
+  readonly runtime: SettingsDocumentRuntime
   /** Sampling settings applied to the next request. */
   readonly generation: GenerationSettings
   /** Default and per-model load settings, the latter as one object. */
   readonly loadConfiguration: SettingsDocumentLoadConfiguration
   /** Secrets, with the keys as plain text. */
   readonly secrets: SettingsDocumentSecrets
-  /** Provider choice, with the addresses as plain text. */
+  /** Providers that are on, with the addresses as plain text. */
   readonly providers: SettingsDocumentProviders
   /** Tool choices, with the names on Just run as one array. */
   readonly tools: SettingsDocumentTools
@@ -267,6 +288,47 @@ function buildProvidersSettings(
 }
 
 /**
+ * Builds the renderer's runtime settings from the document group.
+ *
+ * @param runtime - Group Rust validated.
+ * @param providers - Providers the same document turns on.
+ * @returns The group with its default model as a reference: the stored key on
+ * the first provider that is on, in provider order, or null when no key is
+ * stored or no provider is on.
+ */
+function buildRuntimeSettings(
+  runtime: SettingsDocumentRuntime,
+  providers: ProvidersSettings
+): RuntimeSettings {
+  return {
+    autoStartBackend: runtime.autoStartBackend,
+    autoStartVmo: runtime.autoStartVmo,
+    defaultModel: buildDefaultModel(runtime.defaultModel, providers),
+    backendAddress: runtime.backendAddress
+  }
+}
+
+/**
+ * Reads the stored default model's key as a reference.
+ *
+ * @param modelKey - Stored key, or null.
+ * @param providers - Providers that are on.
+ * @returns The key on the first provider that is on, in provider order, or
+ * null when no key is stored or no provider is on.
+ * @remarks An empty key names no model, so it reads as none.
+ */
+function buildDefaultModel(
+  modelKey: string | null,
+  providers: ProvidersSettings
+): LlmModelReference | null {
+  if (modelKey === null || modelKey.length === 0) return null
+  const provider = LLM_PROVIDERS.find((candidate) =>
+    providers.enabled.includes(candidate)
+  )
+  return provider === undefined ? null : { provider, modelKey }
+}
+
+/**
  * Builds the renderer's location from the document group.
  *
  * @param location - Group Rust validated.
@@ -362,7 +424,8 @@ function buildToolSettings(tools: SettingsDocumentTools): ToolSettings {
  *
  * @param settingsDocument - Document a Tauri settings command resolved with,
  * already validated by Rust.
- * @returns Settings holding the document's groups. The per-model load
+ * @returns Settings holding the document's groups. The default model is a
+ * reference, as {@link buildRuntimeSettings} builds it. The per-model load
  * settings are a newly owned map with one entry per key of the document's
  * object, whatever the text of the key, the tool choices are newly owned, as
  * {@link buildToolSettings} builds them, the MCP servers are parsed by
@@ -380,45 +443,17 @@ function buildLysSettings(settingsDocument: SettingsDocument): LysSettings {
     default: settingsDocument.loadConfiguration.default,
     models
   }
+  const providers = buildProvidersSettings(settingsDocument.providers)
   return {
-    runtime: settingsDocument.runtime,
+    runtime: buildRuntimeSettings(settingsDocument.runtime, providers),
     generation: settingsDocument.generation,
     loadConfiguration,
     secrets: buildSecretsSettings(settingsDocument.secrets),
-    providers: buildProvidersSettings(settingsDocument.providers),
+    providers,
     tools: buildToolSettings(settingsDocument.tools),
     location: buildLocationSettings(settingsDocument.location),
     mcp: buildMcpSettings(settingsDocument.mcp),
     email: buildEmailSettings(settingsDocument.email)
-  }
-}
-
-/**
- * Builds the settings document that stores the renderer's settings.
- *
- * @param settings - Complete settings value owned by the desktop store.
- * @returns A document holding the same groups. The per-model load settings
- * are a newly owned object with one property of its own per map entry, also
- * for a model key that names a member of the object prototype, and the tool
- * choices are an array and an object, as
- * {@link buildSettingsDocumentTools} builds them.
- */
-function buildSettingsDocument(settings: LysSettings): SettingsDocument {
-  const models = Object.fromEntries(settings.loadConfiguration.models)
-  const loadConfiguration: SettingsDocumentLoadConfiguration = {
-    default: settings.loadConfiguration.default,
-    models
-  }
-  return {
-    runtime: settings.runtime,
-    generation: settings.generation,
-    loadConfiguration,
-    secrets: settings.secrets,
-    providers: settings.providers,
-    tools: buildSettingsDocumentTools(settings.tools),
-    location: settings.location,
-    mcp: settings.mcp,
-    email: settings.email
   }
 }
 
@@ -435,24 +470,36 @@ function buildSettingsDocument(settings: LysSettings): SettingsDocument {
  * accepted it; the message holds no setting value.
  */
 export async function loadSettings(): Promise<LysSettings> {
-  const settingsDocument = await invoke<SettingsDocument>("load_settings")
-  return buildLysSettings(settingsDocument)
+  return buildLysSettings(await readSettingsDocument())
 }
 
 /**
- * Sends desktop settings to the Tauri settings command.
+ * Reads the settings document through the Tauri settings command.
  *
- * @param settings - Complete settings value owned by the desktop store.
- * @returns Resolves after the native settings file write completes.
- * @throws The Tauri invoke rejection for command deserialization, serialization,
- * or file-writing failures.
- * @remarks The named newSettings argument matches Rust's new_settings
- * parameter. The per-model load settings are sent as one object keyed by
- * model key, the tools on Just run as one array, and the tool switches as
- * one object keyed by tool name, the forms the settings file keeps.
+ * @returns The complete document after Rust validation and defaulting.
+ * @throws The Tauri invoke rejection when the settings path cannot be read or
+ * parsed.
  */
-export async function saveSettings(settings: LysSettings): Promise<void> {
-  const newSettings = buildSettingsDocument(settings)
+async function readSettingsDocument(): Promise<SettingsDocument> {
+  return invoke<SettingsDocument>("load_settings")
+}
+
+/**
+ * Sends a settings document to the Tauri settings command.
+ *
+ * @param newSettings - Complete document to write, every group in the form
+ * the settings file keeps.
+ * @returns Resolves after the native settings file write completes.
+ * @throws The Tauri invoke rejection for command deserialization,
+ * serialization, or file-writing failures.
+ * @remarks The named newSettings argument matches Rust's new_settings
+ * parameter. Each group save reads the document, replaces its own group, and
+ * writes the rest as read, so the desktop never rewrites a group it does not
+ * own, such as the stored default model's key.
+ */
+async function writeSettingsDocument(
+  newSettings: SettingsDocument
+): Promise<void> {
   await invoke("save_settings", { newSettings })
 }
 
@@ -468,8 +515,8 @@ export async function saveSettings(settings: LysSettings): Promise<void> {
 export async function saveGenerationSettings(
   generation: GenerationSettings
 ): Promise<void> {
-  const persistedSettings = await loadSettings()
-  await saveSettings({ ...persistedSettings, generation })
+  const persistedDocument = await readSettingsDocument()
+  await writeSettingsDocument({ ...persistedDocument, generation })
 }
 
 /**
@@ -489,13 +536,13 @@ export async function saveGenerationSettings(
 export async function saveLoadConfigurationSettings(
   loadConfiguration: LoadConfigurationSettings
 ): Promise<void> {
-  const persistedSettings = await loadSettings()
-  const savedLoadConfiguration: LoadConfigurationSettings = {
-    default: persistedSettings.loadConfiguration.default,
-    models: loadConfiguration.models
+  const persistedDocument = await readSettingsDocument()
+  const savedLoadConfiguration: SettingsDocumentLoadConfiguration = {
+    default: persistedDocument.loadConfiguration.default,
+    models: Object.fromEntries(loadConfiguration.models)
   }
-  await saveSettings({
-    ...persistedSettings,
+  await writeSettingsDocument({
+    ...persistedDocument,
     loadConfiguration: savedLoadConfiguration
   })
 }
@@ -516,18 +563,18 @@ export async function saveLoadConfigurationSettings(
 export async function saveSecretsSettings(
   changedSecrets: Partial<SecretsSettings>
 ): Promise<void> {
-  const persistedSettings = await loadSettings()
-  const secrets: SecretsSettings = {
-    ...persistedSettings.secrets,
+  const persistedDocument = await readSettingsDocument()
+  const secrets: SettingsDocumentSecrets = {
+    ...persistedDocument.secrets,
     ...changedSecrets
   }
-  await saveSettings({ ...persistedSettings, secrets })
+  await writeSettingsDocument({ ...persistedDocument, secrets })
 }
 
 /**
- * Persists the provider choice while preserving everything else already on
- * disk.
- * @param providers - Provider choice and addresses to save.
+ * Persists the providers that are on and their addresses while preserving
+ * everything else already on disk.
+ * @param providers - Providers that are on and addresses to save.
  * @returns Resolves after the merged settings document is written by Tauri.
  * @throws The native load or save rejection; no replacement is written if
  * loading fails.
@@ -538,8 +585,8 @@ export async function saveSecretsSettings(
 export async function saveProviderSettings(
   providers: ProvidersSettings
 ): Promise<void> {
-  const persistedSettings = await loadSettings()
-  await saveSettings({ ...persistedSettings, providers })
+  const persistedDocument = await readSettingsDocument()
+  await writeSettingsDocument({ ...persistedDocument, providers })
 }
 
 /**
@@ -555,8 +602,11 @@ export async function saveProviderSettings(
  * back each other's stale group.
  */
 export async function saveToolSettings(tools: ToolSettings): Promise<void> {
-  const persistedSettings = await loadSettings()
-  await saveSettings({ ...persistedSettings, tools })
+  const persistedDocument = await readSettingsDocument()
+  await writeSettingsDocument({
+    ...persistedDocument,
+    tools: buildSettingsDocumentTools(tools)
+  })
 }
 
 /**
@@ -574,8 +624,8 @@ export async function saveToolSettings(tools: ToolSettings): Promise<void> {
 export async function saveLocationSettings(
   location: LocationSettings
 ): Promise<void> {
-  const persistedSettings = await loadSettings()
-  await saveSettings({ ...persistedSettings, location })
+  const persistedDocument = await readSettingsDocument()
+  await writeSettingsDocument({ ...persistedDocument, location })
 }
 
 /**
@@ -587,22 +637,21 @@ export async function saveLocationSettings(
  * @throws The native load or save rejection; no replacement is written if
  * loading fails.
  * @remarks The runtime group is written with the given switches and the
- * default model and backend address as they are on disk: the store's copies
- * of those two are session-only. The application store serializes this
+ * default model's key and backend address as they are on disk: the store's
+ * copies of those two are session-only. The application store serializes this
  * read-modify-write operation with the other settings-group saves, so that
  * overlapping saves cannot write back each other's stale group.
  */
 export async function saveRuntimeAutoStartSettings(
   autoStart: RuntimeAutoStartSettings
 ): Promise<void> {
-  const persistedSettings = await loadSettings()
-  const runtime: RuntimeSettings = {
+  const persistedDocument = await readSettingsDocument()
+  const runtime: SettingsDocumentRuntime = {
+    ...persistedDocument.runtime,
     autoStartBackend: autoStart.autoStartBackend,
-    autoStartVmo: autoStart.autoStartVmo,
-    defaultModel: persistedSettings.runtime.defaultModel,
-    backendAddress: persistedSettings.runtime.backendAddress
+    autoStartVmo: autoStart.autoStartVmo
   }
-  await saveSettings({ ...persistedSettings, runtime })
+  await writeSettingsDocument({ ...persistedDocument, runtime })
 }
 
 /**
@@ -627,13 +676,13 @@ export async function saveEmailAccountSettings(
   account: EmailAccount | null,
   password: EmailPassword | null
 ): Promise<void> {
-  const persistedSettings = await loadSettings()
-  const secrets: SecretsSettings = {
-    ...persistedSettings.secrets,
+  const persistedDocument = await readSettingsDocument()
+  const secrets: SettingsDocumentSecrets = {
+    ...persistedDocument.secrets,
     emailPassword: password
   }
-  const email: EmailSettings = { account }
-  await saveSettings({ ...persistedSettings, secrets, email })
+  const email: SettingsDocumentEmail = { account }
+  await writeSettingsDocument({ ...persistedDocument, secrets, email })
 }
 
 /**
@@ -653,6 +702,6 @@ export async function saveEmailAccountSettings(
  * group.
  */
 export async function saveMcpSettings(mcp: McpSettings): Promise<void> {
-  const persistedSettings = await loadSettings()
-  await saveSettings({ ...persistedSettings, mcp })
+  const persistedDocument = await readSettingsDocument()
+  await writeSettingsDocument({ ...persistedDocument, mcp })
 }

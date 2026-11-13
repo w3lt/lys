@@ -24,6 +24,7 @@ import {
   type ConversationMetadata,
   type ConversationSource,
   type ConversationUserMessage,
+  type LlmProvider,
   type ReplyPart,
   type ToolCallReplyPart
 } from "@lys/share"
@@ -53,6 +54,13 @@ export const FIXTURE_TIMESTAMP = "2026-01-02T03:04:05.678Z"
 
 /** Model that owns assistant-message fixtures. */
 export const FIXTURE_MODEL = "fixture-model"
+
+/**
+ * Provider stored with assistant-message fixtures: none, as for a reply
+ * stored before replies named their provider, so a fixture reply does not
+ * decide which model a conversation uses unless a case gives it a provider.
+ */
+export const FIXTURE_PROVIDER: LlmProvider | null = null
 
 /**
  * Builds a stored user message.
@@ -262,7 +270,8 @@ function buildReplyParts(
 }
 
 /**
- * Builds the shared fields of an assistant message from {@link FIXTURE_MODEL}.
+ * Builds the shared fields of an assistant message from {@link FIXTURE_MODEL}
+ * and {@link FIXTURE_PROVIDER}.
  *
  * @param sequence - Identity sequence of the message.
  * @param body - Stored parts, or stored reply text, possibly empty.
@@ -276,6 +285,7 @@ function buildAssistantMessageBase(
     id: createFixtureUuidV7(sequence),
     role: "assistant" as const,
     model: FIXTURE_MODEL,
+    provider: FIXTURE_PROVIDER,
     parts: buildReplyParts(sequence, body),
     createdAt: FIXTURE_TIMESTAMP,
     updatedAt: FIXTURE_TIMESTAMP

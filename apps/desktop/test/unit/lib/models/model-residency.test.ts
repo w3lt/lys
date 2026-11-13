@@ -1,20 +1,16 @@
+import type { LlmModelReference } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import { buildModelDescriptor } from "@/lib/models/inventory"
+import type { ModelAvailability } from "@/lib/models/model-availability"
 import {
-  findEligibleChatModel,
-  findLoadedModel,
   formatComposerModelRowTag,
   formatModelResidencyHeading,
   formatModelResidencyMeta,
   formatModelRowTag,
-  readLoadedModelKey,
   readModelResidencyTone,
   readModelRowTone
 } from "@/lib/models/model-residency"
-import type {
-  ModelInventoryState,
-  ModelRuntimeState
-} from "@/lib/store/model-runtime"
+import type { ModelRequestState } from "@/lib/store/model-runtime"
 import { buildLlmInfo } from "../../support/modelFixtures"
 
 /** Row for weights that are resident according to the inventory. */
@@ -25,115 +21,42 @@ const RESIDENT_ROW = buildModelDescriptor(
 /** Row for weights that are only on disk. */
 const ON_DISK_ROW = buildModelDescriptor(buildLlmInfo("on-disk"))
 
-/** Residency summaries that name no model. */
-const NONE: ModelRuntimeState = { status: "none" }
-const UNKNOWN: ModelRuntimeState = { status: "unknown" }
-const UNAVAILABLE: ModelRuntimeState = { status: "unavailable" }
+/** No request in flight. */
+const IDLE: ModelRequestState = { status: "idle" }
 
-describe("readLoadedModelKey", () => {
-  it("names the loaded model", () => {
-    expect(readLoadedModelKey({ status: "loaded", modelKey: "qwen" })).toBe(
-      "qwen"
-    )
-  })
+/** The model a case shows: `qwen` of LM Studio. */
+const QWEN: LlmModelReference = { provider: "lmStudio", modelKey: "qwen" }
 
-  it.each<ModelRuntimeState>([
-    NONE,
-    UNKNOWN,
-    UNAVAILABLE,
-    { status: "loading", modelKey: "qwen" },
-    { status: "unloading", modelKey: "qwen" }
-  ])("names no model while the summary is $status", (modelRuntime) => {
-    expect(readLoadedModelKey(modelRuntime)).toBeNull()
-  })
-})
+/** Inventory entry of {@link QWEN} while it is loaded. */
+const LOADED_QWEN = buildLlmInfo("qwen", { loaded: true })
 
-describe("findLoadedModel", () => {
-  it("finds the loaded model's inventory entry", () => {
-    const resident = buildLlmInfo("resident", { loaded: true })
+/** Inventory entry of {@link QWEN} while it is on disk only. */
+const ON_DISK_QWEN = buildLlmInfo("qwen")
 
-    expect(
-      findLoadedModel(
-        { status: "loaded", modelKey: "resident" },
-        {
-          status: "ready",
-          modelLoading: "lys",
-          models: [buildLlmInfo("on-disk"), resident]
-        }
-      )
-    ).toBe(resident)
-  })
-
-  it.each<[string, ModelRuntimeState, ModelInventoryState]>([
-    [
-      "no model is loaded",
-      NONE,
-      {
-        status: "ready",
-        modelLoading: "lys",
-        models: [buildLlmInfo("resident", { loaded: true })]
-      }
-    ],
-    [
-      "the inventory cannot be read",
-      { status: "loaded", modelKey: "resident" },
-      { status: "unavailable" }
-    ],
-    [
-      "the inventory failed",
-      { status: "loaded", modelKey: "resident" },
-      { status: "failed" }
-    ],
-    [
-      "the inventory does not list the loaded model",
-      { status: "loaded", modelKey: "resident" },
-      {
-        status: "ready",
-        modelLoading: "lys",
-        models: [buildLlmInfo("on-disk")]
-      }
-    ]
-  ])("finds no entry while %s", (_case, modelRuntime, inventory) => {
-    expect(findLoadedModel(modelRuntime, inventory)).toBeUndefined()
-  })
-})
-
-describe("findEligibleChatModel", () => {
-  it("offers the loaded model while the backend runs", () => {
-    expect(
-      findEligibleChatModel("running", { status: "loaded", modelKey: "qwen" })
-    ).toBe("qwen")
-  })
-
-  it.each(["starting", "stopping", "stopped", "unresponsive"] as const)(
-    "offers no model while the backend is %s",
-    (backendStatus) => {
-      expect(
-        findEligibleChatModel(backendStatus, {
-          status: "loaded",
-          modelKey: "qwen"
-        })
-      ).toBeNull()
-    }
-  )
-
-  it("offers no model while weights are still loading", () => {
-    expect(
-      findEligibleChatModel("running", { status: "loading", modelKey: "qwen" })
-    ).toBeNull()
-  })
-})
+/** Every availability whose model is neither loaded nor in a transition. */
+const UNAVAILABLE_STATES: readonly ModelAvailability[] = [
+  { status: "backend-not-running" },
+  { status: "provider-off" },
+  { status: "provider-connecting" },
+  { status: "provider-unreachable" },
+  { status: "inventory-unread" },
+  { status: "inventory-failed" },
+  { status: "not-listed" },
+  { status: "not-loaded", modelLoading: "lys", model: ON_DISK_QWEN }
+]
 
 describe("readModelResidencyTone", () => {
-  it.each<[ModelRuntimeState, string]>([
-    [{ status: "loaded", modelKey: "qwen" }, "active"],
-    [{ status: "loading", modelKey: "qwen" }, "pending"],
-    [{ status: "unloading", modelKey: "qwen" }, "pending"],
-    [NONE, "idle"],
-    [UNKNOWN, "idle"],
-    [UNAVAILABLE, "idle"]
-  ])("shows %o in the %s tone", (modelRuntime, tone) => {
-    expect(readModelResidencyTone(modelRuntime)).toBe(tone)
+  it.each<[ModelAvailability | null, string]>([
+    [{ status: "loaded", model: LOADED_QWEN }, "active"],
+    [{ status: "loading" }, "pending"],
+    [{ status: "unloading" }, "pending"],
+    [null, "idle"],
+    ...UNAVAILABLE_STATES.map((availability): [ModelAvailability, string] => [
+      availability,
+      "idle"
+    ])
+  ])("shows %o in the %s tone", (availability, tone) => {
+    expect(readModelResidencyTone(availability)).toBe(tone)
   })
 })
 
@@ -151,82 +74,80 @@ describe("readModelRowTone", () => {
   })
 
   it("leaves a row that is only on disk idle", () => {
-    expect(readModelRowTone(NONE, ON_DISK_ROW)).toBe("idle")
+    expect(readModelRowTone(IDLE, ON_DISK_ROW)).toBe("idle")
   })
 
-  it("leaves every row idle while residency is unknown", () => {
-    expect(readModelRowTone(UNKNOWN, RESIDENT_ROW)).toBe("idle")
+  it("keeps a resident row active while the inventory is refreshed", () => {
+    expect(readModelRowTone({ status: "listing" }, RESIDENT_ROW)).toBe("active")
   })
 })
 
 describe("formatModelResidencyHeading", () => {
-  it.each<[ModelRuntimeState, string]>([
-    [{ status: "loaded", modelKey: "qwen" }, "Model loaded"],
-    [{ status: "loading", modelKey: "qwen" }, "Loading weights"],
-    [{ status: "unloading", modelKey: "qwen" }, "Unloading"],
-    [NONE, "No model loaded"],
-    [UNKNOWN, "Model state unavailable"],
-    [UNAVAILABLE, "Model state unavailable"]
-  ])("heads %o with %j", (modelRuntime, heading) => {
-    expect(formatModelResidencyHeading(modelRuntime)).toBe(heading)
+  it.each<[ModelAvailability | null, string]>([
+    [{ status: "loaded", model: LOADED_QWEN }, "Model loaded"],
+    [{ status: "loading" }, "Loading weights"],
+    [{ status: "unloading" }, "Unloading"],
+    [
+      { status: "not-loaded", modelLoading: "lys", model: ON_DISK_QWEN },
+      "No model loaded"
+    ],
+    [null, "No model loaded"],
+    [{ status: "not-listed" }, "Model not listed"],
+    [{ status: "backend-not-running" }, "Model state unavailable"],
+    [{ status: "provider-off" }, "Model state unavailable"],
+    [{ status: "provider-connecting" }, "Model state unavailable"],
+    [{ status: "provider-unreachable" }, "Model state unavailable"],
+    [{ status: "inventory-unread" }, "Model state unavailable"],
+    [{ status: "inventory-failed" }, "Model state unavailable"]
+  ])("heads %o with %j", (availability, heading) => {
+    expect(formatModelResidencyHeading(availability)).toBe(heading)
   })
 })
 
 describe("formatModelResidencyMeta", () => {
-  it.each<[ModelRuntimeState, string]>([
-    [{ status: "loaded", modelKey: "qwen" }, "qwen · loaded in LM Studio"],
-    [{ status: "loading", modelKey: "qwen" }, "qwen"],
-    [{ status: "unloading", modelKey: "qwen" }, "releasing qwen"],
-    [UNKNOWN, "refresh the model inventory to check loaded weights"]
-  ])("describes %o as %j", (modelRuntime, meta) => {
-    expect(
-      formatModelResidencyMeta(modelRuntime, "available", "qwen", "LM Studio")
-    ).toBe(meta)
+  it.each<[ModelAvailability, string]>([
+    [{ status: "loaded", model: LOADED_QWEN }, "qwen · loaded in LM Studio"],
+    [{ status: "loading" }, "qwen"],
+    [{ status: "unloading" }, "releasing qwen"],
+    [{ status: "backend-not-running" }, "start the backend first"],
+    [{ status: "provider-off" }, "LM Studio is off · turn it on in Providers"],
+    [{ status: "provider-connecting" }, "connecting to LM Studio"],
+    [{ status: "provider-unreachable" }, "LM Studio is not reachable"],
+    [
+      { status: "inventory-unread" },
+      "refresh the model inventory to check loaded weights"
+    ],
+    [
+      { status: "inventory-failed" },
+      "refresh the model inventory to check loaded weights"
+    ],
+    [{ status: "not-listed" }, "qwen is not listed by LM Studio"],
+    [
+      { status: "not-loaded", modelLoading: "lys", model: ON_DISK_QWEN },
+      "qwen is default · not in memory"
+    ]
+  ])("describes %o as %j", (availability, meta) => {
+    expect(formatModelResidencyMeta(QWEN, availability)).toBe(meta)
   })
 
-  it("names the active provider holding the weights", () => {
+  it("names the provider holding the weights", () => {
     expect(
       formatModelResidencyMeta(
-        { status: "loaded", modelKey: "qwen" },
-        "available",
-        "qwen",
-        "Ollama"
+        { provider: "groq", modelKey: "qwen" },
+        { status: "loaded", model: LOADED_QWEN }
       )
-    ).toBe("qwen · loaded in Ollama")
+    ).toBe("qwen · loaded in Groq")
   })
 
-  it.each([
-    ["backend-offline", "qwen", "start the backend first"],
-    ["lm-studio-connecting", "qwen", "connecting to LM Studio"],
-    ["lm-studio-unreachable", "qwen", "LM Studio is not reachable"],
-    ["available", null, "no default model chosen · pick one in Model"],
-    ["available", "qwen", "qwen is default · not in memory"]
-  ] as const)(
-    "explains no resident weights when %s with default %s",
-    (availability, defaultModel, meta) => {
-      expect(
-        formatModelResidencyMeta(NONE, availability, defaultModel, "LM Studio")
-      ).toBe(meta)
-    }
-  )
-
-  it.each([
-    ["backend-offline", "start the backend first"],
-    ["lm-studio-connecting", "connecting to LM Studio"],
-    ["lm-studio-unreachable", "LM Studio is not reachable"],
-    ["available", "refresh the model inventory to check loaded weights"]
-  ] as const)(
-    "explains why residency cannot be observed yet when %s, without claiming nothing is loaded",
-    (availability, meta) => {
-      expect(
-        formatModelResidencyMeta(UNAVAILABLE, availability, "qwen", "LM Studio")
-      ).toBe(meta)
-    }
-  )
+  it("asks for a model to be chosen while there is none", () => {
+    expect(formatModelResidencyMeta(null, null)).toBe(
+      "no default model chosen · pick one in Model"
+    )
+  })
 })
 
 describe("formatModelRowTag", () => {
-  it.each(["loading", "loaded", "unloading"] as const)(
+  it.each(["loading", "unloading"] as const)(
     "tags the row in play as %s",
     (status) => {
       expect(
@@ -235,7 +156,8 @@ describe("formatModelRowTag", () => {
     }
   )
 
-  it("tags another resident row as loaded", () => {
+  it("tags a resident row as loaded, also while another model loads", () => {
+    expect(formatModelRowTag(IDLE, RESIDENT_ROW)).toBe("loaded")
     expect(
       formatModelRowTag(
         { status: "loading", modelKey: "on-disk" },
@@ -245,25 +167,11 @@ describe("formatModelRowTag", () => {
   })
 
   it("tags a row that is only on disk with its size", () => {
-    expect(formatModelRowTag(NONE, ON_DISK_ROW)).toBe("4.0 GB on disk")
-  })
-
-  it("tags every row as unavailable while residency is unknown", () => {
-    expect(formatModelRowTag(UNKNOWN, RESIDENT_ROW)).toBe("state unavailable")
+    expect(formatModelRowTag(IDLE, ON_DISK_ROW)).toBe("4.0 GB on disk")
   })
 })
 
 describe("formatComposerModelRowTag", () => {
-  it("tags the loaded row in play as resident", () => {
-    expect(
-      formatComposerModelRowTag(
-        { status: "loaded", modelKey: "on-disk" },
-        ON_DISK_ROW,
-        null
-      )
-    ).toBe("resident")
-  })
-
   it.each(["loading", "unloading"] as const)(
     "tags the row in play as %s",
     (status) => {
@@ -271,33 +179,25 @@ describe("formatComposerModelRowTag", () => {
         formatComposerModelRowTag(
           { status, modelKey: "on-disk" },
           ON_DISK_ROW,
-          null
+          false
         )
       ).toBe(status)
     }
   )
 
-  it("tags another resident row as resident, even when it is not the selected one", () => {
-    expect(formatComposerModelRowTag(NONE, RESIDENT_ROW, "on-disk")).toBe(
+  it("tags a resident row as resident, even when it is not the selected one", () => {
+    expect(formatComposerModelRowTag(IDLE, RESIDENT_ROW, false)).toBe(
       "resident"
     )
   })
 
   it("tags the selected row that is only on disk as selected", () => {
-    expect(formatComposerModelRowTag(NONE, ON_DISK_ROW, "on-disk")).toBe(
-      "selected"
-    )
+    expect(formatComposerModelRowTag(IDLE, ON_DISK_ROW, true)).toBe("selected")
   })
 
   it("tags an unselected row that is only on disk with its size", () => {
-    expect(formatComposerModelRowTag(NONE, ON_DISK_ROW, "resident")).toBe(
+    expect(formatComposerModelRowTag(IDLE, ON_DISK_ROW, false)).toBe(
       "4.0 GB on disk"
-    )
-  })
-
-  it("tags every row as unavailable while residency is unknown", () => {
-    expect(formatComposerModelRowTag(UNKNOWN, ON_DISK_ROW, "on-disk")).toBe(
-      "state unavailable"
     )
   })
 })

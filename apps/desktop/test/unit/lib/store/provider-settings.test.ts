@@ -1,7 +1,8 @@
 import {
   groqApiKeySchema,
   llmProviderSettingsSchema,
-  ollamaApiKeySchema
+  ollamaApiKeySchema,
+  type LlmProvider
 } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import { createStore } from "zustand/vanilla"
@@ -26,16 +27,16 @@ import {
 /** Store state the slice borrows: the current settings and the slice. */
 type ProviderStore = ProviderSettingsSlice & { settings: LysSettings }
 
-/** Groq active, the choice a case switches to. */
-const GROQ_ACTIVE = llmProviderSettingsSchema.parse({
+/** Groq turned on beside the stored local Ollama server. */
+const GROQ_ADDED = llmProviderSettingsSchema.parse({
   ...STORED_PROVIDERS_SETTINGS,
-  active: "groq"
+  enabled: ["ollama", "groq"]
 })
 
-/** Ollama Cloud active. */
-const OLLAMA_CLOUD_ACTIVE = llmProviderSettingsSchema.parse({
+/** Only Ollama Cloud on. */
+const OLLAMA_CLOUD_ONLY = llmProviderSettingsSchema.parse({
   ...STORED_PROVIDERS_SETTINGS,
-  active: "ollamaCloud"
+  enabled: ["ollamaCloud"]
 })
 
 /** Ollama key a case saves: a made-up value of a key's shape. */
@@ -55,7 +56,9 @@ const NEW_GROQ_API_KEY = groqApiKeySchema.parse("gsk_fixture_1111111111111")
  */
 function createProviderStore(settings: LysSettings = STORED_SETTINGS) {
   const settingsGroupSaves = createSettingsGroupSaves()
-  const connectLlmProvider = vi.fn(async () => undefined)
+  const connectLlmProvider = vi.fn<(provider: LlmProvider) => Promise<void>>(
+    async () => undefined
+  )
   const store = createStore<ProviderStore>()((set, get) => ({
     settings,
     ...createProviderSettingsSlice(set, get, {
@@ -108,11 +111,11 @@ describe("createProviderSettingsSlice", () => {
   })
 
   describe("saveProviderSettings", () => {
-    it("saves the choice, holds it once written, then reconnects", async () => {
+    it("saves the providers, holds them once written, then connects the provider it turned on", async () => {
       const { host, writes } = startControlledSettingsHost()
       const { store, connectLlmProvider } = createProviderStore()
 
-      const save = store.getState().saveProviderSettings(GROQ_ACTIVE)
+      const save = store.getState().saveProviderSettings(GROQ_ADDED)
       await waitForMicrotasks()
       const whileWriting = store.getState()
       writes[0]?.resolve(null)
@@ -123,18 +126,50 @@ describe("createProviderSettingsSlice", () => {
       expect(store.getState().providerSettingsSave).toEqual({
         status: "saved"
       })
-      expect(store.getState().settings.providers).toBe(GROQ_ACTIVE)
+      expect(store.getState().settings.providers).toBe(GROQ_ADDED)
       expect(listSettingsWrites(host.commands)).toEqual([
-        { newSettings: { ...STORED_SETTINGS_DOCUMENT, providers: GROQ_ACTIVE } }
+        { newSettings: { ...STORED_SETTINGS_DOCUMENT, providers: GROQ_ADDED } }
       ])
-      expect(connectLlmProvider).toHaveBeenCalledOnce()
+      expect(connectLlmProvider.mock.calls).toEqual([["groq"]])
     })
 
-    it("keeps the choice and does not reconnect when the save fails", async () => {
+    it("connects every provider it turned on or off, and none it left as it was", async () => {
       const { writes } = startControlledSettingsHost()
       const { store, connectLlmProvider } = createProviderStore()
 
-      const save = store.getState().saveProviderSettings(GROQ_ACTIVE)
+      const save = store.getState().saveProviderSettings(OLLAMA_CLOUD_ONLY)
+      await waitForMicrotasks()
+      writes[0]?.resolve(null)
+      await save
+
+      expect(connectLlmProvider.mock.calls).toEqual([
+        ["ollama"],
+        ["ollamaCloud"]
+      ])
+    })
+
+    it("connects a provider that stays on when its address changes", async () => {
+      const { writes } = startControlledSettingsHost()
+      const { store, connectLlmProvider } = createProviderStore()
+      const moved = llmProviderSettingsSchema.parse({
+        ...STORED_PROVIDERS_SETTINGS,
+        ollama: { address: "192.168.1.21:11434" },
+        lmStudio: { address: "192.168.1.5:1234" }
+      })
+
+      const save = store.getState().saveProviderSettings(moved)
+      await waitForMicrotasks()
+      writes[0]?.resolve(null)
+      await save
+
+      expect(connectLlmProvider.mock.calls).toEqual([["ollama"]])
+    })
+
+    it("keeps the providers and connects none when the save fails", async () => {
+      const { writes } = startControlledSettingsHost()
+      const { store, connectLlmProvider } = createProviderStore()
+
+      const save = store.getState().saveProviderSettings(GROQ_ADDED)
       await waitForMicrotasks()
       writes[0]?.reject("EACCES: /Users/someone/.lys/settings.json")
 
@@ -153,7 +188,7 @@ describe("createProviderSettingsSlice", () => {
       const { host, writes } = startControlledSettingsHost()
       const { store } = createProviderStore()
 
-      const first = store.getState().saveProviderSettings(GROQ_ACTIVE)
+      const first = store.getState().saveProviderSettings(GROQ_ADDED)
       await waitForMicrotasks()
       const second = await store
         .getState()
@@ -167,11 +202,11 @@ describe("createProviderSettingsSlice", () => {
   })
 
   describe("saveProviderApiKey", () => {
-    it("saves only that key, keeping the other keys, and reconnects while its provider uses it", async () => {
+    it("saves only that key, keeping the other keys, and connects its provider while it is on", async () => {
       const { host, writes } = startControlledSettingsHost()
       const { store, connectLlmProvider } = createProviderStore({
         ...STORED_SETTINGS,
-        providers: GROQ_ACTIVE
+        providers: GROQ_ADDED
       })
 
       const save = store
@@ -196,15 +231,15 @@ describe("createProviderSettingsSlice", () => {
           }
         }
       ])
-      expect(connectLlmProvider).toHaveBeenCalledOnce()
+      expect(connectLlmProvider.mock.calls).toEqual([["groq"]])
     })
 
-    it("reconnects for Ollama Cloud's key only while Ollama Cloud is active, not a local Ollama server", async () => {
+    it("connects Ollama Cloud for its key only while Ollama Cloud is on, not a local Ollama server", async () => {
       const { writes } = startControlledSettingsHost()
       const local = createProviderStore()
       const cloud = createProviderStore({
         ...STORED_SETTINGS,
-        providers: OLLAMA_CLOUD_ACTIVE
+        providers: OLLAMA_CLOUD_ONLY
       })
 
       const localSave = local.store.getState().saveProviderApiKey({
@@ -223,10 +258,10 @@ describe("createProviderSettingsSlice", () => {
       await cloudSave
 
       expect(local.connectLlmProvider).not.toHaveBeenCalled()
-      expect(cloud.connectLlmProvider).toHaveBeenCalledOnce()
+      expect(cloud.connectLlmProvider.mock.calls).toEqual([["ollamaCloud"]])
     })
 
-    it("removes a key with null without reconnecting while another provider is active", async () => {
+    it("removes a key with null without connecting while its provider is off", async () => {
       const { writes } = startControlledSettingsHost()
       const { store, connectLlmProvider } = createProviderStore()
 

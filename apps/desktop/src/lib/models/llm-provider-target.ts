@@ -6,7 +6,7 @@ import {
   OLLAMA_HOST,
   OLLAMA_PORT
 } from "@lys/protocol"
-import type { LlmProvider } from "@lys/share"
+import { LLM_PROVIDER_NAMES, type LlmProvider } from "@lys/share"
 import type { ProvidersSettings } from "@/lib/store/settings"
 
 /** Provider reached at a server address the person may set. */
@@ -15,9 +15,9 @@ export type AddressedLlmProvider = "lmStudio" | "ollama"
 /** Provider reached at a hosted API with a key the person saves. */
 export type KeyedLlmProvider = "ollamaCloud" | "groq"
 
-/** The provider the saved choice makes the backend connect to. */
+/** A provider, and where the saved settings make the backend reach it. */
 export type LlmProviderTarget = {
-  /** Active provider. */
+  /** The provider. */
   readonly provider: LlmProvider
   /** Provider's name. */
   readonly name: string
@@ -30,14 +30,6 @@ export type LlmProviderTarget = {
   readonly location: string
 }
 
-/** Name of each provider. */
-export const LLM_PROVIDER_NAMES = Object.freeze({
-  lmStudio: "LM Studio",
-  ollama: "Ollama",
-  ollamaCloud: "Ollama Cloud",
-  groq: "Groq"
-} satisfies Readonly<Record<LlmProvider, string>>)
-
 /** Address each addressed provider uses while none is saved. */
 export const DEFAULT_PROVIDER_ADDRESSES = Object.freeze({
   lmStudio: `${LMSTUDIO_HOST}:${LMSTUDIO_PORT}`,
@@ -45,16 +37,18 @@ export const DEFAULT_PROVIDER_ADDRESSES = Object.freeze({
 } satisfies Readonly<Record<AddressedLlmProvider, string>>)
 
 /**
- * Describes the provider the saved choice makes the backend connect to.
+ * Describes where the saved settings make the backend reach a provider.
  *
- * @param providers - Saved provider choice and addresses.
- * @returns The active provider, its name, and how and where it is reached,
- * with a provider's default address while none is saved.
+ * @param provider - Provider to describe, whether on or off.
+ * @param providers - Saved providers group, which holds the addresses.
+ * @returns The provider, its name, and how and where it is reached, with a
+ * provider's default address while none is saved.
  */
 export function describeLlmProviderTarget(
+  provider: LlmProvider,
   providers: ProvidersSettings
 ): LlmProviderTarget {
-  switch (providers.active) {
+  switch (provider) {
     case "lmStudio":
       return {
         provider: "lmStudio",

@@ -5,23 +5,38 @@ import {
   SettingsContext,
   type SettingsContextValue
 } from "@/components/SettingsViewComponents/SettingsContext"
-import { initialModelState, type ModelState } from "@/lib/store/model-runtime"
+import { INITIAL_PROVIDER_MODEL_STATES } from "@/lib/store/model-runtime"
 import { initialSettingsState } from "@/lib/store/settings"
 
+/** The request fields of the shown provider a case varies. */
+type ModelFeedbackArrangement = Partial<
+  Pick<SettingsContextValue, "modelRequest" | "modelError" | "modelHealth">
+>
+
 /**
- * Builds the settings authority a pane reads, with the model state a case
- * arranges.
+ * Builds the settings authority a pane reads, with the request state of the
+ * shown provider a case arranges.
  *
- * @param modelState - Model fields the case varies.
+ * @param arrangement - Request fields the case varies; the others are LM
+ * Studio's initial state.
  * @returns A complete context value with spy callbacks.
  */
 function buildSettingsContext(
-  modelState: Partial<ModelState>
+  arrangement: ModelFeedbackArrangement
 ): SettingsContextValue {
+  const { inventory, request, error, health, loadedModelConfigurations } =
+    INITIAL_PROVIDER_MODEL_STATES.lmStudio
   return {
-    ...initialModelState,
-    ...modelState,
     settings: initialSettingsState,
+    shownProvider: "lmStudio",
+    providerAvailability: "available",
+    modelInventory: inventory,
+    modelRequest: request,
+    modelError: error,
+    modelHealth: health,
+    loadedModelConfigurations,
+    newConversationModel: { model: null, availability: null },
+    ...arrangement,
     onRuntimeChange: vi.fn(),
     onGenerationChange: vi.fn(),
     onAssignModelLoadSettings: vi.fn(),
@@ -37,11 +52,11 @@ function buildSettingsContext(
 /**
  * Renders the feedback under a settings authority.
  *
- * @param modelState - Model fields the case varies.
+ * @param arrangement - Request fields the case varies.
  */
-function startFeedback(modelState: Partial<ModelState>): void {
+function startFeedback(arrangement: ModelFeedbackArrangement): void {
   render(
-    <SettingsContext value={buildSettingsContext(modelState)}>
+    <SettingsContext value={buildSettingsContext(arrangement)}>
       <ModelRequestFeedback />
     </SettingsContext>
   )
@@ -55,7 +70,7 @@ describe("ModelRequestFeedback", () => {
     expect(screen.getByRole("alert")).toBeEmptyDOMElement()
   })
 
-  it.each<[ModelState["modelRequest"], string]>([
+  it.each<[SettingsContextValue["modelRequest"], string]>([
     [{ status: "listing" }, "Refreshing model inventory…"],
     [{ status: "loading", modelKey: "qwen3-8b" }, "loading qwen3-8b…"],
     [{ status: "unloading", modelKey: "qwen3-8b" }, "unloading qwen3-8b…"],

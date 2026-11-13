@@ -1,28 +1,43 @@
+import type { LlmProvider } from "@lys/share"
 import type { BackendServerStatus } from "@/lib/store"
-import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
+import type {
+  LlmProviderStatus,
+  ProviderModelStates
+} from "@/lib/store/model-runtime"
 import type { LlmProviderTarget } from "./llm-provider-target"
 
 /**
- * Whether model requests can reach the active provider, and why not.
+ * Whether model requests can reach one provider, and why not.
  *
  * @remarks Ordered by prerequisite: the backend must answer before the
- * provider's status matters. The `lm-studio-` names predate other providers
- * and cover every provider.
+ * provider's settings matter, and the provider must be on before its status
+ * matters.
  */
-export type ModelRuntimeAvailability =
+export type ProviderAvailability =
   | "backend-offline"
-  | "lm-studio-connecting"
-  | "lm-studio-unreachable"
+  | "provider-off"
+  | "provider-connecting"
+  | "provider-unreachable"
   | "available"
 
+/** The application state whether a provider or a model can answer depends on. */
+export type ModelAvailabilitySource = {
+  /** Backend lifecycle state. */
+  readonly backendStatus: BackendServerStatus
+  /** Providers the saved settings turn on. */
+  readonly enabledProviders: readonly LlmProvider[]
+  /** What the desktop knows of every provider. */
+  readonly providerModels: ProviderModelStates
+}
+
 /** Visual tone of the provider status indicator. */
-export type LmStudioStatusTone = "active" | "pending" | "idle" | "danger"
+export type ProviderStatusTone = "active" | "pending" | "idle" | "danger"
 
 /**
  * Formats the explanation shown wherever model features wait for an
  * unreachable provider.
  *
- * @param provider - Active provider.
+ * @param provider - Provider that cannot be reached.
  * @returns What to check: a server at an address, or a key and the network
  * for a hosted provider; then where to refresh.
  */
@@ -37,43 +52,48 @@ export function formatProviderUnreachableMessage(
 }
 
 /**
- * Calculates whether model requests can reach the active provider, and why
- * not.
+ * Calculates whether model requests can reach one provider, and why not.
  *
- * @param backendStatus - Store-owned backend lifecycle state.
- * @param lmStudioStatus - Latest published provider status.
- * @returns `available` only while the backend runs and the provider is
- * connected. An `unknown` status while the backend runs counts as connecting,
- * because the store reads it right after the backend becomes ready.
+ * @param source - Backend state, the providers that are on, and every
+ * provider's status.
+ * @param provider - Provider to check.
+ * @returns `available` only while the backend runs and the provider is on
+ * and connected. A provider the saved settings leave off, or that the
+ * backend reports `off`, is off. An `unknown` status while the backend runs
+ * counts as connecting, because the store reads it right after the backend
+ * becomes ready.
  */
-export function calculateModelRuntimeAvailability(
-  backendStatus: BackendServerStatus,
-  lmStudioStatus: LmStudioStatus
-): ModelRuntimeAvailability {
-  if (backendStatus !== "running") return "backend-offline"
-  switch (lmStudioStatus) {
+export function calculateProviderAvailability(
+  source: ModelAvailabilitySource,
+  provider: LlmProvider
+): ProviderAvailability {
+  if (source.backendStatus !== "running") return "backend-offline"
+  if (!source.enabledProviders.includes(provider)) return "provider-off"
+  switch (source.providerModels[provider].status) {
+    case "off":
+      return "provider-off"
     case "connected":
       return "available"
     case "unreachable":
-      return "lm-studio-unreachable"
+      return "provider-unreachable"
     case "unknown":
     case "connecting":
-      return "lm-studio-connecting"
+      return "provider-connecting"
   }
 }
 
 /**
  * Formats the provider status card heading.
  *
- * @param lmStudioStatus - Latest published provider status.
- * @param provider - Active provider.
+ * @param status - Latest published provider status.
+ * @param provider - Provider the card shows.
  * @returns The heading naming the provider and the connection state.
  */
-export function formatLmStudioStatusLabel(
-  lmStudioStatus: LmStudioStatus,
+export function formatProviderStatusLabel(
+  status: LlmProviderStatus,
   provider: LlmProviderTarget
 ): string {
-  switch (lmStudioStatus) {
+  switch (status) {
     case "unknown":
       return `${provider.name} status unknown`
     case "connecting":
@@ -82,6 +102,8 @@ export function formatLmStudioStatusLabel(
       return `${provider.name} connected`
     case "unreachable":
       return `${provider.name} not reachable`
+    case "off":
+      return `${provider.name} is off`
   }
 }
 
@@ -93,7 +115,7 @@ export function formatLmStudioStatusLabel(
  * responding; the next step otherwise, which is starting a stopped backend
  * and refreshing against a running one.
  */
-function formatUnknownLmStudioStatusReason(
+function formatUnknownProviderStatusReason(
   backendStatus: BackendServerStatus
 ): string {
   switch (backendStatus) {
@@ -114,21 +136,22 @@ function formatUnknownLmStudioStatusReason(
  * Formats where the provider is and the next step, shown under the provider
  * status heading.
  *
- * @param lmStudioStatus - Latest published provider status.
+ * @param status - Latest published provider status.
  * @param backendStatus - Store-owned backend lifecycle state.
- * @param provider - Active provider.
+ * @param provider - Provider the card shows.
  * @returns The meta line, starting with the provider's location; an
  * `unknown` status adds why it is not known, which depends on the backend's
- * state, and an `unreachable` one what to check.
+ * state, an `unreachable` one what to check, and an `off` one where to turn
+ * it on.
  */
-export function formatLmStudioStatusMeta(
-  lmStudioStatus: LmStudioStatus,
+export function formatProviderStatusMeta(
+  status: LlmProviderStatus,
   backendStatus: BackendServerStatus,
   provider: LlmProviderTarget
 ): string {
-  switch (lmStudioStatus) {
+  switch (status) {
     case "unknown":
-      return `${provider.location} · ${formatUnknownLmStudioStatusReason(backendStatus)}`
+      return `${provider.location} · ${formatUnknownProviderStatusReason(backendStatus)}`
     case "connecting":
       return `${provider.location} · connecting`
     case "connected":
@@ -137,20 +160,23 @@ export function formatLmStudioStatusMeta(
       return provider.access === "address"
         ? `${provider.location} · start ${provider.name}, then refresh`
         : `${provider.location} · check the key in Providers, then refresh`
+    case "off":
+      return `${provider.location} · turn it on in Providers`
   }
 }
 
 /**
  * Selects the provider status indicator tone.
  *
- * @param lmStudioStatus - Latest published provider status.
+ * @param status - Latest published provider status.
  * @returns The tone consumed by the status dot's styles.
  */
-export function calculateLmStudioStatusTone(
-  lmStudioStatus: LmStudioStatus
-): LmStudioStatusTone {
-  switch (lmStudioStatus) {
+export function calculateProviderStatusTone(
+  status: LlmProviderStatus
+): ProviderStatusTone {
+  switch (status) {
     case "unknown":
+    case "off":
       return "idle"
     case "connecting":
       return "pending"

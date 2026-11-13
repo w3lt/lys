@@ -2,8 +2,10 @@ import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import type { BackendServerStatus } from "@/lib/store"
-import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
-import type { ModelInventoryState } from "@/lib/store/model-runtime"
+import type {
+  LlmProviderStatus,
+  ModelInventoryState
+} from "@/lib/store/model-runtime"
 import { buildJsonResponse, startBackendFake } from "../../support/backendFake"
 import { buildLlmInfo } from "../../support/modelFixtures"
 import {
@@ -134,7 +136,13 @@ describe("SettingsView", () => {
   })
 
   it.each<
-    [string, BackendServerStatus, LmStudioStatus, ModelInventoryState, string]
+    [
+      string,
+      BackendServerStatus,
+      LlmProviderStatus,
+      ModelInventoryState,
+      string
+    ]
   >([
     [
       "a stopped backend",
@@ -165,11 +173,18 @@ describe("SettingsView", () => {
       "backend not responding"
     ],
     [
-      "LM Studio in an unknown state",
+      "LM Studio in an unknown state, as about to be connected",
       "running",
       "unknown",
       { status: "unavailable" },
-      "backend up · LM Studio status unknown"
+      "backend up · connecting to LM Studio"
+    ],
+    [
+      "LM Studio turned off on the backend",
+      "running",
+      "off",
+      { status: "unavailable" },
+      "backend up · LM Studio is off"
     ],
     [
       "LM Studio connecting",
@@ -222,7 +237,7 @@ describe("SettingsView", () => {
       startBackendFake({
         [INVENTORY_ROUTE]: buildInventoryRoute(runtime),
         // A failed inventory read is followed by a re-read of LM Studio.
-        "GET /api/v1/llm/runtime": () =>
+        "GET /api/v1/llm/lmStudio/runtime": () =>
           buildJsonResponse(200, { status: lmStudioStatus })
       })
       const { SettingsView } = await loadFreshSettingsView(
@@ -239,7 +254,7 @@ describe("SettingsView", () => {
     }
   )
 
-  it("reads the model inventory when shown with a running backend", async () => {
+  it("reads the model inventory of each connected provider when shown with a running backend", async () => {
     const backend = startBackendFake({
       [INVENTORY_ROUTE]: buildInventoryRoute()
     })
@@ -250,7 +265,7 @@ describe("SettingsView", () => {
 
     expect(backend.requests.map((request) => request.method)).toEqual(["GET"])
     expect(new URL(backend.requests[0]?.url ?? "").pathname).toBe(
-      "/api/v1/llm/list"
+      "/api/v1/llm/lmStudio/list"
     )
   })
 

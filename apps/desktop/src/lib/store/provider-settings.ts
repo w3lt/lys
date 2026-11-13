@@ -1,4 +1,9 @@
-import type { GroqApiKey, OllamaApiKey } from "@lys/share"
+import {
+  LLM_PROVIDERS,
+  type GroqApiKey,
+  type LlmProvider,
+  type OllamaApiKey
+} from "@lys/share"
 import type { StoreApi } from "zustand"
 
 import type {
@@ -45,11 +50,13 @@ export type ProviderSettingsSlice = {
   /** Latest save outcome, retained across pane unmounts. */
   readonly providerSettingsSave: ProviderSettingsSaveState
   /**
-   * Saves the provider choice and addresses, then asks the backend to
-   * connect again, so the next request goes to the saved provider.
-   * @param providers - Provider choice and addresses to save.
-   * @returns `saved` after the settings file and the store hold the choice
-   * and the reconnection settled, `failed` when the save failed, or `busy`
+   * Saves which providers are on and their addresses, then asks the backend
+   * to connect again to every provider the save changed: turned on or off,
+   * or given another address. The backend answers `off` for a provider
+   * turned off.
+   * @param providers - Providers that are on and addresses to save.
+   * @returns `saved` after the settings file and the store hold the group
+   * and the reconnections settled, `failed` when the save failed, or `busy`
    * without saving while another provider save runs. It never rejects.
    */
   readonly saveProviderSettings: (
@@ -57,7 +64,7 @@ export type ProviderSettingsSlice = {
   ) => Promise<ProviderSettingsSaveOutcome>
   /**
    * Saves a provider's key, or removes it with null, then asks the backend
-   * to connect again when the active provider uses that key.
+   * to connect to that provider again while it is on.
    * @param change - Provider and key.
    * @returns The same outcomes as {@link saveProviderSettings}. It never
    * rejects.
@@ -85,10 +92,12 @@ export type ProviderSettingsDependencies = {
     changedSecrets: Partial<SecretsSettings>
   ) => Promise<void>
   /**
-   * Asks the backend to connect to the saved provider again; never rejects,
-   * and does nothing while the backend is not running.
+   * Asks the backend to connect to one provider again; never rejects, and
+   * does nothing while the backend is not running.
+   *
+   * @param provider - Provider to connect.
    */
-  readonly connectLlmProvider: () => Promise<void>
+  readonly connectLlmProvider: (provider: LlmProvider) => Promise<void>
 }
 
 /** Save state before any save. */
@@ -107,17 +116,45 @@ const SAVE_FAILED: ProviderSettingsSaveState = Object.freeze({
 })
 
 /**
- * Answers whether the active provider sends a key, so a change of that key
- * changes how the backend connects.
- * @param providers - Saved provider choice.
+ * Answers whether a provider sends its key, so a change of that key changes
+ * how the backend connects.
+ * @param providers - Saved providers group.
  * @param provider - Provider whose key changed.
- * @returns True while that provider is the active one.
+ * @returns True while that provider is on.
  */
 function isKeyInUse(
   providers: ProvidersSettings,
   provider: ProviderApiKeyChange["provider"]
 ): boolean {
-  return providers.active === provider
+  return providers.enabled.includes(provider)
+}
+
+/**
+ * Answers whether a providers save changes how the backend reaches one
+ * provider.
+ * @param previous - Group held before the save.
+ * @param saved - Group the save wrote.
+ * @param provider - Provider to check.
+ * @returns True when the save turned the provider on or off, or gave it
+ * another address while it stays on.
+ */
+function hasProviderChanged(
+  previous: ProvidersSettings,
+  saved: ProvidersSettings,
+  provider: LlmProvider
+): boolean {
+  const isOn = saved.enabled.includes(provider)
+  if (previous.enabled.includes(provider) !== isOn) return true
+  if (!isOn) return false
+  switch (provider) {
+    case "lmStudio":
+      return previous.lmStudio.address !== saved.lmStudio.address
+    case "ollama":
+      return previous.ollama.address !== saved.ollama.address
+    case "ollamaCloud":
+    case "groq":
+      return false
+  }
 }
 
 /**
@@ -141,10 +178,10 @@ function buildSecretsChange(
  * @returns The slice.
  * @remarks One provider save runs at a time; a request while one runs
  * answers `busy`. The store's settings change only after the file holds the
- * change, so the pane never shows a choice the backend cannot read. The
+ * change, so the pane never shows a group the backend cannot read. The
  * backend reads the providers group and the keys at each connection
- * attempt, so the slice reconnects after a save that changes them. Native
- * writes are not cancellable; leaving the pane cancels nothing.
+ * attempt, so the slice reconnects each provider a save changes, all at
+ * once. Native writes are not cancellable; leaving the pane cancels nothing.
  */
 export function createProviderSettingsSlice(
   set: StoreApi<ProviderSettingsStore>["setState"],
@@ -180,11 +217,18 @@ export function createProviderSettingsSlice(
   async function saveProviderSettings(
     providers: ProvidersSettings
   ): Promise<ProviderSettingsSaveOutcome> {
+    const previous = get().settings.providers
     const outcome = await runProviderSave(
       () => dependencies.saveProviderSettings(providers),
       (settings) => ({ ...settings, providers })
     )
-    if (outcome === "saved") await dependencies.connectLlmProvider()
+    if (outcome === "saved") {
+      await Promise.all(
+        LLM_PROVIDERS.filter((provider) =>
+          hasProviderChanged(previous, providers, provider)
+        ).map((provider) => dependencies.connectLlmProvider(provider))
+      )
+    }
     return outcome
   }
 
@@ -204,7 +248,7 @@ export function createProviderSettingsSlice(
       outcome === "saved" &&
       isKeyInUse(get().settings.providers, change.provider)
     ) {
-      await dependencies.connectLlmProvider()
+      await dependencies.connectLlmProvider(change.provider)
     }
     return outcome
   }

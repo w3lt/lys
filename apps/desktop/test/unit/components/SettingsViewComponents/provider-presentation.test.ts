@@ -2,13 +2,16 @@ import { llmProviderSettingsSchema, providerAddressSchema } from "@lys/share"
 import { describe, expect, it } from "vitest"
 import {
   buildProvidersWithAddress,
+  buildProvidersWithOnlyProvider,
   calculateProviderBadge,
   calculateProviderKeyFieldValue,
   findProviderAccessKind,
+  findProviderCardProvider,
   formatProviderAddressPlaceholder,
   formatProviderKeyPlaceholder,
   formatProviderMessage,
   formatProviderModeTag,
+  isProviderCardOn,
   parseProviderAddressDraft,
   parseProviderKeyDraft,
   UNEDITED_PROVIDER_DRAFT,
@@ -28,18 +31,25 @@ const SECRETS: SecretsSettings = STORED_SETTINGS.secrets
 /** Saved address of the stored local Ollama. */
 const OLLAMA_ADDRESS = providerAddressSchema.parse("192.168.1.20:11434")
 
-/** Provider choice with Ollama Cloud active, the local address still saved. */
+/** Providers with only Ollama Cloud on, the local address still saved. */
 const OLLAMA_CLOUD: ProvidersSettings = llmProviderSettingsSchema.parse({
   ...STORED_PROVIDERS_SETTINGS,
-  active: "ollamaCloud",
+  enabled: ["ollamaCloud"],
   ollama: { address: OLLAMA_ADDRESS }
 })
 
-/** Provider choice with Groq active. */
+/** Providers with only Groq on. */
 const GROQ_ACTIVE: ProvidersSettings = llmProviderSettingsSchema.parse({
   ...STORED_PROVIDERS_SETTINGS,
-  active: "groq"
+  enabled: ["groq"]
 })
+
+/** Providers with both Ollama servers and Groq on. */
+const BOTH_OLLAMAS_AND_GROQ: ProvidersSettings =
+  llmProviderSettingsSchema.parse({
+    ...STORED_PROVIDERS_SETTINGS,
+    enabled: ["ollamaCloud", "ollama", "groq"]
+  })
 
 /**
  * Builds an edit of a field.
@@ -84,6 +94,39 @@ describe("provider-presentation", () => {
     expect(formatProviderModeTag("groq", STORED_PROVIDERS_SETTINGS)).toBe(
       "cloud"
     )
+  })
+
+  describe("provider cards", () => {
+    it("presents Ollama Cloud on Ollama's card only while it is on and the local server is not", () => {
+      expect(findProviderCardProvider("ollama", OLLAMA_CLOUD)).toBe(
+        "ollamaCloud"
+      )
+      expect(
+        findProviderCardProvider("ollama", STORED_PROVIDERS_SETTINGS)
+      ).toBe("ollama")
+      expect(findProviderCardProvider("ollama", BOTH_OLLAMAS_AND_GROQ)).toBe(
+        "ollama"
+      )
+      expect(findProviderCardProvider("ollama", GROQ_ACTIVE)).toBe("ollama")
+      expect(findProviderCardProvider("groq", OLLAMA_CLOUD)).toBe("groq")
+      expect(findProviderCardProvider("lmStudio", OLLAMA_CLOUD)).toBe(
+        "lmStudio"
+      )
+    })
+
+    it("marks a card on while the provider it presents is on", () => {
+      expect(isProviderCardOn("ollama", OLLAMA_CLOUD)).toBe(true)
+      expect(isProviderCardOn("ollama", STORED_PROVIDERS_SETTINGS)).toBe(true)
+      expect(isProviderCardOn("groq", BOTH_OLLAMAS_AND_GROQ)).toBe(true)
+      expect(isProviderCardOn("lmStudio", BOTH_OLLAMAS_AND_GROQ)).toBe(false)
+      expect(isProviderCardOn("ollama", GROQ_ACTIVE)).toBe(false)
+    })
+
+    it("turns exactly one provider on, keeping the addresses", () => {
+      expect(
+        buildProvidersWithOnlyProvider(BOTH_OLLAMAS_AND_GROQ, "lmStudio")
+      ).toEqual({ ...BOTH_OLLAMAS_AND_GROQ, enabled: ["lmStudio"] })
+    })
   })
 
   it("reaches LM Studio and local Ollama at an address, Ollama Cloud and Groq with a key", () => {
@@ -237,7 +280,7 @@ describe("provider-presentation", () => {
   })
 
   describe("calculateProviderBadge", () => {
-    it("stands a provider by while another is active", () => {
+    it("marks a provider that is turned off as off", () => {
       expect(
         calculateProviderBadge(
           "groq",
@@ -245,16 +288,22 @@ describe("provider-presentation", () => {
           SECRETS,
           "connected"
         )
-      ).toEqual({ label: "standby", tone: "muted" })
+      ).toEqual({ label: "off", tone: "muted" })
     })
 
-    it("asks for a key the active provider needs and lacks", () => {
+    it("marks a provider the backend reports off as off", () => {
+      expect(
+        calculateProviderBadge("groq", GROQ_ACTIVE, SECRETS, "off")
+      ).toEqual({ label: "off", tone: "muted" })
+    })
+
+    it("asks for a key a turned-on provider needs and lacks", () => {
       expect(
         calculateProviderBadge("ollama", OLLAMA_CLOUD, SECRETS, "unreachable")
       ).toEqual({ label: "needs key", tone: "attention" })
     })
 
-    it("follows the connection of the active provider", () => {
+    it("follows the connection of a turned-on provider", () => {
       expect(
         calculateProviderBadge("groq", GROQ_ACTIVE, SECRETS, "connected")
       ).toEqual({ label: "connected", tone: "success" })
@@ -373,6 +422,15 @@ describe("provider-presentation", () => {
       expect(
         formatProviderMessage(buildStatusInput({ status: "connecting" }))
       ).toEqual({ text: "connecting to Ollama…", tone: "pending" })
+    })
+
+    it("says the backend still has a turned-on provider off until it is checked again", () => {
+      expect(
+        formatProviderMessage(buildStatusInput({ status: "off" }))
+      ).toEqual({
+        text: "the backend has Ollama off · press Test to check again",
+        tone: "muted"
+      })
     })
 
     it("words an unknown connection by what the backend is doing", () => {

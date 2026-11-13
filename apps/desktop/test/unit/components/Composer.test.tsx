@@ -13,7 +13,8 @@ import {
   CALIGINIA_AGENT_CODE,
   conversationSchema,
   LYSIPTERA_AGENT_CODE,
-  type Conversation
+  type Conversation,
+  type LlmModelReference
 } from "@lys/share"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
@@ -66,6 +67,17 @@ import {
 
 /** Route key of the chat request. */
 const CHAT_ROUTE = "POST /api/v1/chat"
+
+/**
+ * Builds a reference to an LM Studio model, the provider every arranged
+ * runtime turns on.
+ *
+ * @param modelKey - Key of the model.
+ * @returns The model's provider and key.
+ */
+function buildLmStudioModel(modelKey: string): LlmModelReference {
+  return { provider: "lmStudio", modelKey }
+}
 
 /** Route key of the history list read. */
 const HISTORY_ROUTE = "GET /api/v1/conversations"
@@ -555,7 +567,7 @@ describe("Composer", () => {
         {
           conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
           message: "Hello",
-          model: "qwen3-8b",
+          model: buildLmStudioModel("qwen3-8b"),
           generationOptions: generation
         }
       ])
@@ -831,11 +843,33 @@ describe("Composer", () => {
       [
         "LM Studio is not reachable",
         buildUnreachableRuntime("running", "unreachable"),
+        "Waiting on LM Studio…",
         "Check LM Studio",
-        "runtime"
+        "providers"
       ],
       [
-        "no model is loaded",
+        "LM Studio is turned off",
+        buildUnreachableRuntime("running", "off"),
+        "Waiting on LM Studio…",
+        "Open Providers",
+        "providers"
+      ],
+      [
+        "the default model is not loaded",
+        {
+          ...READY_RUNTIME,
+          modelInventory: {
+            status: "ready",
+            modelLoading: "lys",
+            models: [buildLlmInfo("qwen3-8b")]
+          }
+        },
+        "Waiting on LM Studio…",
+        "Load model",
+        "model"
+      ],
+      [
+        "no model is chosen or loaded",
         {
           ...READY_RUNTIME,
           defaultModel: null,
@@ -845,18 +879,20 @@ describe("Composer", () => {
             models: [buildLlmInfo("qwen3-8b")]
           }
         },
-        "Load model",
+        "Waiting on a model…",
+        "Choose model",
         "model"
       ],
       [
         "the model state is unknown",
         { ...READY_RUNTIME, modelInventory: { status: "failed" } },
+        "Waiting on LM Studio…",
         "Check models",
         "model"
       ]
     ] as const)(
       "opens the settings pane that fixes it when %s",
-      async (_case, runtime, actionLabel, pane) => {
+      async (_case, runtime, placeholder, actionLabel, pane) => {
         const { useLysStore, Composer } = await loadFreshComposer(runtime)
         const user = userEvent.setup()
         render(
@@ -866,10 +902,7 @@ describe("Composer", () => {
           />
         )
 
-        expect(getMessageField()).toHaveAttribute(
-          "placeholder",
-          "Waiting on LM Studio…"
-        )
+        expect(getMessageField()).toHaveAttribute("placeholder", placeholder)
         await user.click(screen.getByRole("button", { name: actionLabel }))
 
         expect(useLysStore.getState()).toMatchObject({
@@ -896,7 +929,7 @@ describe("Composer", () => {
       defaultModel: "gemma-3"
     }
 
-    it("names the weights that answer and sends with them", async () => {
+    it("names the default model with its provider and sends with it", async () => {
       const { backend, streams } = startChatBackend()
       const { Composer } = await loadFreshComposer(TWO_LOADED)
       const user = userEvent.setup()
@@ -904,23 +937,23 @@ describe("Composer", () => {
         <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
       )
 
-      expect(screen.getByRole("button", { name: "gemma-3" })).toHaveAttribute(
-        "aria-haspopup",
-        "menu"
-      )
+      expect(
+        screen.getByRole("button", { name: "gemma-3 · LM Studio" })
+      ).toHaveAttribute("aria-haspopup", "menu")
       await user.type(getMessageField(), "Hello{Enter}")
       await waitForRenderedWork()
 
       expect(listChatBodies(backend)).toEqual([
-        expect.objectContaining({ model: "gemma-3" })
+        expect.objectContaining({ model: buildLmStudioModel("gemma-3") })
       ])
       streams[0]?.close()
     })
 
-    it("switches the answering weights to another loaded model for this session only", async () => {
+    it("switches this conversation to another loaded model without changing the default", async () => {
       startNativeHostFake({})
       const { backend, streams } = startChatBackend()
-      const { useLysStore, Composer } = await loadFreshComposer(TWO_LOADED)
+      const { useLysStore, useChatViewStore, Composer } =
+        await loadFreshComposer(TWO_LOADED)
       const user = userEvent.setup()
       render(
         <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
@@ -928,28 +961,31 @@ describe("Composer", () => {
 
       await openMenuWithKeyboard(
         user,
-        screen.getByRole("button", { name: "gemma-3" })
+        screen.getByRole("button", { name: "gemma-3 · LM Studio" })
       )
       await user.click(screen.getByRole("menuitemradio", { name: /^qwen3-8b/ }))
       await user.type(getMessageField(), "Hello{Enter}")
       await waitForRenderedWork()
 
       expect(
-        screen.getByRole("button", { name: "qwen3-8b" })
+        screen.getByRole("button", { name: "qwen3-8b · LM Studio" })
       ).toBeInTheDocument()
-      expect(useLysStore.getState().settings.runtime.defaultModel).toBe(
-        "qwen3-8b"
+      expect(useChatViewStore.getState().modelPick).toEqual(
+        buildLmStudioModel("qwen3-8b")
+      )
+      expect(useLysStore.getState().settings.runtime.defaultModel).toEqual(
+        buildLmStudioModel("gemma-3")
       )
       expect(listChatBodies(backend)).toEqual([
-        expect.objectContaining({ model: "qwen3-8b" })
+        expect.objectContaining({ model: buildLmStudioModel("qwen3-8b") })
       ])
       streams[0]?.close()
     })
 
-    it("keeps naming and sending with loaded weights when an unloaded model is chosen", async () => {
+    it("keeps a chosen model that is not loaded, says so, and sends nothing to a loaded one instead", async () => {
       startNativeHostFake({})
-      const { backend, streams } = startChatBackend()
-      const { Composer } = await loadFreshComposer(TWO_LOADED)
+      const { backend } = startChatBackend()
+      const { useChatViewStore, Composer } = await loadFreshComposer(TWO_LOADED)
       const user = userEvent.setup()
       render(
         <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
@@ -957,19 +993,24 @@ describe("Composer", () => {
 
       await openMenuWithKeyboard(
         user,
-        screen.getByRole("button", { name: "gemma-3" })
+        screen.getByRole("button", { name: "gemma-3 · LM Studio" })
       )
       await user.click(screen.getByRole("menuitemradio", { name: /^llama-4/ }))
-      await user.type(getMessageField(), "Hello{Enter}")
-      await waitForRenderedWork()
+      await act(async () => {
+        await useChatViewStore.getState().sendMessage("Hello")
+      })
 
       expect(
-        screen.getByRole("button", { name: "qwen3-8b" })
+        screen.getByRole("button", { name: "llama-4 · LM Studio" })
       ).toBeInTheDocument()
-      expect(listChatBodies(backend)).toEqual([
-        expect.objectContaining({ model: "qwen3-8b" })
-      ])
-      streams[0]?.close()
+      expect(getMessageField()).toBeDisabled()
+      expect(listStatusTexts()).toContainEqual(
+        expect.stringContaining("llama-4 is not loaded in LM Studio.")
+      )
+      expect(
+        screen.getByRole("button", { name: "Load model" })
+      ).toBeInTheDocument()
+      expect(listChatBodies(backend)).toEqual([])
     })
   })
 
@@ -1473,7 +1514,7 @@ describe("Composer", () => {
       ).toEqual([
         {
           conversation: { kind: "new", agentCode: CALIGINIA_AGENT_CODE },
-          model: "qwen3-8b"
+          model: buildLmStudioModel("qwen3-8b")
         }
       ])
       expect(

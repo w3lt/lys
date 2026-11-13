@@ -11,13 +11,24 @@ import {
 import SettingsPaneFrame from "@/components/SettingsViewComponents/SettingsPaneFrame"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import {
+  LLM_PROVIDER_NAMES,
+  LLM_PROVIDERS,
+  type LlmModelReference,
+  type LlmProvider
+} from "@lys/share"
+import {
+  useNewConversationModel,
+  type ShownModelState
+} from "@/lib/hooks/conversationModel"
+import {
   buildLoadConfigurationSettings,
   type ModelLoadConfigurationChange
 } from "@/lib/models/model-load-configuration"
-import { describeLlmProviderTarget } from "@/lib/models/llm-provider-target"
+import {
+  calculateProviderAvailability,
+  type ProviderAvailability
+} from "@/lib/models/provider-connection"
 import { type BackendServerStatus, useLysStore } from "@/lib/store"
-import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
-import type { ModelRuntimeState } from "@/lib/store/model-runtime"
 import type { LysSettings } from "@/lib/store/settings"
 
 import "./SettingsView.scss"
@@ -229,25 +240,29 @@ function formatRailBackendStatus(
 }
 
 /**
- * Formats the rail summary for a running backend without a connected
- * provider.
+ * Formats the rail summary for a running backend from one provider's state.
  *
- * @param lmStudioStatus - Latest published provider status other than
- * `connected`.
- * @param providerName - Name of the active provider.
- * @returns The provider state, matching the Runtime pane's provider card.
+ * @param availability - Whether model requests can reach the provider.
+ * @param providerName - Name of the provider.
+ * @returns The provider state, matching the Runtime pane's provider card, or
+ * that no model is loaded once the provider can be reached. A backend
+ * offline, which the caller rules out first, reads as unavailable.
  */
-function formatRailLmStudioStatus(
-  lmStudioStatus: Exclude<LmStudioStatus, "connected">,
+function formatRailProviderStatus(
+  availability: ProviderAvailability,
   providerName: string
 ): string {
-  switch (lmStudioStatus) {
-    case "unknown":
-      return `backend up · ${providerName} status unknown`
-    case "connecting":
+  switch (availability) {
+    case "provider-off":
+      return `backend up · ${providerName} is off`
+    case "provider-connecting":
       return `backend up · connecting to ${providerName}`
-    case "unreachable":
+    case "provider-unreachable":
       return `backend up · ${providerName} not reachable`
+    case "available":
+      return "backend up · no model"
+    case "backend-offline":
+      return "backend up · model state unavailable"
   }
 }
 
@@ -255,36 +270,90 @@ function formatRailLmStudioStatus(
  * Formats the one-line runtime summary shown under the settings rail.
  *
  * @param backendStatus - Store-owned backend lifecycle state.
- * @param lmStudioStatus - Latest published provider status.
- * @param modelRuntime - Current weight residency state.
- * @param providerName - Name of the active provider.
+ * @param shownModel - The model a new conversation uses, with its
+ * availability.
+ * @param shownProvider - Provider the panes show, which the summary
+ * describes while there is no model.
+ * @param providerAvailability - Whether model requests can reach that
+ * provider.
  * @returns The rail's summary of the first missing prerequisite—the backend,
- * then the provider—or of the weights once both are available.
+ * then the model's provider—or of the model's weights once both are
+ * available.
  */
 function formatRailStatus(
   backendStatus: BackendServerStatus,
-  lmStudioStatus: LmStudioStatus,
-  modelRuntime: ModelRuntimeState,
-  providerName: string
+  shownModel: ShownModelState,
+  shownProvider: LlmProvider,
+  providerAvailability: ProviderAvailability
 ): string {
   if (backendStatus !== "running") return formatRailBackendStatus(backendStatus)
-  if (lmStudioStatus !== "connected") {
-    return formatRailLmStudioStatus(lmStudioStatus, providerName)
+  if (shownModel.model === null || shownModel.availability === null) {
+    return formatRailProviderStatus(
+      providerAvailability,
+      LLM_PROVIDER_NAMES[shownProvider]
+    )
   }
 
-  switch (modelRuntime.status) {
+  const providerName = LLM_PROVIDER_NAMES[shownModel.model.provider]
+  switch (shownModel.availability.status) {
     case "loaded":
       return "backend up · model loaded"
     case "loading":
       return "backend up · loading weights"
     case "unloading":
       return "backend up · releasing weights"
-    case "none":
+    case "not-loaded":
       return "backend up · no model"
-    case "unknown":
-    case "unavailable":
+    case "not-listed":
+      return "backend up · model not listed"
+    case "provider-off":
+      return formatRailProviderStatus("provider-off", providerName)
+    case "provider-connecting":
+      return formatRailProviderStatus("provider-connecting", providerName)
+    case "provider-unreachable":
+      return formatRailProviderStatus("provider-unreachable", providerName)
+    case "backend-not-running":
+    case "inventory-unread":
+    case "inventory-failed":
       return "backend up · model state unavailable"
   }
+}
+
+/**
+ * Finds the provider whose models the settings panes show.
+ *
+ * @param settings - Current settings.
+ * @param newConversationModel - The model a new conversation uses, or null
+ * when there is none.
+ * @returns That model's provider while it is on, else the first provider
+ * that is on, in provider order, else LM Studio.
+ */
+function findShownProvider(
+  settings: LysSettings,
+  newConversationModel: LlmModelReference | null
+): LlmProvider {
+  const { enabled } = settings.providers
+  const modelProvider = newConversationModel?.provider
+  if (modelProvider !== undefined && enabled.includes(modelProvider)) {
+    return modelProvider
+  }
+  return (
+    LLM_PROVIDERS.find((provider) => enabled.includes(provider)) ?? "lmStudio"
+  )
+}
+
+/**
+ * Builds a reference to one of the shown provider's models.
+ *
+ * @param provider - Shown provider.
+ * @param modelKey - Key of the model.
+ * @returns The reference.
+ */
+function buildShownModelReference(
+  provider: LlmProvider,
+  modelKey: string
+): LlmModelReference {
+  return { provider, modelKey }
 }
 
 /**
@@ -323,12 +392,15 @@ export type SettingsViewProps = {
  * switch edits are saved automatically; other runtime edits remain
  * session-only.
  *
- * Inventory, load, unload, reload, and health requests belong to the application store.
- * Entering settings refreshes inventory; leaving the view does not cancel work.
+ * Inventory, load, unload, reload, and health requests belong to the
+ * application store; the panes show one provider's models, as
+ * {@link findShownProvider} finds it, and act on them. Entering settings
+ * refreshes every provider's inventory; leaving the view does not cancel
+ * work.
  * Request errors and loaded-state health observations are rendered by the panes.
  * Agents are managed through the agent store, which the Agents pane reads
  * directly rather than through `SettingsContext`; its prompt measure reads the
- * loaded model's context length from the application store's model inventory,
+ * context length of the model a new conversation uses, while it is loaded,
  * and it proposes no settings patch. The Tools pane likewise reads the tool store directly; it
  * lists the tools the desktop and the backend report, MCP servers' tools
  * among them. Its tool-calls switch
@@ -353,17 +425,9 @@ export default function SettingsView({
   const settings = useLysStore((state) => state.settings)
   const setSettings = useLysStore((state) => state.setSettings)
   const backendStatus = useLysStore((state) => state.backendServerInfo.status)
-  const lmStudioStatus = useLysStore((state) => state.lmStudioStatus)
-  const modelRuntime = useLysStore((state) => state.modelRuntime)
+  const providerModels = useLysStore((state) => state.providerModels)
   const loadModel = useLysStore((state) => state.loadModel)
   const unloadModel = useLysStore((state) => state.unloadModel)
-  const modelInventory = useLysStore((state) => state.modelInventory)
-  const modelRequest = useLysStore((state) => state.modelRequest)
-  const modelError = useLysStore((state) => state.modelError)
-  const modelHealth = useLysStore((state) => state.modelHealth)
-  const loadedModelConfigurations = useLysStore(
-    (state) => state.loadedModelConfigurations
-  )
   const updateLoadedModelConfiguration = useLysStore(
     (state) => state.updateLoadedModelConfiguration
   )
@@ -371,20 +435,34 @@ export default function SettingsView({
   const updateModelInventory = useLysStore(
     (state) => state.updateModelInventory
   )
+  const newConversationModel = useNewConversationModel()
+  const shownProvider = findShownProvider(settings, newConversationModel.model)
+  const shownProviderModels = providerModels[shownProvider]
+  const providerAvailability = calculateProviderAvailability(
+    {
+      backendStatus,
+      enabledProviders: settings.providers.enabled,
+      providerModels
+    },
+    shownProvider
+  )
 
   useEffect(() => {
-    if (backendStatus === "running") void updateModelInventory()
+    if (backendStatus !== "running") return
+    for (const provider of LLM_PROVIDERS) void updateModelInventory(provider)
   }, [backendStatus, updateModelInventory])
 
   const contextValue = useMemo<SettingsContextValue>(
     () => ({
       settings,
-      modelRuntime,
-      modelInventory,
-      modelRequest,
-      modelError,
-      modelHealth,
-      loadedModelConfigurations,
+      shownProvider,
+      providerAvailability,
+      modelInventory: shownProviderModels.inventory,
+      modelRequest: shownProviderModels.request,
+      modelError: shownProviderModels.error,
+      modelHealth: shownProviderModels.health,
+      loadedModelConfigurations: shownProviderModels.loadedModelConfigurations,
+      newConversationModel,
       onRuntimeChange: (patch) =>
         setSettings({
           ...settings,
@@ -410,20 +488,24 @@ export default function SettingsView({
         }
         setSettings(buildSettingsWithLoadConfigurationChange(settings, change))
       },
-      onLoadModel: loadModel,
-      onUnloadModel: unloadModel,
-      onReloadModel: updateLoadedModelConfiguration,
-      onTestModel: testModel,
-      onRefreshModels: updateModelInventory
+      onLoadModel: (modelKey) =>
+        loadModel(buildShownModelReference(shownProvider, modelKey)),
+      onUnloadModel: (modelKey) =>
+        unloadModel(buildShownModelReference(shownProvider, modelKey)),
+      onReloadModel: (modelKey) =>
+        updateLoadedModelConfiguration(
+          buildShownModelReference(shownProvider, modelKey)
+        ),
+      onTestModel: (modelKey) =>
+        testModel(buildShownModelReference(shownProvider, modelKey)),
+      onRefreshModels: () => updateModelInventory(shownProvider)
     }),
     [
       settings,
-      modelRuntime,
-      modelInventory,
-      modelRequest,
-      modelError,
-      modelHealth,
-      loadedModelConfigurations,
+      shownProvider,
+      providerAvailability,
+      shownProviderModels,
+      newConversationModel,
       setSettings,
       loadModel,
       unloadModel,
@@ -435,9 +517,9 @@ export default function SettingsView({
 
   const railStatus = formatRailStatus(
     backendStatus,
-    lmStudioStatus,
-    modelRuntime,
-    describeLlmProviderTarget(settings.providers).name
+    newConversationModel,
+    shownProvider,
+    providerAvailability
   )
 
   return (

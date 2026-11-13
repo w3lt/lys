@@ -4,6 +4,7 @@ import LmStudioLogo from "@lobehub/icons/es/LmStudio/components/Mono.js"
 import OllamaLogo from "@lobehub/icons/es/Ollama/components/Mono.js"
 import {
   groqApiKeySchema,
+  LLM_PROVIDER_NAMES,
   ollamaApiKeySchema,
   providerAddressSchema,
   type GroqApiKey,
@@ -14,12 +15,11 @@ import {
 
 import {
   DEFAULT_PROVIDER_ADDRESSES,
-  LLM_PROVIDER_NAMES,
   type AddressedLlmProvider,
   type KeyedLlmProvider
 } from "@/lib/models/llm-provider-target"
 import type { BackendServerStatus } from "@/lib/store"
-import type { LmStudioStatus } from "@/lib/store/lm-studio-status"
+import type { LlmProviderStatus } from "@/lib/store/model-runtime"
 import type {
   ProviderApiKeyChange,
   ProviderSettingsSaveState
@@ -34,7 +34,7 @@ import { formatMaskedApiKey, type SecretTone } from "./secrets-presentation"
  */
 export type ProviderCardKind = "lmStudio" | "ollama" | "groq"
 
-/** Provider an Ollama card's Local or Cloud button makes active. */
+/** Provider an Ollama card's Local or Cloud button turns on. */
 export type OllamaLlmProvider = "ollama" | "ollamaCloud"
 
 /** What a provider card shows of its provider. */
@@ -50,7 +50,7 @@ export type ProviderDescription = {
   readonly logo: IconType
 }
 
-/** How the active provider is reached, which decides the card's form. */
+/** How a card's provider is reached, which decides the card's form. */
 export type ProviderAccessKind =
   | {
       /** A server at an address. */
@@ -69,12 +69,7 @@ export type ProviderAccessKind =
 export type ProviderBadge = {
   /** Lowercase badge text. */
   readonly label:
-    | "standby"
-    | "needs key"
-    | "unknown"
-    | "connecting"
-    | "connected"
-    | "unreachable"
+    "off" | "needs key" | "unknown" | "connecting" | "connected" | "unreachable"
   /** Tone of the badge's dot. */
   readonly tone: SecretTone
 }
@@ -110,16 +105,16 @@ export type ProviderKeyDraftParse =
   | { readonly status: "unchanged" }
   | { readonly status: "invalid" }
 
-/** Facts the active card's status line describes. */
+/** Facts a turned-on card's status line describes. */
 export type ProviderStatusInput = {
-  /** How the active provider is reached. */
+  /** How the card's provider is reached. */
   readonly access: ProviderAccessKind
-  /** Saved provider choice and addresses. */
+  /** Saved providers and addresses. */
   readonly providers: ProvidersSettings
   /** Saved keys. */
   readonly secrets: SecretsSettings
-  /** Latest published connection status of the backend's provider. */
-  readonly status: LmStudioStatus
+  /** Latest published connection status of the card's provider. */
+  readonly status: LlmProviderStatus
   /** Backend lifecycle state, which explains an `unknown` status. */
   readonly backendStatus: BackendServerStatus
   /** Latest provider save. */
@@ -128,7 +123,7 @@ export type ProviderStatusInput = {
   readonly draft: ProviderFieldDraft
 }
 
-/** One line under the active card's form. */
+/** One line under a turned-on card's form. */
 export type ProviderMessage = {
   /** Text of the line. */
   readonly text: string
@@ -148,17 +143,9 @@ export const PROVIDER_CARD_ORDER: readonly ProviderCardKind[] = Object.freeze([
   "groq"
 ])
 
-/** Card that presents each provider. */
-export const PROVIDER_CARDS = Object.freeze({
-  lmStudio: "lmStudio",
-  ollama: "ollama",
-  ollamaCloud: "ollama",
-  groq: "groq"
-} satisfies Readonly<Record<LlmProvider, ProviderCardKind>>)
-
 /**
- * Provider that picking each card makes active; picking Ollama's card makes
- * the local server active, and its Cloud button switches to Ollama Cloud.
+ * Provider that picking each card turns on; picking Ollama's card turns the
+ * local server on, and its Cloud button switches to Ollama Cloud.
  */
 export const PROVIDER_CARD_PROVIDERS = Object.freeze({
   lmStudio: "lmStudio",
@@ -206,13 +193,13 @@ const KEY_PLACEHOLDERS = Object.freeze({
   groq: "gsk_…"
 } satisfies Readonly<Record<KeyedLlmProvider, string>>)
 
-/** Text of the Ollama card's buttons, by the provider each makes active. */
+/** Text of the Ollama card's buttons, by the provider each turns on. */
 export const OLLAMA_PROVIDER_LABELS = Object.freeze({
   ollama: "Local",
   ollamaCloud: "Cloud"
 } satisfies Readonly<Record<OllamaLlmProvider, string>>)
 
-/** Note above the Ollama card's buttons, by active Ollama provider. */
+/** Note above the Ollama card's buttons, by the Ollama provider shown. */
 export const OLLAMA_PROVIDER_NOTES = Object.freeze({
   ollama:
     "A server on this machine or your network. Conversations stay where it runs.",
@@ -233,13 +220,62 @@ const INVALID_ADDRESS_MESSAGE: ProviderMessage = Object.freeze({
 })
 
 /**
+ * Finds the provider a card presents.
+ *
+ * @param card - Card to read.
+ * @param providers - Saved providers, for which Ollama provider is on.
+ * @returns The card's provider; for Ollama's card, Ollama Cloud while it is
+ * on and the local server is not, and the local server otherwise.
+ */
+export function findProviderCardProvider(
+  card: ProviderCardKind,
+  providers: ProvidersSettings
+): LlmProvider {
+  if (card !== "ollama") return PROVIDER_CARD_PROVIDERS[card]
+  return providers.enabled.includes("ollamaCloud") &&
+    !providers.enabled.includes("ollama")
+    ? "ollamaCloud"
+    : "ollama"
+}
+
+/**
+ * Answers whether a card's provider is on.
+ *
+ * @param card - Card to read.
+ * @param providers - Saved providers.
+ * @returns Whether the saved providers turn on the provider the card
+ * presents.
+ */
+export function isProviderCardOn(
+  card: ProviderCardKind,
+  providers: ProvidersSettings
+): boolean {
+  return providers.enabled.includes(findProviderCardProvider(card, providers))
+}
+
+/**
+ * Builds the saved providers with exactly one provider turned on.
+ *
+ * @param providers - Saved providers.
+ * @param provider - Provider to turn on.
+ * @returns A new value that turns on only `provider`; the addresses are
+ * unchanged.
+ */
+export function buildProvidersWithOnlyProvider(
+  providers: ProvidersSettings,
+  provider: LlmProvider
+): ProvidersSettings {
+  return { ...providers, enabled: [provider] }
+}
+
+/**
  * Formats the tag after a card's name.
  *
  * @param card - Card the tag belongs to.
- * @param providers - Saved provider choice, for which Ollama provider is
- * active.
- * @returns `local` for LM Studio, `cloud` while Ollama Cloud is active and
- * `local` otherwise for Ollama, and `cloud` for Groq.
+ * @param providers - Saved providers, for which Ollama provider the card
+ * presents.
+ * @returns `local` for LM Studio, `cloud` while Ollama's card presents Ollama
+ * Cloud and `local` otherwise, and `cloud` for Groq.
  */
 export function formatProviderModeTag(
   card: ProviderCardKind,
@@ -249,7 +285,9 @@ export function formatProviderModeTag(
     case "lmStudio":
       return "local"
     case "ollama":
-      return providers.active === "ollamaCloud" ? "cloud" : "local"
+      return findProviderCardProvider(card, providers) === "ollamaCloud"
+        ? "cloud"
+        : "local"
     case "groq":
       return "cloud"
   }
@@ -432,9 +470,9 @@ export function parseProviderKeyDraft(
 }
 
 /**
- * Answers whether the active provider needs a key that is not saved.
+ * Answers whether a provider needs a key that is not saved.
  *
- * @param access - How the active provider is reached.
+ * @param access - How the provider is reached.
  * @param secrets - Saved keys.
  * @returns True for a keyed provider without a saved key.
  */
@@ -452,24 +490,26 @@ function isProviderKeyMissing(
  * Calculates a provider card's badge.
  *
  * @param card - Card the badge belongs to.
- * @param providers - Saved provider choice.
+ * @param providers - Saved providers.
  * @param secrets - Saved keys.
- * @param status - Latest published connection status.
- * @returns `standby` for a card that does not present the active provider;
- * `needs key` for the active provider without its key; otherwise the
- * connection status, `unknown` while it is not known.
+ * @param status - Latest published connection status of the card's provider.
+ * @returns `off` for a card whose provider is off, or that the backend
+ * reports off; `needs key` for a keyed provider without its key; otherwise
+ * the connection status, `unknown` while it is not known.
  */
 export function calculateProviderBadge(
   card: ProviderCardKind,
   providers: ProvidersSettings,
   secrets: SecretsSettings,
-  status: LmStudioStatus
+  status: LlmProviderStatus
 ): ProviderBadge {
-  if (PROVIDER_CARDS[providers.active] !== card)
-    return { label: "standby", tone: "muted" }
-  if (isProviderKeyMissing(findProviderAccessKind(providers.active), secrets))
+  if (!isProviderCardOn(card, providers)) return { label: "off", tone: "muted" }
+  const provider = findProviderCardProvider(card, providers)
+  if (isProviderKeyMissing(findProviderAccessKind(provider), secrets))
     return { label: "needs key", tone: "attention" }
   switch (status) {
+    case "off":
+      return { label: "off", tone: "muted" }
     case "unknown":
       return { label: "unknown", tone: "muted" }
     case "connecting":
@@ -508,10 +548,10 @@ function formatUnknownConnectionText(
 }
 
 /**
- * Formats what the active connection status means for one provider.
+ * Formats what a connection status means for one provider.
  *
- * @param input - How the active provider is reached, the saved choice for
- * its address, the connection status, and the backend's state.
+ * @param input - How the provider is reached, the saved providers for its
+ * address, its connection status, and the backend's state.
  * @returns The line for that status.
  */
 function formatConnectionMessage({
@@ -532,6 +572,11 @@ function formatConnectionMessage({
     case "unknown":
       return {
         text: formatUnknownConnectionText(name, backendStatus),
+        tone: "muted"
+      }
+    case "off":
+      return {
+        text: `the backend has ${name} off · press Test to check again`,
         tone: "muted"
       }
     case "connecting":
@@ -586,7 +631,7 @@ function formatDraftMessage(
 }
 
 /**
- * Formats the line under the active card's form.
+ * Formats the line under a turned-on card's form.
  *
  * @param input - Access, saved settings, connection, save, and edit.
  * @returns, in order of precedence: what an edit means; a running or failed

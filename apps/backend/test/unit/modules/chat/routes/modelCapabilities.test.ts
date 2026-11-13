@@ -1,12 +1,11 @@
 import {
-  groqApiKeySchema,
   LLM_PROVIDERS,
+  providerAddressSchema,
   type LlmModelReference
 } from "@lys/share"
 import { describe, expect, it, vi } from "vitest"
 import {
   createLlmModelCapabilitiesLookup,
-  createModelCapabilitiesLookup,
   findListedModelCapabilities,
   NO_MODEL_CAPABILITIES,
   type ModelCapabilitiesSource
@@ -21,20 +20,23 @@ import {
   TEST_LLM_PROVIDER_ACCESSES
 } from "../../../support/llmFixtures"
 
-/** Groq with a synthetic key; not a real credential. */
-const GROQ_ACCESS: LlmProviderAccess = Object.freeze({
-  provider: "groq",
-  apiKey: groqApiKeySchema.parse("gsk_synthetic_0123456789")
+/** LM Studio reached at an address other than its default. */
+const OTHER_LM_STUDIO_ACCESS: LlmProviderAccess = Object.freeze({
+  provider: "lmStudio",
+  address: providerAddressSchema.parse("studio-box.local:4321")
 })
-
-/** Finds LM Studio connected, as most cases need. */
-const findLmStudioConnected = () => DEFAULT_LM_STUDIO_ACCESS
 
 /** A downloaded model that sees images and uses tools. */
 const VISION_MODEL: DownloadedLlmModel = Object.freeze({
   ...createDownloadedLlmModel({ modelKey: "qwen/qwen2.5-vl-7b" }),
   vision: true,
   trainedForToolUse: true
+})
+
+/** {@link VISION_MODEL} on LM Studio. */
+const LM_STUDIO_QWEN2_5_VL_7B: LlmModelReference = Object.freeze({
+  provider: "lmStudio",
+  modelKey: VISION_MODEL.modelKey
 })
 
 /** A downloaded text-only model. */
@@ -85,13 +87,20 @@ describe("findListedModelCapabilities", () => {
 })
 
 /**
- * Creates each provider's source, connected as
- * {@link TEST_LLM_PROVIDER_ACCESSES} reaches it, whose listing is a spy that
- * lists no model until a case configures it.
+ * Creates each provider's source, whose listing is a spy that lists no model
+ * until a case configures it. LM Studio is connected as the case's finder
+ * says, read at every lookup; every other provider is connected as
+ * {@link TEST_LLM_PROVIDER_ACCESSES} reaches it.
  *
+ * @param findLmStudioConnection - Finds how LM Studio is connected, or
+ * undefined while it is not; LM Studio at its default address unless a case
+ * varies it.
  * @returns Each provider's source and its listing spy.
  */
-function createProviderSources() {
+function createProviderSources(
+  findLmStudioConnection: () => LlmProviderAccess | undefined = () =>
+    DEFAULT_LM_STUDIO_ACCESS
+) {
   const listings = buildLlmProviderRecord(() =>
     vi.fn(async (): Promise<readonly DownloadedLlmModel[]> => [])
   )
@@ -99,7 +108,11 @@ function createProviderSources() {
     (provider): ModelCapabilitiesSource => ({
       llmService: { listDownloadedLlmModels: listings[provider] },
       llmRuntimeService: {
-        connectedLlmProviderAccess: TEST_LLM_PROVIDER_ACCESSES[provider]
+        get connectedLlmProviderAccess() {
+          return provider === "lmStudio"
+            ? findLmStudioConnection()
+            : TEST_LLM_PROVIDER_ACCESSES[provider]
+        }
       }
     })
   )
@@ -161,149 +174,123 @@ describe("createLlmModelCapabilitiesLookup", () => {
       trainedForToolUse: true
     })
   })
-})
 
-describe("createModelCapabilitiesLookup", () => {
-  it("answers with the matching model's capabilities, listing the downloaded models once per model", async () => {
-    const listDownloadedLlmModels = vi.fn(async () => [
-      TEXT_MODEL,
-      VISION_MODEL
-    ])
-    const findModelCapabilities = createModelCapabilitiesLookup(
-      listDownloadedLlmModels,
-      findLmStudioConnected
-    )
+  it("answers with the matching model's capabilities, listing the provider's downloaded models once per model", async () => {
+    const { sources, listings } = createProviderSources()
+    listings.lmStudio.mockResolvedValue([TEXT_MODEL, VISION_MODEL])
+    const findModelCapabilities = createLlmModelCapabilitiesLookup(sources)
 
-    const vision = await findModelCapabilities("qwen/qwen2.5-vl-7b")
-    const text = await findModelCapabilities("qwen/qwen3-8b")
+    const vision = await findModelCapabilities(LM_STUDIO_QWEN2_5_VL_7B)
+    const text = await findModelCapabilities(LM_STUDIO_QWEN3_8B)
 
     expect(vision).toEqual({ vision: true, trainedForToolUse: true })
     expect(Object.isFrozen(vision)).toBe(true)
     expect(text).toEqual({ vision: false, trainedForToolUse: true })
-    expect(listDownloadedLlmModels).toHaveBeenCalledTimes(2)
+    expect(listings.lmStudio).toHaveBeenCalledTimes(2)
   })
 
   it("remembers a listed model's capabilities, so later lookups of it list nothing", async () => {
-    const listDownloadedLlmModels = vi.fn(async () => [TEXT_MODEL])
-    const findModelCapabilities = createModelCapabilitiesLookup(
-      listDownloadedLlmModels,
-      findLmStudioConnected
-    )
+    const { sources, listings } = createProviderSources()
+    listings.lmStudio.mockResolvedValue([TEXT_MODEL])
+    const findModelCapabilities = createLlmModelCapabilitiesLookup(sources)
 
-    const first = await findModelCapabilities("qwen/qwen3-8b")
-    listDownloadedLlmModels.mockResolvedValue([])
-    const second = await findModelCapabilities("qwen/qwen3-8b")
+    const first = await findModelCapabilities(LM_STUDIO_QWEN3_8B)
+    listings.lmStudio.mockResolvedValue([])
+    const second = await findModelCapabilities(LM_STUDIO_QWEN3_8B)
 
     expect(second).toBe(first)
-    expect(listDownloadedLlmModels).toHaveBeenCalledOnce()
+    expect(listings.lmStudio).toHaveBeenCalledOnce()
   })
 
   it("lists again for a model the inventory did not list, and remembers it once listed", async () => {
-    const listDownloadedLlmModels = vi.fn(
-      async (): Promise<readonly DownloadedLlmModel[]> => []
-    )
-    const findModelCapabilities = createModelCapabilitiesLookup(
-      listDownloadedLlmModels,
-      findLmStudioConnected
-    )
+    const { sources, listings } = createProviderSources()
+    const findModelCapabilities = createLlmModelCapabilitiesLookup(sources)
 
     await expect(
-      findModelCapabilities("qwen/qwen3-8b")
+      findModelCapabilities(LM_STUDIO_QWEN3_8B)
     ).resolves.toBeUndefined()
-    listDownloadedLlmModels.mockResolvedValue([TEXT_MODEL])
-    await expect(findModelCapabilities("qwen/qwen3-8b")).resolves.toEqual({
+    listings.lmStudio.mockResolvedValue([TEXT_MODEL])
+    await expect(findModelCapabilities(LM_STUDIO_QWEN3_8B)).resolves.toEqual({
       vision: false,
       trainedForToolUse: true
     })
-    await findModelCapabilities("qwen/qwen3-8b")
+    await findModelCapabilities(LM_STUDIO_QWEN3_8B)
 
-    expect(listDownloadedLlmModels).toHaveBeenCalledTimes(2)
+    expect(listings.lmStudio).toHaveBeenCalledTimes(2)
   })
 
   it("lists again after a failed listing", async () => {
+    const { sources, listings } = createProviderSources()
     const failure = new Error("queue full")
-    const listDownloadedLlmModels = vi
-      .fn(async (): Promise<readonly DownloadedLlmModel[]> => [TEXT_MODEL])
+    listings.lmStudio
+      .mockResolvedValue([TEXT_MODEL])
       .mockRejectedValueOnce(failure)
-    const findModelCapabilities = createModelCapabilitiesLookup(
-      listDownloadedLlmModels,
-      findLmStudioConnected
-    )
+    const findModelCapabilities = createLlmModelCapabilitiesLookup(sources)
 
-    await expect(findModelCapabilities("qwen/qwen3-8b")).rejects.toBe(failure)
-    await expect(findModelCapabilities("qwen/qwen3-8b")).resolves.toEqual({
+    await expect(findModelCapabilities(LM_STUDIO_QWEN3_8B)).rejects.toBe(
+      failure
+    )
+    await expect(findModelCapabilities(LM_STUDIO_QWEN3_8B)).resolves.toEqual({
       vision: false,
       trainedForToolUse: true
     })
 
-    expect(listDownloadedLlmModels).toHaveBeenCalledTimes(2)
+    expect(listings.lmStudio).toHaveBeenCalledTimes(2)
   })
 
   it("resolves to undefined for a model the inventory does not list, matching the key exactly", async () => {
-    const findModelCapabilities = createModelCapabilitiesLookup(
-      async () => [TEXT_MODEL],
-      findLmStudioConnected
-    )
+    const { sources, listings } = createProviderSources()
+    listings.lmStudio.mockResolvedValue([TEXT_MODEL])
+    const findModelCapabilities = createLlmModelCapabilitiesLookup(sources)
 
     await expect(
-      findModelCapabilities("qwen/qwen3-8b-2")
+      findModelCapabilities({
+        provider: "lmStudio",
+        modelKey: "qwen/qwen3-8b-2"
+      })
     ).resolves.toBeUndefined()
     await expect(
-      findModelCapabilities("QWEN/QWEN3-8B")
+      findModelCapabilities({ provider: "lmStudio", modelKey: "QWEN/QWEN3-8B" })
     ).resolves.toBeUndefined()
   })
 
-  it("rejects with the inventory read's failure", async () => {
-    const failure = new Error("queue full")
-    const findModelCapabilities = createModelCapabilitiesLookup(
-      () => Promise.reject(failure),
-      findLmStudioConnected
-    )
-
-    await expect(findModelCapabilities("qwen/qwen3-8b")).rejects.toBe(failure)
-  })
-
-  it("forgets every remembered model when another provider connects", async () => {
+  it("forgets every remembered model when the provider reconnects at another address", async () => {
     let connected: LlmProviderAccess | undefined = DEFAULT_LM_STUDIO_ACCESS
-    const listDownloadedLlmModels = vi.fn(async () => [TEXT_MODEL])
-    const findModelCapabilities = createModelCapabilitiesLookup(
-      listDownloadedLlmModels,
-      () => connected
-    )
+    const { sources, listings } = createProviderSources(() => connected)
+    listings.lmStudio.mockResolvedValue([TEXT_MODEL])
+    const findModelCapabilities = createLlmModelCapabilitiesLookup(sources)
 
-    await findModelCapabilities("qwen/qwen3-8b")
-    connected = GROQ_ACCESS
-    listDownloadedLlmModels.mockResolvedValue([
+    await findModelCapabilities(LM_STUDIO_QWEN3_8B)
+    connected = OTHER_LM_STUDIO_ACCESS
+    listings.lmStudio.mockResolvedValue([
       { ...TEXT_MODEL, trainedForToolUse: false }
     ])
-    const afterSwitch = await findModelCapabilities("qwen/qwen3-8b")
-    await findModelCapabilities("qwen/qwen3-8b")
+    const afterReconnect = await findModelCapabilities(LM_STUDIO_QWEN3_8B)
+    await findModelCapabilities(LM_STUDIO_QWEN3_8B)
 
-    expect(afterSwitch).toEqual({ vision: false, trainedForToolUse: false })
-    expect(listDownloadedLlmModels).toHaveBeenCalledTimes(2)
+    expect(afterReconnect).toEqual({ vision: false, trainedForToolUse: false })
+    expect(listings.lmStudio).toHaveBeenCalledTimes(2)
   })
 
-  it("remembers nothing listed while no provider is connected or while the provider changed", async () => {
+  it("remembers nothing listed while the provider is not connected or while its connection changed", async () => {
     const connections: (LlmProviderAccess | undefined)[] = [
       undefined,
       undefined,
       DEFAULT_LM_STUDIO_ACCESS,
-      GROQ_ACCESS
+      OTHER_LM_STUDIO_ACCESS
     ]
     let connected: LlmProviderAccess | undefined = undefined
-    const listDownloadedLlmModels = vi.fn(async () => [TEXT_MODEL])
-    const findModelCapabilities = createModelCapabilitiesLookup(
-      listDownloadedLlmModels,
-      () => {
-        connected = connections.shift() ?? connected
-        return connected
-      }
-    )
+    const { sources, listings } = createProviderSources(() => {
+      connected = connections.shift() ?? connected
+      return connected
+    })
+    listings.lmStudio.mockResolvedValue([TEXT_MODEL])
+    const findModelCapabilities = createLlmModelCapabilitiesLookup(sources)
 
-    await findModelCapabilities("qwen/qwen3-8b")
-    await findModelCapabilities("qwen/qwen3-8b")
-    await findModelCapabilities("qwen/qwen3-8b")
+    await findModelCapabilities(LM_STUDIO_QWEN3_8B)
+    await findModelCapabilities(LM_STUDIO_QWEN3_8B)
+    await findModelCapabilities(LM_STUDIO_QWEN3_8B)
 
-    expect(listDownloadedLlmModels).toHaveBeenCalledTimes(3)
+    expect(listings.lmStudio).toHaveBeenCalledTimes(3)
   })
 })

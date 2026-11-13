@@ -60,9 +60,10 @@ export type LlmProviderAccessRead =
  * reader takes only the `providers` group and the two provider keys of the
  * `secrets` group; every other group, and every other field of `secrets`, is
  * dropped unread, so a group it does not know never makes a provider
- * unreadable. The `providers` group follows the rules the desktop host
- * reads it by, so the backend never reaches a provider from a file the host
- * refuses: a field the group does not have is refused; `enabled`, when
+ * unreadable. The `providers` group, with its `lmStudio` and `ollama`
+ * servers, follows the rules the desktop host reads it by, so the backend
+ * never reaches a provider from a `providers` group the host refuses: a field
+ * the group or one of those servers does not have is refused; `enabled`, when
  * present, is a list naming each provider at most once, and an empty list
  * turns every provider off; `active`, when present, names a provider even
  * when `enabled` makes it unused. Keys stay unchecked here, so a malformed
@@ -74,10 +75,10 @@ const providerSettingsDocumentSchema = z.object({
       enabled: llmProviderSettingsSchema.unwrap().shape.enabled.optional(),
       active: llmProviderSchema.optional(),
       lmStudio: z
-        .object({ address: providerAddressSchema.nullable().optional() })
+        .strictObject({ address: providerAddressSchema.nullable().optional() })
         .optional(),
       ollama: z
-        .object({ address: providerAddressSchema.nullable().optional() })
+        .strictObject({ address: providerAddressSchema.nullable().optional() })
         .optional()
     })
     .optional(),

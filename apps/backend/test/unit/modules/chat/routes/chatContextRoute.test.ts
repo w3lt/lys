@@ -149,8 +149,9 @@ const VISION_MODEL_INFO: DownloadedLlmModel = Object.freeze({
  * service and conversation reader on an in-memory database owned by the
  * current test.
  *
- * @returns The application, the database for seeding rows, the context
- * meter spy every agent measures with, which every context fits by default,
+ * @returns The application, the destination of its log, the database for
+ * seeding rows, the context meter spy every agent measures with, which every
+ * context fits by default,
  * each provider's downloaded-model spy behind the route's capability lookup,
  * which lists no model until a case configures it, LM Studio's among them
  * as `listDownloadedLlmModels`, the attachment file store, over a
@@ -160,7 +161,7 @@ const VISION_MODEL_INFO: DownloadedLlmModel = Object.freeze({
  * is closed when the test finishes.
  */
 async function createChatContextRouteApp() {
-  const { app } = createTestFastify()
+  const { app, log } = createTestFastify()
   const { database, history } = openConversationTestServices()
   const replyContextMeter = createRoomyReplyContextMeter()
   const attachmentsDirectoryPath = mkdtempSync(
@@ -189,6 +190,7 @@ async function createChatContextRouteApp() {
   await app.register(registerSerializedChatContextRoute, { listings })
   return {
     app,
+    log,
     database,
     replyContextMeter,
     listDownloadedLlmModels: listings.lmStudio,
@@ -1102,6 +1104,26 @@ describe("registerChatContextRoute", () => {
       type: "urn:lys:problem:llm:runtime-unavailable"
     })
     expect(replyContextMeter.findReplyContextMeasurement).not.toHaveBeenCalled()
+  })
+
+  it("logs the provider of the model the request names when that provider stops answering during the capability lookup", async () => {
+    const { app, log, listings } = await createChatContextRouteApp()
+    listings.groq.mockRejectedValue(
+      createLlmRuntimeUnavailableError([new Error("socket closed")])
+    )
+
+    const response = await sendChatContextRequest(app, {
+      conversation: { kind: "new", agentCode: "caliginia" },
+      model: { provider: "groq", modelKey: MODEL.modelKey }
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(log.records.filter(({ level }) => level === "warn")).toEqual([
+      expect.objectContaining({
+        provider: "groq",
+        msg: "The model provider stopped answering during a model operation"
+      })
+    ])
   })
 
   it("responds with the conversation-not-found problem without measuring for a conversation that is not stored", async () => {

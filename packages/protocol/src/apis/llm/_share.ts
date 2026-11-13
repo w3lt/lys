@@ -130,6 +130,8 @@ export type LlmProviderApiParams = z.infer<typeof llmProviderApiParamsSchema>
  * @param provider - Provider the request is for.
  * @returns The path with the provider in place of `:provider`; any other
  * parameter, such as `:modelId`, is left for the caller.
+ * @remarks Every LLM route path has a `:provider` segment right after
+ * `/llm/`, naming the provider the request is for, which this fills in.
  */
 export function buildLlmProviderApiPath(
   path: string,

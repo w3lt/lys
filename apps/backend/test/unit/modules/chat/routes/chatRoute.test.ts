@@ -2975,6 +2975,48 @@ describe("updateFastifyWithChatRoute", () => {
       ])
     })
 
+    it("has Armitage measure and stream on the provider of the asking reply's model, sending nothing to LM Studio", async () => {
+      const testApp = await createChatRouteTestApp()
+      registerStoringChatRoute(testApp)
+      const model: LlmModelReference = {
+        provider: "groq",
+        modelKey: NEW_CONVERSATION_REQUEST.model.modelKey
+      }
+      const groq = testApp.llmServiceSpies.groq
+      groq.listDownloadedLlmModels.mockResolvedValue([TOOL_MODEL_INFO])
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames: new Set(["look_up_word"])
+      })
+      addFoundToolTurnStreams(testApp)
+
+      const response = await sendChatRequest(testApp.app, {
+        ...NEW_CONVERSATION_REQUEST,
+        model,
+        tools: { definitions: [], backendToolNames: ["look_up_word"] }
+      })
+
+      expect(response.statusCode).toBe(200)
+      const armitageRequest = testApp.completeChatStream.mock.calls[1]?.[0]
+      expect(armitageRequest?.messages[0]).toEqual({
+        role: "system",
+        content: TEST_BUILT_IN_AGENT_PROMPTS.armitage
+      })
+      expect(armitageRequest?.model).toEqual(model)
+      expect(groq.findLlmContextMeasurement).toHaveBeenCalledWith(
+        model.modelKey,
+        expect.arrayContaining([TEST_BUILT_IN_AGENT_PROMPTS.armitage])
+      )
+      const lmStudio = testApp.llmServiceSpies.lmStudio
+      expect(lmStudio.findLlmContextMeasurement).not.toHaveBeenCalled()
+      expect(lmStudio.listDownloadedLlmModels).not.toHaveBeenCalled()
+      expect(
+        testApp.completeChatStream.mock.calls.map(
+          ([request]) => request.model.provider
+        )
+      ).not.toContain("lmStudio")
+    })
+
     it("offers the found tool from the reply's next round, runs its call saved as Just run without asking, and stores the search as the find_tools call alone", async () => {
       const testApp = await createStateToolApp()
       testApp.readJustRunToolNames.mockResolvedValue({

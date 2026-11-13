@@ -293,6 +293,14 @@ describe("readLlmProviderAccess", () => {
       '{ "providers": { "enabled": ["lmStudio"], "openai": {} } }'
     ],
     [
+      "an unknown field in the lmStudio group",
+      '{ "providers": { "lmStudio": { "address": null, "port": 1234 } } }'
+    ],
+    [
+      "an unknown field in the ollama group",
+      '{ "providers": { "ollama": { "address": null, "port": 11434 } } }'
+    ],
+    [
       "an unknown provider in the enabled list",
       '{ "providers": { "enabled": ["lmStudio", "openai"] } }'
     ],

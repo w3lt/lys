@@ -59,12 +59,6 @@ export const apiLlmRuntimeStatusRoute = `${API_PREFIX_V1}/llm/:provider/runtime`
 export const apiLlmRuntimeConnectRoute = `${API_PREFIX_V1}/llm/:provider/runtime/connect`
 
 /**
- * Every LLM route path above starts its own part with a `:provider` segment,
- * the provider the request is for, which {@link buildLlmProviderApiPath}
- * fills in.
- */
-
-/**
  * Versioned POST path for the chat SSE endpoint.
  *
  * @remarks This path is transmitted in HTTP requests and is not persisted. It

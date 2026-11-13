@@ -457,10 +457,11 @@ async function handleChatRequest(
  * before the inventory is read; the conversation's stored attachments come
  * from that read. The model's capabilities are then read for every turn,
  * because they decide the images the model sees and the tools the backend
- * offers it; the lookup lists the connected provider's inventory only until
- * it has seen the model, so only a model's first turn with that provider
- * waits for the model-operation queue. The agent found here is not kept: the lookup that decides who
- * answers runs again when the turn is stored.
+ * offers it; the lookup lists the inventory of the model's own provider only
+ * until it has seen the model, so only a model's first turn with that
+ * provider waits for that provider's model-operation queue. The agent found
+ * here is not kept: the lookup that decides who answers runs again when the
+ * turn is stored.
  */
 async function parseTurnRequest(
   request: ChatRouteRequest,

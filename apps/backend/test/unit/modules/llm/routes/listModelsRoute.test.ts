@@ -145,4 +145,30 @@ describe("updateFastifyWithLlmListModelsRoute", () => {
       llmRuntimeUnavailableProblemSchema.safeParse(response.json()).success
     ).toBe(true)
   })
+
+  it("logs the provider the path names when that provider stops answering during the listing", async () => {
+    const testApp = createLlmRouteTestApp()
+    vi.spyOn(
+      testApp.llmProviderServices.groq.llmService,
+      "listLlmModels"
+    ).mockRejectedValue(
+      createLlmRuntimeUnavailableError([new Error("socket closed")])
+    )
+    await updateFastifyWithLlmListModelsRoute(testApp.app)
+
+    const response = await testApp.app.inject({
+      method: "GET",
+      url: buildLlmProviderApiPath(llmListModelsApi.path, "groq")
+    })
+
+    expect(response.statusCode).toBe(503)
+    expect(testApp.log.records.filter(({ level }) => level === "warn")).toEqual(
+      [
+        expect.objectContaining({
+          provider: "groq",
+          msg: "The model provider stopped answering during a model operation"
+        })
+      ]
+    )
+  })
 })

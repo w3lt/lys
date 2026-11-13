@@ -317,13 +317,14 @@ export async function createSingletonServices(
     serviceLifetime.defer(databaseAcquisition.closeService)
     const databaseServices = createDatabaseServices(databaseAcquisition.service)
 
-    const llmProviderServices = buildLlmProviderRecord((provider) => {
-      const acquisition = factories.createLlmRuntimeService(
-        buildLlmRuntimeServiceFactoryOptions(provider, config, logReporters)
-      )
-      serviceLifetime.defer(acquisition.closeService)
-      return createLlmProviderServices(acquisition.service)
-    })
+    const llmProviderServices = buildLlmProviderRecord((provider) =>
+      createOwnedLlmProviderServices(provider, {
+        config,
+        logReporters,
+        factories,
+        serviceLifetime
+      })
+    )
 
     const chatServiceAcquisition = factories.createChatService(
       buildChatServiceOptions(config, llmProviderServices)
@@ -361,6 +362,56 @@ export async function createSingletonServices(
       "Singleton service creation and cleanup both failed."
     )
   }
+}
+
+/**
+ * What creating each provider's services takes from the service bundle that
+ * owns them.
+ */
+type OwnedLlmProviderServicesCreationOptions = Readonly<{
+  /** Settings file each provider's runtime service reads its provider from. */
+  config: BackendConfig
+  /**
+   * Each provider's runtime failure reporters and the LM Studio SDK's
+   * logger.
+   */
+  logReporters: Pick<SingletonLogReporters, "llmRuntime" | "lmStudioSdk">
+  /** Creates each provider's runtime service. */
+  factories: Pick<SingletonServiceFactories, "createLlmRuntimeService">
+  /**
+   * The bundle's owner of acquired services, which takes over each runtime
+   * service's close.
+   */
+  serviceLifetime: Pick<AsyncDisposableStack, "defer">
+}>
+
+/**
+ * Creates one provider's runtime service and LLM service, and hands the
+ * runtime service's close to the bundle that owns them.
+ *
+ * @param provider - Provider whose services are created.
+ * @param options - Settings file and log reporters the runtime service is
+ * created with, its factory, and the bundle's owner of acquired services.
+ * @returns The runtime service and the LLM service over it; the bundle's
+ * owner closes the runtime service, and the LLM service owns nothing to
+ * release.
+ * @throws The factory's failure; the provider then has nothing for the
+ * owner to close.
+ */
+function createOwnedLlmProviderServices(
+  provider: LlmProvider,
+  {
+    config,
+    logReporters,
+    factories,
+    serviceLifetime
+  }: OwnedLlmProviderServicesCreationOptions
+): LlmProviderServices {
+  const acquisition = factories.createLlmRuntimeService(
+    buildLlmRuntimeServiceFactoryOptions(provider, config, logReporters)
+  )
+  serviceLifetime.defer(acquisition.closeService)
+  return createLlmProviderServices(acquisition.service)
 }
 
 /**

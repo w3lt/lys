@@ -60,13 +60,14 @@ const TOOL_OFFER_TEMPLATE_TOKENS = 160
  * fixed allowance for the template's markup is added to each message, each
  * earlier tool call, and the tool offer. Each image a user message sends is
  * counted as {@link calculateImageTokens} estimates it from the image's
- * sides, since the tokenizer measures text only. Owns no resource: the LLM service's
- * owner releases the runtime, and its queue keeps each accepted measurement
- * until it settles. Concurrency model: reentrant; it keeps no state, and the
- * borrowed query serializes its own work.
+ * sides, since the tokenizer measures text only. Owns no resource: the owner
+ * of each provider's LLM service releases that provider's runtime, whose
+ * queue keeps each accepted measurement until it settles. Concurrency model:
+ * reentrant; it keeps no state, and the borrowed query serializes its own
+ * work.
  */
 export default class LlmReplyContextMeter implements ReplyContextMeter {
-  /** Borrowed query of the backend's LLM service. */
+  /** Borrowed query of the LLM service of each measured model's provider. */
   readonly #findLlmContextMeasurement: FindLlmContextMeasurement
 
   /**

@@ -28,7 +28,7 @@ export type ModelCapabilities = Readonly<{
  * @throws If the inventory cannot be read: the provider is not connected or
  * cannot be reached, or its model-operation queue is full.
  */
-export type FindModelCapabilities = (
+type FindModelCapabilities = (
   model: string
 ) => Promise<ModelCapabilities | undefined>
 
@@ -114,26 +114,26 @@ type RememberedCapabilities = Readonly<{
  * Creates the capability lookup over one provider's downloaded models, which
  * remembers each listed model's capabilities for that provider as connected.
  *
- * @param listDownloadedLlmModels - Downloaded-model query of the LLM service;
- * borrowed for the lookup's lifetime.
- * @param findConnectedLlmProvider - Finds the provider the runtime service is
- * connected to, or undefined while none is; borrowed for the lookup's
+ * @param listDownloadedLlmModels - Downloaded-model query of the provider's
+ * LLM service; borrowed for the lookup's lifetime.
+ * @param findConnectedLlmProvider - Finds how the provider's runtime service
+ * is connected, or undefined while it is not; borrowed for the lookup's
  * lifetime.
  * @returns The lookup, which matches the model key exactly. The first lookup
  * of a model lists the downloaded models; once a listing has the model, its
  * capabilities are remembered and later lookups of it list nothing while the
- * same provider stays connected. Connecting another provider, or the same
- * one at another address or with another key, forgets every remembered
- * model. A model the listing does not have, a failed listing, a listing made
- * while no provider is connected, and a listing during which the connected
- * provider changed are not remembered, so the next lookup lists again. It
- * reads no loaded state, which the capabilities do not depend on.
+ * provider stays connected the same way. Reconnecting the provider at
+ * another address or with another key forgets every remembered model. A
+ * model the listing does not have, a failed listing, a listing made while
+ * the provider is not connected, and a listing during which its connection
+ * changed are not remembered, so the next lookup lists again. It reads no
+ * loaded state, which the capabilities do not depend on.
  * @remarks A model's capabilities come from its provider's metadata, so they
  * are taken not to change while the backend stays connected to it; a restart
  * reads them again. Concurrent first lookups of one model may each list.
  * Concurrency model: single-owner, on the backend's event loop.
  */
-export function createModelCapabilitiesLookup(
+function createModelCapabilitiesLookup(
   listDownloadedLlmModels: () => Promise<readonly DownloadedLlmModel[]>,
   findConnectedLlmProvider: () => LlmProviderAccess | undefined
 ): FindModelCapabilities {

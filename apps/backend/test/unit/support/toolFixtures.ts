@@ -1,7 +1,82 @@
-import { toolDefinitionSchema, type ToolDefinition } from "@lys/share"
+import {
+  toolDefinitionSchema,
+  type ToolCallReplyPart,
+  type ToolDefinition
+} from "@lys/share"
 import { buildAgentStateDefinitions } from "../../../src/modules/agent/agentStateTools"
 import type { ToolSearchOutcome } from "../../../src/modules/agent/findToolsTool"
+import type {
+  CreateToolSearchCallRecordInput,
+  ToolSearchCallRecordWriter
+} from "../../../src/modules/conversation/records"
 import AgentTool from "../../../src/modules/tool/tool"
+import type {
+  ApprovedFolders,
+  ToolCallPolicy
+} from "../../../src/modules/toolApproval/toolCallPolicy"
+import { createFixtureUuidV7 } from "./conversationFixtures"
+
+/** UUIDv7 of the stored call a test's built-in tool run belongs to. */
+export const RUN_TOOL_CALL_ID = createFixtureUuidV7(901)
+
+/** UUIDv7 of the stored `find_tools` call a test's tool search runs in. */
+export const SEARCH_CALL_ID = createFixtureUuidV7(902)
+
+/** A store of tool searches' call records that keeps what it is given. */
+export type RecordedToolSearchCalls = Readonly<{
+  /** The store, lent to the code under test. */
+  records: ToolSearchCallRecordWriter
+  /** Every record asked for, in order. */
+  created: CreateToolSearchCallRecordInput[]
+  /** Every ended call given, in order. */
+  ended: ToolCallReplyPart[]
+}>
+
+/**
+ * Creates a store of tool searches' call records that keeps every record
+ * and answers each write the same way.
+ *
+ * @param isStored - The answer of every write: true as when stored, false
+ * as when the search's `find_tools` call no longer runs.
+ * @returns The store and what it was given.
+ */
+export function createToolSearchCallRecords(
+  isStored = true
+): RecordedToolSearchCalls {
+  const created: CreateToolSearchCallRecordInput[] = []
+  const ended: ToolCallReplyPart[] = []
+  return {
+    records: {
+      createToolSearchCallRecord: (input) => {
+        created.push(input)
+        return isStored
+      },
+      updateToolSearchCallOutcome: (call) => {
+        ended.push(call)
+        return isStored
+      }
+    },
+    created,
+    ended
+  }
+}
+
+/** Approved folders when the person lists none: the folder rule is off. */
+export const ANY_APPROVED_FOLDER: ApprovedFolders = Object.freeze({
+  kind: "any"
+})
+
+/**
+ * Tool call policy of a test machine whose home folder is `/home/ada` and
+ * whose Lys home is `/home/ada/.lys`, with no folder listed; it allows every
+ * call a case makes unless the case names a credential file or a blocked
+ * address on purpose.
+ */
+export const TOOL_CALL_POLICY = Object.freeze({
+  settingsFilePath: "/home/ada/.lys/settings.json",
+  homeFolderPath: "/home/ada",
+  readApprovedFolders: () => Promise.resolve(ANY_APPROVED_FOLDER)
+} satisfies ToolCallPolicy)
 
 /**
  * Validated definition of the desktop's read-text-file tool: one required

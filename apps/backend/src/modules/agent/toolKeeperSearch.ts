@@ -1,8 +1,11 @@
 import {
   conversationUserMessageSchema,
-  type ConversationUserMessage
+  type ConversationUserMessage,
+  type ReplyPart,
+  type ToolCallReplyPart
 } from "@lys/share"
 import { v7 as uuidv7 } from "uuid"
+import type { ToolSearchCallRecordWriter } from "../conversation/records"
 import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
 import type Agent from "./agent"
@@ -14,6 +17,7 @@ import {
   type ToolSearchOutcome
 } from "./findToolsTool"
 import MemoryReply from "./memoryReply"
+import type { ReplyPartDraft, ReplyToolCallChange } from "./replyPartSequence"
 import ToolCatalog from "./toolCatalog"
 import { buildToolKeeperTools } from "./toolKeeperTools"
 import { NO_UNOFFERED_TOOLS } from "./unofferedTools"
@@ -23,6 +27,16 @@ import { NO_UNOFFERED_TOOLS } from "./unofferedTools"
  * of a later round ends the search with the tools recommended so far.
  */
 export const MAXIMUM_TOOL_KEEPER_ROUND_COUNT = 6
+
+/** Where the tool calls of one search's reply are recorded. */
+type SearchCallRecording = Readonly<{
+  /** UUIDv7 of the stored `find_tools` call that runs the search. */
+  searchCallId: string
+  /** Code of the agent that answers the search. */
+  agentCode: string
+  /** Stores the decision records of the search's own tool calls. */
+  records: ToolSearchCallRecordWriter
+}>
 
 /** What building the turn of one search needs. */
 type SearchTurnInput = Readonly<{
@@ -34,6 +48,8 @@ type SearchTurnInput = Readonly<{
   now: string
   /** Receives the failure that ended the search without finding. */
   reportFailure: ReportToolSearchFailure
+  /** Where the reply's tool calls are recorded. */
+  recording: SearchCallRecording
 }>
 
 /**
@@ -43,10 +59,12 @@ type SearchTurnInput = Readonly<{
  * @param armitage - Armitage's live agent, which answers the search as one
  * of its requests, on the asking reply's conversation, taking one of its
  * request slots.
- * @param search - The task, the asking turn's tools, the model and its
- * controls, the asking reply's cancellation, and the receiver of the
- * failure that ends a search without finding; borrowed until the returned
- * promise settles.
+ * @param search - The task, the `find_tools` call that runs it, the asking
+ * turn's tools, the model and its controls, the asking reply's
+ * cancellation, and the receiver of the failure that ends a search without
+ * finding; borrowed until the returned promise settles.
+ * @param records - Stores the decision record of each tool call Armitage's
+ * reply keeps; borrowed until the returned promise settles.
  * @returns `found` with the tools Armitage recommended, in the order
  * recommended, when its reply completed or ended at the round limit;
  * `failed` when the reply was refused, failed, or was reported as cancelled
@@ -54,15 +72,21 @@ type SearchTurnInput = Readonly<{
  * @throws The abort reason once the asking reply's signal aborted, whatever
  * Armitage found by then, reporting nothing.
  * @remarks Armitage reads only the asking turn's definitions, through its
- * own two tools, which run at once without the person being asked; it runs
- * none of the asking turn's tools. Its reply starts from Armitage's own
- * system prompt and a user message holding the task, without history,
- * images, or the asking reply's other tools. The clock is read once, when
- * the search starts, for the time of that message.
+ * own two tools, whose calls pass the search's tool call policy and then
+ * run at once without the person being asked; it runs none of the asking
+ * turn's tools. Each call its reply keeps is recorded, under the search's
+ * `find_tools` call, before it can run, and its end once it ends; a call
+ * that cannot be recorded because that `find_tools` call no longer runs is
+ * refused and never runs, and a record that cannot be written fails the
+ * search. Its reply starts from Armitage's own system prompt and a
+ * user message holding the task, without history, images, or the asking
+ * reply's other tools. The clock is read once, when the search starts, for
+ * the time of that message.
  */
 export async function runToolKeeperSearch(
   armitage: Agent,
-  search: ToolSearch
+  search: ToolSearch,
+  records: ToolSearchCallRecordWriter
 ): Promise<ToolSearchOutcome> {
   const catalog = new ToolCatalog(search.tools)
   let failed = false
@@ -82,7 +106,12 @@ export async function runToolKeeperSearch(
       search,
       catalog,
       now,
-      reportFailure: handleSearchFailure
+      reportFailure: handleSearchFailure,
+      recording: {
+        searchCallId: search.searchCallId,
+        agentCode: armitage.code,
+        records
+      }
     })
   )
   search.abortSignal.throwIfAborted()
@@ -94,12 +123,14 @@ export async function runToolKeeperSearch(
 /**
  * Builds the turn Armitage answers for one search.
  *
- * @param input - The search, its catalog, the time it started, and the
- * receiver of the failure that ended it without finding.
+ * @param input - The search, its catalog, the time it started, the
+ * receiver of the failure that ended it without finding, and where its
+ * reply's tool calls are recorded.
  * @returns A turn on a new in-memory reply that keeps the tool calls of
- * {@link MAXIMUM_TOOL_KEEPER_ROUND_COUNT} rounds, offering Armitage's two
- * tools and nothing else, so it is never routed; a cancellation is reported
- * only when the asking reply was not stopped.
+ * {@link MAXIMUM_TOOL_KEEPER_ROUND_COUNT} rounds, each recorded as it is
+ * kept and as it ends, offering Armitage's two tools and nothing else, so
+ * it is never routed; a cancellation is reported only when the asking reply
+ * was not stopped.
  * @throws If the search's message breaks the conversation contract.
  */
 function buildSearchTurn(input: SearchTurnInput): AgentTurn {
@@ -114,7 +145,7 @@ function buildSearchTurn(input: SearchTurnInput): AgentTurn {
   /** MCP tools of a search: none. */
   const noMcpTools: readonly TurnMcpTool[] = Object.freeze([])
 
-  const { search, reportFailure } = input
+  const { search, reportFailure, recording } = input
   const reply = new MemoryReply(MAXIMUM_TOOL_KEEPER_ROUND_COUNT)
   const userMessage = buildSearchMessage(search.task, input.now)
   const directTools = buildToolKeeperTools(input.catalog)
@@ -135,16 +166,17 @@ function buildSearchTurn(input: SearchTurnInput): AgentTurn {
     mcpTools: noMcpTools,
     unofferedTools: NO_UNOFFERED_TOOLS,
     abortSignal: search.abortSignal,
-    createReplyPart: (draft) => reply.createReplyPart(draft),
+    createReplyPart: (draft) => createSearchReplyPart(recording, reply, draft),
     updateReplyPartContent: (partId, content) =>
       reply.updateReplyPartContent(partId, content),
     updateReplyToolCall: (toolCallId, change) =>
-      reply.updateReplyToolCall(toolCallId, change),
+      updateSearchToolCall(recording.records, reply, toolCallId, change),
     updateAssistantMessageState: (completion) =>
       reply.updateAssistantMessageState(completion),
     findReplyStatus: () => reply.findReplyStatus(),
     sendEvent: handleSearchEvent,
     sendClientToolCall: rejectClientToolCall,
+    toolCallPolicy: search.toolCallPolicy,
     createToolCallGate: rejectToolCallGate,
     reportReplyCancellation: (failure) =>
       handleSearchCancellation(search.abortSignal, reportFailure, failure),
@@ -152,6 +184,59 @@ function buildSearchTurn(input: SearchTurnInput): AgentTurn {
     reportReplyFailure: reportFailure,
     reportToolSearchFailure: reportFailure
   }
+}
+
+/**
+ * Keeps a new part of a search's reply and records a kept tool call.
+ *
+ * @param recording - Where the reply's tool calls are recorded.
+ * @param reply - The search's reply.
+ * @param draft - The part.
+ * @returns The kept part; undefined when the reply refused it, or when it
+ * is a call that could not be recorded because the search's `find_tools`
+ * call no longer runs, which the agent then treats as refused, so the call
+ * never runs.
+ * @throws If the draft breaks the part contract or the record cannot be
+ * written.
+ */
+function createSearchReplyPart(
+  recording: SearchCallRecording,
+  reply: MemoryReply,
+  draft: ReplyPartDraft
+): ReplyPart | undefined {
+  const part = reply.createReplyPart(draft)
+  if (part?.kind !== "tool-call" || draft.kind !== "tool-call") return part
+  const isRecorded = recording.records.createToolSearchCallRecord({
+    searchCallId: recording.searchCallId,
+    agentCode: recording.agentCode,
+    call: part,
+    decision: draft.decision
+  })
+  return isRecorded ? part : undefined
+}
+
+/**
+ * Keeps one change of a search's tool call and records how the call ended.
+ *
+ * @param records - Receiver of the search's call records.
+ * @param reply - The search's reply.
+ * @param toolCallId - UUIDv7 of the call.
+ * @param change - The call's next state.
+ * @returns The call as kept; undefined when the reply refused the change,
+ * or when its record no longer runs because the search's `find_tools` call
+ * stopped running.
+ * @throws If the record cannot be written, including for a change no run
+ * ends with, since a search's call never waits for the person.
+ */
+function updateSearchToolCall(
+  records: ToolSearchCallRecordWriter,
+  reply: MemoryReply,
+  toolCallId: string,
+  change: ReplyToolCallChange
+): ToolCallReplyPart | undefined {
+  const call = reply.updateReplyToolCall(toolCallId, change)
+  if (call === undefined) return undefined
+  return records.updateToolSearchCallOutcome(call) ? call : undefined
 }
 
 /**

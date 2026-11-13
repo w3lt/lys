@@ -91,28 +91,27 @@ the services together.
    to reconcile desktop metadata from an earlier missed delivery.
 5. The agent found when the turn is stored answers with the system prompt it
    has then: a built-in agent's shipped prompt, or a stored agent's current
-   one. The agent's `createReply` opens an
-   OpenAI-compatible streaming completion against the connected provider through
-   `OpenAiReplyModel`, offers the turn's tools (the attachment reader first
-   when the conversation holds a text file and the model is trained for tool
-   use, then client tools, then built-in tools, then MCP tools, then, when
-   the model is trained for tool use, the
-   [agent state tools](#agent-state-tools) the agent's role gives; when the
-   model is trained for tool use, the request's tools are
+   one. The agent's `createReply` opens an OpenAI-compatible streaming
+   completion against the connected provider through `OpenAiReplyModel`,
+   offers the turn's tools (the attachment reader first when the conversation
+   holds a text file and the model is trained for tool use, then client tools,
+   then built-in tools, then MCP tools, then, when the model is trained for
+   tool use, the [agent state tools](#agent-state-tools) the agent's role
+   gives; when the model is trained for tool use, the request's tools are
    [routed](#tool-routing): the first round offers `find_tools` in their
    place, and each tool Armitage finds is offered from the next round), and
-   runs rounds while
-   the model calls them: each call is
-   checked by `AgentTool`, then passes the round's
-   [approval gate](#tool-approval). A call of a backend tool is first parsed by
-   the tool, so arguments it can never run are answered without asking. An
-   allowed client tool's call is sent to the desktop as a `tool-call` event
-   and answered through the tool-result route; an allowed backend tool runs in
-   the backend under the reply's cancellation, and an allowed MCP tool's call
-   runs on its server, which is told when the reply is stopped. Every call
-   has an answer before the next round. [Reply parts](#reply-parts-and-sources) describes how each
-   part is stored before it is sent to every stream following the reply; the
-   agent stores completion before emitting `done`.
+   runs rounds while the model calls them: each call is checked by
+   `AgentTool`, then decided by the [tool call policy](#tool-call-policy),
+   then passes the round's [approval gate](#tool-approval). A call of a
+   backend tool is first parsed by the tool, so arguments it can never run are
+   answered without asking. An allowed client tool's call is sent to the
+   desktop as a `tool-call` event and answered through the tool-result route;
+   an allowed backend tool runs in the backend under the reply's cancellation,
+   and an allowed MCP tool's call runs on its server, which is told when the
+   reply is stopped. Every call has an answer before the next round.
+   [Reply parts](#reply-parts-and-sources) describes how each part is stored
+   before it is sent to every stream following the reply; the agent stores
+   completion before emitting `done`.
 6. When the conversation has no stored title, `createTitleGenerationTask` runs
    in parallel and emits a `title` event only after a conditional write wins the
    first assignment.
@@ -289,22 +288,22 @@ after a prior title event was lost.
 title task per conversation: a turn sent while an earlier turn's title task is
 still running gets none, so its streams close when its reply ends. A
 `ReplyGeneration` owns one turn's reply task and optional title task, their
-cancellation, and the SSE streams following them; no HTTP connection owns it. It
-also lists what its reply waits on (`PendingToolCalls`): calls sent to the
-desktop to run and approval prompts, which the reply-events snapshot reports
-and the tool-result and tool-approval routes answer. Each stream is
-a `ReplyEventSubscription`, an ordered queue that never makes the generation
-wait and closes a follower that falls 4,096 events behind. Only the reply-stop
-route (reply task only) and shutdown (both tasks) cancel work. A newer turn or a
-deletion also ends a reply, but only when the model sends its next content: that
-write is refused, which ends the upstream request. A reply waiting for a tool
-result or an approval is not ended this way
-([#137](https://github.com/w3lt/lys/issues/137)).
-The title task of a deleted conversation still runs to its end. The registry is
-disposed in Fastify's `preClose` hook, while streams are still open: it closes
-admission, cancels every generation, and waits until each has stored its final
-state before singleton disposal closes SQLite. Task failures are logged by the
-generation that owns them.
+cancellation, and the SSE streams following them; no HTTP connection owns it.
+It also lists what its reply waits on (`PendingToolCalls`): calls sent to the
+desktop to run and approval prompts with their tokens, which the reply-events
+snapshot reports and the tool-result and tool-approval routes answer. Each
+stream is a `ReplyEventSubscription`, an ordered queue that never makes the
+generation wait and closes a follower that falls 4,096 events behind. Only the
+reply-stop route (reply task only) and shutdown (both tasks) cancel work. A
+newer turn or a deletion also ends a reply, but only when the model sends its
+next content: that write is refused, which ends the upstream request. A reply
+waiting for a tool result or an approval is not ended this way
+([#137](https://github.com/w3lt/lys/issues/137)). The title task of a deleted
+conversation still runs to its end. The registry is disposed in Fastify's
+`preClose` hook, while streams are still open: it closes admission, cancels
+every generation, and waits until each has stored its final state before
+singleton disposal closes SQLite. Task failures are logged by the generation
+that owns them.
 
 ### Attachments
 
@@ -372,10 +371,188 @@ state and context lengths the model list adds. A model the inventory does
 not list has neither capability: an image attached for it is refused, and no
 reader is offered.
 
+## Tool call policy
+
+Every checked call of every turn passes one gateway step, `startToolCall` in
+`src/modules/agent/toolCallRound.ts`, before it runs or the person is asked.
+For each call, in order:
+
+1. A call of a tool its round did not offer, such as a routed turn's tool
+   Armitage has not found, is stored as failed with a result the model reads.
+2. `AgentTool` checks the arguments against the tool's definition, only
+   their shape for an MCP tool, and a backend tool's `parseToolCall` checks
+   them for what it can run; a call either refuses is stored as failed.
+3. `decideToolCall` (`src/modules/toolApproval/toolCallPolicy.ts`) decides
+   the call by the rules, whatever the tool: `deny`, `require-approval`, or
+   `allow`, each but `allow` with the rule as its reason.
+4. A call the policy requires approval of passes the round's
+   [approval gate](#tool-approval), which asks the person even for a tool
+   saved as Just run. An allowed call of a backend tool that runs without
+   approval starts at once; every other allowed call passes the gate, where
+   the person's approval mode decides.
+5. A call the person allows is stored as running, then decided again with
+   the approved folders read at that moment and the usage counted when it
+   arrived (spec §4): one the rules now deny
+   is stored as failed with the denial and never runs. Its decision record
+   keeps the decision made when the call arrived, with the answer `allowed`
+   and the outcome `failed`; the denial is in the call's result.
+
+The policy reads a `ToolCallRequest` that the gateway builds from what the
+backend trusts, never from what the model claims, in the attribute groups of
+#330's tool authorization spec that its rules read: `action`, the tool's
+attributes; `resource`, the checked arguments; and `environment`, the call's
+`usageInTask`. A reply is the task: each reply counts, in a `ToolCallUsage`
+it creates and keeps across its rounds, the calls of each tool the policy
+did not deny, and each call reads the count of the calls before it in the
+model's order, which a call the policy does not deny then raises. A call Lys's
+own checks fail never reaches the policy and is not counted; a call the
+person rejects is. Armitage's search turn is a reply of its own, with its own
+count. It does no I/O and throws
+nothing; a defect that made it throw would end the reply as failed before
+the call ran. A deny always wins: the person cannot allow a denied call, and
+approval is never asked of it.
+
+A denied call is stored as failed with a sentence the model reads
+(`formatToolCallDenial`), naming the rule it broke and telling the model not
+to reach the target another way: it never runs, and the person is never
+asked, even for a tool saved as Just run. The rules are code; their one
+setting is the list of folders the person lets tools use. `app.ts` builds a
+`ToolCallPolicy` from the configuration: the settings file path, the home
+folder, and a reader of `tools.approvedFolders` (`readApprovedFolders`,
+`src/infrastructure/settings/approvedFoldersFile.ts`). It hands it to the
+chat route, every turn carries it, and `find_tools` hands it to Armitage's
+search turn, so Armitage's own `search_tools` and `recommend_tool` calls are
+decided too. Each round reads the folders once into the `ToolCallRules` the
+round's calls are decided by (`readToolCallRules`), and the re-check of an
+allowed call reads them again. A missing file or list leaves the folder rule
+off. A file that cannot be read approves no folder: every call naming a path
+is denied with the reason `settings-unreadable`, whose sentence tells the
+model the settings file cannot be read, and the chat route logs a warning
+with the request's logger at each such read, as it does for the Just run
+choices.
+
+The policy reads every text of the call's arguments: the argument names,
+every string value at any depth, and the keys of nested objects; numbers,
+booleans, and `null` are not read. Each text is trimmed, and each rule is
+asked over every text before the next:
+
+- **Credential file.** The text is split into parts at `/` and `\`, without
+  empty and `.` parts, and compared in lowercase with `CREDENTIAL_FILE_LIST`
+  from `@lys/protocol`, the list the desktop's
+  [file tools](/architecture/host/#file-tools) refuse too. The call is denied
+  when a part is a credential folder (`.ssh`, `.gnupg`, `.aws`, `.azure`, `.kube`,
+  `.docker`, or `Keychains`), a credential file name (`id_rsa`, `id_dsa`,
+  `id_ecdsa`, `id_ed25519`, `id_ecdsa_sk`, `id_ed25519_sk`, `.netrc`,
+  `_netrc`, `.pgpass`, `.git-credentials`, `.npmrc`, `.pypirc`, `.htpasswd`,
+  or `.env`), a name that starts with `.env.`, or a name that ends with
+  `.pem`, `.key`, `.p8`, `.p12`, `.pfx`, `.ppk`, `.jks`, `.keystore`, or
+  `.kdbx`. It is also denied when the parts hold the settings file's folder
+  and name side by side, `.lys/settings.json` with the default Lys home: the
+  file holds the provider and Tavily API keys and the email password. A part
+  that is the settings file's name followed by `.`, a number, `.`, a number,
+  and `.tmp`, such as `settings.json.4242.0.tmp`, is read as the settings
+  file's name: it names the copy a save that stops midway leaves, with the
+  same secrets. `SETTINGS_FILE_COPY_ENDING_PATTERN` repeats the host's
+  pattern, and both sides' tests read the cases of
+  `packages/share/test/fixtures/settings-file-copy-names.json`. A
+  `file:` URL is read by its decoded path; a URL of any other scheme with a
+  host names a file on another machine and is left to the next rule.
+- **Outside approved folders.** Only while folders are listed. A text, or
+  one line of it, names a path when it starts with `/` but not `//`, with
+  `~` alone or before `/`, or with `.` or `..` alone or before `/`, or is a
+  `file:` URL, decoded with `fileURLToPath`. `~` names the home folder, and
+  a relative path is resolved against it, because Lys starts MCP servers
+  there. The path is resolved by text with `path.resolve`, and the call is
+  denied when it is not a listed folder or below one by whole parts, so
+  `/work/app-old` is outside `/work/app`. Letter case counts. A `file:` URL
+  with a host other than `localhost`, or with an escaped `/`, names no path on this machine and is
+  outside. A path inside a longer text, such as `cat /etc/hosts`, and a
+  relative name without a leading `.`, such as `notes/a.txt`, are not read.
+- **Blocked address.** A text without whitespace that is a URL with a host,
+  or a host without a scheme, is denied when the host is
+  `localhost`, a name under `.localhost`, or an IP address in a range Lys
+  never connects to: the ranges of `webAddresses.ts`, which `read_page` and
+  `web_search` also refuse. A URL's host is normalized as an `http` host
+  first, so `postgres://0x7f.1/db` names `127.0.0.1`; a bare address counts
+  only in standard notation, so a text `2130706433` is a number, not an
+  address. A host without a scheme may follow `//` or `\\` and a user name
+  with `@`, and anything after a `:`, `/`, or `\` that follows it is left
+  aside, so `10.0.0.1:22`, `admin@192.168.1.10`, `git@10.0.0.2:repo.git`,
+  and `\\10.0.0.5\share` are all denied.
+- **Usage limit.** A call is denied with the reason `usage-limit` when its
+  reply already made `MAXIMUM_TOOL_CALLS_PER_TASK`, 100, calls of the tool
+  that were not denied, so a model that calls one tool in a loop stops. A
+  main reply has no other limit on its rounds or on the calls of a round.
+- **Paid tool budget.** `web_search` is paid: Tavily bills the person for
+  each search. Its call is denied with the reason `paid-tool-budget` when
+  the reply already made `MAXIMUM_PAID_TOOL_CALLS_PER_TASK`, 20, of them,
+  even one the person would allow.
+- **Destructive tool.** A call that no deny rule matches requires approval
+  when its tool is an MCP tool whose server marks it as destructive: its
+  annotations say `destructiveHint: true` and not `readOnlyHint: true`
+  (`McpToolCatalog.destructiveToolNames`). MCP reads a tool without the hint
+  as destructive, but only an explicit mark counts, so a server that sends no
+  annotations keeps the person's Just run choice. A server's annotations can
+  only make Lys ask more, never less. Lys's own tools are never marked.
+- **Open-world write.** Otherwise, a call requires approval with the reason
+  `open-world-write` when its tool is an MCP tool whose server marks it as
+  reaching beyond Lys and this machine without marking it read-only: its
+  annotations say `openWorldHint: true` and not `readOnlyHint: true`
+  (`McpToolCatalog.openWorldWriteToolNames`). The built-in email server marks
+  `send_email`, `send_draft`, and `save_draft` so, which its server does not
+  mark destructive, so sending an email asks even on Just run. As with the
+  destructive mark, only an explicit mark counts.
+- **Paid tool.** Otherwise, a `web_search` call requires approval with the
+  reason `paid-tool` when the reply already made
+  `PAID_TOOL_CALLS_PER_TASK_WITHOUT_APPROVAL`, 5, of them, so from the sixth
+  search on, each asks the person even on Just run.
+
+The rules read text only. They resolve no host name: an MCP server resolves
+the names it reaches, and `read_page` checks every resolved address when it
+runs. They follow no symbolic link and read no command, and a text with
+whitespace, such as a sentence or a shell command, is never read as an
+address, so a tool that runs commands can still reach a credential file or a
+local address, or a path outside the approved folders. The desktop's
+[file tools](/architecture/host/#file-tools) check the real path of every
+file they read or list against the same list and the approved folders, so a
+link to a key, a search of a folder that holds keys, or a link out of an
+approved folder reaches none. A
+sentence that holds a credential path, such as a web search query, is denied
+like a path.
+
+Every call the gateway stores gets a decision record, a row of
+[`tool_call_decisions`](/reference/schema/#tool_call_decisions) written in
+the transaction that stores the call. It names the conversation, its agent,
+and the tool, and holds the policy's effect and reason when the call arrived, with the
+identity of the rule set that decided it (`TOOL_CALL_POLICY_ID`,
+`lys-policy-v1`, which changes whenever a rule or a limit changes),
+none when step 1 or 2 failed the call, and for a call step 5 denies, still
+the decision made when it arrived; the approval mode the gate applied,
+`just-run` or `ask-me`, none when the call never reached the gate; the answer that moved a
+waiting call on, `allowed`, `declined`, or `showFailed`, or `expired` when
+nobody answered its prompt in time, stored in the transaction that changes the
+call; and the call's status as its outcome,
+which a trigger copies on every change, `interrupted` included. It holds no
+argument value; the call's row keeps them. The record goes with its call and
+its conversation, and nothing reads it yet. Armitage's own `search_tools` and
+`recommend_tool` calls belong to a search turn kept in memory and never
+stored, so each gets a row of
+[`tool_search_call_decisions`](/reference/schema/#tool_search_call_decisions)
+instead, under the `find_tools` call that started the search. The search's
+reply writes it when it keeps the call, before the call can run, with the
+call's argument text, which no other row keeps, and the policy's effect,
+reason, and rule set identity, and writes the outcome when the run ends. A call the search cannot
+record because the `find_tools` call no longer runs is refused and never
+runs, and a record that cannot be written fails the search. When the
+`find_tools` call stops running, by its end, Stop, or the interrupted
+marking at startup, a trigger marks its search's calls still running as
+interrupted. The rows go with the `find_tools` call and its conversation.
+
 ## Tool approval
 
 `ToolApprovalService` (`src/modules/toolApproval/toolApprovalService.ts`) is the
-approval gateway for every tool call of every turn, client, backend, and MCP
+approval gate for every tool call of every turn that the
+[tool call policy](#tool-call-policy) does not deny, client, backend, and MCP
 tools alike, except a call of a backend tool that runs without approval:
 `read_attachment` reads only what the person attached to the conversation,
 the [agent state tools](#agent-state-tools) only read what agents are
@@ -395,20 +572,50 @@ parse failures dropped unread. A missing file, `tools` group, or `justRun`
 list means no tool is on Just run. A round whose calls all run without
 approval or name no offered tool creates no gate and does not read the file.
 
-For each checked call that passes the gate, in the model's order, the gate's
-`startToolCall` stores the call and decides how it goes on. A call of a tool on Just run is
-stored as `running` and goes on at once. Any other call is stored as
-`awaiting-approval` first; the gate then sends a `tool-approval` event, and
-the round waits for the person's answer through the tool-approval route,
-with no timer. A call the store refuses is never prompted. Storing and
-prompting happen in the same synchronous step, so a follower that sees the
-prompt can read the call, and a round's prompts and the run requests of
-calls allowed at once keep the model's order. When the settings
-file cannot be read, or `tools`, `justRun`, or a name in it is invalid, no
-tool is on Just run, every call of the round asks, and the chat route logs a
-warning with the request's logger. A choice the desktop saves applies from
-the next round. The desktop is the file's only writer; the backend never
-writes it.
+For each call that passes the gate, in the model's order, the gate's
+`startToolCall` stores the call, with the approval mode it applied, and
+decides how it goes on. A call of a tool
+on Just run that the policy allowed is stored as `running` and goes on at
+once. Any other call is stored as `awaiting-approval` first; the gate then
+sends a `tool-approval` event, and the round waits for the person's answer
+through the tool-approval route, for at most five minutes. A call the store refuses is
+never prompted. Storing and prompting happen in the same synchronous step, so
+a follower that sees the prompt can read the call, and a round's prompts and
+the run requests of calls allowed at once keep the model's order. When the
+settings file cannot be read, or `tools`, `justRun`, or a name in it is
+invalid, no tool is on Just run, every call of the round asks, and the chat
+route logs a warning with the request's logger. A choice the desktop saves
+applies from the next round. The desktop is the file's only writer; the
+backend never writes it.
+
+Each prompt carries an approval token. `PendingToolCalls` creates it when it
+lists the prompt, 32 bytes from `crypto.randomBytes` written as unpadded
+base64url, keeps it beside the frozen call, and sends both in the
+`tool-approval` event and the snapshot's `pendingToolApprovals`. The
+tool-approval route hands the body to `ReplyGeneration.resolveToolCall`, which
+compares the token with the prompt's in constant time (`timingSafeEqual`). On
+a match it removes the prompt and gives the round the answer without its
+token, so the token works once and never reaches the model, a reply part, or
+the log; the round then runs the call it stored, never one the answer names. A
+token that is not the prompt's returns `token-mismatch`: the route answers the
+same `409` as for an unknown call and logs a warning with the call's
+identifier, and the prompt keeps waiting. The token ends with its prompt, when
+the answer is accepted, when Stop, shutdown, or the end of the reply cancels
+the wait, or when the prompt expires. It binds an answer to a prompt but does not identify the person: a
+caller that can read the reply's events can read it
+([security](/architecture/security/#candid-limits)).
+
+A prompt expires `TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES` (five) minutes
+after `PendingToolCalls` sent it, a constant of `@lys/protocol` the desktop's
+notice names too. Each prompt owns a timer, started when it is listed and
+cleared as soon as it is answered or cancelled. When the timer fires, the
+prompt is removed, so its token gets the not-pending `409` from then on, and
+the round gets `expired`: it stores the call as `failed`, from
+`awaiting-approval`, with a sentence that names the limit and asks the model
+to tell the person what it wanted the call for, records the answer `expired`,
+and goes on as after a rejection, the model reading that sentence. An answer
+that arrives before the limit is taken. A call sent to the desktop to run has
+no time limit.
 
 The Tools pane's switches are not part of the gateway: they decide only which
 tools a chat request offers, so switching a tool or tool calls off applies
@@ -794,10 +1001,11 @@ pane row and no saved choice, and its calls run without approval. A call
 asks the `ToolKeeper` for the turn's tools that fit the task and answers
 with their names, and each one is offered from the reply's next round to its
 end. Discovery is not authorization: each call of a found tool passes the
-argument check and the [approval gate](#tool-approval) as any other, and a
-call of a tool its round did not offer is stored as failed and never runs.
-A call of a tool the request names as switched off or unavailable, or any
-call while tool calls are off, gets the result that
+argument check, the [tool call policy](#tool-call-policy), and the
+[approval gate](#tool-approval) as any other, and a call of a tool its round
+did not offer is stored as failed and never runs. A call of a tool the
+request names as switched off or unavailable, or any call while tool calls
+are off, gets the result that
 [tools the turn does not offer](/reference/api/#tools-the-turn-does-not-offer)
 gives for it; any other such call gets a result that lists the tools the
 model can call and points to `find_tools`, without saying whether the turn
@@ -1128,14 +1336,17 @@ schema requires, at most 32 levels of nesting, and no `__proto__` key. The
 server checks the values.
 
 `handleMcpToolCall` (`src/modules/agent/toolCallRound.ts`) sends every call
-through the round's [approval gate](#tool-approval), which asks the person
-unless they saved the tool as Just run. An allowed call runs on its server as
-the server is connected when the call runs, with five minutes to answer, and
-the reply's Stop signal tells the server that the call was cancelled. A call
-whose server is no longer connected, or no longer lists the tool, fails with a
-sentence the model reads and is logged as a call that was not sent. Because an MCP tool's access is `unknown`, its
-result, failure, or rejection is cleaned of invisible characters like a
-network tool's before it is stored and read.
+the [tool call policy](#tool-call-policy) does not deny through the round's
+[approval gate](#tool-approval), which asks the person unless they saved the
+tool as Just run and the server does not mark it as destructive; the turn
+keeps that mark with the tool, as the server listed it when the turn found it.
+An allowed call runs on its server as the server is connected when the call
+runs, with five minutes to answer, and the reply's Stop signal tells the
+server that the call was cancelled. A call whose server is no longer
+connected, or no longer lists the tool, fails with a sentence the model reads
+and is logged as a call that was not sent. Because an MCP tool's access is
+`unknown`, its result, failure, or rejection is cleaned of invisible
+characters like a network tool's before it is stored and read.
 
 `formatMcpToolResult` (`mcpToolResult.ts`) frames the server's result as
 untrusted: a sentence naming the server and the tool, by the
@@ -1334,7 +1545,12 @@ version 10 adds the attachment rows, version 11 adds `agents.deleted_at`, so
 deleting an agent only marks it, version 12 moves a stored agent coded
 `armitage`, deleted or not, and every conversation stored under `armitage`
 to the first `armitage-<n>` code no agent or conversation holds, so the code
-is Armitage's, and
+is Armitage's, version 13 adds the tool call decision records, version 14
+lets a record store the answer `expired`, version 15 lets it store the
+denials `outside-approved-folders` and `settings-unreadable`, version 16 adds
+the records of tool searches' own calls, version 17 lets both kinds of
+record store the policy's rule set identity and its usage, budget,
+open-world, and paid-tool reasons, and
 turn persistence's startup recovers streaming assistants and their open tool
 calls without reordering history.
 Two triggers keep `conversations.updated_at` in sync with message and part
@@ -1482,11 +1698,10 @@ for the separate inference and model-management lifetimes.
   MCP resources, prompts, sampling, elicitation, or roots
   ([#255](https://github.com/w3lt/lys/issues/255))
 - No provider fallback or budget-accounting logic
-- No tool execution gateway or attribute-based policy engine, no approval
-  bound to one exact call, and no stored audit record of tool decisions:
-  [tool routing](#tool-routing) names tools, and each call still passes the
-  per-call approval gate; these parts of #330's tool authorization spec are
-  its follow-ups
+- The [tool call policy](#tool-call-policy)'s rules read only argument text
+  and the destructive mark of an MCP tool: no rule keeps calls inside folders
+  the person approves ([#341](https://github.com/w3lt/lys/issues/341)), and
+  none limits usage or spending, or attaches constraints to an allowed call
 
 ## Coming soon
 

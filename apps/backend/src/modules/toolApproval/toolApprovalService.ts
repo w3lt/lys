@@ -16,14 +16,15 @@ const NO_JUST_RUN_TOOL_NAMES: ReadonlySet<string> = new Set()
  * without approval unless its tool was saved as Just run.
  *
  * @remarks This is the backend's approval gateway: every checked call of
- * every turn, client and backend tools alike, passes a {@link ToolCallGate}
- * created here before anything runs, except a call of a backend tool that
- * runs without approval, such as the attachment reader, which only reads
- * what the person gave Lys for the conversation. The choices are read once
- * per model round that has a call to gate, so a choice saved before a
- * round's calls arrive applies to that round. When the saved choices cannot
- * be read, every call asks (it fails closed). Concurrency model: reentrant;
- * it owns no mutable state, and each gate is independent.
+ * every turn that the tool call policy does not deny, client, backend, and
+ * MCP tools alike, passes a {@link ToolCallGate} created here before anything
+ * runs, except an allowed call of a backend tool that runs without approval,
+ * such as the attachment reader, which only reads what the person gave Lys
+ * for the conversation. The choices are read once per model round that has a
+ * call to gate, so a choice saved before a round's calls arrive applies to
+ * that round. When the saved choices cannot be read, every call asks (it
+ * fails closed). Concurrency model: reentrant; it owns no mutable state, and
+ * each gate is independent.
  */
 export default class ToolApprovalService {
   /** Reads the saved choices; lent by the composition root. */
@@ -46,9 +47,9 @@ export default class ToolApprovalService {
    * belongs to, borrowed by the gate for the round.
    * @param reportSettingsUnreadable - Called once when the saved choices
    * cannot be read, before the gate is returned; must not throw.
-   * @returns A promise resolving with the gate: tools saved as Just run go on
-   * at once, every other tool asks the person. When the choices cannot be
-   * read, no tool is on Just run.
+   * @returns A promise resolving with the gate: an allowed call of a tool
+   * saved as Just run goes on at once, every other call asks the person. When
+   * the choices cannot be read, no tool is on Just run.
    * @throws The reader's failure, when the settings file cannot be closed.
    */
   public async createToolCallGate(

@@ -29,11 +29,11 @@ repository today; it is not a promise of unreleased work.
 - A new conversation is answered by the agent chosen in the composer: a
   built-in agent, Caliginia unless another is chosen, or one of the user's
   own. Armitage, the built-in tool keeper, answers no chat: a model trained
-  for tool use asks it, through `find_tools`, which of the turn's tools fit
-  a task, and is offered those tools from its next round, each call still
-  asking first unless the tool is on Just run. A conversation keeps its
-  agent for every turn, and one whose agent was
-  deleted stays readable but accepts no new message.
+  for tool use asks it, through `find_tools`, which of the turn's tools fit a
+  task, and is offered those tools from its next round, each call still going
+  through the tool call policy and the approval as without routing. A
+  conversation keeps its agent for every turn, and one whose agent was deleted
+  stays readable but accepts no new message.
 - Conversation history supports search, cursor pagination, transcript retrieval,
   rename, and deletion. A reply's parts, its reasoning, text, and tool calls
   with their results, are each persisted before publication; continuation
@@ -89,7 +89,15 @@ repository today; it is not a promise of unreleased work.
   off until an email account is saved and its switch is on, reads, searches,
   sends, and files mail over IMAP and SMTP. Each call
   asks the person first unless its tool is set to Just run, which the backend
-  decides for every tool from the saved choices; both web tools start off. Lys's instructions do not
+  decides for every tool from the saved choices; before that, the backend
+  denies a call that names a private key or credential file, a path outside
+  the folders the person lets tools use, once any is listed, or a local or
+  private network address, or that is a reply's call of one tool past its
+  100th or of `web_search` past its 20th, which then never runs or asks, and
+  asks before every call of an MCP tool its server marks as destructive or
+  as an open-world write, such as sending an email, and before a reply's
+  sixth and later `web_search` calls, even on Just run; both web tools start
+  off. Lys's instructions do not
   give her today's date yet
   ([#148](https://github.com/w3lt/lys/issues/148)).
 - The email server works with one account, signed in with a password or an app

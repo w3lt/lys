@@ -572,7 +572,514 @@ const databaseMigrations: readonly (string | DatabaseMigrationStep)[] = [
     ALTER TABLE agents ADD COLUMN deleted_at TEXT
       CHECK (deleted_at IS NULL OR deleted_at <> '')
   `,
-  migrateArmitageRecords
+  migrateArmitageRecords,
+  // Records how each tool call was decided, one row per stored call, written
+  // with the call's row: the tool call policy's effect and its reason, the
+  // approval mode the gate applied, and the person's answer, with the call's
+  // status as its outcome. No argument value is copied; the call's row keeps
+  // them. A null effect means Lys's own checks failed the call before the
+  // policy was asked; a null mode, that the call never reached the gate. A
+  // comparison with NULL makes a CHECK pass in SQLite, so every comparison on
+  // a nullable column is guarded by `IS NOT NULL`. The trigger copies each
+  // status change of a call, including the interrupted marking, into its
+  // record. Calls stored before this version have no record. Rows go with
+  // their call and their conversation.
+  `
+    CREATE TABLE tool_call_decisions (
+      call_id TEXT PRIMARY KEY
+        REFERENCES conversation_messages(id) ON DELETE CASCADE,
+      conversation_id TEXT NOT NULL
+        REFERENCES conversations(id) ON DELETE CASCADE,
+      agent_code TEXT NOT NULL CHECK (agent_code <> ''),
+      tool_name TEXT NOT NULL,
+      policy_effect TEXT,
+      policy_reason TEXT,
+      approval_mode TEXT,
+      answer TEXT CHECK (
+        answer IS NULL
+        OR (
+          answer IN ('allowed', 'declined', 'showFailed')
+          AND approval_mode IS NOT NULL
+        )
+      ),
+      outcome TEXT NOT NULL CHECK (
+        outcome IN (
+          'awaiting-approval', 'running', 'succeeded', 'failed', 'rejected',
+          'interrupted'
+        )
+      ),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      CHECK (
+        (
+          policy_effect IS NULL
+          AND policy_reason IS NULL
+          AND approval_mode IS NULL
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'deny'
+          AND policy_reason IS NOT NULL
+          AND policy_reason IN ('credential-file', 'blocked-address')
+          AND approval_mode IS NULL
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'require-approval'
+          AND policy_reason IS NOT NULL
+          AND policy_reason = 'destructive-tool'
+          AND approval_mode IS NOT NULL
+          AND approval_mode IN ('ask-me', 'just-run')
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'allow'
+          AND policy_reason IS NULL
+          AND (approval_mode IS NULL OR approval_mode IN ('ask-me', 'just-run'))
+        )
+      )
+    ) STRICT;
+
+    CREATE INDEX tool_call_decisions_conversation_idx
+      ON tool_call_decisions (conversation_id);
+
+    CREATE TRIGGER update_tool_call_decision_after_tool_call_update
+    AFTER UPDATE OF status ON conversation_messages
+    FOR EACH ROW
+    WHEN NEW.role = 'tool_call'
+    BEGIN
+      UPDATE tool_call_decisions
+      SET outcome = NEW.status, updated_at = NEW.updated_at
+      WHERE call_id = NEW.id;
+    END;
+  `,
+  // Lets a decision record store the answer `expired`: nobody answered the
+  // call's approval prompt within its time limit, so the call was stored as
+  // failed without running. SQLite cannot change a CHECK, so the table is
+  // created again with every other rule unchanged, every row is copied, and
+  // its index and the trigger that copies status changes into it are created
+  // again unchanged. The trigger is dropped first because its body names the
+  // table. Rows stored before this version keep their values.
+  `
+    DROP TRIGGER update_tool_call_decision_after_tool_call_update;
+
+    CREATE TABLE new_tool_call_decisions (
+      call_id TEXT PRIMARY KEY
+        REFERENCES conversation_messages(id) ON DELETE CASCADE,
+      conversation_id TEXT NOT NULL
+        REFERENCES conversations(id) ON DELETE CASCADE,
+      agent_code TEXT NOT NULL CHECK (agent_code <> ''),
+      tool_name TEXT NOT NULL,
+      policy_effect TEXT,
+      policy_reason TEXT,
+      approval_mode TEXT,
+      answer TEXT CHECK (
+        answer IS NULL
+        OR (
+          answer IN ('allowed', 'declined', 'showFailed', 'expired')
+          AND approval_mode IS NOT NULL
+        )
+      ),
+      outcome TEXT NOT NULL CHECK (
+        outcome IN (
+          'awaiting-approval', 'running', 'succeeded', 'failed', 'rejected',
+          'interrupted'
+        )
+      ),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      CHECK (
+        (
+          policy_effect IS NULL
+          AND policy_reason IS NULL
+          AND approval_mode IS NULL
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'deny'
+          AND policy_reason IS NOT NULL
+          AND policy_reason IN ('credential-file', 'blocked-address')
+          AND approval_mode IS NULL
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'require-approval'
+          AND policy_reason IS NOT NULL
+          AND policy_reason = 'destructive-tool'
+          AND approval_mode IS NOT NULL
+          AND approval_mode IN ('ask-me', 'just-run')
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'allow'
+          AND policy_reason IS NULL
+          AND (approval_mode IS NULL OR approval_mode IN ('ask-me', 'just-run'))
+        )
+      )
+    ) STRICT;
+
+    INSERT INTO new_tool_call_decisions (
+      call_id, conversation_id, agent_code, tool_name, policy_effect,
+        policy_reason, approval_mode, answer, outcome, created_at, updated_at
+    )
+    SELECT
+      call_id, conversation_id, agent_code, tool_name, policy_effect,
+        policy_reason, approval_mode, answer, outcome, created_at, updated_at
+    FROM tool_call_decisions;
+
+    DROP TABLE tool_call_decisions;
+    ALTER TABLE new_tool_call_decisions RENAME TO tool_call_decisions;
+
+    CREATE INDEX tool_call_decisions_conversation_idx
+      ON tool_call_decisions (conversation_id);
+
+    CREATE TRIGGER update_tool_call_decision_after_tool_call_update
+    AFTER UPDATE OF status ON conversation_messages
+    FOR EACH ROW
+    WHEN NEW.role = 'tool_call'
+    BEGIN
+      UPDATE tool_call_decisions
+      SET outcome = NEW.status, updated_at = NEW.updated_at
+      WHERE call_id = NEW.id;
+    END;
+  `,
+  // Lets a decision record store the denial reasons
+  // `outside-approved-folders`, for an argument naming a path outside the
+  // folders the person lets tools use, and `settings-unreadable`, for one
+  // naming a path while those folders cannot be read. SQLite cannot change
+  // a CHECK, so the table is created again with every other rule unchanged,
+  // every row is copied, and its index and the trigger that copies status
+  // changes into it are created again unchanged, as in the version before.
+  // Rows stored before this version keep their values.
+  `
+    DROP TRIGGER update_tool_call_decision_after_tool_call_update;
+
+    CREATE TABLE new_tool_call_decisions (
+      call_id TEXT PRIMARY KEY
+        REFERENCES conversation_messages(id) ON DELETE CASCADE,
+      conversation_id TEXT NOT NULL
+        REFERENCES conversations(id) ON DELETE CASCADE,
+      agent_code TEXT NOT NULL CHECK (agent_code <> ''),
+      tool_name TEXT NOT NULL,
+      policy_effect TEXT,
+      policy_reason TEXT,
+      approval_mode TEXT,
+      answer TEXT CHECK (
+        answer IS NULL
+        OR (
+          answer IN ('allowed', 'declined', 'showFailed', 'expired')
+          AND approval_mode IS NOT NULL
+        )
+      ),
+      outcome TEXT NOT NULL CHECK (
+        outcome IN (
+          'awaiting-approval', 'running', 'succeeded', 'failed', 'rejected',
+          'interrupted'
+        )
+      ),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      CHECK (
+        (
+          policy_effect IS NULL
+          AND policy_reason IS NULL
+          AND approval_mode IS NULL
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'deny'
+          AND policy_reason IS NOT NULL
+          AND policy_reason IN ('credential-file', 'outside-approved-folders', 'settings-unreadable', 'blocked-address')
+          AND approval_mode IS NULL
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'require-approval'
+          AND policy_reason IS NOT NULL
+          AND policy_reason = 'destructive-tool'
+          AND approval_mode IS NOT NULL
+          AND approval_mode IN ('ask-me', 'just-run')
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'allow'
+          AND policy_reason IS NULL
+          AND (approval_mode IS NULL OR approval_mode IN ('ask-me', 'just-run'))
+        )
+      )
+    ) STRICT;
+
+    INSERT INTO new_tool_call_decisions (
+      call_id, conversation_id, agent_code, tool_name, policy_effect,
+        policy_reason, approval_mode, answer, outcome, created_at, updated_at
+    )
+    SELECT
+      call_id, conversation_id, agent_code, tool_name, policy_effect,
+        policy_reason, approval_mode, answer, outcome, created_at, updated_at
+    FROM tool_call_decisions;
+
+    DROP TABLE tool_call_decisions;
+    ALTER TABLE new_tool_call_decisions RENAME TO tool_call_decisions;
+
+    CREATE INDEX tool_call_decisions_conversation_idx
+      ON tool_call_decisions (conversation_id);
+
+    CREATE TRIGGER update_tool_call_decision_after_tool_call_update
+    AFTER UPDATE OF status ON conversation_messages
+    FOR EACH ROW
+    WHEN NEW.role = 'tool_call'
+    BEGIN
+      UPDATE tool_call_decisions
+      SET outcome = NEW.status, updated_at = NEW.updated_at
+      WHERE call_id = NEW.id;
+    END;
+  `,
+  // Records the tool calls of a tool search's reply, such as Armitage's
+  // `search_tools` and `recommend_tool` calls, which that reply never
+  // stores: one row per call, tied to the stored `find_tools` call that
+  // started the search, written as the search keeps the call. It holds the
+  // call's tool, its argument text, which no other row keeps, the tool call
+  // policy's effect and reason, and the call's status as its outcome. A
+  // search's call never reaches the approval gate, so no mode or answer is
+  // kept, and an effect that asks the person cannot be stored. When the
+  // `find_tools` call stops running, by its end, Stop, or the interrupted
+  // marking at startup, the trigger marks its calls still running as
+  // interrupted, keeping the later of the two update times. Rows go with
+  // their `find_tools` call and their conversation.
+  `
+    CREATE TABLE tool_search_call_decisions (
+      call_id TEXT PRIMARY KEY,
+      search_call_id TEXT NOT NULL
+        REFERENCES conversation_messages(id) ON DELETE CASCADE,
+      conversation_id TEXT NOT NULL
+        REFERENCES conversations(id) ON DELETE CASCADE,
+      agent_code TEXT NOT NULL CHECK (agent_code <> ''),
+      tool_name TEXT NOT NULL,
+      argument_text TEXT NOT NULL,
+      policy_effect TEXT,
+      policy_reason TEXT,
+      outcome TEXT NOT NULL CHECK (
+        outcome IN ('running', 'succeeded', 'failed', 'interrupted')
+      ),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      CHECK (
+        (policy_effect IS NULL AND policy_reason IS NULL)
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'deny'
+          AND policy_reason IS NOT NULL
+          AND policy_reason IN ('credential-file', 'outside-approved-folders', 'settings-unreadable', 'blocked-address')
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'allow'
+          AND policy_reason IS NULL
+        )
+      )
+    ) STRICT;
+
+    CREATE INDEX tool_search_call_decisions_search_call_idx
+      ON tool_search_call_decisions (search_call_id);
+
+    CREATE INDEX tool_search_call_decisions_conversation_idx
+      ON tool_search_call_decisions (conversation_id);
+
+    CREATE TRIGGER interrupt_tool_search_calls_after_tool_call_update
+    AFTER UPDATE OF status ON conversation_messages
+    FOR EACH ROW
+    WHEN NEW.role = 'tool_call' AND NEW.status <> 'running'
+    BEGIN
+      UPDATE tool_search_call_decisions
+      SET outcome = 'interrupted', updated_at = max(updated_at, NEW.updated_at)
+      WHERE search_call_id = NEW.id AND outcome = 'running';
+    END;
+  `,
+  // Lets both decision tables store the rules the tool call policy gained:
+  // the denials `usage-limit`, for a call past the calls of one tool one
+  // reply may make, and `paid-tool-budget`, for a paid tool's call past the
+  // calls one reply may make of it; and, in the table of stored calls, the
+  // approval reasons `open-world-write`, for a tool its MCP server marks as
+  // reaching beyond Lys without marking it read-only, and `paid-tool`, for
+  // a paid tool's call past those a reply makes without asking. Each record
+  // also stores `policy_id`, the identity of the rule set that decided the
+  // call, so a record stays readable after the rules change; it is null when
+  // the policy was not asked, and in every record stored before this
+  // version. SQLite cannot change a CHECK, so each table is created again
+  // with every other rule unchanged, every row is copied, and its indexes
+  // and trigger are created again unchanged; each trigger is dropped first
+  // because its body names its table. Rows stored before this version keep
+  // their values.
+  `
+    DROP TRIGGER update_tool_call_decision_after_tool_call_update;
+
+    CREATE TABLE new_tool_call_decisions (
+      call_id TEXT PRIMARY KEY
+        REFERENCES conversation_messages(id) ON DELETE CASCADE,
+      conversation_id TEXT NOT NULL
+        REFERENCES conversations(id) ON DELETE CASCADE,
+      agent_code TEXT NOT NULL CHECK (agent_code <> ''),
+      tool_name TEXT NOT NULL,
+      policy_effect TEXT,
+      policy_reason TEXT,
+      policy_id TEXT CHECK (
+        policy_id IS NULL OR (policy_id <> '' AND policy_effect IS NOT NULL)
+      ),
+      approval_mode TEXT,
+      answer TEXT CHECK (
+        answer IS NULL
+        OR (
+          answer IN ('allowed', 'declined', 'showFailed', 'expired')
+          AND approval_mode IS NOT NULL
+        )
+      ),
+      outcome TEXT NOT NULL CHECK (
+        outcome IN (
+          'awaiting-approval', 'running', 'succeeded', 'failed', 'rejected',
+          'interrupted'
+        )
+      ),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      CHECK (
+        (
+          policy_effect IS NULL
+          AND policy_reason IS NULL
+          AND approval_mode IS NULL
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'deny'
+          AND policy_reason IS NOT NULL
+          AND policy_reason IN ('credential-file', 'outside-approved-folders', 'settings-unreadable', 'blocked-address', 'usage-limit', 'paid-tool-budget')
+          AND approval_mode IS NULL
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'require-approval'
+          AND policy_reason IS NOT NULL
+          AND policy_reason IN ('destructive-tool', 'open-world-write', 'paid-tool')
+          AND approval_mode IS NOT NULL
+          AND approval_mode IN ('ask-me', 'just-run')
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'allow'
+          AND policy_reason IS NULL
+          AND (approval_mode IS NULL OR approval_mode IN ('ask-me', 'just-run'))
+        )
+      )
+    ) STRICT;
+
+    INSERT INTO new_tool_call_decisions (
+      call_id, conversation_id, agent_code, tool_name, policy_effect,
+        policy_reason, approval_mode, answer, outcome, created_at, updated_at
+    )
+    SELECT
+      call_id, conversation_id, agent_code, tool_name, policy_effect,
+        policy_reason, approval_mode, answer, outcome, created_at, updated_at
+    FROM tool_call_decisions;
+
+    DROP TABLE tool_call_decisions;
+    ALTER TABLE new_tool_call_decisions RENAME TO tool_call_decisions;
+
+    CREATE INDEX tool_call_decisions_conversation_idx
+      ON tool_call_decisions (conversation_id);
+
+    CREATE TRIGGER update_tool_call_decision_after_tool_call_update
+    AFTER UPDATE OF status ON conversation_messages
+    FOR EACH ROW
+    WHEN NEW.role = 'tool_call'
+    BEGIN
+      UPDATE tool_call_decisions
+      SET outcome = NEW.status, updated_at = NEW.updated_at
+      WHERE call_id = NEW.id;
+    END;
+
+    DROP TRIGGER interrupt_tool_search_calls_after_tool_call_update;
+
+    CREATE TABLE new_tool_search_call_decisions (
+      call_id TEXT PRIMARY KEY,
+      search_call_id TEXT NOT NULL
+        REFERENCES conversation_messages(id) ON DELETE CASCADE,
+      conversation_id TEXT NOT NULL
+        REFERENCES conversations(id) ON DELETE CASCADE,
+      agent_code TEXT NOT NULL CHECK (agent_code <> ''),
+      tool_name TEXT NOT NULL,
+      argument_text TEXT NOT NULL,
+      policy_effect TEXT,
+      policy_reason TEXT,
+      policy_id TEXT CHECK (
+        policy_id IS NULL OR (policy_id <> '' AND policy_effect IS NOT NULL)
+      ),
+      outcome TEXT NOT NULL CHECK (
+        outcome IN ('running', 'succeeded', 'failed', 'interrupted')
+      ),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      CHECK (
+        (policy_effect IS NULL AND policy_reason IS NULL)
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'deny'
+          AND policy_reason IS NOT NULL
+          AND policy_reason IN ('credential-file', 'outside-approved-folders', 'settings-unreadable', 'blocked-address', 'usage-limit', 'paid-tool-budget')
+        )
+        OR
+        (
+          policy_effect IS NOT NULL
+          AND policy_effect = 'allow'
+          AND policy_reason IS NULL
+        )
+      )
+    ) STRICT;
+
+    INSERT INTO new_tool_search_call_decisions (
+      call_id, search_call_id, conversation_id, agent_code, tool_name,
+        argument_text, policy_effect, policy_reason, outcome, created_at,
+        updated_at
+    )
+    SELECT
+      call_id, search_call_id, conversation_id, agent_code, tool_name,
+        argument_text, policy_effect, policy_reason, outcome, created_at,
+        updated_at
+    FROM tool_search_call_decisions;
+
+    DROP TABLE tool_search_call_decisions;
+    ALTER TABLE new_tool_search_call_decisions
+      RENAME TO tool_search_call_decisions;
+
+    CREATE INDEX tool_search_call_decisions_search_call_idx
+      ON tool_search_call_decisions (search_call_id);
+
+    CREATE INDEX tool_search_call_decisions_conversation_idx
+      ON tool_search_call_decisions (conversation_id);
+
+    CREATE TRIGGER interrupt_tool_search_calls_after_tool_call_update
+    AFTER UPDATE OF status ON conversation_messages
+    FOR EACH ROW
+    WHEN NEW.role = 'tool_call' AND NEW.status <> 'running'
+    BEGIN
+      UPDATE tool_search_call_decisions
+      SET outcome = 'interrupted', updated_at = max(updated_at, NEW.updated_at)
+      WHERE search_call_id = NEW.id AND outcome = 'running';
+    END;
+  `
 ]
 
 /** Latest schema version that the backend database can open and migrate. */

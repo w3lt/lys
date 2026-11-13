@@ -11,6 +11,7 @@ import type {
   BuiltInToolRunContext,
   ParsedBuiltInToolCall
 } from "../tool/builtIn/builtInTool"
+import type { ToolCallPolicy } from "../toolApproval/toolCallPolicy"
 
 /** Inclusive maximum length of a trimmed task, in UTF-16 code units. */
 const MAXIMUM_TOOL_TASK_LENGTH = 500
@@ -27,6 +28,11 @@ export type ReportToolSearchFailure = (failure: unknown) => void
 export type ToolSearch = Readonly<{
   /** What the asking agent needs a tool for; trimmed, 1 to 500 characters. */
   task: string
+  /**
+   * UUIDv7 of the asking reply's stored `find_tools` call that runs the
+   * search; the records of the search's own tool calls are kept under it.
+   */
+  searchCallId: string
   /**
    * Definitions of the asking turn's client, built-in, and MCP tools, each
    * name once, in offer order; at least one.
@@ -45,6 +51,11 @@ export type ToolSearch = Readonly<{
    * the returned promise settles.
    */
   reportFailure: ReportToolSearchFailure
+  /**
+   * The asking turn's tool call policy; a search answered by a reply of its
+   * own, such as Armitage's, decides that reply's tool calls by it.
+   */
+  toolCallPolicy: ToolCallPolicy
 }>
 
 /** Outcome of one search for tools. */
@@ -74,21 +85,23 @@ export const FAILED_TOOL_SEARCH: ToolSearchOutcome = Object.freeze({
  *
  * @remarks Consumed by `find_tools`, which a routed reply offers its model.
  * Discovery is not authorization: the keeper only names tools, and every
- * call of a named tool still passes the asking reply's argument check and
- * approval gate. The provider reads only the definitions the search holds,
- * runs no tool of the asking turn, and keeps nothing of a search after it
- * settles. Ready when created; owns no resource of the caller. Concurrency
- * model: asynchronous on the backend's event loop; searches may overlap and
- * run independently, as many at once as the provider allows, the others
- * failing or waiting their turn.
+ * call of a named tool still passes the asking reply's argument check, tool
+ * call policy, and approval gate. The provider reads only the definitions
+ * the search holds, runs no tool of the asking turn, and keeps nothing of a
+ * search after it settles but the records of the search's own tool calls,
+ * under `searchCallId`. Ready when created; owns no resource of the
+ * caller. Concurrency model: asynchronous on the backend's event loop;
+ * searches may overlap and run independently, as many at once as the
+ * provider allows, the others failing or waiting their turn.
  */
 export interface ToolKeeper {
   /**
    * Finds the tools that fit a task.
    *
-   * @param search - The task, the asking turn's tools, the model and its
-   * controls, and the asking reply's cancellation; borrowed until the
-   * returned promise settles.
+   * @param search - The task, the `find_tools` call that runs it, the
+   * asking turn's tools, the model and its controls, the asking reply's
+   * cancellation, and its tool call policy; borrowed until the returned
+   * promise settles.
    * @returns `found` with the fitting tools' names, each one of
    * `search.tools`, frozen; `failed` when the search could not run, was
    * refused, failed, or was cancelled by the model, after reporting why to
@@ -116,6 +129,11 @@ export type FindToolsContext = Readonly<{
   generationOptions: MessageGenerationOptions
   /** Receives why a search ended without finding; lent for the reply. */
   reportFailure: ReportToolSearchFailure
+  /**
+   * What the tool call rules know about this machine, and the reader of the
+   * folders the person lets tools use.
+   */
+  toolCallPolicy: ToolCallPolicy
 }>
 
 /** The task argument of `find_tools`. */
@@ -237,7 +255,8 @@ export default class FindToolsTool implements BuiltInTool {
    * Runs one search and keeps what it found.
    *
    * @param task - Trimmed task of the call.
-   * @param context - The run's cancellation.
+   * @param context - The running call's identity and the run's
+   * cancellation.
    * @returns The tools found, named for the model, or that none was found;
    * a failure when the keeper could not search.
    * @throws The abort reason when the run's signal aborted before or during
@@ -260,7 +279,12 @@ export default class FindToolsTool implements BuiltInTool {
     const { abortSignal } = context
     abortSignal.throwIfAborted()
     const { keeper, ...search } = this.#context
-    const outcome = await keeper.findTools({ ...search, task, abortSignal })
+    const outcome = await keeper.findTools({
+      ...search,
+      task,
+      searchCallId: context.toolCallId,
+      abortSignal
+    })
     abortSignal.throwIfAborted()
     if (outcome.status === "failed") return failedSearchResult
     const { toolNames } = outcome

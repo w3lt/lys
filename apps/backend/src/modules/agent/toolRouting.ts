@@ -2,6 +2,7 @@ import type { MessageGenerationOptions } from "@lys/protocol"
 import type { ToolDefinition } from "@lys/share"
 import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
+import type { ToolCallPolicy } from "../toolApproval/toolCallPolicy"
 import { formatSystemPrompt } from "./agentContext"
 import FindToolsTool, {
   FIND_TOOLS_DEFINITION,
@@ -67,6 +68,11 @@ export type ReplyToolsTurn = Readonly<{
   mcpTools: readonly TurnMcpTool[]
   /** Receives why a `find_tools` search ended without finding. */
   reportToolSearchFailure: ReportToolSearchFailure
+  /**
+   * What the tool call rules know about this machine, and the reader of the
+   * folders the person lets tools use.
+   */
+  toolCallPolicy: ToolCallPolicy
 }>
 
 /**
@@ -199,7 +205,8 @@ export function buildReplyTools(
     conversationId: turn.conversationId,
     model: turn.model,
     generationOptions: turn.generationOptions,
-    reportFailure: turn.reportToolSearchFailure
+    reportFailure: turn.reportToolSearchFailure,
+    toolCallPolicy: turn.toolCallPolicy
   })
   const directTools = [...turn.directTools, buildFindToolsEntry(findTools)]
   const tools = buildTurnToolset(turn, directTools, agentStateTools)

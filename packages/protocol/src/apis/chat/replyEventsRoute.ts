@@ -15,6 +15,7 @@ import {
   chatReplyPathParamsSchema,
   chatTitleEventSchema,
   chatToolApprovalEventSchema,
+  chatToolApprovalPromptSchema,
   chatToolCallEventSchema,
   chatToolCallSchema,
   type ChatReplyPathParams
@@ -48,10 +49,11 @@ const chatReplySnapshotEventSchema = z.strictObject({
   pendingToolCalls: z.array(chatToolCallSchema).readonly(),
   /**
    * Approval prompts sent and not yet answered when the snapshot was read, in
-   * the order sent; empty when the reply is not generating. Each prompt
-   * reaches a follower once: here or as a later `tool-approval` event.
+   * the order sent, each with the token its answer must carry; empty when the
+   * reply is not generating. Each prompt reaches a follower once: here or as
+   * a later `tool-approval` event.
    */
-  pendingToolApprovals: z.array(chatToolCallSchema).readonly()
+  pendingToolApprovals: z.array(chatToolApprovalPromptSchema).readonly()
 })
 
 /**

@@ -126,3 +126,19 @@ export const OLLAMA_CLOUD_API_HOST = "ollama.com"
  */
 export const GROQ_API_HOST = "api.groq.com"
 // ============== EXTERNAL SERVICES ============== //
+
+// ============== TOOL APPROVAL ============== //
+/**
+ * Whole minutes an approval prompt waits for the person's answer before it
+ * expires.
+ *
+ * @remarks The limit is exclusive: an answer is taken only while fewer than
+ * this many minutes have passed since the backend sent the prompt. At the
+ * limit the backend ends the prompt, refuses its token, and stores the call
+ * as failed with a sentence naming the limit, which the model reads; the
+ * desktop names the same limit when it tells the person the prompt expired.
+ * It is not persisted. Changing it changes how long a reply waits for the
+ * person and requires a coordinated desktop and backend release.
+ */
+export const TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES = 5
+// ============== TOOL APPROVAL ============== //

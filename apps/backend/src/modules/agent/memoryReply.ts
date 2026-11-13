@@ -29,15 +29,22 @@ type ToolCallPartFields = Pick<
  * Selects the status a tool call has before a change.
  *
  * @param change - The call's next state.
- * @returns `awaiting-approval` for `running` and `rejected`, which answer
- * the person; `running` for `succeeded` and `failed`, which end a run.
+ * @returns `awaiting-approval` for `running`, `rejected`, and `expired`,
+ * which end a prompt; `running` for `succeeded` and `failed`, which end a
+ * run.
  */
 function getPreviousToolCallStatus(
   change: ReplyToolCallChange
 ): "awaiting-approval" | "running" {
-  return change.status === "running" || change.status === "rejected"
-    ? "awaiting-approval"
-    : "running"
+  switch (change.status) {
+    case "running":
+    case "rejected":
+    case "expired":
+      return "awaiting-approval"
+    case "succeeded":
+    case "failed":
+      return "running"
+  }
 }
 
 /**
@@ -46,8 +53,9 @@ function getPreviousToolCallStatus(
  * @param part - The call as kept.
  * @param change - The call's next state.
  * @param updatedAt - Time of the change.
- * @returns The validated, frozen call: its new status, the result the model
- * reads when it has one, and the numbers of a succeeded call's sources.
+ * @returns The validated, frozen call: its new status, `failed` for an
+ * expired prompt, the result the model reads when it has one, and the
+ * numbers of a succeeded call's sources.
  * @throws If the changed call breaks the part contract.
  */
 function buildChangedToolCall(
@@ -79,6 +87,12 @@ function buildChangedToolCall(
       return parseToolCallPart({
         ...base,
         status: change.status,
+        result: change.result
+      })
+    case "expired":
+      return parseToolCallPart({
+        ...base,
+        status: "failed",
         result: change.result
       })
   }

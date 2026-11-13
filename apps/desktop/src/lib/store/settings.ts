@@ -154,8 +154,11 @@ export type ProvidersSettings = LlmProviderSettings
  * the map held here. A tool not in the set asks the person before each call.
  * A tool without a switch is on or off as its access makes it by default, so
  * a tool added later starts at its own default. A name Lys does not list is
- * kept and has no effect. The application store saves the group
- * automatically whenever a tool's approval or switch changes.
+ * kept and has no effect. The approved folders are absolute paths Rust and
+ * the backend check with the shared approved folder path rule; with none,
+ * tools may name any path. The application store saves the group
+ * automatically whenever a tool's approval or switch changes, and whenever a
+ * folder is added or removed.
  */
 export type ToolSettings = {
   /** Names of the tools that run at once, without asking, when called. */
@@ -165,6 +168,11 @@ export type ToolSettings = {
    * tools the person switched have an entry.
    */
   readonly switches: ReadonlyMap<string, boolean>
+  /**
+   * Paths of the folders the person lets tools use, each once, as typed;
+   * empty when tools may name any path.
+   */
+  readonly approvedFolderPaths: readonly string[]
 }
 
 /**
@@ -288,12 +296,13 @@ const INITIAL_PROVIDERS_SETTINGS: ProvidersSettings = Object.freeze({
 
 /**
  * Tool choices shown before Tauri initialization completes: no tool on Just
- * run and no tool switched, as in a first-run settings file, so every call
- * asks and every tool is on or off by default.
+ * run, no tool switched, and no folder listed, as in a first-run settings
+ * file, so every call asks and every tool is on or off by default.
  */
 const INITIAL_TOOL_SETTINGS: ToolSettings = Object.freeze({
   justRunToolNames: new Set<string>(),
-  switches: new Map<string, boolean>()
+  switches: new Map<string, boolean>(),
+  approvedFolderPaths: Object.freeze([])
 })
 
 /**

@@ -217,7 +217,7 @@ function handleSendChatToolResultRequest(
     request.body,
     generations
   )
-  if (outcome === "not-pending") {
+  if (outcome !== "accepted") {
     sendToolCallNotPendingProblem(reply, request.params.callId, request.url)
     return
   }
@@ -237,10 +237,13 @@ function handleSendChatToolResultRequest(
  * @param generations - Borrowed registry.
  * @throws If the registry is closed because shutdown began; nothing is
  * answered.
- * @remarks Sends the 204 or the not-pending problem before returning. After
- * `allowed`, the reply runs a backend tool itself or sends a client tool's
- * call to run. Only a rejection's content reaches the model; its reason is
- * logged at debug level.
+ * @remarks Sends the 204 or the not-pending problem before returning. An
+ * answer whose token is not its prompt's gets the same problem as an answer
+ * no prompt waits for, so the caller learns nothing about which calls wait;
+ * the refusal is logged at warn level with the call's identifier, never the
+ * token. After `allowed`, the reply runs a backend tool itself or sends a
+ * client tool's call to run. Only a rejection's content reaches the model;
+ * its reason is logged at debug level.
  */
 function handleSendChatToolApprovalRequest(
   request: FastifyRequest<SendChatToolApprovalApiRoute>,
@@ -252,9 +255,19 @@ function handleSendChatToolApprovalRequest(
     request.body,
     generations
   )
-  if (outcome === "not-pending") {
-    sendToolCallNotPendingProblem(reply, request.params.callId, request.url)
-    return
+  switch (outcome) {
+    case "accepted":
+      break
+    case "token-mismatch":
+      request.log.warn(
+        { toolCallId: request.params.callId },
+        "Tool approval answer carried a token its prompt was not sent with and was refused"
+      )
+      sendToolCallNotPendingProblem(reply, request.params.callId, request.url)
+      return
+    case "not-pending":
+      sendToolCallNotPendingProblem(reply, request.params.callId, request.url)
+      return
   }
   if (request.body.status === "rejected")
     request.log.debug(
@@ -268,10 +281,12 @@ function handleSendChatToolApprovalRequest(
  * Hands one answer to the generation of the addressed reply.
  *
  * @param target - Validated call, reply, and conversation identifiers.
- * @param answer - Validated result or approval answer.
+ * @param answer - Validated result, or approval answer with its token.
  * @param generations - Borrowed registry.
- * @returns `accepted` when the reply waited for that answer; `not-pending`
- * when no generation runs for the reply or it does not wait for that answer.
+ * @returns `accepted` when the reply waited for that answer;
+ * `token-mismatch` when a prompt waits for the call but the token is not
+ * its own; `not-pending` when no generation runs for the reply or it does
+ * not wait for that answer.
  * @throws If the registry is closed because shutdown began.
  */
 function resolveReplyToolCall(

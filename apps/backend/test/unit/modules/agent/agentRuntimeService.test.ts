@@ -34,7 +34,12 @@ import {
   createUserMessage
 } from "../../support/conversationFixtures"
 import { createRoomyReplyContextMeter } from "../../support/replyContextMeterFakes"
-import { LEADER_STATE_TOOL_NAMES } from "../../support/toolFixtures"
+import {
+  LEADER_STATE_TOOL_NAMES,
+  TOOL_CALL_POLICY,
+  SEARCH_CALL_ID,
+  createToolSearchCallRecords
+} from "../../support/toolFixtures"
 import {
   registerToolKeeperContractSuite,
   TOOL_KEEPER_SEARCH_TOOLS,
@@ -213,7 +218,8 @@ function createRuntime(options: RuntimeOptions = {}) {
     replyContextMeter: createRoomyReplyContextMeter(),
     findConversationTitle: (conversationId) =>
       buildConversationTitleLookup(conversations.get(conversationId)),
-    requestLimits: REQUEST_LIMITS
+    requestLimits: REQUEST_LIMITS,
+    toolSearchCallRecords: createToolSearchCallRecords().records
   })
   return {
     runtime,
@@ -286,6 +292,7 @@ async function createHelloReply(
     updateReplyToolCall: vi.fn(),
     sendEvent: vi.fn(),
     sendClientToolCall: vi.fn(),
+    toolCallPolicy: TOOL_CALL_POLICY,
     createToolCallGate: vi.fn(),
     reportReplyCancellation: vi.fn(),
     reportReplyRefusal: vi.fn(),
@@ -612,12 +619,14 @@ describe("AgentRuntimeService", () => {
       const generationOptions: MessageGenerationOptions = { temperature: 0.2 }
       const search = runtime.findTools({
         task: "read a web page",
+        searchCallId: SEARCH_CALL_ID,
         tools: TOOL_KEEPER_SEARCH_TOOLS,
         conversationId,
         model: "qwen/qwen3-8b",
         generationOptions,
         abortSignal: new AbortController().signal,
-        reportFailure: vi.fn()
+        reportFailure: vi.fn(),
+        toolCallPolicy: TOOL_CALL_POLICY
       })
       await vi.waitFor(() => {
         expect(openReplyStream).toHaveBeenCalledOnce()
@@ -667,12 +676,14 @@ describe("AgentRuntimeService", () => {
         }
         const search = runtime.findTools({
           task: "read a web page",
+          searchCallId: SEARCH_CALL_ID,
           tools: TOOL_KEEPER_SEARCH_TOOLS,
           conversationId: createFixtureUuidV7(31),
           model: "qwen/qwen3-8b",
           generationOptions,
           abortSignal,
-          reportFailure
+          reportFailure,
+          toolCallPolicy: TOOL_CALL_POLICY
         })
         return { search, reportFailure, replyModel, countAgentReads }
       }

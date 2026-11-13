@@ -25,7 +25,7 @@ The chat route emits exactly eleven SSE payload variants, defined by
 | `done`                             | `finishReason`                                                                                 | Successful assistant completion with `stop` or `length`.                                                                                  |
 | `interrupted`                      | none                                                                                           | The reply ended before the model finished.                                                                                                |
 | `error`                            | `message`                                                                                      | A user-presentable chat generation error string.                                                                                          |
-| `tool-approval`                    | `call`                                                                                         | The reply waits for the person to allow or reject this tool call.                                                                         |
+| `tool-approval`                    | `call`, `approvalToken`                                                                        | The reply waits for the person to allow or reject this tool call.                                                                         |
 | `tool-call`                        | `call`                                                                                         | The reply waits for the client to run this call of a client tool.                                                                         |
 | `reply-snapshot`                   | `conversationTitle`, `assistantMessage`, `sources`, `pendingToolCalls`, `pendingToolApprovals` | Reply-events route only: the stored reply, the conversation's sources, and the reply's unanswered calls and prompts when following began. |
 
@@ -155,21 +155,29 @@ too.
 
 ### `tool-approval`
 
-Carries one tool call the backend shows to the person before anything runs,
-in the same shape as a `tool-call` event's `call`. The backend's tool approval
-service sends it for every call of a tool that is not saved as Just run,
-client, backend, and MCP tools alike except `read_attachment`, the agent
-state tools (`read_my_state`, `find_agents`, `read_agent_state`), and
-`find_tools`, which run without approval, right after the call's
-`reply-part` stored it
-as `awaiting-approval`; a call of a tool on Just run gets no prompt. The
+Carries one tool call the backend shows to the person before anything runs, in
+the same shape as a `tool-call` event's `call`, and `approvalToken`, a
+single-use token of 43 base64url characters that the answer must return. The
+backend's tool approval service sends it for every call the
+[tool call policy](/architecture/backend/#tool-call-policy) allows of a tool
+that is not saved as Just run, and for every call it requires approval of, of
+an MCP tool its server marks as destructive or as an open-world write, and
+of `web_search` from a reply's sixth call on, even on Just run; client,
+backend, and MCP tools alike except `read_attachment`, the agent state tools
+(`read_my_state`, `find_agents`, `read_agent_state`), and `find_tools`, which
+run without approval, right after the call's `reply-part` stored it as
+`awaiting-approval`; any other call of a tool on Just run gets no prompt. The
 client shows the call and answers with the
-[tool-approval route](/reference/api/#tool-approvals). After `allowed`, a
-backend tool runs in the backend, an MCP tool runs on its
-[MCP server](/reference/api/#mcp-servers), and a client tool's call comes
-back as a `tool-call` event under the same `id`. The event is live only: a client that
-was not following when it was sent finds the call in the next
-`reply-snapshot`'s `pendingToolApprovals`.
+[tool-approval route](/reference/api/#tool-approvals), returning the token;
+the backend accepts one answer with that token and refuses any other. After
+`allowed`, a backend tool runs in the backend, an MCP tool runs on its
+[MCP server](/reference/api/#mcp-servers), and a client tool's call comes back
+as a `tool-call` event under the same `id`. The event is live only: a client
+that was not following when it was sent finds the call in the next
+`reply-snapshot`'s `pendingToolApprovals`. A prompt nobody answers within five
+minutes expires: it leaves `pendingToolApprovals`, its token is refused, and a
+`reply-part` event carries the call stored as `failed`, straight from
+`awaiting-approval`, with the sentence the model reads.
 
 ### `tool-call`
 
@@ -199,17 +207,18 @@ model reads the error. A call of a backend tool, such as `read_page` or
 `web_search`, or of an MCP tool never arrives here: once allowed, the backend
 runs it itself.
 
-The backend sends this event only once the call may run: at once for a tool
-saved as Just run, otherwise after the person allowed its `tool-approval`
-prompt. The client runs it without asking again and answers with the
+The backend sends this event only once the call may run: at once when the tool
+call policy allows a call of a tool saved as Just run, otherwise after the
+person allowed its `tool-approval` prompt; a call the policy denies is never
+sent. The client runs it without asking again and answers with the
 [tool-result route](/reference/api/#tool-results). When a round's calls
 arrive, their prompts and the run requests of calls that need no prompt are
 sent in the model's order; the next round starts once every call has an
-answer. The model's text in a round that calls tools is streamed and stored
-as a text part of that round. The event itself is live only: a client that
-was not following when it was sent finds the call in the next
-`reply-snapshot`'s `pendingToolCalls`. The call is also stored as a
-`tool-call` part, which `reply-part` events report.
+answer. The model's text in a round that calls tools is streamed and stored as
+a text part of that round. The event itself is live only: a client that was
+not following when it was sent finds the call in the next `reply-snapshot`'s
+`pendingToolCalls`. The call is also stored as a `tool-call` part, which
+`reply-part` events report.
 
 ### `reply-snapshot`
 
@@ -217,12 +226,15 @@ The first event of every reply-events stream. `assistantMessage` is the stored
 reply, including every part and fragment sent before this event, so later
 `reply-part` and `reply-part-delta` events continue from exactly its parts.
 `sources` holds every source the conversation stored, by number.
-`conversationTitle` is the stored title, or `null`. `pendingToolCalls` lists the calls sent to run and not yet answered
-with their result, and `pendingToolApprovals` the prompts not yet answered,
-each in the order sent and in the same shape as an event's `call`; both are
-empty when the reply is not generating. Each reaches a follower once, either
-here or as a later `tool-call` or `tool-approval` event. When the reply's
-generation has already ended, the stream closes right after this event.
+`conversationTitle` is the stored title, or `null`. `pendingToolCalls` lists
+the calls sent to run and not yet answered with their result, each in the
+order sent and in the same shape as an event's `call`, and
+`pendingToolApprovals` the prompts not yet answered, in the order sent, each
+as `{ call, approvalToken }` with the call and the token of its
+`tool-approval` event; both are empty when the reply is not generating. Each
+reaches a follower once, either here or as a later `tool-call` or
+`tool-approval` event. When the reply's generation has already ended, the
+stream closes right after this event.
 
 ### `error`
 

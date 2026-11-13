@@ -6,11 +6,12 @@ import {
   rmSync,
   writeFileSync
 } from "node:fs"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import * as z from "zod"
 import { buildApp } from "../../src/app"
+import registerChatRoutes from "../../src/modules/chat/routes"
 import type { BackendConfig } from "../../src/config"
 import {
   createBackendLogger,
@@ -37,6 +38,11 @@ import {
 import { createFailingOutput, createWorkingOutput } from "./support/testOutputs"
 
 vi.mock("@lmstudio/sdk", () => import("./support/lmStudioSdkFake"))
+vi.mock("../../src/modules/chat/routes", async (importOriginal) => {
+  const chatRoutes =
+    await importOriginal<Readonly<{ default: typeof registerChatRoutes }>>()
+  return { default: vi.fn(chatRoutes.default) }
+})
 
 /**
  * Creates a configuration that satisfies `backendConfigSchema`, with the
@@ -225,6 +231,34 @@ describe("buildApp", () => {
       storedCount: 0,
       nextCursor: null
     })
+  })
+
+  it("installs the chat routes with the tool call policy of the configured settings file", async () => {
+    const config = createConfigWithMcpServers([])
+    const app = await buildApp({
+      config,
+      logger: createBackendLogger(new CapturedLogDestination())
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    writeFileSync(
+      config.settingsFilePath,
+      JSON.stringify({ tools: { approvedFolders: ["/srv/shared/"] } })
+    )
+
+    const registration = vi.mocked(registerChatRoutes).mock.lastCall?.[1]
+
+    expect(registration).toEqual({
+      titleGenerationMaxAttempts: config.titleGenerationMaxAttempts,
+      toolCallPolicy: {
+        settingsFilePath: config.settingsFilePath,
+        homeFolderPath: homedir(),
+        readApprovedFolders: expect.any(Function)
+      }
+    })
+    await expect(
+      registration?.toolCallPolicy.readApprovedFolders()
+    ).resolves.toStrictEqual({ kind: "listed", folderPaths: ["/srv/shared"] })
   })
 
   it("decorates the reply part store over the configured database", async () => {

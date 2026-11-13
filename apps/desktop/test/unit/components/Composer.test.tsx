@@ -58,7 +58,11 @@ import {
   waitForMicrotasks
 } from "../support/settlement"
 import { openMenuWithKeyboard, waitForRenderedWork } from "../support/rendering"
-import { buildToolCall, buildToolDefinition } from "../support/toolFixtures"
+import {
+  buildToolCall,
+  buildToolDefinition,
+  createFixtureApprovalToken
+} from "../support/toolFixtures"
 
 /** Route key of the chat request. */
 const CHAT_ROUTE = "POST /api/v1/chat"
@@ -122,6 +126,7 @@ const WAITING_READ: HeldToolCall = Object.freeze({
   }),
   call: READ_CALL,
   step: "approval",
+  approvalToken: createFixtureApprovalToken(1),
   answer: Object.freeze({
     status: "awaiting-person",
     definition: buildToolDefinition("read_text_file"),
@@ -1090,7 +1095,8 @@ describe("Composer", () => {
         READ_APPROVAL_ROUTE
       ])
       expect(listRequestsBesideMeasurements(backend)[0]?.body).toEqual({
-        status: "allowed"
+        status: "allowed",
+        approvalToken: createFixtureApprovalToken(1)
       })
       expect(
         screen.queryByRole("group", {
@@ -1126,6 +1132,7 @@ describe("Composer", () => {
           READ_APPROVAL_ROUTE
         ])
         expect(listRequestsBesideMeasurements(backend)[0]?.body).toEqual({
+          approvalToken: createFixtureApprovalToken(1),
           status: "rejected",
           reason: "declined",
           content: "The person declined this call. They said: Not that file"
@@ -1153,6 +1160,7 @@ describe("Composer", () => {
         listRequestsBesideMeasurements(backend).map((request) => request.body)
       ).toEqual([
         {
+          approvalToken: createFixtureApprovalToken(1),
           status: "rejected",
           reason: "declined",
           content: "The person declined this call."
@@ -1181,6 +1189,7 @@ describe("Composer", () => {
         listRequestsBesideMeasurements(backend).map((request) => request.body)
       ).toEqual([
         {
+          approvalToken: createFixtureApprovalToken(1),
           status: "rejected",
           reason: "declined",
           content:
@@ -1244,6 +1253,56 @@ describe("Composer", () => {
         screen.getByRole("group", { name: "Tool answer not sent" })
       ).toBeInTheDocument()
     })
+
+    it("drops an expired prompt on Dismiss and moves focus to the message field", async () => {
+      startNativeHostFake({})
+      startBackendFake(MEASURING_BACKEND_ROUTES)
+      const { Composer } = await loadFreshComposerWithWaitingCall()
+      const { useToolCallStore } = await import("@/lib/store/tool-calls")
+      useToolCallStore.setState({
+        heldCalls: [{ ...WAITING_READ, answer: { status: "expired" } }]
+      })
+      const user = userEvent.setup()
+      render(
+        <Composer messageFieldRef={createRef()} onStartConversation={vi.fn()} />
+      )
+
+      await user.click(screen.getByRole("button", { name: "Dismiss" }))
+
+      expect(useToolCallStore.getState().heldCalls).toEqual([])
+      expect(
+        screen.queryByRole("group", { name: "Tool call prompt expired" })
+      ).not.toBeInTheDocument()
+      expect(getMessageField()).toHaveFocus()
+    })
+
+    it.each(["Escape", "Enter"])(
+      "leaves %s to the field while only an expired prompt is shown, sending nothing",
+      async (key) => {
+        startNativeHostFake({})
+        const backend = startBackendFake(MEASURING_BACKEND_ROUTES)
+        const { Composer } = await loadFreshComposerWithWaitingCall()
+        const { useToolCallStore } = await import("@/lib/store/tool-calls")
+        useToolCallStore.setState({
+          heldCalls: [{ ...WAITING_READ, answer: { status: "expired" } }]
+        })
+        const user = userEvent.setup()
+        render(
+          <Composer
+            messageFieldRef={createRef()}
+            onStartConversation={vi.fn()}
+          />
+        )
+
+        await user.type(getMessageField(), `{${key}}`)
+        await waitForRenderedWork()
+
+        expect(listRequestsBesideMeasurements(backend)).toEqual([])
+        expect(
+          screen.getByRole("group", { name: "Tool call prompt expired" })
+        ).toBeInTheDocument()
+      }
+    )
 
     it.each(["Escape", "Enter"])(
       "leaves an %s that belongs to text composition to the input method while a call waits",

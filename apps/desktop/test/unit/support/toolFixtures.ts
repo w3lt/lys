@@ -150,3 +150,14 @@ export function buildToolCall(
   chatReplyEventSchema.parse({ type: "tool-call", call })
   return call
 }
+
+/**
+ * Builds the token of one approval prompt, in the shape the backend sends.
+ *
+ * @param sequence - Non-negative integer that tells the prompts of one case
+ * apart.
+ * @returns 43 base64url characters; distinct for distinct sequences.
+ */
+export function createFixtureApprovalToken(sequence: number): string {
+  return `fixture-approval-token-${sequence.toString().padStart(20, "0")}`
+}

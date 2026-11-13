@@ -45,6 +45,7 @@ import type {
 } from "../../tool/builtIn/builtInTool"
 import { findTurnBuiltInTools } from "../../tool/builtIn/builtInTools"
 import type ToolApprovalService from "../../toolApproval/toolApprovalService"
+import type { ToolCallPolicy } from "../../toolApproval/toolCallPolicy"
 import type { TitleGenerationOptions } from "../chatService"
 import type {
   ConversationTurn,
@@ -87,7 +88,18 @@ import {
 } from "./turnRequest"
 
 /** Backend settings the chat route applies to every request. */
-export type ChatRouteOptions = Pick<BackendConfig, "titleGenerationMaxAttempts">
+export type ChatRouteOptions = Pick<
+  BackendConfig,
+  "titleGenerationMaxAttempts"
+> &
+  Readonly<{
+    /**
+     * What the tool call rules know about this machine, and the reader of
+     * the folders the person lets tools use; every tool call of every turn
+     * the route starts is decided by them.
+     */
+    toolCallPolicy: ToolCallPolicy
+  }>
 
 /**
  * Settings, the generation registry, and the capability lookup the chat
@@ -161,8 +173,14 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      */
     findMcpTool: (toolName: string) => McpTurnToolLookup
     /**
-     * Approval gateway every tool call passes, except a call of a backend
-     * tool that runs without approval.
+     * What the tool call rules know about this machine, and the reader of
+     * the folders the person lets tools use; every checked call is decided
+     * by them before its approval, and again once the person allows it.
+     */
+    toolCallPolicy: ToolCallPolicy
+    /**
+     * Approval gate every tool call the policy does not deny passes, except
+     * an allowed call of a backend tool that runs without approval.
      */
     toolApprovals: ToolApprovalService
   }>
@@ -237,6 +255,10 @@ type TurnGenerationSource = Readonly<{
 const UNREADABLE_JUST_RUN_CHOICES_MESSAGE =
   "The saved Just run choices could not be read from settings.json; every tool call of this round asks the person"
 
+/** Warning logged when a read of the approved folders finds them unreadable. */
+const UNREADABLE_APPROVED_FOLDERS_MESSAGE =
+  "The folders tools may use could not be read from settings.json; every tool call of this round that names a file or folder is denied"
+
 /** Client tools of a request that offered none. */
 const NO_REQUESTED_TOOLS: readonly ToolDefinition[] = Object.freeze([])
 
@@ -293,8 +315,9 @@ type TurnGenerationInput = Readonly<{
  * follows that generation on the response stream.
  *
  * @param app - Backend with SSE, validation, and singleton services installed.
- * @param registration - Title attempt limit, the registry that owns the
- * started generations, and the model capability lookup.
+ * @param registration - Title attempt limit, the tool call policy, the
+ * registry that owns the started generations, and the model capability
+ * lookup.
  * @throws If route registration fails.
  * @remarks The route accepts bodies up to the chat contract's limit, so a
  * message can carry its attachments. A full model-operation queue and a
@@ -305,6 +328,7 @@ export default function updateFastifyWithChatRoute(
   app: FastifyInstance,
   {
     titleGenerationMaxAttempts,
+    toolCallPolicy,
     generations,
     findModelCapabilities
   }: ChatRouteRegistration
@@ -330,6 +354,7 @@ export default function updateFastifyWithChatRoute(
     builtInTools: app.builtInTools,
     findMcpTool: (toolName: string) =>
       app.mcpServerRegistry.findTurnTool(toolName),
+    toolCallPolicy,
     toolApprovals: app.toolApprovalService
   }
   app.route<ChatApiRoute>({
@@ -955,14 +980,14 @@ async function createTurnReplyTask(
  * sender, and approval prompt sender.
  * @returns The agent turn, whose parts and final state go to the stored
  * reply and whose reply state is read back from the stored conversation,
- * which numbers new sources after the conversation's stored ones,
- * whose tool calls pass the approval gateway, and whose images are read
- * from the conversation's attachment files. With the request's logger, an
- * unreadable settings file, a reply refused because its agent's request
- * slots and line were full, and a tool search Armitage could not finish are
- * logged as warnings; a cancelled reply, and a round that was not sent
- * because it did not fit or its model was not loaded, at debug level; and
- * any other reply failure as an error.
+ * which numbers new sources after the conversation's stored ones, whose tool
+ * calls pass the tool call policy and then the approval gate, and whose
+ * images are read from the conversation's attachment files. With the
+ * request's logger, an unreadable settings file, a reply refused because its
+ * agent's request slots and line were full, and a tool search Armitage could
+ * not finish are logged as warnings; a cancelled reply, and a round that was
+ * not sent because it did not fit or its model was not loaded, at debug
+ * level; and any other reply failure as an error.
  */
 function buildAgentTurn(
   input: TurnGenerationInput,
@@ -1011,6 +1036,12 @@ function buildAgentTurn(
       ),
     sendEvent,
     sendClientToolCall,
+    toolCallPolicy: reportUnreadableApprovedFolders(
+      dependencies.toolCallPolicy,
+      () => {
+        input.logger.warn(UNREADABLE_APPROVED_FOLDERS_MESSAGE)
+      }
+    ),
     createToolCallGate: () =>
       dependencies.toolApprovals.createToolCallGate(
         sendToolApprovalPrompt,
@@ -1020,6 +1051,34 @@ function buildAgentTurn(
       ),
     ...buildReplyFailureReporters(input.logger)
   }
+}
+
+/**
+ * Wraps a tool call policy so that each read of the approved folders that
+ * finds them unreadable is reported.
+ *
+ * @param toolCallPolicy - The backend's policy, left unchanged.
+ * @param reportApprovedFoldersUnreadable - Called once per such read, before
+ * the read settles; must not throw.
+ * @returns A frozen policy with the same paths, whose reads settle as the
+ * policy's do.
+ * @remarks The policy denies every call that names a path while the folders
+ * cannot be read, so the report is what tells an operator why, as the Just
+ * run read reports the same file.
+ */
+function reportUnreadableApprovedFolders(
+  toolCallPolicy: ToolCallPolicy,
+  reportApprovedFoldersUnreadable: () => void
+): ToolCallPolicy {
+  return Object.freeze({
+    ...toolCallPolicy,
+    readApprovedFolders: async () => {
+      const approvedFolders = await toolCallPolicy.readApprovedFolders()
+      if (approvedFolders.kind === "unreadable")
+        reportApprovedFoldersUnreadable()
+      return approvedFolders
+    }
+  })
 }
 
 /**

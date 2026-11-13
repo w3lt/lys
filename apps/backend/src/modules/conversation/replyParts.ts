@@ -37,7 +37,7 @@ export default class StoredReplyParts implements ReplyPartWriter {
 
   /**
    * Implements {@link ReplyPartWriter.createReplyPart}, stamping the part with
-   * the current time.
+   * the current time and storing a tool call's decision with it.
    * @param assistantMessageId - Interface-defined reply.
    * @param draft - Interface-defined part.
    * @returns The interface-defined stored part or absence.
@@ -50,7 +50,8 @@ export default class StoredReplyParts implements ReplyPartWriter {
     const part = buildReplyPart(draft, new Date().toISOString())
     return this.#replyPartRecordWriter.createReplyPart({
       assistantMessageId,
-      part
+      part,
+      toolCallDecision: draft.kind === "tool-call" ? draft.decision : undefined
     })
       ? part
       : undefined

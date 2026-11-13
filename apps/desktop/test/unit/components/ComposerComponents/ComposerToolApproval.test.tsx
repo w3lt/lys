@@ -1,3 +1,4 @@
+import { TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES } from "@lys/protocol"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ComponentProps } from "react"
@@ -12,7 +13,8 @@ import {
   buildBackendToolDefinition,
   buildMcpToolDefinition,
   buildToolCall,
-  buildToolDefinition
+  buildToolDefinition,
+  createFixtureApprovalToken
 } from "../../support/toolFixtures"
 
 /** Search the model asked for; the card lists its arguments in this order. */
@@ -47,6 +49,7 @@ const WAITING_SEARCH: ShownToolCall = Object.freeze({
   target: buildCallTarget(SEARCH_CALL.id),
   call: SEARCH_CALL,
   step: "approval",
+  approvalToken: createFixtureApprovalToken(1),
   answer: {
     status: "awaiting-person",
     definition: buildToolDefinition("search_files"),
@@ -68,6 +71,7 @@ const WAITING_PAGE_READ: ShownToolCall = Object.freeze({
   target: buildCallTarget(PAGE_CALL.id),
   call: PAGE_CALL,
   step: "approval",
+  approvalToken: createFixtureApprovalToken(1),
   answer: {
     status: "awaiting-person",
     definition: buildBackendToolDefinition("read_page"),
@@ -89,6 +93,7 @@ const WAITING_WEB_SEARCH: ShownToolCall = Object.freeze({
   target: buildCallTarget(WEB_SEARCH_CALL.id),
   call: WEB_SEARCH_CALL,
   step: "approval",
+  approvalToken: createFixtureApprovalToken(1),
   answer: {
     status: "awaiting-person",
     definition: buildBackendToolDefinition("web_search"),
@@ -116,6 +121,7 @@ const WAITING_MCP_CALL: ShownToolCall = Object.freeze({
   target: buildCallTarget(MCP_CALL.id),
   call: MCP_CALL,
   step: "approval",
+  approvalToken: createFixtureApprovalToken(1),
   answer: {
     status: "awaiting-person",
     definition: NOTES_SEARCH,
@@ -140,12 +146,21 @@ const UNSENT_SEARCH: ShownToolCall = Object.freeze({
   }
 } satisfies ShownToolCall)
 
+/** Search whose prompt expired before the person answered. */
+const EXPIRED_SEARCH: ShownToolCall = Object.freeze({
+  target: buildCallTarget(SEARCH_CALL.id),
+  call: SEARCH_CALL,
+  step: "approval",
+  approvalToken: createFixtureApprovalToken(10),
+  answer: { status: "expired" }
+} satisfies ShownToolCall)
+
 /**
  * Renders the card for one shown call.
  *
  * @param props - Shown call and whether the composer holds a draft; the
  * answers default to recorders.
- * @returns The recorders of the three answers.
+ * @returns The recorders of the three answers and the dismissal.
  */
 function startToolApproval(
   props: Pick<
@@ -156,10 +171,59 @@ function startToolApproval(
   const answers = {
     onAllowToolCall: vi.fn(),
     onRejectToolCall: vi.fn(),
-    onRetryToolCallAnswer: vi.fn()
+    onRetryToolCallAnswer: vi.fn(),
+    onDismissToolCall: vi.fn()
   }
   render(<ComposerToolApproval {...props} {...answers} />)
   return answers
+}
+
+/** {@link WAITING_SEARCH} after the person's allowed answer failed to send. */
+const UNSENT_APPROVAL: ShownToolCall = Object.freeze({
+  ...EXPIRED_SEARCH,
+  answer: {
+    status: "send-failed",
+    toolAnswer: { status: "allowed" },
+    error: "Couldn't send the answer to Lys: The backend could not be reached."
+  }
+} satisfies ShownToolCall)
+
+/**
+ * Renders a search's card after a text field, moves focus to the element
+ * the case picks, and lets the prompt expire.
+ *
+ * @param toolCall - The search's card before the prompt expires.
+ * @param findFocusTarget - Finds the element that holds focus before the
+ * prompt expires; undefined leaves focus on the page body.
+ */
+function expireAfterFocusing(
+  toolCall: ShownToolCall,
+  findFocusTarget?: () => HTMLElement
+): void {
+  const answers = {
+    onAllowToolCall: vi.fn(),
+    onRejectToolCall: vi.fn(),
+    onRetryToolCallAnswer: vi.fn(),
+    onDismissToolCall: vi.fn()
+  }
+  const { rerender } = render(
+    <>
+      <textarea aria-label="Message" />
+      <ComposerToolApproval {...answers} hasDraft={false} toolCall={toolCall} />
+    </>
+  )
+  findFocusTarget?.().focus()
+
+  rerender(
+    <>
+      <textarea aria-label="Message" />
+      <ComposerToolApproval
+        {...answers}
+        hasDraft={false}
+        toolCall={EXPIRED_SEARCH}
+      />
+    </>
+  )
 }
 
 describe("ComposerToolApproval", () => {
@@ -368,6 +432,62 @@ describe("ComposerToolApproval", () => {
       expect(answers.onRetryToolCallAnswer).toHaveBeenCalledOnce()
       expect(answers.onAllowToolCall).not.toHaveBeenCalled()
       expect(answers.onRejectToolCall).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("a call whose prompt expired", () => {
+    it("names the tool, says the call did not run because nobody answered within the limit, and offers only Dismiss", async () => {
+      const user = userEvent.setup()
+      const answers = startToolApproval({
+        toolCall: EXPIRED_SEARCH,
+        hasDraft: true
+      })
+      const card = screen.getByRole("group", {
+        name: "Tool call prompt expired"
+      })
+
+      await user.click(within(card).getByRole("button", { name: "Dismiss" }))
+
+      expect(within(card).getByText("Prompt expired")).toBeInTheDocument()
+      expect(within(card).getByText("search_files")).toBeInTheDocument()
+      expect(card).toHaveTextContent(
+        `No answer came within ${TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES} minutes, so the call did not run`
+      )
+      expect(within(card).queryByRole("alert")).not.toBeInTheDocument()
+      expect(within(card).getAllByRole("button")).toHaveLength(1)
+      expect(answers.onDismissToolCall).toHaveBeenCalledOnce()
+      expect(answers.onAllowToolCall).not.toHaveBeenCalled()
+      expect(answers.onRejectToolCall).not.toHaveBeenCalled()
+      expect(answers.onRetryToolCallAnswer).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      [WAITING_SEARCH, "Allow once"],
+      [UNSENT_APPROVAL, "Try again"]
+    ])(
+      "gives Dismiss the focus the card held when the prompt expires (%#: %s)",
+      (toolCall, focusedButtonName) => {
+        expireAfterFocusing(toolCall, () =>
+          screen.getByRole("button", { name: focusedButtonName })
+        )
+
+        expect(screen.getByRole("button", { name: "Dismiss" })).toHaveFocus()
+      }
+    )
+
+    it("leaves focus in the field when the prompt expires while the person types", () => {
+      expireAfterFocusing(WAITING_SEARCH, () =>
+        screen.getByRole("textbox", { name: "Message" })
+      )
+
+      expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus()
+    })
+
+    it("leaves focus on the page when the prompt expires while nothing on its card held focus", () => {
+      expireAfterFocusing(WAITING_SEARCH)
+
+      expect(document.body).toHaveFocus()
+      expect(screen.getByRole("button", { name: "Dismiss" })).not.toHaveFocus()
     })
   })
 })

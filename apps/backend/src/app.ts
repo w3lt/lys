@@ -1,4 +1,5 @@
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify"
+import { homedir } from "node:os"
 import updateFastifyWithAgentRoutes from "./modules/agent/routes"
 import updateFastifyWithConversationRoutes from "./modules/conversation/routes"
 import registerHealthRoutes from "./modules/health/routes"
@@ -8,6 +9,11 @@ import registerChatRoutes from "./modules/chat/routes"
 import registerToolRoutes from "./modules/tool/routes"
 import { backendConfigSchema, type BackendConfig } from "./config"
 import singletonServicesPlugin from "./di/fastify"
+import { readApprovedFolders } from "./infrastructure/settings/approvedFoldersFile"
+import {
+  buildApprovedFolders,
+  type ToolCallPolicy
+} from "./modules/toolApproval/toolCallPolicy"
 import { updateFastifyWithHttpTransport } from "./http"
 
 /** Options used to construct the backend Fastify application. */
@@ -55,11 +61,19 @@ export async function buildApp(
     config
   })
 
+  const toolCallPolicy: ToolCallPolicy = Object.freeze({
+    settingsFilePath: config.settingsFilePath,
+    homeFolderPath: homedir(),
+    readApprovedFolders: async () =>
+      buildApprovedFolders(await readApprovedFolders(config.settingsFilePath))
+  })
+
   // =============== REGISTER THE ROUTES =============== //
   await app.register(registerHealthRoutes)
   await app.register(updateFastifyWithLlmRoutes)
   await app.register(registerChatRoutes, {
-    titleGenerationMaxAttempts: config.titleGenerationMaxAttempts
+    titleGenerationMaxAttempts: config.titleGenerationMaxAttempts,
+    toolCallPolicy
   })
   await app.register(updateFastifyWithConversationRoutes)
   await app.register(updateFastifyWithAgentRoutes)

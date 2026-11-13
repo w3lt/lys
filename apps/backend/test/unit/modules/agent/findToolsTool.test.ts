@@ -18,7 +18,11 @@ import {
   registerBuiltInToolContractSuite,
   type BuiltInToolHarness
 } from "../../support/builtInToolContract"
-import { buildFoundToolSearchOutcome } from "../../support/toolFixtures"
+import {
+  buildFoundToolSearchOutcome,
+  RUN_TOOL_CALL_ID,
+  TOOL_CALL_POLICY
+} from "../../support/toolFixtures"
 
 /**
  * Builds the definition of a backend tool that takes no argument.
@@ -87,7 +91,8 @@ function buildContext(
     conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
     model: "qwen/qwen3-8b",
     generationOptions,
-    reportFailure
+    reportFailure,
+    toolCallPolicy: TOOL_CALL_POLICY
   }
 }
 
@@ -122,7 +127,11 @@ async function runFindTools(
 ): Promise<BuiltInToolResult> {
   const parsed = tool.parseToolCall({ task })
   if (parsed.status !== "parsed") throw new Error(parsed.message)
-  return await parsed.runToolCall({ abortSignal, addWebSources: () => [] })
+  return await parsed.runToolCall({
+    toolCallId: RUN_TOOL_CALL_ID,
+    abortSignal,
+    addWebSources: () => []
+  })
 }
 
 describe("FIND_TOOLS_DEFINITION", () => {
@@ -151,7 +160,7 @@ describe("formatToolRoutingNote", () => {
 describe("FindToolsTool", () => {
   registerBuiltInToolContractSuite(createFindToolsHarness)
 
-  it("asks the keeper with the trimmed task, the turn's tools, and the run's signal", async () => {
+  it("asks the keeper with the trimmed task, the running call as the search's call, the turn's tools, and the run's signal", async () => {
     const keeper = createKeeper(buildFoundToolSearchOutcome([]))
     const abortSignal = new AbortController().signal
 
@@ -165,12 +174,14 @@ describe("FindToolsTool", () => {
 
     expect(keeper.findTools).toHaveBeenCalledWith({
       task: "read a web page",
+      searchCallId: RUN_TOOL_CALL_ID,
       tools: TOOLS,
       conversationId: "0190a3f2-7b1c-7d3e-8f45-6a7b8c9d0e1f",
       model: "qwen/qwen3-8b",
       generationOptions: context.generationOptions,
       abortSignal,
-      reportFailure: reportUnexpectedFailure
+      reportFailure: reportUnexpectedFailure,
+      toolCallPolicy: TOOL_CALL_POLICY
     })
   })
 

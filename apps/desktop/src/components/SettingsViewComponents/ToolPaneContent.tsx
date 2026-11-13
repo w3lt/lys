@@ -7,6 +7,7 @@ import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
 import { useLysStore } from "@/lib/store"
 import { useToolStore, type ToolListState } from "@/lib/store/tools"
 
+import ApprovedFoldersCard from "./ApprovedFoldersCard"
 import LocationCard from "./LocationCard"
 import PaneSkeleton from "./PaneSkeleton"
 import { ToolApprovalSaveFeedback } from "./ToolApprovalSaveFeedback"
@@ -149,6 +150,46 @@ function ToolGroupList({
   }
 
   return <>{buildToolGroups(tools).map(buildToolGroupSection)}</>
+}
+
+/**
+ * Presents the folders the person lets tools use.
+ *
+ * @remarks The application store owns the list and saves it with the other
+ * tool choices, whose save status the pane shows above. The section owns no
+ * state or effects, stays mounted while the pane is shown, whatever the state
+ * of the tool list, and is not locked with the tool controls. A saved change
+ * applies to the next round of tool calls, because the backend's policy and
+ * the desktop's file tools read the settings file.
+ * @returns The section with its heading, note, and card.
+ */
+function ApprovedFoldersSection(): ReactElement {
+  const headingId = useId()
+  const folderPaths = useLysStore(
+    (state) => state.settings.tools.approvedFolderPaths
+  )
+  const addApprovedFolder = useLysStore((state) => state.addApprovedFolder)
+  const removeApprovedFolder = useLysStore(
+    (state) => state.removeApprovedFolder
+  )
+
+  return (
+    <section aria-labelledby={headingId} className="settings-view__section">
+      <div className="settings-view__section-heading">
+        <h2 id={headingId}>folders tools may use</h2>
+      </div>
+      <p className="settings-view__note">
+        Once you list a folder, a tool call that names a file or folder outside
+        every listed one is denied: it never runs, and you are not asked, even
+        on Just run. Paths are compared as typed, letter case included.
+      </p>
+      <ApprovedFoldersCard
+        folderPaths={folderPaths}
+        onAddFolder={addApprovedFolder}
+        onRemoveFolder={removeApprovedFolder}
+      />
+    </section>
+  )
 }
 
 /**
@@ -313,7 +354,8 @@ function ToolListBody({ list }: ToolListBodyProps): ReactElement | null {
  * either list, shows the failure and offers Retry. The save status of the
  * tool choices stays mounted below them, so a failed save and its
  * Retry saving stay shown while the tools are read again or cannot be read.
- * The location section follows, also shown whatever the state of the list.
+ * The approved folders section and the location section follow, also shown
+ * whatever the state of the list.
  * The pane accepts no props and is loaded lazily by the settings view.
  * @returns The tools pane body.
  */
@@ -336,6 +378,7 @@ export default function ToolPane(): ReactElement {
       <div className="settings-view__stack">
         <ToolListBody list={list} />
         <ToolApprovalSaveFeedback />
+        <ApprovedFoldersSection />
         <LocationSection />
       </div>
     </div>

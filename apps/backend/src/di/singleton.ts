@@ -19,6 +19,7 @@ import SqliteConversationRecordEditor from "../infrastructure/database/conversat
 import SqliteConversationRecordReader from "../infrastructure/database/conversations/sqliteConversationRecordReader"
 import SqliteConversationTurnRecordWriter from "../infrastructure/database/conversations/sqliteConversationTurnRecordWriter"
 import SqliteReplyPartRecordWriter from "../infrastructure/database/conversations/sqliteReplyPartRecordWriter"
+import SqliteToolSearchCallRecordWriter from "../infrastructure/database/conversations/sqliteToolSearchCallRecordWriter"
 import StoredConversationHistoryEditor from "../modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../modules/conversation/historyReader"
 import StoredReplyParts from "../modules/conversation/replyParts"
@@ -415,7 +416,8 @@ function createAgentServices(
       requestLimits: Object.freeze({
         slotCount: config.agentRequestSlotCount,
         waitingLimit: config.agentWaitingRequestLimit
-      })
+      }),
+      toolSearchCallRecords: new SqliteToolSearchCallRecordWriter(database)
     })
   }
 }

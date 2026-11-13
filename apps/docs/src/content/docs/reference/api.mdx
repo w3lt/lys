@@ -40,7 +40,7 @@ route definitions.
 | `GET`    | `/api/v1/chat/:conversationId/replies/:assistantMessageId/events`                 | none                                                                                                 | `text/event-stream` (reply snapshot, then live events)                     |
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/stop`                   | none                                                                                                 | Bodyless `204`, or `409` Problem Details                                   |
 | `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`   | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                                   |
-| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId` | `{ status, reason?, content? }`                                                                      | Bodyless `204`, or `409` Problem Details                                   |
+| `POST`   | `/api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId` | `{ status, reason?, content?, approvalToken }`                                                       | Bodyless `204`, or `409` Problem Details                                   |
 
 `/api/v1/heath` is the current spelling in both the shared protocol package and
 the Fastify route registration.
@@ -547,49 +547,71 @@ fraction Tavily reports is rounded up. The answer never contains the key.
 
 ## Tool approvals
 
-The backend decides which tool calls need the person: every call of a tool
+The backend decides which tool calls need the person: every call the
+[tool call policy](/architecture/backend/#tool-call-policy) allows of a tool
 that is not saved as Just run, client, backend, and MCP tools alike, except
 `read_attachment`, the agent state tools, and `find_tools`, which run without
-approval. A tool `find_tools` found is asked about like any other. It
-shows such a
-call with a `tool-approval` event, and the client answers it with
+approval, and every call the policy requires approval of, of an MCP tool its
+server marks as destructive or as an open-world write, and of `web_search`
+from a reply's sixth call on, even on Just run. A tool `find_tools` found is
+asked about like any other. It shows such a call with a `tool-approval`
+event, and the client answers it with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-approvals/:callId`,
 where `callId` is the `id` of the event's call or of its entry in
-`reply-snapshot.pendingToolApprovals`. One request answers one prompt.
+`reply-snapshot.pendingToolApprovals`. One request answers one prompt, and its
+body returns the prompt's `approvalToken`, the single-use token the event or
+the snapshot entry carried.
 
 ```json
-{ "status": "allowed" }
+{
+  "status": "allowed",
+  "approvalToken": "kq3Vb0z2mY9vYQpX7tq1oJw4cE8fH6sN5rU0dLiGaZk"
+}
 ```
 
 ```json
 {
   "status": "rejected",
   "reason": "declined",
-  "content": "The person declined this call. They said: not that folder"
+  "content": "The person declined this call. They said: not that folder",
+  "approvalToken": "kq3Vb0z2mY9vYQpX7tq1oJw4cE8fH6sN5rU0dLiGaZk"
 }
 ```
 
-After `allowed`, the backend runs a backend tool itself, or calls an MCP
-tool on its server, stores its result with the call, and gives it to the
-model; the client sees that result in the
-call's `reply-part` event. For a client tool, it sends the call to run with a
-`tool-call` event under the same `id`. After `rejected`, nothing runs, no
-request reaches an MCP server, and the model reads `content`. `reason` is not shown to the model: `declined` when the person
-rejected the call, and `showFailed` when the client could not show it, such as
-a tool it does not list or arguments it cannot describe.
+After `allowed`, the backend runs a backend tool itself, or calls an MCP tool
+on its server, stores its result with the call, and gives it to the model; the
+client sees that result in the call's `reply-part` event. For a client tool,
+it sends the call to run with a `tool-call` event under the same `id`. After
+`rejected`, nothing runs, no request reaches an MCP server, and the model
+reads `content`. The model never reads `approvalToken`. `reason` is not shown
+to the model: `declined` when the person rejected the call, and `showFailed`
+when the client could not show it, such as a tool it does not list or
+arguments it cannot describe.
 
 The route answers a bodyless `204` once the answer is accepted, and the
-reply's loop continues. A prompt that is unknown, already answered, or whose
-reply ended, and a call that waits for its result instead, return `409` with
+reply's loop continues; the token then stops working. A body without
+`approvalToken`, or with one that is not 43 base64url characters, fails
+validation with `400`. A prompt that is unknown, already answered, expired,
+or whose reply ended, an answer whose token is not the prompt's, and a call
+that waits for its result instead, return `409` with
 `urn:lys:problem:chat:tool-call-not-pending` and change nothing, so repeating
-a request whose response was lost is harmless. The backend sets no time limit
-on a prompt; it waits as for a [tool result](#tool-results).
+a request whose response was lost is harmless, a token sent again finds
+nothing, and a wrong token does not tell the caller whether a prompt waits.
+The prompt keeps waiting after a wrong token, and the backend logs the refusal
+at warn level without the token. A prompt waits at most five minutes
+(`TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES` in `@lys/protocol`); an answer
+must arrive before then. At the limit the backend ends the prompt, stores the
+call as `failed` with a sentence the model reads that names the limit, and
+continues the reply as after a rejection; the client sees the call's change in
+a `reply-part` event. Stop, the end of the reply, or shutdown ends a prompt
+earlier, as it ends the wait for a [tool result](#tool-results).
 
 ## Tool results
 
 A `tool-call` event asks the client to run one call of a client tool: one the
-person allowed, or one whose tool is saved as Just run. The client runs it
-without asking again and answers with
+person allowed, or one the tool call policy allows of a tool saved as Just
+run; a call the policy denies is never sent. The client runs it without asking
+again and answers with
 `POST /api/v1/chat/:conversationId/replies/:assistantMessageId/tool-results/:callId`,
 where `callId` is the `id` of the call's `tool-call` event or of its entry in
 `reply-snapshot.pendingToolCalls`. One request answers one call. Calls of
@@ -797,10 +819,12 @@ stopped. The model reads one of:
   and which ends the connection, failing the server's other calls in flight
   the same way.
 
-The backend checks only the shape of a call's arguments before it asks the
-person: a JSON object of at most 256 KiB, nesting at most 32 levels, whose
-keys follow the argument name rule and include every name the schema
-requires. The server checks the values.
+Before it asks the person, the backend checks the shape of a call's arguments,
+a JSON object of at most 256 KiB, nesting at most 32 levels, whose keys follow
+the argument name rule and include every name the schema requires, and the
+[tool call policy](/architecture/backend/#tool-call-policy) denies a call that
+names a credential file, a path outside the approved folders, or a blocked
+address. The server checks the values.
 
 ### The email server's tools
 

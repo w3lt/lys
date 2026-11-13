@@ -14,6 +14,8 @@ import type {
 } from "@lys/share"
 import type { TurnMcpTool } from "../mcp/mcpServerRegistry"
 import type { TurnBuiltInTool } from "../tool/builtIn/builtInTool"
+import type { ToolCallPolicy } from "../toolApproval/toolCallPolicy"
+import ToolCallUsage from "../toolApproval/toolCallUsage"
 import { waitForSettlementOrAbort } from "../../utils/abort"
 import { ChatCompletionCancelledError } from "../../utils/errors"
 import AgentActivity, {
@@ -187,8 +189,9 @@ export type AgentTurn = Readonly<{
   builtInTools: readonly TurnBuiltInTool[]
   /**
    * MCP tools found for the turn, each name once and none named like
-   * another offered tool; empty when none are offered. Each call asks the
-   * person first, unless they saved the tool as Just run.
+   * another offered tool; empty when none are offered. Each call the tool
+   * call policy does not deny asks the person first, unless they saved the
+   * tool as Just run and its server does not mark it as destructive.
    */
   mcpTools: readonly TurnMcpTool[]
   /**
@@ -245,11 +248,19 @@ export type AgentTurn = Readonly<{
    */
   sendClientToolCall: SendClientToolCall
   /**
+   * What the tool call rules know about this machine, and the reader of the
+   * folders the person lets tools use; every checked call of the turn's
+   * tools, and every call Armitage makes in each `find_tools` search the
+   * turn starts, is decided by them before it starts.
+   */
+  toolCallPolicy: ToolCallPolicy
+  /**
    * Creates the approval gate of one round of tool calls, which asks the
-   * person through every stream following the reply unless the tool is
-   * saved as Just run. Called once per round that has a call to gate, when
-   * the round's calls arrive; a round whose calls all name tools that run
-   * without approval creates none.
+   * person through every stream following the reply unless the tool is saved
+   * as Just run and the tool call policy does not require approval of the
+   * call. Called once per round that has a call to gate, when the round's
+   * calls arrive; a round whose calls all name tools that run without
+   * approval creates none.
    */
   createToolCallGate: CreateToolCallGate
   /**
@@ -410,6 +421,11 @@ type ReplyRoundState = Readonly<{
   replyParts: ReplyPartSequence
   /** Numbers the web sources the reply's tool results show. */
   sourceCatalog: SourceCatalog
+  /**
+   * Calls of each tool the tool call policy did not deny in the reply, its
+   * task, across its rounds.
+   */
+  toolCallUsage: ToolCallUsage
 }>
 
 /**
@@ -724,7 +740,8 @@ export default class Agent {
       unofferedTools: turn.unofferedTools,
       replyTools,
       replyParts,
-      sourceCatalog
+      sourceCatalog,
+      toolCallUsage: new ToolCallUsage()
     })
     const images: AgentContextImages = turn.canSeeImages
       ? await readAgentContextImages(
@@ -772,6 +789,8 @@ export default class Agent {
       tools: state.replyTools.toolOffer.listOfferedToolset(),
       unofferedTools: state.unofferedTools,
       sendClientToolCall: turn.sendClientToolCall,
+      toolCallPolicy: turn.toolCallPolicy,
+      toolCallUsage: state.toolCallUsage,
       createToolCallGate: turn.createToolCallGate,
       abortSignal: turn.abortSignal,
       replyParts: state.replyParts,

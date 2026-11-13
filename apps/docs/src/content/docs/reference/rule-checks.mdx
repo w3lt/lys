@@ -45,6 +45,9 @@ report ends with the identifier and a link to its heading.
   with `--staged`; CI runs it with `--base` against the pull request's base,
   and `--base origin/main` checks the working tree, untracked files included,
   before review.
+- **ESLint rules the repository already configures**, such as the one for
+  `MODULE-023`, run at their configured severity in the pre-commit hook's
+  lint-staged step and in CI's lint job.
 - **An exemption** that the rule itself defines, such as a signature a
   framework imposes under `FUNC-004`, is declared on that one declaration with
   `// eslint-disable-next-line lys/<rule> -- <the contract that imposes it>`.

@@ -20,9 +20,11 @@ import {
   readChatReplyEvents,
   sendChatToolApproval,
   sendChatToolResult,
-  stopChatReply
+  stopChatReply,
+  stopConversationJobs
 } from "@/lib/apis/http/chat"
 import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
+import { JOB_CONVERSATION_MESSAGE } from "@/lib/job-messages"
 import {
   buildJsonResponse,
   createTransportFailure,
@@ -33,6 +35,7 @@ import {
 } from "../../../support/backendFake"
 import {
   buildStreamingAssistantMessage,
+  buildConversationIsJobProblem,
   buildConversationMetadata,
   buildTextPart,
   buildConversationNotFoundProblem,
@@ -306,6 +309,17 @@ describe("readChatEvents", () => {
     ).rejects.toThrow(DELETED_CONVERSATION_AGENT_MESSAGE)
   })
 
+  it("says a job cannot be written to when the backend refuses a chat request for one", async () => {
+    startBackendFake({
+      [CHAT_ROUTE]: () =>
+        buildJsonResponse(409, buildConversationIsJobProblem())
+    })
+
+    await expect(
+      listStreamEvents(readChatEvents(CONTINUED_CONVERSATION_REQUEST))
+    ).rejects.toThrow(JOB_CONVERSATION_MESSAGE)
+  })
+
   it.each([
     [
       "web_search",
@@ -357,7 +371,7 @@ describe("readChatEvents", () => {
     }
   )
 
-  it("does not report an undeclared conflict as a deleted agent", async () => {
+  it("does not report an undeclared conflict as a deleted agent or a job", async () => {
     startBackendFake({
       [CHAT_ROUTE]: () => buildJsonResponse(409, { message: "conflict" })
     })
@@ -368,6 +382,7 @@ describe("readChatEvents", () => {
 
     await expect(events).rejects.toThrow("409")
     await expect(events).rejects.not.toThrow(DELETED_CONVERSATION_AGENT_MESSAGE)
+    await expect(events).rejects.not.toThrow(JOB_CONVERSATION_MESSAGE)
     await expect(events).rejects.not.toBeInstanceOf(BackendToolUnavailableError)
   })
 
@@ -638,6 +653,76 @@ describe("stopChatReply", () => {
     await expect(
       stopChatReply(REPLY_TARGET, { backendUrl: FIXTURE_BACKEND_URL })
     ).rejects.toMatchObject({ cause: transportFailure })
+  })
+})
+
+describe("stopConversationJobs", () => {
+  /** Route key of the jobs-stop endpoint for the fixture conversation. */
+  const JOBS_STOP_ROUTE = `POST /api/v1/chat/${FIXTURE_CONVERSATION_ID}/jobs/stop`
+
+  it("stops every working job of a conversation, without a body or a cancellation signal", async () => {
+    const backend = startBackendFake({
+      [JOBS_STOP_ROUTE]: () => new Response(null, { status: 204 })
+    })
+
+    await expect(
+      stopConversationJobs(FIXTURE_CONVERSATION_ID, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
+    ).resolves.toEqual({ status: "stopped" })
+    expect(backend.requests).toHaveLength(1)
+    expect(backend.requests[0]?.url).toBe(
+      `${FIXTURE_BACKEND_URL}/api/v1/chat/${FIXTURE_CONVERSATION_ID}/jobs/stop`
+    )
+    expect(backend.requests[0]?.body).toBeUndefined()
+    expect(backend.requests[0]?.signal).toBeUndefined()
+  })
+
+  it("reports a conversation that is no longer stored", async () => {
+    startBackendFake({
+      [JOBS_STOP_ROUTE]: () =>
+        buildJsonResponse(404, buildConversationNotFoundProblem())
+    })
+
+    await expect(
+      stopConversationJobs(FIXTURE_CONVERSATION_ID, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
+    ).resolves.toEqual({ status: "conversation-not-found" })
+  })
+
+  it.each([
+    ["an undeclared success", 200, {}],
+    ["an undeclared 404", 404, { message: "Route not found" }],
+    ["a server failure", 500, { detail: "boom" }]
+  ])("names the status of %s", async (_label, status, body) => {
+    startBackendFake({
+      [JOBS_STOP_ROUTE]: () => buildJsonResponse(status, body)
+    })
+
+    await expect(
+      stopConversationJobs(FIXTURE_CONVERSATION_ID, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
+    ).rejects.toThrow(
+      `The backend could not stop the jobs (HTTP ${String(status)}).`
+    )
+  })
+
+  it("rejects when the backend cannot be reached and keeps the transport failure as its cause", async () => {
+    const transportFailure = createTransportFailure()
+    startBackendFake({
+      [JOBS_STOP_ROUTE]: () => Promise.reject(transportFailure)
+    })
+
+    await expect(
+      stopConversationJobs(FIXTURE_CONVERSATION_ID, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
+    ).rejects.toMatchObject({
+      message: "The backend could not be reached.",
+      cause: transportFailure
+    })
   })
 })
 

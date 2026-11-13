@@ -5,6 +5,7 @@ import {
   listConversations,
   updateConversationTitle
 } from "@/lib/apis/http/conversations"
+import { JOB_CONVERSATION_MESSAGE } from "@/lib/job-messages"
 import {
   buildJsonResponse,
   createTransportFailure,
@@ -13,18 +14,31 @@ import {
   type BackendRoute
 } from "../../../support/backendFake"
 import {
+  buildCompletedAssistantMessage,
   buildConversation,
+  buildConversationIsJobProblem,
   buildConversationListPage,
   buildConversationMetadata,
   buildConversationNotFoundProblem,
   buildConversationSummary,
+  buildConversationWithJobs,
+  buildDelegatorMessage,
+  buildJob,
+  buildJobConversation,
+  buildJobReport,
   buildUserMessage,
+  buildUserMessageWithReports,
+  buildWakeUpMessage,
   createFixtureUuidV7,
-  FIXTURE_CONVERSATION_ID
+  FIXTURE_CONVERSATION_ID,
+  FIXTURE_JOB_ID
 } from "../../../support/conversationFixtures"
 
 /** Path of the conversation the single-conversation cases address. */
 const CONVERSATION_PATH = `/api/v1/conversations/${FIXTURE_CONVERSATION_ID}`
+
+/** Path of the job the job cases address. */
+const JOB_PATH = `/api/v1/conversations/${FIXTURE_JOB_ID}`
 
 /** A conversation other than the addressed one. */
 const OTHER_CONVERSATION_ID = createFixtureUuidV7(9)
@@ -188,6 +202,56 @@ describe("getConversation", () => {
     )
   })
 
+  it("reads a job with its parent, number, and delegator", async () => {
+    const jobConversation = buildJobConversation(
+      buildConversation(FIXTURE_JOB_ID, "News", [
+        buildDelegatorMessage(2, "Find this week's hologram news.")
+      ])
+    )
+    startBackendFake({
+      [`GET ${JOB_PATH}`]: () => buildJsonResponse(200, jobConversation)
+    })
+
+    const result = await getConversation(FIXTURE_JOB_ID, {
+      backendUrl: FIXTURE_BACKEND_URL
+    })
+
+    expect(result).toEqual({ status: "found", conversation: jobConversation })
+    expect(result).toMatchObject({
+      conversation: {
+        parentConversationId: FIXTURE_CONVERSATION_ID,
+        jobNumber: 1,
+        delegatorAgentCode: "caliginia"
+      }
+    })
+  })
+
+  it("reads a conversation with its jobs and the reports its messages delivered", async () => {
+    const conversation = buildConversationWithJobs(
+      buildConversation(FIXTURE_CONVERSATION_ID, "Trip", [
+        buildUserMessageWithReports(buildUserMessage(2, "Any news yet?"), [
+          buildJobReport({
+            id: createFixtureUuidV7(66),
+            kind: "note",
+            content: "Reading three feeds."
+          })
+        ]),
+        buildCompletedAssistantMessage(3, "Nyx is still reading."),
+        buildWakeUpMessage(4, [buildJobReport()])
+      ]),
+      [buildJob({ state: "replied" })]
+    )
+    startBackendFake({
+      [`GET ${CONVERSATION_PATH}`]: () => buildJsonResponse(200, conversation)
+    })
+
+    await expect(
+      getConversation(FIXTURE_CONVERSATION_ID, {
+        backendUrl: FIXTURE_BACKEND_URL
+      })
+    ).resolves.toEqual({ status: "found", conversation })
+  })
+
   it("reports the declared missing conversation as not found", async () => {
     startBackendFake({
       [`GET ${CONVERSATION_PATH}`]: () =>
@@ -303,6 +367,35 @@ describe("updateConversationTitle", () => {
     ).resolves.toEqual({ status: "not-found" })
   })
 
+  it("refuses to rename a job", async () => {
+    startBackendFake({
+      [`PATCH ${JOB_PATH}`]: () =>
+        buildJsonResponse(409, buildConversationIsJobProblem())
+    })
+
+    await expect(
+      updateConversationTitle(
+        { conversationId: FIXTURE_JOB_ID, title: "Old news" },
+        { backendUrl: FIXTURE_BACKEND_URL }
+      )
+    ).rejects.toThrow(JOB_CONVERSATION_MESSAGE)
+  })
+
+  it("does not report an undeclared conflict as a job", async () => {
+    startBackendFake({
+      [`PATCH ${CONVERSATION_PATH}`]: () =>
+        buildJsonResponse(409, { message: "conflict" })
+    })
+
+    const update = updateConversationTitle(
+      { conversationId: FIXTURE_CONVERSATION_ID, title: "Trip" },
+      { backendUrl: FIXTURE_BACKEND_URL }
+    )
+
+    await expect(update).rejects.toThrow("409")
+    await expect(update).rejects.not.toThrow(JOB_CONVERSATION_MESSAGE)
+  })
+
   it("rejects metadata for a different conversation", async () => {
     startBackendFake({
       [`PATCH ${CONVERSATION_PATH}`]: () =>
@@ -346,6 +439,17 @@ describe("deleteConversation", () => {
         backendUrl: FIXTURE_BACKEND_URL
       })
     ).resolves.toEqual({ status: "not-found" })
+  })
+
+  it("refuses to delete a job", async () => {
+    startBackendFake({
+      [`DELETE ${JOB_PATH}`]: () =>
+        buildJsonResponse(409, buildConversationIsJobProblem())
+    })
+
+    await expect(
+      deleteConversation(FIXTURE_JOB_ID, { backendUrl: FIXTURE_BACKEND_URL })
+    ).rejects.toThrow(JOB_CONVERSATION_MESSAGE)
   })
 
   it.each([

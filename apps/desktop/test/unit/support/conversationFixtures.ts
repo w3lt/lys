@@ -1,10 +1,12 @@
 import {
   chatReplyNotFoundProblemSchema,
   chatReplyNotGeneratingProblemSchema,
+  conversationIsJobProblemSchema,
   conversationNotFoundProblemSchema,
   listConversationsApi,
   type ChatReplyNotFoundProblem,
   type ChatReplyNotGeneratingProblem,
+  type ConversationIsJobProblem,
   type ConversationNotFoundProblem,
   type ConversationPreview,
   type ConversationSummary,
@@ -16,6 +18,8 @@ import {
   conversationMetadataSchema,
   conversationSchema,
   conversationUserMessageSchema,
+  jobReportSchema,
+  jobSchema,
   replyPartSchema,
   type Conversation,
   type ConversationAssistantMessage,
@@ -24,6 +28,10 @@ import {
   type ConversationMetadata,
   type ConversationSource,
   type ConversationUserMessage,
+  type Job,
+  type JobReport,
+  type JobReportKind,
+  type JobState,
   type ReplyPart,
   type ToolCallReplyPart
 } from "@lys/share"
@@ -54,6 +62,36 @@ export const FIXTURE_TIMESTAMP = "2026-01-02T03:04:05.678Z"
 /** Model that owns assistant-message fixtures. */
 export const FIXTURE_MODEL = "fixture-model"
 
+/** Job 1 of {@link FIXTURE_CONVERSATION_ID}: the job conversation's identity. */
+export const FIXTURE_JOB_ID = createFixtureUuidV7(60)
+
+/** Latest reply of {@link FIXTURE_JOB_ID}: an assistant message of the job. */
+export const FIXTURE_JOB_REPLY_ID = createFixtureUuidV7(61)
+
+/**
+ * A wake-up reply: a reply of {@link FIXTURE_CONVERSATION_ID}'s agent that
+ * the backend started for reports that arrived.
+ */
+export const FIXTURE_WAKE_REPLY_ID = createFixtureUuidV7(62)
+
+/** Identity of the report {@link buildJobReport} builds by default. */
+export const FIXTURE_JOB_REPORT_ID = createFixtureUuidV7(63)
+
+/**
+ * The `delegate_work` call of {@link FIXTURE_CONVERSATION_ID} that started
+ * {@link FIXTURE_JOB_ID}; a call made inside the job has another identity.
+ */
+export const FIXTURE_JOB_CALL_ID = createFixtureUuidV7(65)
+
+/** Number of {@link FIXTURE_JOB_ID} in its parent. */
+const FIXTURE_JOB_NUMBER = 1
+
+/** Code of the agent that works on {@link FIXTURE_JOB_ID}. */
+const FIXTURE_JOB_AGENT_CODE = "nyx"
+
+/** Title of the job message {@link FIXTURE_JOB_ID} works on. */
+const FIXTURE_JOB_TITLE = "News"
+
 /**
  * Builds a stored user message the person wrote.
  *
@@ -78,6 +116,68 @@ export function buildUserMessage(
       origin: "person",
       reports: [],
       createdAt: FIXTURE_TIMESTAMP
+    })
+  )
+}
+
+/**
+ * Builds a message of the person that delivered reports of the
+ * conversation's jobs.
+ *
+ * @param message - The person's message, as {@link buildUserMessage} builds
+ * it.
+ * @param reports - Reports delivered with the message, oldest first.
+ * @returns A frozen copy of the message carrying the reports, validated by
+ * the shared schema.
+ */
+export function buildUserMessageWithReports(
+  message: ConversationUserMessage,
+  reports: readonly JobReport[]
+): ConversationUserMessage {
+  return Object.freeze(
+    conversationUserMessageSchema.parse({ ...message, reports })
+  )
+}
+
+/**
+ * Builds a wake-up message: one the backend wrote to deliver reports and
+ * start a reply of the conversation's agent.
+ *
+ * @param sequence - Identity sequence of the message.
+ * @param reports - Reports the message delivered, oldest first.
+ * @returns A frozen user message of the backend whose content is
+ * `Reports arrived.`, validated by the shared schema.
+ */
+export function buildWakeUpMessage(
+  sequence: number,
+  reports: readonly JobReport[]
+): ConversationUserMessage {
+  return Object.freeze(
+    conversationUserMessageSchema.parse({
+      ...buildUserMessage(sequence, "Reports arrived."),
+      origin: "wake-up",
+      reports
+    })
+  )
+}
+
+/**
+ * Builds a job message: one the delegator of a job wrote in the job's
+ * conversation.
+ *
+ * @param sequence - Identity sequence of the message.
+ * @param content - Non-empty work the delegator gave.
+ * @returns A frozen user message of the delegator that delivers no reports,
+ * validated by the shared schema.
+ */
+export function buildDelegatorMessage(
+  sequence: number,
+  content: string
+): ConversationUserMessage {
+  return Object.freeze(
+    conversationUserMessageSchema.parse({
+      ...buildUserMessage(sequence, content),
+      origin: "delegator"
     })
   )
 }
@@ -504,6 +604,135 @@ export function buildConversationWithSources(
 }
 
 /**
+ * Fields of a job a case may vary. Every job built has the agent nyx, the
+ * title `News`, and the latest reply {@link FIXTURE_JOB_REPLY_ID}; the
+ * defaults make it job 1 of {@link FIXTURE_CONVERSATION_ID}.
+ */
+export type JobFixture = Readonly<{
+  /** The job conversation's identity; defaults to {@link FIXTURE_JOB_ID}. */
+  id?: string
+  /** The job's number in its parent; defaults to 1. */
+  number?: number
+  /** State read from the job's latest reply; defaults to `working`. */
+  state?: JobState
+  /** Newest progress note of that reply; defaults to null, none sent. */
+  latestNote?: string | null
+  /**
+   * The parent's `delegate_work` calls that sent the job's messages, oldest
+   * first; defaults to {@link FIXTURE_JOB_CALL_ID} alone.
+   */
+  jobCallIds?: readonly string[]
+}>
+
+/**
+ * Builds one job of a conversation, as its card shows it.
+ *
+ * @param fixture - Fields the case depends on; see {@link JobFixture} for
+ * their defaults.
+ * @returns A frozen job created and updated at {@link FIXTURE_TIMESTAMP},
+ * validated by the shared schema.
+ */
+export function buildJob(fixture: JobFixture = {}): Job {
+  return Object.freeze(
+    jobSchema.parse({
+      id: fixture.id ?? FIXTURE_JOB_ID,
+      number: fixture.number ?? FIXTURE_JOB_NUMBER,
+      agentCode: FIXTURE_JOB_AGENT_CODE,
+      title: FIXTURE_JOB_TITLE,
+      state: fixture.state ?? "working",
+      latestNote: fixture.latestNote ?? null,
+      replyId: FIXTURE_JOB_REPLY_ID,
+      jobCallIds: fixture.jobCallIds ?? [FIXTURE_JOB_CALL_ID],
+      createdAt: FIXTURE_TIMESTAMP,
+      updatedAt: FIXTURE_TIMESTAMP
+    })
+  )
+}
+
+/**
+ * Fields of a report a case may vary. The others name job 1 of
+ * {@link FIXTURE_CONVERSATION_ID}, which nyx works on under the title
+ * `News`.
+ */
+export type JobReportFixture = Readonly<{
+  /** Identity of the report; defaults to {@link FIXTURE_JOB_REPORT_ID}. */
+  id?: string
+  /** What the report says; defaults to `result`. */
+  kind?: JobReportKind
+  /**
+   * The note, the result's text, or the failure sentence; defaults to
+   * `Done.`. A `stopped` or `interrupted` report carries none, so its case
+   * gives empty content.
+   */
+  content?: string
+  /**
+   * Numbers of the parent's sources the content cites, ascending; defaults
+   * to none.
+   */
+  sourceNumbers?: readonly number[]
+}>
+
+/**
+ * Builds one report a job sent to its delegator.
+ *
+ * @param fixture - Fields the case depends on; see {@link JobReportFixture}
+ * for their defaults.
+ * @returns A frozen report written at {@link FIXTURE_TIMESTAMP}, validated by
+ * the shared schema.
+ */
+export function buildJobReport(fixture: JobReportFixture = {}): JobReport {
+  return Object.freeze(
+    jobReportSchema.parse({
+      id: fixture.id ?? FIXTURE_JOB_REPORT_ID,
+      jobId: FIXTURE_JOB_ID,
+      jobNumber: FIXTURE_JOB_NUMBER,
+      agentCode: FIXTURE_JOB_AGENT_CODE,
+      title: FIXTURE_JOB_TITLE,
+      kind: fixture.kind ?? "result",
+      content: fixture.content ?? "Done.",
+      sourceNumbers: fixture.sourceNumbers ?? [],
+      createdAt: FIXTURE_TIMESTAMP
+    })
+  )
+}
+
+/**
+ * Builds a stored conversation that started jobs.
+ *
+ * @param conversation - The conversation, such as {@link buildConversation}
+ * builds it.
+ * @param jobs - Jobs started from the conversation, in number order.
+ * @returns A frozen copy of the conversation holding the jobs, validated by
+ * the shared schema.
+ */
+export function buildConversationWithJobs(
+  conversation: Conversation,
+  jobs: readonly Job[]
+): Conversation {
+  return Object.freeze(conversationSchema.parse({ ...conversation, jobs }))
+}
+
+/**
+ * Builds a stored job conversation: job 1 of
+ * {@link FIXTURE_CONVERSATION_ID}, whose messages Caliginia wrote.
+ *
+ * @param conversation - The job's conversation, such as
+ * {@link buildConversation} builds it under {@link FIXTURE_JOB_ID}.
+ * @returns A frozen copy of the conversation with its parent, job number,
+ * and delegator, validated by the shared schema.
+ */
+export function buildJobConversation(conversation: Conversation): Conversation {
+  return Object.freeze(
+    conversationSchema.parse({
+      ...conversation,
+      parentConversationId: FIXTURE_CONVERSATION_ID,
+      jobNumber: FIXTURE_JOB_NUMBER,
+      delegatorAgentCode: CALIGINIA_AGENT_CODE
+    })
+  )
+}
+
+/**
  * Builds the problem the backend sends for a conversation it does not store.
  *
  * @returns A problem body validated by the shared schema.
@@ -514,6 +743,21 @@ export function buildConversationNotFoundProblem(): ConversationNotFoundProblem 
     title: "Conversation not found",
     status: 404,
     detail: "No conversation is stored under this identifier."
+  })
+}
+
+/**
+ * Builds the problem the backend sends when the person's request addresses
+ * a job, which they can only read and stop.
+ *
+ * @returns A problem body validated by the shared schema.
+ */
+export function buildConversationIsJobProblem(): ConversationIsJobProblem {
+  return conversationIsJobProblemSchema.parse({
+    type: "urn:lys:problem:conversation:is-job",
+    title: "Conversation is a job",
+    status: 409,
+    detail: "A job can be read and stopped, and nothing else."
   })
 }
 

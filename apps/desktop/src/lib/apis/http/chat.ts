@@ -12,9 +12,11 @@ import {
   chatReplyEventsApi,
   chatToolCallNotPendingProblemSchema,
   conversationAgentMissingProblemSchema,
+  conversationIsJobProblemSchema,
   sendChatToolApprovalApi,
   sendChatToolResultApi,
   stopChatReplyApi,
+  stopConversationJobsApi,
   type BackendToolUnavailableReason,
   type ChatApiRequestBody,
   type ChatBackendToolUnavailableProblem,
@@ -27,9 +29,10 @@ import {
   type ChatToolCallPathParams,
   type ChatToolResult
 } from "@lys/protocol"
-import { EventSourceParserStream } from "eventsource-parser/stream"
 
 import { DELETED_CONVERSATION_AGENT_MESSAGE } from "@/lib/conversation-agent-messages"
+import { JOB_CONVERSATION_MESSAGE } from "@/lib/job-messages"
+import { readServerSentEvents } from "./server-sent-events"
 
 /** What the person can do for each reason a backend tool cannot run. */
 const BACKEND_TOOL_UNAVAILABLE_ADVICE = Object.freeze({
@@ -106,6 +109,20 @@ export type StopChatReplyResult =
   | {
       /** No generation was running for the reply; nothing changed. */
       readonly status: "not-generating"
+    }
+
+/** Outcome of asking the backend to stop a conversation's working jobs. */
+export type StopConversationJobsResult =
+  | {
+      /**
+       * Each job that was working stopped and its reply's final state is
+       * stored; also when none was working.
+       */
+      readonly status: "stopped"
+    }
+  | {
+      /** No conversation is stored under the identifier; nothing stopped. */
+      readonly status: "conversation-not-found"
     }
 
 /** Transport scope sampled once for one context measurement. */
@@ -206,12 +223,13 @@ const MISSING_REPLY_MESSAGE = "The reply is no longer stored."
  * @returns An async generator yielding validated chat protocol events.
  * @throws If the request, stream read, JSON parse, or event validation fails;
  * with {@link DELETED_CONVERSATION_AGENT_MESSAGE} when the backend reports
- * that the continued conversation's agent no longer exists, a
- * {@link BackendToolUnavailableError} when an offered backend tool cannot run
- * now, and the backend's own sentence when it refuses an attachment whose
- * content it cannot send, an image for a model without vision, or the
- * request while its model runtime is busy or unreachable; none of these
- * stored anything.
+ * that the continued conversation's agent no longer exists,
+ * {@link JOB_CONVERSATION_MESSAGE} when it reports that the continued
+ * conversation is a job, a {@link BackendToolUnavailableError} when an
+ * offered backend tool cannot run now, and the backend's own sentence when it
+ * refuses an attachment whose content it cannot send, an image for a model
+ * without vision, or the request while its model runtime is busy or
+ * unreachable; none of these stored anything.
  */
 export async function* readChatEvents(
   payload: ChatApiRequestBody,
@@ -308,6 +326,46 @@ export async function stopChatReply(
   }
   throw new Error(
     `The backend could not stop the reply (HTTP ${response.status}).`
+  )
+}
+
+/**
+ * Asks the backend to stop every working job of one conversation.
+ *
+ * @param conversationId - UUIDv7 of the conversation whose jobs stop.
+ * @param connection - Backend origin. The request is deliberately not
+ * cancellable, so a stop the person asked for still reaches the backend.
+ * @returns `stopped` after the reply of each job that was working reached
+ * its stored final state, also when none was working, or
+ * `conversation-not-found` when the backend stores no such conversation.
+ * @throws A caller-safe error when the backend cannot be reached or answers
+ * with an undeclared response.
+ */
+export async function stopConversationJobs(
+  conversationId: string,
+  connection: Pick<ChatReplyConnection, "backendUrl">
+): Promise<StopConversationJobsResult> {
+  const path = stopConversationJobsApi.path.replace(
+    ":conversationId",
+    encodeURIComponent(conversationId)
+  )
+  const response = await getChatReplyActionResponse(
+    `${connection.backendUrl}${path}`,
+    {
+      method: stopConversationJobsApi.method,
+      headers: ACCEPT_JSON_HEADERS,
+      cache: "no-store"
+    }
+  )
+  if (response.status === 204) return Object.freeze({ status: "stopped" })
+  if (
+    response.status === 404 &&
+    isConversationNotFoundProblem(await readFailureBody(response))
+  ) {
+    return Object.freeze({ status: "conversation-not-found" })
+  }
+  throw new Error(
+    `The backend could not stop the jobs (HTTP ${response.status}).`
   )
 }
 
@@ -504,9 +562,9 @@ async function sendChatToolCallAnswer(
 
 /**
  * Gets the response to one reply action request, such as a stop or a tool
- * result, in any HTTP status.
+ * result, or to a stop of a conversation's jobs, in any HTTP status.
  *
- * @param url - Absolute URL of the reply action.
+ * @param url - Absolute URL of the action.
  * @param init - Method, headers, and body of the request; it carries no
  * abort signal, so the request reaches the backend once sent.
  * @returns The response whose body remains owned by the caller.
@@ -520,49 +578,6 @@ async function getChatReplyActionResponse(
     return await fetch(url, init)
   } catch (cause) {
     throw new Error("The backend could not be reached.", { cause })
-  }
-}
-
-/**
- * Reads validated events from one SSE response body.
- *
- * @typeParam TStreamEvent - Validated event union of the endpoint.
- * @param body - Response body; this reader owns it from now on.
- * @param parseEvent - Authoritative schema parser for one event payload.
- * @returns An async generator yielding events until the backend closes the
- * stream.
- * @throws If reading, JSON parsing, or event validation fails.
- * @remarks Ending iteration before the backend closes the stream cancels the
- * body before releasing it.
- */
-async function* readServerSentEvents<TStreamEvent>(
-  body: NonNullable<Response["body"]>,
-  parseEvent: (value: unknown) => TStreamEvent
-): AsyncGenerator<TStreamEvent, void, unknown> {
-  const source = body.pipeThrough(new TextDecoderStream()).pipeThrough(
-    new EventSourceParserStream({
-      onError: "terminate"
-    })
-  )
-  const reader = source.getReader()
-  let hasReachedStreamEnd = false
-
-  try {
-    while (true) {
-      const readResult = await reader.read()
-      if (readResult.done) {
-        hasReachedStreamEnd = true
-        return
-      }
-
-      yield parseEvent(JSON.parse(readResult.value.data))
-    }
-  } finally {
-    try {
-      if (!hasReachedStreamEnd) await reader.cancel()
-    } finally {
-      reader.releaseLock()
-    }
   }
 }
 
@@ -583,9 +598,10 @@ function isConversationAgentMissingProblem(body: unknown): boolean {
  *
  * @param body - Untrusted problem body.
  * @returns A {@link BackendToolUnavailableError} for an unavailable tool, the
- * deleted-agent error for a missing conversation agent, an error carrying
- * the backend's sentence for an image sent to a model without vision, or a
- * generic error for any other 409 body.
+ * deleted-agent error for a missing conversation agent, the job error for a
+ * continued conversation that is a job, an error carrying the backend's
+ * sentence for an image sent to a model without vision, or a generic error
+ * for any other 409 body.
  */
 function buildChatConflictError(body: unknown): Error {
   const toolProblem = chatBackendToolUnavailableProblemSchema.safeParse(body)
@@ -594,6 +610,9 @@ function buildChatConflictError(body: unknown): Error {
   }
   if (isConversationAgentMissingProblem(body)) {
     return new Error(DELETED_CONVERSATION_AGENT_MESSAGE)
+  }
+  if (conversationIsJobProblemSchema.safeParse(body).success) {
+    return new Error(JOB_CONVERSATION_MESSAGE)
   }
   const visionProblem = chatImageNeedsVisionProblemSchema.safeParse(body)
   if (visionProblem.success) return new Error(visionProblem.data.detail)
@@ -641,6 +660,18 @@ function isChatReplyAbsenceProblem(body: unknown): boolean {
  */
 function isReplyNotGeneratingProblem(body: unknown): boolean {
   return stopChatReplyApi.responses[409].safeParse(body).success
+}
+
+/**
+ * Determines whether a decoded body declares that no conversation is stored
+ * under the identifier a jobs stop addressed.
+ *
+ * @param body - Untrusted body of a failed jobs-stop response.
+ * @returns Whether it validates as the declared missing-conversation problem;
+ * a different body, such as the one an unregistered route returns, does not.
+ */
+function isConversationNotFoundProblem(body: unknown): boolean {
+  return stopConversationJobsApi.responses[404].safeParse(body).success
 }
 
 /**

@@ -41,11 +41,18 @@ import {
   buildConversationListPage,
   buildConversationMetadata,
   buildConversationSummary,
+  buildConversationWithJobs,
+  buildDelegatorMessage,
+  buildJob,
+  buildJobConversation,
   buildTextPart,
+  buildToolCallPart,
   buildStreamingAssistantMessage,
   buildUserMessage,
   createFixtureUuidV7,
-  FIXTURE_CONVERSATION_ID
+  FIXTURE_CONVERSATION_ID,
+  FIXTURE_JOB_ID,
+  FIXTURE_JOB_REPLY_ID
 } from "../../support/conversationFixtures"
 import {
   buildUnreachableRuntime,
@@ -728,6 +735,84 @@ describe("ChatView", () => {
       })
 
       expect(screen.getByText("Chat is unavailable.")).toBeInTheDocument()
+    })
+  })
+
+  describe("job cards", () => {
+    /**
+     * Shows, in a fresh chat view, a main conversation whose reply started
+     * job 1, which works.
+     *
+     * @param routes - Routes the case's backend adds.
+     * @returns The backend observation handle.
+     */
+    async function startParentConversation(routes: BackendRoutes) {
+      const parent = buildConversationWithJobs(
+        buildConversation(FIXTURE_CONVERSATION_ID, "News", [
+          buildUserMessage(14, "Get me the news"),
+          buildCompletedAssistantMessage(15, [
+            buildToolCallPart(65, 0, {
+              toolName: "delegate_work",
+              argumentText:
+                '{"agent":"nyx","title":"News","instructions":"Find the news."}',
+              status: "succeeded",
+              result: "Job 1 started.",
+              sourceNumbers: []
+            }),
+            buildTextPart(16, 1, "Nyx is on it.")
+          ])
+        ]),
+        [buildJob()]
+      )
+      const { backend } = startChatViewBackend(routes)
+      const { useChatViewStore, ChatView } = await loadFreshChatView()
+      act(() => {
+        useChatViewStore.setState({
+          conversation: createStoredChatViewConversation(parent)
+        })
+      })
+      await startChatView(ChatView, {
+        atBottom: true,
+        onScrollPositionChange: vi.fn()
+      })
+      return backend
+    }
+
+    it("opens a job from its card", async () => {
+      const jobRoute = `GET /api/v1/conversations/${FIXTURE_JOB_ID}`
+      const job = buildJobConversation(
+        buildConversation(FIXTURE_JOB_ID, "News", [
+          buildDelegatorMessage(68, "Find the news."),
+          buildCompletedAssistantMessage(61, "Here is the news.")
+        ])
+      )
+      const backend = await startParentConversation({
+        [jobRoute]: () => buildJsonResponse(200, job)
+      })
+      const user = userEvent.setup()
+
+      await user.click(screen.getByRole("button", { name: "News, job 1" }))
+      await waitForRenderedWork()
+
+      expect(listRequestsBesideMeasurements(backend).at(-1)?.routeKey).toBe(
+        jobRoute
+      )
+      expect(screen.getByText("Here is the news.")).toBeInTheDocument()
+    })
+
+    it("stops a job from its card", async () => {
+      const stopRoute = `POST /api/v1/chat/${FIXTURE_JOB_ID}/replies/${FIXTURE_JOB_REPLY_ID}/stop`
+      const backend = await startParentConversation({
+        [stopRoute]: () => new Response(null, { status: 204 })
+      })
+      const user = userEvent.setup()
+
+      await user.click(screen.getByRole("button", { name: "Stop job 1" }))
+      await waitForRenderedWork()
+
+      expect(listRequestsBesideMeasurements(backend).at(-1)?.routeKey).toBe(
+        stopRoute
+      )
     })
   })
 })

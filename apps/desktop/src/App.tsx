@@ -1,4 +1,4 @@
-import { lazy, useEffect, useReducer } from "react"
+import { lazy, useCallback, useEffect, useReducer } from "react"
 
 import { appReducer, createInitialState } from "@/app/state"
 
@@ -29,7 +29,9 @@ import { registerToolListRefresh } from "./lib/store/tools"
  * Composes the initialized desktop shell and switches between its main views.
  *
  * @remarks The application store owns
- * initialization and the active view; the reducer owns chat scroll state. The
+ * initialization and the active view; the reducer owns chat scroll state,
+ * which the chat view reports through a callback whose identity never
+ * changes, so the callbacks the view builds on it keep theirs. The
  * component renders intentionally blank while initialization is pending, then
  * renders the title bar and one lazily loaded child view. While mounted, it
  * keeps the tool list in step with the backend and vmo through
@@ -62,6 +64,11 @@ export default function App() {
     undefined,
     createInitialState
   )
+  const handleScrollPositionChange = useCallback(
+    (atBottom: boolean) =>
+      dispatch({ type: "scrollPositionChanged", atBottom }),
+    []
+  )
 
   if (initializing) return null
   return (
@@ -71,9 +78,7 @@ export default function App() {
       {activeView === "chat" ? (
         <ChatView
           atBottom={state.atBottom}
-          onScrollPositionChange={(atBottom) =>
-            dispatch({ type: "scrollPositionChanged", atBottom })
-          }
+          onScrollPositionChange={handleScrollPositionChange}
         />
       ) : (
         <SettingsView onDone={() => setActiveView("chat")} />

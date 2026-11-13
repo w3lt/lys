@@ -24,15 +24,18 @@ const AGENT_NAME = "Caliginia"
  * {@link AGENT_NAME}.
  *
  * @returns Fresh callback spies, the transcript ref, the agent's name, no
- * sources, and idle state.
+ * sources, no jobs, and idle state.
  */
 function buildPanelControls() {
   return {
     activity: "idle" as const,
     agentName: AGENT_NAME,
     isAtBottom: true,
+    jobCards: [],
     onJumpToLatest: vi.fn(),
+    onOpenJob: vi.fn(),
     onSendMessage: vi.fn(() => Promise.resolve()),
+    onStopJob: vi.fn(),
     onTranscriptScroll: vi.fn(),
     sources: [],
     transcriptRef: createRef<HTMLDivElement>()

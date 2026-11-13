@@ -1,12 +1,14 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { CALIGINIA_AGENT_CODE, type ToolCallReplyPart } from "@lys/share"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import ConversationTranscript, {
   type ConversationTranscriptProps
 } from "@/components/ChatViewComponents/ConversationTranscript"
 import {
   buildCompletedChatViewReply,
+  buildJob,
+  buildJobCard,
   buildReasoningPart,
   buildStreamingChatViewReply,
   buildTextPart,
@@ -41,6 +43,16 @@ function listRenderedMessages(): string[] {
 
 /** Sources of a conversation that has none. */
 const NO_SOURCES = Object.freeze([])
+
+/**
+ * Job properties of a conversation that started no job; nothing calls the
+ * callbacks.
+ */
+const NO_JOBS = Object.freeze({
+  jobCards: [],
+  onOpenJob: vi.fn(),
+  onStopJob: vi.fn()
+})
 
 /**
  * Builds a round-0 search that showed one source.
@@ -115,6 +127,7 @@ describe("ConversationTranscript", () => {
   it("renders completed messages in order with their speakers", () => {
     render(
       <ConversationTranscript
+        {...NO_JOBS}
         completedMessages={[QUESTION, ANSWER, FOLLOW_UP]}
         kind="completed-only"
         speakerName={SPEAKER_NAME}
@@ -133,6 +146,7 @@ describe("ConversationTranscript", () => {
   it("renders the streaming reply after the completed messages", () => {
     render(
       <ConversationTranscript
+        {...NO_JOBS}
         completedMessages={[QUESTION, ANSWER, FOLLOW_UP]}
         kind="streaming-tail"
         speakerName={SPEAKER_NAME}
@@ -150,6 +164,7 @@ describe("ConversationTranscript", () => {
   it("shows every reply under the answering agent's name when that name changes", () => {
     const { rerender } = render(
       <ConversationTranscript
+        {...NO_JOBS}
         completedMessages={[QUESTION, ANSWER, FOLLOW_UP]}
         kind="streaming-tail"
         sources={NO_SOURCES}
@@ -161,6 +176,7 @@ describe("ConversationTranscript", () => {
 
     rerender(
       <ConversationTranscript
+        {...NO_JOBS}
         completedMessages={[QUESTION, ANSWER, FOLLOW_UP]}
         kind="streaming-tail"
         speakerName={SPEAKER_NAME}
@@ -209,6 +225,7 @@ describe("ConversationTranscript", () => {
     async (_label, messages) => {
       render(
         <ConversationTranscript
+          {...NO_JOBS}
           {...messages}
           speakerName={SPEAKER_NAME}
           sources={[
@@ -235,6 +252,7 @@ describe("ConversationTranscript", () => {
   it("announces a lifecycle error after the messages", () => {
     render(
       <ConversationTranscript
+        {...NO_JOBS}
         completedMessages={[QUESTION]}
         error="The backend stopped before the reply finished."
         kind="completed-only"
@@ -257,6 +275,7 @@ describe("ConversationTranscript", () => {
   it("keeps each rendered message when later messages arrive", () => {
     const { rerender } = render(
       <ConversationTranscript
+        {...NO_JOBS}
         completedMessages={[QUESTION]}
         kind="streaming-tail"
         speakerName={SPEAKER_NAME}
@@ -268,6 +287,7 @@ describe("ConversationTranscript", () => {
 
     rerender(
       <ConversationTranscript
+        {...NO_JOBS}
         completedMessages={[QUESTION, ANSWER, FOLLOW_UP]}
         kind="completed-only"
         speakerName={SPEAKER_NAME}
@@ -282,6 +302,7 @@ describe("ConversationTranscript", () => {
     const user = userEvent.setup()
     const { rerender } = render(
       <ConversationTranscript
+        {...NO_JOBS}
         completedMessages={[QUESTION]}
         kind="streaming-tail"
         speakerName={SPEAKER_NAME}
@@ -302,6 +323,7 @@ describe("ConversationTranscript", () => {
 
     rerender(
       <ConversationTranscript
+        {...NO_JOBS}
         completedMessages={[
           QUESTION,
           buildCompletedChatViewReply(2, TOOL_REPLY_PARTS)
@@ -326,6 +348,7 @@ describe("ConversationTranscript", () => {
   it("renders a new message element when another message takes a position", () => {
     const { rerender } = render(
       <ConversationTranscript
+        {...NO_JOBS}
         completedMessages={[QUESTION, ANSWER]}
         kind="completed-only"
         speakerName={SPEAKER_NAME}
@@ -336,6 +359,7 @@ describe("ConversationTranscript", () => {
 
     rerender(
       <ConversationTranscript
+        {...NO_JOBS}
         completedMessages={[
           buildUserMessage(11, "Another conversation"),
           buildCompletedChatViewReply(12, "Another reply")
@@ -348,5 +372,47 @@ describe("ConversationTranscript", () => {
 
     expect(screen.getAllByRole("article")[0]).not.toBe(question)
     expect(question).not.toBeInTheDocument()
+  })
+
+  it("shows a job's new state on its reply's card when the job changes", () => {
+    const messages = [
+      QUESTION,
+      buildCompletedChatViewReply(2, [
+        buildToolCallPart(65, 0, {
+          toolName: "delegate_work",
+          argumentText:
+            '{"agent":"nyx","title":"News","instructions":"Find the news."}',
+          status: "succeeded",
+          result: "Job 1 started.",
+          sourceNumbers: []
+        }),
+        buildTextPart(23, 1, "Nyx is on it.")
+      ])
+    ]
+    const { rerender } = render(
+      <ConversationTranscript
+        {...NO_JOBS}
+        completedMessages={messages}
+        jobCards={[buildJobCard(buildJob())]}
+        kind="completed-only"
+        speakerName={SPEAKER_NAME}
+        sources={NO_SOURCES}
+      />
+    )
+    expect(screen.getByText("Working")).toBeInTheDocument()
+
+    rerender(
+      <ConversationTranscript
+        {...NO_JOBS}
+        completedMessages={messages}
+        jobCards={[buildJobCard(buildJob({ state: "replied" }))]}
+        kind="completed-only"
+        speakerName={SPEAKER_NAME}
+        sources={NO_SOURCES}
+      />
+    )
+
+    expect(screen.getByText("Replied")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Stop job 1" })).toBeNull()
   })
 })

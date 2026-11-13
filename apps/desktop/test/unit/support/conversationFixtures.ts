@@ -35,6 +35,10 @@ import {
   type ReplyPart,
   type ToolCallReplyPart
 } from "@lys/share"
+import type {
+  JobCardPresentation,
+  JobCardState
+} from "@/components/ChatViewComponents/job-presentation"
 import {
   buildChatViewReplyPart,
   listAnswerCitationNumbers,
@@ -647,6 +651,21 @@ export function buildJob(fixture: JobFixture = {}): Job {
       updatedAt: FIXTURE_TIMESTAMP
     })
   )
+}
+
+/**
+ * Builds the card of a job, as the transcript shows it while the agent list
+ * names nyx `Nyx`.
+ *
+ * @param job - The job, as {@link buildJob} builds it.
+ * @param state - State the card shows; defaults to the job's own state.
+ * @returns A frozen card.
+ */
+export function buildJobCard(
+  job: Job,
+  state: JobCardState = job.state
+): JobCardPresentation {
+  return Object.freeze({ job, agentName: "Nyx", state })
 }
 
 /**

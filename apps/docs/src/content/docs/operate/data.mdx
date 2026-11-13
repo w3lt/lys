@@ -96,8 +96,9 @@ The checked-in schema currently creates:
 - `conversation_attachments`
 - `agents`
 - `tool_call_decisions`, one record per stored tool call of how it was
-  decided, the answer that moved it on, and its outcome, without its
-  arguments; it is deleted with its conversation
+  decided and by which version of the rules, the answer that moved it on,
+  and its outcome, without its arguments; it is deleted with its
+  conversation
 - `tool_search_call_decisions`, one record per tool call Armitage made for a
   `find_tools` search, with its argument text, how it was decided, and its
   outcome; it is deleted with the `find_tools` call and its conversation

@@ -93,7 +93,8 @@ table is `STRICT`.
 | `agent_code`      | `TEXT NOT NULL` | Non-empty code of the conversation's agent when the call was stored                                                                                                                                                                                                                                                                                                              |
 | `tool_name`       | `TEXT NOT NULL` | The called tool, as the model named it                                                                                                                                                                                                                                                                                                                                           |
 | `policy_effect`   | `TEXT`          | The tool call policy's answer when the call arrived: `allow`, `require-approval`, or `deny`; null when Lys's own checks failed the call first, because it names a tool the round did not offer or arguments the tool cannot take. A call the person allowed and the policy then denied, when it was decided again before running, keeps this answer; its result holds the denial |
-| `policy_reason`   | `TEXT`          | `credential-file`, `outside-approved-folders`, `settings-unreadable`, or `blocked-address` for `deny`, `destructive-tool` for `require-approval`; null otherwise                                                                                                                                                                                                                 |
+| `policy_reason`   | `TEXT`          | `credential-file`, `outside-approved-folders`, `settings-unreadable`, `blocked-address`, `usage-limit`, or `paid-tool-budget` for `deny`; `destructive-tool`, `open-world-write`, or `paid-tool` for `require-approval`; null otherwise                                                                                                                                          |
+| `policy_id`       | `TEXT`          | Identity of the rule set that decided the call, `lys-policy-v1` today; null when `policy_effect` is, and in every record stored before version 17                                                                                                                                                                                                                                |
 | `approval_mode`   | `TEXT`          | Mode the approval gate applied: `just-run` when the tool was saved as Just run, `ask-me` otherwise; null when the call never reached the gate                                                                                                                                                                                                                                    |
 | `answer`          | `TEXT`          | Answer that moved a waiting call on: `allowed`, the rejection's reason, `declined` or `showFailed`, or `expired` when nobody answered in time; null while none came or none was asked for                                                                                                                                                                                        |
 | `outcome`         | `TEXT NOT NULL` | The call's `status`, which a trigger copies on every change                                                                                                                                                                                                                                                                                                                      |
@@ -121,7 +122,8 @@ is `STRICT`.
 | `tool_name`       | `TEXT NOT NULL` | The called tool, as the model named it                                                                                                                                                                 |
 | `argument_text`   | `TEXT NOT NULL` | The call's arguments, as the model wrote them                                                                                                                                                          |
 | `policy_effect`   | `TEXT`          | The tool call policy's answer: `allow` or `deny`; null when Lys's own checks failed the call first. `require-approval` cannot be stored: a search asks nobody, so such a call fails the search instead |
-| `policy_reason`   | `TEXT`          | `credential-file`, `outside-approved-folders`, `settings-unreadable`, or `blocked-address` for `deny`; null otherwise                                                                                  |
+| `policy_reason`   | `TEXT`          | `credential-file`, `outside-approved-folders`, `settings-unreadable`, `blocked-address`, `usage-limit`, or `paid-tool-budget` for `deny`; null otherwise                                               |
+| `policy_id`       | `TEXT`          | Identity of the rule set that decided the call, `lys-policy-v1` today; null when `policy_effect` is, and in every record stored before version 17                                                      |
 | `outcome`         | `TEXT NOT NULL` | `running` or `failed` when kept, then `succeeded` or `failed` when the run ends, or `interrupted` when the `find_tools` call stops running first                                                       |
 | `created_at`      | `TEXT NOT NULL` | The call's creation time                                                                                                                                                                               |
 | `updated_at`      | `TEXT NOT NULL` | The call's latest update time; when interrupted, the later of it and the `find_tools` call's update time                                                                                               |
@@ -184,12 +186,16 @@ is `STRICT`.
   UTF-16 surrogate; and millisecond ISO timestamps. A row that breaks them
   fails to read.
 - Decision records must have a non-empty `agent_code` and an `outcome` that
-  is a tool call status. A null `policy_effect` has no reason and no mode;
-  `deny` has the reason `credential-file`, `outside-approved-folders`,
-  `settings-unreadable`, or `blocked-address` and no mode;
-  `require-approval` has the reason `destructive-tool` and a mode; `allow`
-  has no reason and may have a mode. A mode is `ask-me` or `just-run`, and an
-  answer, `allowed`, `declined`, `showFailed`, or `expired`, needs a mode. A
+  is a tool call status. A null `policy_effect` has no reason, no mode, and
+  no `policy_id`; `deny` has the reason `credential-file`,
+  `outside-approved-folders`, `settings-unreadable`, `blocked-address`,
+  `usage-limit`, or `paid-tool-budget` and no mode; `require-approval` has
+  the reason `destructive-tool`, `open-world-write`, or `paid-tool` and a
+  mode; `allow` has no reason and may have a mode. A `policy_id` is not
+  empty. A mode is `ask-me` or `just-run`, and an answer, `allowed`,
+  `declined`, `showFailed`, or `expired`, needs a mode. A search call's
+  record follows the same rules for its effect, reason, and `policy_id`,
+  but refuses `require-approval`. A
   comparison with `NULL` makes a check pass in SQLite, so every comparison on
   a nullable column is guarded with `IS NOT NULL`. SQLite does not check that a record's
   conversation, agent, and tool match its call's; the backend copies them
@@ -291,7 +297,13 @@ while those folders cannot be read from the settings file. Builds that
 support only version 14 refuse a version-15 database. Version 16 adds
 `tool_search_call_decisions`, its two indexes, and its trigger, and changes
 no existing row: a search that ran before it has no record of its calls.
-Builds that support only version 15 refuse a version-16 database.
+Builds that support only version 15 refuse a version-16 database. Version 17
+creates `tool_call_decisions` and `tool_search_call_decisions` again, each
+with a `policy_id` column, so that `policy_reason` may also be `usage-limit`
+or `paid-tool-budget` in both and, in `tool_call_decisions`,
+`open-world-write` or `paid-tool`, copying every row with a null
+`policy_id`, and creates their indexes and triggers again; every other rule
+stays. Builds that support only version 16 refuse a version-17 database.
 Versions 1–3 are unchanged. Missing migrations
 and the version marker commit together. At startup, streaming replies
 become interrupted with a refreshed `updated_at`; their waiting and running

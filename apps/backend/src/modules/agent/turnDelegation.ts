@@ -1,4 +1,4 @@
-import type { JobState } from "@lys/share"
+import type { Conversation, JobState } from "@lys/share"
 
 /** The job a turn works on, as the turn's agent is told about it. */
 export type JobTurn = Readonly<{
@@ -183,29 +183,58 @@ export type TurnDelegation = Readonly<{
 }>
 
 /**
- * Fails a delegation call of a turn that takes no part in delegation.
- *
- * @throws Always: such a turn offers no delegation tool, so a call of one of
- * its callbacks is a defect.
+ * Where a conversation stands in delegation: the job it is, when it is one,
+ * and the jobs started from it.
  */
-function handleUnofferedDelegationCall(): never {
-  throw new Error("This turn takes no part in delegation")
-}
-
-/** Offer of a turn that takes no part in delegation: nothing. */
-const NO_DELEGATION_OFFER: DelegationOffer = Object.freeze({
-  mayDelegate: false,
-  hasJobs: false,
-  job: undefined
-})
+export type ConversationDelegation = Pick<
+  Conversation,
+  "parentConversationId" | "jobNumber" | "delegatorAgentCode" | "jobs"
+>
 
 /**
- * Delegation of a turn that takes no part in delegation: it offers nothing,
- * and each callback throws.
+ * Builds what a turn's conversation and tool offer allow of delegation.
+ *
+ * @param conversation - Where the turn's conversation stands in delegation.
+ * @param offersDelegateWork - Whether the turn's tool offer names
+ * `delegate_work`.
+ * @param findAgentName - Finds the display name of an agent by its code;
+ * undefined when no agent has the code.
+ * @returns The frozen offer: `mayDelegate` for a main conversation whose
+ * tool offer names `delegate_work`; `hasJobs` once a job was started from
+ * the conversation; and, for a job, its number with its delegator's display
+ * name, or the delegator's code when no agent has it.
  */
-export const NO_TURN_DELEGATION: TurnDelegation = Object.freeze({
-  offer: NO_DELEGATION_OFFER,
-  createJobMessage: handleUnofferedDelegationCall,
-  createProgressNote: handleUnofferedDelegationCall,
-  stopJob: handleUnofferedDelegationCall
-})
+export function buildDelegationOffer(
+  conversation: ConversationDelegation,
+  offersDelegateWork: boolean,
+  findAgentName: (code: string) => string | undefined
+): DelegationOffer {
+  const isMainConversation = conversation.parentConversationId === null
+  const job = findJobTurn(conversation, findAgentName)
+  return Object.freeze({
+    mayDelegate: isMainConversation && offersDelegateWork,
+    hasJobs: conversation.jobs.length > 0,
+    job
+  })
+}
+
+/**
+ * Finds the job a turn's conversation is, as the turn's agent is told about
+ * it.
+ *
+ * @param conversation - Where the turn's conversation stands in delegation.
+ * @param findAgentName - Finds the display name of an agent by its code;
+ * undefined when no agent has the code.
+ * @returns The frozen job with its number and its delegator's display name,
+ * or the delegator's code when no agent has it; undefined for a main
+ * conversation.
+ */
+function findJobTurn(
+  conversation: ConversationDelegation,
+  findAgentName: (code: string) => string | undefined
+): JobTurn | undefined {
+  const { jobNumber, delegatorAgentCode } = conversation
+  if (jobNumber === null || delegatorAgentCode === null) return undefined
+  const delegatorName = findAgentName(delegatorAgentCode) ?? delegatorAgentCode
+  return Object.freeze({ delegatorName, jobNumber })
+}

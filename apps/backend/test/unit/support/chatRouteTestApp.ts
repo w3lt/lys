@@ -6,12 +6,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { onTestFinished, vi, type Mock, type MockInstance } from "vitest"
 import SqliteAgentRecordStore from "../../../src/infrastructure/database/agents/sqliteAgentRecordStore"
+import SqliteJobActivityReader from "../../../src/infrastructure/database/delegation/sqliteJobActivityReader"
+import SqliteJobReader from "../../../src/infrastructure/database/delegation/sqliteJobReader"
+import SqliteJobReportWriter from "../../../src/infrastructure/database/delegation/sqliteJobReportWriter"
 import type {
   DatabaseFunctionRegistry,
   DatabaseReader,
   DatabaseWriter
 } from "../../../src/infrastructure/database/databaseTransactions"
 import type SqliteDatabase from "../../../src/infrastructure/database/sqliteDatabase"
+import ActivityHub from "../../../src/modules/activity/activityHub"
 import AgentRuntimeService, {
   buildConversationTitleLookup
 } from "../../../src/modules/agent/agentRuntimeService"
@@ -32,6 +36,10 @@ import {
   startTurn,
   type TurnStartDependencies
 } from "../../../src/modules/chat/turnStart"
+import ConversationWakeSettings from "../../../src/modules/delegation/conversationWakeSettings"
+import { createDelegationRuntime } from "../../../src/modules/delegation/delegationRuntime"
+import { handleDelegationEvent } from "../../../src/modules/delegation/delegationEventLog"
+import ReplyStopRequests from "../../../src/modules/delegation/replyStopRequests"
 import LlmRuntimeService from "../../../src/modules/llm/llmRuntimeService"
 import LlmService from "../../../src/modules/llm/llmService"
 import McpServerRegistry from "../../../src/modules/mcp/mcpServerRegistry"
@@ -41,6 +49,7 @@ import type { BuiltInToolEntry } from "../../../src/modules/tool/builtIn/builtIn
 import ToolApprovalService, {
   type ReadJustRunToolNames
 } from "../../../src/modules/toolApproval/toolApprovalService"
+import { TEST_BACKEND_CONFIG } from "./backendConfig"
 import { createChatSseTestApp } from "./chatSseRoute"
 import {
   createAcquiredFakeLlmRuntime,
@@ -299,11 +308,13 @@ export type AgentConversationTestServices = Readonly<{
  * a case applies settings, and it is closed when the test finishes. The
  * decorated turn start is the real one, as {@link registerTestTurnStart}
  * binds it to the decorated services and to the decorated reply generation
- * registry, which is the returned one. When the
- * test finishes, the generation
- * registry is disposed first, so every generation it holds has stored its
- * final state before the in-memory conversation database is closed; the
- * directory is removed last.
+ * registry, which is the returned one. The decorated delegation hooks are
+ * the real ones, as {@link registerTestTurnDelegations} builds them over
+ * the decorated services and the same database. When the
+ * test finishes, the activity hub of the delegation hooks is closed and the
+ * generation registry is disposed first, so every generation it holds has
+ * stored its final state before the in-memory conversation database is
+ * closed; the directory is removed last.
  */
 export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   const attachmentsDirectoryPath = mkdtempSync(
@@ -323,6 +334,7 @@ export async function createChatRouteTestApp(): Promise<ChatRouteTestApp> {
   testFastify.app.setValidatorCompiler(validatorCompiler)
   registerChatRouteTestServices(testFastify.app, services)
   registerTestTurnStart(testFastify.app, generations)
+  registerTestTurnDelegations(testFastify.app, database)
   return Object.freeze({
     ...testFastify,
     ...spies,
@@ -373,6 +385,62 @@ function registerTestTurnStart(
   }
   app.decorate("replyGenerations", generations)
   app.decorate("startTurn", (options) => startTurn(dependencies, options))
+}
+
+/**
+ * Registers the delegation hooks with the chat route test app, over a
+ * delegation runtime built as the backend's composition root builds its own.
+ *
+ * @param app - Application with the agent services, the conversation
+ * services, the turn start, and the reply generation registry registered;
+ * the runtime borrows them for the test.
+ * @param database - Database the job records read and write; the caller
+ * closes it.
+ * @throws If the application already has delegation hooks.
+ * @remarks The runtime's job records are the Sqlite ones over the database,
+ * and it stores job turns through `app.conversationTurns`, whose turn
+ * creation throws until a case configures it. Its hub is a real activity
+ * hub of its own, closed when the test finishes, before the generation
+ * registry is disposed. It remembers wake settings and stop requests in
+ * instances of its own, allows the job messages of
+ * {@link TEST_BACKEND_CONFIG}, and logs its events and the turns it starts
+ * with the application's logger.
+ */
+function registerTestTurnDelegations(
+  app: FastifyInstance,
+  database: SqliteDatabase
+): void {
+  const activityHub = new ActivityHub()
+  onTestFinished(() => {
+    activityHub.close()
+  })
+  const wakeSettings = new ConversationWakeSettings()
+  const stopRequests = new ReplyStopRequests()
+  const jobs = new SqliteJobReader(database)
+  const jobActivity = new SqliteJobActivityReader(database)
+  const reports = new SqliteJobReportWriter(database)
+  const runtime = createDelegationRuntime({
+    findAgent: (code) => app.agentService.findAgent(code),
+    loadChatAgent: (code) => app.agentRuntimeService.loadChatAgent(code),
+    findConversationAgentCode: (conversationId) =>
+      app.conversationHistoryReader.getConversationMetadata(conversationId)
+        ?.agentCode,
+    jobs,
+    jobActivity,
+    reports,
+    turns: app.conversationTurns,
+    startTurn: app.startTurn,
+    generations: app.replyGenerations,
+    hub: activityHub,
+    wakeSettings,
+    stopRequests,
+    agentJobMessageLimit: TEST_BACKEND_CONFIG.agentJobMessageLimit,
+    reportEvent: (event) => {
+      handleDelegationEvent(app.log, event)
+    },
+    logger: app.log
+  })
+  app.decorate("turnDelegations", runtime.hooks)
 }
 
 /**

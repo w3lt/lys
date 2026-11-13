@@ -17,10 +17,7 @@ import type {
   ReplyStreamEvent,
   ReplyStreamRequest
 } from "../../../../src/modules/agent/replyModel"
-import {
-  NO_TURN_DELEGATION,
-  type TurnDelegation
-} from "../../../../src/modules/agent/turnDelegation"
+import type { TurnDelegation } from "../../../../src/modules/agent/turnDelegation"
 import { NO_UNOFFERED_TOOLS } from "../../../../src/modules/agent/unofferedTools"
 import type {
   ConversationTurn,
@@ -30,7 +27,6 @@ import type {
 import ReplyEventSubscription from "../../../../src/modules/chat/replyEventSubscription"
 import ReplyGenerationRegistry from "../../../../src/modules/chat/replyGenerationRegistry"
 import {
-  NO_TURN_DELEGATION_HOOKS,
   startTurn,
   type EndedReply,
   type StartTurnOptions,
@@ -69,7 +65,11 @@ import {
   LEADER_STATE_TOOL_NAMES,
   READ_TEXT_FILE_TOOL
 } from "../../support/toolFixtures"
-import { buildTurnDelegation } from "../../support/turnDelegationFakes"
+import {
+  buildTurnDelegation,
+  NO_TURN_DELEGATION,
+  NO_TURN_DELEGATION_HOOKS
+} from "../../support/turnDelegationFakes"
 
 /** Opens one reply stream for the agent that answers a case's turns. */
 type OpenReplyStream = ReplyModel["openReplyStream"]

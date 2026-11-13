@@ -2,7 +2,8 @@ import { chatContextApi } from "@lys/protocol"
 import {
   mcpSettingsSchema,
   type BuiltInAgent,
-  type McpServerSettings
+  type McpServerSettings,
+  type ToolDefinition
 } from "@lys/share"
 import type { FastifyInstance } from "fastify"
 import { serializerCompiler } from "fastify-type-provider-zod"
@@ -17,7 +18,16 @@ import AgentRuntimeService, {
 } from "../../../../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../../../../src/modules/agent/agentService"
 import { formatSystemPrompt } from "../../../../../src/modules/agent/agentContext"
-import { TOOL_CALLS_OFF } from "../../../../../src/modules/agent/unofferedTools"
+import { buildAgentStateDefinitions } from "../../../../../src/modules/agent/agentStateTools"
+import {
+  buildDelegationDefinitions,
+  formatJobNote
+} from "../../../../../src/modules/agent/delegationTools"
+import type { JobTurn } from "../../../../../src/modules/agent/turnDelegation"
+import {
+  NO_UNOFFERED_TOOLS,
+  TOOL_CALLS_OFF
+} from "../../../../../src/modules/agent/unofferedTools"
 import type { ReplyContextMeter } from "../../../../../src/modules/agent/replyContextMeter"
 import type { ReplyModel } from "../../../../../src/modules/agent/replyModel"
 import AttachmentFileStore from "../../../../../src/modules/attachment/attachmentFileStore"
@@ -41,6 +51,7 @@ import {
   type McpServerUpdateTestApp
 } from "../../../support/chatRouteTestApp"
 import {
+  createJobSeedingHarness,
   openConversationTestServices,
   saveAssistantMessageRow,
   saveConversationRow,
@@ -50,6 +61,11 @@ import {
   createFixtureUuidV7,
   createTextPart
 } from "../../../support/conversationFixtures"
+import {
+  createJobFixture,
+  saveJob,
+  saveMainConversation
+} from "../../../support/conversationRecordsContract"
 import { createTestFastify } from "../../../support/fastifyTestApp"
 import {
   createDownloadedLlmModel,
@@ -122,10 +138,51 @@ const VISION_MODEL_INFO: DownloadedLlmModel = Object.freeze({
   trainedForToolUse: true
 })
 
+/** The model as the inventory lists it when it sees no image. */
+const TOOL_MODEL_INFO: DownloadedLlmModel = Object.freeze({
+  ...VISION_MODEL_INFO,
+  vision: false
+})
+
+/** Definition of the stored agent that works on the stored job of a case. */
+const RESEARCHER_DEFINITION = Object.freeze({
+  code: "researcher",
+  name: "Researcher",
+  bio: "Finds things out.",
+  systemPrompt: "You are the test researcher."
+})
+
+/** Job 1 of a conversation Caliginia answers, as the job's turn is told. */
+const CALIGINIA_JOB: JobTurn = Object.freeze({
+  delegatorName: CALIGINIA.name,
+  jobNumber: 1
+})
+
+/** What a leader's turn in a main conversation that offers it may delegate. */
+const DELEGATING_OFFER = Object.freeze({
+  mayDelegate: true,
+  hasJobs: false,
+  job: undefined
+})
+
+/** What a leader's turn in a main conversation with a job may stop. */
+const STOPPING_OFFER = Object.freeze({
+  mayDelegate: false,
+  hasJobs: true,
+  job: undefined
+})
+
+/** What the turn of job 1 of a conversation Caliginia answers may report. */
+const REPORTING_OFFER = Object.freeze({
+  mayDelegate: false,
+  hasJobs: false,
+  job: CALIGINIA_JOB
+})
+
 /**
- * Creates an application with the chat-context route over a real agent
- * service and conversation reader on an in-memory database owned by the
- * current test.
+ * Creates an application with the chat-context route over real agent
+ * services and a real conversation reader on an in-memory database owned by
+ * the current test.
  *
  * @returns The application, the database for seeding rows, the context
  * meter spy every agent measures with, which every context fits by default,
@@ -157,14 +214,16 @@ async function createChatContextRouteApp() {
     .spyOn(llmService, "listDownloadedLlmModels")
     .mockResolvedValue([])
   const { mcpServerRegistry, readMcpSettings } = createTestMcpServerRegistry()
+  const agents = createTestAgentServices(
+    { database, history },
+    replyContextMeter
+  )
   await updateFastifyWithHttpTransport(app)
   app.decorate("llmService", llmService)
   app.decorate("mcpServerRegistry", mcpServerRegistry)
   app.decorate("attachmentFileStore", attachmentFileStore)
-  app.decorate(
-    "agentRuntimeService",
-    createTestAgentRuntimeService({ database, history }, replyContextMeter)
-  )
+  app.decorate("agentService", agents.agentService)
+  app.decorate("agentRuntimeService", agents.agentRuntimeService)
   app.decorate("conversationHistoryReader", history)
   app.decorate(
     "builtInTools",
@@ -188,24 +247,29 @@ type ChatContextRouteTestOptions = Readonly<{
 }>
 
 /**
- * Creates the agent runtime service of the chat-context route's cases: its
- * one built-in agent, Caliginia, keeps its records on the test's database,
- * and its reply model is one that the route never calls.
+ * Creates the agent services of the chat-context route's cases: the agent
+ * service, whose one built-in agent is Caliginia and which keeps its
+ * records on the test's database, and the agent runtime service over it,
+ * whose reply model is one that the route never calls.
  *
  * @param conversation - The test's database and the history the agents
  * title conversations from.
  * @param replyContextMeter - Meter every agent measures its context with.
- * @returns The service.
+ * @returns The two services.
  */
-function createTestAgentRuntimeService(
+function createTestAgentServices(
   conversation: AgentConversationTestServices,
   replyContextMeter: ReplyContextMeter
-): AgentRuntimeService {
-  return new AgentRuntimeService({
-    agents: new AgentService({
-      recordStore: SqliteAgentRecordStore.create(conversation.database),
-      builtInAgents: [CALIGINIA]
-    }),
+): Readonly<{
+  agentService: AgentService
+  agentRuntimeService: AgentRuntimeService
+}> {
+  const agentService = new AgentService({
+    recordStore: SqliteAgentRecordStore.create(conversation.database),
+    builtInAgents: [CALIGINIA]
+  })
+  const agentRuntimeService = new AgentRuntimeService({
+    agents: agentService,
     replyModel: UNUSED_REPLY_MODEL,
     replyContextMeter,
     findConversationTitle: (conversationId) =>
@@ -214,6 +278,7 @@ function createTestAgentRuntimeService(
       ),
     requestLimits: REQUEST_LIMITS
   })
+  return Object.freeze({ agentService, agentRuntimeService })
 }
 
 /**
@@ -365,6 +430,39 @@ async function sendChatContextRequest(
     headers: { "content-type": "application/json" },
     payload: JSON.stringify(payload)
   })
+}
+
+/**
+ * Stores a main conversation that Caliginia answers and one job of it, with
+ * the job's first message and a completed reply, and creates the stored
+ * agent `researcher` that works on the job.
+ *
+ * @param testApp - The case's application and its database.
+ * @returns UUIDv7s of the main conversation and of its job.
+ */
+function saveResearcherJob(
+  testApp: Pick<
+    Awaited<ReturnType<typeof createChatContextRouteApp>>,
+    "app" | "database"
+  >
+): Readonly<{ mainId: string; jobId: string }> {
+  testApp.app.agentService.createAgent(RESEARCHER_DEFINITION)
+  const harness = createJobSeedingHarness(testApp.database)
+  const mainId = saveMainConversation(harness, 1)
+  const job = saveJob(harness, createJobFixture(mainId, 1, "completed"))
+  return Object.freeze({ mainId, jobId: job.id })
+}
+
+/**
+ * Builds the function tools a turn offers for tool definitions.
+ *
+ * @param definitions - Definitions in offer order.
+ * @returns Each definition as the model is offered it, in the same order.
+ */
+function buildToolFormats(definitions: readonly ToolDefinition[]) {
+  return definitions.map((definition) =>
+    new AgentTool(definition).buildAgentFormat()
+  )
 }
 
 /**
@@ -884,6 +982,78 @@ describe("registerChatContextRoute", () => {
       new AgentTool(echoDefinition).buildAgentFormat(),
       ...LEADER_STATE_TOOL_FORMATS
     ])
+  })
+
+  it("measures delegate_work after the leader's state tools for a new conversation whose request offers it, as a turn offers it", async () => {
+    const { app, replyContextMeter, listDownloadedLlmModels } =
+      await createChatContextRouteApp()
+    listDownloadedLlmModels.mockResolvedValue([TOOL_MODEL_INFO])
+
+    const response = await sendChatContextRequest(app, {
+      conversation: { kind: "new", agentCode: "caliginia" },
+      model: MODEL,
+      tools: { definitions: [], backendToolNames: ["delegate_work"] }
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(
+      replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0].tools
+    ).toEqual([
+      ...LEADER_STATE_TOOL_FORMATS,
+      ...buildToolFormats(
+        buildDelegationDefinitions("leader", DELEGATING_OFFER)
+      )
+    ])
+  })
+
+  it("measures stop_job after the leader's state tools for a stored conversation with a job, as a turn offers it", async () => {
+    const testApp = await createChatContextRouteApp()
+    const { mainId } = saveResearcherJob(testApp)
+    testApp.listDownloadedLlmModels.mockResolvedValue([TOOL_MODEL_INFO])
+
+    const response = await sendChatContextRequest(testApp.app, {
+      conversation: { kind: "existing", id: mainId },
+      model: MODEL
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(
+      testApp.replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
+        .tools
+    ).toEqual([
+      ...LEADER_STATE_TOOL_FORMATS,
+      ...buildToolFormats(buildDelegationDefinitions("leader", STOPPING_OFFER))
+    ])
+  })
+
+  it("measures a stored job's note with its delegator's name, and report_progress after the member's state tools but never delegate_work, as the job's turn sends them", async () => {
+    const testApp = await createChatContextRouteApp()
+    const { jobId } = saveResearcherJob(testApp)
+    testApp.listDownloadedLlmModels.mockResolvedValue([TOOL_MODEL_INFO])
+
+    const response = await sendChatContextRequest(testApp.app, {
+      conversation: { kind: "existing", id: jobId },
+      model: MODEL,
+      tools: { definitions: [], backendToolNames: ["delegate_work"] }
+    })
+
+    expect(response.statusCode).toBe(200)
+    const measured =
+      testApp.replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
+    expect(measured?.messages[0]).toEqual({
+      role: "system",
+      content: formatSystemPrompt(
+        RESEARCHER_DEFINITION.systemPrompt,
+        NO_UNOFFERED_TOOLS,
+        formatJobNote(CALIGINIA_JOB, true)
+      )
+    })
+    expect(measured?.tools).toEqual(
+      buildToolFormats([
+        ...buildAgentStateDefinitions("member"),
+        ...buildDelegationDefinitions("member", REPORTING_OFFER)
+      ])
+    )
   })
 
   it("leaves out an offered MCP tool whose server is not connected", async () => {

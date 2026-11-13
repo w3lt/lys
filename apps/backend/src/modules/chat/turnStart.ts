@@ -12,10 +12,7 @@ import type Agent from "../agent/agent"
 import type { AgentTurn } from "../agent/agent"
 import { AgentRequestLimitError } from "../agent/agentActivity"
 import type { FindAttachmentImage } from "../agent/agentContext"
-import {
-  NO_TURN_DELEGATION,
-  type TurnDelegation
-} from "../agent/turnDelegation"
+import type { TurnDelegation } from "../agent/turnDelegation"
 import type { UnofferedTools } from "../agent/unofferedTools"
 import type AttachmentFileStore from "../attachment/attachmentFileStore"
 import { buildAttachmentImageReader } from "../attachment/attachmentImageReader"
@@ -244,21 +241,6 @@ type ReplyStorage = Pick<
 
 /** The failure that ended a reply because one of its rounds was not sent. */
 type ReplyRefusal = Parameters<AgentTurn["reportReplyRefusal"]>[0]
-
-/**
- * Hooks of a starter whose turns take no part in delegation: they do nothing
- * when a turn starts or a reply ends, and every turn gets
- * {@link NO_TURN_DELEGATION}.
- *
- * @remarks The chat route passes them until the delegation policies are
- * wired into the composition root; the commit that wires them removes this
- * constant.
- */
-export const NO_TURN_DELEGATION_HOOKS: TurnDelegationHooks = Object.freeze({
-  handleTurnStarted: () => undefined,
-  createTurnDelegation: () => NO_TURN_DELEGATION,
-  handleReplyEnded: () => undefined
-})
 
 /**
  * Starts the generation that writes one stored turn's reply and, for a

@@ -1,6 +1,7 @@
 import { describe, expect, it, onTestFinished, vi, type Mock } from "vitest"
 import type { StartReplyGenerationOptions } from "../../../../src/modules/chat/replyGeneration"
 import ReplyGenerationRegistry, {
+  ReplyGenerationRegistryClosedError,
   type ReplyTarget
 } from "../../../../src/modules/chat/replyGenerationRegistry"
 import ControlledReplyTask from "../../support/controlledReplyTask"
@@ -391,9 +392,9 @@ describe("ReplyGenerationRegistry", () => {
           REPLY_OF_Y,
           createLaunchers(lateReply, lateTitle)
         )
-      ).toThrow(Error)
+      ).toThrow(ReplyGenerationRegistryClosedError)
       expect(() => registry.findReplyGeneration(FIRST_REPLY_OF_X)).toThrow(
-        Error
+        ReplyGenerationRegistryClosedError
       )
       runningReply.resolve()
       await disposal
@@ -402,7 +403,7 @@ describe("ReplyGenerationRegistry", () => {
       expect(lateReply.hasStarted).toBe(false)
       expect(lateTitle.hasStarted).toBe(false)
       expect(() => registry.findReplyGeneration(FIRST_REPLY_OF_X)).toThrow(
-        Error
+        ReplyGenerationRegistryClosedError
       )
     })
   })

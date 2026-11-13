@@ -1,7 +1,11 @@
 import type { LoggerInterface } from "@lmstudio/sdk"
+import type { FastifyBaseLogger } from "fastify"
 import { homedir } from "node:os"
 import type { BackendConfig } from "../config"
 import SqliteAgentRecordStore from "../infrastructure/database/agents/sqliteAgentRecordStore"
+import SqliteJobActivityReader from "../infrastructure/database/delegation/sqliteJobActivityReader"
+import SqliteJobReader from "../infrastructure/database/delegation/sqliteJobReader"
+import SqliteJobReportWriter from "../infrastructure/database/delegation/sqliteJobReportWriter"
 import AttachmentFileStore from "../modules/attachment/attachmentFileStore"
 import SqliteDatabase from "../infrastructure/database/sqliteDatabase"
 import { acquireLlmProviderRuntime } from "../modules/llm/runtimes/llmProviderRuntime"
@@ -20,6 +24,7 @@ import ReplyGenerationRegistry from "../modules/chat/replyGenerationRegistry"
 import {
   startTurn,
   type StartTurn,
+  type TurnDelegationHooks,
   type TurnStartDependencies
 } from "../modules/chat/turnStart"
 import SqliteConversationRecordEditor from "../infrastructure/database/conversations/sqliteConversationRecordEditor"
@@ -30,6 +35,10 @@ import StoredConversationHistoryEditor from "../modules/conversation/historyEdit
 import StoredConversationHistoryReader from "../modules/conversation/historyReader"
 import StoredReplyParts from "../modules/conversation/replyParts"
 import StoredConversationTurns from "../modules/conversation/turns"
+import ConversationWakeSettings from "../modules/delegation/conversationWakeSettings"
+import type { DelegationEvent } from "../modules/delegation/delegationEvent"
+import { createDelegationRuntime } from "../modules/delegation/delegationRuntime"
+import ReplyStopRequests from "../modules/delegation/replyStopRequests"
 import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
 } from "../modules/llm/llmRuntimeService"
@@ -101,7 +110,8 @@ export type SingletonServiceFactories = Readonly<{
 
 /**
  * Receive, for logging, what the services report that no caller observes in
- * full: their failures and the LM Studio SDK's own messages.
+ * full: their failures, the LM Studio SDK's own messages, and what
+ * delegation does, with the logger of the turns the backend starts itself.
  */
 export type SingletonLogReporters = Readonly<{
   /** Receive the LLM runtime failures that no caller observes. */
@@ -129,6 +139,16 @@ export type SingletonLogReporters = Readonly<{
    * not report, without the account or the password.
    */
   sendEmailAccountCheckEvent: (event: EmailAccountCheckEvent) => void
+  /**
+   * Receives what delegation does that no caller observes, such as a job
+   * message sent or refused, or a job asked to stop.
+   */
+  reportDelegationEvent: (event: DelegationEvent) => void
+  /**
+   * Logger of the turns the backend starts itself, such as a job's turn,
+   * which no request logs.
+   */
+  backendTurnLogger: FastifyBaseLogger
 }>
 
 /** Production factories used when the composition root supplies no substitutes. */
@@ -224,6 +244,18 @@ export type SingletonServices = Readonly<{
    * before the generations end.
    */
   activityHub: ActivityHub
+  /**
+   * The settings each main conversation's wake-up turns start with, which
+   * delegation remembers while a job of the conversation works; it owns
+   * nothing to release.
+   */
+  conversationWakeSettings: ConversationWakeSettings
+  /**
+   * Hooks through which each person's turn takes part in delegation, over
+   * the job records on the shared database, the agent services, the turn
+   * start, and the activity hub; they own nothing to release.
+   */
+  turnDelegations: TurnDelegationHooks
   /** Module-private cleanup capability for the complete owned service lifetime. */
   [CLOSE_SINGLETON_SERVICES]: CloseSingletonServices
 }>
@@ -237,14 +269,56 @@ type TurnStartServices = Pick<
   "replyGenerations" | "startTurn"
 >
 
+/** What delegation adds to a bundle: its wake settings and its hooks. */
+type DelegationServices = Pick<
+  SingletonServices,
+  "conversationWakeSettings" | "turnDelegations"
+>
+
 /**
  * The services a bundle's turn start is created over: every service of the
- * bundle except the turn start, its registry, and the activity hub.
+ * bundle except the turn start, its registry, the activity hub, and
+ * delegation's.
  */
 type CoreServices = Omit<
   SingletonServices,
-  keyof TurnStartServices | "activityHub" | typeof CLOSE_SINGLETON_SERVICES
+  | keyof TurnStartServices
+  | "activityHub"
+  | keyof DelegationServices
+  | typeof CLOSE_SINGLETON_SERVICES
 >
+
+/** What a bundle is created with, besides the services it holds. */
+type SingletonBundleContext = Readonly<{
+  /**
+   * Title attempt limit given to the turn start, and job message limit
+   * given to delegation.
+   */
+  config: Pick<
+    BackendConfig,
+    "titleGenerationMaxAttempts" | "agentJobMessageLimit"
+  >
+  /**
+   * Receive delegation's events, and log the turns the backend starts
+   * itself.
+   */
+  logReporters: Pick<
+    SingletonLogReporters,
+    "reportDelegationEvent" | "backendTurnLogger"
+  >
+  /**
+   * Owner of every service the bundle acquired; it takes over the disposal
+   * of the reply generation registry, then the close of the activity hub,
+   * so it closes the hub first, then disposes the registry, before
+   * everything it took over earlier.
+   */
+  serviceLifetime: AsyncDisposableStack
+  /**
+   * Shared database lent to delegation's job records; the caller keeps
+   * ownership and closes it.
+   */
+  database: SqliteDatabase
+}>
 
 /**
  * Services that run, find, and approve tools; only the MCP server registry
@@ -279,12 +353,14 @@ type DatabaseServices = Pick<
  * directory given to the attachment file store, the MCP process groups
  * file given to the holder of the MCP servers' process groups, the email
  * server's path given to the built-in email server and the email account
- * checker, and the title attempt limit given to the turn start.
+ * checker, the title attempt limit given to the turn start, and the job
+ * message limit given to delegation.
  * @param logReporters - Receive, for logging, the LLM runtime failures that
  * no caller observes, the causes of read failures the model learns only by
  * kind, the LM Studio SDK's messages, the MCP servers' events, the
- * failures to save their process groups file, and the email account
- * checks.
+ * failures to save their process groups file, the email account checks,
+ * and delegation's events; and the logger of the turns the backend starts
+ * itself.
  * @param factories - Service factories owned by the composition root.
  * @returns A promise resolving to the frozen bundle of owned services. No
  * service reads the active provider or contacts it during creation; the
@@ -308,7 +384,10 @@ type DatabaseServices = Pick<
  * service, the MCP server registry, the email account checker, and the
  * attachment file store are created next; they read and contact nothing at
  * creation. The reply generation registry and the turn start are created
- * next, over the services before them, and the activity hub last. Only the
+ * next, over the services before them, then the activity hub, and last
+ * delegation's wake settings, stop requests, and job records, over the
+ * database, with the hooks of its runtime over the services before them;
+ * they read nothing at creation and own nothing to release. Only the
  * MCP server registry, the email account checker, the reply generation
  * registry, and the activity hub own resources: the connections and the
  * check process the first two open later, the generations the turn start
@@ -332,7 +411,8 @@ export async function createSingletonServices(
       config.databaseFilePath
     )
     serviceLifetime.defer(databaseAcquisition.closeService)
-    const databaseServices = createDatabaseServices(databaseAcquisition.service)
+    const database = databaseAcquisition.service
+    const databaseServices = createDatabaseServices(database)
 
     const llmRuntimeServiceAcquisition = factories.createLlmRuntimeService(
       config.settingsFilePath,
@@ -350,29 +430,29 @@ export async function createSingletonServices(
     const llmService = new LlmService({
       llmEngineOperationQueue: llmRuntimeServiceAcquisition.service
     })
-    const agentServices = createAgentServices(
-      config,
-      databaseAcquisition.service,
+    const agentServices = createAgentServices(config, database, {
+      chatService,
+      llmService,
+      historyReader: databaseServices.conversationHistoryReader
+    })
+    const toolServices = createToolServices(config, logReporters)
+    serviceLifetime.defer(buildCloseToolServices(toolServices))
+    const attachmentFileStore = new AttachmentFileStore(
+      config.attachmentsDirectoryPath
+    )
+
+    return createSingletonServiceBundle(
+      { config, logReporters, serviceLifetime, database },
       {
         chatService,
         llmService,
-        historyReader: databaseServices.conversationHistoryReader
+        llmRuntimeService: llmRuntimeServiceAcquisition.service,
+        ...databaseServices,
+        ...agentServices,
+        ...toolServices,
+        attachmentFileStore
       }
     )
-    const toolServices = createToolServices(config, logReporters)
-    serviceLifetime.defer(buildCloseToolServices(toolServices))
-
-    return createSingletonServiceBundle(config, serviceLifetime, {
-      chatService,
-      llmService,
-      llmRuntimeService: llmRuntimeServiceAcquisition.service,
-      ...databaseServices,
-      ...agentServices,
-      ...toolServices,
-      attachmentFileStore: new AttachmentFileStore(
-        config.attachmentsDirectoryPath
-      )
-    })
   } catch (creationError) {
     return await throwCreationFailureAfterClosingResources(
       creationError,
@@ -384,35 +464,94 @@ export async function createSingletonServices(
 
 /**
  * Creates the turn start and its registry over a bundle's other services,
- * creates the activity hub, and builds the bundle.
+ * creates the activity hub and delegation's services, and builds the bundle.
  *
- * @param config - Title attempt limit given to the turn start.
- * @param serviceLifetime - Owner of every service the bundle acquired; it
- * takes over the disposal of the reply generation registry, then the close
- * of the activity hub, so it closes the hub first, then disposes the
- * registry, before everything it took over earlier.
+ * @param context - The limits, delegation's log reporters, the owner of
+ * every service the bundle acquired, and the shared database.
  * @param coreServices - The bundle's other services, which the turn start
- * borrows for the bundle's lifetime.
+ * and delegation borrow for the bundle's lifetime.
  * @returns The frozen bundle of owned services, with its cleanup capability.
  */
 function createSingletonServiceBundle(
-  config: Pick<BackendConfig, "titleGenerationMaxAttempts">,
-  serviceLifetime: AsyncDisposableStack,
+  context: SingletonBundleContext,
   coreServices: CoreServices
 ): SingletonServices {
+  const { config, serviceLifetime } = context
   const turnStartServices = createTurnStartServices(config, coreServices)
   serviceLifetime.use(turnStartServices.replyGenerations)
   const activityHub = new ActivityHub()
   serviceLifetime.defer(() => {
     activityHub.close()
   })
+  const delegationServices = createDelegationServices(context, {
+    ...coreServices,
+    ...turnStartServices,
+    activityHub
+  })
   return Object.freeze({
     ...coreServices,
     replyGenerations: turnStartServices.replyGenerations,
     startTurn: turnStartServices.startTurn,
     activityHub,
+    ...delegationServices,
     [CLOSE_SINGLETON_SERVICES]: buildCloseSingletonServices(serviceLifetime)
   })
+}
+
+/**
+ * Creates what delegation remembers, its job records, and the hooks of its
+ * runtime.
+ *
+ * @param context - The job message limit, delegation's log reporters, and
+ * the shared database the job records read and write.
+ * @param services - Services delegation borrows for the bundle's lifetime:
+ * the agent service and the agent runtime service, which find and load
+ * agents, the history reader and turn persistence, the turn start and its
+ * registry, and the activity hub.
+ * @returns The wake settings and the runtime's hooks; they read and contact
+ * nothing at creation and own nothing to release.
+ */
+function createDelegationServices(
+  context: Pick<SingletonBundleContext, "config" | "logReporters" | "database">,
+  services: Pick<
+    SingletonServices,
+    | "agentService"
+    | "agentRuntimeService"
+    | "conversationHistoryReader"
+    | "conversationTurns"
+    | "startTurn"
+    | "replyGenerations"
+    | "activityHub"
+  >
+): DelegationServices {
+  const { config, logReporters, database } = context
+  const { agentService, agentRuntimeService, conversationHistoryReader } =
+    services
+  const conversationWakeSettings = new ConversationWakeSettings()
+  const stopRequests = new ReplyStopRequests()
+  const jobs = new SqliteJobReader(database)
+  const jobActivity = new SqliteJobActivityReader(database)
+  const reports = new SqliteJobReportWriter(database)
+  const runtime = createDelegationRuntime({
+    findAgent: (code) => agentService.findAgent(code),
+    loadChatAgent: (code) => agentRuntimeService.loadChatAgent(code),
+    findConversationAgentCode: (conversationId) =>
+      conversationHistoryReader.getConversationMetadata(conversationId)
+        ?.agentCode,
+    jobs,
+    jobActivity,
+    reports,
+    turns: services.conversationTurns,
+    startTurn: services.startTurn,
+    generations: services.replyGenerations,
+    hub: services.activityHub,
+    wakeSettings: conversationWakeSettings,
+    stopRequests,
+    agentJobMessageLimit: config.agentJobMessageLimit,
+    reportEvent: logReporters.reportDelegationEvent,
+    logger: logReporters.backendTurnLogger
+  })
+  return { conversationWakeSettings, turnDelegations: runtime.hooks }
 }
 
 /**

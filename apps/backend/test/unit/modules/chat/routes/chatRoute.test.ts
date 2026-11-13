@@ -8,20 +8,23 @@ import {
   conversationAgentMissingProblemSchema,
   conversationIsJobProblemSchema,
   conversationNotFoundProblemSchema,
-  MAXIMUM_OFFERED_BACKEND_TOOL_COUNT
+  MAXIMUM_OFFERED_BACKEND_TOOL_COUNT,
+  type ChatToolCall
 } from "@lys/protocol"
 import {
   CALIGINIA_AGENT_CODE,
   MAXIMUM_ATTACHMENT_BYTES,
   MAXIMUM_MESSAGE_ATTACHMENT_BYTES,
   mcpSettingsSchema,
+  type Job,
   type McpServerSettings
 } from "@lys/share"
 import type { LightMyRequestResponse } from "fastify"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi, type MockInstance } from "vitest"
 import type ReplyGeneration from "../../../../../src/modules/chat/replyGeneration"
+import type ReplyGenerationRegistry from "../../../../../src/modules/chat/replyGenerationRegistry"
 import updateFastifyWithChatRoute from "../../../../../src/modules/chat/routes/chatRoute"
 import type { DownloadedLlmModel } from "../../../../../src/modules/llm/llmRuntimeTypes"
 import { createLlmRuntimeUnavailableError } from "../../../../../src/modules/llm/llmRuntimeUnavailableError"
@@ -40,17 +43,13 @@ import {
   type McpServerUpdateTestApp
 } from "../../../support/chatRouteTestApp"
 import { parseSseEvents } from "../../../support/chatSseRoute"
-import {
-  saveAssistantMessageRow,
-  saveConversationRow,
-  saveUserMessageRow
-} from "../../../support/conversationDatabase"
+import { createJobSeedingHarness } from "../../../support/conversationDatabase"
 import { createFixtureUuidV7 } from "../../../support/conversationFixtures"
+import { waitForFirstJobReplyEnd } from "../../../support/delegationTestServices"
 import {
   createJobFixture,
   saveJob,
-  saveMainConversation,
-  type JobSeedingHarness
+  saveMainConversation
 } from "../../../support/conversationRecordsContract"
 import { createDownloadedLlmModel } from "../../../support/llmFixtures"
 import { buildFakeStdioServerSettings } from "../../../support/mcpTestServers"
@@ -170,18 +169,7 @@ async function startWebResearcherConversation(
  * @returns UUIDv7 of the stored job.
  */
 function saveResearcherJob(testApp: ChatRouteTestApp): string {
-  const { database } = testApp
-  const harness: JobSeedingHarness = {
-    saveConversation: (row) => {
-      saveConversationRow(database, row)
-    },
-    saveUserMessage: (row) => {
-      saveUserMessageRow(database, row)
-    },
-    saveAssistantMessage: (row) => {
-      saveAssistantMessageRow(database, row)
-    }
-  }
+  const harness = createJobSeedingHarness(testApp.database)
   testApp.app.agentService.createAgent({
     ...WEB_RESEARCHER_DEFINITION,
     code: "researcher"
@@ -215,6 +203,108 @@ async function* createChunkStream(
   ...chunks: ReturnType<typeof createChatCompletionChunk>[]
 ): AsyncGenerator<ReturnType<typeof createChatCompletionChunk>> {
   yield* chunks
+}
+
+/** The request model as the inventory lists a model trained for tool use. */
+const TOOL_MODEL_INFO: DownloadedLlmModel = Object.freeze({
+  ...createDownloadedLlmModel({ modelKey: NEW_CONVERSATION_REQUEST.model }),
+  trainedForToolUse: true
+})
+
+/**
+ * Registers the chat route on a test application whose turns are stored for
+ * real and whose request model is trained for tool use.
+ *
+ * @returns The test application.
+ */
+async function createStateToolApp(): Promise<ChatRouteTestApp> {
+  const testApp = await createChatRouteTestApp()
+  registerStoringChatRoute(testApp)
+  testApp.listDownloadedLlmModels.mockResolvedValue([TOOL_MODEL_INFO])
+  return testApp
+}
+
+/** What came of a request whose model gave the web researcher work. */
+type DelegatedRequest = Readonly<{
+  /** Approval prompt of the `delegate_work` call, which the person allowed. */
+  prompt: ChatToolCall
+  /** UUIDv7 of the main conversation the request started. */
+  conversationId: string
+  /** The web researcher's job, as stored once its reply ended. */
+  job: Job
+}>
+
+/**
+ * Creates the stream of a model that makes one tool call and stops for its
+ * result.
+ *
+ * @param toolName - Name of the called tool.
+ * @param argumentText - Arguments of the call, as JSON text.
+ * @returns An iterator that yields the call, identified as `call_0`, then
+ * the finish for tool calls, and ends.
+ */
+function createToolCallStream(
+  toolName: string,
+  argumentText: string
+): AsyncGenerator<ReturnType<typeof createChatCompletionChunk>> {
+  return createChunkStream(
+    createChatCompletionChunk({
+      toolCalls: [
+        {
+          index: 0,
+          id: "call_0",
+          type: "function",
+          function: { name: toolName, arguments: argumentText }
+        }
+      ]
+    }),
+    createChatCompletionChunk({ finishReason: "tool_calls" })
+  )
+}
+
+/**
+ * Gets the generation of the first reply a test application's registry
+ * started.
+ *
+ * @param startReplyGeneration - Spy on the registry's
+ * `startReplyGeneration`.
+ * @returns The generation.
+ * @throws If the registry has not started one yet.
+ */
+function getFirstGeneration(
+  startReplyGeneration: MockInstance<
+    ReplyGenerationRegistry["startReplyGeneration"]
+  >
+): ReplyGeneration {
+  const result = startReplyGeneration.mock.results[0]
+  if (result?.type !== "return") throw new Error("No generation started.")
+  return result.value
+}
+
+/**
+ * Waits until the first reply a test application's registry started asks
+ * the person about one call, then resolves the call as allowed.
+ *
+ * @param startReplyGeneration - Spy on the registry's
+ * `startReplyGeneration`, created before the request was sent.
+ * @returns The approval prompt of the call.
+ * @throws If no reply asks about one call before `vi.waitFor` times out.
+ */
+async function resolveFirstToolApproval(
+  startReplyGeneration: MockInstance<
+    ReplyGenerationRegistry["startReplyGeneration"]
+  >
+): Promise<ChatToolCall> {
+  await vi.waitFor(() => {
+    expect(
+      getFirstGeneration(startReplyGeneration).pendingToolCalls.toolApprovals
+    ).toHaveLength(1)
+  })
+  const generation = getFirstGeneration(startReplyGeneration)
+  const [prompt] = generation.pendingToolCalls.toolApprovals
+  if (prompt === undefined) throw new Error("No prompt was sent.")
+  generation.resolveToolCall(prompt.id, { status: "allowed" })
+  return prompt
 }
 
 /**
@@ -2654,25 +2744,6 @@ describe("updateFastifyWithChatRoute", () => {
     })
   })
   describe("agent state tools", () => {
-    /** The request model as the inventory lists a model trained for tool use. */
-    const TOOL_MODEL_INFO: DownloadedLlmModel = Object.freeze({
-      ...createDownloadedLlmModel({ modelKey: NEW_CONVERSATION_REQUEST.model }),
-      trainedForToolUse: true
-    })
-
-    /**
-     * Registers the chat route on a test application whose turns are stored
-     * for real and whose request model is trained for tool use.
-     *
-     * @returns The test application.
-     */
-    async function createStateToolApp(): Promise<ChatRouteTestApp> {
-      const testApp = await createChatRouteTestApp()
-      registerStoringChatRoute(testApp)
-      testApp.listDownloadedLlmModels.mockResolvedValue([TOOL_MODEL_INFO])
-      return testApp
-    }
-
     it("offers a built-in agent's model, trained for tool use, the leader's state tools after the turn's tools", async () => {
       const testApp = await createStateToolApp()
 
@@ -2866,6 +2937,147 @@ describe("updateFastifyWithChatRoute", () => {
           CALIGINIA_AGENT_CODE
         )
       ).toMatchObject({ status: "found", state: { requests: [] } })
+    })
+  })
+
+  describe("delegation tools", () => {
+    /** A request of the person's that offers `delegate_work`. */
+    const DELEGATING_REQUEST = Object.freeze({
+      ...NEW_CONVERSATION_REQUEST,
+      tools: { definitions: [], backendToolNames: ["delegate_work"] }
+    })
+
+    /**
+     * Arguments of a `delegate_work` call that gives the web researcher a
+     * new job.
+     */
+    const RESEARCHER_JOB_ARGUMENTS = JSON.stringify({
+      agent: WEB_RESEARCHER_DEFINITION.code,
+      title: "Moths",
+      instructions: "Find what moths eat"
+    })
+
+    /**
+     * Sends {@link DELEGATING_REQUEST} to a test application whose model
+     * first calls `delegate_work` for the web researcher, allows the call
+     * once the person is asked, and waits until the researcher's reply
+     * ended.
+     *
+     * @param testApp - Test application from {@link createStateToolApp},
+     * which does not store the web researcher yet; no tool is saved as Just
+     * run.
+     * @returns The allowed prompt, the main conversation, and the job.
+     */
+    async function sendDelegatingRequest(
+      testApp: ChatRouteTestApp
+    ): Promise<DelegatedRequest> {
+      const toolNames: ReadonlySet<string> = new Set()
+      testApp.app.agentService.createAgent(WEB_RESEARCHER_DEFINITION)
+      testApp.readJustRunToolNames.mockResolvedValue({
+        status: "read",
+        toolNames
+      })
+      testApp.completeChatStream.mockImplementationOnce(async () =>
+        createToolCallStream("delegate_work", RESEARCHER_JOB_ARGUMENTS)
+      )
+      const startReplyGeneration = vi.spyOn(
+        testApp.generations,
+        "startReplyGeneration"
+      )
+      const responsePromise = sendChatRequest(testApp.app, DELEGATING_REQUEST)
+      const prompt = await resolveFirstToolApproval(startReplyGeneration)
+      const response = await responsePromise
+      const conversationId = findStartedConversationId(response.body)
+      const job = await waitForFirstJobReplyEnd(testApp.app, conversationId)
+      return Object.freeze({ prompt, conversationId, job })
+    }
+
+    it("offers Caliginia's model delegate_work after the leader's state tools when the request offers it in a new conversation", async () => {
+      const testApp = await createStateToolApp()
+
+      const response = await sendChatRequest(testApp.app, DELEGATING_REQUEST)
+
+      expect(response.statusCode).toBe(200)
+      expect(listOfferedToolNames(testApp, 0)).toEqual([
+        ...LEADER_STATE_TOOL_NAMES,
+        "delegate_work"
+      ])
+    })
+
+    it.each([
+      [
+        "to a member",
+        {
+          ...WEB_RESEARCHER_REQUEST,
+          tools: { definitions: [], backendToolNames: ["delegate_work"] }
+        }
+      ],
+      [
+        "while tool calls are switched off",
+        { ...NEW_CONVERSATION_REQUEST, areToolCallsSwitchedOff: true }
+      ]
+    ])("does not offer delegate_work %s", async (_label, request) => {
+      const testApp = await createStateToolApp()
+      testApp.app.agentService.createAgent(WEB_RESEARCHER_DEFINITION)
+
+      const response = await sendChatRequest(testApp.app, request)
+
+      expect(response.statusCode).toBe(200)
+      expect(listOfferedToolNames(testApp, 0)).not.toContain("delegate_work")
+    })
+
+    it("gives a member work once the person allows Caliginia's call: job 1 is stored with the call and answered by the member, whose model is offered report_progress", async () => {
+      const testApp = await createStateToolApp()
+
+      const { prompt, conversationId, job } =
+        await sendDelegatingRequest(testApp)
+
+      expect(prompt.toolName).toBe("delegate_work")
+      expect(
+        testApp.app.conversationHistoryReader.getConversation(conversationId)
+          ?.messages[1]
+      ).toMatchObject({
+        parts: [
+          {
+            id: prompt.id,
+            kind: "tool-call",
+            status: "succeeded",
+            result:
+              'Job 1 started: Web Researcher is working on "Moths". Its result arrives later in a message that starts with reports. End your reply when you have nothing else to do.'
+          },
+          { kind: "text", content: "Hi" }
+        ]
+      })
+      expect(job).toMatchObject({
+        number: 1,
+        state: "replied",
+        agentCode: WEB_RESEARCHER_DEFINITION.code,
+        title: "Moths",
+        jobCallIds: [prompt.id]
+      })
+      expect(
+        testApp.app.conversationHistoryReader.getConversation(job.id)
+      ).toMatchObject({
+        parentConversationId: conversationId,
+        jobNumber: 1,
+        messages: [
+          {
+            role: "user",
+            content: "Find what moths eat",
+            origin: "delegator"
+          },
+          {
+            id: job.replyId,
+            status: "completed",
+            parts: [{ kind: "text", content: "Hi" }]
+          }
+        ]
+      })
+      expect(
+        testApp.completeChatStream.mock.calls.map(([request]) =>
+          (request.tools ?? []).map((tool) => tool.function.name)
+        )
+      ).toContainEqual(["read_my_state", "report_progress"])
     })
   })
 })

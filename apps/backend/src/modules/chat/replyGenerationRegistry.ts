@@ -19,8 +19,20 @@ type RegisteredReplyGeneration = Readonly<{
   generation: ReplyGeneration
 }>
 
-/** Canonical failure for any registry operation after disposal began. */
-const CLOSED_REGISTRY_MESSAGE = "Reply generation registry is closed"
+/**
+ * Failure of starting or finding a generation once the registry's disposal
+ * began, which ends every generation it holds.
+ *
+ * @remarks Passive failure value constructed once per refused call. It
+ * preserves the native `Error` contract and owns no mutable state, so a
+ * caller can tell a closed registry from any other failure by its class.
+ */
+export class ReplyGenerationRegistryClosedError extends Error {
+  /** Creates the failure of one call made after disposal began. */
+  public constructor() {
+    super("Reply generation registry is closed")
+  }
+}
 
 /**
  * Owns every running reply generation: admits new ones, finds one for a
@@ -33,8 +45,8 @@ const CLOSED_REGISTRY_MESSAGE = "Reply generation registry is closed"
  * Lifecycle: ready until disposal begins; disposal permanently closes the
  * registry, cancels every generation, and settles after all of them settle,
  * and repeated calls share that completion. After disposal begins, starting
- * or finding a generation throws the closed-registry failure. Concurrency
- * model: single-owner, on the backend's event loop.
+ * or finding a generation throws {@link ReplyGenerationRegistryClosedError}.
+ * Concurrency model: single-owner, on the backend's event loop.
  */
 export default class ReplyGenerationRegistry implements AsyncDisposable {
   /** Running generations keyed by assistant message identifier. */
@@ -50,8 +62,9 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
    * @param target - Stored reply the generation writes, with its conversation.
    * @param options - Task launchers and the task-failure reporter.
    * @returns The running generation, registered until it settles.
-   * @throws If the registry is closed or a generation for the reply is already
-   * running; nothing is started in either case.
+   * @throws {ReplyGenerationRegistryClosedError} If the registry is closed.
+   * @throws If a generation for the reply is already running; nothing is
+   * started in either case.
    * @remarks A title launcher is dropped while another generation of the same
    * conversation is running a title task, so the new generation runs only its
    * reply and settles without waiting for that title. A later generation can
@@ -61,7 +74,8 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
     target: ReplyTarget,
     options: StartReplyGenerationOptions
   ): ReplyGeneration {
-    if (this.#disposal !== undefined) throw new Error(CLOSED_REGISTRY_MESSAGE)
+    if (this.#disposal !== undefined)
+      throw new ReplyGenerationRegistryClosedError()
     if (this.#generations.has(target.assistantMessageId))
       throw new Error("A generation for this reply is already running")
 
@@ -89,10 +103,11 @@ export default class ReplyGenerationRegistry implements AsyncDisposable {
    * @param target - Reply and the conversation expected to hold it.
    * @returns The generation, or undefined when none is running for that
    * reply in that conversation.
-   * @throws If the registry is closed.
+   * @throws {ReplyGenerationRegistryClosedError} If the registry is closed.
    */
   public findReplyGeneration(target: ReplyTarget): ReplyGeneration | undefined {
-    if (this.#disposal !== undefined) throw new Error(CLOSED_REGISTRY_MESSAGE)
+    if (this.#disposal !== undefined)
+      throw new ReplyGenerationRegistryClosedError()
 
     const registered = this.#generations.get(target.assistantMessageId)
     return registered?.conversationId === target.conversationId

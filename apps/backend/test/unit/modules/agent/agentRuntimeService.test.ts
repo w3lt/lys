@@ -16,7 +16,6 @@ import type {
   ReplyModel,
   ReplyStreamEvent
 } from "../../../../src/modules/agent/replyModel"
-import { NO_TURN_DELEGATION } from "../../../../src/modules/agent/turnDelegation"
 import { NO_UNOFFERED_TOOLS } from "../../../../src/modules/agent/unofferedTools"
 import {
   registerAgentStateReaderContractSuite,
@@ -32,6 +31,7 @@ import {
 } from "../../support/conversationFixtures"
 import { createRoomyReplyContextMeter } from "../../support/replyContextMeterFakes"
 import { LEADER_STATE_TOOL_NAMES } from "../../support/toolFixtures"
+import { NO_TURN_DELEGATION } from "../../support/turnDelegationFakes"
 
 /** Time the clock reads when a case starts. */
 const NOW = "2026-10-24T10:00:00.000Z"

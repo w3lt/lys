@@ -36,11 +36,7 @@ import type {
   CreateConversationTurnOptions
 } from "../persistence"
 import ReplyEventSubscription from "../replyEventSubscription"
-import {
-  NO_TURN_DELEGATION_HOOKS,
-  type StartTurn,
-  type TurnSettings
-} from "../turnStart"
+import type { StartTurn, TurnDelegationHooks, TurnSettings } from "../turnStart"
 import {
   findListedModelCapabilities,
   type FindModelCapabilities,
@@ -109,6 +105,8 @@ type ChatRouteDependencies = Pick<TurnAgentLookups, "loadChatAgent"> &
      * every running generation.
      */
     startTurn: StartTurn
+    /** Hooks through which each person's turn takes part in delegation. */
+    turnDelegations: TurnDelegationHooks
   }>
 
 /** Problems the chat route sends before the stream starts. */
@@ -182,7 +180,9 @@ const NO_REQUESTED_TOOLS: readonly ToolDefinition[] = Object.freeze([])
  * follows that generation on the response stream.
  *
  * @param app - Backend with SSE, validation, and singleton services
- * installed, whose turn start starts each stored turn's generation.
+ * installed, whose turn start starts each stored turn's generation, with the
+ * delegation hooks every turn the route starts takes part in delegation
+ * through.
  * @param findModelCapabilities - Capabilities of the model a request names,
  * read from the connected provider's inventory and remembered by the lookup
  * while that provider stays connected; shared with the chat-context route.
@@ -207,7 +207,8 @@ export default function updateFastifyWithChatRoute(
     builtInTools: app.builtInTools,
     findMcpTool: (toolName: string) =>
       app.mcpServerRegistry.findTurnTool(toolName),
-    startTurn: app.startTurn
+    startTurn: app.startTurn,
+    turnDelegations: app.turnDelegations
   }
   app.route<ChatApiRoute>({
     method: chatApi.method,
@@ -250,9 +251,11 @@ export default function updateFastifyWithChatRoute(
  * key saved or removed while it runs applies from the next request. An MCP
  * tool's call runs on its server as connected when the call runs, and fails
  * for the model when the server is no longer connected or no longer lists
- * the tool. The turn is started with {@link NO_TURN_DELEGATION_HOOKS}, so it
- * takes no part in delegation: the model is offered no delegation tool, also
- * when the request offers `delegate_work`.
+ * the tool. The turn is started with the application's delegation hooks,
+ * so it takes part in delegation: for a model trained for tool use, its
+ * agent is offered `delegate_work` when the request offers it in a main
+ * conversation and the agent's role may delegate, and `stop_job` once the
+ * conversation has a job.
  */
 async function handleChatRequest(
   request: ChatRouteRequest,
@@ -271,7 +274,7 @@ async function handleChatRequest(
     agent: saved.agent,
     settings: buildTurnSettings(request.body, accepted),
     startedBy: "person",
-    delegation: NO_TURN_DELEGATION_HOOKS,
+    delegation: dependencies.turnDelegations,
     logger: request.log
   })
   const subscription = new ReplyEventSubscription<ChatApiStreamEvent>(

@@ -9,7 +9,6 @@ import ActivityHub from "../../../src/modules/activity/activityHub"
 import type { AgentTurn } from "../../../src/modules/agent/agent"
 import AgentRuntimeService from "../../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../../src/modules/agent/agentService"
-import { NO_TURN_DELEGATION } from "../../../src/modules/agent/turnDelegation"
 import { NO_UNOFFERED_TOOLS } from "../../../src/modules/agent/unofferedTools"
 import ChatService from "../../../src/modules/chat/chatService"
 import type { ConversationTurn } from "../../../src/modules/chat/persistence"
@@ -17,15 +16,13 @@ import type ReplyGeneration from "../../../src/modules/chat/replyGeneration"
 import ReplyGenerationRegistry, {
   type ReplyTarget
 } from "../../../src/modules/chat/replyGenerationRegistry"
-import {
-  NO_TURN_DELEGATION_HOOKS,
-  type TurnSettings
-} from "../../../src/modules/chat/turnStart"
+import type { TurnSettings } from "../../../src/modules/chat/turnStart"
 import StoredConversationHistoryEditor from "../../../src/modules/conversation/historyEditor"
 import StoredConversationHistoryReader from "../../../src/modules/conversation/historyReader"
 import AttachmentFileStore from "../../../src/modules/attachment/attachmentFileStore"
 import StoredReplyParts from "../../../src/modules/conversation/replyParts"
 import StoredConversationTurns from "../../../src/modules/conversation/turns"
+import ConversationWakeSettings from "../../../src/modules/delegation/conversationWakeSettings"
 import LlmRuntimeService, {
   type LlmRuntimeFailureReporters
 } from "../../../src/modules/llm/llmRuntimeService"
@@ -50,6 +47,13 @@ import {
   createUserMessage
 } from "../support/conversationFixtures"
 import {
+  createJobMessageDraft,
+  createPersonTurn,
+  FIRST_MEMBER_DEFINITION,
+  MOTHS_REQUEST,
+  waitForFirstJobReplyEnd
+} from "../support/delegationTestServices"
+import {
   createAcquiredFakeLlmRuntime,
   createConnectedFakeLlmEngine,
   createFakeLlmRuntime
@@ -60,6 +64,10 @@ import { createChatCompletionChunk } from "../support/openAiEndpointFake"
 import { writeSettingsFile } from "../support/settingsFile"
 import { createSettlementReader } from "../support/settlement"
 import { READ_TEXT_FILE_TOOL } from "../support/toolFixtures"
+import {
+  NO_TURN_DELEGATION,
+  NO_TURN_DELEGATION_HOOKS
+} from "../support/turnDelegationFakes"
 import { answerWithBody, startVmoServer } from "../support/vmoServer"
 
 // The bundle imports the LM Studio SDK through its runtime adapter. No case
@@ -129,7 +137,8 @@ type ClosedServiceName =
 /**
  * Creates log reporters that record what they receive.
  *
- * @returns Reporters whose calls each case can inspect.
+ * @returns Reporters whose calls each case can inspect, and a logger of the
+ * backend's own turns that writes to a destination no case reads.
  */
 function createLogReporters() {
   const llmRuntime = {
@@ -149,7 +158,9 @@ function createLogReporters() {
     lmStudioSdk,
     reportMcpServerEvent: vi.fn(),
     reportMcpProcessGroupsSaveFailure: vi.fn(),
-    sendEmailAccountCheckEvent: vi.fn()
+    sendEmailAccountCheckEvent: vi.fn(),
+    reportDelegationEvent: vi.fn(),
+    backendTurnLogger: createBackendLogger(new CapturedLogDestination())
   } satisfies SingletonLogReporters
 }
 
@@ -554,6 +565,64 @@ describe("createSingletonServices", () => {
     expect(services.attachmentFileStore).toBeInstanceOf(AttachmentFileStore)
     expect(services.replyGenerations).toBeInstanceOf(ReplyGenerationRegistry)
     expect(services.activityHub).toBeInstanceOf(ActivityHub)
+    expect(services.conversationWakeSettings).toBeInstanceOf(
+      ConversationWakeSettings
+    )
+    expect(services.turnDelegations).toEqual({
+      handleTurnStarted: expect.any(Function),
+      createTurnDelegation: expect.any(Function),
+      handleReplyEnded: expect.any(Function)
+    })
+  })
+
+  it("gives a member work through the bundle's delegation hooks: the job's turn is stored, answered by the member, and reported", async () => {
+    const { factories } = createRecordedFactories()
+    const reporters = createLogReporters()
+    const services = await createSingletonServices(
+      TEST_BACKEND_CONFIG,
+      reporters,
+      factories
+    )
+    onTestFinished(async () => await closeSingletonServices(services))
+    createModelSpies(services)
+    services.agentService.createAgent(FIRST_MEMBER_DEFINITION)
+    const delegating = createPersonTurn(services.conversationTurns)
+    const conversationId = delegating.turn.conversation.id
+    const draft = createJobMessageDraft(
+      services.replyParts,
+      delegating,
+      MOTHS_REQUEST
+    )
+    const delegation = services.turnDelegations.createTurnDelegation(delegating)
+
+    const outcome = delegation.createJobMessage(draft)
+    const job = await waitForFirstJobReplyEnd(services, conversationId)
+
+    expect(outcome).toEqual({
+      status: "sent",
+      jobNumber: 1,
+      agentName: "Researcher",
+      title: "Moths",
+      isNewJob: true
+    })
+    expect(job.state).toBe("replied")
+    expect(
+      services.conversationHistoryReader.getConversation(job.id)
+    ).toMatchObject({
+      parentConversationId: conversationId,
+      messages: [
+        { role: "user", content: "Find what moths eat", origin: "delegator" },
+        { id: job.replyId, status: "completed", parts: [{ content: "Hi" }] }
+      ]
+    })
+    expect(reporters.reportDelegationEvent).toHaveBeenCalledExactlyOnceWith({
+      kind: "job-message-sent",
+      conversationId,
+      jobId: job.id,
+      jobNumber: 1,
+      agentCode: "researcher",
+      isNewJob: true
+    })
   })
 
   it("starts a person's turn in the bundle's reply generation registry and stores its reply and generated title on the acquired database", async () => {

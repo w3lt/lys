@@ -42,13 +42,12 @@ import {
 } from "../../../../src/modules/agent/agentContext"
 import type { AgentRole } from "../../../../src/modules/agent/agentRoles"
 import type { AgentStateReader } from "../../../../src/modules/agent/agentStateTools"
-import {
-  NO_TURN_DELEGATION,
-  type DelegationOffer,
-  type JobMessageDraft,
-  type JobMessageOutcome,
-  type JobTurn,
-  type TurnDelegation
+import type {
+  DelegationOffer,
+  JobMessageDraft,
+  JobMessageOutcome,
+  JobTurn,
+  TurnDelegation
 } from "../../../../src/modules/agent/turnDelegation"
 import {
   NO_UNOFFERED_TOOLS,
@@ -109,7 +108,10 @@ import {
   READ_TEXT_FILE_FORMAT,
   READ_TEXT_FILE_TOOL
 } from "../../support/toolFixtures"
-import { buildTurnDelegation } from "../../support/turnDelegationFakes"
+import {
+  buildTurnDelegation,
+  NO_TURN_DELEGATION
+} from "../../support/turnDelegationFakes"
 
 /** Opens one reply stream for the agent under test. */
 type OpenReplyStream = ReplyModel["openReplyStream"]

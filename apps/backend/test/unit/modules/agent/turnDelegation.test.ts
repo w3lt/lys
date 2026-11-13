@@ -1,46 +1,111 @@
-import { describe, expect, it } from "vitest"
+import { jobSchema, type Job } from "@lys/share"
+import { describe, expect, it, vi } from "vitest"
 import {
-  NO_TURN_DELEGATION,
-  type JobMessageDraft
+  buildDelegationOffer,
+  type ConversationDelegation
 } from "../../../../src/modules/agent/turnDelegation"
 import { createFixtureUuidV7 } from "../../support/conversationFixtures"
 
-/** A job message a `delegate_work` call could ask to send. */
-const JOB_MESSAGE_DRAFT: JobMessageDraft = Object.freeze({
+/** Job started from the main conversation of the cases that have one. */
+const RESEARCH_JOB: Job = jobSchema.parse({
+  id: createFixtureUuidV7(2),
+  number: 1,
   agentCode: "researcher",
   title: "Hologram news",
-  instructions: "Collect this week's news about holograms.",
-  jobNumber: undefined,
-  toolCallId: createFixtureUuidV7(1)
+  state: "working",
+  latestNote: null,
+  replyId: createFixtureUuidV7(4),
+  jobCallIds: [createFixtureUuidV7(3)],
+  createdAt: "2026-11-10T10:00:00.000Z",
+  updatedAt: "2026-11-10T10:00:00.000Z"
 })
 
-/** Cancellation of a stop that no case aborts. */
-const { signal: STOP_SIGNAL } = new AbortController()
+/** A main conversation no job was started from. */
+const MAIN_CONVERSATION: ConversationDelegation = Object.freeze({
+  parentConversationId: null,
+  jobNumber: null,
+  delegatorAgentCode: null,
+  jobs: Object.freeze([])
+})
 
-/** One delegation callback, with the call a delegation tool would make of it. */
-type DelegationCallCase = [label: string, callDelegation: () => unknown]
+/** A main conversation one job was started from. */
+const MAIN_CONVERSATION_WITH_JOB: ConversationDelegation = Object.freeze({
+  ...MAIN_CONVERSATION,
+  jobs: Object.freeze([RESEARCH_JOB])
+})
 
-describe("NO_TURN_DELEGATION", () => {
-  it("allows nothing of delegation", () => {
-    expect(NO_TURN_DELEGATION.offer).toEqual({
+/** Job 3 of a main conversation of Caliginia. */
+const JOB_CONVERSATION: ConversationDelegation = Object.freeze({
+  parentConversationId: createFixtureUuidV7(1),
+  jobNumber: 3,
+  delegatorAgentCode: "caliginia",
+  jobs: Object.freeze([])
+})
+
+/**
+ * Finds the display name of the built-in agents only.
+ *
+ * @param code - Agent code.
+ * @returns `Caliginia` for `caliginia`; undefined for every other code.
+ */
+function findBuiltInAgentName(code: string): string | undefined {
+  return code === "caliginia" ? "Caliginia" : undefined
+}
+
+describe("buildDelegationOffer", () => {
+  it.each([
+    ["a main conversation whose offer names delegate_work", true, true],
+    ["a main conversation whose offer leaves it out", false, false]
+  ])(
+    "lets %s delegate only when the offer names delegate_work",
+    (_label, offersDelegateWork, mayDelegate) => {
+      expect(
+        buildDelegationOffer(
+          MAIN_CONVERSATION,
+          offersDelegateWork,
+          findBuiltInAgentName
+        )
+      ).toEqual({ mayDelegate, hasJobs: false, job: undefined })
+    }
+  )
+
+  it("never lets a job delegate, and names its number and its delegator", () => {
+    const findAgentName = vi.fn(findBuiltInAgentName)
+
+    const offer = buildDelegationOffer(JOB_CONVERSATION, true, findAgentName)
+
+    expect(offer).toEqual({
       mayDelegate: false,
       hasJobs: false,
-      job: undefined
+      job: { delegatorName: "Caliginia", jobNumber: 3 }
     })
+    expect(findAgentName).toHaveBeenCalledExactlyOnceWith("caliginia")
   })
 
-  it.each<DelegationCallCase>([
-    [
-      "send a job message",
-      () => NO_TURN_DELEGATION.createJobMessage(JOB_MESSAGE_DRAFT)
-    ],
-    [
-      "store a progress note",
-      () =>
-        NO_TURN_DELEGATION.createProgressNote("Two of five sources are read.")
-    ],
-    ["stop a job", () => NO_TURN_DELEGATION.stopJob(1, STOP_SIGNAL)]
-  ])("throws when it is asked to %s", (_label, callDelegation) => {
-    expect(callDelegation).toThrow("This turn takes no part in delegation")
+  it("names a job's delegator by its code when no agent has the code", () => {
+    expect(
+      buildDelegationOffer(JOB_CONVERSATION, false, () => undefined).job
+    ).toEqual({ delegatorName: "caliginia", jobNumber: 3 })
+  })
+
+  it("says a conversation has jobs once a job was started from it", () => {
+    expect(
+      buildDelegationOffer(
+        MAIN_CONVERSATION_WITH_JOB,
+        true,
+        findBuiltInAgentName
+      )
+    ).toEqual({ mayDelegate: true, hasJobs: true, job: undefined })
+  })
+
+  it("returns a frozen offer and job", () => {
+    const offer = buildDelegationOffer(
+      JOB_CONVERSATION,
+      false,
+      findBuiltInAgentName
+    )
+
+    expect(Object.isFrozen(offer)).toBe(true)
+    expect(Object.isFrozen(offer.job)).toBe(true)
   })
 })

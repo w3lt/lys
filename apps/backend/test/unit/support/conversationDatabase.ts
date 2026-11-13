@@ -25,6 +25,7 @@ import type {
   ConversationRecordsHarness,
   ConversationRowFixture,
   JobReportRowFixture,
+  JobSeedingHarness,
   UserMessageRowFixture
 } from "./conversationRecordsContract"
 
@@ -252,6 +253,30 @@ export function saveAssistantMessageRow(
     saveReplyRow(statements, row)
     saveReplyPartRows(statements, row)
   })
+}
+
+/**
+ * Builds the controls that store a job fixture's rows on a test database.
+ *
+ * @param database - Write access to a migrated test database.
+ * @returns Controls that store conversation, user-message, and
+ * assistant-message rows, as {@link saveConversationRow},
+ * {@link saveUserMessageRow}, and {@link saveAssistantMessageRow} do.
+ */
+export function createJobSeedingHarness(
+  database: DatabaseWriter
+): JobSeedingHarness {
+  return {
+    saveConversation: (row) => {
+      saveConversationRow(database, row)
+    },
+    saveUserMessage: (row) => {
+      saveUserMessageRow(database, row)
+    },
+    saveAssistantMessage: (row) => {
+      saveAssistantMessageRow(database, row)
+    }
+  }
 }
 
 /**

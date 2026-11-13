@@ -1,6 +1,7 @@
 import fastifyPlugin from "fastify-plugin"
 import { type FastifyInstance, type FastifyPluginAsync } from "fastify"
 import type { BackendConfig } from "../config"
+import { handleDelegationEvent } from "../modules/delegation/delegationEventLog"
 import type { LlmRuntimeFailureReporters } from "../modules/llm/llmRuntimeService"
 import PinoLmStudioSdkLogger from "../modules/llm/runtimes/pinoLmStudioSdkLogger"
 import { handleEmailAccountCheckEvent } from "../modules/mcp/builtIn/email/emailAccountCheckLog"
@@ -39,9 +40,10 @@ type SingletonServicePluginOptions = {
  * first request already sees every configured server, connecting; the
  * servers connect in the background and never delay listening. The
  * services' failures that no caller observes, the messages of the LM
- * Studio SDK, the MCP servers' events, the email account checks, and the
- * failures to save their process groups file are logged through the
- * application's logger.
+ * Studio SDK, the MCP servers' events, the email account checks, the
+ * failures to save their process groups file, delegation's events, and the
+ * turns the backend starts itself are logged through the application's
+ * logger.
  */
 const openSingletonServices: FastifyPluginAsync<
   SingletonServicePluginOptions
@@ -68,10 +70,11 @@ const openSingletonServices: FastifyPluginAsync<
       )
     }
   }
+  const lmStudioSdk = new PinoLmStudioSdkLogger(app.log)
   const singletonServices = await createSingletonServices(config, {
     llmRuntime,
     pageRendering,
-    lmStudioSdk: new PinoLmStudioSdkLogger(app.log),
+    lmStudioSdk,
     reportMcpServerEvent: (event) => {
       handleMcpServerEvent(app.log, event)
     },
@@ -83,7 +86,11 @@ const openSingletonServices: FastifyPluginAsync<
     },
     sendEmailAccountCheckEvent: (event) => {
       handleEmailAccountCheckEvent(app.log, event)
-    }
+    },
+    reportDelegationEvent: (event) => {
+      handleDelegationEvent(app.log, event)
+    },
+    backendTurnLogger: app.log
   })
 
   app.addHook("preClose", async () => {
@@ -143,6 +150,7 @@ function registerSingletonServices(
   app.decorate("replyGenerations", singletonServices.replyGenerations)
   app.decorate("startTurn", singletonServices.startTurn)
   app.decorate("activityHub", singletonServices.activityHub)
+  app.decorate("turnDelegations", singletonServices.turnDelegations)
 }
 
 /** Fastify plugin that opens the application-scoped singleton services. */

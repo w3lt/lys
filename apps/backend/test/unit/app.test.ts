@@ -32,6 +32,13 @@ import {
   createNewConversationTarget,
   createTurnUserMessage
 } from "./support/conversationFixtures"
+import {
+  createJobMessageDraft,
+  createPersonTurn,
+  FIRST_MEMBER_DEFINITION,
+  MOTHS_REQUEST,
+  waitForFirstJobReplyEnd
+} from "./support/delegationTestServices"
 import { CapturedLogDestination } from "./support/fastifyTestApp"
 import { buildFakeStdioServerSettings } from "./support/mcpTestServers"
 import {
@@ -299,6 +306,57 @@ describe("buildApp", () => {
         { title: "Greeting", preview: { role: "assistant", content: "Hi" } }
       ]
     })
+  })
+
+  it("decorates the delegation hooks, which give a member work and log the job message with its logger", async () => {
+    const log = new CapturedLogDestination()
+    const app = await buildApp({
+      config: createOwnedBackendConfig(),
+      logger: createBackendLogger(log)
+    })
+    onTestFinished(async () => await app.close())
+    await app.ready()
+    // No provider is connected: the model calls are answered here instead.
+    vi.spyOn(app.llmService, "findLlmContextMeasurement").mockImplementation(
+      async (_model, texts) => ({
+        contextLength: 1_000_000,
+        textTokenCounts: texts.map(() => 1)
+      })
+    )
+    vi.spyOn(app.chatService, "completeChatStream").mockImplementation(
+      async () => createHiReplyStream()
+    )
+    app.agentService.createAgent(FIRST_MEMBER_DEFINITION)
+    const delegating = createPersonTurn(app.conversationTurns)
+    const conversationId = delegating.turn.conversation.id
+    const draft = createJobMessageDraft(
+      app.replyParts,
+      delegating,
+      MOTHS_REQUEST
+    )
+    const delegation = app.turnDelegations.createTurnDelegation(delegating)
+
+    const outcome = delegation.createJobMessage(draft)
+    const job = await waitForFirstJobReplyEnd(app, conversationId)
+
+    expect(outcome).toMatchObject({ status: "sent", jobNumber: 1 })
+    expect(log.records).toContainEqual(
+      expect.objectContaining({
+        level: "info",
+        msg: "An agent gave work to another agent",
+        conversationId,
+        jobId: job.id,
+        jobNumber: 1,
+        agentCode: "researcher",
+        isNewJob: true
+      })
+    )
+    expect(
+      app.conversationHistoryReader.getConversation(job.id)?.messages
+    ).toMatchObject([
+      { role: "user", content: "Find what moths eat" },
+      { id: job.replyId, status: "completed" }
+    ])
   })
 
   it("ends every running reply generation of the decorated registry before it closes its HTTP server", async () => {

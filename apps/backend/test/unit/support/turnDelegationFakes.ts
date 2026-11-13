@@ -2,6 +2,7 @@ import type {
   DelegationOffer,
   TurnDelegation
 } from "../../../src/modules/agent/turnDelegation"
+import type { TurnDelegationHooks } from "../../../src/modules/chat/turnStart"
 
 /**
  * The delegation callbacks one case arranges; a call of one it leaves out
@@ -49,3 +50,28 @@ export function buildTurnDelegation(
     stopJob: callbacks.stopJob ?? handleUnexpectedDelegationCall
   })
 }
+
+/** Offer of a turn that takes no part in delegation: nothing. */
+const NO_DELEGATION_OFFER: DelegationOffer = Object.freeze({
+  mayDelegate: false,
+  hasJobs: false,
+  job: undefined
+})
+
+/**
+ * Delegation of a case's turn that takes no part in delegation: it offers
+ * nothing, and a call of any of its callbacks fails the case.
+ */
+export const NO_TURN_DELEGATION: TurnDelegation =
+  buildTurnDelegation(NO_DELEGATION_OFFER)
+
+/**
+ * Hooks of a case's starter whose turns take no part in delegation: they do
+ * nothing when a turn starts or a reply ends, and every turn gets
+ * {@link NO_TURN_DELEGATION}.
+ */
+export const NO_TURN_DELEGATION_HOOKS: TurnDelegationHooks = Object.freeze({
+  handleTurnStarted: () => undefined,
+  createTurnDelegation: () => NO_TURN_DELEGATION,
+  handleReplyEnded: () => undefined
+})

@@ -6,7 +6,7 @@ import type AgentService from "./modules/agent/agentService"
 import type AttachmentFileStore from "./modules/attachment/attachmentFileStore"
 import type ChatService from "./modules/chat/chatService"
 import type ReplyGenerationRegistry from "./modules/chat/replyGenerationRegistry"
-import type { StartTurn } from "./modules/chat/turnStart"
+import type { StartTurn, TurnDelegationHooks } from "./modules/chat/turnStart"
 import type StoredConversationHistoryEditor from "./modules/conversation/historyEditor"
 import type StoredConversationHistoryReader from "./modules/conversation/historyReader"
 import type StoredReplyParts from "./modules/conversation/replyParts"
@@ -92,5 +92,10 @@ declare module "fastify" {
      * disposes the reply generation registry.
      */
     activityHub: ActivityHub
+    /**
+     * Hooks through which each turn a person starts takes part in
+     * delegation, as the application's delegation runtime handles it.
+     */
+    turnDelegations: TurnDelegationHooks
   }
 }

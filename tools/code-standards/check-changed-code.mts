@@ -100,7 +100,8 @@ function parseChangeSource(args: readonly string[]): ChangeSource {
   const base = Object.freeze({ type: "string" as const })
   const options = Object.freeze({ staged, base })
   const { values } = parseArgs({ args: [...args], options })
-  if (values.staged === (values.base !== undefined)) {
+  const isStaged = values.staged === true
+  if (isStaged === (values.base !== undefined)) {
     throw new Error(usage)
   }
   if (values.base !== undefined && !baseRefPattern.test(values.base)) {

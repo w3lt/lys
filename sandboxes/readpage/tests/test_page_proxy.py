@@ -6,6 +6,7 @@ names ``public.test``, ``private.test``, and ``mixed.test`` to them.
 """
 
 import ipaddress
+import selectors
 import socket
 import threading
 import unittest
@@ -59,8 +60,9 @@ def list_test_host_addresses(host: str, port: int) -> Sequence[HostAddress]:
 class TargetServer:
     """A server that runs a handler for each connection and counts them.
 
-    It owns its listener and threads; close() wakes its accept loop with a
-    connection of its own, which is not counted, and joins every thread.
+    It owns its listener, a socket pair that wakes its accept loop, and its
+    threads. close() wakes the loop through the pair, which needs no port, so
+    it cannot fail where a connection could, and joins every thread.
     """
 
     def __init__(
@@ -75,11 +77,10 @@ class TargetServer:
                 may close it; the server closes it afterwards.
         """
         self._listener = socket.create_server((host, 0), family=family)
-        self._host = host
+        self._wake_reader, self._wake_writer = socket.socketpair()
         self._handler = handler
         self._lock = threading.Lock()
         self._connection_count = 0
-        self._is_closing = False
         self._threads: list[threading.Thread] = []
         self._accept_thread = threading.Thread(target=self._accept_connections)
         self._accept_thread.start()
@@ -97,26 +98,28 @@ class TargetServer:
 
     def close(self) -> None:
         """Stops accepting and waits for every handler."""
-        with self._lock:
-            self._is_closing = True
-        socket.create_connection((self._host, self.port)).close()
+        self._wake_writer.close()
         self._accept_thread.join()
         self._listener.close()
+        self._wake_reader.close()
         for thread in self._threads:
             thread.join()
 
     def _accept_connections(self) -> None:
-        """Accepts connections until close() wakes it."""
-        while True:
-            connection, _ = self._listener.accept()
-            with self._lock:
-                if self._is_closing:
-                    connection.close()
+        """Accepts connections until close() closes the wake pair's writer."""
+        with selectors.DefaultSelector() as selector:
+            selector.register(self._listener, selectors.EVENT_READ)
+            selector.register(self._wake_reader, selectors.EVENT_READ)
+            while True:
+                ready = {key.fileobj for key, _ in selector.select()}
+                if self._wake_reader in ready:
                     return
-                self._connection_count += 1
-            thread = threading.Thread(target=self._serve, args=(connection,))
-            thread.start()
-            self._threads.append(thread)
+                connection, _ = self._listener.accept()
+                with self._lock:
+                    self._connection_count += 1
+                thread = threading.Thread(target=self._serve, args=(connection,))
+                thread.start()
+                self._threads.append(thread)
 
     def _serve(self, connection: socket.socket) -> None:
         """Runs the handler on one connection and closes it."""
@@ -311,6 +314,10 @@ class BoundTests(PageProxyTestCase):
             self.assertTrue(
                 client.recv(TEST_READ_BYTE_COUNT).startswith(b"HTTP/1.1 200")
             )
+            # The echo shows the target accepted and counted the connection,
+            # which its accept thread does after the proxy has connected.
+            client.sendall(b"x")
+            self.assertEqual(client.recv(TEST_READ_BYTE_COUNT), b"x")
             client.close()
         self.assertEqual(read_until_closed(self.open_tunnel(echo_server.port)), b"")
         self.assertEqual(
@@ -350,12 +357,12 @@ class BoundTests(PageProxyTestCase):
 
         The proxy closes its listener once its gate stops, but in its own
         thread, so a connection may still reach the listener and be closed
-        or reset instead of refused.
+        or reset instead of refused, which a send can see as a broken pipe.
         """
         connection_count = server.connection_count
         try:
             received = read_until_closed(self.open_tunnel(server.port))
-        except (ConnectionRefusedError, ConnectionResetError):
+        except ConnectionError:
             received = b""
         self.assertEqual(received, b"")
         self.assertEqual(server.connection_count, connection_count)

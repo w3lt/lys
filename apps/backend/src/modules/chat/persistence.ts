@@ -127,9 +127,12 @@ export interface GeneratedConversationTitleWriter {
  */
 export interface ReplyPartWriter {
   /**
-   * Stores a new part after the reply's last one.
+   * Stores a new part after the reply's last one, and a tool call's decision
+   * with it.
    * @param assistantMessageId - Streaming reply UUIDv7.
-   * @param draft - The part; a reasoning or text part gets a new UUIDv7.
+   * @param draft - The part; a reasoning or text part gets a new UUIDv7, and
+   * a tool call carries how it was decided, which the returned part leaves
+   * out.
    * @returns The stored part with its identity and times, or undefined when
    * the reply is no longer streaming.
    * @throws If the draft is invalid, such as empty text (before any storage

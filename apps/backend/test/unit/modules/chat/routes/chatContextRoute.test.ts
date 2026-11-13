@@ -1,5 +1,6 @@
 import { chatContextApi } from "@lys/protocol"
 import {
+  ARMITAGE_AGENT_CODE,
   mcpSettingsSchema,
   type BuiltInAgent,
   type McpServerSettings
@@ -17,6 +18,10 @@ import AgentRuntimeService, {
 } from "../../../../../src/modules/agent/agentRuntimeService"
 import AgentService from "../../../../../src/modules/agent/agentService"
 import { formatSystemPrompt } from "../../../../../src/modules/agent/agentContext"
+import {
+  FIND_TOOLS_DEFINITION,
+  formatToolRoutingNote
+} from "../../../../../src/modules/agent/findToolsTool"
 import { TOOL_CALLS_OFF } from "../../../../../src/modules/agent/unofferedTools"
 import type { ReplyContextMeter } from "../../../../../src/modules/agent/replyContextMeter"
 import type { ReplyModel } from "../../../../../src/modules/agent/replyModel"
@@ -66,6 +71,7 @@ import {
   LEADER_STATE_TOOL_FORMATS,
   READ_TEXT_FILE_TOOL
 } from "../../../support/toolFixtures"
+import SqliteToolSearchCallRecordWriter from "../../../../../src/infrastructure/database/conversations/sqliteToolSearchCallRecordWriter"
 
 /** Built-in agent that answers the cases' conversations. */
 const CALIGINIA: BuiltInAgent = Object.freeze({
@@ -73,6 +79,14 @@ const CALIGINIA: BuiltInAgent = Object.freeze({
   name: "Caliginia",
   bio: "Lys's dark side.",
   systemPrompt: "You are the test Caliginia."
+})
+
+/** Built-in agent that answers other agents, never a chat. */
+const ARMITAGE: BuiltInAgent = Object.freeze({
+  code: ARMITAGE_AGENT_CODE,
+  name: "Armitage",
+  bio: "Lys's tool keeper.",
+  systemPrompt: "You are the test Armitage."
 })
 
 /** Model every case names. */
@@ -189,8 +203,8 @@ type ChatContextRouteTestOptions = Readonly<{
 
 /**
  * Creates the agent runtime service of the chat-context route's cases: its
- * one built-in agent, Caliginia, keeps its records on the test's database,
- * and its reply model is one that the route never calls.
+ * built-in agents, Caliginia and Armitage, keep their records on the test's
+ * database, and its reply model is one that the route never calls.
  *
  * @param conversation - The test's database and the history the agents
  * title conversations from.
@@ -204,7 +218,7 @@ function createTestAgentRuntimeService(
   return new AgentRuntimeService({
     agents: new AgentService({
       recordStore: SqliteAgentRecordStore.create(conversation.database),
-      builtInAgents: [CALIGINIA]
+      builtInAgents: [CALIGINIA, ARMITAGE]
     }),
     replyModel: UNUSED_REPLY_MODEL,
     replyContextMeter,
@@ -212,7 +226,10 @@ function createTestAgentRuntimeService(
       buildConversationTitleLookup(
         conversation.history.getConversation(conversationId)
       ),
-    requestLimits: REQUEST_LIMITS
+    requestLimits: REQUEST_LIMITS,
+    toolSearchCallRecords: new SqliteToolSearchCallRecordWriter(
+      conversation.database
+    )
   })
 }
 
@@ -686,7 +703,7 @@ describe("registerChatContextRoute", () => {
     }
   )
 
-  it("measures a stored text file's listing and, for a model trained for tool use, the attachment reader after the offered tools, as a turn offers it", async () => {
+  it("measures a stored text file's listing and, for a model trained for tool use, the attachment reader first and find_tools in place of the offered tools, as a routed turn offers them", async () => {
     const { app, database, replyContextMeter, listDownloadedLlmModels } =
       await createChatContextRouteApp()
     saveConversationWithAttachment(
@@ -714,10 +731,13 @@ describe("registerChatContextRoute", () => {
       images: []
     })
     expect(measured?.tools).toEqual([
-      new AgentTool(LOOK_UP_WORD_TOOL).buildAgentFormat(),
       new AgentTool(buildReadAttachmentDefinition()).buildAgentFormat(),
+      new AgentTool(FIND_TOOLS_DEFINITION).buildAgentFormat(),
       ...LEADER_STATE_TOOL_FORMATS
     ])
+    expect(measured?.messages[0]?.content).toBe(
+      `${CALIGINIA.systemPrompt}\n\n${formatToolRoutingNote(1)}`
+    )
   })
 
   it.each([
@@ -835,7 +855,7 @@ describe("registerChatContextRoute", () => {
     ])
   })
 
-  it("measures the attachment reader after the built-in tools and before a connected MCP server's tool, then the agent state tools, as a turn offers them", async () => {
+  it("measures the attachment reader first, then find_tools in place of the client, built-in, and connected MCP tools, then the agent state tools, as a routed turn offers them", async () => {
     const testApp = await createChatContextRouteApp()
     saveConversationWithAttachment(
       testApp.database,
@@ -866,12 +886,14 @@ describe("registerChatContextRoute", () => {
       testApp.replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
         .tools
     ).toEqual([
-      new AgentTool(READ_TEXT_FILE_TOOL).buildAgentFormat(),
-      new AgentTool(LOOK_UP_WORD_TOOL).buildAgentFormat(),
       new AgentTool(buildReadAttachmentDefinition()).buildAgentFormat(),
-      new AgentTool(echoDefinition).buildAgentFormat(),
+      new AgentTool(FIND_TOOLS_DEFINITION).buildAgentFormat(),
       ...LEADER_STATE_TOOL_FORMATS
     ])
+    expect(
+      testApp.replyContextMeter.findReplyContextMeasurement.mock.calls[0]?.[0]
+        .messages[0]?.content
+    ).toBe(`${CALIGINIA.systemPrompt}\n\n${formatToolRoutingNote(3)}`)
   })
 
   it("leaves out an offered MCP tool whose server is not connected", async () => {
@@ -977,22 +999,32 @@ describe("registerChatContextRoute", () => {
     }
   )
 
-  it("responds with the agent-not-found problem without measuring or reading the inventory for a new conversation's unknown agent", async () => {
-    const { app, replyContextMeter, listDownloadedLlmModels } =
-      await createChatContextRouteApp()
+  it.each([
+    ["an unknown agent", "nobody"],
+    ["Armitage, who answers no chat", ARMITAGE.code]
+  ])(
+    "responds with the agent-not-found problem without measuring or reading the inventory for a new conversation naming %s",
+    async (_label, agentCode) => {
+      const { app, replyContextMeter, listDownloadedLlmModels } =
+        await createChatContextRouteApp()
 
-    const response = await sendChatContextRequest(app, {
-      conversation: { kind: "new", agentCode: "nobody" },
-      model: MODEL
-    })
+      const response = await sendChatContextRequest(app, {
+        conversation: { kind: "new", agentCode },
+        model: MODEL
+      })
 
-    expect(response.statusCode).toBe(404)
-    expect(chatContextApi.responses[404].parse(response.json())).toMatchObject({
-      type: "urn:lys:problem:agent:not-found"
-    })
-    expect(replyContextMeter.findReplyContextMeasurement).not.toHaveBeenCalled()
-    expect(listDownloadedLlmModels).not.toHaveBeenCalled()
-  })
+      expect(response.statusCode).toBe(404)
+      expect(
+        chatContextApi.responses[404].parse(response.json())
+      ).toMatchObject({
+        type: "urn:lys:problem:agent:not-found"
+      })
+      expect(
+        replyContextMeter.findReplyContextMeasurement
+      ).not.toHaveBeenCalled()
+      expect(listDownloadedLlmModels).not.toHaveBeenCalled()
+    }
+  )
 
   it("reads the model's capabilities for a new conversation, which has no attachment", async () => {
     const { app, listDownloadedLlmModels } = await createChatContextRouteApp()

@@ -7,6 +7,7 @@ import ReplyPartSequence, {
   type ReplyToolCallChange
 } from "../../../../src/modules/agent/replyPartSequence"
 import {
+  ASK_ME_TOOL_CALL_DECISION,
   createFixtureUuidV7,
   createToolCallPart,
   FIXTURE_TIMESTAMP
@@ -61,12 +62,14 @@ function createScriptedPart(
  * @param _toolCallId - Call the change is for.
  * @param change - The call's next state.
  * @returns {@link RUNNING_CALL} in the new state, numbering a success's
- * sources.
+ * sources and storing an expired prompt as failed.
  */
 function updateScriptedToolCall(
   _toolCallId: string,
   change: ReplyToolCallChange
 ): ToolCallReplyPart {
+  if (change.status === "expired")
+    return { ...RUNNING_CALL, status: "failed", result: change.result }
   if (change.status !== "succeeded") return { ...RUNNING_CALL, ...change }
   return {
     ...RUNNING_CALL,
@@ -178,6 +181,7 @@ describe("ReplyPartSequence", () => {
       round: 0,
       toolName: "web_search",
       argumentText: '{"query":"moths"}',
+      decision: ASK_ME_TOOL_CALL_DECISION,
       status: "running"
     } as const
 
@@ -270,6 +274,7 @@ describe("ReplyPartSequence", () => {
           round: 0,
           toolName: "web_search",
           argumentText: "{}",
+          decision: ASK_ME_TOOL_CALL_DECISION,
           status: "running"
         })
     ],

@@ -58,8 +58,10 @@ crate of the email MCP server Lys ships.
   through Node's `node:http`, and `web_search` uses Node's `node:https` and
   no search SDK
 - `build` (root `pnpm backend:build`) bundles `src/index.ts` with esbuild into
-  `dist/backend.mjs` and copies the two prompt files beside it; `build.sh`
-  installs that output as the release backend.
+  `dist/backend.mjs` and copies its four prompt files beside it
+  (`caliginia.txt`, `lysiptera.txt`, `armitage.txt`, `title-generation.txt`),
+  because the bundle reads them from its own directory; `build.sh` installs
+  that output as the release backend.
 - Starts the email MCP server Lys ships, `mcps/email`, as a built-in stdio
   server once it is switched on, and runs its `check` subcommand for the
   email account check; the executable is the file `LYS_EMAIL_SERVER_PATH`

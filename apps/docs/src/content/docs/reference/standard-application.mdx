@@ -161,7 +161,11 @@ accepted until [#171](https://github.com/w3lt/lys/issues/171).
 - **Constraint:** the commands are tools, not the permission gateway, and Lys
   has no path policy yet for them to check against. The paths they can reach
   are bounded only by the operating-system user that runs Lys, which today is
-  the person who launched it.
+  the person who launched it, except the files that
+  [#339](https://github.com/w3lt/lys/issues/339) has them refuse: a file
+  whose real path names a private key or credential file or folder of the
+  list the backend's tool call policy denies, and Lys's settings file. That
+  list is the gateway's own, so it is not a second path policy.
 - **Alternatives considered:**
   - A fixed restriction inside the commands, such as the home directory only
     or no hidden files, was rejected when the tools were designed: it would be
@@ -270,9 +274,12 @@ to the wait for the answer to a backend tool's call.
   tool's result; its pending prompts and calls; and the reply-events
   connections that follow it while it waits. Every other API still follows
   API-019.
-- **Constraint:** on Ask me the person may take any time to allow or reject a
-  call, so the backend sets no timer on the wait. The answer, Stop, or backend
-  shutdown ends it. A newer turn in the conversation or deleting the
+- **Constraint:** the backend sets no timer on the wait for a client tool's
+  result. A prompt the person has not answered expires after five minutes
+  ([#342](https://github.com/w3lt/lys/issues/342)): the call is stored as
+  failed without running and the reply goes on, so no answer is given for the
+  person. The answer, Stop, or backend shutdown ends either wait sooner. A
+  newer turn in the conversation or deleting the
   conversation does not end it yet: the delete route cannot reach the running
   generations, and a waiting reply writes nothing that would notice either
   change ([#137](https://github.com/w3lt/lys/issues/137)).
@@ -288,8 +295,9 @@ to the wait for the answer to a backend tool's call.
   newer turn, the old reply keeps waiting, and a later round that only calls
   tools can keep asking for calls until Stop.
 - **Removal condition:** [#137](https://github.com/w3lt/lys/issues/137) ends
-  the wait on a newer turn or a deletion. The missing timer stays by design:
-  the person's answer or Stop bounds the wait.
+  the wait on a newer turn or a deletion. The missing timer on a client tool's
+  result stays by design: the tool runs on the person's machine, and its
+  result or Stop bounds the wait.
 
 ## Tool run failure exception
 

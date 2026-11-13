@@ -1,3 +1,4 @@
+import { TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES } from "@lys/protocol"
 import { describe, expect, it } from "vitest"
 import {
   formatToolCallAnnouncement,
@@ -8,7 +9,11 @@ import {
   createFixtureUuidV7,
   FIXTURE_CONVERSATION_ID
 } from "../../support/conversationFixtures"
-import { buildToolCall, buildToolDefinition } from "../../support/toolFixtures"
+import {
+  buildToolCall,
+  buildToolDefinition,
+  createFixtureApprovalToken
+} from "../../support/toolFixtures"
 
 /** Validated input of a read of the fixture notes. */
 const READ_INPUT: ToolCallInput = Object.freeze({
@@ -112,6 +117,7 @@ describe("formatToolCallAnnouncement", () => {
       target: READ_CALL_TARGET,
       call: READ_CALL,
       step: "approval",
+      approvalToken: createFixtureApprovalToken(1),
       answer: {
         status: "awaiting-person",
         definition: buildToolDefinition("read_text_file"),
@@ -121,6 +127,20 @@ describe("formatToolCallAnnouncement", () => {
 
     expect(formatToolCallAnnouncement(waitingCall, "Caliginia")).toBe(
       "Caliginia is waiting for you to allow or reject read_text_file: Read /notes/todo.md. Nothing is changed."
+    )
+  })
+
+  it("names the agent and the tool of a prompt that expired, and says why its call did not run", () => {
+    const expiredCall: ShownToolCall = {
+      target: READ_CALL_TARGET,
+      call: READ_CALL,
+      step: "approval",
+      approvalToken: createFixtureApprovalToken(1),
+      answer: { status: "expired" }
+    }
+
+    expect(formatToolCallAnnouncement(expiredCall, "Caliginia")).toBe(
+      `Caliginia’s request to use read_text_file expired. No answer came within ${TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES} minutes, so the call did not run and the reply went on without it.`
     )
   })
 

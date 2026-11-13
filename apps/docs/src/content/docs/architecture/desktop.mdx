@@ -483,7 +483,10 @@ The pane lists the built-in agents first, in their own section, then the
 user's agents oldest first, each with its name, code, and bio. A built-in
 agent ships with Lys and cannot be changed or deleted: opening one shows its
 name, bio, and system prompt read-only, with Duplicate, which opens a copy as
-a new agent of the user's own.
+a new agent of the user's own. Armitage, the tool keeper, is listed among
+them; it answers other agents when they look for a tool, never a chat, and
+a copy of it is an ordinary agent of the user's own, without its search
+tools.
 Opening one of the user's agents reads it with its system prompt into an editor; New agent opens
 an empty one. The editor edits the name, bio, and system prompt, and for a new
 agent an optional code. The name, bio, and prompt are marked required, and the
@@ -520,8 +523,9 @@ every turn sends the agent's current system prompt.
 ### Choosing a conversation's agent
 
 The composer's agent menu, left of the weights menu, names the agent that
-answers. Before the first message it lists the built-in agents, then the
-user's own, each with its bio and tagged `selected` or `built-in`; choosing
+answers. Before the first message it lists the built-in agents that answer
+chats, which leaves out Armitage, then the user's own, each with its bio
+and tagged `selected` or `built-in`; choosing
 one selects the agent of the new conversation, and Edit agents opens the
 Agents pane. The chat store keeps the selection, which starts on Caliginia,
 survives starting another conversation, and is not saved across restarts. A
@@ -642,7 +646,24 @@ or switched off has no rows, and its tools come back once it connects; see
 [MCP servers](#mcp-servers). A switch or approval saved for a tool its server
 no longer lists is kept and has no effect.
 
-Below the tools, a "your location" section holds the location `get_location`
+Below the tools and the save status, a "folders tools may use" section lists
+the folders the person lets tool calls name paths in
+(`ApprovedFoldersCard.tsx`), each with Remove, named for its path, and a
+Folder field with Add folder. With none listed, it says tools may use any
+file Lys can read. Enter or Add folder adds the trimmed path when it passes
+`approvedFolderPathSchema` from `@lys/share` (it starts with `/`, has at most
+1024 characters, and no tab or other control character) and is not listed yet; otherwise the field
+is marked invalid and described by what to change, until the person types
+again. Remove moves focus to the field. Whether the folder exists is not
+checked. The section stays shown while the tools are read or cannot be read,
+and the tool lock does not apply to it. A change applies to the store at once
+and saves the `tools` group like a switch, reported by the same save status;
+the store writes the list as `tools.approvedFolders`, left out when empty. The
+backend and the desktop's [file tools](/architecture/host/#file-tools) read
+it from the file at each round of tool calls; see
+[Tool call policy](/architecture/backend/#tool-call-policy).
+
+Below them, a "your location" section holds the location `get_location`
 returns: City, Region, and Country fields, each labelled, described by the
 hint "Each field is optional and holds up to 100 characters.", and filled
 with the saved location. The section stays shown while the tools are read or
@@ -1049,21 +1070,25 @@ Settings → MCP, or switch `mcp__files__read` off.", and the tool
 list is read again so the next request leaves the tool out.
 
 The backend's tool approval service decides which calls need the person: every
-call of a tool that is not saved as Just run, client, backend, and MCP tools
-alike, except `read_attachment` and the agent state tools, which run without
-approval (see the
-[backend's tool approval](/architecture/backend/#tool-approval)). The
-desktop does not decide; it reads neither the switches nor the saved Just run
-list when a call arrives.
+call the [tool call policy](/architecture/backend/#tool-call-policy) allows of
+a tool that is not saved as Just run, client, backend, and MCP tools alike,
+except `read_attachment`, the agent state tools, and `find_tools`, which run
+without approval, and every call of an MCP tool its server marks as
+destructive or as an open-world write, and of `web_search` from a reply's
+sixth call on, even on Just run (see the
+[backend's tool approval](/architecture/backend/#tool-approval)). The desktop
+does not decide; it reads neither the switches nor the saved Just run list
+when a call arrives.
 
 The tool-call store follows every reply the chat store starts or follows on
 its own reply-events connection, so tool calls keep moving while another
-conversation is shown. It takes each prompt from a `tool-approval` event or the
-snapshot's `pendingToolApprovals`, and each call to run from a `tool-call`
-event or the snapshot's `pendingToolCalls`, once. A held call keeps its step,
-approval or run, so a client tool's prompt and its later run request share one
-identifier, and an answered call stays held while the store follows its reply,
-so a snapshot built before the answer arrived does not bring it back:
+conversation is shown. It takes each prompt, with its approval token, from a
+`tool-approval` event or the snapshot's `pendingToolApprovals`, and each call
+to run from a `tool-call` event or the snapshot's `pendingToolCalls`, once. A
+held call keeps its step, approval or run, so a client tool's prompt and its
+later run request share one identifier, and an answered call stays held while
+the store follows its reply, so a snapshot built before the answer arrived
+does not bring it back:
 
 1. A prompt the desktop cannot show (a tool it does not list, or arguments it
    cannot describe) is answered `showFailed` at once. A backend tool's call is
@@ -1072,7 +1097,15 @@ so a snapshot built before the answer arrived does not bring it back:
    same rule the backend applies. An MCP call is always shown: the backend
    checked that its arguments are a JSON object, and the card shows every
    argument as it is.
-2. Every other prompt waits for the person.
+2. Every other prompt waits for the person, for at most five minutes. When
+   the call arrives stored as `failed` while its prompt still waits, in a
+   `reply-part` event or a later snapshot's parts, the backend ended the prompt
+   at its time limit, and the card becomes a "Prompt expired" notice. A call
+   that arrives as `running` or `rejected` first was answered, so its later
+   failure is not taken for an expiry. When the backend refuses an answer
+   because the prompt no longer waits, the card is hidden until the call's
+   stored state arrives, so an answer sent just after the limit still ends in
+   the notice.
 3. A call to run is run at once and its result sent; a call the desktop
    cannot run is answered `runFailed`. Nothing is shown. The desktop does not
    check that the person allowed the call, so a call that another local
@@ -1095,26 +1128,35 @@ Allow once answers `allowed`, after which the backend runs its tool or sends a
 client tool's call back to run; Allow anyway does the same while keeping the
 text. In the field, Escape rejects,
 Enter with an empty draft allows, and Enter with text rejects with that text.
-Several calls wait in the model's order, one card at a time.
+Several calls wait in the model's order, one card at a time. A call that
+waits for the person comes before a notice of an expired prompt, which shows
+the tool and says that no answer came within five minutes, so the call did not
+run and the reply went on without it; the composer's status line announces it
+once. When the card it replaces held focus, Dismiss takes it. Dismiss
+removes the notice and moves focus to the message field, and Escape and Enter
+leave the notice alone.
 
 A read sends the file's text, a search sends its report as JSON, and a
 declared tool failure sends the failure as JSON. A backend or MCP tool's
-result goes from the backend to the model; the desktop receives it only as part of the
-stored call, in a `reply-part` event while the reply streams and in the
-reply's parts of a `reply-snapshot` or of the stored conversation, and shows
-it in the reply's steps.
-Approval answers go
-to the [tool-approval route](/reference/api/#tool-approvals) and results to
-the [tool-result route](/reference/api/#tool-results). When an answer cannot
-be sent, the card says so and Try again sends the same answer without running
-the tool again. An allowed answer still in flight when the call's run request
-arrives does not hold the run back. When the reply ends, by finishing, Stop, or backend shutdown, its
-waiting calls disappear. A newer turn in the conversation or deleting the
-conversation does not end a waiting reply yet
-([#137](https://github.com/w3lt/lys/issues/137)). After a renderer reload, a
-call still waiting is found again through the reply's snapshot when its
-conversation is shown. Quitting the app stops the backend, so its waiting calls
-are gone and the reply is marked interrupted when the backend next starts.
+result goes from the backend to the model; the desktop receives it only as
+part of the stored call, in a `reply-part` event while the reply streams and
+in the reply's parts of a `reply-snapshot` or of the stored conversation, and
+shows it in the reply's steps. Approval answers go, each with the token its
+prompt carried, which the store keeps with the call while it is in its
+approval step, to the [tool-approval route](/reference/api/#tool-approvals)
+and results to the [tool-result route](/reference/api/#tool-results). When an
+answer cannot be sent, the card says so and Try again sends the same answer
+without running the tool again. An allowed answer still in flight when the
+call's run request arrives does not hold the run back. When the reply ends, by
+finishing, Stop, or backend shutdown, its waiting calls disappear; a notice of
+an expired prompt stays until it is dismissed or a later reply of its
+conversation is followed. A newer
+turn in the conversation or deleting the conversation does not end a waiting
+reply yet ([#137](https://github.com/w3lt/lys/issues/137)). After a renderer
+reload, a call still waiting is found again through the reply's snapshot when
+its conversation is shown. Quitting the app stops the backend, so its waiting
+calls are gone and the reply is marked interrupted when the backend next
+starts.
 
 ## Current limitations
 

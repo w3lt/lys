@@ -1,3 +1,4 @@
+import { ARMITAGE_AGENT_CODE } from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   AgentRequestStep,
@@ -27,6 +28,7 @@ import {
   type RunnableBuiltInToolHarness
 } from "../../support/builtInToolContract"
 import { createFixtureUuidV7 } from "../../support/conversationFixtures"
+import { RUN_TOOL_CALL_ID } from "../../support/toolFixtures"
 
 /** Time the clock reads during every run. */
 const NOW = "2026-10-24T10:05:30.000Z"
@@ -166,6 +168,7 @@ async function runStateTool(
   const parsed = findStateTool(tools, name).parseToolCall(callArguments)
   if (parsed.status === "invalid") return parsed
   return await parsed.runToolCall({
+    toolCallId: RUN_TOOL_CALL_ID,
     abortSignal: new AbortController().signal,
     addWebSources: () => []
   })
@@ -200,6 +203,10 @@ describe("buildAgentStateDefinitions", () => {
     expect(definitions[0]?.description).toContain(
       "You can see only your own state."
     )
+  })
+
+  it("gives the tool keeper no state tool", () => {
+    expect(buildAgentStateDefinitions("tool-keeper")).toEqual([])
   })
 
   it.each(["leader", "member"] as const)(
@@ -247,6 +254,16 @@ describe("buildAgentStateTools", () => {
     )
     for (const tool of [...leaderTools, ...memberTools])
       expect(tool.runsWithoutApproval).toBe(true)
+  })
+
+  it("builds no tool for the tool keeper", () => {
+    expect(
+      buildAgentStateTools({
+        self: { code: ARMITAGE_AGENT_CODE, role: "tool-keeper" },
+        requestId: OWN_REQUEST_ID,
+        reader: createReader({})
+      })
+    ).toEqual([])
   })
 
   describe("read_my_state", () => {
@@ -422,6 +439,7 @@ describe("buildAgentStateTools", () => {
       if (parsed?.status !== "parsed") throw new Error("Not parsed")
       vi.setSystemTime(new Date("2026-10-24T10:07:00.000Z"))
       const result = await parsed.runToolCall({
+        toolCallId: RUN_TOOL_CALL_ID,
         abortSignal: new AbortController().signal,
         addWebSources: () => []
       })

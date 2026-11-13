@@ -38,6 +38,8 @@ export type AddWebSources = (
 
 /** What one run of a built-in tool borrows from its turn. */
 export type BuiltInToolRunContext = Readonly<{
+  /** UUIDv7 of the stored call that runs, its part's identity. */
+  toolCallId: string
   /** Stops the run; borrowed for the call. */
   abortSignal: AbortSignal
   /** Numbers the web sources the result shows; borrowed for the call. */
@@ -168,8 +170,9 @@ export type TurnBuiltInTool = Readonly<{
   /**
    * Whether the tool's calls run without asking the person: true only for a
    * tool that reads what the person gave Lys for this conversation, such as
-   * the attachment reader, or what the backend knows about its agents, such
-   * as the agent state tools; every other tool's calls pass the approval
+   * the attachment reader, or what the backend knows about its agents and
+   * the turn's tools, such as the agent state tools, `find_tools`, and the
+   * tool keeper's search tools; every other tool's calls pass the approval
    * gate.
    */
   runsWithoutApproval: boolean

@@ -35,7 +35,7 @@ export const MAXIMUM_AGENT_NAME_LENGTH = 64
 export const MAXIMUM_AGENT_BIO_LENGTH = 128
 
 /**
- * Code of Caliginia, Lys's dark side and one of the two agents the backend
+ * Code of Caliginia, Lys's dark side and one of the three agents the backend
  * ships with.
  *
  * @remarks Clients send it to start a conversation that Caliginia answers,
@@ -48,8 +48,8 @@ export const MAXIMUM_AGENT_BIO_LENGTH = 128
 export const CALIGINIA_AGENT_CODE = "caliginia"
 
 /**
- * Code of Lysiptera, Lys's light side and one of the two agents the backend
- * ships with.
+ * Code of Lysiptera, Lys's light side and one of the three agents the
+ * backend ships with.
  *
  * @remarks Clients send it to start a conversation that Lysiptera answers.
  * The backend reserves it, so no stored agent can be created under it, and
@@ -59,11 +59,26 @@ export const CALIGINIA_AGENT_CODE = "caliginia"
 export const LYSIPTERA_AGENT_CODE = "lysiptera"
 
 /**
+ * Code of Armitage, the built-in tool keeper: the agent the other agents ask
+ * which of their turn's tools fit a task.
+ *
+ * @remarks Armitage answers agents, never chats: a chat or a context
+ * measurement naming it is refused as naming no agent, and clients list it
+ * with the built-in agents but never offer it for a conversation. The
+ * backend reserves it, so no stored agent can be created under it; its
+ * schema version 12 moved a stored agent recorded under it, with its
+ * conversations, to a free code. Changing it frees the old code for stored
+ * agents, so it stays fixed across releases.
+ */
+export const ARMITAGE_AGENT_CODE = "armitage"
+
+/**
  * Name the model calls the tool by that tells an agent its own state: who it
  * is, its role, and the requests it is working on.
  *
- * @remarks The backend offers it to every agent whose model is trained for
- * tool use, so a chat request may not offer or name a tool of this name.
+ * @remarks The backend offers it to every agent but Armitage, when the
+ * agent's model is trained for tool use, so a chat request may not offer or
+ * name a tool of this name.
  */
 export const READ_MY_STATE_TOOL_NAME = "read_my_state"
 
@@ -82,6 +97,17 @@ export const FIND_AGENTS_TOOL_NAME = "find_agents"
  * not offer or name a tool of this name.
  */
 export const READ_AGENT_STATE_TOOL_NAME = "read_agent_state"
+
+/**
+ * Name the model calls the tool by that asks Armitage, the tool keeper, for
+ * the tools that fit a task.
+ *
+ * @remarks The backend offers it in place of a turn's client, built-in, and
+ * MCP tools when the turn's model is trained for tool use and the turn has
+ * at least one such tool, beside the turn's other tools, so a chat request
+ * may not offer or name a tool of this name.
+ */
+export const FIND_TOOLS_TOOL_NAME = "find_tools"
 
 /**
  * Lowercase ASCII letters and digits in hyphen-separated groups, with no

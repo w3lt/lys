@@ -167,12 +167,45 @@ export const chatToolCallSchema = z
 export type ChatToolCall = z.infer<typeof chatToolCallSchema>
 
 /**
+ * Validates the token that binds an answer to one approval prompt.
+ *
+ * @remarks 32 random bytes written as 43 characters of unpadded base64url. The
+ * backend creates one for each prompt it sends and accepts an answer to that
+ * prompt only when the answer carries it, once. It is a secret of the prompt's
+ * lifetime: it is never written to the database or the log, and it stops
+ * working when the prompt is answered or its reply ends. It does not identify
+ * the person: any caller that can read the reply's events can read it (#171).
+ */
+export const chatToolApprovalTokenSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{43}$/)
+
+/**
+ * Validates one approval prompt: the call shown to the person and the token
+ * an answer to it must carry.
+ */
+export const chatToolApprovalPromptSchema = z
+  .strictObject({
+    /** Call the person allows or rejects. */
+    call: chatToolCallSchema,
+    /** Single-use token the answer returns. */
+    approvalToken: chatToolApprovalTokenSchema
+  })
+  .readonly()
+
+/** One approval prompt: the call and the token an answer must carry. */
+export type ChatToolApprovalPrompt = z.infer<
+  typeof chatToolApprovalPromptSchema
+>
+
+/**
  * Validates the event asking a client to run one call of a client tool.
  *
- * @remarks Sent only once the call may run: at once for a tool the person
- * saved as Just run, otherwise after the person allowed the call's approval
- * prompt. The client runs it without asking again. Live only: a client that
- * was not following when it was sent finds the call in the next
+ * @remarks Sent only once the call may run: at once when the backend's tool
+ * call policy allows a call of a tool the person saved as Just run, otherwise
+ * after the person allowed the call's approval prompt. A call the policy
+ * denies is never sent. The client runs it without asking again. Live only: a
+ * client that was not following when it was sent finds the call in the next
  * `reply-snapshot`'s `pendingToolCalls`. Calls of backend tools never arrive
  * here; the backend runs them itself.
  */
@@ -186,20 +219,25 @@ export const chatToolCallEventSchema = z.strictObject({
  * Validates the event asking a client to show one call to the person for
  * approval.
  *
- * @remarks The backend sends it for every checked call of a tool that is not
- * saved as Just run, client and backend tools alike, and runs nothing until
- * the person's answer arrives through the tool-approval endpoint. A tool on
- * Just run gets no prompt. Live only: a client that was not following when it
- * was sent finds the call in the next `reply-snapshot`'s
+ * @remarks The backend sends it for every checked call its tool call policy
+ * does not deny, client, backend, and MCP tools alike, unless the policy
+ * allows the call and its tool is saved as Just run or runs without approval;
+ * a call the policy requires approval of is sent even on Just run. It runs
+ * nothing until the person's answer arrives through the tool-approval
+ * endpoint. A denied call gets no prompt. Live only: a client that was not
+ * following when it was sent finds the call in the next `reply-snapshot`'s
  * `pendingToolApprovals`. When a model round's calls arrive, their prompts,
  * and the run requests of calls that need none, are sent in the model's
- * order; a run request that follows an allowed prompt is sent when the
- * answer arrives.
+ * order; a run request that follows an allowed prompt is sent when the answer
+ * arrives. Each prompt carries its own token; see
+ * {@link chatToolApprovalTokenSchema}.
  */
 export const chatToolApprovalEventSchema = z.strictObject({
   type: z.literal("tool-approval"),
   /** Call the person allows or rejects through the tool-approval endpoint. */
-  call: chatToolCallSchema
+  call: chatToolCallSchema,
+  /** Single-use token the answer to this prompt must carry. */
+  approvalToken: chatToolApprovalTokenSchema
 })
 
 /**

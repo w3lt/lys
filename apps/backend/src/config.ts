@@ -158,6 +158,14 @@ export const backendConfigSchema = z
      */
     lysipteraSystemPrompt: promptTextSchema,
     /**
+     * System prompt of Armitage, the built-in tool keeper, sent first in the
+     * context of every tool search it runs for another agent.
+     *
+     * @remarks Read once from the maintained `armitage.txt` prompt file, with
+     * surrounding whitespace trimmed, when the configuration is loaded.
+     */
+    armitageSystemPrompt: promptTextSchema,
+    /**
      * System prompt sent with every title-generation request.
      *
      * @remarks Read once from the maintained `title-generation.txt` prompt file,
@@ -248,6 +256,7 @@ export function loadBackendConfig(): BackendConfig {
     vmoPort: VMO_PORT,
     caliginiaSystemPrompt: readPrompt("caliginia-system"),
     lysipteraSystemPrompt: readPrompt("lysiptera-system"),
+    armitageSystemPrompt: readPrompt("armitage-system"),
     titleGenerationPrompt: readPrompt("title-generation"),
     titleGenerationMaxAttempts: TITLE_GENERATION_MAX_ATTEMPTS,
     generatedTitleMaxLength: GENERATED_TITLE_MAX_LENGTH,

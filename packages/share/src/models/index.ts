@@ -3,9 +3,11 @@ export {
   agentCodeSchema,
   agentDefinitionSchema,
   agentSchema,
+  ARMITAGE_AGENT_CODE,
   builtInAgentSchema,
   CALIGINIA_AGENT_CODE,
   FIND_AGENTS_TOOL_NAME,
+  FIND_TOOLS_TOOL_NAME,
   LYSIPTERA_AGENT_CODE,
   MAXIMUM_AGENT_BIO_LENGTH,
   MAXIMUM_AGENT_CODE_LENGTH,
@@ -81,6 +83,10 @@ export {
   type LocationSettings,
   type PlaceName
 } from "./location"
+export {
+  approvedFolderPathSchema,
+  MAXIMUM_APPROVED_FOLDER_PATH_LENGTH
+} from "./approvedFolder"
 export { getTypedHostAndPort } from "./internationalizedHost"
 export {
   isWithinJsonValueLimits,

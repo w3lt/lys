@@ -193,7 +193,8 @@ const FORBIDDEN_MESSAGE = "Only leaders can see other agents."
 /** What the state tools offer an agent of each role. */
 const ROLE_SCOPE_TEXT: Readonly<Record<AgentRole, string>> = Object.freeze({
   leader: `As a leader you can find other agents with ${FIND_AGENTS_TOOL_NAME} and read their state with ${READ_AGENT_STATE_TOOL_NAME}.`,
-  member: "As a member you can see only your own state."
+  member: "As a member you can see only your own state.",
+  "tool-keeper": "As the tool keeper you can see no agent's state."
 })
 
 /** Words for each status of a tool call. */
@@ -754,14 +755,18 @@ function buildRoleTools(role: AgentRole): readonly AgentStateToolEntry[] {
 const ROLE_TOOLS: Readonly<Record<AgentRole, readonly AgentStateToolEntry[]>> =
   Object.freeze({
     leader: buildRoleTools("leader"),
-    member: buildRoleTools("member")
+    member: buildRoleTools("member"),
+    "tool-keeper": buildRoleTools("tool-keeper")
   })
 
 /** State tool definitions of each role, built once from its tools. */
 const ROLE_DEFINITIONS: Readonly<Record<AgentRole, readonly ToolDefinition[]>> =
   Object.freeze({
     leader: Object.freeze(ROLE_TOOLS.leader.map((tool) => tool.definition)),
-    member: Object.freeze(ROLE_TOOLS.member.map((tool) => tool.definition))
+    member: Object.freeze(ROLE_TOOLS.member.map((tool) => tool.definition)),
+    "tool-keeper": Object.freeze(
+      ROLE_TOOLS["tool-keeper"].map((tool) => tool.definition)
+    )
   })
 
 /**
@@ -769,7 +774,8 @@ const ROLE_DEFINITIONS: Readonly<Record<AgentRole, readonly ToolDefinition[]>> =
  *
  * @param role - Role of the agent.
  * @returns The frozen definitions, the same on every call: `read_my_state`
- * for both roles, then `find_agents` and `read_agent_state` for a leader.
+ * for a leader and a member, then `find_agents` and `read_agent_state` for a
+ * leader; none for the tool keeper.
  * Each is in the `agents` group, reads this machine, and runs in the
  * backend.
  */

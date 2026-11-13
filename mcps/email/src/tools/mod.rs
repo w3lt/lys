@@ -102,6 +102,34 @@ impl ToolContext {
         }
     }
 
+    /// Creates the context of a mailbox whose account has the address, a
+    /// synthetic password, and servers no test reaches, for tests that never
+    /// sign in.
+    ///
+    /// # Arguments
+    ///
+    /// * `mailbox` - The mailbox.
+    /// * `address` - The account's address, also its user name.
+    /// * `shared` - What the calls of every mailbox of the process share.
+    #[cfg(test)]
+    pub fn build_without_sign_in(mailbox: Mailbox, address: &str, shared: &SharedCalls) -> Self {
+        /// A password no server is asked to accept.
+        const SYNTHETIC_PASSWORD: &str = "synthetic-test-value";
+
+        let variable = serde_json::json!({
+            "address": address,
+            "displayName": "A Person",
+            "userName": address,
+            "password": SYNTHETIC_PASSWORD,
+            "imap": { "host": "imap.example.com", "port": 993, "security": "tls" },
+            "smtp": { "host": "smtp.example.com", "port": 587, "security": "starttls" },
+            "serverKeepsSentCopy": false
+        });
+        let account = crate::account::parse_account_variable(&variable.to_string())
+            .expect("a valid synthetic account");
+        Self::new(mailbox, account, shared.clone())
+    }
+
     /// Takes the next sequence number for a message identifier, from the
     /// sequence every mailbox of the process shares.
     pub fn create_message_sequence(&self) -> u64 {
@@ -409,16 +437,6 @@ pub(crate) fn format_list_argument(texts: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::account::parse_account_variable;
-
-    /// Builds the context of a mailbox whose account has the address.
-    fn build_context(mailbox: Mailbox, address: &str, shared: &SharedCalls) -> ToolContext {
-        let variable = format!(
-            r#"{{"address":"{address}","displayName":"A Person","userName":"{address}","password":"correct horse","imap":{{"host":"imap.example.com","port":993,"security":"tls"}},"smtp":{{"host":"smtp.example.com","port":587,"security":"starttls"}},"serverKeepsSentCopy":false}}"#
-        );
-        let account = parse_account_variable(&variable).expect("account");
-        ToolContext::new(mailbox, account, shared.clone())
-    }
 
     /// Checks that the contexts of two mailboxes made from one
     /// `SharedCalls` take their message numbers from one sequence, so that
@@ -426,8 +444,9 @@ mod tests {
     #[test]
     fn numbers_the_messages_of_both_mailboxes_from_one_sequence() {
         let shared = SharedCalls::new(Trust::create_with_extra_roots(Vec::new()));
-        let person = build_context(Mailbox::Person, "person@example.com", &shared);
-        let lys = build_context(Mailbox::Lys, "lys@example.net", &shared);
+        let person =
+            ToolContext::build_without_sign_in(Mailbox::Person, "person@example.com", &shared);
+        let lys = ToolContext::build_without_sign_in(Mailbox::Lys, "lys@example.net", &shared);
 
         let numbers = [
             person.create_message_sequence(),
@@ -443,7 +462,7 @@ mod tests {
     #[test]
     fn sends_only_from_the_mailbox_s_own_address() {
         let shared = SharedCalls::new(Trust::create_with_extra_roots(Vec::new()));
-        let lys = build_context(Mailbox::Lys, "lys@example.net", &shared);
+        let lys = ToolContext::build_without_sign_in(Mailbox::Lys, "lys@example.net", &shared);
         let refused = Err(ToolFailure::SenderNotMailbox("lys@example.net".to_owned()));
 
         assert_eq!(lys.check_sender("lys@example.net"), Ok(()));

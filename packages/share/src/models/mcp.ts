@@ -564,10 +564,8 @@ export function isBuiltInMcpServerOn(
   builtIn: BuiltInMcpSettings,
   name: BuiltInMcpServerName
 ): boolean {
-  switch (name) {
-    case "email":
-      return builtIn.email.enabled || builtIn.email.lysEnabled
-  }
+  const switches = builtIn[name]
+  return switches.enabled || switches.lysEnabled
 }
 
 /** The switches of an `mcp` group that has none, which are all off. */

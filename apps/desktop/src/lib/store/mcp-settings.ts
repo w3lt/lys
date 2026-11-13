@@ -230,19 +230,24 @@ export function createMcpSettingsSlice(
    * @param serverName - Name of the built-in server.
    * @param isOn - Whether the backend starts it.
    * @returns The save outcome.
+   * @remarks The one server Lys ships, `email`, has a switch per mailbox:
+   * off switches both off, and on switches on each mailbox whose account is
+   * saved.
    */
   function saveBuiltInMcpServerSwitch(
     serverName: BuiltInMcpServerName,
     isOn: boolean
   ): Promise<McpSettingsSaveOutcome> {
     const { settings } = get()
-    switch (serverName) {
-      case "email":
-        return saveEmailSwitches({
-          enabled: isOn && readEmailMailboxAccount(settings, "person") !== null,
-          lysEnabled: isOn && readEmailMailboxAccount(settings, "lys") !== null
-        })
+    const { servers, builtIn } = settings.mcp
+    const switches: McpSettings["builtIn"][BuiltInMcpServerName] = {
+      enabled: isOn && readEmailMailboxAccount(settings, "person") !== null,
+      lysEnabled: isOn && readEmailMailboxAccount(settings, "lys") !== null
     }
+    return saveMcpGroup({
+      servers,
+      builtIn: { ...builtIn, [serverName]: switches }
+    })
   }
 
   /**

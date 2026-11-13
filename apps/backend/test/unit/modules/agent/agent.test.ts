@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util"
 import {
   TOOL_APPROVAL_PROMPT_TIME_LIMIT_MINUTES,
+  WEB_SEARCH_TOOL_NAME,
   type ChatGenerationEvent,
   type ChatToolApprovalAnswer,
   type ChatToolCall,
@@ -71,6 +72,10 @@ import ToolCallGate, {
   type SendToolApprovalPrompt
 } from "../../../../src/modules/toolApproval/toolCallGate"
 import {
+  MAXIMUM_PAID_TOOL_CALLS_PER_TASK,
+  MAXIMUM_TOOL_CALLS_PER_TASK,
+  PAID_TOOL_CALLS_PER_TASK_WITHOUT_APPROVAL,
+  TOOL_CALL_POLICY_ID,
   formatToolCallDenial,
   type ApprovedFolders,
   type ToolCallPolicy
@@ -602,6 +607,25 @@ function buildCallRound(
   return [{ type: "tool-calls", toolCalls: [toolCall] }]
 }
 
+/**
+ * Builds a round in which the model calls one tool several times.
+ *
+ * @param toolName - Name of the tool.
+ * @param argumentTexts - Arguments of each call as the model wrote them, in
+ * call order.
+ * @returns The round's events.
+ */
+function buildRepeatedCallRound(
+  toolName: string,
+  argumentTexts: readonly string[]
+): readonly ReplyStreamEvent[] {
+  const toolCalls = argumentTexts.map((argumentText) => ({
+    toolName,
+    argumentText
+  }))
+  return [{ type: "tool-calls", toolCalls }]
+}
+
 /** Answer of a person who rejected a call with a note. */
 const DECLINED_APPROVAL = Object.freeze({
   status: "rejected",
@@ -647,12 +671,26 @@ const ECHO_MOTH_ROUND: readonly ReplyStreamEvent[] = Object.freeze([
   }
 ])
 
+/** What a case's MCP server marks its echo tool as. */
+type McpToolMarks = Partial<
+  Pick<TurnMcpTool, "isDestructive" | "isOpenWorldWrite">
+>
+
+/** Marks of an echo tool its server calls an open-world write. */
+const OPEN_WORLD_WRITE_MARKS = Object.freeze({
+  isOpenWorldWrite: true
+} satisfies McpToolMarks)
+
+/** Marks of an echo tool its server calls destructive. */
+const DESTRUCTIVE_MARKS = Object.freeze({
+  isDestructive: true
+} satisfies McpToolMarks)
+
 /**
  * Builds the MCP echo tool offered for one case.
  *
  * @param sendToolCall - Runs each call; answers `echo: <text>` by default.
- * @param isDestructive - Whether its server marks it as destructive; false
- * by default.
+ * @param marks - What its server marks it as; unmarked by default.
  * @returns The tool and a spy over its calls.
  */
 function createMcpEchoTool(
@@ -660,12 +698,13 @@ function createMcpEchoTool(
     status: "succeeded",
     content: `echo: ${JSON.stringify(callArguments)}`
   }),
-  isDestructive = false
+  marks: McpToolMarks = {}
 ) {
   const call = vi.fn<TurnMcpTool["sendToolCall"]>(sendToolCall)
   const tool: TurnMcpTool = Object.freeze({
     definition: MCP_ECHO_DEFINITION,
-    isDestructive,
+    isDestructive: marks.isDestructive ?? false,
+    isOpenWorldWrite: marks.isOpenWorldWrite ?? false,
     sendToolCall: call
   })
   return { tool, call }
@@ -686,6 +725,25 @@ function createLookUpWordTool(runScript?: BuiltInToolRunScript) {
   const tool = new ScriptedBuiltInTool(runScript)
   const entry: TurnBuiltInTool = {
     definition: LOOK_UP_WORD_TOOL,
+    tool,
+    runsWithoutApproval: false
+  }
+  return { tool, entry }
+}
+
+/**
+ * Creates a scripted backend tool named as the paid `web_search`, which
+ * looks up the word it is given.
+ *
+ * @returns The tool, recording each run's word, and its turn entry.
+ */
+function createPaidSearchTool() {
+  const tool = new ScriptedBuiltInTool()
+  const entry: TurnBuiltInTool = {
+    definition: toolDefinitionSchema.parse({
+      ...LOOK_UP_WORD_TOOL,
+      name: WEB_SEARCH_TOOL_NAME
+    }),
     tool,
     runsWithoutApproval: false
   }
@@ -3976,7 +4034,7 @@ describe("Agent", () => {
     })
 
     it("asks the person before an MCP tool marked destructive runs, even on Just run, and runs the call once they allow it", async () => {
-      const { tool, call } = createMcpEchoTool(undefined, true)
+      const { tool, call } = createMcpEchoTool(undefined, DESTRUCTIVE_MARKS)
       const sendToolApprovalPrompt = createAllowingPromptSender()
 
       const run = await getAgentReplyOutcome({
@@ -4003,7 +4061,7 @@ describe("Agent", () => {
     })
 
     it("never calls the server for a call of an MCP tool marked destructive that the person rejects on Just run", async () => {
-      const { tool, call } = createMcpEchoTool(undefined, true)
+      const { tool, call } = createMcpEchoTool(undefined, DESTRUCTIVE_MARKS)
 
       const run = await getAgentReplyOutcome({
         openReplyStream: createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND),
@@ -4022,7 +4080,7 @@ describe("Agent", () => {
     })
 
     it("denies a call of an MCP tool marked destructive that names a credential file, without asking the person", async () => {
-      const { tool, call } = createMcpEchoTool(undefined, true)
+      const { tool, call } = createMcpEchoTool(undefined, DESTRUCTIVE_MARKS)
       const sendToolApprovalPrompt = createAllowingPromptSender()
 
       const run = await getAgentReplyOutcome({
@@ -4043,6 +4101,98 @@ describe("Agent", () => {
           result: CREDENTIAL_FILE_DENIAL
         })
       ])
+    })
+
+    it("asks the person before an MCP tool its server marks as an open-world write runs, even on Just run", async () => {
+      const { tool, call } = createMcpEchoTool(
+        undefined,
+        OPEN_WORLD_WRITE_MARKS
+      )
+      const sendToolApprovalPrompt = vi.fn<SendToolApprovalPrompt>(
+        async () => DECLINED_APPROVAL
+      )
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND),
+        mcpTools: [tool],
+        justRunToolNames: ["mcp__files__echo"],
+        sendToolApprovalPrompt
+      })
+
+      expect(sendToolApprovalPrompt).toHaveBeenCalledOnce()
+      expect(call).not.toHaveBeenCalled()
+      expect(run.parts).toEqual([
+        expect.objectContaining({ status: "rejected" })
+      ])
+    })
+
+    it("runs a reply's first paid calls on Just run, asks about each later one, and denies each past the budget, counting across rounds and skipping a denied call", async () => {
+      const { tool, entry } = createPaidSearchTool()
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+      const words = Array.from(
+        { length: MAXIMUM_PAID_TOOL_CALLS_PER_TASK + 1 },
+        (_, index) => `w${index + 1}`
+      )
+      const argumentTexts = words.map((word) => JSON.stringify({ word }))
+      const firstRoundCount = PAID_TOOL_CALLS_PER_TASK_WITHOUT_APPROVAL
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          buildRepeatedCallRound(WEB_SEARCH_TOOL_NAME, [
+            '{"word":"http://127.0.0.1/"}',
+            ...argumentTexts.slice(0, firstRoundCount)
+          ]),
+          buildRepeatedCallRound(
+            WEB_SEARCH_TOOL_NAME,
+            argumentTexts.slice(firstRoundCount)
+          ),
+          FINISH_ROUND
+        ),
+        builtInTools: [entry],
+        sendToolApprovalPrompt
+      })
+
+      const ranWords = words.slice(0, MAXIMUM_PAID_TOOL_CALLS_PER_TASK)
+      expect(
+        sendToolApprovalPrompt.mock.calls.map(([call]) => call.arguments.word)
+      ).toEqual(ranWords.slice(firstRoundCount))
+      expect(tool.startedWords).toHaveLength(ranWords.length)
+      expect(tool.startedWords).toEqual(expect.arrayContaining(ranWords))
+      expect(run.parts[0]).toMatchObject({
+        status: "failed",
+        result: BLOCKED_ADDRESS_DENIAL
+      })
+      expect(run.parts.at(-1)).toMatchObject({
+        status: "failed",
+        result: formatToolCallDenial("paid-tool-budget")
+      })
+      expect(run.parts).toHaveLength(words.length + 1)
+    })
+
+    it("denies a reply's call of one tool past the usage limit without asking, and runs the calls before it", async () => {
+      const { tool, call } = createMcpEchoTool()
+      const sendToolApprovalPrompt = createAllowingPromptSender()
+      const argumentTexts = Array.from(
+        { length: MAXIMUM_TOOL_CALLS_PER_TASK + 1 },
+        (_, index) => JSON.stringify({ text: `t${index}` })
+      )
+
+      const run = await getAgentReplyOutcome({
+        openReplyStream: createRoundStreams(
+          buildRepeatedCallRound("mcp__files__echo", argumentTexts),
+          FINISH_ROUND
+        ),
+        mcpTools: [tool],
+        sendToolApprovalPrompt
+      })
+
+      expect(sendToolApprovalPrompt).not.toHaveBeenCalled()
+      expect(call).toHaveBeenCalledTimes(MAXIMUM_TOOL_CALLS_PER_TASK)
+      expect(run.parts).toHaveLength(argumentTexts.length)
+      expect(run.parts.at(-1)).toMatchObject({
+        status: "failed",
+        result: formatToolCallDenial("usage-limit")
+      })
     })
 
     it("runs a round's allowed call and denies the other, in the model's order", async () => {
@@ -4126,6 +4276,7 @@ describe("Agent", () => {
     const ALLOWED_WITHOUT_GATE = Object.freeze({
       policyEffect: "allow",
       policyReason: null,
+      policyId: TOOL_CALL_POLICY_ID,
       approvalMode: null,
       answer: null
     })
@@ -4137,6 +4288,7 @@ describe("Agent", () => {
     const FAILED_BEFORE_POLICY = Object.freeze({
       policyEffect: null,
       policyReason: null,
+      policyId: null,
       approvalMode: null,
       answer: null,
       outcome: "failed"
@@ -4156,6 +4308,7 @@ describe("Agent", () => {
             toolName: "read_text_file",
             policyEffect: "allow",
             policyReason: null,
+            policyId: TOOL_CALL_POLICY_ID,
             approvalMode: "ask-me",
             answer: "allowed",
             outcome: "succeeded"
@@ -4171,6 +4324,7 @@ describe("Agent", () => {
             toolName: "read_text_file",
             policyEffect: "allow",
             policyReason: null,
+            policyId: TOOL_CALL_POLICY_ID,
             approvalMode: "just-run",
             answer: null,
             outcome: "succeeded"
@@ -4187,6 +4341,7 @@ describe("Agent", () => {
             toolName: "read_text_file",
             policyEffect: "allow",
             policyReason: null,
+            policyId: TOOL_CALL_POLICY_ID,
             approvalMode: "ask-me",
             answer: "declined",
             outcome: "rejected"
@@ -4207,6 +4362,7 @@ describe("Agent", () => {
             toolName: "read_text_file",
             policyEffect: "allow",
             policyReason: null,
+            policyId: TOOL_CALL_POLICY_ID,
             approvalMode: "ask-me",
             answer: "showFailed",
             outcome: "rejected"
@@ -4223,6 +4379,7 @@ describe("Agent", () => {
             toolName: "read_text_file",
             policyEffect: "allow",
             policyReason: null,
+            policyId: TOOL_CALL_POLICY_ID,
             approvalMode: "ask-me",
             answer: "expired",
             outcome: "failed"
@@ -4240,6 +4397,7 @@ describe("Agent", () => {
             toolName: "read_text_file",
             policyEffect: "deny",
             policyReason: "credential-file",
+            policyId: TOOL_CALL_POLICY_ID,
             approvalMode: null,
             answer: null,
             outcome: "failed"
@@ -4248,13 +4406,32 @@ describe("Agent", () => {
         "a destructive MCP tool's call the person allowed on Just run": {
           createScenario: () => ({
             openReplyStream: createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND),
-            mcpTools: [createMcpEchoTool(undefined, true).tool],
+            mcpTools: [createMcpEchoTool(undefined, DESTRUCTIVE_MARKS).tool],
             sendToolApprovalPrompt: createAllowingPromptSender()
           }),
           record: {
             toolName: "mcp__files__echo",
             policyEffect: "require-approval",
             policyReason: "destructive-tool",
+            policyId: TOOL_CALL_POLICY_ID,
+            approvalMode: "just-run",
+            answer: "allowed",
+            outcome: "succeeded"
+          }
+        },
+        "an open-world MCP tool's call the person allowed on Just run": {
+          createScenario: () => ({
+            openReplyStream: createRoundStreams(ECHO_MOTH_ROUND, FINISH_ROUND),
+            mcpTools: [
+              createMcpEchoTool(undefined, OPEN_WORLD_WRITE_MARKS).tool
+            ],
+            sendToolApprovalPrompt: createAllowingPromptSender()
+          }),
+          record: {
+            toolName: "mcp__files__echo",
+            policyEffect: "require-approval",
+            policyReason: "open-world-write",
+            policyId: TOOL_CALL_POLICY_ID,
             approvalMode: "just-run",
             answer: "allowed",
             outcome: "succeeded"
@@ -5299,6 +5476,7 @@ describe("Agent", () => {
 
       expect(keeper.findTools).toHaveBeenCalledExactlyOnceWith({
         task: "define a word",
+        searchCallId: run.parts[0]?.id,
         tools: [READ_TEXT_FILE_TOOL, LOOK_UP_WORD_TOOL, mcpTool.definition],
         conversationId: store.conversationId,
         model: TURN_REQUEST.model,

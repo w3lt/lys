@@ -233,7 +233,10 @@ creates the parent directory and writes the default document.
 Every save writes a temporary file beside `settings.json`, readable and
 writable only by its owner on Unix, flushes it to disk, and renames it over the
 file, so a reader sees the previous document or the whole new one, never part
-of a write. The Tauri host is the file's only writer; the backend reads it for
+of a write. A save that stops midway leaves its temporary file,
+`settings.json.<process id>.<number>.tmp`; the tool call policy and the
+desktop's file tools refuse it as they refuse `settings.json`. The Tauri host
+is the file's only writer; the backend reads it for
 the model provider and its key, the Tavily API key, the Just run choices,
 the MCP servers with their switches, and the email account with its password.
 

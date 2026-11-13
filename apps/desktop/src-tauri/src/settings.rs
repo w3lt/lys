@@ -30,7 +30,7 @@ use secrets::SecretsSettings;
 use tools::ToolSettings;
 
 use std::{
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     fs,
     io::{self, ErrorKind, Write},
     path::{Path, PathBuf},
@@ -45,6 +45,10 @@ use crate::utils::lys_home::LysHome;
 /// Number of temporary files this process has named, so that two saves
 /// running at once in one process never share a temporary file.
 static TEMPORARY_FILE_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// Last part of a temporary file's name, after the saved file's name, the
+/// process id, and the number.
+const TEMPORARY_FILE_NAME_ENDING: &str = ".tmp";
 
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -315,9 +319,43 @@ fn save_owner_only_file_atomically(path: &Path, contents: &[u8]) -> io::Result<(
 fn build_temporary_path(path: &Path) -> PathBuf {
     let temporary_file_number = TEMPORARY_FILE_COUNT.fetch_add(1, Ordering::Relaxed);
     let mut file_name = path.file_name().map(OsString::from).unwrap_or_default();
-    file_name.push(format!(".{}.{temporary_file_number}.tmp", process::id()));
+    file_name.push(format!(
+        ".{}.{temporary_file_number}{TEMPORARY_FILE_NAME_ENDING}",
+        process::id()
+    ));
 
     path.with_file_name(file_name)
+}
+
+/// Answers whether `name` has the form [`build_temporary_path`] gives the
+/// temporary file of a save of the file named `saved_file_name`: that name,
+/// `.`, one or more ASCII digits, `.`, one or more ASCII digits, and `.tmp`.
+///
+/// Both names are compared in lowercase, as the backend's tool call policy
+/// compares path parts, so a name in other letter case matches too. A name
+/// that is not UTF-8 is compared with its invalid bytes replaced, which no
+/// digit matches. The shared cases in
+/// `packages/share/test/fixtures/settings-file-copy-names.json` keep this
+/// and the policy's `SETTINGS_FILE_COPY_ENDING_PATTERN` alike.
+pub fn is_temporary_file_name(name: &OsStr, saved_file_name: &OsStr) -> bool {
+    let name = name.to_string_lossy().to_lowercase();
+    let saved_file_name = saved_file_name.to_string_lossy().to_lowercase();
+    let Some(numbers) = name
+        .strip_prefix(saved_file_name.as_str())
+        .and_then(|rest| rest.strip_prefix('.'))
+        .and_then(|rest| rest.strip_suffix(TEMPORARY_FILE_NAME_ENDING))
+    else {
+        return false;
+    };
+
+    numbers
+        .split_once('.')
+        .is_some_and(|(process_id, number)| is_digit_run(process_id) && is_digit_run(number))
+}
+
+/// Answers whether `text` is one or more ASCII digits.
+fn is_digit_run(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 /// Writes `contents` to the new temporary file at `temporary_path`, syncs it,
@@ -398,6 +436,7 @@ fn create_parent_dir(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use std::{
+        ffi::OsStr,
         fs,
         path::{Path, PathBuf},
     };
@@ -405,8 +444,8 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{
-        build_temporary_path, create_owner_only_file, find_settings_file, load_settings_file,
-        save_settings_file, LysSettings,
+        build_temporary_path, create_owner_only_file, find_settings_file, is_temporary_file_name,
+        load_settings_file, save_settings_file, LysSettings,
     };
     use crate::tools::test_directory::TestDirectory;
 
@@ -1101,6 +1140,60 @@ mod tests {
             );
             assert!(name.ends_with(".tmp"), "{name}");
         }
+    }
+
+    #[test]
+    fn recognizes_every_temporary_file_name_a_save_writes() {
+        let path = Path::new("/nonexistent/lys/settings.json");
+
+        for _ in 0..3 {
+            let temporary_path = build_temporary_path(path);
+            let name = temporary_path.file_name().expect("a file name");
+
+            assert!(
+                is_temporary_file_name(name, OsStr::new("settings.json")),
+                "{}",
+                name.to_string_lossy()
+            );
+        }
+        assert!(!is_temporary_file_name(
+            OsStr::new("settings.json"),
+            OsStr::new("settings.json")
+        ));
+    }
+
+    /// Names that the host and the backend's tool call policy must judge
+    /// alike as leftover copies of the settings file; the policy's tests read
+    /// the same file.
+    const SHARED_COPY_NAME_CASES: &str =
+        include_str!("../../../../packages/share/test/fixtures/settings-file-copy-names.json");
+
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    /// One case of the shared copy names.
+    struct SharedCopyNameCase {
+        /// What the case checks.
+        case: String,
+        /// One file name, beside a settings file named `settings.json`.
+        name: String,
+        /// Whether the name is that of a copy a stopped save left.
+        copy: bool,
+    }
+
+    #[test]
+    fn judges_the_shared_copy_names_as_the_backend_policy_does() {
+        let cases: Vec<SharedCopyNameCase> =
+            serde_json::from_str(SHARED_COPY_NAME_CASES).expect("the shared copy names parse");
+        let mismatches: Vec<String> = cases
+            .into_iter()
+            .filter(|name_case| {
+                is_temporary_file_name(OsStr::new(&name_case.name), OsStr::new("settings.json"))
+                    != name_case.copy
+            })
+            .map(|name_case| name_case.case)
+            .collect();
+
+        assert_eq!(mismatches, Vec::<String>::new());
     }
 
     #[test]

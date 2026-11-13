@@ -57,7 +57,8 @@ export const readTextFileErrorSchema = z.discriminatedUnion("code", [
   buildCodeOnlyFailureSchema({
     /**
      * The file's real path has a name of `CREDENTIAL_FILE_LIST` as a part,
-     * or the file is Lys's settings file, so none of it was read.
+     * or the file is Lys's settings file or a copy of it that a stopped save
+     * left, so none of it was read.
      */
     code: z.literal("credentialFile")
   }),

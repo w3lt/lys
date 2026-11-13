@@ -11,6 +11,7 @@ import type {
   UpdateReplyToolCallInput
 } from "../../../modules/conversation/records"
 import type { ToolCallDecisionRecord } from "../../../modules/toolApproval/toolCallDecisionRecord"
+import { TOOL_CALL_POLICY_ID } from "../../../modules/toolApproval/toolCallPolicy"
 import type {
   DatabaseStatementCompiler,
   DatabaseWriter
@@ -117,13 +118,13 @@ const CREATE_CONVERSATION_SOURCE_SQL = `INSERT INTO conversation_sources
 /**
  * Stores the decision record of one tool call just stored: its conversation,
  * the conversation's agent, its tool, and its status and times come from the
- * call's row; bound to the policy's effect and reason and the approval mode,
- * then the call.
+ * call's row; bound to the policy's effect, reason, and identity and the
+ * approval mode, then the call.
  */
 const CREATE_TOOL_CALL_DECISION_SQL = `INSERT INTO tool_call_decisions
   (call_id, conversation_id, agent_code, tool_name, policy_effect,
-    policy_reason, approval_mode, outcome, created_at, updated_at)
-  SELECT p.id, p.conversation_id, c.agent_code, p.tool_name, ?, ?, ?,
+    policy_reason, policy_id, approval_mode, outcome, created_at, updated_at)
+  SELECT p.id, p.conversation_id, c.agent_code, p.tool_name, ?, ?, ?, ?,
     p.status, p.created_at, p.updated_at
   FROM conversation_messages p JOIN conversations c ON c.id = p.conversation_id
   WHERE p.id = ? AND p.role = 'tool_call'`
@@ -144,6 +145,11 @@ type ToolCallDecisionColumns = Readonly<{
   policyEffect: string | null
   /** Rule behind `require-approval` or `deny`; null otherwise. */
   policyReason: string | null
+  /**
+   * Identity of the rule set that decided the call; null when the policy
+   * was not asked.
+   */
+  policyId: string | null
   /** `ask-me` or `just-run`; null when the call never reached the gate. */
   approvalMode: string | null
 }>
@@ -320,8 +326,8 @@ function updateToolCallResult(
  * Builds the column values of one call's decision record.
  *
  * @param decision - How the call was decided.
- * @returns The policy's effect and reason and the approval mode, null where
- * the decision has none.
+ * @returns The policy's effect, reason, and identity, which is this
+ * build's, and the approval mode, null where the decision has none.
  */
 function buildToolCallDecisionColumns(
   decision: ToolCallDecisionRecord
@@ -333,6 +339,7 @@ function buildToolCallDecisionColumns(
       policyDecision === undefined || policyDecision.effect === "allow"
         ? null
         : policyDecision.reason,
+    policyId: policyDecision === undefined ? null : TOOL_CALL_POLICY_ID,
     approvalMode: decision.approvalMode ?? null
   }
 }
@@ -358,6 +365,7 @@ function createToolCallDecision(
       .run(
         columns.policyEffect,
         columns.policyReason,
+        columns.policyId,
         columns.approvalMode,
         toolCallId
       ).changes === 1

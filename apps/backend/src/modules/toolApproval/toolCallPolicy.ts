@@ -57,7 +57,8 @@ export type ReadApprovedFolders = () => Promise<ApprovedFolders>
 export type ToolCallPolicy = Readonly<{
   /**
    * Absolute path of Lys's settings file, which holds its API keys and
-   * passwords; a call naming it is denied.
+   * passwords; a call naming it, or a copy of it that a stopped save left,
+   * is denied.
    */
   settingsFilePath: string
   /**
@@ -91,9 +92,8 @@ export type ToolCallRules = Readonly<{
  * authorization spec that its rules read, assembled by the gateway from what
  * the backend trusts, never from what the model claims.
  *
- * @remarks No rule reads an attribute of the subject (the agent) or the
- * environment (the conversation), so the request has none; a rule that needs
- * one adds it.
+ * @remarks No rule reads an attribute of the subject (the agent), so the
+ * request has none; a rule that needs one adds it.
  */
 export type ToolCallRequest = Readonly<{
   /** What the call does: attributes of the tool it names. */
@@ -104,11 +104,31 @@ export type ToolCallRequest = Readonly<{
      * not mark so.
      */
     isDestructive: boolean
+    /**
+     * Whether the tool's MCP server marks it as one that reaches beyond
+     * Lys and this machine (`openWorldHint: true`) without marking it
+     * read-only, such as one that sends an email; false for every tool of
+     * Lys's own and for an MCP tool its server does not mark so.
+     */
+    isOpenWorldWrite: boolean
+    /**
+     * Whether a call spends a paid credit of the person's: true for
+     * `web_search`, whose provider bills each search, and false otherwise.
+     */
+    isPaid: boolean
   }>
   /** What the call acts on. */
   resource: Readonly<{
     /** The call's arguments, after `AgentTool` checked their types. */
     arguments: ToolCallArguments
+  }>
+  /** The state the call is made in. */
+  environment: Readonly<{
+    /**
+     * Number of earlier calls of the same tool in the call's reply, its
+     * task, that the policy did not deny; a non-negative integer.
+     */
+    usageInTask: number
   }>
 }>
 
@@ -118,9 +138,12 @@ export type ToolCallDenialReason =
   | "outside-approved-folders"
   | "settings-unreadable"
   | "blocked-address"
+  | "usage-limit"
+  | "paid-tool-budget"
 
 /** Why the policy requires the person's approval of a call. */
-type ToolCallApprovalReason = "destructive-tool"
+type ToolCallApprovalReason =
+  "destructive-tool" | "open-world-write" | "paid-tool"
 
 /**
  * The policy's answer for one call.
@@ -160,6 +183,17 @@ const CREDENTIAL_NAMES: ReadonlySet<string> = new Set([
 /** Path parts of Lys's settings file a value must hold, in order. */
 const SETTINGS_FILE_PART_COUNT = 2
 
+/**
+ * What follows the settings file's name in the name of the temporary copy
+ * a save writes beside it: `.`, a process id, `.`, a number, and `.tmp`, as
+ * `build_temporary_path` in the desktop's `src-tauri/src/settings.rs`
+ * writes it. A save that stops midway leaves the copy, which holds the same
+ * secrets; the shared cases in
+ * `packages/share/test/fixtures/settings-file-copy-names.json` keep both
+ * sides alike.
+ */
+const SETTINGS_FILE_COPY_ENDING_PATTERN = /^\.\d+\.\d+\.tmp$/u
+
 /** A run of path separators, `/` or `\`. */
 const PATH_SEPARATOR_PATTERN = /[/\\]+/u
 
@@ -194,6 +228,33 @@ const WHITESPACE_PATTERN = /\s/u
  */
 const BARE_HOST_PATTERN =
   /^(?:\/\/|\\\\)?(?:[^/\\]*@)?(?<host>\[[^\]]*\]|[^:/\\[\]@]+)(?:[:/\\].*)?$/u
+
+/**
+ * Identity of the rule set {@link decideToolCall} applies, stored with every
+ * decision it makes; it changes whenever a rule or a limit changes, so a
+ * stored decision names the rules that made it.
+ */
+export const TOOL_CALL_POLICY_ID = "lys-policy-v1"
+
+/**
+ * Number of calls of one tool one reply may make; a later call is denied.
+ * High enough for a reply that reads many files, low enough to stop a model
+ * that calls one tool in a loop.
+ */
+export const MAXIMUM_TOOL_CALLS_PER_TASK = 100
+
+/**
+ * Number of calls of a paid tool one reply makes in the person's approval
+ * mode; each later call asks the person, even on Just run.
+ */
+export const PAID_TOOL_CALLS_PER_TASK_WITHOUT_APPROVAL = 5
+
+/**
+ * Number of calls of a paid tool one reply may make, the most of the
+ * person's paid credits one reply may spend; a later call is denied, even
+ * one the person would allow.
+ */
+export const MAXIMUM_PAID_TOOL_CALLS_PER_TASK = 20
 
 /** Folders when none is listed: the folder rule is off. */
 const ANY_FOLDER: ApprovedFolders = Object.freeze({ kind: "any" })
@@ -233,10 +294,37 @@ const DENIED_BLOCKED_ADDRESS: ToolCallDecision = Object.freeze({
   reason: "blocked-address"
 })
 
+/** Answer for a call past the number of calls of one tool one reply may make. */
+const DENIED_USAGE_LIMIT: ToolCallDecision = Object.freeze({
+  effect: "deny",
+  reason: "usage-limit"
+})
+
+/** Answer for a paid tool's call past the calls one reply may make of it. */
+const DENIED_PAID_TOOL_BUDGET: ToolCallDecision = Object.freeze({
+  effect: "deny",
+  reason: "paid-tool-budget"
+})
+
 /** Answer for a call of a tool its MCP server marks as destructive. */
 const DESTRUCTIVE_TOOL_APPROVAL_REQUIRED: ToolCallDecision = Object.freeze({
   effect: "require-approval",
   reason: "destructive-tool"
+})
+
+/**
+ * Answer for a call of a tool its MCP server marks as reaching beyond Lys
+ * and this machine without marking it read-only.
+ */
+const OPEN_WORLD_WRITE_APPROVAL_REQUIRED: ToolCallDecision = Object.freeze({
+  effect: "require-approval",
+  reason: "open-world-write"
+})
+
+/** Answer for a paid tool's call past the reply's calls without approval. */
+const PAID_TOOL_APPROVAL_REQUIRED: ToolCallDecision = Object.freeze({
+  effect: "require-approval",
+  reason: "paid-tool"
 })
 
 /** Sentences the model reads for each denial, by reason. */
@@ -248,7 +336,9 @@ const DENIAL_MESSAGES = Object.freeze({
   "settings-unreadable":
     "This call was denied and did not run: an argument names a file or folder, and Lys cannot read the folders the person lets tools use, because its settings file cannot be read, so no file or folder may be named until the file is fixed. Do not try to reach it another way; tell the person that Lys's settings file cannot be read.",
   "blocked-address":
-    "This call was denied and did not run: an argument names this machine, a private network, or another address Lys never connects to. Do not try to reach it another way; tell the person what you need it for."
+    "This call was denied and did not run: an argument names this machine, a private network, or another address Lys never connects to. Do not try to reach it another way; tell the person what you need it for.",
+  "usage-limit": `This call was denied and did not run: this reply has already called this tool ${MAXIMUM_TOOL_CALLS_PER_TASK} times, the most one reply may. Do not call it again in this reply; tell the person what you found and what is left to do.`,
+  "paid-tool-budget": `This call was denied and did not run: this reply has already called this tool ${MAXIMUM_PAID_TOOL_CALLS_PER_TASK} times, and each call spends the person's paid credits, so no reply may call it more. Do not call it again in this reply; work with the results you have and tell the person what is left to do.`
 } satisfies Readonly<Record<ToolCallDenialReason, string>>)
 
 /**
@@ -344,22 +434,47 @@ function holdsPathSequence(
 }
 
 /**
+ * Reads a path part that names a leftover copy of Lys's settings file as
+ * the settings file's name.
+ *
+ * @param part - Lowercase path part.
+ * @param settingsFileName - Name of Lys's settings file, in lowercase.
+ * @returns `settingsFileName` when `part` is that name followed by
+ * `SETTINGS_FILE_COPY_ENDING_PATTERN`; otherwise `part`.
+ */
+function readCopyAsSettingsFileName(
+  part: string,
+  settingsFileName: string
+): string {
+  return part.startsWith(settingsFileName) &&
+    SETTINGS_FILE_COPY_ENDING_PATTERN.test(part.slice(settingsFileName.length))
+    ? settingsFileName
+    : part
+}
+
+/**
  * Answers whether a path names a private key or credential file, a folder
- * of them, or Lys's settings file.
+ * of them, Lys's settings file, or a copy of it that a stopped save left.
  *
  * @param path - Path, or text that holds one.
  * @param settingsFileParts - Last parts of Lys's settings file path, in
  * lowercase: its folder and its name.
  * @returns True when one of its parts is a credential name, or its parts
- * hold `settingsFileParts`.
+ * hold `settingsFileParts`, a copy's name read as the settings file's.
  */
 function namesCredentialPath(
   path: string,
   settingsFileParts: readonly string[]
 ): boolean {
   const parts = listPathParts(path)
+  const settingsFileName = settingsFileParts.at(-1)
+  const settingsParts =
+    settingsFileName === undefined
+      ? parts
+      : parts.map((part) => readCopyAsSettingsFileName(part, settingsFileName))
   return (
-    parts.some(isCredentialPart) || holdsPathSequence(parts, settingsFileParts)
+    parts.some(isCredentialPart) ||
+    holdsPathSequence(settingsParts, settingsFileParts)
   )
 }
 
@@ -550,16 +665,25 @@ function namesBlockedAddress(text: string): boolean {
  * @param rules - What the rules need to know about this machine and the
  * folders the person lets tools use.
  * @returns `deny` with `credential-file` when an argument text names a
- * private key or credential file, a folder of them, or Lys's settings file;
- * otherwise `deny` with `outside-approved-folders` when folders are listed
+ * private key or credential file, a folder of them, Lys's settings file, or
+ * a copy of it that a stopped save left; otherwise `deny` with
+ * `outside-approved-folders` when folders are listed
  * and an argument text, or a line of one, names a path outside them, or with
  * `settings-unreadable` when it names any path while the folders cannot be
  * read;
  * otherwise `deny` with `blocked-address` when an argument text is a URL or
- * host of this machine or a blocked IP address; otherwise `require-approval`
- * with `destructive-tool` when the tool is marked destructive; otherwise
- * `allow`. The deny rules come first, so a call that breaks one is denied
- * even when it would also need approval.
+ * host of this machine or a blocked IP address; otherwise `deny` with
+ * `usage-limit` when the reply already made
+ * {@link MAXIMUM_TOOL_CALLS_PER_TASK} calls of the tool that were not
+ * denied, and with `paid-tool-budget` when the tool is paid and the reply
+ * already made {@link MAXIMUM_PAID_TOOL_CALLS_PER_TASK} of them; otherwise
+ * `require-approval` with `destructive-tool` when the tool is marked
+ * destructive, with `open-world-write` when it is marked as reaching beyond
+ * Lys and this machine and not read-only, and with `paid-tool` when it is
+ * paid and the reply already made
+ * {@link PAID_TOOL_CALLS_PER_TASK_WITHOUT_APPROVAL} calls of it that were
+ * not denied; otherwise `allow`. The deny rules come first, so a call that
+ * breaks one is denied even when it would also need approval.
  * @remarks Reads argument texts only: it resolves no host name and follows
  * no symbolic link, and a text with whitespace is never read as an address.
  * A path is read only from a text, or a line of one, that starts as one; a
@@ -582,7 +706,26 @@ export function decideToolCall(
   const folderDecision = decideApprovedFolders(texts, rules)
   if (folderDecision !== undefined) return folderDecision
   if (texts.some(namesBlockedAddress)) return DENIED_BLOCKED_ADDRESS
-  if (request.action.isDestructive) return DESTRUCTIVE_TOOL_APPROVAL_REQUIRED
+  return decideUsageAndAction(request)
+}
+
+/**
+ * Decides a call that names no forbidden path or address by its usage in
+ * the reply and the marks of its tool.
+ *
+ * @param request - What the gateway knows about the call.
+ * @returns As {@link decideToolCall} returns from its usage limit on.
+ */
+function decideUsageAndAction(request: ToolCallRequest): ToolCallDecision {
+  const { action } = request
+  const { usageInTask } = request.environment
+  if (usageInTask >= MAXIMUM_TOOL_CALLS_PER_TASK) return DENIED_USAGE_LIMIT
+  if (action.isPaid && usageInTask >= MAXIMUM_PAID_TOOL_CALLS_PER_TASK)
+    return DENIED_PAID_TOOL_BUDGET
+  if (action.isDestructive) return DESTRUCTIVE_TOOL_APPROVAL_REQUIRED
+  if (action.isOpenWorldWrite) return OPEN_WORLD_WRITE_APPROVAL_REQUIRED
+  if (action.isPaid && usageInTask >= PAID_TOOL_CALLS_PER_TASK_WITHOUT_APPROVAL)
+    return PAID_TOOL_APPROVAL_REQUIRED
   return ALLOWED
 }
 

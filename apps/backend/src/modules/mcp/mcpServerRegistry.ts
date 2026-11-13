@@ -81,6 +81,12 @@ export type TurnMcpTool = Readonly<{
    */
   isDestructive: boolean
   /**
+   * Whether the tool's server marked it, when the turn found it, as
+   * reaching beyond Lys and this machine without marking it read-only; the
+   * tool call policy then asks the person before each call.
+   */
+  isOpenWorldWrite: boolean
+  /**
    * Runs one call on the tool's server as it is connected when the call
    * runs.
    *
@@ -703,6 +709,7 @@ export default class McpServerRegistry {
           tool: Object.freeze({
             definition,
             isDestructive: lookup.isDestructive,
+            isOpenWorldWrite: lookup.isOpenWorldWrite,
             sendToolCall: (
               callArguments: McpToolCallArguments,
               abortSignal: AbortSignal

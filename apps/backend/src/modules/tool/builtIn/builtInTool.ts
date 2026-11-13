@@ -38,6 +38,8 @@ export type AddWebSources = (
 
 /** What one run of a built-in tool borrows from its turn. */
 export type BuiltInToolRunContext = Readonly<{
+  /** UUIDv7 of the stored call that runs, its part's identity. */
+  toolCallId: string
   /** Stops the run; borrowed for the call. */
   abortSignal: AbortSignal
   /** Numbers the web sources the result shows; borrowed for the call. */

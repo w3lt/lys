@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import {
+  MAXIMUM_PAID_TOOL_CALLS_PER_TASK,
+  MAXIMUM_TOOL_CALLS_PER_TASK,
+  PAID_TOOL_CALLS_PER_TASK_WITHOUT_APPROVAL,
   buildApprovedFolders,
   decideToolCall,
   formatToolCallDenial,
@@ -39,22 +42,54 @@ function buildListedRules(folderPaths: readonly string[]): ToolCallRules {
 /** Rules approving `/home/ada/work/app` and `/srv/shared` only. */
 const LISTED_RULES = buildListedRules(["/home/ada/work/app", "/srv/shared"])
 
+/** What a case's request says about its tool and its usage. */
+type RequestTraits = Readonly<{
+  /** Whether the tool's server marks it as destructive. */
+  isDestructive?: boolean
+  /** Whether the tool's server marks it as an open-world write. */
+  isOpenWorldWrite?: boolean
+  /** Whether a call spends a paid credit. */
+  isPaid?: boolean
+  /** Earlier calls of the tool in the reply that were not denied. */
+  usageInTask?: number
+}>
+
+/** Traits of a destructive tool's first call. */
+const DESTRUCTIVE_TRAITS = Object.freeze({
+  isDestructive: true
+} satisfies RequestTraits)
+
 /**
  * Builds what the gateway knows about one call.
  *
  * @param callArguments - The call's checked arguments.
- * @param isDestructive - Whether the tool's server marks it as destructive;
- * false by default.
+ * @param traits - The tool's marks and the call's usage; by default an
+ * unmarked tool's first call.
  * @returns The request.
  */
 function buildRequest(
   callArguments: ChatToolCall["arguments"],
-  isDestructive = false
+  traits: RequestTraits = {}
 ): ToolCallRequest {
   return Object.freeze({
-    action: Object.freeze({ isDestructive }),
-    resource: Object.freeze({ arguments: callArguments })
+    action: Object.freeze({
+      isDestructive: traits.isDestructive ?? false,
+      isOpenWorldWrite: traits.isOpenWorldWrite ?? false,
+      isPaid: traits.isPaid ?? false
+    }),
+    resource: Object.freeze({ arguments: callArguments }),
+    environment: Object.freeze({ usageInTask: traits.usageInTask ?? 0 })
   })
+}
+
+/**
+ * Builds what the gateway knows about a call without arguments.
+ *
+ * @param traits - The tool's marks and the call's usage.
+ * @returns The request.
+ */
+function buildTraitRequest(traits: RequestTraits): ToolCallRequest {
+  return buildRequest(Object.freeze({}), traits)
 }
 
 /**
@@ -95,6 +130,33 @@ const DENIED_BLOCKED_ADDRESS = Object.freeze({
 /** Decision for a call no rule denies. */
 const ALLOWED = Object.freeze({ effect: "allow" } satisfies ToolCallDecision)
 
+/**
+ * Reads the cases of a fixture the host's tests read too.
+ *
+ * @param fileName - Name of a file in `packages/share/test/fixtures`.
+ * @param caseSchema - Schema of one case.
+ * @returns The cases, validated.
+ * @throws When the file cannot be read or a case does not match the schema.
+ */
+function readSharedCases<CaseSchema extends z.ZodType>(
+  fileName: string,
+  caseSchema: CaseSchema
+): readonly z.output<CaseSchema>[] {
+  return z
+    .array(caseSchema)
+    .parse(
+      JSON.parse(
+        readFileSync(
+          new URL(
+            `../../../../../../packages/share/test/fixtures/${fileName}`,
+            import.meta.url
+          ),
+          "utf8"
+        )
+      )
+    )
+}
+
 /** Validates one case of the shared credential file names. */
 const sharedCredentialNameCaseSchema = z
   .strictObject({
@@ -112,19 +174,35 @@ const sharedCredentialNameCaseSchema = z
  * host's tests in `src-tauri/src/tools/credential_files.rs` read the same
  * file.
  */
-const SHARED_CREDENTIAL_NAME_CASES = z
-  .array(sharedCredentialNameCaseSchema)
-  .parse(
-    JSON.parse(
-      readFileSync(
-        new URL(
-          "../../../../../../packages/share/test/fixtures/credential-file-names.json",
-          import.meta.url
-        ),
-        "utf8"
-      )
-    )
-  )
+const SHARED_CREDENTIAL_NAME_CASES = readSharedCases(
+  "credential-file-names.json",
+  sharedCredentialNameCaseSchema
+)
+
+/**
+ * Validates one case of the names that may be a leftover copy of the
+ * settings file.
+ */
+const sharedSettingsFileCopyNameCaseSchema = z
+  .strictObject({
+    /** What the case checks. */
+    case: z.string(),
+    /** One file name, beside a settings file named `settings.json`. */
+    name: z.string(),
+    /** Whether the name is that of a copy a stopped save left. */
+    copy: z.boolean()
+  })
+  .readonly()
+
+/**
+ * Names that this policy and the desktop's file tools must judge alike as
+ * leftover copies of the settings file; the host's tests in
+ * `src-tauri/src/settings.rs` read the same file.
+ */
+const SHARED_SETTINGS_FILE_COPY_NAME_CASES = readSharedCases(
+  "settings-file-copy-names.json",
+  sharedSettingsFileCopyNameCaseSchema
+)
 
 /** Values naming a private key or credential file, by what each shows. */
 const CREDENTIAL_FILE_CASES = Object.freeze({
@@ -169,7 +247,11 @@ const CREDENTIAL_FILE_CASES = Object.freeze({
   "Lys's settings file with a doubled slash": "~/.lys//settings.json",
   "a command reading Lys's settings file": "cat ~/.lys/settings.json",
   "Lys's settings file in other letter case": "/HOME/ADA/.LYS/Settings.JSON",
-  "Lys's settings file as a file URL": "file:///home/ada/.lys/settings.json"
+  "Lys's settings file as a file URL": "file:///home/ada/.lys/settings.json",
+  "a copy a stopped save left": "~/.lys/settings.json.4242.0.tmp",
+  "a leftover copy as a file URL":
+    "file:///home/ada/.lys/settings.json.4242.0.tmp",
+  "a leftover copy in other letter case": "/HOME/ADA/.LYS/SETTINGS.JSON.1.0.TMP"
 })
 
 /** Values that look like a credential path but name none, by what each shows. */
@@ -177,6 +259,9 @@ const ALLOWED_PATH_CASES = Object.freeze({
   "a public key outside the SSH folder": "keys/id_rsa.pub",
   "a guide about SSH": "docs/ssh-guide.md",
   "another settings file": "/home/ada/project/settings.json",
+  "a copy's name in another folder":
+    "/home/ada/project/settings.json.4242.0.tmp",
+  "a copy's name without its folder": "settings.json.4242.0.tmp",
   "a settings file without its folder": "settings.json",
   "another file in Lys's home": "~/.lys/notes.json",
   "a name that only starts like .env": ".environment",
@@ -265,6 +350,20 @@ describe("decideToolCall", () => {
       expect(
         decideToolCall(buildTargetRequest(`/home/ada/${name}`), RULES)
       ).toStrictEqual(credential ? DENIED_CREDENTIAL_FILE : ALLOWED)
+    }
+  )
+
+  it.each(
+    SHARED_SETTINGS_FILE_COPY_NAME_CASES.map((nameCase) => [
+      nameCase.case,
+      nameCase
+    ])
+  )(
+    "judges %s in Lys's home as the desktop's file tools do",
+    (_label, { name, copy }) => {
+      expect(
+        decideToolCall(buildTargetRequest(`/home/ada/.lys/${name}`), RULES)
+      ).toStrictEqual(copy ? DENIED_CREDENTIAL_FILE : ALLOWED)
     }
   )
 
@@ -364,7 +463,10 @@ describe("decideToolCall", () => {
   })
 
   it("requires approval of a call of a tool marked destructive", () => {
-    const request = buildRequest(Object.freeze({ path: "notes/old.md" }), true)
+    const request = buildRequest(
+      Object.freeze({ path: "notes/old.md" }),
+      DESTRUCTIVE_TRAITS
+    )
 
     expect(decideToolCall(request, RULES)).toStrictEqual({
       effect: "require-approval",
@@ -378,11 +480,105 @@ describe("decideToolCall", () => {
   ])(
     "denies a call of a tool marked destructive that names %s, rather than asking",
     (_label, value, decision) => {
-      const request = buildRequest(Object.freeze({ target: value }), true)
+      const request = buildRequest(
+        Object.freeze({ target: value }),
+        DESTRUCTIVE_TRAITS
+      )
 
       expect(decideToolCall(request, RULES)).toStrictEqual(decision)
     }
   )
+
+  it.each(
+    Object.entries({
+      "an open-world write": [{ isOpenWorldWrite: true }, "open-world-write"],
+      "a paid tool's sixth call": [
+        {
+          isPaid: true,
+          usageInTask: PAID_TOOL_CALLS_PER_TASK_WITHOUT_APPROVAL
+        },
+        "paid-tool"
+      ],
+      "a paid tool's twentieth call": [
+        { isPaid: true, usageInTask: MAXIMUM_PAID_TOOL_CALLS_PER_TASK - 1 },
+        "paid-tool"
+      ]
+    } satisfies Record<string, readonly [RequestTraits, string]>)
+  )("requires approval of %s", (_label, [traits, reason]) => {
+    expect(decideToolCall(buildTraitRequest(traits), RULES)).toStrictEqual({
+      effect: "require-approval",
+      reason
+    })
+  })
+
+  it("denies a paid tool's call past its budget, rather than asking", () => {
+    const request = buildTraitRequest({
+      isPaid: true,
+      usageInTask: MAXIMUM_PAID_TOOL_CALLS_PER_TASK
+    })
+
+    expect(decideToolCall(request, RULES)).toStrictEqual({
+      effect: "deny",
+      reason: "paid-tool-budget"
+    })
+  })
+
+  it.each(
+    Object.entries({
+      "a paid tool's fifth call": {
+        isPaid: true,
+        usageInTask: PAID_TOOL_CALLS_PER_TASK_WITHOUT_APPROVAL - 1
+      },
+      "an unmarked tool's hundredth call": {
+        usageInTask: MAXIMUM_TOOL_CALLS_PER_TASK - 1
+      }
+    })
+  )("allows %s", (_label, traits) => {
+    expect(decideToolCall(buildTraitRequest(traits), RULES)).toStrictEqual(
+      ALLOWED
+    )
+  })
+
+  it.each(
+    Object.entries({
+      "an unmarked tool": {},
+      "a destructive tool": DESTRUCTIVE_TRAITS,
+      "a paid tool": { isPaid: true }
+    })
+  )(
+    "denies a call of %s past the usage limit, rather than asking",
+    (_label, traits) => {
+      const request = buildTraitRequest({
+        ...traits,
+        usageInTask: MAXIMUM_TOOL_CALLS_PER_TASK
+      })
+
+      expect(decideToolCall(request, RULES)).toStrictEqual({
+        effect: "deny",
+        reason: "usage-limit"
+      })
+    }
+  )
+
+  it("asks about a destructive tool before an open-world write", () => {
+    const request = buildTraitRequest({
+      isDestructive: true,
+      isOpenWorldWrite: true
+    })
+
+    expect(decideToolCall(request, RULES)).toStrictEqual({
+      effect: "require-approval",
+      reason: "destructive-tool"
+    })
+  })
+
+  it("denies a blocked address before it counts the usage", () => {
+    const request = buildRequest(Object.freeze({ url: "http://127.0.0.1/" }), {
+      usageInTask: MAXIMUM_TOOL_CALLS_PER_TASK
+    })
+
+    expect(decideToolCall(request, RULES)).toStrictEqual(DENIED_BLOCKED_ADDRESS)
+  })
 
   it("compares with the settings file of the policy it is given", () => {
     const policy = Object.freeze({
@@ -396,6 +592,23 @@ describe("decideToolCall", () => {
     expect(
       decideToolCall(buildTargetRequest("~/.lys/settings.json"), policy)
     ).toStrictEqual({ effect: "allow" })
+  })
+
+  it("reads a leftover copy by the name of the policy's settings file", () => {
+    const policy = Object.freeze({
+      ...RULES,
+      settingsFilePath: "/srv/lys/lys.json"
+    } satisfies ToolCallRules)
+
+    expect(
+      decideToolCall(buildTargetRequest("/srv/lys/lys.json.4242.0.tmp"), policy)
+    ).toStrictEqual(DENIED_CREDENTIAL_FILE)
+    expect(
+      decideToolCall(
+        buildTargetRequest("/srv/lys/settings.json.4242.0.tmp"),
+        policy
+      )
+    ).toStrictEqual(ALLOWED)
   })
 })
 
@@ -547,7 +760,10 @@ describe("decideToolCall with approved folders", () => {
   })
 
   it("denies a path outside before it asks about a destructive tool", () => {
-    const request = buildRequest(Object.freeze({ target: "/etc/hosts" }), true)
+    const request = buildRequest(
+      Object.freeze({ target: "/etc/hosts" }),
+      DESTRUCTIVE_TRAITS
+    )
 
     expect(decideToolCall(request, LISTED_RULES)).toStrictEqual(
       DENIED_OUTSIDE_APPROVED_FOLDERS
@@ -618,6 +834,14 @@ describe("formatToolCallDenial", () => {
     [
       "blocked-address",
       "This call was denied and did not run: an argument names this machine, a private network, or another address Lys never connects to. Do not try to reach it another way; tell the person what you need it for."
+    ],
+    [
+      "usage-limit",
+      "This call was denied and did not run: this reply has already called this tool 100 times, the most one reply may. Do not call it again in this reply; tell the person what you found and what is left to do."
+    ],
+    [
+      "paid-tool-budget",
+      "This call was denied and did not run: this reply has already called this tool 20 times, and each call spends the person's paid credits, so no reply may call it more. Do not call it again in this reply; work with the results you have and tell the person what is left to do."
     ]
   ] as const)("explains a %s denial", (reason, message) => {
     expect(formatToolCallDenial(reason)).toBe(message)

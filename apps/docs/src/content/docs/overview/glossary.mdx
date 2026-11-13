@@ -68,9 +68,11 @@ Terms that mean something specific inside Lys.
   before the approval gate, whatever the tool: a call that names a private
   key or credential file, a path outside the approved folders once any is
   listed, or a URL or host of this machine or a private network, is denied, stored as failed with a sentence the model
-  reads, and never runs or asks the person, even on Just run. A call of an
-  MCP tool its server marks as destructive requires approval: it asks the
-  person even on Just run.
+  reads, and never runs or asks the person, even on Just run, and so is a
+  reply's call of one tool past its 100th or of `web_search` past its 20th.
+  A call of an MCP tool its server marks as destructive or as an open-world
+  write, and a reply's sixth and later `web_search` calls, require approval:
+  they ask the person even on Just run.
 - **Approval token**: the single-use token of 32 random bytes an approval
   prompt carries in its `tool-approval` event. The backend takes an answer to
   the prompt only when it returns that token, once, and runs the call it
@@ -113,8 +115,8 @@ Terms that mean something specific inside Lys.
   `settings.json`.
 - **MCP tool**: a tool of a connected MCP server. The model calls it as
   `mcp__<server>__<tool>`; the backend applies the tool call policy, asks the
-  person first unless the tool is on Just run and its server does not mark it
-  as destructive, and runs the call on the server. Its output is untrusted.
+  person first unless the tool is on Just run and its server marks it neither
+  as destructive nor as an open-world write, and runs the call on the server. Its output is untrusted.
 
 ## Streaming terms
 

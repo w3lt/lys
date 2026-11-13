@@ -6,8 +6,9 @@
 //! names and lines case-insensitively, and stops at fixed result and scan
 //! budgets so that one request cannot read an unbounded amount of the disk.
 //! It never starts inside a credential folder or outside the folders the
-//! person lets tools use, and it leaves credential files and folders and
-//! Lys's settings file out of its walk.
+//! person lets tools use, and it leaves credential files and folders, Lys's
+//! settings file, and the copies of it that stopped saves left out of its
+//! walk.
 
 use std::{
     collections::VecDeque,
@@ -281,12 +282,16 @@ struct FileSearch {
     /// Identity of Lys's settings file when the search was parsed, or `None`
     /// when there was none; the walk leaves the file out.
     settings_file: Option<FileIdentity>,
+    /// Identity of the folder that holds Lys's settings file when the search
+    /// was parsed, or `None` when there was none; the walk leaves out the
+    /// copies of the settings file that stopped saves left in it.
+    settings_folder: Option<FileIdentity>,
 }
 
 /// One directory entry, classified without following symbolic links.
 ///
-/// A credential file or folder, or Lys's settings file, is
-/// [`ListedEntry::Ignored`] whatever its type.
+/// A credential file or folder, Lys's settings file, or a copy of it that a
+/// stopped save left, is [`ListedEntry::Ignored`] whatever its type.
 enum ListedEntry {
     /// A subdirectory, searched after the current directory level.
     Directory(PathBuf),
@@ -295,8 +300,8 @@ enum ListedEntry {
     /// An entry whose type could not be read or whose path is not valid UTF-8.
     Unexaminable,
     /// A symbolic link, FIFO, socket, or device, or a credential file or
-    /// folder, or Lys's settings file, which is never followed, read, or
-    /// reported.
+    /// folder, Lys's settings file, or a copy of it that a stopped save left,
+    /// which is never followed, read, or reported.
     Ignored,
 }
 
@@ -434,7 +439,8 @@ fn find_files_under_root(
 /// `approved_folders` limit, applying the documented defaults.
 ///
 /// The query and limits are checked before the root is inspected on disk.
-/// The identity of Lys's settings file is looked up once, after the root.
+/// The identities of Lys's settings file and of the folder that holds it are
+/// looked up once, after the root.
 ///
 /// # Errors
 ///
@@ -466,6 +472,7 @@ fn parse_search_files_filter(
 
     let root = parse_search_root(filter.root, &credential_files, &approved_folders)?;
     let settings_file = credential_files.find_settings_file();
+    let settings_folder = credential_files.find_settings_folder();
 
     Ok(FileSearch {
         root,
@@ -476,6 +483,7 @@ fn parse_search_files_filter(
         credential_files,
         approved_folders,
         settings_file,
+        settings_folder,
     })
 }
 
@@ -657,7 +665,8 @@ fn list_directory_entries(directory: &Path, search: &FileSearch) -> io::Result<V
 /// Classifies one directory entry without following symbolic links.
 ///
 /// An entry with a credential name is ignored before its type is read, and a
-/// regular file that is Lys's settings file is ignored too.
+/// regular file that is Lys's settings file, or a copy of it that a stopped
+/// save left, is ignored too.
 fn build_listed_entry(entry: &DirEntry, search: &FileSearch) -> ListedEntry {
     if search
         .credential_files
@@ -678,7 +687,11 @@ fn build_listed_entry(entry: &DirEntry, search: &FileSearch) -> ListedEntry {
         return ListedEntry::Ignored;
     }
 
-    if is_settings_file_entry(entry, search.settings_file) {
+    if is_settings_file_entry(entry, search.settings_file)
+        || search
+            .credential_files
+            .is_settings_file_copy(&entry.path(), search.settings_folder)
+    {
         return ListedEntry::Ignored;
     }
 
@@ -928,7 +941,7 @@ pub(super) fn build_search_files_definition() -> ToolDefinition {
     ToolDefinition {
         name: "search_files",
         description: String::from(
-            "Find files under a directory whose name or content contains the query, ignoring case. Returns each matching file's absolute path and, for content matches, its first matching lines with their line numbers. Private key and credential files and folders, and Lys's settings file, are never searched or returned. When the person listed the folders tools may use, a directory outside them is refused.",
+            "Find files under a directory whose name or content contains the query, ignoring case. Returns each matching file's absolute path and, for content matches, its first matching lines with their line numbers. Private key and credential files and folders, and Lys's settings file and its leftover copies, are never searched or returned. When the person listed the folders tools may use, a directory outside them is refused.",
         ),
         group: ToolGroup::Files,
         access: ToolAccess::Reads,
@@ -1625,6 +1638,37 @@ mod tests {
     }
 
     #[test]
+    fn leaves_a_leftover_copy_of_the_settings_file_out_but_not_its_name_elsewhere() {
+        let directory = TestDirectory::create("search-settings-copy");
+        let settings_path = directory.create_file("lys/settings.json", "todo");
+        directory.create_file("lys/settings.json.4242.0.tmp", "todo");
+        directory.create_file("lys/todo.txt", "todo");
+        let same_name_elsewhere = directory.create_file("notes/settings.json.4242.0.tmp", "todo");
+        let todo_path = directory.path().join("lys/todo.txt");
+        let elsewhere = get_path_text(&same_name_elsewhere);
+        let content_matches = vec![get_path_text(&todo_path), elsewhere.clone()];
+
+        for (target, query, expected) in [
+            ("name", "settings", vec![elsewhere]),
+            ("content", "todo", content_matches.clone()),
+            ("nameAndContent", "todo", content_matches),
+        ] {
+            let report = find_files_with(
+                json!({
+                    "root": get_path_text(directory.path()),
+                    "query": query,
+                    "target": target
+                }),
+                CredentialFiles::load_for_test(settings_path.clone()),
+            )
+            .expect("a completed search");
+
+            assert_eq!(list_match_paths(&report), expected, "target {target}");
+            assert_eq!(report.skipped_path_count, 0);
+        }
+    }
+
+    #[test]
     fn leaves_credential_files_out_of_a_root_reached_through_a_link() {
         let directory = TestDirectory::create("search-linked-root");
         let real_root = directory.create_subdirectory("real");
@@ -1830,6 +1874,7 @@ mod tests {
             credential_files: CredentialFiles::load_for_test_without_settings_file(),
             approved_folders: ApprovedFolders::Any,
             settings_file: None,
+            settings_folder: None,
         };
         let find_stop = |scanned_entry_count: usize, scanned_content_bytes: u64| {
             let tally = SearchTally {

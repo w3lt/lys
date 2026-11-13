@@ -101,7 +101,8 @@ describe("McpToolCatalogBuilder", async () => {
       ],
       skippedTools: [],
       isToolListCut: false,
-      destructiveToolNames: new Set()
+      destructiveToolNames: new Set(),
+      openWorldWriteToolNames: new Set()
     })
   })
 
@@ -125,6 +126,38 @@ describe("McpToolCatalogBuilder", async () => {
 
       expect(catalog.destructiveToolNames).toEqual(
         new Set(isDestructive ? ["mcp__notes__erase"] : [])
+      )
+    }
+  )
+
+  it.each(
+    Object.entries({
+      "marked open-world": [{ openWorldHint: true }, true],
+      "marked open-world and destructive": [
+        { openWorldHint: true, destructiveHint: true },
+        true
+      ],
+      "marked open-world and read-only": [
+        { openWorldHint: true, readOnlyHint: true },
+        false
+      ],
+      "marked not open-world": [{ openWorldHint: false }, false],
+      "marked only as not read-only": [{ readOnlyHint: false }, false],
+      "without annotations": [undefined, false]
+    } satisfies Record<
+      string,
+      readonly [Readonly<Record<string, boolean>> | undefined, boolean]
+    >)
+  )(
+    "names a listed tool %s as an open-world write only when its server says so",
+    (_label, [annotations, isOpenWorldWrite]) => {
+      const catalog = buildCatalog([
+        { ...buildTool("send"), annotations },
+        buildTool("read")
+      ])
+
+      expect(catalog.openWorldWriteToolNames).toEqual(
+        new Set(isOpenWorldWrite ? ["mcp__notes__send"] : [])
       )
     }
   )
@@ -688,7 +721,8 @@ describe("McpToolCatalogBuilder", async () => {
       definitions: [],
       skippedTools: [],
       isToolListCut: false,
-      destructiveToolNames: new Set()
+      destructiveToolNames: new Set(),
+      openWorldWriteToolNames: new Set()
     })
   })
 })

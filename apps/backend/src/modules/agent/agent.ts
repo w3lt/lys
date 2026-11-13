@@ -8,6 +8,7 @@ import type {
   ConversationMessage,
   ConversationSource,
   ConversationUserMessage,
+  OpenAIFunctionTool,
   ReplyPart,
   ToolCallReplyPart,
   ToolDefinition
@@ -25,6 +26,7 @@ import AgentActivity, {
 import {
   buildAgentContext,
   calculateAgentContextHistoryMessageCount,
+  formatSystemPrompt,
   getAgentContextImageSides,
   readAgentContextImages,
   UNSEEN_CONTEXT_IMAGES,
@@ -39,7 +41,6 @@ import {
   buildAgentStateTools,
   type AgentStateReader
 } from "./agentStateTools"
-import type { ReportToolSearchFailure, ToolKeeper } from "./findToolsTool"
 import {
   findReplyRoundFitFailure,
   ReplyContextOverflowError,
@@ -62,20 +63,15 @@ import ReplyPartSequence, {
 } from "./replyPartSequence"
 import SourceCatalog from "./sourceCatalog"
 import {
+  buildAgentToolset,
   buildDefinedToolOffer,
+  buildOfferedTools,
   handleToolCallRound,
+  type AgentToolset,
   type CreateToolCallGate,
   type SendClientToolCall,
   type ToolCallRound
 } from "./toolCallRound"
-import {
-  addFoundTools,
-  buildReplyTools,
-  calculateToolRouting,
-  formatRoutedSystemPrompt,
-  listOfferedDefinitions,
-  type ReplyTools
-} from "./toolRouting"
 import type { UnofferedTools } from "./unofferedTools"
 
 /** What an agent knows about itself to answer turns. */
@@ -107,11 +103,6 @@ export type AgentDependencies = Readonly<{
   replyContextMeter: ReplyContextMeter
   /** Reads agents and their state for the agent's state tools. */
   stateReader: AgentStateReader
-  /**
-   * Keeper that `find_tools` asks for the tools of a routed turn that fit a
-   * task.
-   */
-  toolKeeper: ToolKeeper
 }>
 
 /** Valid terminal assistant state; only completed replies carry a finish reason. */
@@ -164,20 +155,12 @@ export type AgentTurn = Readonly<{
   model: string
   /**
    * Whether the model is trained for tool use: true offers the agent's state
-   * tools after the turn's other tools, also while tool calls are off, and
-   * routes the turn's client, built-in, and MCP tools through `find_tools`
-   * when it has any.
+   * tools after the turn's built-in and MCP tools, also while tool calls are
+   * off.
    */
   trainedForToolUse: boolean
   /** Caller-provided sampling and reply length controls. */
   generationOptions: MessageGenerationOptions
-  /**
-   * Backend tools offered in every round before every other tool, never
-   * routed through `find_tools`, such as the attachment reader; each name
-   * once and none named like another tool of the turn; empty when none are
-   * offered.
-   */
-  directTools: readonly TurnBuiltInTool[]
   /** Client tools offered for the turn, each name once; empty when none are. */
   clientTools: readonly ToolDefinition[]
   /**
@@ -272,12 +255,6 @@ export type AgentTurn = Readonly<{
   ) => void
   /** Receives any other failure that ended a reply stored as failed. */
   reportReplyFailure: (failure: unknown) => void
-  /**
-   * Receives why a `find_tools` search of a routed turn ended without
-   * finding; the model reads only that Armitage could not search, and the
-   * reply goes on.
-   */
-  reportToolSearchFailure: ReportToolSearchFailure
 }>
 
 /** How one model round of a reply ended. */
@@ -333,21 +310,14 @@ export type AgentContextInput = Readonly<{
    */
   getAttachmentImageFileStatus: GetAttachmentImageFileStatus
   /**
-   * Definitions of the direct tools, as {@link AgentTurn.directTools}, in
-   * offer order; empty when none would be offered.
-   */
-  directTools: readonly ToolDefinition[]
-  /**
-   * Definitions of the other offered tools, each name once: client tools
-   * first, then built-in tools, then MCP tools; empty when none would be
-   * offered.
+   * Definitions of the offered tools, each name once: client tools first,
+   * then built-in tools, then MCP tools; empty when none would be offered.
    */
   tools: readonly ToolDefinition[]
   /**
    * Whether that model is trained for tool use, as
    * {@link AgentTurn.trainedForToolUse}: true counts the agent's state tool
-   * definitions after the others, and counts `find_tools` and the routing
-   * note in place of `tools` when there are any.
+   * definitions after `tools`.
    */
   trainedForToolUse: boolean
   /**
@@ -366,15 +336,10 @@ export type AgentContextMeasurement = Readonly<{
   contextLength: number
   /**
    * Tokens of the agent's system prompt, with the notes about the tools the
-   * message would not offer when there are any, and the routing note when a
-   * turn would route its tools.
+   * message would not offer when there are any.
    */
   systemPromptTokens: number
-  /**
-   * Tokens of the tool definitions a turn's first round would offer: for a
-   * routed turn, `find_tools` in place of its client, built-in, and MCP
-   * tools; 0 when none are offered.
-   */
+  /** Tokens of the offered tool definitions; 0 when none are offered. */
   toolTokens: number
   /** Tokens of the stored messages a turn would include. */
   historyTokens: number
@@ -399,13 +364,12 @@ type ReplyRoundInput = Readonly<{
 type ReplyRoundState = Readonly<{
   /** Turn context, tools, reply storage, and cancellation. */
   turn: AgentTurn
+  /** Tools offered for the turn, by name. */
+  tools: AgentToolset
   /** What the request names about the tools the turn does not offer. */
   unofferedTools: UnofferedTools
-  /**
-   * How the turn offers its tools, what each round offers, and the reply's
-   * `find_tools` when the turn is routed.
-   */
-  replyTools: ReplyTools
+  /** Function tools the model is offered in every round. */
+  offeredTools: readonly OpenAIFunctionTool[]
   /** Stores and sends the reply's parts. */
   replyParts: ReplyPartSequence
   /** Numbers the web sources the reply's tool results show. */
@@ -420,8 +384,7 @@ type ReplyRoundState = Readonly<{
  * every turn of that agent with it. Every context a turn builds starts with
  * the system prompt the agent held when the turn started, never one stored
  * with the conversation, followed by the notes about the tools the turn does
- * not offer when there are any, and by the routing note when the turn routes
- * its tools through `find_tools`. Between turns it keeps only that prompt and
+ * not offer when there are any. Between turns it keeps only that prompt and
  * its activity: each request is listed from the start of its `createReply`
  * call until the call settles, as waiting while it waits for a request slot
  * and then at the step its stored parts show. A turn's rounds and context
@@ -446,8 +409,6 @@ export default class Agent {
   readonly #replyContextMeter: ReplyContextMeter
   /** Borrowed reader of agents and their state, for the state tools. */
   readonly #stateReader: AgentStateReader
-  /** Borrowed keeper of a routed turn's tools, which `find_tools` asks. */
-  readonly #toolKeeper: ToolKeeper
   /**
    * Requests this agent is working on, the step each is at, and its request
    * slots.
@@ -459,8 +420,8 @@ export default class Agent {
    * free, without contacting its model.
    * @param profile - Trusted code, role, system prompt, and request limits
    * of the agent.
-   * @param dependencies - Model access, its context meter, the state
-   * reader, and the tool keeper, lent for the agent's lifetime.
+   * @param dependencies - Model access, its context meter, and the state
+   * reader, lent for the agent's lifetime.
    */
   public constructor(profile: AgentProfile, dependencies: AgentDependencies) {
     this.#identity = Object.freeze({ code: profile.code, role: profile.role })
@@ -469,7 +430,6 @@ export default class Agent {
     this.#replyModel = dependencies.replyModel
     this.#replyContextMeter = dependencies.replyContextMeter
     this.#stateReader = dependencies.stateReader
-    this.#toolKeeper = dependencies.toolKeeper
   }
 
   /**
@@ -507,14 +467,13 @@ export default class Agent {
    * its next message.
    *
    * @param input - Stored transcript, model, whether it sees images, the
-   * image file lookup, direct and other offered tool definitions, whether the
-   * model is trained for tool use, and what the request names about the
-   * tools it would not offer, borrowed until the returned promise settles.
+   * image file lookup, offered tool definitions, whether the model is trained
+   * for tool use, and what the request names about the tools it would not
+   * offer, borrowed until the returned promise settles.
    * @returns A promise resolving to the window and the tokens of this agent's
    * system prompt with the notes about the tools the message would not
-   * offer, and the routing note when a turn would route its tools, of the
-   * tools a turn's first round would offer, as {@link listOfferedDefinitions}
-   * lists them, of the stored messages a turn would include,
+   * offer, of the tools with the agent's state tools after them when the
+   * model is trained for tool use, of the stored messages a turn would include,
    * and of the new message's markup, measured exactly as a turn's first round
    * sends them with an empty new message without files; or to undefined when
    * the model is not loaded. When the model sees images, the history's image
@@ -529,17 +488,7 @@ export default class Agent {
   public async findContextMeasurement(
     input: AgentContextInput
   ): Promise<AgentContextMeasurement | undefined> {
-    /**
-     * State tool definitions a measurement for a model not trained for tool
-     * use counts: none.
-     */
-    const noAgentStateDefinitions: readonly ToolDefinition[] = Object.freeze([])
-
     const systemPrompt = this.#systemPrompt
-    const routing = calculateToolRouting(
-      input.trainedForToolUse,
-      input.tools.length
-    )
     const images: AgentContextImages<ReplyContextImageSides> =
       input.canSeeImages
         ? await getAgentContextImageSides(
@@ -547,28 +496,22 @@ export default class Agent {
             input.getAttachmentImageFileStatus
           )
         : UNSEEN_CONTEXT_IMAGES
-    const messages = buildAgentContext({
-      systemPrompt: formatRoutedSystemPrompt(
-        systemPrompt,
-        input.unofferedTools,
-        routing
-      ),
-      history: input.history,
-      userMessage: EMPTY_USER_MESSAGE,
-      images
-    })
-    const definitions = listOfferedDefinitions({
-      directTools: input.directTools,
-      tools: input.tools,
-      agentStateTools: input.trainedForToolUse
-        ? buildAgentStateDefinitions(this.#identity.role)
-        : noAgentStateDefinitions,
-      routing
-    })
     const measurement =
       await this.#replyContextMeter.findReplyContextMeasurement({
-        messages,
-        tools: buildDefinedToolOffer(definitions),
+        messages: buildAgentContext({
+          systemPrompt: formatSystemPrompt(systemPrompt, input.unofferedTools),
+          history: input.history,
+          userMessage: EMPTY_USER_MESSAGE,
+          images
+        }),
+        tools: buildDefinedToolOffer(
+          input.trainedForToolUse
+            ? [
+                ...input.tools,
+                ...buildAgentStateDefinitions(this.#identity.role)
+              ]
+            : input.tools
+        ),
         model: input.model
       })
     return measurement === undefined
@@ -620,17 +563,10 @@ export default class Agent {
    * context, tools, and reply ceiling exceed the model's context length, or
    * whose model is not loaded, is not sent: the reply fails, keeping the
    * parts earlier rounds stored, and its `error` event says why. The turn uses
-   * the system prompt the agent holds when the call starts. The turn's direct
-   * tools are offered first in every round. When the model is trained for
-   * tool use, the agent's state tools are offered after the turn's other
-   * tools, also while tool calls are off, and their calls run at once; and
-   * when the turn has client, built-in, or MCP tools, they are routed: every
-   * round's system prompt ends with the routing note, the first round offers
-   * `find_tools` in their place, whose calls run at once and ask the tool
-   * keeper which of them fit a task, and each tool it found is offered from
-   * the next round on, its calls passing the gate as any other. A call of a
-   * tool its round did not offer is stored as failed with a result saying
-   * so, and never runs. The reply holds one of the agent's request slots from
+   * the system prompt the agent holds when the call starts. When the model is
+   * trained for tool use, the agent's state tools are offered after the
+   * turn's built-in and MCP tools, also while tool calls are off, and their
+   * calls run at once. The reply holds one of the agent's request slots from
    * the call's start to its end, also while it waits on the person. When
    * every slot is held, it waits in line for one, first come first served,
    * and starts once a slot frees; Stop or shutdown while it waits ends it as
@@ -707,24 +643,27 @@ export default class Agent {
     turn: AgentTurn,
     systemPrompt: string
   ): Promise<ConversationAssistantMessageFinishReason | undefined> {
-    const agentStateTools = turn.trainedForToolUse
-      ? buildAgentStateTools({
-          self: this.#identity,
-          requestId: turn.requestId,
-          reader: this.#stateReader
-        })
-      : NO_AGENT_STATE_TOOLS
-    const replyTools = buildReplyTools(turn, agentStateTools, this.#toolKeeper)
-    const replyParts = new ReplyPartSequence(
-      buildActivityReplyStorage(turn, this.#activity)
-    )
-    const sourceCatalog = new SourceCatalog(turn.sources)
+    const tools = buildAgentToolset({
+      clientTools: turn.clientTools,
+      builtInTools: turn.builtInTools,
+      mcpTools: turn.mcpTools,
+      agentStateTools: turn.trainedForToolUse
+        ? buildAgentStateTools({
+            self: this.#identity,
+            requestId: turn.requestId,
+            reader: this.#stateReader
+          })
+        : NO_AGENT_STATE_TOOLS
+    })
     const state: ReplyRoundState = Object.freeze({
       turn,
+      tools,
       unofferedTools: turn.unofferedTools,
-      replyTools,
-      replyParts,
-      sourceCatalog
+      offeredTools: buildOfferedTools(tools),
+      replyParts: new ReplyPartSequence(
+        buildActivityReplyStorage(turn, this.#activity)
+      ),
+      sourceCatalog: new SourceCatalog(turn.sources)
     })
     const images: AgentContextImages = turn.canSeeImages
       ? await readAgentContextImages(
@@ -733,11 +672,7 @@ export default class Agent {
         )
       : UNSEEN_CONTEXT_IMAGES
     const messages = buildAgentContext({
-      systemPrompt: formatRoutedSystemPrompt(
-        systemPrompt,
-        turn.unofferedTools,
-        replyTools
-      ),
+      systemPrompt: formatSystemPrompt(systemPrompt, turn.unofferedTools),
       history: turn.history,
       userMessage: turn.userMessage,
       images
@@ -769,7 +704,7 @@ export default class Agent {
       return round.status === "finished" ? round.finishReason : undefined
     const { turn } = state
     const roundMessages = await handleToolCallRound(round, {
-      tools: state.replyTools.toolOffer.listOfferedToolset(),
+      tools: state.tools,
       unofferedTools: state.unofferedTools,
       sendClientToolCall: turn.sendClientToolCall,
       createToolCallGate: turn.createToolCallGate,
@@ -778,7 +713,6 @@ export default class Agent {
       sourceCatalog: state.sourceCatalog
     })
     if (roundMessages === undefined) return undefined
-    addFoundTools(state.replyTools)
     const nextMessages = [...messages, ...roundMessages]
     const nextRound = await this.#createReplyRound(state, {
       messages: nextMessages,
@@ -830,7 +764,7 @@ export default class Agent {
    * Opens one round's reply stream once its context is measured to fit.
    *
    * @param state - The reply's turn, with its model, generation controls, and
-   * cancellation, and the tools it offers.
+   * cancellation, and the tools offered in every round.
    * @param input - The round's context.
    * @returns The model's events for the round.
    * @throws A `ReplyModelNotLoadedError` when the model is not loaded, a
@@ -847,8 +781,7 @@ export default class Agent {
     state: ReplyRoundState,
     input: ReplyRoundInput
   ): Promise<AsyncIterable<ReplyStreamEvent>> {
-    const { turn } = state
-    const offeredTools = state.replyTools.toolOffer.listOfferedTools()
+    const { turn, offeredTools } = state
     const measurement = await waitForSettlementOrAbort(
       this.#replyContextMeter.findReplyContextMeasurement({
         messages: input.messages,

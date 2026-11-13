@@ -657,8 +657,7 @@ export function registerAgentSearcherContractSuite(
       expect(
         harness.agentSearcher
           .listAgentMatches("agent")
-          .matches.filter((match) => match.kind === "custom")
-          .map((match) => match.code)
+          .matches.map((match) => match.code)
       ).toEqual(["b", "c", "a"])
     })
 

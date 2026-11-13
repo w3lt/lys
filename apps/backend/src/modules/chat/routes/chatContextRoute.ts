@@ -200,19 +200,18 @@ async function handleChatContextRequest(
     body.model,
     dependencies.findModelCapabilities
   )
-  const directTools = listDirectDefinitions(
-    capabilities.trainedForToolUse,
-    measured.attachments
-  )
-  const tools = buildOfferedDefinitions(body, requestedTools)
   const measurement = await requestedAgent.agent.findContextMeasurement({
     history: measured.history,
     model: body.model,
     canSeeImages: capabilities.vision,
     getAttachmentImageFileStatus: measured.getAttachmentImageFileStatus,
     trainedForToolUse: capabilities.trainedForToolUse,
-    directTools,
-    tools,
+    tools: buildOfferedDefinitions(
+      body,
+      requestedTools,
+      capabilities.trainedForToolUse &&
+        hasReadableTextAttachment(measured.attachments)
+    ),
     unofferedTools
   })
   if (measurement === undefined) {
@@ -238,26 +237,6 @@ function sendModelNotLoadedProblem(
     instance
   })
   reply.type("application/problem+json").code(problem.status).send(problem)
-}
-
-/**
- * Lists the direct tools a measurement counts.
- *
- * @param trainedForToolUse - Whether the measured model is trained for tool
- * use.
- * @param attachments - Attachments of the stored messages a turn would
- * include.
- * @returns The attachment reader alone when the model is trained for tool
- * use and a stored message holds a text file, as a turn would offer it;
- * nothing otherwise. The list is frozen.
- */
-function listDirectDefinitions(
-  trainedForToolUse: boolean,
-  attachments: readonly ReadableAttachment[]
-): readonly ToolDefinition[] {
-  if (!trainedForToolUse || !hasReadableTextAttachment(attachments))
-    return Object.freeze([])
-  return Object.freeze([buildReadAttachmentDefinition()])
 }
 
 /**
@@ -290,21 +269,25 @@ function buildMeasuredHistory(
 }
 
 /**
- * Builds the definitions of the tools the request offers, as a turn orders
- * them.
+ * Builds the definitions of the tools a turn would offer, as it orders them.
  *
  * @param body - Validated chat-context input.
  * @param requestedTools - The offered backend tools, in offer order.
+ * @param offersReader - Whether the turn would offer the attachment reader:
+ * the conversation holds a text attachment and the model is trained for
+ * tool use.
  * @returns The client definitions first, then the built-in tools', then the
- * connected MCP tools'.
+ * reader's when the turn offers it, then the connected MCP tools'.
  */
 function buildOfferedDefinitions(
   body: ChatContextApiRequestBody,
-  requestedTools: RequestedBackendTools
+  requestedTools: RequestedBackendTools,
+  offersReader: boolean
 ): readonly ToolDefinition[] {
   return [
     ...(body.tools?.definitions ?? []),
     ...requestedTools.builtInTools.map((entry) => entry.definition),
+    ...(offersReader ? [buildReadAttachmentDefinition()] : []),
     ...requestedTools.mcpTools.map((tool) => tool.definition)
   ]
 }

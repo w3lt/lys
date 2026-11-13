@@ -1,11 +1,9 @@
 import type { ChatGenerationEvent } from "@lys/protocol"
-import {
-  replyPartSchema,
-  type ConversationSource,
-  type ReplyPart,
-  type ToolCallReplyPart
+import type {
+  ConversationSource,
+  ReplyPart,
+  ToolCallReplyPart
 } from "@lys/share"
-import { v7 as uuidv7 } from "uuid"
 
 /** Reasoning or text of one round, as the agent asks to store it. */
 type ReplyFragmentDraft = Readonly<{
@@ -82,34 +80,6 @@ export type ReplyToolCallChange =
       /** Non-empty explanation the model reads. */
       result: string
     }>
-
-/**
- * Builds the complete part a draft describes.
- *
- * @param draft - Part the agent asks to store.
- * @param now - Time of the operation, stored as both of the part's times.
- * @returns The validated part; a reasoning or text part gets a new UUIDv7, a
- * tool call keeps its own identifier. No draft is a succeeded call, so none
- * shows sources.
- * @throws If the draft breaks the part contract, such as empty text or an
- * empty failure message.
- */
-export function buildReplyPart(draft: ReplyPartDraft, now: string): ReplyPart {
-  if (draft.kind !== "tool-call")
-    return replyPartSchema.parse({
-      kind: draft.kind,
-      id: uuidv7(),
-      round: draft.round,
-      createdAt: now,
-      updatedAt: now,
-      content: draft.content
-    })
-  return replyPartSchema.parse({
-    ...draft,
-    createdAt: now,
-    updatedAt: now
-  })
-}
 
 /** What a reply's part sequence needs from its turn. */
 export type ReplyPartSequenceDependencies = Readonly<{

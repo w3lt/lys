@@ -1,4 +1,3 @@
-import { ARMITAGE_AGENT_CODE } from "@lys/share"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   AgentRequestStep,
@@ -203,10 +202,6 @@ describe("buildAgentStateDefinitions", () => {
     )
   })
 
-  it("gives the tool keeper no state tool", () => {
-    expect(buildAgentStateDefinitions("tool-keeper")).toEqual([])
-  })
-
   it.each(["leader", "member"] as const)(
     "lists every %s tool in the agents group, reading this machine, run by the backend",
     (role) => {
@@ -252,16 +247,6 @@ describe("buildAgentStateTools", () => {
     )
     for (const tool of [...leaderTools, ...memberTools])
       expect(tool.runsWithoutApproval).toBe(true)
-  })
-
-  it("builds no tool for the tool keeper", () => {
-    expect(
-      buildAgentStateTools({
-        self: { code: ARMITAGE_AGENT_CODE, role: "tool-keeper" },
-        requestId: OWN_REQUEST_ID,
-        reader: createReader({})
-      })
-    ).toEqual([])
   })
 
   describe("read_my_state", () => {

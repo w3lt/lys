@@ -28,11 +28,7 @@ repository today; it is not a promise of unreleased work.
   rows in SQLite, and streams typed SSE events back to the desktop.
 - A new conversation is answered by the agent chosen in the composer: a
   built-in agent, Caliginia unless another is chosen, or one of the user's
-  own. Armitage, the built-in tool keeper, answers no chat: a model trained
-  for tool use asks it, through `find_tools`, which of the turn's tools fit
-  a task, and is offered those tools from its next round, each call still
-  asking first unless the tool is on Just run. A conversation keeps its
-  agent for every turn, and one whose agent was
+  own. A conversation keeps its agent for every turn, and one whose agent was
   deleted stays readable but accepts no new message.
 - Conversation history supports search, cursor pagination, transcript retrieval,
   rename, and deletion. A reply's parts, its reasoning, text, and tool calls
@@ -60,9 +56,8 @@ repository today; it is not a promise of unreleased work.
   The Runtime pane starts and stops the backend and vmo, shows whether each
   is ready, and saves whether each starts when Lys opens; Lys stops both when
   it quits. Model controls refresh inventory, load and unload weights, and check
-  loaded-state health. The Agents pane lists the built-in agents, Caliginia,
-  Lysiptera, and Armitage, which can be read and duplicated but not changed
-  or deleted,
+  loaded-state health. The Agents pane lists the built-in agents, Caliginia
+  and Lysiptera, which can be read and duplicated but not changed or deleted,
   and creates, edits, duplicates, and deletes the user's agents through the
   backend. The Tools pane lists the desktop's file tools, the backend's
   `read_page` and `web_search`, and the tools of the connected MCP servers;

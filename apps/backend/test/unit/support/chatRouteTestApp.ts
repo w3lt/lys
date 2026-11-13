@@ -67,8 +67,7 @@ const MCP_TEST_OPENING_TIMEOUT_MILLISECONDS = 10_000
  */
 export const TEST_BUILT_IN_AGENT_PROMPTS = Object.freeze({
   caliginia: "You are the test Caliginia.",
-  lysiptera: "You are the test Lysiptera.",
-  armitage: "You are the test Armitage."
+  lysiptera: "You are the test Lysiptera."
 })
 
 /**

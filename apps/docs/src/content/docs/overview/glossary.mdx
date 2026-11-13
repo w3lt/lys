@@ -36,19 +36,16 @@ Terms that mean something specific inside Lys.
   code of the agent that answers it, and timestamps. A new conversation names
   its agent; a continued one keeps it.
 - **Built-in agent**: an agent that ships with the backend: Caliginia
-  (`caliginia`), Lys's dark side, Lysiptera (`lysiptera`), her light side,
-  and Armitage (`armitage`), the tool keeper, which answers only other
-  agents. A built-in agent is never stored, changed, or deleted, and no
-  stored agent can take its code. A new conversation starts with Caliginia
-  unless another agent is selected; it can never start with Armitage.
+  (`caliginia`), Lys's dark side, and Lysiptera (`lysiptera`), her light side.
+  A built-in agent is never stored, changed, or deleted, and no stored agent
+  can take its code. A new conversation starts with Caliginia unless another
+  agent is selected.
 - **Stored agent**: an agent the user created, kept in the backend database.
   It answers chats with the system prompt it has when each turn starts.
   Deleting it only marks it deleted, so its code is never free again.
-- **Leader**, **member**, and **tool keeper**: the role of an agent, fixed
-  by its code and kind. The built-in agents other than Armitage are leaders,
-  which can find every agent and read any agent's state; stored agents are
-  members, which can read only their own; Armitage is the tool keeper, which
-  reads no agent's state.
+- **Leader** and **member**: the role of an agent, fixed by its kind. The
+  built-in agents are leaders, which can find every agent and read any
+  agent's state; stored agents are members, which can read only their own.
 - **Live agent**: the one instance of an agent that answers all of its
   turns while the backend runs and knows the requests it is working on.
 - **Request slot**: one of the replies a live agent works on at once, two
@@ -59,11 +56,6 @@ Terms that mean something specific inside Lys.
   `read_agent_state`, which the backend adds to a turn of a model trained
   for tool use so an agent can tell what it and the other agents are
   doing.
-- **Tool routing**: how a turn of a model trained for tool use offers its
-  client, built-in, and MCP tools: first only `find_tools`, which asks
-  Armitage which of them fit a task, then each tool Armitage finds, from the
-  reply's next round. Finding a tool never allows its calls; each still
-  passes the approval gate.
 - **User message**: a persisted message with role `user`, non-empty content,
   and the attachments sent with it.
 - **Attachment**: a file sent with a user message and stored with the
@@ -81,8 +73,7 @@ Terms that mean something specific inside Lys.
   protocol: `stop` or `length`.
 - **System prompt**: the instructions an agent sends first in the context of
   every reply. A built-in agent's comes from its backend prompt file
-  (`caliginia.txt`, `lysiptera.txt`, `armitage.txt`) and a stored agent's
-  from its record; it
+  (`caliginia.txt`, `lysiptera.txt`) and a stored agent's from its record; it
   is not stored with conversations.
 
 ## MCP terms

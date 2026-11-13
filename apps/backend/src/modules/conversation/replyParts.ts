@@ -1,11 +1,43 @@
-import type { ReplyPart, ToolCallReplyPart } from "@lys/share"
 import {
-  buildReplyPart,
-  type ReplyPartDraft,
-  type ReplyToolCallChange
+  replyPartSchema,
+  type ReplyPart,
+  type ToolCallReplyPart
+} from "@lys/share"
+import { v7 as uuidv7 } from "uuid"
+import type {
+  ReplyPartDraft,
+  ReplyToolCallChange
 } from "../agent/replyPartSequence"
 import type { ReplyPartWriter } from "../chat/persistence"
 import type { ReplyPartRecordWriter } from "./records"
+
+/**
+ * Builds the complete part a draft describes.
+ *
+ * @param draft - Part the agent asks to store.
+ * @param now - Time of the operation, stored as both of the part's times.
+ * @returns The validated part; a reasoning or text part gets a new UUIDv7, a
+ * tool call keeps its own identifier. No draft is a succeeded call, so none
+ * shows sources.
+ * @throws If the draft breaks the part contract, such as empty text or an
+ * empty failure message.
+ */
+function buildReplyPart(draft: ReplyPartDraft, now: string): ReplyPart {
+  if (draft.kind !== "tool-call")
+    return replyPartSchema.parse({
+      kind: draft.kind,
+      id: uuidv7(),
+      round: draft.round,
+      createdAt: now,
+      updatedAt: now,
+      content: draft.content
+    })
+  return replyPartSchema.parse({
+    ...draft,
+    createdAt: now,
+    updatedAt: now
+  })
+}
 
 /**
  * Retains borrowed reply-part records to store the parts of streaming

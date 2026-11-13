@@ -29,8 +29,7 @@ import { findBuiltInTools } from "../../tool/builtIn/builtInTools"
 export type TurnAgentLookups = Readonly<{
   /**
    * Live agent loading of the agent runtime service; undefined means no
-   * built-in or stored agent has the code, its agent is deleted, or the code
-   * is Armitage's, which answers tool searches and no chat.
+   * built-in or stored agent has the code, or its agent is deleted.
    */
   loadChatAgent: (code: string) => Agent | undefined
   /**
@@ -80,10 +79,7 @@ export type RequestedAgentOutcome =
       agent: Agent
     }>
   | Readonly<{
-      /**
-       * A new conversation names a code no agent has, a deleted agent's, or
-       * Armitage's, which answers no chat.
-       */
+      /** A new conversation names a code no built-in or stored agent has. */
       status: "agent-not-found"
       /** Code the request names. */
       agentCode: string
@@ -266,9 +262,9 @@ export function findUnofferedTools(
  * continues.
  * @param dependencies - Borrowed live agent loading and conversation lookup.
  * @returns The live agent, made live when it was not, or why no agent
- * answers: a new conversation names a code no agent has, a deleted agent's,
- * or Armitage's, which answers no chat; a continued conversation is not
- * stored; or its agent no longer exists. Nothing is stored or sent.
+ * answers: a new conversation names a
+ * code no agent has, a continued conversation is not stored, or its agent no
+ * longer exists. Nothing is stored or sent.
  * @throws Any persistence failure of a lookup.
  */
 export function loadRequestedAgent(
@@ -296,10 +292,9 @@ export function loadRequestedAgent(
  *
  * @param outcome - Lookup outcome without an agent.
  * @param instance - Request path identifying this occurrence.
- * @returns The missing-agent problem for a new conversation whose code no
- * agent that answers chats has, the missing-conversation problem for a
- * conversation that is not stored, and the conversation agent missing
- * problem for one whose agent no longer exists.
+ * @returns The missing-agent problem for a new conversation's unknown code,
+ * the missing-conversation problem for a conversation that is not stored, and
+ * the conversation agent missing problem for one whose agent no longer exists.
  */
 function buildUnansweredTurnProblem(
   outcome: UnansweredTurnOutcome,

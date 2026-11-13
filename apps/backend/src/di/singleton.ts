@@ -394,8 +394,7 @@ function createAgentServices(
     recordStore: SqliteAgentRecordStore.create(database),
     builtInAgents: buildBuiltInAgents({
       caliginia: config.caliginiaSystemPrompt,
-      lysiptera: config.lysipteraSystemPrompt,
-      armitage: config.armitageSystemPrompt
+      lysiptera: config.lysipteraSystemPrompt
     })
   })
   return {

@@ -35,6 +35,10 @@ ruleTester.run("func-014", guardClauseRule, {
       code: "function pick(a, b) { if (a) { if (b) { return 1 } } else { log() } }"
     },
     {
+      name: "treats a switch statement as not exiting",
+      code: "function pick(a) { if (a) { switch (a) { default: return 1 } } else { log() } }"
+    },
+    {
       name: "treats a try statement as not exiting",
       code: "function pick(a) { if (a) { try { return 1 } finally { log() } } else { log() } }"
     }

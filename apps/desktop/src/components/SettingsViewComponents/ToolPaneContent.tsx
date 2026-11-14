@@ -6,7 +6,10 @@ import { useEffect, useId, useRef, useState, type ReactElement } from "react"
 import { Button } from "@/components/ui/button"
 import { useNewConversationModel } from "@/lib/hooks/conversationModel"
 import { findLoadedModelInfo } from "@/lib/models/model-availability"
-import { calculateToolModelSupport } from "@/lib/models/tool-model-support"
+import {
+  calculateToolModelSupport,
+  type ToolModelSupport
+} from "@/lib/models/tool-model-support"
 import { useLysStore } from "@/lib/store"
 import { useMcpServerStore } from "@/lib/store/mcp-servers"
 import type { LoadConfigurationSettings } from "@/lib/store/settings"
@@ -263,6 +266,35 @@ function McpToolsPointer(): ReactElement {
   )
 }
 
+/** What the Tools pane shows of the model a new conversation uses. */
+type ToolModelFacts = {
+  /** Whether the model was trained for tool calls. */
+  readonly support: ToolModelSupport
+  /** The model's context length while it can answer, or null. */
+  readonly contextLength: number | null
+}
+
+/**
+ * Observes whether the model a new conversation uses was trained for tool
+ * calls, and its context length.
+ *
+ * @remarks The application store owns the providers' models and the stored
+ * load settings; the hook owns no state.
+ * @returns The model's tool support and, while it can answer, its context
+ * length.
+ */
+function useToolModelFacts(): ToolModelFacts {
+  const { model, availability } = useNewConversationModel()
+  const loadConfiguration = useLysStore(
+    (state) => state.settings.loadConfiguration
+  )
+  const loadedModel = findLoadedModelInfo(availability)
+  return {
+    support: calculateToolModelSupport(loadedModel),
+    contextLength: findToolContextLength(model, loadedModel, loadConfiguration)
+  }
+}
+
 /** Properties accepted by {@link ToolWorkspace}. */
 type ToolWorkspaceProps = {
   /** Every tool, the app's then the backend's, in the order Settings lists them. */
@@ -301,18 +333,8 @@ function ToolWorkspace({
   const areToolCallsOn = useToolStore((state) => state.areToolCallsOn)
   const toolSwitches = useLysStore((state) => state.settings.tools.switches)
   const updateToolCallsOn = useToolStore((state) => state.updateToolCallsOn)
-  const { model, availability } = useNewConversationModel()
-  const loadConfiguration = useLysStore(
-    (state) => state.settings.loadConfiguration
-  )
+  const { support, contextLength } = useToolModelFacts()
   const [expandedToolName, setExpandedToolName] = useState<string | null>(null)
-  const loadedModel = findLoadedModelInfo(availability)
-  const support = calculateToolModelSupport(loadedModel)
-  const contextLength = findToolContextLength(
-    model,
-    loadedModel,
-    loadConfiguration
-  )
   const isLocked = support.status === "untrained"
   const shownToolName = isLocked ? null : expandedToolName
   const ownTools = tools.filter((tool) => tool.runner !== "mcp")

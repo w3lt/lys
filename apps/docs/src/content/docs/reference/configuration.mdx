@@ -351,7 +351,9 @@ provider of the model it names, and never to another one.
   missing, the `active` provider is the one on, LM Studio when `active` is
   missing too. When `enabled` is present, `active` is ignored, but it must
   still name a provider Lys knows. Lys never writes `active`: the next save
-  writes `enabled` without it.
+  writes `enabled` without it. Telling the two formats apart by the missing
+  `enabled` is approved by the
+  [settings file version exception](/reference/standard-application/#settings-file-version-exception).
 - An address is a host name or IPv4 address, a colon, and a port from 1 to
   65535, such as `127.0.0.1:1234`. A scheme, a path, a user name, or an IPv6
   address is not an address. It may name another machine; Lys reaches it over

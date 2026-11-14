@@ -32,8 +32,13 @@ export type ActivityGeneration = Pick<
   "openSubscription" | "pendingToolCalls"
 >
 
-/** Stored final state of a reply that ended. */
-export type EndedActivityStatus = "completed" | "interrupted" | "failed"
+/**
+ * Stored final state of a reply that ended: the status a `reply-ended`
+ * event carries when it has one.
+ */
+export type EndedActivityStatus = NonNullable<
+  Extract<ActivityEvent, { type: "reply-ended" }>["status"]
+>
 
 /** One reply the hub follows, with what the hub holds for it. */
 type FollowedReply = Readonly<{

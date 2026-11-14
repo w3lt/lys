@@ -21,6 +21,23 @@ import {
 import { waitForMicrotasks } from "../../../support/settlement"
 import { buildToolCall } from "../../../support/toolFixtures"
 
+/**
+ * Builds a `reply-ended` event of the fixture job's reply as a backend could
+ * send it, without validating it.
+ *
+ * @param status - Status the event carries, valid or not.
+ * @returns The untrusted event.
+ */
+function buildReplyEndedEvent(status: unknown): object {
+  return {
+    type: "reply-ended",
+    conversationId: FIXTURE_JOB_ID,
+    parentConversationId: FIXTURE_CONVERSATION_ID,
+    assistantMessageId: FIXTURE_JOB_REPLY_ID,
+    status
+  }
+}
+
 describe("readActivityEvents", () => {
   it("opens the stream at the caller's backend origin, asking for events, uncached, under the caller's signal", async () => {
     const backend = startBackendFake({
@@ -114,6 +131,40 @@ describe("readActivityEvents", () => {
 
     await expect(events.next()).rejects.toMatchObject({ name: "ZodError" })
     expect(stream.isCancelled()).toBe(true)
+  })
+
+  it.each([
+    ["a completed reply", "completed"],
+    ["an interrupted reply", "interrupted"],
+    ["a failed reply", "failed"],
+    ["a reply no longer stored or not read", null]
+  ] as const)("reads the end of %s", async (_label, status) => {
+    const stream = startBackendEventStream()
+    startBackendFake({ [ACTIVITY_ROUTE]: () => stream.response })
+    stream.sendEvent(buildReplyEndedEvent(status))
+
+    const events = readActivityEvents({
+      backendUrl: FIXTURE_BACKEND_URL,
+      signal: new AbortController().signal
+    })
+
+    await expect(events.next()).resolves.toEqual({
+      done: false,
+      value: buildReplyEndedEvent(status)
+    })
+  })
+
+  it("throws when an ended reply's status is streaming, which no ended reply has", async () => {
+    const stream = startBackendEventStream()
+    startBackendFake({ [ACTIVITY_ROUTE]: () => stream.response })
+    stream.sendEvent(buildReplyEndedEvent("streaming"))
+
+    const events = readActivityEvents({
+      backendUrl: FIXTURE_BACKEND_URL,
+      signal: new AbortController().signal
+    })
+
+    await expect(events.next()).rejects.toMatchObject({ name: "ZodError" })
   })
 
   it.each([

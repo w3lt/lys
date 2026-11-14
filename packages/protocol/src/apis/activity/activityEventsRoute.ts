@@ -1,4 +1,4 @@
-import { jobSchema } from "@lys/share"
+import { conversationAssistantMessageSchema, jobSchema } from "@lys/share"
 import * as z from "zod"
 import { chatToolCallSchema } from "../chat/_share"
 import { apiActivityEventsRoute } from "./routes"
@@ -59,8 +59,13 @@ const activityReplyStartedEventSchema = z.strictObject({
 const activityReplyEndedEventSchema = z.strictObject({
   type: z.literal("reply-ended"),
   ...activityReplyTargetShape,
-  /** Stored final state of the reply; null when it is no longer stored. */
-  status: z.enum(["completed", "interrupted", "failed"]).nullable()
+  /**
+   * Stored final state of the reply; null when it is no longer stored or
+   * could not be read.
+   */
+  status: conversationAssistantMessageSchema.shape.status
+    .exclude(["streaming"])
+    .nullable()
 })
 
 /**

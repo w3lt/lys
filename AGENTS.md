@@ -91,6 +91,15 @@ An agent MUST NOT:
 - Duplicate a canonical rule in another file.
 - Weaken or disable formatting, lint, type, test, security, or build checks.
 
+### Rules decided by ESLint
+
+For TypeScript and JavaScript, the [rule check inventory](apps/docs/src/content/docs/reference/rule-checks.mdx) marks the rules, and parts of rules, that a check decides exactly. For those parts, an agent MUST run the check and act on its result instead of judging them by hand:
+
+- `node tools/code-standards/check-changed-code.mts --base <base branch>`, such as `--base origin/main`, reports every violation of a `lys` plugin rule in the constructs the change touches. The pre-commit hook runs the same check on staged changes.
+- `pnpm exec eslint <paths>` reports, for any code, the plugin's rules as warnings and the other ESLint rules the inventory names at their configured severity.
+
+Every other rule, every part the inventory leaves to hand review, and every rule for Rust and Swift is judged by hand. When an agent finds a violation that the check missed, the standard still wins, as [Review and exceptions](#review-and-exceptions) states: the agent fixes or reports the violation and files an issue against the check.
+
 ### Validation
 
 After editing, an agent MUST:
